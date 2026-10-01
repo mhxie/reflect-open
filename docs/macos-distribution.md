@@ -58,7 +58,10 @@ update checks off so the release feed never replaces it. Settings and recent gra
 are shared with every other flavor; app data such as downloaded models is not.
 `pnpm tauri:install:local` builds it, quits the running copy, installs it as
 `/Applications/Reflect.app`, and relaunches it; it refuses to replace any other app.
-macOS ties microphone permission to the signature, so each ad-hoc build asks again.
+macOS grants the microphone to the app's signature, so an ad-hoc build asks again
+after every install. If the login keychain holds a code-signing identity named
+`Reflect Local Signing` (self-signed is fine), the install signs with it instead and
+permissions carry over from build to build.
 
 ## What `pnpm release:macos` does
 

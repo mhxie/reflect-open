@@ -21,7 +21,7 @@
     "tauri:build:dev": "tauri build --config src-tauri/tauri.dev.conf.json",
     "tauri:build:beta": "tauri build --config src-tauri/tauri.beta.conf.json",
     "tauri:build:local": "tauri build --config src-tauri/tauri.local.conf.json --bundles app",
-    "tauri:install:local": "pnpm tauri:build:local && node scripts/install-local.mjs"
+    "tauri:install:local": "node scripts/install-local.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
