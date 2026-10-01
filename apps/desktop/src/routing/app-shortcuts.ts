@@ -51,6 +51,14 @@ const BINDING_TO_ID = new Map(
 )
 const HISTORY_COMMAND_IDS = new Set(['history.back', 'history.forward'])
 
+// A mouse's side buttons, as `MouseEvent.button` numbers them. On macOS, wry
+// re-dispatches them as synthetic `mouseup`s and, unless one is cancelled,
+// falls back to `window.history`, which this router never writes.
+const MOUSE_BUTTON_TO_HISTORY_ID: ReadonlyMap<number, string> = new Map([
+  [3, 'history.back'],
+  [4, 'history.forward'],
+])
+
 // AppKit owns this key equivalent on macOS. Keep it in the registry for
 // display, collision detection, and the plain-browser/non-macOS fallback, but
 // do not consume its keydown in the webview before the native menu sees it.
@@ -340,6 +348,16 @@ export function useAppShortcuts(): CommandContext {
       }
     }
 
+    // No composition guard: unlike a keystroke, a button press is never IME input.
+    function onHistoryMouseUpCapture(event: MouseEvent) {
+      const id = MOUSE_BUTTON_TO_HISTORY_ID.get(event.button)
+      if (id !== undefined && triggerCommand(id)) {
+        // Captured like the bracket chords, so no surface under the pointer
+        // can swallow it; cancelling also skips wry's `window.history` fallback.
+        event.preventDefault()
+      }
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (getIsComposing()) {
         return
@@ -365,10 +383,12 @@ export function useAppShortcuts(): CommandContext {
     setMenuCommandDispatch(triggerCommand)
     window.addEventListener('keydown', onHistoryKeyDownCapture, { capture: true })
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('mouseup', onHistoryMouseUpCapture, { capture: true })
     return () => {
       setMenuCommandDispatch(null)
       window.removeEventListener('keydown', onHistoryKeyDownCapture, true)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('mouseup', onHistoryMouseUpCapture, true)
     }
   }, [context, closeShortcuts])
 
