@@ -43,12 +43,12 @@ function fakePipelineBridge(options: {
           if (description === undefined) {
             throw { kind: 'notFound', message: `no description at ${path}` }
           }
-          return { kind: 'content', content: description }
+          return { kind: 'content', content: description, localOnly: false }
         }
         if (options.evicted === true) {
           return { kind: 'evicted' }
         }
-        return { kind: 'content', content: options.content }
+        return { kind: 'content', content: options.content, localOnly: false }
       }
       if (command === 'db_query') {
         return options.storedRows

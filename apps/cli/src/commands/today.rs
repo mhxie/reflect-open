@@ -1,5 +1,6 @@
 //! `reflect today` — print today's daily note. File-only: resolved straight
-//! from the local date and the `daily/YYYY-MM-DD.md` convention, no index.
+//! from the local date and the `daily/YYYY-MM-DD.md` convention, no index —
+//! so no local-only folders either (`daily/` sits at the graph root).
 
 use crate::commands::output::{print_content, print_json, NoteJson, PathJson};
 use crate::error::CliError;
@@ -15,7 +16,7 @@ pub fn run(graph: &Graph, json: bool, path_only: bool) -> Result<(), CliError> {
     if path_only {
         // Dailies are created lazily, so the path is printed even when the
         // file doesn't exist yet — that's how editors/scripts create it.
-        ensure_not_private(&graph.root, &rel_path)?;
+        ensure_not_private(&graph.root, &rel_path, None)?;
         if json {
             return print_json(&PathJson {
                 date: Some(&date),
@@ -33,7 +34,7 @@ pub fn run(graph: &Graph, json: bool, path_only: bool) -> Result<(), CliError> {
             "no daily note for {date} yet (would be {rel_path})"
         )));
     }
-    let note = read_note(&graph.root, &rel_path)?;
+    let note = read_note(&graph.root, &rel_path, None)?;
     if json {
         return print_json(&NoteJson {
             date: Some(&date),

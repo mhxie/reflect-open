@@ -6,7 +6,10 @@ import {
   getGithubToken,
   gistBodyHash,
   gistFilename,
+  isAppError,
   parseNote,
+  PrivateNoteError,
+  readNoteShareable,
   ReflectError,
   splitFrontmatter,
   updateGist,
@@ -51,9 +54,13 @@ function releaseGistOperation(path: string): void {
  *
  * `private: true` is the hard block: the gate runs on the content actually
  * being published (live, not the possibly-lagging index), and it fails
- * closed before any byte leaves the device.
+ * closed before any byte leaves the device. A note in a local-only folder is
+ * refused first by Rust, pinned to the publishing graph session and decided
+ * by the entry the path resolves to, so neither a graph switch nor a folded
+ * spelling can slip past the name check.
  */
 export async function publishNoteToGist(path: string, generation: number): Promise<string> {
+  await ensureNotLocalOnly(path, generation)
   const source = await readNoteSource(path)
   const parsed = parseNote({ path, source })
   assertCloudAllowed({ path, isPrivate: parsed.frontmatter.private })
@@ -112,6 +119,21 @@ export async function publishNoteToGist(path: string, generation: number): Promi
     throw cause
   }
   return published.htmlUrl
+}
+
+async function ensureNotLocalOnly(path: string, generation: number): Promise<void> {
+  let read: Awaited<ReturnType<typeof readNoteShareable>>
+  try {
+    read = await readNoteShareable(path, generation)
+  } catch (cause) {
+    if (isAppError(cause) && cause.kind === 'notFound') {
+      return // not on disk yet: Rust cleared the path itself before reading
+    }
+    throw cause
+  }
+  if (read.kind === 'localOnly') {
+    throw new PrivateNoteError(path)
+  }
 }
 
 /**

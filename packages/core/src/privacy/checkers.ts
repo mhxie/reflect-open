@@ -1,9 +1,12 @@
 import type { RetrievalHit } from '../embeddings/retrieve.ts'
+import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { parseFrontmatter, splitFrontmatter } from '../markdown/frontmatter.ts'
 
 /**
  * Reflect's outbound-service privacy gate (Plan 10). `private: true` is a hard block:
- * a private note's content must never be sent to an external service.
+ * a private note's content must never be sent to an external service. A note
+ * inside a local-only folder (`../graph/local-only.ts`) is private by its
+ * path, whatever its frontmatter says — every gate here checks both.
  *
  * Enforcement is structural, not call-site discipline: provider-bound
  * payloads carry note content only as {@link CloudSafe} values, and the
@@ -30,10 +33,15 @@ function mint<T>(value: T): CloudSafe<T> {
 
 /** What the cloud guard needs to know about a note. */
 export interface CloudSendable {
-  /** Graph-relative path (for the error message). */
+  /** Graph-relative path: checked against the local-only folders, and named in the error. */
   path: string
   /** The note's live `private: true` frontmatter flag. */
   isPrivate: boolean
+}
+
+/** Whether a note may not leave the device: flagged private, or local-only by its path. */
+function isPrivateNote(note: CloudSendable): boolean {
+  return note.isPrivate || isLocalOnlyPath(note.path)
 }
 
 /** Thrown when a private note would otherwise reach an external service. */
@@ -56,7 +64,7 @@ export function isPrivateNoteError(value: unknown): value is PrivateNoteError {
  * answer, but they can never accidentally ship the body.
  */
 export function assertCloudAllowed(note: CloudSendable): void {
-  if (note.isPrivate) {
+  if (isPrivateNote(note)) {
     throw new PrivateNoteError(note.path)
   }
 }
@@ -100,7 +108,7 @@ export async function cloudSafeSearchHits(
   hits: readonly RetrievalHit[],
   isPrivateLive: (path: string) => Promise<boolean>,
 ): Promise<CloudSafe<CloudSearchHit>[]> {
-  const indexedPublic = hits.filter((hit) => !hit.isPrivate)
+  const indexedPublic = hits.filter((hit) => !isPrivateNote(hit))
   const liveFlags = await Promise.all(indexedPublic.map((hit) => isPrivateLive(hit.path)))
   return indexedPublic
     .filter((_, index) => liveFlags[index] === false)
@@ -132,7 +140,7 @@ export async function cloudSafeNoteListings(
   entries: readonly (CloudSendable & Omit<CloudNoteListing, 'path'>)[],
   isPrivateLive: (path: string) => Promise<boolean>,
 ): Promise<CloudSafe<CloudNoteListing>[]> {
-  const indexedPublic = entries.filter((entry) => !entry.isPrivate)
+  const indexedPublic = entries.filter((entry) => !isPrivateNote(entry))
   const liveFlags = await Promise.all(indexedPublic.map((entry) => isPrivateLive(entry.path)))
   return indexedPublic
     .filter((_, index) => liveFlags[index] === false)

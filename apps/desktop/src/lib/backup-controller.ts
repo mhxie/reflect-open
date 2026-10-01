@@ -360,6 +360,13 @@ export function createBackupController(options: BackupControllerOptions): Backup
           const names = files.map((file) => file.path).join(', ')
           startOperation('Backing up').fail(`Too large to back up (kept local): ${names}`)
         },
+        onLocalOnlyChangesSkipped: (paths) => {
+          // Local-only folders are never written by sync: say so, or the
+          // other device's edits would seem to vanish.
+          startOperation('Syncing').warn(
+            `Not applied here (local-only folders stay as they are): ${paths.join(', ')}`,
+          )
+        },
         onRemoteChanges,
       })
       setState({ phase: 'connected', remoteUrl, repo, status: { state: 'idle' } })

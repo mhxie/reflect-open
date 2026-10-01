@@ -80,6 +80,7 @@ beforeEach(() => {
     root: '/Users/alex/Documents/Notes',
     name: 'Notes',
     generation: 1,
+    localOnlyFolders: [],
   }
   core.status = {
     available: true,
@@ -115,6 +116,7 @@ describe('SyncSection', () => {
       root: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Notes',
       name: 'Notes',
       generation: 1,
+      localOnlyFolders: [],
     }
 
     await renderSection()
@@ -134,6 +136,7 @@ describe('SyncSection', () => {
       root: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Notes',
       name: 'Notes',
       generation: 1,
+      localOnlyFolders: [],
     }
     core.pendingNotes = 2
     core.conflictedNotes = [{ path: 'notes/a.md', title: 'A' }]

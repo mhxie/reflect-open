@@ -33,6 +33,7 @@ const GRAPH = {
   root: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Notes',
   name: 'Notes',
   generation: 7,
+  localOnlyFolders: [],
 }
 
 let invoked: Array<[string, Record<string, unknown>]>

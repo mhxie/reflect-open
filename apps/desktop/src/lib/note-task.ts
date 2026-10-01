@@ -3,6 +3,7 @@ import {
   appendTaskLine,
   editTaskLine,
   isAppError,
+  isLocalOnlyPath,
   parseNote,
   readNote,
   removeTaskLine,
@@ -60,6 +61,11 @@ export class NoteBusyError extends Error {
 const writeChains = new Map<string, Promise<unknown>>()
 
 function serializeByPath<T>(path: string, op: () => Promise<T>): Promise<T> {
+  // Every task write funnels through here, so this is where a note inside a
+  // local-only folder (read-only) refuses them all.
+  if (isLocalOnlyPath(path)) {
+    return Promise.reject(new Error('This note is in a local-only folder and can’t be edited.'))
+  }
   const previous = writeChains.get(path) ?? Promise.resolve()
   // Run `op` whether the previous write resolved or rejected — one failure must
   // not wedge the chain for the note.

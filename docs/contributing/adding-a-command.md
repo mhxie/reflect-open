@@ -55,19 +55,28 @@ Conventions that matter here:
   through the matching zod union in `packages/core/src/errors.ts`. Never
   return bare strings. `std::io::Error` and `rusqlite::Error` already convert
   via `From` (`?` just works); NotFound is mapped for you.
-- **Paths must not escape the graph.** Anything taking a graph-relative path
-  resolves it via `resolve()` (`fs/resolve.rs`), which rejects traversal and
-  symlink escapes. Don't build paths by hand.
+- **Paths must not escape the graph, and writes never touch local-only
+  folders.** Anything taking a graph-relative path resolves it through
+  `fs/resolve.rs`, which rejects traversal and symlink escapes: `resolve()`
+  for a plain in-graph path, `resolve_read()` for a read (it follows an
+  allowed local-only link one hop and reports whether the entry is
+  local-only), `resolve_write()` for every write, create, delete, or move (it
+  refuses a local-only folder by name and by the entry the path resolves
+  to), and `resolve_shareable()` for bytes about to leave the device. Don't
+  build paths by hand.
 - **Writes are generation-pinned.** Mutating commands take a `generation`
-  argument (from `graph_open`/`graph_create`) and get the root via
-  `root_for_generation`, which rejects stale ones — a write racing a graph
-  switch fails loudly instead of landing in the wrong graph. A new mutating
-  command must follow this pattern.
+  argument (from `graph_open`/`graph_create`) and get the root and the
+  graph's local-only folders together via `graph_for(&state,
+  Some(generation))`, which rejects stale ones — a write racing a graph
+  switch fails loudly instead of landing in the wrong graph — then resolve
+  with `resolve_write`. A new mutating command must follow this pattern.
 - **Background reads may also pin.** UI reads for the currently open graph can
   use `current_root`, but a read that belongs to a background pass that can
   span a graph switch should accept `generation: Option<u64>` (or a required
-  `generation`, if the pass always has one) and use the `root_for` pattern
-  from `fs::note_read`/`asset_read`.
+  `generation`, if the pass always has one) and use `graph_for` like
+  `fs::note_read`. A command whose bytes leave the device uses
+  `graph_for_sharing` instead, and sync uses `graph_for_sync`: both refuse
+  while the graph's local-only configuration is unknown.
 - **No product policy.** A command exposes a primitive. If you find yourself
   encoding "what to do when X", that decision belongs in `@reflect/core`.
 
@@ -77,8 +86,9 @@ runtime with a "command not found" rejection.
 
 Test the logic with `#[cfg(test)]` against the pure helper, not the command
 wrapper: `settings.rs` is a good model — `settings_load`/`settings_save` are
-two-liners over `load_from`/`save_to`, and the tests exercise those with
-`tempfile`. From the repo root, stage the sidecars once before compiling the
+thin wrappers over `load_from`/`save_keeping_rust_keys`, and the tests
+exercise those with `tempfile` (plus the commands themselves through a
+test-only store path). From the repo root, stage the sidecars once before compiling the
 desktop crate, then run the crate tests:
 
 ```bash

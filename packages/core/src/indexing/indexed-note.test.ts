@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import { gistBodyHash, parseNote } from '../markdown/index.ts'
 import {
   buildIndexedNote,
@@ -10,6 +11,20 @@ import {
 describe('buildIndexedNote', () => {
   it('carries the projection version that rebuilds has_content and the FTS body', () => {
     expect(PROJECTION_VERSION).toBe(20)
+  })
+
+  it('marks a note inside a local-only folder private whatever its frontmatter says', () => {
+    const source = '# Bank\n\nAccount details.\n'
+    const build = (path: string) =>
+      buildIndexedNote(parseNote({ path, source }), { fileHash: 'h', mtime: 1, source })
+    setLocalOnlyFolders(['secure'])
+    try {
+      expect(build('finance/secure/bank.md').isPrivate).toBe(true)
+      expect(build('finance/bank.md').isPrivate).toBe(false)
+    } finally {
+      setLocalOnlyFolders([])
+    }
+    expect(build('finance/secure/bank.md').isPrivate).toBe(false)
   })
 
   it('flattens a parsed note into the index payload', () => {

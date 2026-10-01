@@ -6,14 +6,22 @@ import { setBridge, type GraphInfo } from '@reflect/core'
 import { queryClient } from '@/lib/query-client.ts'
 import { useAttachmentCatalogSync } from '@/lib/attachment-catalog.ts'
 import { deferred } from '@/test-utils/deferred.ts'
-import { useNoteAttachments, type NoteAttachments } from './use-note-attachments.ts'
+import {
+  createNoteAttachments,
+  useNoteAttachments,
+  type NoteAttachments,
+} from './use-note-attachments.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (filePath: string, protocol = 'asset') =>
     `${protocol}://localhost/${encodeURIComponent(filePath)}`,
 }))
+vi.mock('@reflect/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@reflect/core')>()),
+  isLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
+}))
 
-const GRAPH: GraphInfo = { root: '/vault', name: 'Vault', generation: 3 }
+const GRAPH: GraphInfo = { root: '/vault', name: 'Vault', generation: 3, localOnlyFolders: [] }
 
 interface FakeVault {
   listings: () => number
@@ -132,6 +140,16 @@ describe('useNoteAttachments', () => {
     })
     expect(attachments?.resolveWikiEmbed(embed('Deep Work'))).toEqual({ kind: 'note' })
     expect(attachments?.resolveWikiEmbed(embed('../outside.png'))).toBeUndefined()
+  })
+})
+
+describe('createNoteAttachments for a local-only note', () => {
+  it('never hands a remote image source to the webview', () => {
+    const remote = 'https://example.com/chart.png'
+    expect(createNoteAttachments(3, 'finance/secure/bank.md').resolveImageUrl(remote)).toBe(
+      undefined,
+    )
+    expect(createNoteAttachments(3, 'notes/a.md').resolveImageUrl(remote)).toBe(remote)
   })
 })
 

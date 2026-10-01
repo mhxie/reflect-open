@@ -474,8 +474,15 @@ fn downscale_jpeg(bytes: &[u8], max_dim: u32) -> AppResult<Vec<u8>> {
     Ok(out)
 }
 
-fn persist_asset(root: &Path, asset_path: &str, bytes: &[u8]) -> AppResult<()> {
-    let target = crate::fs::resolve_in_graph(root, asset_path)?;
+/// Write `bytes` at `asset_path` through the write guard: a target in (or
+/// aliased into) a local-only folder is refused like any other write.
+fn persist_asset(
+    root: &Path,
+    asset_path: &str,
+    bytes: &[u8],
+    local_only: Option<&reflect_graph_paths::LocalOnlyFolders>,
+) -> AppResult<()> {
+    let target = crate::fs::resolve_write_in_graph(root, asset_path, local_only)?;
     let parent = target
         .parent()
         .ok_or_else(|| AppError::io("asset path has no parent"))?;
@@ -499,10 +506,10 @@ pub fn capture_screenshot_promote(
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<()> {
-    let root = root_for_generation(&state, generation)?;
+    let (root, local_only) = crate::fs::graph_for(&state, Some(generation))?;
     let bytes = fs::read(inbox_file(&root, &spool_name)?)?;
     let jpeg = downscale_jpeg(&bytes, max_dim)?;
-    persist_asset(&root, &asset_path, &jpeg)
+    persist_asset(&root, &asset_path, &jpeg, local_only.as_deref())
 }
 
 /// Ask the platform link-preview service for one representative image and
@@ -559,6 +566,28 @@ pub async fn capture_oembed_fetch(url: String) -> AppResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A promoted screenshot never lands in a local-only folder, named or
+    /// reached through an `assets/` aliased into one; without the folders the
+    /// same writes go through (the guard is what refuses).
+    #[cfg(unix)]
+    #[test]
+    fn a_screenshot_is_never_promoted_into_a_local_only_folder() {
+        for configured in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            fs::create_dir_all(root.join("people/secure")).unwrap();
+            std::os::unix::fs::symlink(root.join("people/secure"), root.join("assets")).unwrap();
+            let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
+            let folders = if configured { folders } else { None };
+            for asset in ["people/secure/shot.jpg", "assets/shot2.jpg"] {
+                let written = persist_asset(&root, asset, b"jpeg", folders.as_ref());
+                assert_eq!(written.is_ok(), !configured, "{asset}");
+            }
+            let landed = fs::read_dir(root.join("people/secure")).unwrap().count();
+            assert_eq!(landed, if configured { 0 } else { 2 });
+        }
+    }
 
     #[test]
     fn meta_fetch_statuses_classify_rate_limits_as_retryable() {
@@ -782,6 +811,53 @@ mod tests {
             .join("big.json")
             .is_file());
         assert!(!graph.path().join(INBOX_DIR).join("big.json").exists());
+    }
+
+    /// Command tier: `capture_screenshot_promote` takes the graph's folders
+    /// from `GraphState`, so a spooled screenshot never lands in a real
+    /// local-only folder through an aliased `assets/`; the control session
+    /// without folders promotes it.
+    #[cfg(unix)]
+    #[test]
+    fn the_promote_command_takes_the_folders_from_the_open_graph() {
+        use tauri::Manager;
+        for configured in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            fs::create_dir_all(root.join("people/secure")).unwrap();
+            fs::create_dir_all(root.join(INBOX_DIR)).unwrap();
+            std::os::unix::fs::symlink(root.join("people/secure"), root.join("assets")).unwrap();
+            let mut png = Vec::new();
+            image::DynamicImage::new_rgb8(8, 8)
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .unwrap();
+            fs::write(root.join(INBOX_DIR).join("shot.png"), &png).unwrap();
+
+            let app = tauri::test::mock_builder()
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .expect("mock app");
+            app.manage(GraphState::default());
+            {
+                let state = app.state::<GraphState>();
+                let mut inner = state.0.lock().unwrap();
+                inner.generation = 1;
+                inner.root = Some(root.clone());
+                inner.set_local_only(if configured {
+                    reflect_graph_paths::LocalOnlyFolders::new(["secure"], None)
+                } else {
+                    None
+                });
+            }
+            let promoted = capture_screenshot_promote(
+                "shot.png".into(),
+                "assets/shot.jpg".into(),
+                1600,
+                1,
+                app.state(),
+            );
+            assert_eq!(promoted.is_ok(), !configured, "{promoted:?}");
+            assert_eq!(root.join("people/secure/shot.jpg").exists(), !configured);
+        }
     }
 
     #[test]

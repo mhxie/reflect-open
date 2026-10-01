@@ -4,6 +4,7 @@ import {
   noteBasenameKey,
   wikiNoteReference,
 } from '../graph/note-reference.ts'
+import { isLocalOnlyPath } from '../graph/local-only.ts'
 import {
   dateFromDailyPath,
   foldGraphPath,
@@ -374,7 +375,9 @@ export function buildIndexedNote(
     pathKey: foldGraphPath(parsed.path),
     kind: isDaily(parsed.path) ? 'daily' : isTemplatePath(parsed.path) ? 'template' : 'note',
     dailyDate: isDaily(parsed.path) ? dateFromDailyPath(parsed.path) : null,
-    isPrivate: parsed.frontmatter.private,
+    // A note inside a local-only folder is private whatever its frontmatter
+    // says, so every `is_private` filter and gate downstream covers it.
+    isPrivate: parsed.frontmatter.private || isLocalOnlyPath(parsed.path),
     isPinned: isPinned(parsed.frontmatter),
     pinnedOrder: pinnedOrder(parsed.frontmatter),
     hasConflict: detectConflictMarkers(meta.source),

@@ -28,6 +28,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   hasBridge: () => true,
   getPinnedNotes,
   getNote,
+  isLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
 }))
 vi.mock('@/lib/keybindings.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/keybindings.ts')>()),
@@ -170,6 +171,18 @@ describe('NoteActionsSection pin toggle', () => {
     expect(startOperation).toHaveBeenCalledWith('Updating pin')
     expect(operationFail).toHaveBeenCalled()
     await view.unmount()
+  })
+})
+
+describe('NoteActionsSection for a local-only note', () => {
+  it('offers no actions: each would write or publish a read-only note', async () => {
+    getNote.mockResolvedValue(noteRow('finance/secure/bank.md', true))
+    const view = await renderSection('finance/secure/bank.md', true)
+    await expect.element(view.getByRole('button', { name: /Unlock note/ })).not.toBeInTheDocument()
+    await expect
+      .element(view.getByRole('button', { name: /Pin this note/ }))
+      .not.toBeInTheDocument()
+    expect(view.container.textContent).toBe('')
   })
 })
 

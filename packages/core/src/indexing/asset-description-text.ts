@@ -1,5 +1,6 @@
 import { isAppError } from '../errors.ts'
 import { readNoteLocal } from '../graph/commands.ts'
+import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { descriptionPathFor } from '../graph/paths.ts'
 import { splitFrontmatter } from '../markdown/frontmatter.ts'
 
@@ -49,7 +50,10 @@ export interface AssetDescriptionGather {
  * download mid-pass); a repeated asset contributes once. Accumulation stops
  * once the combined length reaches {@link MAX_ASSET_TEXT_CHARS} (the body
  * that crosses the cap is kept whole — consumers apply their own final cap).
- * Reads are unpinned, matching the indexer's own note reads (the *write* is
+ * A local-only asset's description is never folded: the folded text becomes
+ * the referencing note's own, indexed and AI-searchable as public text. The
+ * path is checked by name before any read, then by Rust's verdict on the
+ * entry the sidecar path resolves to. Reads are unpinned, matching the indexer's own note reads (the *write* is
  * generation-pinned, so a graph switch drops the stale row regardless).
  */
 export async function gatherAssetDescriptionBodies(
@@ -67,6 +71,9 @@ export async function gatherAssetDescriptionBodies(
       continue // an asset referenced twice in one note contributes once
     }
     seen.add(assetPath)
+    if (isLocalOnlyPath(assetPath)) {
+      continue
+    }
     let read: Awaited<ReturnType<typeof readNoteLocal>>
     try {
       read = await readNoteLocal(descriptionPathFor(assetPath))
@@ -82,6 +89,9 @@ export async function gatherAssetDescriptionBodies(
     }
     if (read.kind === 'evicted') {
       evicted.push(assetPath)
+      continue
+    }
+    if (read.localOnly) {
       continue
     }
     const body = splitFrontmatter(read.content).body.trim()

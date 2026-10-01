@@ -21,7 +21,7 @@ import { RouterProvider, useRouter } from './router.tsx'
 
 const commitNoteFrontmatter = vi.hoisted(() => vi.fn(async () => {}))
 const graphState = vi.hoisted((): { graph: GraphInfo | null } => ({
-  graph: { root: '/g', name: 'g', generation: 1 },
+  graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: [] },
 }))
 vi.mock('@/lib/note-frontmatter.ts', () => ({
   commitNoteFrontmatter,
@@ -83,7 +83,7 @@ vi.mock('@/providers/chat-provider.tsx', () => ({
 registerAppCommands() // production does this in main.tsx
 
 beforeEach(() => {
-  graphState.graph = { root: '/g', name: 'g', generation: 1 }
+  graphState.graph = { root: '/g', name: 'g', generation: 1, localOnlyFolders: [] }
   commitNoteFrontmatter.mockReset().mockResolvedValue(undefined)
   openRecent.mockClear()
   openRouteInNewWindow.mockClear()

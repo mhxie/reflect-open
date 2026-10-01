@@ -14,8 +14,9 @@
 //! percent-encodes the whole path into one segment). The generation pins the
 //! request to the graph session that issued it, exactly like mutating
 //! commands — a request racing a graph switch is refused, never resolved
-//! against the new graph. The path must live under `assets/` and passes the
-//! shared symlink-aware traversal guard before any IO.
+//! against the new graph. The path must be a supported attachment and passes
+//! the shared symlink-aware read guard before any IO (which grants the one
+//! local-only hop, `resolve::resolve_read`).
 //! Passive previews append `?reflect-preview=raster`; those responses are
 //! served only when byte sniffing identifies PNG, JPEG, GIF, or WebP content,
 //! so an SVG renamed with a raster extension cannot load subresources there.
@@ -112,12 +113,20 @@ fn serve<R: Runtime>(
 ) -> Result<(String, Vec<u8>), StatusCode> {
     let (generation, rel) = parse_request_path(request_path)?;
     let state = app.state::<GraphState>();
-    let root = super::root_for_generation(&state, generation).map_err(|_| StatusCode::FORBIDDEN)?;
-    let abs = super::resolve::resolve(&root, rel).map_err(|_| StatusCode::FORBIDDEN)?;
+    let (root, local_only) =
+        super::graph_for(&state, Some(generation)).map_err(|_| StatusCode::FORBIDDEN)?;
+    let target = super::resolve::resolve_read(&root, rel, local_only.as_deref())
+        .map_err(|_| StatusCode::FORBIDDEN)?;
     // On an iCloud graph this read blocks until the file is materialized on
     // the device — acceptable here on the blocking pool, and exactly the wait
-    // that must never happen on the UI thread.
-    let bytes = std::fs::read(&abs).map_err(|err| match err.kind() {
+    // that must never happen on the UI thread. A local-only attachment opens
+    // from its raw-store directory with every component below it policed.
+    let read = if target.local_only {
+        super::io::read_bytes_no_follow(&target.base, &target.rest)
+    } else {
+        std::fs::read(target.path())
+    };
+    let bytes = read.map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
         std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -197,6 +206,58 @@ mod tests {
             parse_request_path("3/assets/").unwrap_err(),
             StatusCode::FORBIDDEN,
         );
+    }
+
+    /// Command tier: `serve` takes the folders from `GraphState`, follows an
+    /// allowed link one hop for display, and refuses a symlink inside the
+    /// raw store; the control session without folders refuses the link.
+    #[cfg(unix)]
+    #[test]
+    fn serves_a_local_only_attachment_through_its_link_and_nothing_past_it() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, raw, elsewhere) = (base.join("graph"), base.join("raw"), base.join("elsewhere"));
+        std::fs::create_dir_all(root.join("finance")).unwrap();
+        std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(raw.join("finance/secure/scan.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        std::fs::write(elsewhere.join("leak.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+        symlink(&elsewhere, raw.join("finance/secure/alias")).unwrap();
+
+        for configured in [true, false] {
+            let app = tauri::test::mock_builder()
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .expect("mock app");
+            app.manage(GraphState::default());
+            {
+                let state = app.state::<GraphState>();
+                let mut inner = state.0.lock().unwrap();
+                inner.generation = 4;
+                inner.root = Some(root.clone());
+                inner.set_local_only(configured.then(|| {
+                    reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap()
+                }));
+            }
+            let served = serve(app.handle(), "4/finance/secure/scan.png");
+            if configured {
+                let (mime, bytes) = served.expect("served through the link");
+                assert_eq!(mime, "image/png");
+                assert_eq!(bytes, b"\x89PNG\r\n\x1a\n");
+                assert_eq!(
+                    serve(app.handle(), "4/finance/secure/alias/leak.png").unwrap_err(),
+                    StatusCode::FORBIDDEN
+                );
+            } else {
+                assert_eq!(served.unwrap_err(), StatusCode::FORBIDDEN);
+            }
+            // A stale generation is refused either way.
+            assert_eq!(
+                serve(app.handle(), "3/finance/secure/scan.png").unwrap_err(),
+                StatusCode::FORBIDDEN
+            );
+        }
     }
 
     #[test]

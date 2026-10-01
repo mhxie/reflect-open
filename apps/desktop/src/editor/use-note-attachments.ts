@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
 import {
+  isLocalOnlyPath,
   resolveAttachmentLink,
   resolveWikiEmbedTarget,
   type AttachmentCatalog,
@@ -17,9 +18,10 @@ export interface NoteAttachments {
    */
   resolveAttachmentPath: (destination: string) => string | null
   /**
-   * A displayable URL for an image source: http(s) as-is, a local attachment
-   * as a generation-pinned `reflect-asset://` URL. Answers synchronously once
-   * the catalog is loaded and waits for it before that.
+   * A displayable URL for an image source: http(s) as-is (never for a note in
+   * a local-only folder, which must not reach the network), a local
+   * attachment as a generation-pinned `reflect-asset://` URL. Answers
+   * synchronously once the catalog is loaded and waits for it before that.
    */
   resolveImageUrl: ImageUrlResolver
   /** Classifies an Obsidian `![[target]]` embed. */
@@ -55,12 +57,13 @@ export function createNoteAttachments(
 ): NoteAttachments {
   const resolvePath = (destination: string, catalog: AttachmentCatalog | null): string | null =>
     generation === null ? null : resolveAttachmentLink(notePath, destination, catalog)
+  const remoteAllowed = !isLocalOnlyPath(notePath)
   return {
     resolveAttachmentPath: (destination) =>
       resolvePath(destination, generation === null ? null : peekAttachmentCatalog(generation)),
     resolveImageUrl: (src) => {
       if (/^https?:\/\//i.test(src)) {
-        return src
+        return remoteAllowed ? src : undefined
       }
       if (generation === null) {
         return

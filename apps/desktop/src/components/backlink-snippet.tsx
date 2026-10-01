@@ -1,12 +1,18 @@
+import {
+  resolveNoXPost,
+  resolveNoYouTubeVideo,
+  withoutEmbedSnapshots,
+} from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
-import type { ReactElement } from 'react'
+import { useCallback, useMemo, type ReactElement } from 'react'
 import { MarkdownView } from '@meowdown/react'
 import type { WikilinkClickHandler } from '@meowdown/core'
-import type { SnippetTask } from '@reflect/core'
+import { isLocalOnlyPath, type SnippetTask } from '@reflect/core'
 import { useOpenExternalLink } from '@/editor/open-external-link.ts'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
+import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import { useSnippetTaskToggle } from '@/hooks/use-snippet-task-toggle.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 
@@ -17,8 +23,11 @@ interface BacklinkSnippetProps {
   notePath: string
   /** The snippet's checkbox tasks anchored to the source note (query-provided). */
   tasks: SnippetTask[]
-  /** Navigate a clicked `[[wiki link]]` to its target. Pass a stable function. */
-  onWikilinkClick: WikilinkClickHandler
+  /**
+   * Navigate a clicked `[[wiki link]]` to its target; receives this
+   * snippet's `notePath` as the source. Pass a stable function.
+   */
+  onWikilinkClick: BacklinkWikilinkClick
 }
 
 /**
@@ -37,6 +46,10 @@ interface BacklinkSnippetProps {
  * `![[embeds]]` resolve from the source note's folder, as in its editor. The
  * `reflect-editor` class shares the editor's chip styling; the
  * `reflect-backlink-snippet` wrapper keeps it in the panel's compact line box.
+ * A snippet from a local-only note renders without network embeds or their
+ * saved snapshots (its images resolve local-only through
+ * `createNoteAttachments`), and its checkboxes stay inert: the source note is
+ * read-only.
  */
 export function BacklinkSnippet({
   text,
@@ -46,20 +59,29 @@ export function BacklinkSnippet({
 }: BacklinkSnippetProps): ReactElement {
   const generation = useGraph({ optional: true })?.graph?.generation ?? null
   const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(generation, notePath)
-  const resolveXPost = useXPostResolver()
+  const graphXPostResolver = useXPostResolver()
   const onTaskClick = useSnippetTaskToggle(notePath, tasks)
   const openExternalLink = useOpenExternalLink()
+  const localOnly = isLocalOnlyPath(notePath)
+  const handleWikilinkClick = useCallback<WikilinkClickHandler>(
+    (payload) => onWikilinkClick(payload, notePath),
+    [onWikilinkClick, notePath],
+  )
+  const markdown = useMemo(
+    () => (localOnly ? withoutEmbedSnapshots(text) : text),
+    [localOnly, text],
+  )
   return (
     <div className="reflect-backlink-snippet select-text text-xs text-text">
       <MarkdownView
-        resolveXPost={resolveXPost}
-        resolveYouTubeVideo={resolveYouTubeVideo}
+        resolveXPost={localOnly ? resolveNoXPost : graphXPostResolver}
+        resolveYouTubeVideo={localOnly ? resolveNoYouTubeVideo : resolveYouTubeVideo}
         mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
         className="reflect-editor"
-        markdown={text}
+        markdown={markdown}
         expandCollapsed
         resolveWikilink={resolveWikilink}
-        onWikilinkClick={onWikilinkClick}
+        onWikilinkClick={handleWikilinkClick}
         onLinkClick={openExternalLink}
         {...(onTaskClick ? { onTaskClick } : {})}
         resolveImageUrl={resolveImageUrl}

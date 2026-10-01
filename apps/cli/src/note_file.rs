@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag};
-use reflect_graph_paths::eviction_placeholder;
+use reflect_graph_paths::{eviction_placeholder, LocalOnlyFolders};
 
 use crate::error::CliError;
 use crate::frontmatter::{parse_frontmatter, split_frontmatter, Frontmatter};
@@ -317,9 +317,62 @@ pub fn parse_note_meta(rel_path: &str, source: &str) -> NoteMeta {
     }
 }
 
+/// Refuse a note inside one of the graph's local-only folders exactly like a
+/// `private: true` note (exit 3): such a note is private by its path.
+fn refuse_local_only(
+    root: &Path,
+    rel_path: &str,
+    local_only: Option<&LocalOnlyFolders>,
+) -> Result<(), CliError> {
+    if local_only.is_some_and(|folders| in_local_only_folder(root, rel_path, folders)) {
+        return Err(CliError::Private(format!("note is private: {rel_path}")));
+    }
+    Ok(())
+}
+
+/// Whether `rel_path` lies in a local-only folder as written, or as the
+/// filesystem resolves it: APFS folds Unicode case and normalization, so
+/// `people/ſecure/visa.md` opens `people/secure/visa.md`. The deepest
+/// existing ancestor is canonicalized (on-disk spelling); a path that
+/// resolves outside the graph crosses a symlink, which
+/// [`checked_note_path`] refuses on its own.
+fn in_local_only_folder(root: &Path, rel_path: &str, folders: &LocalOnlyFolders) -> bool {
+    if folders.contains(rel_path) {
+        return true;
+    }
+    let joined = root.join(rel_path);
+    let mut existing = joined.as_path();
+    while !existing.exists() {
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => return false,
+        }
+    }
+    let (Ok(anchor), Ok(canonical_root)) = (existing.canonicalize(), root.canonicalize()) else {
+        return true; // unresolvable: fail closed
+    };
+    let Ok(on_disk) = anchor.strip_prefix(&canonical_root) else {
+        return false;
+    };
+    let remainder = joined.strip_prefix(existing).unwrap_or(Path::new(""));
+    let on_disk: Vec<String> = on_disk
+        .join(remainder)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    folders.contains(&on_disk.join("/"))
+}
+
 /// Read a note and enforce the privacy contract: a `private: true` note is
-/// refused (exit 3), based on the file's own frontmatter — never an index row.
-pub fn read_note(root: &Path, rel_path: &str) -> Result<Note, CliError> {
+/// refused (exit 3), based on the file's own frontmatter — never an index row
+/// — and so is a note inside a local-only folder (`local_only`, from the
+/// index's record of them), before anything is read.
+pub fn read_note(
+    root: &Path,
+    rel_path: &str,
+    local_only: Option<&LocalOnlyFolders>,
+) -> Result<Note, CliError> {
+    refuse_local_only(root, rel_path, local_only)?;
     let absolute = checked_note_path(root, rel_path)?;
     let content = fs::read_to_string(&absolute)
         .map_err(|err| CliError::Runtime(format!("could not read {rel_path}: {err}")))?;
@@ -332,7 +385,12 @@ pub fn read_note(root: &Path, rel_path: &str) -> Result<Note, CliError> {
 
 /// Enforce the privacy contract without returning content (used by `path`).
 /// A missing file has nothing to protect.
-pub fn ensure_not_private(root: &Path, rel_path: &str) -> Result<(), CliError> {
+pub fn ensure_not_private(
+    root: &Path,
+    rel_path: &str,
+    local_only: Option<&LocalOnlyFolders>,
+) -> Result<(), CliError> {
+    refuse_local_only(root, rel_path, local_only)?;
     let absolute = checked_note_path(root, rel_path)?;
     let content = match fs::read_to_string(&absolute) {
         Ok(content) => content,
@@ -410,6 +468,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_folded_spelling_of_a_local_only_folder_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().canonicalize().expect("canonical");
+        fs::create_dir_all(root.join("people/secure")).expect("mkdir");
+        fs::write(root.join("people/secure/visa.md"), "# Visa").expect("write");
+        let folders = LocalOnlyFolders::new(["secure"], None).expect("folders");
+        let folded = "people/\u{17f}ecure/visa.md";
+        assert!(matches!(
+            read_note(&root, "people/SECURE/visa.md", Some(&folders)),
+            Err(CliError::Private(_))
+        ));
+        if !root.join(folded).exists() {
+            return; // this filesystem keeps the spellings apart
+        }
+        // Control: the name alone does not match, and without the folders
+        // the folded spelling reads the note.
+        assert!(!folders.contains(folded));
+        assert!(read_note(&root, folded, None).is_ok());
+        assert!(matches!(
+            read_note(&root, folded, Some(&folders)),
+            Err(CliError::Private(_))
+        ));
+        assert!(matches!(
+            ensure_not_private(&root, folded, Some(&folders)),
+            Err(CliError::Private(_))
+        ));
+        assert!(read_note(&root, "people/plan.md", Some(&folders))
+            .is_err_and(|err| !matches!(err, CliError::Private(_))));
+    }
+
+    #[test]
     fn walk_finds_arbitrary_notes_and_prunes_ignored_trees() {
         let root = tempfile::tempdir().expect("tempdir");
         for (path, content) in [
@@ -453,7 +542,7 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].rel_path, "Projects/plan.md");
         assert!(notes[0].placeholder);
-        let error = ensure_not_private(root.path(), "Projects/plan.md").unwrap_err();
+        let error = ensure_not_private(root.path(), "Projects/plan.md", None).unwrap_err();
         assert!(error.to_string().contains("unavailable"));
     }
 

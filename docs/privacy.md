@@ -61,7 +61,9 @@ disk at call time), and it is covered by tests.
   by default; a public repo requires explicit confirmation), or any git host over SSH.
 - **What:** the whole graph as git commits — including notes marked `private: true`.
   The privacy flag blocks *services that read your content*; backup is your own
-  repository, and excluding private notes from it would silently lose them.
+  repository, and excluding private notes from it would silently lose them. The
+  one exception is [local-only folders](#local-only-folders-macos), which are
+  never staged.
 - **When:** after you connect, on the background backup cadence and on "Back up now".
 - GitHub sign-in uses the OAuth device flow against `github.com`; the token is stored
   in the OS keychain.
@@ -97,6 +99,123 @@ disk at call time), and it is covered by tests.
   request; `private: true` prevents the request or discards its result. A successful
   image is downscaled and stored as a local JPEG in the graph. Any BYOK AI enrichment
   then follows the provider rules above.
+
+## Local-only folders (macOS, off by default)
+
+Some notes should never leave this Mac at all — not even to your own backup
+repository. A graph can name **local-only folders**: every folder with one of
+the configured names (at any depth) is local-only. Typically each is a symlink
+from the graph into a separate "raw store" directory outside it (for example
+`finance/secure` → `<raw store>/finance/secure`), so the files themselves never
+sit inside the synced graph.
+
+- **Where:** nowhere. Notes inside a local-only folder are listed, opened,
+  previewed, searched locally (including on-device semantic search), and
+  resolved as link and backlink targets — and that is all.
+- **What is blocked:** they are private whatever their frontmatter says (every
+  AI surface, asset descriptions of images they reference or contain, gist
+  publishing, link previews, and X/YouTube/remote-image embeds); they open
+  read-only and the app never writes, creates, moves, or deletes anything
+  inside them; Git backup never stages the folder entry or anything in it; and
+  the `reflect` CLI treats them as private.
+- **Git pulls never write into them.** Another device's changes inside a
+  local-only folder stay in the backup's history but are not applied on this
+  Mac, and Reflect warns when a pull skips one. Files committed before a
+  folder became local-only stay frozen: never updated, deleted, or checked
+  out again here.
+- **How to configure:** add an entry for the graph to the settings file
+  (`~/Library/Application Support/reflect-open/settings.json`), keyed by the
+  graph's root path. It applies the next time the graph opens (switch to it
+  again, or relaunch); Reflect keeps the entry as written when it saves its
+  own settings. If the file stops parsing (say, a stray comma), Reflect
+  refuses to save *any* setting until it is fixed or removed, rather than
+  overwrite it and lose this entry.
+
+  ```json
+  "localOnlyFolders": {
+    "/Users/me/Notes": { "folders": ["secure"], "rawRoot": "/Users/me/Raw" }
+  }
+  ```
+
+  Folder names are plain ASCII, one folder name each, and never one of the
+  folders Reflect manages (`daily`, `notes`, `templates`, `assets`,
+  `audio-memos`). A link is followed only when its target resolves to a
+  directory inside `rawRoot`, which must neither contain the graph nor lie
+  inside it; nothing inside the raw store is followed further. Without a
+  valid `rawRoot` the folders stay private, read-only, and out of Git
+  backups, but unreadable. Reflect shows every problem it finds when the graph opens
+  (a dropped name, an unusable `rawRoot`, an entry for a path that no longer
+  exists or is not a graph you have opened).
+- **If the configuration goes missing, the folders stay local-only.**
+  Reflect remembers, in the graph's index, which folders were local-only
+  when the graph last opened; while a pause lasts it only adds to that list,
+  so a folder you list meanwhile is remembered even if it is dropped again
+  before the pause ends. When the settings file cannot be read, or no
+  longer lists one of them (moving or renaming the graph changes its key, for
+  example), that folder stays private and read-only, and Reflect pauses Git
+  sync, the iCloud conflict sweep and move-in, and every path that sends a
+  note's or attachment's content off the device (the AI chat's note and
+  attachment reads, transcription, asset descriptions, capture enrichment,
+  gist publishing) until the configuration lists it again. Two of those
+  pauses are partial: on-device transcription keeps running (its recordings
+  stay on the Mac, and it never transcribes one inside a local-only folder),
+  and so does enrichment of captures without a screenshot, which reads no
+  attachment. The editor's AI selection menu and the chat's graph statistics
+  keep working: neither can carry content from those folders, which open
+  read-only (without that menu) and are left out of the statistics.
+- **If that memory cannot be read,** Reflect pauses the same way. While it
+  is damaged (it no longer parses, or is not text), the `reflect` CLI
+  refuses every note (`reflect today` aside: daily notes are never
+  local-only), and when the graph's own entry names at least one valid
+  folder and none in both lists, Reflect records the entry in its place,
+  names what it records, and resumes at the next open. Check that list: a folder it leaves out is no longer
+  remembered. To end up with no local-only folders at all, list a placeholder
+  name in `folders` (for example `placeholder`; no such folder needs to
+  exist), open the graph once, then release it as described next.
+- **To stop treating a folder as local-only on purpose,** take it out of
+  `folders` and add it to `released` in the graph's own entry, for example
+  `{ "folders": [], "released": ["secure"] }`. The next time the graph opens,
+  Reflect lets it go and says so; after that you can remove the `released`
+  list. A released name only counts in the entry for this graph and only for
+  a folder Reflect remembers, so a moved graph or a typo still keeps the
+  folder local-only. A name listed in both `folders` and `released` stays
+  local-only, and Reflect warns and pauses the same way until you remove it
+  from one of the two lists: from `released` to keep the folder local-only,
+  or from `folders` to let it go. Do it right away, because while the pause
+  lasts, any edit that drops the name from `folders` (a typo included)
+  releases the folder.
+- **A released folder is ordinary again, Git backups included.** For a real
+  directory, the next commit stages this Mac's copies of its files,
+  including ones frozen since it became local-only, and the deletion of any
+  this Mac no longer has, so the backup's latest version can undo other
+  devices' changes inside it (the history keeps them). For a linked folder,
+  the link itself (its target path) is committed unless the graph's
+  `.gitignore` lists the name.
+- **That memory stays with this copy of the graph.** It lives in the graph's
+  `.reflect/` folder, which Git backups, sync providers, and Time Machine do
+  not carry (Reflect excludes it from backups). A graph restored or moved
+  without `.reflect/`, whose local-only folder is a real directory and whose
+  settings entry no longer matches, loses this protection. A linked folder
+  stays safe: without a configuration Reflect never follows the link.
+- **Unpublish first.** A gist published from a note before its folder became
+  local-only stays published, and the read-only view cannot unpublish it:
+  unpublish before moving the note in.
+- **Also list the names in the graph's `.gitignore`** (for example
+  `secure`, without a trailing slash, which would match only a real
+  directory and not a link). Reflect's own commits never need it, but `git`
+  run outside Reflect does not read Reflect's settings.
+- **Keep the raw store available offline.** Evicted (cloud-only) files in it
+  are skipped rather than downloaded on demand.
+- **iCloud Drive and other sync folders.** When the graph itself lives in a
+  synced folder (iCloud Drive, Dropbox, Google Drive, OneDrive), that
+  provider still syncs a *real* local-only folder inside it: Reflect cannot
+  stop another app's sync, and it never marks your folders to try (the marks
+  would also drop them from Time Machine, and Dropbox deletes an ignored
+  folder from your other devices). Keep such notes in a raw store outside the
+  synced graph and link them in. Reflect's own iCloud conflict sweep never
+  reads, merges, or writes inside a local-only folder, and moving a graph into
+  iCloud Drive leaves local-only folders and links behind; configure the new
+  root and recreate the links there.
 
 ## Apple Contacts (off by default)
 
@@ -173,7 +292,7 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | Transcription model update check | Hugging Face | No | On once the model is downloaded |
 | Embeddings | Nowhere (on-device) | — | Yes (opt-in download) |
 | Model download | Hugging Face | No | Yes (opt-in) |
-| Backup | Your git repository | Yes — including private notes | Yes (needs connecting) |
+| Backup | Your git repository | Yes — including private notes, never local-only folders | Yes (needs connecting) |
 | Key validation | The provider | No | — (only when adding a key) |
 | Update check | GitHub Releases | No | On in packaged builds |
 | Browser capture | Nowhere (local host on disk) | — (stays on your machine) | — (only when you capture) |

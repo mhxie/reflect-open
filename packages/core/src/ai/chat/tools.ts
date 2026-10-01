@@ -1,6 +1,6 @@
 import type { Tool, TypedToolCall, TypedToolResult } from '@reflect/modules/ai'
 import { z } from 'zod'
-import { readNote } from '../../graph/commands.ts'
+import { isLocalOnlyPath } from '../../graph/local-only.ts'
 import { retrieve, type RetrievalHit, type RetrieveOptions } from '../../embeddings/retrieve.ts'
 import { assetReferencingNotePaths } from '../../indexing/asset-refs.ts'
 import { listDailyNotes, type DailyNoteRow, type DailyNotesRange } from '../../indexing/queries.ts'
@@ -11,7 +11,12 @@ import {
 } from '../../indexing/note-list.ts'
 import { isTagName } from '../../markdown/extract.ts'
 import { buildReadOneAsset, readAssetsInput, type ReadAssetsOutput } from './read-assets.ts'
-import { buildReadOneNote, readNotesInput, type ReadNotesOutput } from './read-notes.ts'
+import {
+  buildReadOneNote,
+  readNotesInput,
+  readShareableNote,
+  type ReadNotesOutput,
+} from './read-notes.ts'
 import {
   cloudSafeNoteListings,
   cloudSafeSearchHits,
@@ -144,7 +149,7 @@ function listingCandidate(
  */
 export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
   const retrieveFn = options.retrieveFn ?? retrieve
-  const readNoteFn = options.readNoteFn ?? readNote
+  const readNoteFn = options.readNoteFn ?? readShareableNote
   const listRecentNotesFn = options.listRecentNotesFn ?? listRecentNotes
   const listDailyNotesFn = options.listDailyNotesFn ?? listDailyNotes
   const assetRefsFn = options.assetReferencingNotePathsFn ?? assetReferencingNotePaths
@@ -154,8 +159,11 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
   // The gate's live privacy probe: the index flag on a hit can lag a
   // just-saved `private: true`, so each candidate's frontmatter is re-read
   // from disk. Fail closed — a note that can't be read can't be cleared
-  // for sending.
+  // for sending. A local-only note is private by its path and never read.
   const isPrivateLive = async (path: string): Promise<boolean> => {
+    if (isLocalOnlyPath(path)) {
+      return true
+    }
     try {
       return notePrivate(await readNoteFn(path))
     } catch {

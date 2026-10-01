@@ -16,6 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
+use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
 #[cfg(mobile)]
 use tauri::Manager;
@@ -443,18 +444,23 @@ pub async fn icloud_status() -> AppResult<IcloudStatus> {
 /// rebuildable projection, and a backup repo must never ride a file-sync
 /// provider. The Git remote, if any, is disconnected by the caller first —
 /// iCloud sync and a Git remote are mutually exclusive per graph (Plan 21).
+/// Local-only folders are left behind too, real directories and links
+/// alike: their notes must never reach iCloud. The copy carries no
+/// local-only configuration (that is keyed by the old root).
 #[tauri::command]
 pub async fn icloud_adopt_graph(
     generation: u64,
     state: tauri::State<'_, crate::fs::GraphState>,
 ) -> AppResult<String> {
-    let root = crate::fs::root_for_generation(&state, generation)?;
-    tauri::async_runtime::spawn_blocking(move || adopt_graph(&root))
+    // Refused while the local-only configuration is unknown: the move-in
+    // could not tell which folders to leave behind.
+    let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
+    tauri::async_runtime::spawn_blocking(move || adopt_graph(&root, local_only.as_deref()))
         .await
         .map_err(|err| AppError::io(err.to_string()))?
 }
 
-fn adopt_graph(root: &Path) -> AppResult<String> {
+fn adopt_graph(root: &Path, local_only: Option<&LocalOnlyFolders>) -> AppResult<String> {
     let documents = platform::ubiquity_documents_dir().ok_or_else(|| {
         AppError::io("iCloud Drive is unavailable — sign in to iCloud and try again")
     })?;
@@ -468,7 +474,7 @@ fn adopt_graph(root: &Path) -> AppResult<String> {
             "iCloud Drive already contains a graph named \"{name}\" — open that one instead, or rename one of the two"
         )));
     }
-    adopt_into(root, &target)?;
+    adopt_into(root, &target, local_only)?;
     Ok(target.to_string_lossy().into_owned())
 }
 
@@ -478,12 +484,12 @@ fn adopt_graph(root: &Path) -> AppResult<String> {
 /// iCloud Drive by hand. On failure the target is removed, but **only** when
 /// this attempt effectively created it (missing or empty before); a
 /// pre-existing non-empty folder is never deleted wholesale.
-fn adopt_into(root: &Path, target: &Path) -> AppResult<()> {
+fn adopt_into(root: &Path, target: &Path, local_only: Option<&LocalOnlyFolders>) -> AppResult<()> {
     let target_was_fresh = !target.exists()
         || std::fs::read_dir(target)
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(false);
-    let outcome = copy_and_verify(root, target);
+    let outcome = copy_and_verify(root, target, local_only);
     if outcome.is_err() && target_was_fresh {
         let _ = std::fs::remove_dir_all(target); // best-effort retry hygiene
     }
@@ -492,9 +498,13 @@ fn adopt_into(root: &Path, target: &Path) -> AppResult<()> {
 
 /// The copy + count/byte verification half of [`adopt_into`], separated so
 /// its failure paths share one cleanup decision in the caller.
-fn copy_and_verify(root: &Path, target: &Path) -> AppResult<()> {
-    let copied = copy_graph_tree(root, target)?;
-    let landed = count_graph_tree(target)?;
+fn copy_and_verify(
+    root: &Path,
+    target: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
+    let copied = copy_graph_tree(root, target, local_only)?;
+    let landed = count_graph_tree(target, local_only)?;
     if copied != landed {
         return Err(AppError::io(format!(
             "the iCloud copy did not verify (copied {} files / {} bytes, found {} / {}); the original graph is untouched",
@@ -514,8 +524,22 @@ fn local_only_name(name: &str) -> bool {
     matches!(name, ".reflect" | ".git" | ".DS_Store")
 }
 
+/// Whether a move-in leaves this directory entry behind: a local-only folder
+/// by its on-disk name (a link is never followed anyway).
+fn left_behind(
+    local_only: Option<&LocalOnlyFolders>,
+    name: &str,
+    file_type: std::fs::FileType,
+) -> bool {
+    file_type.is_dir() && local_only.is_some_and(|folders| folders.is_folder_name(name))
+}
+
 /// Recursively copy the graph tree, returning `(files, bytes)` copied.
-fn copy_graph_tree(source: &Path, target: &Path) -> AppResult<(u64, u64)> {
+fn copy_graph_tree(
+    source: &Path,
+    target: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<(u64, u64)> {
     std::fs::create_dir_all(target)?;
     let mut files = 0u64;
     let mut bytes = 0u64;
@@ -530,6 +554,9 @@ fn copy_graph_tree(source: &Path, target: &Path) -> AppResult<(u64, u64)> {
             let file_type = entry.file_type()?;
             if file_type.is_symlink() {
                 continue; // never follow links out of the graph
+            }
+            if left_behind(local_only, &name.to_string_lossy(), file_type) {
+                continue;
             }
             let from = entry.path();
             let to = to_dir.join(&name);
@@ -546,7 +573,7 @@ fn copy_graph_tree(source: &Path, target: &Path) -> AppResult<(u64, u64)> {
 }
 
 /// Count `(files, bytes)` in a copied tree, with the same skip rules.
-fn count_graph_tree(root: &Path) -> AppResult<(u64, u64)> {
+fn count_graph_tree(root: &Path, local_only: Option<&LocalOnlyFolders>) -> AppResult<(u64, u64)> {
     let mut files = 0u64;
     let mut bytes = 0u64;
     let mut stack = vec![root.to_path_buf()];
@@ -557,7 +584,9 @@ fn count_graph_tree(root: &Path) -> AppResult<(u64, u64)> {
                 continue;
             }
             let file_type = entry.file_type()?;
-            if file_type.is_symlink() {
+            if file_type.is_symlink()
+                || left_behind(local_only, &entry.file_name().to_string_lossy(), file_type)
+            {
                 continue;
             }
             if file_type.is_dir() {
@@ -621,9 +650,9 @@ mod tests {
 
         let container = tempfile::tempdir().expect("tempdir");
         let target = container.path().join("Notes");
-        let copied = copy_graph_tree(source.path(), &target).expect("copy");
+        let copied = copy_graph_tree(source.path(), &target, None).expect("copy");
         assert_eq!(copied, (1, 3)); // one file, three bytes — the note alone
-        assert_eq!(count_graph_tree(&target).expect("count"), copied);
+        assert_eq!(count_graph_tree(&target, None).expect("count"), copied);
         assert_eq!(
             std::fs::read_to_string(target.join("notes/a.md")).expect("read"),
             "# A"
@@ -631,6 +660,44 @@ mod tests {
         assert!(!target.join(".reflect").exists());
         assert!(!target.join(".git").exists());
         assert!(!target.join(".DS_Store").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adoption_leaves_local_only_folders_behind() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().canonicalize().expect("canonical");
+        let (source, raw) = (base.join("graph"), base.join("raw"));
+        for (path, contents) in [
+            (source.join("notes/a.md"), "# A"),
+            (source.join("people/secure/visa.md"), "# Visa"),
+            (source.join("people/SECURE-notes/b.md"), "# B"),
+            (raw.join("finance/secure/bank.md"), "# Bank"),
+        ] {
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            std::fs::write(path, contents).expect("write");
+        }
+        std::fs::create_dir_all(source.join("finance")).expect("mkdir");
+        std::os::unix::fs::symlink(raw.join("finance/secure"), source.join("finance/secure"))
+            .expect("link");
+        let folders = LocalOnlyFolders::new(["secure"], Some(&raw)).expect("folders");
+
+        let target = base.join("container/Notes");
+        let copied = copy_graph_tree(&source, &target, Some(&folders)).expect("copy");
+        assert_eq!(copied, (2, 6)); // notes/a.md and the look-alike folder's b.md
+        assert_eq!(
+            count_graph_tree(&target, Some(&folders)).expect("count"),
+            copied
+        );
+        assert!(!target.join("people/secure").exists());
+        assert!(!target.join("finance/secure").exists());
+        assert!(target.join("people/SECURE-notes/b.md").exists());
+
+        // Control: unconfigured, the real folder rides along (the link never does).
+        let unguarded = base.join("container/Unguarded");
+        copy_graph_tree(&source, &unguarded, None).expect("copy");
+        assert!(unguarded.join("people/secure/visa.md").exists());
+        assert!(!unguarded.join("finance/secure").exists());
     }
 
     /// The pending walk must count placeholders anywhere in the graph but
@@ -671,7 +738,7 @@ mod tests {
 
         let container = tempfile::tempdir().expect("tempdir");
         let target = container.path().join("Notes");
-        let result = adopt_into(source.path(), &target);
+        let result = adopt_into(source.path(), &target, None);
 
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
             .expect("chmod back");
@@ -698,7 +765,7 @@ mod tests {
         std::fs::create_dir_all(&target).expect("mkdir");
         std::fs::write(target.join("keep.txt"), b"precious").expect("write");
 
-        let result = adopt_into(source.path(), &target);
+        let result = adopt_into(source.path(), &target, None);
 
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
             .expect("chmod back");

@@ -9,13 +9,15 @@
 //! file they stand in for.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::UNIX_EPOCH;
 
-use ignore::WalkBuilder;
+use ignore::gitignore::Gitignore;
+use ignore::{Match, WalkBuilder};
 
+use crate::local_only::{LocalOnlyFolders, LocalOnlyLink};
 use crate::{
     classify, evicted_logical_path, icloud_placeholder_target, is_dataless, wire_path,
     GraphPathKind,
@@ -61,6 +63,9 @@ pub struct FileCatalog {
     /// unreadable metadata, symlinks, and default-pruned trees. Surfaced so
     /// "why isn't my file showing up" is always diagnosable.
     pub skipped: u32,
+    /// Local-only links the walk followed one hop ([`walk_catalog_with`]);
+    /// always empty from [`walk_catalog`].
+    pub local_only_links: Vec<LocalOnlyLink>,
 }
 
 /// Recursively list every eligible note and supported attachment under `root`.
@@ -73,104 +78,347 @@ pub struct FileCatalog {
 /// pruned. Every refusal is counted, never fatal: one unreadable directory
 /// costs that directory, not the listing.
 pub fn walk_catalog(root: &Path) -> FileCatalog {
-    let skipped = Arc::new(AtomicU32::new(0));
-    let mut builder = WalkBuilder::new(root);
-    builder
-        .hidden(false)
-        .ignore(false)
-        .parents(false)
-        .git_global(false)
-        .require_git(false)
-        .follow_links(false)
-        .add_custom_ignore_filename(REFLECT_IGNORE_FILE);
-    let filter_skipped = Arc::clone(&skipped);
-    builder.filter_entry(move |entry| {
-        if entry.depth() == 0 {
-            return true;
-        }
-        if entry.path_is_symlink() {
-            filter_skipped.fetch_add(1, Ordering::Relaxed);
-            return false;
-        }
-        let name = entry.file_name().to_string_lossy();
-        if name.starts_with('.') {
-            return entry.file_type().is_some_and(|kind| kind.is_file())
-                && icloud_placeholder_target(&name).is_some();
-        }
-        if entry.file_type().is_some_and(|kind| kind.is_dir()) && is_pruned_dir(&name, entry.path())
-        {
-            filter_skipped.fetch_add(1, Ordering::Relaxed);
-            return false;
-        }
-        true
-    });
-
     let mut catalog = FileCatalog::default();
-    for result in builder.build() {
-        let Ok(entry) = result else {
-            skipped.fetch_add(1, Ordering::Relaxed);
-            continue;
-        };
-        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
-            continue;
-        }
-        let path = entry.path();
-        let Ok(rel) = path.strip_prefix(root) else {
-            continue;
-        };
-        // A placeholder lists as the logical file it stands in for, unless
-        // something already occupies that name (mid-download both exist).
-        let listed = match evicted_logical_path(rel) {
-            Some(logical_rel) => {
-                let occupied = path
-                    .with_file_name(logical_rel.file_name().unwrap_or_default())
-                    .symlink_metadata()
-                    .is_ok();
-                if occupied {
-                    None
-                } else {
-                    wire_path(&logical_rel).map(|wire| (wire, true))
-                }
-            }
-            None => wire_path(rel).map(|wire| (wire, false)),
-        };
-        let Some((wire, placeholder)) = listed else {
-            continue;
-        };
-        let Some(kind) = classify(&wire) else {
-            continue;
-        };
-        let Ok(meta) = entry.metadata() else {
-            skipped.fetch_add(1, Ordering::Relaxed);
-            continue;
-        };
-        let file = FileEntry {
-            path: wire,
-            size: meta.len(),
-            modified_ms: meta
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_millis() as u64)
-                .unwrap_or(0),
-            // Two eviction forms fold into one flag: the legacy `.icloud`
-            // stub (detected by name above) and the modern dataless file
-            // (kernel flag on the real path).
-            placeholder: placeholder || is_dataless(&meta),
-        };
-        match kind {
-            GraphPathKind::Note => catalog.notes.push(file),
-            GraphPathKind::Attachment => catalog.attachments.push(file),
-        }
+    let skipped = TreeWalk::graph(root, None).run(&mut catalog);
+    finish(catalog, skipped)
+}
+
+/// [`walk_catalog`] plus the graph's local-only folders: each allowed link
+/// ([`LocalOnlyFolders::link_target`]) in a directory this walk entered, and
+/// not itself `.reflectignore`d, is followed one hop and its target walked as
+/// if it sat at the link's path. Its `.gitignore` status is not consulted (a
+/// local-only folder is expected to be Git-ignored). Inside a target the
+/// ordinary rules hold, with the graph-side `.reflectignore` files above the
+/// link applied to the composed path; nothing is followed further, and
+/// evicted (dataless) files are skipped.
+pub fn walk_catalog_with(root: &Path, local_only: &LocalOnlyFolders) -> FileCatalog {
+    let mut catalog = FileCatalog::default();
+    let (mut skipped, links) = walk_graph_and_links(root, local_only, &mut catalog);
+    for (link, ignores) in links {
+        skipped += TreeWalk::local_only(&link, ignores).run(&mut catalog);
+        catalog.local_only_links.push(link);
     }
+    finish(catalog, skipped)
+}
+
+/// Just the allowed local-only links [`walk_catalog_with`] would follow,
+/// without walking their targets (the desktop watcher's discovery).
+pub fn local_only_links(root: &Path, local_only: &LocalOnlyFolders) -> Vec<LocalOnlyLink> {
+    let (_, links) = walk_graph_and_links(root, local_only, &mut FileCatalog::default());
+    links.into_iter().map(|(link, _)| link).collect()
+}
+
+/// The graph walk into `catalog`, then link discovery over the directories
+/// it entered (none without a raw-store root). Returns the refusal count.
+fn walk_graph_and_links(
+    root: &Path,
+    local_only: &LocalOnlyFolders,
+    catalog: &mut FileCatalog,
+) -> (u32, Vec<(LocalOnlyLink, AncestorIgnores)>) {
+    if local_only.raw_root().is_none() {
+        return (TreeWalk::graph(root, None).run(catalog), Vec::new());
+    }
+    let discovery = Discovery {
+        visited: Arc::new(Mutex::new(vec![root.to_path_buf()])),
+        folders: Arc::new(local_only.clone()),
+    };
+    let visited = Arc::clone(&discovery.visited);
+    let mut skipped = TreeWalk::graph(root, Some(discovery)).run(catalog);
+    let directories = std::mem::take(&mut *visited.lock().unwrap_or_else(PoisonError::into_inner));
+    let links = discover_links(root, &directories, local_only, &mut skipped);
+    (skipped, links)
+}
+
+/// What the graph walk gathers for link discovery.
+#[derive(Clone)]
+struct Discovery {
+    /// Directories the walk enters.
+    visited: Arc<Mutex<Vec<PathBuf>>>,
+    /// The configured names: a symlink carrying one is left to discovery to
+    /// judge (and count, if refused) instead of being counted here.
+    folders: Arc<LocalOnlyFolders>,
+}
+
+/// Sort the listings into their canonical order and stamp the refusal count.
+fn finish(mut catalog: FileCatalog, skipped: u32) -> FileCatalog {
     catalog
         .notes
         .sort_by(|left, right| left.path.cmp(&right.path));
     catalog
         .attachments
         .sort_by(|left, right| left.path.cmp(&right.path));
-    catalog.skipped = skipped.load(Ordering::Relaxed);
+    catalog.skipped = skipped;
     catalog
+}
+
+/// One `ignore` walk feeding a catalog: the graph itself, or one local-only
+/// link's target listed under the link's path.
+struct TreeWalk {
+    /// Where the walker starts: the graph root, or a link's canonical target.
+    start: PathBuf,
+    /// Wire prefix for everything under `start` (the link's path); `None`
+    /// for the graph root.
+    prefix: Option<String>,
+    /// Link discovery's share of the graph walk.
+    discovery: Option<Discovery>,
+    /// Graph-side `.reflectignore` rules above a link, which a walker rooted
+    /// at the link's target never reads on its own.
+    ancestor_ignores: Option<Arc<AncestorIgnores>>,
+}
+
+impl TreeWalk {
+    fn graph(root: &Path, discovery: Option<Discovery>) -> Self {
+        Self {
+            start: root.to_path_buf(),
+            prefix: None,
+            discovery,
+            ancestor_ignores: None,
+        }
+    }
+
+    fn local_only(link: &LocalOnlyLink, ignores: AncestorIgnores) -> Self {
+        Self {
+            start: link.target.clone(),
+            prefix: Some(link.path.clone()),
+            discovery: None,
+            ancestor_ignores: Some(Arc::new(ignores)),
+        }
+    }
+
+    /// The graph-relative path an entry under `start` lists as.
+    fn composed(prefix: Option<&str>, wire: String) -> String {
+        match prefix {
+            Some(prefix) => format!("{prefix}/{wire}"),
+            None => wire,
+        }
+    }
+
+    /// Walk into `catalog`; returns how many entries were refused.
+    fn run(self, catalog: &mut FileCatalog) -> u32 {
+        let skipped = Arc::new(AtomicU32::new(0));
+        let mut builder = WalkBuilder::new(&self.start);
+        builder
+            .hidden(false)
+            .ignore(false)
+            .parents(false)
+            .git_global(false)
+            .require_git(false)
+            .follow_links(false)
+            .add_custom_ignore_filename(REFLECT_IGNORE_FILE);
+        let filter_skipped = Arc::clone(&skipped);
+        let filter_start = self.start.clone();
+        let filter_prefix = self.prefix.clone();
+        let discovery = self.discovery.clone();
+        let ancestor_ignores = self.ancestor_ignores.clone();
+        builder.filter_entry(move |entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            let name = entry.file_name().to_string_lossy();
+            if entry.path_is_symlink() {
+                let deferred = discovery
+                    .as_ref()
+                    .is_some_and(|discovery| discovery.folders.is_folder_name(&name));
+                if !deferred {
+                    filter_skipped.fetch_add(1, Ordering::Relaxed);
+                }
+                return false;
+            }
+            if name.starts_with('.') {
+                return entry.file_type().is_some_and(|kind| kind.is_file())
+                    && icloud_placeholder_target(&name).is_some();
+            }
+            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+            if is_dir && is_pruned_dir(&name, entry.path()) {
+                filter_skipped.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            if let (Some(ignores), Some(prefix)) = (&ancestor_ignores, &filter_prefix) {
+                let excluded = entry
+                    .path()
+                    .strip_prefix(&filter_start)
+                    .is_ok_and(|rel| ignores.is_ignored(&Path::new(prefix).join(rel), is_dir));
+                if excluded {
+                    return false;
+                }
+            }
+            if is_dir {
+                if let Some(discovery) = &discovery {
+                    discovery
+                        .visited
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(entry.path().to_path_buf());
+                }
+            }
+            true
+        });
+
+        let local_only = self.prefix.is_some();
+        for result in builder.build() {
+            let Ok(entry) = result else {
+                skipped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            };
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(rel) = path.strip_prefix(&self.start) else {
+                continue;
+            };
+            // A placeholder lists as the logical file it stands in for, unless
+            // something already occupies that name (mid-download both exist).
+            let listed = match evicted_logical_path(rel) {
+                Some(logical_rel) => {
+                    let occupied = path
+                        .with_file_name(logical_rel.file_name().unwrap_or_default())
+                        .symlink_metadata()
+                        .is_ok();
+                    if occupied {
+                        None
+                    } else {
+                        wire_path(&logical_rel).map(|wire| (wire, true))
+                    }
+                }
+                None => wire_path(rel).map(|wire| (wire, false)),
+            };
+            let Some((wire, placeholder)) = listed else {
+                continue;
+            };
+            let wire = Self::composed(self.prefix.as_deref(), wire);
+            let Some(kind) = classify(&wire) else {
+                continue;
+            };
+            let Ok(meta) = entry.metadata() else {
+                skipped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            };
+            // Two eviction forms fold into one flag: the legacy `.icloud`
+            // stub (detected by name above) and the modern dataless file
+            // (kernel flag on the real path).
+            let placeholder = placeholder || is_dataless(&meta);
+            if placeholder && local_only {
+                // Reading an evicted raw-store file would make its provider
+                // download it on demand, and the iCloud recovery paths
+                // (targeted downloads) can't reach outside the graph.
+                skipped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            let file = FileEntry {
+                path: wire,
+                size: meta.len(),
+                modified_ms: meta
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_millis() as u64)
+                    .unwrap_or(0),
+                placeholder,
+            };
+            match kind {
+                GraphPathKind::Note => catalog.notes.push(file),
+                GraphPathKind::Attachment => catalog.attachments.push(file),
+            }
+        }
+        skipped.load(Ordering::Relaxed)
+    }
+}
+
+/// Find the allowed local-only links directly inside `directories` (the
+/// directories the graph walk entered), paired with the graph-side
+/// `.reflectignore` rules that keep applying beneath each. A configured name
+/// that fails validation counts as skipped. Sorted by path.
+fn discover_links(
+    root: &Path,
+    directories: &[PathBuf],
+    local_only: &LocalOnlyFolders,
+    skipped: &mut u32,
+) -> Vec<(LocalOnlyLink, AncestorIgnores)> {
+    let mut links = Vec::new();
+    for directory in directories {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let is_link = entry.file_type().is_ok_and(|kind| kind.is_symlink());
+            let name = entry.file_name();
+            if !is_link
+                || !name
+                    .to_str()
+                    .is_some_and(|name| local_only.is_folder_name(name))
+            {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(rel) = path.strip_prefix(root) else {
+                continue;
+            };
+            let Some(wire) = wire_path(rel) else {
+                continue;
+            };
+            if has_pruned_component(&wire) {
+                continue;
+            }
+            let ignores = AncestorIgnores::above(root, rel);
+            if ignores.is_ignored(rel, true) {
+                continue;
+            }
+            match local_only.link_target(root, rel) {
+                Some(target) => links.push((LocalOnlyLink { path: wire, target }, ignores)),
+                None => *skipped += 1,
+            }
+        }
+    }
+    links.sort_by(|(left, _), (right, _)| left.path.cmp(&right.path));
+    links
+}
+
+/// The graph-side [`REFLECT_IGNORE_FILE`] matchers above one local-only link,
+/// deepest first, each with the graph-relative directory it applies to.
+struct AncestorIgnores(Vec<(PathBuf, Gitignore)>);
+
+impl AncestorIgnores {
+    /// Matchers from the graph root down to the directory holding `link`.
+    fn above(root: &Path, link: &Path) -> Self {
+        let mut matchers = Vec::new();
+        let mut directory = PathBuf::new();
+        let mut collect = |directory: &Path| {
+            let file = root.join(directory).join(REFLECT_IGNORE_FILE);
+            if file.is_file() {
+                let (matcher, _error) = Gitignore::new(&file);
+                if !matcher.is_empty() {
+                    matchers.push((directory.to_path_buf(), matcher));
+                }
+            }
+        };
+        collect(&directory);
+        if let Some(parent) = link.parent() {
+            for component in parent.components() {
+                directory.push(component);
+                collect(&directory);
+            }
+        }
+        matchers.reverse();
+        Self(matchers)
+    }
+
+    /// Whether a graph-relative path is excluded by the nearest matcher
+    /// with an opinion — gitignore precedence: deeper files win, and a
+    /// whitelist (`!pattern`) un-ignores.
+    fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {
+        for (directory, matcher) in &self.0 {
+            let Ok(rel) = path.strip_prefix(directory) else {
+                continue;
+            };
+            match matcher.matched(rel, is_dir) {
+                Match::Ignore(_) => return true,
+                Match::Whitelist(_) => return false,
+                Match::None => {}
+            }
+        }
+        false
+    }
 }
 
 fn is_pruned_dir(name: &str, path: &Path) -> bool {
@@ -367,6 +615,177 @@ mod tests {
         assert!(!has_pruned_component("Pods"));
         assert!(!has_pruned_component("notes/node_modules.md"));
         assert!(!has_pruned_component("Projects/deep/plan.md"));
+    }
+
+    /// A graph and a raw store side by side, canonicalized (macOS `/var` →
+    /// `/private/var`), with `finance/secure` linked into the store.
+    #[cfg(unix)]
+    struct LinkedGraph {
+        _dir: tempfile::TempDir,
+        graph: std::path::PathBuf,
+        raw: std::path::PathBuf,
+    }
+
+    #[cfg(unix)]
+    fn linked_graph() -> LinkedGraph {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let graph = base.join("graph");
+        let raw = base.join("raw");
+        write(&graph, "notes/public.md", "public");
+        write(&raw, "finance/secure/bank.md", "bank");
+        fs::create_dir_all(graph.join("finance")).unwrap();
+        symlink(raw.join("finance/secure"), graph.join("finance/secure")).unwrap();
+        LinkedGraph {
+            _dir: dir,
+            graph,
+            raw,
+        }
+    }
+
+    #[cfg(unix)]
+    fn folders(raw: &Path) -> crate::LocalOnlyFolders {
+        crate::LocalOnlyFolders::new(["secure"], Some(raw)).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_only_links_are_followed_one_hop_even_when_gitignored() {
+        use std::os::unix::fs::symlink;
+        let linked = linked_graph();
+        let (graph, raw) = (&linked.graph, &linked.raw);
+        // The vault keeps the link out of Git by name — the expected state.
+        write(graph, ".gitignore", "secure\n");
+        write(raw, "finance/secure/sub/tax.md", "tax");
+        write(raw, "finance/secure/scan.png", "png");
+        write(raw, "finance/secure/.hidden/x.md", "hidden");
+        write(raw, "finance/secure/node_modules/pkg/README.md", "dep");
+        write(raw, "elsewhere/leak.md", "leak");
+        symlink(raw.join("elsewhere"), raw.join("finance/secure/alias")).unwrap();
+
+        let catalog = super::walk_catalog_with(graph, &folders(raw));
+        let notes: Vec<&str> = catalog.notes.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            notes,
+            vec![
+                "finance/secure/bank.md",
+                "finance/secure/sub/tax.md",
+                "notes/public.md"
+            ]
+        );
+        let attachments: Vec<&str> = catalog
+            .attachments
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
+        assert_eq!(attachments, vec!["finance/secure/scan.png"]);
+        assert_eq!(catalog.local_only_links.len(), 1);
+        assert_eq!(catalog.local_only_links[0].path, "finance/secure");
+        assert_eq!(
+            catalog.local_only_links[0].target,
+            raw.join("finance/secure")
+        );
+        // Exactly the nested symlink and the pruned tree; the hidden folder
+        // is invisible, and the followed link is not a refusal.
+        assert_eq!(catalog.skipped, 2);
+
+        // The shared walk (CLI, iCloud sweep) is unchanged: no link followed.
+        assert_eq!(note_paths(graph), vec!["notes/public.md"]);
+        // Discovery alone finds the same links without walking the targets.
+        assert_eq!(
+            super::local_only_links(graph, &folders(raw)),
+            catalog.local_only_links
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_inside_skipped_directories_are_never_discovered() {
+        use std::os::unix::fs::symlink;
+        let linked = linked_graph();
+        let (graph, raw) = (&linked.graph, &linked.raw);
+        write(graph, ".gitignore", "archive/\n");
+        write(raw, "archive/secure/old.md", "old");
+        fs::create_dir_all(graph.join("archive")).unwrap();
+        fs::create_dir_all(graph.join(".hidden")).unwrap();
+        symlink(raw.join("archive/secure"), graph.join("archive/secure")).unwrap();
+        symlink(raw.join("archive/secure"), graph.join(".hidden/secure")).unwrap();
+
+        let catalog = super::walk_catalog_with(graph, &folders(raw));
+        let links: Vec<&str> = catalog
+            .local_only_links
+            .iter()
+            .map(|link| link.path.as_str())
+            .collect();
+        assert_eq!(links, vec!["finance/secure"]);
+        assert!(!catalog.notes.iter().any(|f| f.path.contains("old.md")));
+        // Ignored and hidden directories are pruned silently.
+        assert_eq!(catalog.skipped, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graph_reflectignore_rules_still_apply_inside_a_link() {
+        let linked = linked_graph();
+        let (graph, raw) = (&linked.graph, &linked.raw);
+        write(graph, ".reflectignore", "cache/\n");
+        write(graph, "finance/.reflectignore", "secure/drafts/\n");
+        write(raw, "finance/secure/cache/raw.md", "cached");
+        write(raw, "finance/secure/drafts/wip.md", "draft");
+        write(raw, "finance/secure/.reflectignore", "scratch.md\n");
+        write(raw, "finance/secure/scratch.md", "scratch");
+
+        let catalog = super::walk_catalog_with(graph, &folders(raw));
+        let notes: Vec<&str> = catalog.notes.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(notes, vec!["finance/secure/bank.md", "notes/public.md"]);
+
+        // Ignoring the link itself keeps the whole folder out.
+        write(graph, "finance/.reflectignore", "secure\n");
+        let catalog = super::walk_catalog_with(graph, &folders(raw));
+        assert!(catalog.local_only_links.is_empty());
+        assert_eq!(
+            catalog
+                .notes
+                .iter()
+                .map(|f| f.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["notes/public.md"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_links_are_counted_and_never_followed() {
+        use std::os::unix::fs::symlink;
+        let linked = linked_graph();
+        let (graph, raw) = (&linked.graph, &linked.raw);
+        let outside = tempdir().unwrap();
+        write(outside.path(), "secure/leak.md", "leak");
+        fs::create_dir_all(graph.join("people")).unwrap();
+        fs::create_dir_all(graph.join("career")).unwrap();
+        symlink(outside.path().join("secure"), graph.join("people/secure")).unwrap();
+        symlink(raw.join("missing"), graph.join("career/secure")).unwrap();
+
+        let catalog = super::walk_catalog_with(graph, &folders(raw));
+        assert_eq!(catalog.local_only_links.len(), 1);
+        assert!(!catalog.notes.iter().any(|f| f.path.contains("leak")));
+        // Each refused link counts once (discovery's verdict); the followed
+        // one does not count at all.
+        assert_eq!(catalog.skipped, 2);
+
+        // Without a raw-store root nothing is followed at all.
+        let deny_only = crate::LocalOnlyFolders::new(["secure"], None).unwrap();
+        let catalog = super::walk_catalog_with(graph, &deny_only);
+        assert!(catalog.local_only_links.is_empty());
+        assert_eq!(
+            catalog
+                .notes
+                .iter()
+                .map(|f| f.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["notes/public.md"]
+        );
     }
 
     #[test]

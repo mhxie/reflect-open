@@ -59,6 +59,12 @@ export interface NoteDocumentOptions {
    * for the lazy-contract semantics.
    */
   missingSeed?: string | undefined
+  /**
+   * Never write: the session tracks the note (external changes reload it)
+   * but has no write path, so every save and commit declines. For notes in a
+   * local-only folder, which the app reads but must never edit.
+   */
+  readOnly?: boolean
 }
 
 /**
@@ -75,6 +81,7 @@ export function useNoteDocument(
   const createIfMissing = options?.createIfMissing ?? false
   const trackRenames = options?.trackRenames ?? false
   const missingSeed = options?.missingSeed
+  const readOnly = options?.readOnly ?? false
   const [snapshot, setSnapshot] = useState<NoteSessionSnapshot>(INITIAL_NOTE_SNAPSHOT)
   const editorRef = useRef<NoteEditorHandle | null>(null)
   /** Mirrors the snapshot's conflict for non-reactive checks (rename gating). */
@@ -97,7 +104,7 @@ export function useNoteDocument(
   // write land with the previous generation, which Rust rejects.
   // eslint-disable-next-line react-hooks/refs
   generationRef.current = generation
-  const canWrite = generation !== null
+  const canWrite = generation !== null && !readOnly
 
   useEffect(() => {
     if (!path) {

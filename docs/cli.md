@@ -40,6 +40,21 @@ explain on stderr, and exit `3`. The check reads the resolved file's own
 frontmatter (never just the index row), so a stale index can't leak a
 just-flagged note.
 
+Notes inside the graph's local-only folders (configured in the desktop app,
+which records the folder names in the index) are treated the same way: never
+returned, refused with exit `3`, and left out of the staleness check — the CLI
+never follows the symlinks such folders usually are, so their indexed rows
+would otherwise read as deleted. The CLI keeps every name the record lists,
+as the desktop does, even one the desktop would no longer accept. If the
+record is present but cannot be read, which notes are local-only is unknown,
+so `show`, `path`, `open`, and `search` refuse every note with exit `3` until
+Reflect records the folders again (`today` reads only `daily/`, which can
+never be local-only). The same holds when `.reflect/index.sqlite` exists but
+cannot be read at all (for example a write-ahead log only the app can
+recover): `show`, `path`, and `open` refuse every note with exit `3` rather
+than scan the files, and `search` exits `4` as before. With no index file at
+all, they scan the files.
+
 ## Output contract
 
 - **stdout carries only data** (note content, paths, or JSON); all warnings
@@ -52,7 +67,7 @@ just-flagged note.
 | 0 | success |
 | 1 | runtime error (no graph, IO/SQL failure) |
 | 2 | usage error |
-| 3 | note not found, or note is private |
+| 3 | note not found, or note is private (every note, while the index or its local-only record is unreadable) |
 | 4 | search index missing or unusable (`search` only) |
 
 ## Commands
@@ -120,9 +135,11 @@ Resolves `<note>` and prints the raw markdown. Resolution order:
 4. An alias match (from `aliases:` frontmatter, or a v1 subject-alias
    segment of a `//` title like `Charlotte MacCaw // Mum`).
 
-Works with or without the index — when the index is missing, titles/aliases
-are derived by scanning the files. Ambiguous matches resolve to the first path
-alphabetically and list the others on stderr.
+Works with or without the index — when the index file is missing,
+titles/aliases are derived by scanning the files; when it exists but cannot be
+read, the command refuses with exit `3` (see [Privacy](#privacy)). Ambiguous
+matches resolve to the first path alphabetically and list the others on
+stderr.
 
 ```jsonc
 // reflect show "Project X" --json   ("date" is null for non-dailies)

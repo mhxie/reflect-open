@@ -24,7 +24,7 @@ afterEach(() => {
   httpFetch.mockReset()
 })
 
-const GRAPH: GraphInfo = { root: '/g', name: 'G', generation: 3 }
+const GRAPH: GraphInfo = { root: '/g', name: 'G', generation: 3, localOnlyFolders: [] }
 
 const AUTH = JSON.stringify({ kind: 'pat', token: 'ghp_abc' })
 const CLEAN_COMMIT = { committed: false, sha: null, ahead: 0, skippedLargeFiles: [] }

@@ -11,7 +11,7 @@ use crate::commands::output::{print_json, HitJson, SearchJson};
 use crate::commands::warn;
 use crate::error::CliError;
 use crate::graph::Graph;
-use crate::index::{detect_staleness, open_read_only, IndexOpen};
+use crate::index::{detect_staleness, local_only_folders, open_read_only, IndexOpen};
 use crate::keys::fold_key;
 use crate::note_file::{read_note, subject_display_title};
 use crate::search::{build_fts_match, search_index, SearchHit};
@@ -19,9 +19,14 @@ use crate::search::{build_fts_match, search_index, SearchHit};
 /// The privacy re-check: the index row said public, but the file's own
 /// frontmatter is the truth — a note flagged private after the last index run
 /// must not surface. Unreadable, missing, and iCloud-placeholder files fail
-/// closed: their current privacy state cannot be proven from disk.
-fn still_public_on_disk(root: &Path, rel_path: &str) -> bool {
-    read_note(root, rel_path).is_ok()
+/// closed: their current privacy state cannot be proven from disk, and a note
+/// inside a local-only folder never passes.
+fn still_public_on_disk(
+    root: &Path,
+    rel_path: &str,
+    local_only: Option<&reflect_graph_paths::LocalOnlyFolders>,
+) -> bool {
+    read_note(root, rel_path, local_only).is_ok()
 }
 
 pub fn run(graph: &Graph, json: bool, query: &str, limit: usize) -> Result<(), CliError> {
@@ -38,7 +43,8 @@ pub fn run(graph: &Graph, json: bool, query: &str, limit: usize) -> Result<(), C
         warn("the index schema is newer than this CLI — update Reflect");
     }
 
-    let staleness = detect_staleness(&opened.conn, &graph.root)?;
+    let local_only = local_only_folders(&opened.conn)?;
+    let staleness = detect_staleness(&opened.conn, &graph.root, local_only.as_ref())?;
     if staleness.is_stale() {
         warn(format!(
             "the index may be stale ({} file(s) differ from it) — open the graph in Reflect to refresh",
@@ -52,7 +58,7 @@ pub fn run(graph: &Graph, json: bool, query: &str, limit: usize) -> Result<(), C
     };
     let hits: Vec<SearchHit> = hits
         .into_iter()
-        .filter(|hit| still_public_on_disk(&graph.root, &hit.path))
+        .filter(|hit| still_public_on_disk(&graph.root, &hit.path, local_only.as_ref()))
         .collect();
 
     if json {

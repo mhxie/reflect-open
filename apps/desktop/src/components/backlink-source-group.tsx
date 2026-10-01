@@ -1,8 +1,8 @@
 import { useState, type ReactElement } from 'react'
 import { ChevronRight } from 'lucide-react'
-import type { WikilinkClickHandler } from '@meowdown/core'
 import { displayNoteTitle } from '@reflect/core'
 import { BacklinkSnippet } from '@/components/backlink-snippet.tsx'
+import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import type { BacklinkSource } from '@/lib/group-backlinks.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 
@@ -21,7 +21,7 @@ interface BacklinkSourceGroupProps {
    */
   onOpen: (path: string, event?: ModClickEvent) => void
   /** Navigate a clicked `[[wiki link]]` inside a snippet to its target. */
-  onWikilinkClick: WikilinkClickHandler
+  onWikilinkClick: BacklinkWikilinkClick
 }
 
 /**

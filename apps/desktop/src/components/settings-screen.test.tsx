@@ -220,7 +220,7 @@ describe('SettingsScreen', () => {
   })
 
   it('confirms before forgetting the open graph from saved graphs', async () => {
-    graph.current = { root: '/graphs/work', name: 'Work', generation: 1 }
+    graph.current = { root: '/graphs/work', name: 'Work', generation: 1, localOnlyFolders: [] }
     await renderScreen()
 
     const section = page.getByRole('region', { name: 'Danger zone' })
@@ -236,7 +236,7 @@ describe('SettingsScreen', () => {
   })
 
   it('requires typing the graph name before deleting the graph', async () => {
-    graph.current = { root: '/graphs/work', name: 'Work', generation: 1 }
+    graph.current = { root: '/graphs/work', name: 'Work', generation: 1, localOnlyFolders: [] }
     await renderScreen()
 
     const section = page.getByRole('region', { name: 'Danger zone' })

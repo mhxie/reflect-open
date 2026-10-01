@@ -386,6 +386,11 @@ export const graphColorsSchema = z
     return colors
   })
 
+/*
+ * `localOnlyFolders` is deliberately absent: Rust owns it (`fs/local_only.rs`),
+ * and `settings_save` keeps the copy on disk whatever this document holds.
+ */
+
 /**
  * The AI providers Reflect can call directly (BYOK — the user's own keys, no
  * Reflect-hosted proxy). `openai-compatible` stores its user-supplied base URL

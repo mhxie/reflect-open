@@ -4,6 +4,12 @@ import type { NoteSession } from '@/editor/note-session.ts'
 import { getNoteRowOverlay, resetNoteRowOverlays } from '@/hooks/note-row-overlay.ts'
 
 const readNote = vi.hoisted(() => vi.fn<(path: string) => Promise<string>>())
+const readNoteShareable = vi.hoisted(() =>
+  vi.fn(async (): Promise<{ kind: 'content'; content: string } | { kind: 'localOnly' }> => ({
+    kind: 'content',
+    content: '',
+  })),
+)
 const writeNote = vi.hoisted(() => vi.fn(async () => {}))
 const getGithubToken = vi.hoisted(() => vi.fn(async (): Promise<string | null> => 'tok'))
 const createGist = vi.hoisted(() => vi.fn())
@@ -19,6 +25,7 @@ const startOperation = vi.hoisted(() =>
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   readNote,
+  readNoteShareable,
   writeNote,
   getGithubToken,
   createGist,
@@ -46,6 +53,7 @@ const REPUBLISH_SOURCE = upsertFrontmatter(BODY, {
 
 beforeEach(() => {
   readNote.mockReset()
+  readNoteShareable.mockReset().mockResolvedValue({ kind: 'content', content: '' })
   writeNote.mockClear()
   getGithubToken.mockReset().mockResolvedValue('tok')
   createGist.mockReset().mockResolvedValue(PUBLISHED)
@@ -150,6 +158,22 @@ describe('publishNoteToGist', () => {
     expect(getGithubToken).not.toHaveBeenCalled()
     expect(createGist).not.toHaveBeenCalled()
     expect(updateGist).not.toHaveBeenCalled()
+  })
+
+  it('refuses a note Rust resolves into a local-only folder, before anything leaves', async () => {
+    readNote.mockResolvedValue(BODY)
+    readNoteShareable.mockResolvedValue({ kind: 'localOnly' })
+    await expect(publishNoteToGist('people/\u{17F}ecure/visa.md', 3)).rejects.toThrow()
+    expect(readNoteShareable).toHaveBeenCalledWith('people/\u{17F}ecure/visa.md', 3)
+    expect(getGithubToken).not.toHaveBeenCalled()
+    expect(createGist).not.toHaveBeenCalled()
+  })
+
+  it('publishes a note that is not on disk yet once Rust has cleared its path', async () => {
+    readNoteShareable.mockRejectedValue({ kind: 'notFound', message: 'missing' })
+    const { session } = fakeSession(BODY)
+    openSession.mockReturnValue(session)
+    await expect(publishNoteToGist('notes/a.md', 3)).resolves.toBe(PUBLISHED.htmlUrl)
   })
 
   it('refuses an empty note', async () => {

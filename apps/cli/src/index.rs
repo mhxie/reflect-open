@@ -13,9 +13,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
+use reflect_graph_paths::LocalOnlyFolders;
 use rusqlite::{Connection, OpenFlags};
 
-use reflect_index_schema::{INDEX_FILE, LATEST_SCHEMA_VERSION, REFLECT_DIR};
+use reflect_index_schema::{
+    INDEX_FILE, LATEST_SCHEMA_VERSION, LOCAL_ONLY_FOLDERS_KEY, REFLECT_DIR,
+};
 
 use crate::error::CliError;
 use crate::hash::hash_content;
@@ -30,7 +33,8 @@ pub struct OpenIndex {
 }
 
 /// The three ways opening can go; callers decide how each degrades per command
-/// (`search` needs the index; `show`/`path` fall back to scanning files).
+/// (`search` needs the index; `show`/`path`/`open` fall back to scanning files
+/// only when it is missing, and refuse when it is unusable).
 pub enum IndexOpen {
     Opened(OpenIndex),
     /// No `.reflect/index.sqlite` on disk.
@@ -69,6 +73,33 @@ pub fn open_read_only(root: &Path) -> IndexOpen {
     })
 }
 
+/// The graph's local-only folders as the desktop recorded them when it last
+/// opened the index, kept as recorded like the desktop keeps them (even a
+/// name today's rules refuse). Rows inside them are private, and a symlinked
+/// folder is invisible to this CLI's own walk (it never follows symlinks).
+/// `None` when none are configured, or the index predates the record. A
+/// record that is present but unreadable refuses (exit 3): which notes are
+/// local-only is then unknown.
+pub fn local_only_folders(conn: &Connection) -> Result<Option<LocalOnlyFolders>, CliError> {
+    let unknown = |detail: String| {
+        CliError::Private(format!(
+            "the index's record of local-only folders is unreadable ({detail}), so no note is \
+             shown: open this graph in Reflect and follow its warning"
+        ))
+    };
+    let raw: String = match conn.query_row(
+        "SELECT value FROM index_meta WHERE key = ?1",
+        [LOCAL_ONLY_FOLDERS_KEY],
+        |row| row.get(0),
+    ) {
+        Ok(raw) => raw,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(err) => return Err(unknown(err.to_string())),
+    };
+    let names: Vec<String> = serde_json::from_str(&raw).map_err(|err| unknown(err.to_string()))?;
+    Ok(LocalOnlyFolders::recorded(names, None))
+}
+
 /// How the index diverges from the files on disk.
 #[derive(Debug, Default)]
 pub struct Staleness {
@@ -92,7 +123,17 @@ impl Staleness {
 
 /// Compare the indexed rows against the files on disk. Only files whose mtime
 /// diverges are hashed, so the check stays cheap on large graphs.
-pub fn detect_staleness(conn: &Connection, root: &Path) -> Result<Staleness, CliError> {
+///
+/// Local-only notes (`local_only`, from [`local_only_folders`]) are left out
+/// on both sides: this walk cannot see inside a symlinked local-only folder,
+/// so their rows would read as deleted forever — and counting them would
+/// reveal how many exist.
+pub fn detect_staleness(
+    conn: &Connection,
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+) -> Result<Staleness, CliError> {
+    let is_local_only = |path: &str| local_only.is_some_and(|folders| folders.contains(path));
     let mut indexed: HashMap<String, (i64, String)> = HashMap::new();
     let mut statement = conn.prepare("SELECT path, mtime, file_hash FROM notes")?;
     let rows = statement.query_map([], |row| {
@@ -104,11 +145,16 @@ pub fn detect_staleness(conn: &Connection, root: &Path) -> Result<Staleness, Cli
     })?;
     for row in rows {
         let (path, mtime, file_hash) = row?;
-        indexed.insert(path, (mtime, file_hash));
+        if !is_local_only(&path) {
+            indexed.insert(path, (mtime, file_hash));
+        }
     }
 
     let mut staleness = Staleness::default();
     for note in walk_notes(root) {
+        if is_local_only(&note.rel_path) {
+            continue;
+        }
         match indexed.remove(&note.rel_path) {
             None => {
                 if !note.placeholder {

@@ -2,8 +2,8 @@
 //! into editors and tools. A `YYYY-MM-DD` argument prints the would-be daily
 //! path even before the file exists (dailies are created lazily).
 
-use crate::commands::open_index_for_resolution;
 use crate::commands::output::{print_json, PathJson};
+use crate::commands::{local_only_of, open_index_for_resolution};
 use crate::error::CliError;
 use crate::graph::Graph;
 use crate::note_file::ensure_not_private;
@@ -11,11 +11,12 @@ use crate::paths::date_from_daily_path;
 use crate::resolve::{resolve_note, ResolvedNote};
 
 pub fn run(graph: &Graph, json: bool, note_arg: &str) -> Result<(), CliError> {
-    let index = open_index_for_resolution(&graph.root);
+    let index = open_index_for_resolution(&graph.root)?;
+    let local_only = local_only_of(index.as_ref())?;
     let resolved = resolve_note(note_arg, &graph.root, index.as_ref().map(|open| &open.conn))?;
 
     let rel_path = resolved.rel_path();
-    ensure_not_private(&graph.root, rel_path)?;
+    ensure_not_private(&graph.root, rel_path, local_only.as_ref())?;
     let absolute = graph.root.join(rel_path);
 
     if json {

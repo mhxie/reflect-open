@@ -10,8 +10,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use crate::commands::open_index_for_resolution;
 use crate::commands::output::{print_json, OpenJson};
+use crate::commands::{local_only_of, open_index_for_resolution};
 use crate::error::CliError;
 use crate::graph::Graph;
 use crate::note_file::{ensure_not_private, parse_note_meta};
@@ -19,14 +19,15 @@ use crate::paths::{date_from_daily_path, parse_calendar_date};
 use crate::resolve::{resolve_note, ResolvedNote};
 
 pub fn run(graph: &Graph, json: bool, note_arg: &str, print: bool) -> Result<(), CliError> {
-    let index = open_index_for_resolution(&graph.root);
+    let index = open_index_for_resolution(&graph.root)?;
+    let local_only = local_only_of(index.as_ref())?;
     let resolved = resolve_note(note_arg, &graph.root, index.as_ref().map(|open| &open.conn))?;
 
     // The privacy contract holds on this surface like every other: a private
     // note is refused (exit 3, same as not-found) before its address leaks.
     // A daily that doesn't exist yet is fine — navigation creates it lazily.
     let rel_path = resolved.rel_path();
-    ensure_not_private(&graph.root, rel_path)?;
+    ensure_not_private(&graph.root, rel_path, local_only.as_ref())?;
 
     let url = deep_link_url(&graph.root, &resolved);
     let launched = !print;

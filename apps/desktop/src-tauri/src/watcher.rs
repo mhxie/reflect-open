@@ -16,10 +16,25 @@
 //! only reports "something structural changed" (`index:reconcile`) and the
 //! frontend answers with its ordinary full reconcile pass — re-list, hash
 //! gate, prune. One coarse signal instead of a shadow manifest.
+//!
+//! A graph's local-only folders live outside its root (symlinks into a raw
+//! store), where a watch on the root never sees them. Their targets get
+//! best-effort watches of their own, discovered off the main thread after
+//! the graph watch is installed; events under a target are translated back
+//! to the link's graph path before the ordinary filtering. A missing or
+//! dangling target only loses its own watch. An event on a link itself (or
+//! on a target's root) triggers a reconcile plus a re-discovery, and so does
+//! any structural change (a renamed folder can carry a link with it).
+//! Re-discoveries run one at a time per watch, the last one always after
+//! the last request, and they hold only their own watch's lock, never the
+//! one `watch_start` and `watch_stop` take: watching a target walks it.
+//! Evicted (dataless) raw-store files are skipped like any other — a raw
+//! store must be kept available offline.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use file_id::{get_file_id, FileId};
@@ -27,7 +42,7 @@ use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, FileIdCache};
 use reflect_graph_paths::{
     classify, evicted_logical_path, eviction_placeholder, has_pruned_component, is_pruned_dir_name,
-    wire_path, GraphPathKind,
+    wire_path, GraphPathKind, LocalOnlyFolders, LocalOnlyLink,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -45,9 +60,95 @@ const CHANGE_EVENT: &str = "index:changed";
 /// one full reconcile pass.
 pub(crate) const RECONCILE_EVENT: &str = "index:reconcile";
 
-/// Holds the active debouncer; dropping it stops the background watch thread.
+/// Holds the active watch; dropping it stops the background watch thread.
 #[derive(Default)]
-pub struct WatcherState(pub Mutex<Option<Debouncer<RecommendedWatcher, PrunedFileIdMap>>>);
+pub struct WatcherState(Mutex<Option<ActiveWatch>>);
+
+/// One installed watch over a graph.
+struct ActiveWatch {
+    /// The debouncer with its link-target watches, behind a lock of its own:
+    /// a link refresh watching a large target never holds [`WatcherState`].
+    watch: Arc<Mutex<LinkedWatch>>,
+    /// Identifies this watch, so a link refresh begun for it can never touch
+    /// a successor installed for another graph (or a restart).
+    session: u64,
+    root: PathBuf,
+    local_only: Option<Arc<LocalOnlyFolders>>,
+    /// Cleared once this watch is replaced or stopped: a debouncer an
+    /// in-flight refresh still holds must emit nothing more.
+    live: Arc<AtomicBool>,
+}
+
+impl Drop for ActiveWatch {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The debouncer plus the local-only link targets it also watches.
+struct LinkedWatch {
+    debouncer: Debouncer<RecommendedWatcher, PrunedFileIdMap>,
+    /// The links whose targets are watched, shared with the event handler,
+    /// which translates raw-store paths back to graph paths through them.
+    links: Arc<RwLock<Vec<LocalOnlyLink>>>,
+    /// The watched targets, shared with the file-ID cache so it prunes below
+    /// each exactly as below the graph root.
+    extra_roots: Arc<RwLock<Vec<PathBuf>>>,
+}
+
+/// Session ids for [`ActiveWatch::session`].
+static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+
+/// One running link refresh per watch, and always one more after the last
+/// request: concurrent refreshes could otherwise finish out of order and
+/// leave an older discovery's links in place.
+#[derive(Default)]
+struct RefreshGate {
+    running: AtomicBool,
+    requested: AtomicBool,
+}
+
+impl LinkedWatch {
+    /// Watch exactly the targets of `discovered`: unwatch the ones gone,
+    /// watch the new ones. Best-effort per target — a failure is logged and
+    /// leaves that target unwatched, never the graph watch.
+    fn apply_links(&mut self, discovered: Vec<LocalOnlyLink>) {
+        let current: BTreeSet<PathBuf> = read_lock(&self.links)
+            .iter()
+            .map(|link| link.target.clone())
+            .collect();
+        let wanted: BTreeSet<PathBuf> = discovered.iter().map(|link| link.target.clone()).collect();
+        for target in current.difference(&wanted) {
+            if let Err(err) = self.debouncer.unwatch(target) {
+                tracing::debug!(?err, "could not unwatch a local-only target");
+            }
+            write_lock(&self.extra_roots).retain(|root| root != target);
+        }
+        let mut failed = BTreeSet::new();
+        for target in wanted.difference(&current) {
+            // Registered before the watch so the cache walk it triggers is
+            // already pruned below the target.
+            write_lock(&self.extra_roots).push(target.clone());
+            if let Err(err) = self.debouncer.watch(target, RecursiveMode::Recursive) {
+                tracing::warn!(?err, "could not watch a local-only folder's target");
+                write_lock(&self.extra_roots).retain(|root| root != target);
+                failed.insert(target.clone());
+            }
+        }
+        *write_lock(&self.links) = discovered
+            .into_iter()
+            .filter(|link| !failed.contains(&link.target))
+            .collect();
+    }
+}
+
+fn read_lock<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    lock.read().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn write_lock<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    lock.write().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// The debouncer's file-ID cache, pruned to the trees that can carry tracked
 /// files.
@@ -76,13 +177,22 @@ pub struct WatcherState(pub Mutex<Option<Debouncer<RecommendedWatcher, PrunedFil
 #[derive(Debug)]
 pub struct PrunedFileIdMap {
     root: PathBuf,
+    /// Further watched trees (local-only link targets), screened the same
+    /// way below their own roots.
+    extra_roots: Arc<RwLock<Vec<PathBuf>>>,
     paths: HashMap<PathBuf, FileId>,
 }
 
 impl PrunedFileIdMap {
+    #[cfg(test)]
     fn new(root: PathBuf) -> Self {
+        Self::with_extra_roots(root, Arc::default())
+    }
+
+    fn with_extra_roots(root: PathBuf, extra_roots: Arc<RwLock<Vec<PathBuf>>>) -> Self {
         Self {
             root,
+            extra_roots,
             paths: HashMap::new(),
         }
     }
@@ -112,14 +222,15 @@ impl FileIdCache for PrunedFileIdMap {
         } else {
             1
         };
-        let root = self.root.clone();
+        let mut roots = vec![self.root.clone()];
+        roots.extend(read_lock(&self.extra_roots).iter().cloned());
         let walk = WalkDir::new(path)
             .follow_links(false)
             .max_depth(depth)
             .into_iter()
             // `filter_entry` prunes whole subtrees: the walk never descends
             // into an excluded directory, which is the entire point.
-            .filter_entry(move |entry| cache_keeps(&root, entry.path()));
+            .filter_entry(move |entry| roots.iter().all(|root| cache_keeps(root, entry.path())));
         for entry in walk {
             let Ok(entry) = entry else { continue };
             let path = entry.into_path();
@@ -275,9 +386,124 @@ fn collect_changes(paths: &[PathBuf], root: &Path) -> BatchEffects {
     }
 }
 
+/// Event paths routed for [`collect_changes`]: graph paths as they are,
+/// raw-store paths translated back under the link reaching them, plus
+/// whether a local-only link itself — or a link target's root — changed.
+#[derive(Debug, Default, PartialEq)]
+struct RoutedPaths {
+    paths: Vec<PathBuf>,
+    links_changed: bool,
+}
+
+fn route_event_paths(
+    paths: &[PathBuf],
+    root: &Path,
+    links: &[LocalOnlyLink],
+    local_only: Option<&LocalOnlyFolders>,
+) -> RoutedPaths {
+    let mut routed = RoutedPaths::default();
+    for path in paths {
+        if path.starts_with(root) {
+            routed.links_changed |= local_only.is_some_and(|folders| is_link_event(path, folders));
+            routed.paths.push(path.clone());
+            continue;
+        }
+        for link in links {
+            let Ok(rest) = path.strip_prefix(&link.target) else {
+                continue;
+            };
+            if rest.as_os_str().is_empty() {
+                // The target itself appeared, vanished, or moved.
+                routed.links_changed = true;
+            } else {
+                routed.paths.push(root.join(&link.path).join(rest));
+            }
+        }
+    }
+    routed
+}
+
+/// Whether a graph event concerns a local-only link entry: the path carries
+/// a configured folder name and is now a symlink, or is gone.
+fn is_link_event(path: &Path, folders: &LocalOnlyFolders) -> bool {
+    let named = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| folders.is_folder_name(name));
+    named
+        && match std::fs::symlink_metadata(path) {
+            Ok(meta) => meta.file_type().is_symlink(),
+            Err(err) => err.kind() == std::io::ErrorKind::NotFound,
+        }
+}
+
+/// Ask for a re-discovery of the graph's local-only links, re-pointing the
+/// target watches, off the calling thread: discovery is a graph walk. At
+/// most one runs per watch; a request while one runs queues exactly one more
+/// (so the last refresh always starts after the last request).
+fn request_link_refresh(app: AppHandle, session: u64, gate: Arc<RefreshGate>) {
+    run_coalesced(gate, move || refresh_link_watches_once(&app, session));
+}
+
+/// Run `work` on a background thread unless a run is already going, in
+/// which case that run goes once more after its current pass.
+fn run_coalesced(gate: Arc<RefreshGate>, work: impl Fn() + Send + 'static) {
+    gate.requested.store(true, Ordering::SeqCst);
+    if gate.running.swap(true, Ordering::SeqCst) {
+        return; // the running thread sees the request and goes again
+    }
+    std::thread::spawn(move || loop {
+        while gate.requested.swap(false, Ordering::SeqCst) {
+            work();
+        }
+        gate.running.store(false, Ordering::SeqCst);
+        // A request landing between the last check and the store above saw
+        // the gate still running: take the gate back for it, unless another
+        // thread already has.
+        if !gate.requested.load(Ordering::SeqCst) || gate.running.swap(true, Ordering::SeqCst) {
+            break;
+        }
+    });
+}
+
+/// Whether a batch calls for a link re-discovery: a link itself changed, or
+/// (when links are followed) a folder that may carry one was created,
+/// renamed, or removed — no event names the link inside a renamed folder.
+fn needs_link_refresh(routed: &RoutedPaths, reconcile: bool, follows_links: bool) -> bool {
+    routed.links_changed || (follows_links && reconcile)
+}
+
+/// One re-discovery. The watcher lock is held only to look the watch up;
+/// discovery and the target watches (whose cache walk can be long over a
+/// large raw store) run under the watch's own lock alone. A no-op once the
+/// watch it was requested for is gone.
+fn refresh_link_watches_once<R: tauri::Runtime>(app: &AppHandle<R>, session: u64) {
+    let watcher = app.state::<WatcherState>();
+    let Some((root, folders, watch)) = (match watcher.0.lock() {
+        Ok(guard) => guard
+            .as_ref()
+            .filter(|active| active.session == session)
+            .and_then(|active| {
+                Some((
+                    active.root.clone(),
+                    active.local_only.clone()?,
+                    Arc::clone(&active.watch),
+                ))
+            }),
+        Err(_) => None,
+    }) else {
+        return;
+    };
+    let discovered = reflect_graph_paths::local_only_links(&root, &folders);
+    let Ok(mut linked) = watch.lock() else {
+        return;
+    };
+    linked.apply_links(discovered);
+}
+
 fn lock_watcher<'a>(
     watcher: &'a State<WatcherState>,
-) -> AppResult<std::sync::MutexGuard<'a, Option<Debouncer<RecommendedWatcher, PrunedFileIdMap>>>> {
+) -> AppResult<std::sync::MutexGuard<'a, Option<ActiveWatch>>> {
     watcher.0.lock().map_err(|err| {
         tracing::error!(?err, "watcher state lock poisoned by an earlier panic");
         AppError::io("watcher state lock poisoned")
@@ -303,6 +529,7 @@ pub fn watch_start(
         AppError::io("graph state lock poisoned")
     })?;
     let root = graph_guard.root.clone().ok_or_else(AppError::no_graph)?;
+    let local_only = graph_guard.local_only();
 
     // Drop any previous watcher first: if installing the new one fails we're then
     // left with no watcher, rather than the previous graph's still driving
@@ -310,11 +537,28 @@ pub fn watch_start(
     *lock_watcher(&watcher)? = None;
 
     let started = std::time::Instant::now();
+    let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
+    let links: Arc<RwLock<Vec<LocalOnlyLink>>> = Arc::default();
+    let extra_roots: Arc<RwLock<Vec<PathBuf>>> = Arc::default();
+    let refresh: Arc<RefreshGate> = Arc::default();
+    let live = Arc::new(AtomicBool::new(true));
+    // Links are followed only with a raw-store root to follow them into.
+    let follows_links = local_only
+        .as_ref()
+        .is_some_and(|folders| folders.raw_root().is_some());
     let handler_root = root.clone();
+    let handler_links = Arc::clone(&links);
+    let handler_local_only = local_only.clone();
+    let handler_app = app.clone();
+    let handler_refresh = Arc::clone(&refresh);
+    let handler_live = Arc::clone(&live);
     let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, PrunedFileIdMap>(
         Duration::from_millis(400),
         None,
         move |result: DebounceEventResult| {
+            if !handler_live.load(Ordering::SeqCst) {
+                return; // replaced or stopped; kept alive only by a refresh
+            }
             let Ok(events) = result else {
                 return; // watch errors are transient; the next batch recovers
             };
@@ -323,21 +567,33 @@ pub fn watch_start(
                 .iter()
                 .flat_map(|event| event.paths.clone())
                 .collect();
-            let mut effects = collect_changes(&paths, &handler_root);
-            effects.reconcile |= rescan_demanded;
+            let routed = route_event_paths(
+                &paths,
+                &handler_root,
+                &read_lock(&handler_links),
+                handler_local_only.as_deref(),
+            );
+            let mut effects = collect_changes(&routed.paths, &handler_root);
+            effects.reconcile |= rescan_demanded || routed.links_changed;
             if effects.reconcile || !effects.changes.is_empty() {
                 // Drop the cached catalog before telling the frontend: its
                 // follow-up `list_files` must re-walk, not replay the cache.
-                crate::fs::invalidate_file_catalog(&app.state::<GraphState>(), &handler_root);
+                crate::fs::invalidate_file_catalog(
+                    &handler_app.state::<GraphState>(),
+                    &handler_root,
+                );
             }
             if !effects.changes.is_empty() {
-                let _ = app.emit(CHANGE_EVENT, &effects.changes);
+                let _ = handler_app.emit(CHANGE_EVENT, &effects.changes);
             }
             if effects.reconcile {
-                let _ = app.emit(RECONCILE_EVENT, ());
+                let _ = handler_app.emit(RECONCILE_EVENT, ());
+            }
+            if needs_link_refresh(&routed, effects.reconcile, follows_links) {
+                request_link_refresh(handler_app.clone(), session, Arc::clone(&handler_refresh));
             }
         },
-        PrunedFileIdMap::new(root.clone()),
+        PrunedFileIdMap::with_extra_roots(root.clone(), Arc::clone(&extra_roots)),
         notify::Config::default(),
     )
     .map_err(|err| AppError::io(err.to_string()))?;
@@ -347,8 +603,22 @@ pub fn watch_start(
         .map_err(|err| AppError::io(err.to_string()))?;
 
     // Dropping any previous debouncer here stops its thread.
-    *lock_watcher(&watcher)? = Some(debouncer);
+    *lock_watcher(&watcher)? = Some(ActiveWatch {
+        watch: Arc::new(Mutex::new(LinkedWatch {
+            debouncer,
+            links,
+            extra_roots,
+        })),
+        session,
+        root,
+        local_only,
+        live,
+    });
     drop(graph_guard);
+    if follows_links {
+        // Off the main thread: discovery walks the graph.
+        request_link_refresh(app, session, refresh);
+    }
     tracing::info!(
         elapsed_ms = started.elapsed().as_millis() as u64,
         "watch_start installed"
@@ -726,6 +996,281 @@ mod tests {
         let mut cache = PrunedFileIdMap::new(root.clone());
         cache.add_path(&root, RecursiveMode::Recursive);
         assert!(cache.paths.contains_key(&root.join("notes/a.md")));
+    }
+
+    /// A graph whose `finance/secure` links into a raw store, both
+    /// canonicalized (macOS `/var` → `/private/var`), plus the link record
+    /// the watcher's discovery would produce.
+    #[cfg(unix)]
+    fn linked_graph() -> (tempfile::TempDir, PathBuf, PathBuf, LocalOnlyLink) {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, raw) = (base.join("graph"), base.join("raw"));
+        std::fs::create_dir_all(root.join("finance")).unwrap();
+        std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
+        std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure"))
+            .unwrap();
+        let link = LocalOnlyLink {
+            path: "finance/secure".to_string(),
+            target: raw.join("finance/secure"),
+        };
+        (dir, root, raw, link)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_store_events_translate_back_under_their_link() {
+        let (_dir, root, raw, link) = linked_graph();
+        std::fs::write(raw.join("finance/secure/bank.md"), "# Bank").unwrap();
+        let routed = route_event_paths(
+            &[
+                raw.join("finance/secure/bank.md"),
+                root.join("notes/a.md"),
+                raw.join("elsewhere/x.md"),
+            ],
+            &root,
+            std::slice::from_ref(&link),
+            None,
+        );
+        assert_eq!(
+            routed,
+            RoutedPaths {
+                paths: vec![root.join("finance/secure/bank.md"), root.join("notes/a.md")],
+                links_changed: false,
+            }
+        );
+
+        // The translated path stats through the link like any graph note.
+        let effects = collect_changes(&routed.paths[..1], &root);
+        assert_eq!(effects.changes.len(), 1);
+        assert_eq!(effects.changes[0].path, "finance/secure/bank.md");
+        assert_eq!(effects.changes[0].kind, "upsert");
+        assert!(effects.changes[0].modified_ms.is_some_and(|ms| ms > 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_and_target_root_events_demand_a_reconcile() {
+        let (_dir, root, raw, link) = linked_graph();
+        let folders = LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+        // The link itself appeared (or was retargeted).
+        let routed = route_event_paths(&[root.join("finance/secure")], &root, &[], Some(&folders));
+        assert!(routed.links_changed);
+        // A link removed: gone, with a configured name.
+        let routed = route_event_paths(&[root.join("people/secure")], &root, &[], Some(&folders));
+        assert!(routed.links_changed);
+        // The target's own root vanished or moved.
+        let routed = route_event_paths(
+            std::slice::from_ref(&link.target),
+            &root,
+            std::slice::from_ref(&link),
+            Some(&folders),
+        );
+        assert!(routed.links_changed);
+        assert!(routed.paths.is_empty());
+        // Without a configuration nothing is a link event.
+        let routed = route_event_paths(&[root.join("finance/secure")], &root, &[], None);
+        assert!(!routed.links_changed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_target_only_loses_its_own_watch() {
+        let (_dir, root, raw, link) = linked_graph();
+        let (events, received) = std::sync::mpsc::channel();
+        let extra_roots: Arc<RwLock<Vec<PathBuf>>> = Arc::default();
+        let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, PrunedFileIdMap>(
+            Duration::from_millis(50),
+            None,
+            move |result: DebounceEventResult| {
+                for event in result.unwrap_or_default() {
+                    for path in event.paths.clone() {
+                        let _ = events.send(path);
+                    }
+                }
+            },
+            PrunedFileIdMap::with_extra_roots(root.clone(), Arc::clone(&extra_roots)),
+            notify::Config::default(),
+        )
+        .unwrap();
+        debouncer.watch(&root, RecursiveMode::Recursive).unwrap();
+        let mut active = LinkedWatch {
+            debouncer,
+            links: Arc::default(),
+            extra_roots,
+        };
+        let dangling = LocalOnlyLink {
+            path: "people/secure".to_string(),
+            target: raw.join("missing"),
+        };
+
+        active.apply_links(vec![link.clone(), dangling]);
+
+        assert_eq!(*read_lock(&active.links), vec![link.clone()]);
+        assert_eq!(*read_lock(&active.extra_roots), vec![link.target.clone()]);
+        // The live target reports its own changes.
+        std::fs::write(link.target.join("bank.md"), "# Bank").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let seen = loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match received.recv_timeout(left) {
+                Ok(path) if path.starts_with(&link.target) => break true,
+                Ok(_) => continue,
+                Err(_) => break false,
+            }
+        };
+        assert!(seen, "no event from the watched raw-store target");
+
+        // Re-pointing to nothing unwatches it.
+        active.apply_links(Vec::new());
+        assert!(read_lock(&active.links).is_empty());
+        assert!(read_lock(&active.extra_roots).is_empty());
+    }
+
+    #[test]
+    fn coalesced_refreshes_never_overlap_and_the_last_runs_after_the_last_request() {
+        use std::sync::atomic::AtomicUsize;
+        let gate: Arc<RefreshGate> = Arc::default();
+        let (active, peak, runs) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+        );
+        let requested_at = Arc::new(Mutex::new(Vec::<std::time::Instant>::new()));
+        let started_at = Arc::new(Mutex::new(Vec::<std::time::Instant>::new()));
+        let work = {
+            let (active, peak, runs, started_at) = (
+                Arc::clone(&active),
+                Arc::clone(&peak),
+                Arc::clone(&runs),
+                Arc::clone(&started_at),
+            );
+            move || {
+                started_at.lock().unwrap().push(std::time::Instant::now());
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(5));
+                active.fetch_sub(1, Ordering::SeqCst);
+                runs.fetch_add(1, Ordering::SeqCst);
+            }
+        };
+        let work = Arc::new(work);
+        let requesters: Vec<_> = (0..8)
+            .map(|_| {
+                let (gate, work, requested_at) = (
+                    Arc::clone(&gate),
+                    Arc::clone(&work),
+                    Arc::clone(&requested_at),
+                );
+                std::thread::spawn(move || {
+                    for _ in 0..10 {
+                        requested_at.lock().unwrap().push(std::time::Instant::now());
+                        let work = Arc::clone(&work);
+                        run_coalesced(Arc::clone(&gate), move || work());
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                })
+            })
+            .collect();
+        for requester in requesters {
+            requester.join().unwrap();
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while gate.running.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 1, "refreshes overlapped");
+        let runs = runs.load(Ordering::SeqCst);
+        assert!((1..80).contains(&runs), "{runs} runs for 80 requests");
+        let last_request = *requested_at.lock().unwrap().iter().max().unwrap();
+        let last_start = *started_at.lock().unwrap().iter().max().unwrap();
+        assert!(
+            last_start >= last_request,
+            "no refresh after the last request"
+        );
+    }
+
+    #[test]
+    fn structural_changes_refresh_links_only_when_links_are_followed() {
+        let quiet = RoutedPaths::default();
+        // A renamed folder carrying a link: no event names the link itself.
+        assert!(needs_link_refresh(&quiet, true, true));
+        // Control: without a raw-store root nothing is followed to refresh.
+        assert!(!needs_link_refresh(&quiet, true, false));
+        assert!(!needs_link_refresh(&quiet, false, true));
+        let link_event = RoutedPaths {
+            paths: Vec::new(),
+            links_changed: true,
+        };
+        assert!(needs_link_refresh(&link_event, false, false));
+    }
+
+    /// A refresh looks the watch up under [`WatcherState`] and lets go of it
+    /// before discovery and the target watches: `watch_start` and
+    /// `watch_stop` must never wait behind a large raw store's walk.
+    #[cfg(unix)]
+    #[test]
+    fn a_refresh_never_holds_the_watcher_lock_while_it_works() {
+        let (_dir, root, raw, link) = linked_graph();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(WatcherState::default());
+        let extra_roots: Arc<RwLock<Vec<PathBuf>>> = Arc::default();
+        let debouncer = new_debouncer_opt::<_, RecommendedWatcher, PrunedFileIdMap>(
+            Duration::from_millis(50),
+            None,
+            |_: DebounceEventResult| {},
+            PrunedFileIdMap::with_extra_roots(root.clone(), Arc::clone(&extra_roots)),
+            notify::Config::default(),
+        )
+        .unwrap();
+        let watch = Arc::new(Mutex::new(LinkedWatch {
+            debouncer,
+            links: Arc::default(),
+            extra_roots,
+        }));
+        let folders = LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+        *app.state::<WatcherState>().0.lock().unwrap() = Some(ActiveWatch {
+            watch: Arc::clone(&watch),
+            session: 7,
+            root: root.clone(),
+            local_only: Some(Arc::new(folders)),
+            live: Arc::new(AtomicBool::new(true)),
+        });
+
+        // Hold the watch's own lock, as a long target walk would.
+        let held = watch.lock().unwrap();
+        let handle = app.handle().clone();
+        let refresh = std::thread::spawn(move || refresh_link_watches_once(&handle, 7));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            app.state::<WatcherState>().0.try_lock().is_ok(),
+            "the refresh held the watcher lock while waiting to apply"
+        );
+        drop(held);
+        refresh.join().unwrap();
+        assert_eq!(*read_lock(&watch.lock().unwrap().links), vec![link]);
+    }
+
+    #[test]
+    fn cache_walk_prunes_below_extra_roots_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("graph");
+        let target = dir.path().join("raw/secure");
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::create_dir_all(target.join(".cache")).unwrap();
+        std::fs::write(target.join("bank.md"), "bank").unwrap();
+        std::fs::write(target.join(".cache/blob"), "blob").unwrap();
+
+        let extra = Arc::new(RwLock::new(vec![target.clone()]));
+        let mut cache = PrunedFileIdMap::with_extra_roots(root, extra);
+        cache.add_path(&target, RecursiveMode::Recursive);
+        assert!(cache.paths.contains_key(&target.join("bank.md")));
+        assert!(!cache
+            .paths
+            .keys()
+            .any(|path| path.starts_with(target.join(".cache"))));
     }
 
     #[test]

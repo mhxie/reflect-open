@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { OpenTask } from '@reflect/core'
+import { isLocalOnlyPath, type OpenTask } from '@reflect/core'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { taskContent } from '@/lib/tasks/task-content.ts'
 
@@ -13,6 +13,7 @@ export function TaskText({ task }: { task: OpenTask }): ReactElement {
   return (
     <MarkdownPreview
       content={taskContent(task.raw)}
+      remoteEmbeds={!isLocalOnlyPath(task.notePath)}
       className="reflect-task-preview pointer-events-none text-sm"
     />
   )

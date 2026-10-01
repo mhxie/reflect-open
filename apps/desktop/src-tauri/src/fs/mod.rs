@@ -11,6 +11,7 @@ pub mod assets;
 mod import;
 mod import_assets;
 mod io;
+mod local_only;
 mod resolve;
 pub mod x_archive;
 mod x_archive_store;
@@ -20,18 +21,25 @@ pub mod x_syndication;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::error::{AppError, AppResult};
+use reflect_graph_paths::LocalOnlyFolders;
 
 use self::io::{
     atomic_create, atomic_write, bootstrap, collect_files, initialize_runtime, AtomicCreateOutcome,
 };
-use self::resolve::resolve;
+use self::resolve::{resolve, resolve_read, resolve_shareable, resolve_write};
+
+/// What an index recorded about its local-only folders (read by `db`).
+pub(crate) use self::local_only::Recorded;
+/// The settings key holding every graph's local-only configuration (Rust
+/// owns it: `settings_save` keeps the copy on disk).
+pub(crate) use self::local_only::SETTINGS_KEY as LOCAL_ONLY_SETTINGS_KEY;
 
 /// Cancellation flag for the running Reflect V1 import, managed as Tauri
 /// state in `lib.rs` (`graph_import_cancel` trips it).
@@ -53,9 +61,19 @@ pub(crate) use self::io::modified_ms;
 /// The lexical traversal guard, shared with the conflict stores that mirror
 /// note paths under `.reflect/` (shadow bases, conflict archive).
 pub(crate) use self::resolve::ensure_relative;
+/// The entry-side guard: what a merge never checks out, a commit never
+/// stages, and the iCloud sweep never touches.
+pub(crate) use self::resolve::entry_is_local_only;
 /// The full traversal guard, shared with sibling modules that address graph
 /// files (capture promotes screenshots into `assets/`).
 pub(crate) use self::resolve::resolve as resolve_in_graph;
+/// The sharing guard, shared with on-device transcription: its transcript
+/// lands in an ordinary note, so a recording in a local-only folder is
+/// never read.
+pub(crate) use self::resolve::resolve_shareable as resolve_shareable_in_graph;
+/// The write-side guard, shared with the Git merge: a path the filesystem
+/// resolves into a local-only folder (or out of the graph) is never written.
+pub(crate) use self::resolve::resolve_write as resolve_write_in_graph;
 /// iCloud eviction-placeholder path construction, shared with note deletion
 /// and the desktop watcher (which treats an evicted note as present, not
 /// deleted — Plan 21). The grammar now lives in `reflect-graph-paths`.
@@ -78,6 +96,18 @@ pub(crate) use reflect_graph_paths::is_dataless;
 pub struct GraphInner {
     pub generation: u64,
     pub root: Option<PathBuf>,
+    /// The open graph's local-only folders (`local_only`), loaded with the
+    /// root and swapped with it: one value feeds the walk, the read guard,
+    /// the watcher, the index flag, Git, and `GraphInfo`.
+    local_only: Option<Arc<LocalOnlyFolders>>,
+    /// The configuration problems found at open, shown to the user.
+    local_only_warnings: Vec<String>,
+    /// The settings file was unreadable at open: which folders are
+    /// local-only is unknown, so sync refuses to run ([`graph_for_sync`]).
+    local_only_unknown: bool,
+    /// The configuration is unknown, so the index open only adds to the
+    /// recorded folders (`local_only::LoadedConfig::record`).
+    local_only_grow_record: bool,
     /// Cached vault catalog for the current root, dropped on every write path
     /// and watcher/iCloud change so listings never pin deleted files.
     catalog: Option<io::FileCatalog>,
@@ -85,6 +115,31 @@ pub struct GraphInner {
     /// may publish into the cache only if no invalidation happened since it
     /// began — otherwise its result is returned to its caller but not pinned.
     catalog_revision: u64,
+}
+
+impl GraphInner {
+    /// The open graph's local-only folders (shared with the watcher, which
+    /// reads them under the graph lock it already holds).
+    #[cfg(desktop)]
+    pub(crate) fn local_only(&self) -> Option<Arc<LocalOnlyFolders>> {
+        self.local_only.clone()
+    }
+
+    /// Install a local-only configuration directly: command-tier tests
+    /// build their `GraphState` without the settings store.
+    #[cfg(test)]
+    pub(crate) fn set_local_only(&mut self, folders: Option<LocalOnlyFolders>) {
+        self.local_only = folders.map(Arc::new);
+    }
+
+    /// Mark the configuration unknown (an unreadable settings file, or
+    /// recorded names gone missing), keeping whatever folders are set, for
+    /// command-tier tests.
+    #[cfg(test)]
+    pub(crate) fn set_local_only_unknown(&mut self) {
+        self.local_only_unknown = true;
+        self.local_only_grow_record = true;
+    }
 }
 
 /// Tauri-managed state holding the currently open graph (root + generation).
@@ -101,6 +156,12 @@ pub struct GraphInfo {
     pub name: String,
     /// Open-session generation; mutating file commands must echo it back.
     pub generation: u64,
+    /// The local-only folder names configured for this graph (empty when
+    /// none): notes inside them are private and read-only everywhere.
+    pub local_only_folders: Vec<String>,
+    /// Problems with that configuration the user must see (dropped names,
+    /// an unusable rawRoot, an unreadable settings file); empty when none.
+    pub local_only_warnings: Vec<String>,
 }
 
 /// Metadata for a file inside the graph.
@@ -138,7 +199,12 @@ pub enum NoteCreateOutcome {
 
 // ---- state accessors --------------------------------------------------------
 
-fn graph_info(root: &Path, generation: u64) -> GraphInfo {
+fn graph_info(
+    root: &Path,
+    generation: u64,
+    local_only: Option<&LocalOnlyFolders>,
+    warnings: &[String],
+) -> GraphInfo {
     let name = root
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -147,21 +213,40 @@ fn graph_info(root: &Path, generation: u64) -> GraphInfo {
         root: root.to_string_lossy().into_owned(),
         name,
         generation,
+        local_only_folders: local_only
+            .map(|folders| folders.names().to_vec())
+            .unwrap_or_default(),
+        local_only_warnings: warnings.to_vec(),
     }
 }
 
 /// Set the active root (bumping the generation atomically), record it in
 /// recents, and return its info.
 fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
+    // Read the settings store (and the index's record of the folders) before
+    // taking the lock: it is file IO.
+    let loaded = local_only::load_for_root(root);
+    for warning in &loaded.warnings {
+        tracing::warn!(root = %root.display(), "local-only folders: {warning}");
+    }
     let generation = {
         let mut inner = lock_graph(state)?;
         inner.generation += 1;
         inner.root = Some(root.to_path_buf());
+        inner.local_only = loaded.folders.clone();
+        inner.local_only_warnings = loaded.warnings.clone();
+        inner.local_only_unknown = loaded.unknown;
+        inner.local_only_grow_record = !loaded.record;
         inner.catalog = None;
         inner.catalog_revision = inner.catalog_revision.wrapping_add(1);
         inner.generation
     };
-    let info = graph_info(root, generation);
+    let info = graph_info(
+        root,
+        generation,
+        loaded.folders.as_deref(),
+        &loaded.warnings,
+    );
     // Recents is a convenience cache: a failure to persist it must not fail the
     // open (which would leave Rust treating the graph as open while the command
     // returns an error, out of sync with the UI). Best-effort, log and move on.
@@ -194,7 +279,12 @@ pub(crate) fn current_root(state: &State<GraphState>) -> AppResult<PathBuf> {
 pub(crate) fn current_graph_info(state: &State<GraphState>) -> AppResult<GraphInfo> {
     let inner = lock_graph(state)?;
     let root = inner.root.clone().ok_or_else(AppError::no_graph)?;
-    Ok(graph_info(&root, inner.generation))
+    Ok(graph_info(
+        &root,
+        inner.generation,
+        inner.local_only.as_deref(),
+        &inner.local_only_warnings,
+    ))
 }
 
 /// The current root, verified against the generation a mutating command was
@@ -205,24 +295,91 @@ pub(crate) fn root_for_generation(
     state: &State<GraphState>,
     generation: u64,
 ) -> AppResult<PathBuf> {
+    Ok(graph_for(state, Some(generation))?.0)
+}
+
+/// The open graph's root and local-only folders, read under one lock so the
+/// pair always describes the same graph. `generation` is the optional pin
+/// read commands take: UI reads for the open graph omit it, background passes
+/// (audio-memo reconcile) that can span a graph switch must supply it so
+/// every step of a pass sees one graph — a stale pin is rejected exactly like
+/// [`root_for_generation`].
+pub(crate) fn graph_for(
+    state: &GraphState,
+    generation: Option<u64>,
+) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>)> {
     let inner = lock_graph(state)?;
-    if inner.generation != generation {
+    if generation.is_some_and(|generation| generation != inner.generation) {
         return Err(AppError::io(
             "the graph changed since this command was issued; dropping it",
         ));
     }
-    inner.root.clone().ok_or_else(AppError::no_graph)
+    let root = inner.root.clone().ok_or_else(AppError::no_graph)?;
+    Ok((root, inner.local_only.clone()))
 }
 
-/// `current_root`, or `root_for_generation` when the caller pinned the
-/// command. Read commands take an optional pin: UI reads for the open graph
-/// omit it, background passes (audio-memo reconcile) that can span a graph
-/// switch must supply it so every step of a pass sees one graph.
-fn root_for(state: &State<GraphState>, generation: Option<u64>) -> AppResult<PathBuf> {
-    match generation {
-        Some(generation) => root_for_generation(state, generation),
-        None => current_root(state),
+/// Why sync refuses while the local-only configuration is unknown.
+const SYNC_PAUSED: &str = "Sync is paused: Reflect cannot tell which folders are local-only \
+     (see the warning shown when the graph opened). Restore the local-only configuration, \
+     then reopen the graph.";
+
+/// Why sharing refuses while the local-only configuration is unknown.
+const SHARING_PAUSED: &str = "Sharing is paused: Reflect cannot tell which folders are \
+     local-only, so nothing leaves this device (see the warning shown when the graph \
+     opened). Restore the local-only configuration, then reopen the graph.";
+
+/// [`graph_for`] that also refuses, under the same lock, while the open
+/// graph's local-only configuration is unknown.
+fn graph_when_known(
+    state: &GraphState,
+    generation: Option<u64>,
+    refusal: &'static str,
+) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>)> {
+    let inner = lock_graph(state)?;
+    if generation.is_some_and(|generation| generation != inner.generation) {
+        return Err(AppError::io(
+            "the graph changed since this command was issued; dropping it",
+        ));
     }
+    if inner.local_only_unknown {
+        return Err(AppError::io(refusal));
+    }
+    let root = inner.root.clone().ok_or_else(AppError::no_graph)?;
+    Ok((root, inner.local_only.clone()))
+}
+
+/// [`graph_for`] for Git sync and the iCloud sweep and move-in, which must
+/// know what to leave alone.
+pub(crate) fn graph_for_sync(
+    state: &GraphState,
+    generation: u64,
+) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>)> {
+    graph_when_known(state, Some(generation), SYNC_PAUSED)
+}
+
+/// [`graph_for`] for bytes about to leave this device (AI, transcription,
+/// asset description, capture enrichment, gists).
+pub(crate) fn graph_for_sharing(
+    state: &GraphState,
+    generation: Option<u64>,
+) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>)> {
+    graph_when_known(state, generation, SHARING_PAUSED)
+}
+
+/// The open graph's root and local-only folders plus whether the index may
+/// replace its record with them, under one lock: the index open marks rows
+/// private either way, and while the configuration is unknown it only adds
+/// the names to the record.
+pub(crate) fn graph_for_index(
+    state: &GraphState,
+) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>, bool)> {
+    let inner = lock_graph(state)?;
+    let root = inner.root.clone().ok_or_else(AppError::no_graph)?;
+    Ok((
+        root,
+        inner.local_only.clone(),
+        !inner.local_only_grow_record,
+    ))
 }
 
 /// Reads and OS opens accept any supported attachment anywhere in the vault:
@@ -269,7 +426,7 @@ pub async fn graph_import_reflect_v1_zip(
     state: State<'_, GraphState>,
     cancel: State<'_, ImportCancel>,
 ) -> AppResult<import::ImportSummary> {
-    let root = root_for_generation(&state, generation)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
     // Holds the one import slot until this command returns on any path — a
     // second import starting mid-run would clear a cancel meant for the
     // first and race its writes.
@@ -297,7 +454,8 @@ pub async fn graph_import_reflect_v1_zip(
     // Writing is fast and local; throttle the events to ~100 per import so a
     // large graph doesn't flood the webview.
     let mut last_emitted = 0usize;
-    let summary = import::finalize_import(&root, prepared, downloads, |done, total| {
+    let folders = local_only.as_deref();
+    let summary = import::finalize_import(&root, folders, prepared, downloads, |done, total| {
         let step = (total / 100).max(1);
         if done == total || done >= last_emitted + step {
             last_emitted = done;
@@ -335,7 +493,7 @@ pub fn graph_open(path: String, state: State<GraphState>) -> AppResult<GraphInfo
 }
 
 /// Read a note's markdown by graph-relative path. `generation`, when given,
-/// pins the read to the issuing graph session (see [`root_for`]).
+/// pins the read to the issuing graph session (see [`graph_for`]).
 ///
 /// Off the main thread on purpose: this read *does* materialize an evicted
 /// iCloud note (that is its contract — bulk passes use [`note_read_local`]),
@@ -347,9 +505,65 @@ pub async fn note_read(
     generation: Option<u64>,
     state: State<'_, GraphState>,
 ) -> AppResult<String> {
-    let root = root_for(&state, generation)?;
-    let abs = resolve(&root, &path)?;
-    crate::blocking::run_blocking(move || Ok(io::read_note_no_follow(&root, &abs)?)).await
+    let (root, local_only) = graph_for(&state, generation)?;
+    let target = resolve_read(&root, &path, local_only.as_deref())?;
+    crate::blocking::run_blocking(move || Ok(io::read_note_no_follow(&target.base, &target.rest)?))
+        .await
+}
+
+/// How a [`note_read_shareable`] request found the note.
+#[derive(Debug, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum ShareableNoteRead {
+    /// The note may leave this machine; here are its bytes.
+    Content { content: String },
+    /// The note lies in a local-only folder, by its requested path or by the
+    /// entry the filesystem resolves it to. Nothing was read.
+    LocalOnly,
+}
+
+/// Read a note bound for somewhere beyond this machine (the AI tools, whose
+/// paths are model-supplied). Rust decides local-only status, not the
+/// requested string: a folded spelling (`ſecure`, `SECURE`) or an in-graph
+/// alias of a local-only folder answers `LocalOnly` exactly like the
+/// canonical path. Otherwise identical to [`note_read`].
+#[tauri::command]
+pub async fn note_read_shareable(
+    path: String,
+    generation: Option<u64>,
+    state: State<'_, GraphState>,
+) -> AppResult<ShareableNoteRead> {
+    let (root, local_only) = graph_for_sharing(&state, generation)?;
+    read_shareable(root, local_only, path).await
+}
+
+async fn read_shareable(
+    root: PathBuf,
+    local_only: Option<Arc<LocalOnlyFolders>>,
+    path: String,
+) -> AppResult<ShareableNoteRead> {
+    // By name first, with no IO: a dangling or unmounted link still refuses
+    // as local-only rather than as a traversal error.
+    if local_only
+        .as_deref()
+        .is_some_and(|folders| folders.covers(&path))
+    {
+        return Ok(ShareableNoteRead::LocalOnly);
+    }
+    let target = resolve_read(&root, &path, local_only.as_deref())?;
+    if target.local_only {
+        return Ok(ShareableNoteRead::LocalOnly);
+    }
+    crate::blocking::run_blocking(move || {
+        Ok(ShareableNoteRead::Content {
+            content: io::read_note_no_follow(&target.base, &target.rest)?,
+        })
+    })
+    .await
 }
 
 /// How a [`note_read_local`] request found the note on disk.
@@ -360,8 +574,11 @@ pub async fn note_read(
     tag = "kind"
 )]
 pub enum LocalNoteRead {
-    /// The bytes are local; here they are.
-    Content { content: String },
+    /// The bytes are local; here they are. `local_only` reports whether the
+    /// note lies in a local-only folder, decided by the entry the path
+    /// resolves to: bulk passes fold text across notes (asset descriptions
+    /// into the notes that embed them) and must not carry it out of one.
+    Content { content: String, local_only: bool },
     /// The note is iCloud-evicted (a dataless file, or an `.icloud` stub in
     /// the logical path's place). Reading it would block on an on-demand
     /// download — this command refuses instead.
@@ -385,9 +602,9 @@ pub async fn note_read_local(
     generation: Option<u64>,
     state: State<'_, GraphState>,
 ) -> AppResult<LocalNoteRead> {
-    let root = root_for(&state, generation)?;
-    let abs = resolve(&root, &path)?;
-    let read_root = root;
+    let (root, local_only) = graph_for(&state, generation)?;
+    let target = resolve_read(&root, &path, local_only.as_deref())?;
+    let abs = target.path();
     crate::blocking::run_blocking(move || {
         // Best-effort: when the guard refuses to engage, the read keeps a
         // slim stat-then-read race (an eviction landing between the two
@@ -403,8 +620,11 @@ pub async fn note_read_local(
             }
             _ => {}
         }
-        match io::read_note_no_follow(&read_root, &abs) {
-            Ok(content) => Ok(LocalNoteRead::Content { content }),
+        match io::read_note_no_follow(&target.base, &target.rest) {
+            Ok(content) => Ok(LocalNoteRead::Content {
+                content,
+                local_only: target.local_only,
+            }),
             // The engaged policy answers a dataless read with EDEADLK
             // instead of downloading: the eviction raced the stat.
             Err(err) if err.kind() == std::io::ErrorKind::Deadlock => Ok(LocalNoteRead::Evicted),
@@ -431,8 +651,8 @@ pub fn note_write(
     expected_contents: Option<String>,
     state: State<GraphState>,
 ) -> AppResult<Option<u64>> {
-    let root = root_for_generation(&state, generation)?;
-    let target = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let target = resolve_write(&root, &path, local_only.as_deref())?;
     let modified_ms = write_note_revision(
         &root,
         &target,
@@ -455,7 +675,12 @@ fn write_note_revision(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if checked {
-        let current = match io::read_note_no_follow(root, target) {
+        // The graph root may legitimately sit behind a symlink (`/var`, a
+        // linked `~/Dropbox`): canonicalize it once, police the rest.
+        let rest = target
+            .strip_prefix(root)
+            .map_err(|_| AppError::traversal("note path is outside the graph"))?;
+        let current = match io::read_note_no_follow(&root.canonicalize()?, rest) {
             Ok(value) => Some(value),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
@@ -477,11 +702,11 @@ pub fn note_create(
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<NoteCreateOutcome> {
-    let root = root_for_generation(&state, generation)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
     let _guard = NOTE_WRITE_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let target = resolve(&root, &path)?;
+    let target = resolve_write(&root, &path, local_only.as_deref())?;
     match atomic_create(&root, &target, &contents)? {
         AtomicCreateOutcome::Created(modified_ms) => {
             invalidate_file_catalog(&state, &root);
@@ -502,11 +727,12 @@ pub fn asset_write(
     state: State<GraphState>,
 ) -> AppResult<()> {
     use base64::Engine;
-    let root = root_for_generation(&state, generation)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let target = resolve_write(&root, &path, local_only.as_deref())?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contents_base64.as_bytes())
         .map_err(|err| AppError::io(format!("invalid base64 asset payload: {err}")))?;
-    atomic_write_bytes(&root, &resolve(&root, &path)?, &bytes)?;
+    atomic_write_bytes(&root, &target, &bytes)?;
     invalidate_file_catalog(&state, &root);
     Ok(())
 }
@@ -523,8 +749,8 @@ pub fn audio_memo_delete(path: String, generation: u64, state: State<GraphState>
             "not an audio memo path: {path}"
         )));
     }
-    let root = root_for_generation(&state, generation)?;
-    let abs = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let abs = resolve_write(&root, &path, local_only.as_deref())?;
     // An iCloud-evicted segment exists only as its `.name.icloud` stub —
     // mirror `note_delete` so a cancelled session's evicted parts still
     // delete (Plan 21).
@@ -547,7 +773,11 @@ pub fn audio_memo_delete(path: String, generation: u64, state: State<GraphState>
 /// loses content), invisible to the watcher, indexer, and sync like the rest
 /// of `.reflect/`. It gets its own narrow commands because the attachment
 /// IPC is deliberately fenced to `assets/` and `audio-memos/`.
-fn transcript_cache_file(root: &Path, name: &str) -> AppResult<std::path::PathBuf> {
+fn transcript_cache_file(
+    root: &Path,
+    name: &str,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<std::path::PathBuf> {
     if name.is_empty()
         || name.contains('/')
         || name.contains('\\')
@@ -561,9 +791,10 @@ fn transcript_cache_file(root: &Path, name: &str) -> AppResult<std::path::PathBu
     }
     // Through the shared guard: a cache directory (or entry) symlinked
     // outside the graph must not redirect IO past the generation-pinned
-    // root. The plain-filename check above stays — `resolve` would accept a
-    // nested relative path, and a cache name must be a single segment.
-    let path = resolve(root, &format!(".reflect/transcripts/{name}"))?;
+    // root, nor into a local-only folder. The plain-filename check above
+    // stays — `resolve` would accept a nested relative path, and a cache
+    // name must be a single segment.
+    let path = resolve_write(root, &format!(".reflect/transcripts/{name}"), local_only)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -577,8 +808,8 @@ pub fn transcript_cache_read(
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<String> {
-    let root = root_for_generation(&state, generation)?;
-    match fs::read_to_string(transcript_cache_file(&root, &name)?) {
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    match fs::read_to_string(transcript_cache_file(&root, &name, local_only.as_deref())?) {
         Ok(contents) => Ok(contents),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             Err(AppError::not_found(format!("no cached transcript: {name}")))
@@ -596,23 +827,28 @@ pub fn transcript_cache_write(
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<()> {
-    let root = root_for_generation(&state, generation)?;
-    fs::write(transcript_cache_file(&root, &name)?, contents)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    fs::write(
+        transcript_cache_file(&root, &name, local_only.as_deref())?,
+        contents,
+    )?;
     Ok(())
 }
 
 /// Read a binary asset's bytes as a **raw IPC response** — no base64, no
 /// JSON. Long audio memos read back for transcription would otherwise cross
 /// the bridge ~1.33× inflated inside one giant JSON string. Pinned to
-/// `generation` for the same reason as [`asset_read`].
+/// `generation` for the same reason as [`asset_read`], and refused for
+/// local-only files the same way.
 #[tauri::command]
 pub fn asset_read_binary(
     path: String,
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<tauri::ipc::Response> {
-    let root = root_for_generation(&state, generation)?;
-    Ok(tauri::ipc::Response::new(fs::read(resolve(&root, &path)?)?))
+    let (root, local_only) = graph_for_sharing(&state, Some(generation))?;
+    let abs = resolve_shareable(&root, &path, local_only.as_deref())?;
+    Ok(tauri::ipc::Response::new(fs::read(abs)?))
 }
 
 /// Read a binary asset's bytes, base64-encoded for the JSON IPC (e.g. audio
@@ -620,12 +856,15 @@ pub fn asset_read_binary(
 /// `note_read`: the caller is a background pass that can span a graph
 /// switch, and an unpinned read would resolve against the *new* root —
 /// handing back (and possibly sending to a provider) another graph's file.
+/// Every caller ships the bytes off-device (transcription, asset
+/// description, capture enrichment), so a local-only file is refused
+/// however its path is spelled.
 #[tauri::command]
 pub fn asset_read(path: String, generation: u64, state: State<GraphState>) -> AppResult<String> {
     use base64::Engine;
     ensure_readable_attachment_path(&path)?;
-    let root = root_for_generation(&state, generation)?;
-    let bytes = fs::read(resolve(&root, &path)?)?;
+    let (root, local_only) = graph_for_sharing(&state, Some(generation))?;
+    let bytes = fs::read(resolve_shareable(&root, &path, local_only.as_deref())?)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
@@ -640,8 +879,8 @@ pub fn asset_open(
     state: State<GraphState>,
 ) -> AppResult<()> {
     ensure_readable_attachment_path(&path)?;
-    let root = root_for_generation(&state, generation)?;
-    let abs = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let abs = resolve_read(&root, &path, local_only.as_deref())?.path();
     if !abs.is_file() {
         return Err(AppError::not_found(format!("asset not found: {path}")));
     }
@@ -675,8 +914,8 @@ pub fn asset_reveal(
     state: State<GraphState>,
 ) -> AppResult<()> {
     ensure_revealable_path(&path)?;
-    let root = root_for_generation(&state, generation)?;
-    let abs = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let abs = resolve_read(&root, &path, local_only.as_deref())?.path();
     if !abs.is_file() {
         return Err(AppError::not_found(format!("asset not found: {path}")));
     }
@@ -718,17 +957,22 @@ fn asset_file_url(path: &Path) -> AppResult<tauri::Url> {
 /// `audio-memos`. Which directory means what is the TypeScript layer's policy;
 /// a missing directory lists as empty. Pinned to `generation` for the same
 /// reason as `asset_read` — the listing seeds a background pass that must
-/// never mix graphs.
+/// never mix graphs. Files in a local-only folder are left out, including
+/// every file of a directory linked into one: the passes this listing seeds
+/// (transcription, asset descriptions) must never see them.
 #[tauri::command]
 pub fn dir_list(
     dir: String,
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<Vec<FileMeta>> {
-    let root = root_for_generation(&state, generation)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
     resolve(&root, &dir)?; // traversal guard; the walk itself skips symlinks
     let mut out = Vec::new();
     collect_files(&root, &dir, None, &mut out)?;
+    if let Some(folders) = local_only.as_deref() {
+        out.retain(|file| !entry_is_local_only(&root, &file.path, folders));
+    }
     Ok(out)
 }
 
@@ -737,11 +981,13 @@ pub fn dir_list(
 /// a debounce, and an unindexed file must never be clobbered by a new note.
 #[tauri::command]
 pub fn note_exists(path: String, state: State<GraphState>) -> AppResult<bool> {
-    let root = current_root(&state)?;
+    let (root, local_only) = graph_for(&state, None)?;
     // Occupied, not merely readable: an iCloud-evicted note is only a stub on
     // disk, but creating a new note at its path would collide the moment the
     // real file re-downloads (Plan 21).
-    Ok(io::file_occupied(&resolve(&root, &path)?))
+    Ok(io::file_occupied(
+        &resolve_read(&root, &path, local_only.as_deref())?.path(),
+    ))
 }
 
 /// Rename `from` → `to` on disk (both graph-relative, traversal-guarded).
@@ -751,9 +997,14 @@ pub fn note_exists(path: String, state: State<GraphState>) -> AppResult<bool> {
 /// deleted or overwritten, the caller compensates, and the rename simply
 /// reports failed. One rule, no adoption heuristics; the filename drifts
 /// until the next settled rename retries.
-pub(crate) fn move_note_file(root: &Path, from: &str, to: &str) -> AppResult<()> {
-    let from_abs = resolve(root, from)?;
-    let to_abs = resolve(root, to)?;
+pub(crate) fn move_note_file(
+    root: &Path,
+    from: &str,
+    to: &str,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
+    let from_abs = resolve_write(root, from, local_only)?;
+    let to_abs = resolve_write(root, to, local_only)?;
     // Occupied includes an evicted iCloud note (placeholder only on disk):
     // renaming onto it would collide with the re-download (Plan 21).
     if io::file_occupied(&to_abs) {
@@ -777,8 +1028,8 @@ pub(crate) fn move_note_file(root: &Path, from: &str, to: &str) -> AppResult<()>
 /// `.reflect/` is already excluded from sync and indexing.
 #[tauri::command]
 pub fn note_delete(path: String, generation: u64, state: State<GraphState>) -> AppResult<()> {
-    let root = root_for_generation(&state, generation)?;
-    let abs = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let abs = resolve_write(&root, &path, local_only.as_deref())?;
     // An iCloud-evicted note exists only as its `.name.md.icloud` stub —
     // trashing the logical path would fail and the note would be
     // undeletable. Removing the stub deletes the iCloud item (Plan 21).
@@ -824,6 +1075,10 @@ pub fn graph_delete(generation: u64, state: State<GraphState>) -> AppResult<()> 
                 ));
             }
             let root = inner.root.take().ok_or_else(AppError::no_graph)?;
+            inner.local_only = None;
+            inner.local_only_warnings = Vec::new();
+            inner.local_only_unknown = false;
+            inner.local_only_grow_record = false;
             inner.generation += 1;
             inner.catalog = None;
             inner.catalog_revision = inner.catalog_revision.wrapping_add(1);
@@ -908,7 +1163,7 @@ fn move_to_graph_trash(root: &Path, abs: &Path) -> AppResult<()> {
 }
 
 /// List eligible Markdown notes anywhere in the vault. `generation`, when
-/// given, pins the listing to the issuing graph session (see [`root_for`]).
+/// given, pins the listing to the issuing graph session (see [`graph_for`]).
 ///
 /// Async because a cold catalog is a full-tree walk; the cached case pays
 /// one thread hop, which is noise next to the IPC round-trip itself.
@@ -987,8 +1242,23 @@ pub fn vault_scan_stats(
 /// The same note listing as [`list_files`], callable with a plain root — the
 /// iCloud conflict sweep and the index reconcile walk the disk fresh, outside
 /// the cache: reconcile's whole job is to re-verify what is actually there.
+///
+/// Local-only links are not followed here, and the iCloud sweep drops real
+/// local-only folders from this listing itself (it writes shadow bases and
+/// folds conflict copies over what it lists). The index reconcile uses
+/// [`indexable_note_files`].
 pub(crate) fn note_files(root: &Path) -> Vec<FileMeta> {
     io::collect_note_files(root)
+}
+
+/// [`note_files`] plus the notes inside the graph's local-only folders: the
+/// listing the index reconcile diffs against (the same population as
+/// [`list_files`]).
+pub(crate) fn indexable_note_files(
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+) -> Vec<FileMeta> {
+    io::collect_file_catalog(root, local_only).notes
 }
 
 /// Cached catalog for the current graph. The scan runs without the graph
@@ -1007,9 +1277,9 @@ fn file_catalog_with<F>(
     scan: F,
 ) -> AppResult<io::FileCatalog>
 where
-    F: FnOnce(&Path) -> io::FileCatalog,
+    F: FnOnce(&Path, Option<&LocalOnlyFolders>) -> io::FileCatalog,
 {
-    let (root, expected_generation, expected_revision) = {
+    let (root, local_only, expected_generation, expected_revision) = {
         let inner = lock_graph(state)?;
         if generation.is_some_and(|generation| generation != inner.generation) {
             return Err(AppError::io(
@@ -1021,12 +1291,13 @@ where
         }
         (
             inner.root.clone().ok_or_else(AppError::no_graph)?,
+            inner.local_only.clone(),
             inner.generation,
             inner.catalog_revision,
         )
     };
 
-    let catalog = scan(&root);
+    let catalog = scan(&root, local_only.as_deref());
     let mut inner = lock_graph(state)?;
     if inner.generation == expected_generation
         && inner.root.as_deref() == Some(root.as_path())
@@ -1061,7 +1332,8 @@ mod transcript_cache_tests {
     #[test]
     fn accepts_a_plain_name_and_creates_the_cache_dir() {
         let graph = tempfile::tempdir().expect("graph");
-        let path = transcript_cache_file(graph.path(), "memo.part-001.m4a.json").expect("path");
+        let path =
+            transcript_cache_file(graph.path(), "memo.part-001.m4a.json", None).expect("path");
         assert!(path.ends_with(".reflect/transcripts/memo.part-001.m4a.json"));
         assert!(graph.path().join(".reflect/transcripts").is_dir());
     }
@@ -1069,9 +1341,9 @@ mod transcript_cache_tests {
     #[test]
     fn rejects_path_shaped_names() {
         let graph = tempfile::tempdir().expect("graph");
-        assert!(transcript_cache_file(graph.path(), "../escape.json").is_err());
-        assert!(transcript_cache_file(graph.path(), "a/b.json").is_err());
-        assert!(transcript_cache_file(graph.path(), "").is_err());
+        assert!(transcript_cache_file(graph.path(), "../escape.json", None).is_err());
+        assert!(transcript_cache_file(graph.path(), "a/b.json", None).is_err());
+        assert!(transcript_cache_file(graph.path(), "", None).is_err());
     }
 
     #[cfg(unix)]
@@ -1082,7 +1354,7 @@ mod transcript_cache_tests {
         std::fs::create_dir_all(graph.path().join(".reflect")).expect("reflect dir");
         std::os::unix::fs::symlink(outside.path(), graph.path().join(".reflect/transcripts"))
             .expect("symlink");
-        assert!(transcript_cache_file(graph.path(), "memo.json").is_err());
+        assert!(transcript_cache_file(graph.path(), "memo.json", None).is_err());
     }
 }
 
@@ -1096,6 +1368,10 @@ mod file_catalog_tests {
         GraphState(Mutex::new(GraphInner {
             generation,
             root: Some(root.to_path_buf()),
+            local_only: None,
+            local_only_warnings: Vec::new(),
+            local_only_unknown: false,
+            local_only_grow_record: false,
             catalog: None,
             catalog_revision: 0,
         }))
@@ -1132,6 +1408,37 @@ mod file_catalog_tests {
         assert!(file_catalog(&graph, Some(6)).is_err());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn the_catalog_lists_local_only_folders_but_the_sweep_listing_does_not() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().expect("dir");
+        let base = dir.path().canonicalize().expect("canonical");
+        let (vault, raw) = (base.join("vault"), base.join("raw"));
+        fs::create_dir_all(vault.join("finance")).expect("finance");
+        fs::create_dir_all(raw.join("finance/secure")).expect("raw");
+        fs::write(vault.join("README.md"), "# Root\n").expect("root note");
+        fs::write(raw.join("finance/secure/bank.md"), "# Bank\n").expect("bank");
+        symlink(raw.join("finance/secure"), vault.join("finance/secure")).expect("link");
+        let graph = graph_at(&vault, 2);
+        graph.0.lock().expect("graph lock").local_only = Some(std::sync::Arc::new(
+            reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).expect("folders"),
+        ));
+
+        let listed: Vec<String> = file_catalog(&graph, Some(2))
+            .expect("catalog")
+            .notes
+            .into_iter()
+            .map(|file| file.path)
+            .collect();
+        assert_eq!(listed, vec!["README.md", "finance/secure/bank.md"]);
+        let swept: Vec<String> = super::note_files(&vault)
+            .into_iter()
+            .map(|file| file.path)
+            .collect();
+        assert_eq!(swept, vec!["README.md"]);
+    }
+
     #[test]
     fn invalidation_from_an_old_root_cannot_clear_the_active_catalog() {
         let vault = tempfile::tempdir().expect("vault");
@@ -1151,8 +1458,8 @@ mod file_catalog_tests {
         fs::write(vault.path().join("README.md"), "# Root\n").expect("write root note");
         let graph = graph_at(vault.path(), 5);
 
-        let stale = file_catalog_with(&graph, Some(5), |root| {
-            let scanned = super::io::collect_file_catalog(root);
+        let stale = file_catalog_with(&graph, Some(5), |root, local_only| {
+            let scanned = super::io::collect_file_catalog(root, local_only);
             // A write lands while the scan is in flight: the scan's snapshot
             // may serve its own caller, but must not become the cache.
             fs::write(root.join("arrived.md"), "# Arrived\n").expect("write racing note");
@@ -1213,7 +1520,7 @@ mod move_tests {
     fn renames_when_the_destination_is_free() {
         let root = graph();
         fs::write(root.path().join("notes/a.md"), "# A\n").unwrap();
-        move_note_file(root.path(), "notes/a.md", "notes/b.md").unwrap();
+        move_note_file(root.path(), "notes/a.md", "notes/b.md", None).unwrap();
         assert!(!root.path().join("notes/a.md").exists());
         assert_eq!(
             fs::read_to_string(root.path().join("notes/b.md")).unwrap(),
@@ -1228,7 +1535,7 @@ mod move_tests {
         let root = graph();
         fs::write(root.path().join("notes/a.md"), "# Mine\n").unwrap();
         fs::write(root.path().join("notes/b.md"), "# Theirs\n").unwrap();
-        assert!(move_note_file(root.path(), "notes/a.md", "notes/b.md").is_err());
+        assert!(move_note_file(root.path(), "notes/a.md", "notes/b.md", None).is_err());
         assert_eq!(
             fs::read_to_string(root.path().join("notes/a.md")).unwrap(),
             "# Mine\n"
@@ -1247,7 +1554,7 @@ mod move_tests {
         let root = graph();
         fs::write(root.path().join("notes/a.md"), "# Mine\n").unwrap();
         fs::write(root.path().join("notes/.b.md.icloud"), "stub").unwrap();
-        assert!(move_note_file(root.path(), "notes/a.md", "notes/b.md").is_err());
+        assert!(move_note_file(root.path(), "notes/a.md", "notes/b.md", None).is_err());
         assert!(root.path().join("notes/a.md").exists());
     }
 
@@ -1343,5 +1650,293 @@ mod note_revision_tests {
         write_note_revision(directory.path(), &target, "first", true, None).unwrap();
         assert!(write_note_revision(directory.path(), &target, "second", true, None).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "first");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod local_only_command_tests {
+    //! Command-tier pins: every command takes the open graph's local-only
+    //! configuration from `GraphState` and refuses, or flags, through it.
+    //! Each refusal has a control run without the configuration.
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use tauri::Manager;
+
+    struct Session {
+        app: tauri::App<tauri::test::MockRuntime>,
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+    }
+
+    const FOLDED: &str = "people/\u{17f}ecure/visa.md";
+
+    /// A graph with a real local-only folder (`people/secure`), a linked one
+    /// (`finance/secure` into a raw store), and ordinary files beside them.
+    fn session(configured: bool) -> Session {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(GraphState::default());
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, raw) = (base.join("graph"), base.join("raw"));
+        io::bootstrap(&root).unwrap();
+        let files = [
+            (root.join("people/secure/visa.md"), "# Visa"),
+            (root.join("people/secure/scan.png"), "png"),
+            (root.join("people/plan.md"), "# Plan"),
+            (root.join("people/photo.png"), "png"),
+            (raw.join("finance/secure/bank.md"), "# Bank"),
+            (raw.join("finance/secure/statement.png"), "png"),
+        ];
+        for (path, contents) in files {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+        }
+        fs::create_dir_all(root.join("finance")).unwrap();
+        symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+        {
+            let state: State<GraphState> = app.state();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 1;
+            inner.root = Some(root.clone());
+            inner.set_local_only(
+                configured.then(|| LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap()),
+            );
+        }
+        Session {
+            app,
+            _dir: dir,
+            root,
+        }
+    }
+
+    fn folds(session: &Session) -> bool {
+        session.root.join(FOLDED).exists()
+    }
+
+    fn shareable(session: &Session, path: &str) -> ShareableNoteRead {
+        tauri::async_runtime::block_on(note_read_shareable(
+            path.to_string(),
+            None,
+            session.app.state(),
+        ))
+        .unwrap_or_else(|err| panic!("{path}: {err:?}"))
+    }
+
+    #[test]
+    fn shareable_reads_refuse_local_only_notes_however_spelled() {
+        let session = session(true);
+        symlink(
+            session.root.join("people/secure"),
+            session.root.join("notes/alias"),
+        )
+        .unwrap();
+        let mut refused = vec![
+            "finance/secure/bank.md",
+            "people/secure/visa.md",
+            "people/SECURE/visa.md",
+            "notes/alias/visa.md",
+        ];
+        if folds(&session) {
+            refused.push(FOLDED);
+        }
+        for path in refused {
+            assert!(
+                matches!(shareable(&session, path), ShareableNoteRead::LocalOnly),
+                "{path}"
+            );
+        }
+        assert!(matches!(
+            shareable(&session, "people/plan.md"),
+            ShareableNoteRead::Content { content } if content == "# Plan"
+        ));
+        // The UI read of the same note is allowed: only sharing refuses.
+        let read = tauri::async_runtime::block_on(note_read(
+            "finance/secure/bank.md".to_string(),
+            None,
+            session.app.state(),
+        ));
+        assert_eq!(read.unwrap(), "# Bank");
+    }
+
+    #[test]
+    fn without_the_configuration_a_real_folder_is_ordinary() {
+        let session = session(false);
+        assert!(matches!(
+            shareable(&session, "people/secure/visa.md"),
+            ShareableNoteRead::Content { .. }
+        ));
+    }
+
+    #[test]
+    fn local_reads_report_the_resolved_local_only_status() {
+        let session = session(true);
+        let local = |path: &str| match tauri::async_runtime::block_on(note_read_local(
+            path.to_string(),
+            None,
+            session.app.state(),
+        )) {
+            Ok(LocalNoteRead::Content { local_only, .. }) => local_only,
+            other => panic!("{path}: {other:?}"),
+        };
+        assert!(local("finance/secure/bank.md"));
+        assert!(local("people/secure/visa.md"));
+        assert!(!local("people/plan.md"));
+        if folds(&session) {
+            assert!(local(FOLDED));
+        }
+    }
+
+    #[test]
+    fn asset_reads_bound_off_device_refuse_local_only_files() {
+        let configured = session(true);
+        for path in ["finance/secure/statement.png", "people/secure/scan.png"] {
+            assert!(asset_read(path.to_string(), 1, configured.app.state()).is_err());
+            assert!(asset_read_binary(path.to_string(), 1, configured.app.state()).is_err());
+        }
+        assert!(asset_read("people/photo.png".to_string(), 1, configured.app.state()).is_ok());
+        // Control: unconfigured, the real folder is ordinary, and the link is
+        // still refused by the plain escape guard.
+        let plain = session(false);
+        assert!(asset_read("people/secure/scan.png".to_string(), 1, plain.app.state()).is_ok());
+        assert!(asset_read(
+            "finance/secure/statement.png".to_string(),
+            1,
+            plain.app.state()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn writes_through_an_alias_or_folded_spelling_are_refused() {
+        let session = session(true);
+        let state = || session.app.state::<GraphState>();
+        if folds(&session) {
+            let created = "people/\u{17f}ecure/new.md".to_string();
+            assert!(note_write(FOLDED.to_string(), "x".into(), 1, None, None, state()).is_err());
+            assert!(note_create(created, "x".into(), 1, state()).is_err());
+            assert!(note_delete(FOLDED.to_string(), 1, state()).is_err());
+            let folders = LocalOnlyFolders::new(["secure"], None);
+            assert!(move_note_file(
+                &session.root,
+                "people/plan.md",
+                "people/\u{17f}ecure/plan.md",
+                folders.as_ref(),
+            )
+            .is_err());
+            assert!(
+                move_note_file(&session.root, FOLDED, "people/visa.md", folders.as_ref()).is_err()
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(session.root.join("people/secure/visa.md")).unwrap(),
+            "# Visa"
+        );
+        assert!(session.root.join("people/plan.md").exists());
+    }
+
+    /// With the configuration unknown, nothing leaves the device: shareable
+    /// note reads and asset reads refuse, even for an ordinary note; the
+    /// control session with the configuration known serves them.
+    #[test]
+    fn sharing_pauses_while_the_configuration_is_unknown() {
+        for unknown in [true, false] {
+            let session = session(true);
+            if unknown {
+                session
+                    .app
+                    .state::<GraphState>()
+                    .0
+                    .lock()
+                    .unwrap()
+                    .set_local_only_unknown();
+            }
+            let note = tauri::async_runtime::block_on(note_read_shareable(
+                "people/plan.md".to_string(),
+                None,
+                session.app.state(),
+            ));
+            let asset = asset_read("people/photo.png".to_string(), 1, session.app.state());
+            let binary = asset_read_binary("people/photo.png".to_string(), 1, session.app.state());
+            if unknown {
+                for message in [
+                    format!("{:?}", note.expect_err("note")),
+                    format!("{:?}", asset.expect_err("asset")),
+                    format!("{:?}", binary.err().expect("binary")),
+                ] {
+                    assert!(message.contains("Sharing is paused"), "{message}");
+                }
+            } else {
+                assert!(matches!(note.unwrap(), ShareableNoteRead::Content { .. }));
+                assert!(asset.is_ok() && binary.is_ok());
+            }
+        }
+    }
+
+    /// Listing an `audio-memos/` linked into a real local-only folder shows
+    /// nothing from it (not even an empty recording, which would otherwise
+    /// become a note naming it), and no listing reaches into a local-only
+    /// folder below it; the control session without folders lists them all.
+    #[test]
+    fn listings_never_reach_into_a_local_only_folder() {
+        for configured in [true, false] {
+            let session = session(configured);
+            let secure = session.root.join("people/secure");
+            fs::write(secure.join("memo.m4a"), "").unwrap();
+            symlink(&secure, session.root.join("audio-memos")).unwrap();
+            let listed = |dir: &str| -> Vec<String> {
+                let mut paths: Vec<String> = dir_list(dir.into(), 1, session.app.state())
+                    .unwrap()
+                    .into_iter()
+                    .map(|file| file.path)
+                    .collect();
+                paths.sort();
+                paths
+            };
+            let (memos, people) = (listed("audio-memos"), listed("people"));
+            if configured {
+                assert!(memos.is_empty(), "{memos:?}");
+                assert_eq!(people, ["people/photo.png", "people/plan.md"]);
+            } else {
+                assert!(memos.contains(&"audio-memos/memo.m4a".to_string()));
+                assert!(people.contains(&"people/secure/visa.md".to_string()));
+            }
+        }
+    }
+
+    /// `audio-memos/`, `assets/`, and the transcript cache aliased into a real
+    /// local-only folder: each command refuses configured and works without.
+    #[test]
+    fn fixed_write_targets_aliased_into_a_local_only_folder_are_refused() {
+        for configured in [true, false] {
+            let session = session(configured);
+            let secure = session.root.join("people/secure");
+            fs::write(secure.join("memo.m4a"), "audio").unwrap();
+            symlink(&secure, session.root.join("audio-memos")).unwrap();
+            symlink(&secure, session.root.join(".reflect/transcripts")).unwrap();
+            fs::remove_dir_all(session.root.join("assets")).unwrap();
+            symlink(&secure, session.root.join("assets")).unwrap();
+            let source = session.root.join("people/photo.png");
+            let state = || session.app.state::<GraphState>();
+
+            let deleted = audio_memo_delete("audio-memos/memo.m4a".into(), 1, state());
+            let cached = transcript_cache_write("memo.json".into(), "{}".into(), 1, state());
+            let imported = assets::asset_import(
+                source.to_string_lossy().into_owned(),
+                "pic.png".into(),
+                1,
+                state(),
+            );
+            if configured {
+                assert!(deleted.is_err() && cached.is_err() && imported.is_err());
+                assert!(secure.join("memo.m4a").exists());
+                assert!(!secure.join("memo.json").exists());
+                assert!(!secure.join("pic.png").exists());
+            } else {
+                assert!(deleted.is_ok() && cached.is_ok() && imported.is_ok());
+                assert!(!secure.join("memo.m4a").exists());
+            }
+        }
     }
 }

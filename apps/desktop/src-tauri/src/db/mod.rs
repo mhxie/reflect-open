@@ -20,8 +20,9 @@ mod scan;
 mod tests;
 mod write;
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
+use reflect_graph_paths::LocalOnlyFolders;
 use rusqlite::{params, Connection};
 use serde_json::{Map, Value};
 use tauri::{Manager, State};
@@ -55,6 +56,10 @@ struct IndexInner {
     /// window before the switch's `index_open` bumps the generation, that
     /// delta would pass the staleness gate and drive cross-graph writes.
     root: Option<std::path::PathBuf>,
+    /// The local-only folders of `root`, bound with it: rows inside one are
+    /// private whatever their projection says, and the reconcile scan walks
+    /// into their targets.
+    local_only: Option<Arc<LocalOnlyFolders>>,
 }
 
 /// The `db_query` reader: a second, **read-only** connection under its own
@@ -144,16 +149,7 @@ pub fn index_open(
     background_tasks: State<BackgroundTaskState>,
 ) -> AppResult<u64> {
     let _background_task = background_task::scoped(&background_tasks, "Reflect index open");
-    let root = graph
-        .0
-        .lock()
-        .map_err(|err| {
-            tracing::error!(?err, "graph state lock poisoned by an earlier panic");
-            AppError::io("graph state lock poisoned")
-        })?
-        .root
-        .clone()
-        .ok_or_else(AppError::no_graph)?;
+    let (root, local_only, record) = crate::fs::graph_for_index(&graph)?;
     let mut state = lock_state(&index)?;
     state.generation += 1;
     // Drop the old connections before opening; if an open fails we return
@@ -165,16 +161,97 @@ pub fn index_open(
     // the file it opens read-only.
     state.conn = None;
     state.root = None;
+    state.local_only = None;
     {
         let mut read = lock_read(&index)?;
         read.conn = None;
     }
-    state.conn = Some(migrations::open_index_at(&root)?);
+    let mut conn = migrations::open_index_at(&root)?;
+    sync_local_only(&mut conn, local_only.as_deref(), record)?;
+    state.conn = Some(conn);
     let mut read = lock_read(&index)?;
     read.conn = Some(migrations::open_index_read_only_at(&root)?);
     read.generation = state.generation;
     state.root = Some(root);
+    state.local_only = local_only;
     Ok(state.generation)
+}
+
+/// Bring a freshly opened index in line with the graph's local-only folders:
+/// rows inside them are marked private (they may predate the configuration),
+/// and the folder names are recorded for read-only consumers like the CLI
+/// and for the next open's check that none went missing. `record` is off
+/// while the configuration is unknown: the record then only grows, so the
+/// CLI keeps refusing what it last knew as local-only, and a folder listed
+/// during the pause is remembered even if it is dropped before the pause
+/// lifts.
+fn sync_local_only(
+    conn: &mut Connection,
+    local_only: Option<&LocalOnlyFolders>,
+    record: bool,
+) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    if let Some(folders) = local_only {
+        let marked = write::mark_local_only_private(&tx, folders)?;
+        if marked > 0 {
+            tracing::info!(marked, "marked local-only index rows private");
+        }
+    }
+    write::record_local_only_folders(&tx, local_only, record)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// What the graph's index recorded about its local-only folders at its last
+/// open, read without migrating or writing anything: the graph-open check
+/// that a configuration has not gone missing. A record that cannot be read
+/// or parsed is reported as such (the caller fails closed), never as empty.
+/// A stored value that is not UTF-8 text is damaged content, not a failed
+/// read: it reads as empty, which does not parse.
+pub(crate) fn recorded_local_only_folders(root: &std::path::Path) -> crate::fs::Recorded {
+    let read = || -> AppResult<Option<String>> {
+        let conn = migrations::open_index_read_only_at(root)?;
+        match conn.query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            [reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY],
+            |row| match row.get_ref(0)? {
+                rusqlite::types::ValueRef::Text(text) => {
+                    Ok(std::str::from_utf8(text).unwrap_or_default().to_string())
+                }
+                _ => Ok(String::new()),
+            },
+        ) {
+            Ok(raw) => Ok(Some(raw)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    };
+    let index_file = root
+        .join(reflect_index_schema::REFLECT_DIR)
+        .join(reflect_index_schema::INDEX_FILE);
+    if !index_file.exists() {
+        return crate::fs::Recorded::Nothing;
+    }
+    match read() {
+        Ok(None) => crate::fs::Recorded::Nothing,
+        Ok(Some(raw)) => match serde_json::from_str::<Vec<String>>(&raw) {
+            Ok(names) => crate::fs::Recorded::Names(names),
+            Err(err) => {
+                tracing::warn!(%err, "the index's local-only folder record does not parse");
+                crate::fs::Recorded::Unreadable {
+                    reason: format!("the record does not parse: {err}"),
+                    corrupt: true,
+                }
+            }
+        },
+        Err(err) => {
+            tracing::warn!(?err, "could not read the index's local-only folder record");
+            crate::fs::Recorded::Unreadable {
+                reason: format!("{err:?}"),
+                corrupt: false,
+            }
+        }
+    }
 }
 
 /// Apply a batch of note projections in a single transaction (shared by the
@@ -186,16 +263,18 @@ fn apply_in_txn(
     index: &State<IndexState>,
     background_tasks: &State<BackgroundTaskState>,
     generation: u64,
-    notes: &[IndexedNote],
+    mut notes: Vec<IndexedNote>,
 ) -> AppResult<bool> {
     let _background_task = background_task::scoped(background_tasks, "Reflect index update");
     let mut state = lock_state(index)?;
     if state.generation != generation {
         return Ok(false);
     }
+    let local_only = state.local_only.clone();
     let conn = state.conn.as_mut().ok_or_else(AppError::no_graph)?;
     let tx = conn.transaction()?;
-    for note in notes {
+    for note in &mut notes {
+        write::enforce_local_only(note, local_only.as_deref());
         write::apply_note(&tx, note)?;
     }
     tx.commit()?;
@@ -211,12 +290,7 @@ pub fn index_apply<R: tauri::Runtime>(
     index: State<IndexState>,
     background_tasks: State<BackgroundTaskState>,
 ) -> AppResult<()> {
-    if apply_in_txn(
-        &index,
-        &background_tasks,
-        generation,
-        std::slice::from_ref(&note),
-    )? {
+    if apply_in_txn(&index, &background_tasks, generation, vec![note])? {
         emit_index_written(&app);
     }
     Ok(())
@@ -231,7 +305,7 @@ pub fn index_apply_batch<R: tauri::Runtime>(
     index: State<IndexState>,
     background_tasks: State<BackgroundTaskState>,
 ) -> AppResult<()> {
-    if apply_in_txn(&index, &background_tasks, generation, &notes)? {
+    if apply_in_txn(&index, &background_tasks, generation, notes)? {
         emit_index_written(&app);
     }
     Ok(())
@@ -311,16 +385,30 @@ pub fn note_move_indexed<R: tauri::Runtime>(
     background_tasks: State<BackgroundTaskState>,
 ) -> AppResult<()> {
     let _background_task = background_task::scoped(&background_tasks, "Reflect note move");
-    let root = crate::fs::root_for_generation(&graph, generation)?;
+    let (root, local_only) = crate::fs::graph_for(&graph, Some(generation))?;
+    // A move into or out of a local-only folder is refused before any row
+    // moves (the disk half would refuse it anyway).
+    crate::fs::resolve_write_in_graph(&root, &request.from, local_only.as_deref())?;
+    crate::fs::resolve_write_in_graph(&root, &request.to, local_only.as_deref())?;
     {
         let mut state = lock_state(&index)?;
         let conn = state.conn.as_mut().ok_or_else(AppError::no_graph)?;
-        move_rows(conn, &request.from, &request.to, &request.to_address)?;
-        if let Err(err) = crate::fs::move_note_file(&root, &request.from, &request.to) {
-            // Compensate: the disk refused, so the rows go back. Best-effort —
+        let was_private = write::row_private(conn, &request.from)?;
+        move_rows(
+            conn,
+            &request.from,
+            &request.to,
+            &request.to_address,
+            local_only.as_deref(),
+        )?;
+        if let Err(err) =
+            crate::fs::move_note_file(&root, &request.from, &request.to, local_only.as_deref())
+        {
+            // Compensate: the disk refused, so the rows go back — with their
+            // privacy flag, which the forward move may have set. Best-effort —
             // a failed compensation must surface the *original* error, and the
             // reconcile heals any residue by id.
-            if let Err(comp) = move_rows(conn, &request.to, &request.from, &request.from_address) {
+            if let Err(comp) = compensate_move(conn, &request, was_private, local_only.as_deref()) {
                 tracing::error!(
                     ?comp,
                     "rename compensation failed; reconcile will heal by id"
@@ -335,18 +423,46 @@ pub fn note_move_indexed<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Move the rows back after the disk refused a move, restoring the source
+/// row's privacy flag: a forward move into a local-only folder marks the row
+/// private, and a public note must not come back private.
+fn compensate_move(
+    conn: &mut Connection,
+    request: &NoteMoveRequest,
+    was_private: Option<bool>,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
+    move_rows(
+        conn,
+        &request.to,
+        &request.from,
+        &request.from_address,
+        local_only,
+    )?;
+    if let Some(private) = was_private {
+        write::set_private(conn, &request.from, private)?;
+    }
+    Ok(())
+}
+
 /// One committed row-move transaction (the rename pipeline's halves).
 fn move_rows(
     conn: &mut Connection,
     from: &str,
     to: &str,
     address: &write::MovedNoteAddress,
+    local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<()> {
     let tx = conn.transaction()?;
     // Child tables FK `notes(path)`; deferring lets the parent key move first
     // and the constraint re-check at commit, when the children have followed.
     tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
     write::move_note(&tx, from, to, address)?;
+    // A moved row keeps its old privacy flag (moves never reproject): one
+    // that lands inside a local-only folder must turn private with the move.
+    if local_only.is_some_and(|folders| folders.contains(to)) {
+        write::mark_private(&tx, to)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -374,8 +490,9 @@ pub fn index_move<R: tauri::Runtime>(
         if state.generation != generation {
             return Ok(());
         }
+        let local_only = state.local_only.clone();
         let conn = state.conn.as_mut().ok_or_else(AppError::no_graph)?;
-        move_rows(conn, &from, &to, &to_address)?;
+        move_rows(conn, &from, &to, &to_address, local_only.as_deref())?;
     }
     emit_index_written(&app);
     emit_note_moved(&app, &from, &to);
@@ -404,15 +521,18 @@ pub async fn index_reconcile_scan<R: tauri::Runtime>(
         // commands have no ordering against `graph_open`, and listing a
         // just-swapped root against this generation's rows would diff two
         // different graphs (see `IndexInner::root`).
-        let root = {
+        let (root, local_only) = {
             let state = lock_state(&index)?;
             if state.generation != generation {
                 return Ok(scan::ReconcileScan::empty());
             }
-            state.root.clone().ok_or_else(AppError::no_graph)?
+            (
+                state.root.clone().ok_or_else(AppError::no_graph)?,
+                state.local_only.clone(),
+            )
         };
         let walk_started = std::time::Instant::now();
-        let files = crate::fs::note_files(&root);
+        let files = crate::fs::indexable_note_files(&root, local_only.as_deref());
         let walk_ms = walk_started.elapsed().as_millis() as u64;
         let state = lock_state(&index)?;
         if state.generation != generation {
@@ -476,6 +596,7 @@ pub fn index_touch(
 /// TS policy layer owns — e.g. `syncIndex` stamps the projection version after
 /// a rebuild — and `index_clear` deliberately preserves it, so a marker can
 /// outlive the rows it describes. Reads go through the ordinary `db_query`.
+/// The local-only record is the exception: only the index open writes it.
 #[tauri::command]
 pub fn index_meta_set(
     key: String,
@@ -484,6 +605,11 @@ pub fn index_meta_set(
     index: State<IndexState>,
     background_tasks: State<BackgroundTaskState>,
 ) -> AppResult<()> {
+    if key == reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY {
+        return Err(AppError::io(format!(
+            "index_meta \"{key}\" is written only when the index opens"
+        )));
+    }
     let _background_task = background_task::scoped(&background_tasks, "Reflect index metadata");
     let state = lock_state(&index)?;
     if state.generation != generation {

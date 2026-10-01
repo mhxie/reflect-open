@@ -1,11 +1,18 @@
 import { useCallback } from 'react'
 import type { WikilinkClickHandler } from '@meowdown/core'
+import { isLocalOnlyPath } from '@reflect/core'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import { isModEvent } from '@meowdown/core'
+
+/** A snippet's `[[wiki link]]` click, with the path of the note the snippet is from. */
+export type BacklinkWikilinkClick = (
+  payload: Parameters<WikilinkClickHandler>[0],
+  sourcePath: string,
+) => void
 
 /** The click plumbing a backlinks surface wires into its rows and snippets. */
 export interface BacklinkNavigation {
@@ -21,9 +28,12 @@ export interface BacklinkNavigation {
   /**
    * Navigate a `[[wiki link]]` clicked *inside* a snippet — resolves its
    * target the same way the editor does, distinct from {@link openSource}.
-   * Stable, so it never rebuilds the snippet trees.
+   * A link in a snippet from a local-only note only opens an existing note,
+   * exactly like its read-only note pane: creating one would carry the
+   * link's local-only text out as a public note's title. Stable, so it never
+   * rebuilds the snippet trees.
    */
-  onWikilinkClick: WikilinkClickHandler
+  onWikilinkClick: BacklinkWikilinkClick
 }
 
 /**
@@ -46,9 +56,13 @@ export function useBacklinkNavigation(): BacklinkNavigation {
   )
 
   const navigateWikiLink = useWikiLinkNavigation(graph?.generation ?? null)
-  const onWikilinkClick = useCallback<WikilinkClickHandler>(
-    (payload) => navigateWikiLink({ target: payload.target, openInNewWindow: payload.mod }),
-    [navigateWikiLink],
+  const navigateExisting = useWikiLinkNavigation(null)
+  const onWikilinkClick = useCallback<BacklinkWikilinkClick>(
+    (payload, sourcePath) => {
+      const navigate = isLocalOnlyPath(sourcePath) ? navigateExisting : navigateWikiLink
+      navigate({ target: payload.target, openInNewWindow: payload.mod })
+    },
+    [navigateExisting, navigateWikiLink],
   )
 
   return { openSource, onWikilinkClick }

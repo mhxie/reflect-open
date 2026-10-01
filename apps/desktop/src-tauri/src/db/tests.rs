@@ -2183,3 +2183,692 @@ fn reconcile_scan_walks_the_index_sessions_root_not_the_current_graph() {
     .expect("scan");
     assert_eq!(scan.total, 1, "must list graph A, the index session's root");
 }
+
+fn is_private_row(conn: &Connection, path: &str) -> bool {
+    conn.query_row(
+        "SELECT is_private FROM notes WHERE path = ?1",
+        [path],
+        |row| row.get::<_, i64>(0),
+    )
+    .expect("row")
+        == 1
+}
+
+fn secure_folders() -> reflect_graph_paths::LocalOnlyFolders {
+    reflect_graph_paths::LocalOnlyFolders::new(["secure"], None).expect("folders")
+}
+
+#[test]
+fn local_only_rows_are_private_whatever_the_projection_says() {
+    use super::write::enforce_local_only;
+    let conn = migrated();
+    let folders = secure_folders();
+    for path in ["finance/secure/bank.md", "notes/public.md"] {
+        let mut projected = note(path, "Note", vec![]);
+        enforce_local_only(&mut projected, Some(&folders));
+        apply_note(&conn, &projected).unwrap();
+    }
+    assert!(is_private_row(&conn, "finance/secure/bank.md"));
+    assert!(!is_private_row(&conn, "notes/public.md"));
+
+    // Without a configuration the projection is taken as is.
+    let mut projected = note("people/secure/x.md", "X", vec![]);
+    enforce_local_only(&mut projected, None);
+    apply_note(&conn, &projected).unwrap();
+    assert!(!is_private_row(&conn, "people/secure/x.md"));
+}
+
+#[test]
+fn the_open_sweep_marks_rows_written_before_the_configuration() {
+    use super::write::mark_local_only_private;
+    let conn = migrated();
+    apply_note(&conn, &note("personal/secure/visa.md", "Visa", vec![])).unwrap();
+    apply_note(&conn, &note("personal/plan.md", "Plan", vec![])).unwrap();
+    assert_eq!(
+        mark_local_only_private(&conn, &secure_folders()).unwrap(),
+        1
+    );
+    assert!(is_private_row(&conn, "personal/secure/visa.md"));
+    assert!(!is_private_row(&conn, "personal/plan.md"));
+    assert_eq!(
+        mark_local_only_private(&conn, &secure_folders()).unwrap(),
+        0
+    );
+}
+
+#[test]
+fn a_row_moved_into_a_local_only_folder_turns_private() {
+    let mut conn = migrated();
+    apply_note(&conn, &note("notes/bank.md", "Bank", vec![])).unwrap();
+    let folders = secure_folders();
+    super::move_rows(
+        &mut conn,
+        "notes/bank.md",
+        "finance/secure/bank.md",
+        &moved_address("finance/secure/bank.md"),
+        Some(&folders),
+    )
+    .unwrap();
+    assert!(is_private_row(&conn, "finance/secure/bank.md"));
+}
+
+#[test]
+fn local_only_folder_names_are_recorded_for_the_cli() {
+    use super::write::record_local_only_folders;
+    use reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
+    let conn = migrated();
+    let stored = |conn: &Connection| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            [LOCAL_ONLY_FOLDERS_KEY],
+            |row| row.get(0),
+        )
+        .ok()
+    };
+    record_local_only_folders(&conn, Some(&secure_folders()), true).unwrap();
+    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure"]"#));
+    // Paused: the record only grows, keeping what it had.
+    let kids = reflect_graph_paths::LocalOnlyFolders::new(["kids", "SECURE"], None).unwrap();
+    record_local_only_folders(&conn, Some(&kids), false).unwrap();
+    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure","kids"]"#));
+    record_local_only_folders(&conn, None, false).unwrap();
+    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure","kids"]"#));
+    // A record that cannot be read is left as it is while paused.
+    conn.execute(
+        "UPDATE index_meta SET value = 'not json' WHERE key = ?1",
+        [LOCAL_ONLY_FOLDERS_KEY],
+    )
+    .unwrap();
+    record_local_only_folders(&conn, Some(&kids), false).unwrap();
+    assert_eq!(stored(&conn).as_deref(), Some("not json"));
+    // Control: a known configuration replaces the record, and none clears it.
+    record_local_only_folders(&conn, Some(&secure_folders()), true).unwrap();
+    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure"]"#));
+    record_local_only_folders(&conn, None, true).unwrap();
+    assert_eq!(stored(&conn), None);
+}
+
+/// A mock app with one graph open at `root`, carrying `folders`.
+fn local_only_app(
+    root: &std::path::Path,
+    folders: Option<reflect_graph_paths::LocalOnlyFolders>,
+) -> tauri::App<tauri::test::MockRuntime> {
+    use tauri::Manager;
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("mock app");
+    app.manage(crate::fs::GraphState::default());
+    app.manage(super::IndexState::default());
+    app.manage(crate::background_task::BackgroundTaskState::default());
+    {
+        let state: tauri::State<crate::fs::GraphState> = app.state();
+        let mut inner = state.0.lock().unwrap();
+        inner.generation = 1;
+        inner.root = Some(root.to_path_buf());
+        inner.set_local_only(folders);
+    }
+    app
+}
+
+fn row_private_flag(app: &tauri::App<tauri::test::MockRuntime>, path: &str) -> Option<bool> {
+    use tauri::Manager;
+    let index: tauri::State<super::IndexState> = app.state();
+    let state = super::lock_state(&index).unwrap();
+    super::write::row_private(state.conn.as_ref().unwrap(), path).unwrap()
+}
+
+/// Command tier: `index_open` takes the graph's folders from `GraphState`,
+/// marks stored rows inside them private, binds the policy `index_apply`
+/// enforces, and the reconcile scan lists the notes behind a link; the
+/// control session without folders leaves the same rows public.
+#[cfg(unix)]
+#[test]
+fn the_index_commands_take_local_only_folders_from_the_open_graph() {
+    use tauri::Manager;
+    for configured in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, raw) = (base.join("graph"), base.join("raw"));
+        std::fs::create_dir_all(root.join("people/secure")).unwrap();
+        std::fs::create_dir_all(root.join("finance")).unwrap();
+        std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
+        std::fs::write(root.join("people/secure/visa.md"), "# Visa\n").unwrap();
+        std::fs::write(raw.join("finance/secure/bank.md"), "# Bank\n").unwrap();
+        std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure"))
+            .unwrap();
+        // A row stored before the folder was configured.
+        {
+            let conn = open_index_at(&root).unwrap();
+            apply_note(&conn, &note("people/secure/visa.md", "Visa", vec![])).unwrap();
+        }
+        let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw));
+        let app = local_only_app(&root, if configured { folders } else { None });
+
+        let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+        assert_eq!(
+            row_private_flag(&app, "people/secure/visa.md"),
+            Some(configured)
+        );
+
+        super::index_apply(
+            note("finance/secure/bank.md", "Bank", vec![]),
+            generation,
+            app.handle().clone(),
+            app.state(),
+            app.state(),
+        )
+        .unwrap();
+        assert_eq!(
+            row_private_flag(&app, "finance/secure/bank.md"),
+            Some(configured)
+        );
+
+        let scan = tauri::async_runtime::block_on(super::index_reconcile_scan(
+            generation,
+            app.handle().clone(),
+        ))
+        .expect("scan");
+        // The link's note is listed only when the link is followed.
+        assert_eq!(scan.total, if configured { 2 } else { 1 });
+    }
+}
+
+/// A move into a local-only folder is refused before any row moves, and a
+/// compensated move restores the source row's privacy flag.
+#[cfg(unix)]
+#[test]
+fn a_refused_move_into_a_local_only_folder_leaves_the_row_as_it_was() {
+    use tauri::Manager;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("notes")).unwrap();
+    std::fs::create_dir_all(root.join("people/secure")).unwrap();
+    std::fs::write(root.join("notes/plan.md"), "# Plan\n").unwrap();
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
+    let app = local_only_app(&root, folders.clone());
+    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    super::index_apply(
+        note("notes/plan.md", "Plan", vec![]),
+        generation,
+        app.handle().clone(),
+        app.state(),
+        app.state(),
+    )
+    .unwrap();
+
+    let request = super::NoteMoveRequest {
+        from: "notes/plan.md".into(),
+        to: "people/secure/plan.md".into(),
+        to_address: moved_address("people/secure/plan.md"),
+        from_address: moved_address("notes/plan.md"),
+    };
+    let moved = super::note_move_indexed(
+        request,
+        1,
+        app.handle().clone(),
+        app.state(),
+        app.state(),
+        app.state(),
+    );
+    assert!(moved.is_err());
+    assert_eq!(row_private_flag(&app, "notes/plan.md"), Some(false));
+    assert_eq!(row_private_flag(&app, "people/secure/plan.md"), None);
+    assert!(root.join("notes/plan.md").exists());
+
+    // The compensation itself restores the flag a forward move set.
+    let index: tauri::State<super::IndexState> = app.state();
+    let mut state = super::lock_state(&index).unwrap();
+    let conn = state.conn.as_mut().unwrap();
+    let request = super::NoteMoveRequest {
+        from: "notes/plan.md".into(),
+        to: "people/secure/plan.md".into(),
+        to_address: moved_address("people/secure/plan.md"),
+        from_address: moved_address("notes/plan.md"),
+    };
+    super::move_rows(
+        conn,
+        &request.from,
+        &request.to,
+        &request.to_address,
+        folders.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(
+        super::write::row_private(conn, "people/secure/plan.md").unwrap(),
+        Some(true)
+    );
+    super::compensate_move(conn, &request, Some(false), folders.as_ref()).unwrap();
+    assert_eq!(
+        super::write::row_private(conn, "notes/plan.md").unwrap(),
+        Some(false)
+    );
+}
+
+/// The names an index recorded (empty for no index or no record).
+fn recorded_names(root: &std::path::Path) -> Vec<String> {
+    match super::recorded_local_only_folders(root) {
+        crate::fs::Recorded::Names(names) => names,
+        crate::fs::Recorded::Nothing => Vec::new(),
+        unreadable => panic!("{unreadable:?}"),
+    }
+}
+
+/// An index that cannot be read reports its record unreadable (the open
+/// then fails closed), never as nothing recorded; the controls, no index
+/// and an index without a record, have nothing to compare.
+#[test]
+fn an_index_that_cannot_be_read_reports_the_record_unreadable() {
+    use crate::fs::Recorded;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let recorded = || super::recorded_local_only_folders(&root);
+    assert!(matches!(recorded(), Recorded::Nothing));
+    drop(open_index_at(&root).unwrap());
+    assert!(matches!(recorded(), Recorded::Nothing));
+    std::fs::write(root.join(".reflect/index.sqlite"), b"not a database").unwrap();
+    assert!(
+        matches!(recorded(), Recorded::Unreadable { corrupt: false, .. }),
+        "{:?}",
+        recorded()
+    );
+}
+
+/// The index records the folder names it opened with, the next graph open
+/// reads them back, and an open whose configuration is unknown leaves the
+/// record alone (so the CLI keeps refusing); a known open replaces it.
+#[test]
+fn an_unknown_open_keeps_the_recorded_local_only_folders() {
+    use tauri::Manager;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("people/secure")).unwrap();
+    assert!(recorded_names(&root).is_empty(), "no index yet");
+
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
+    let app = local_only_app(&root, folders);
+    super::index_open(app.state(), app.state(), app.state()).expect("open");
+    assert_eq!(recorded_names(&root), ["secure"]);
+
+    // Unknown, even with no folders in hand: the record stays.
+    let app = local_only_app(&root, None);
+    {
+        let state: tauri::State<crate::fs::GraphState> = app.state();
+        state.0.lock().unwrap().set_local_only_unknown();
+    }
+    super::index_open(app.state(), app.state(), app.state()).expect("open");
+    assert_eq!(recorded_names(&root), ["secure"]);
+
+    // Control: a known configuration without the folder replaces it.
+    let app = local_only_app(&root, None);
+    super::index_open(app.state(), app.state(), app.state()).expect("open");
+    assert!(recorded_names(&root).is_empty());
+}
+
+/// Only the index open writes the local-only record: `index_meta_set`
+/// refuses its key, so a frontend bug cannot empty it; the control key
+/// still lands.
+#[test]
+fn the_frontend_cannot_overwrite_the_local_only_record() {
+    use tauri::Manager;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
+    let app = local_only_app(&root, folders);
+    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    let set = |key: &str| {
+        super::index_meta_set(
+            key.to_string(),
+            "[]".to_string(),
+            generation,
+            app.state(),
+            app.state(),
+        )
+    };
+    assert!(set(reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY).is_err());
+    assert_eq!(recorded_names(&root), ["secure"]);
+    set("projection_version").expect("an ordinary key");
+    let stored: String = open_index_at(&root)
+        .unwrap()
+        .query_row(
+            "SELECT value FROM index_meta WHERE key = 'projection_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, "[]");
+}
+
+/// A temp settings file and recents list for this test thread, a mock app
+/// managing the graph, index, and background-task state, and a graph folder.
+struct OpenFixture {
+    _dir: tempfile::TempDir,
+    root: std::path::PathBuf,
+    settings: std::path::PathBuf,
+    app: tauri::App<tauri::test::MockRuntime>,
+}
+
+impl OpenFixture {
+    fn new() -> Self {
+        use tauri::Manager;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("graph");
+        std::fs::create_dir_all(root.join("people/secure")).unwrap();
+        std::fs::write(root.join("people/secure/visa.md"), "# Visa\n").unwrap();
+        let settings = base.join("settings.json");
+        crate::settings::TEST_STORE_PATH.with(|path| *path.borrow_mut() = Some(settings.clone()));
+        crate::recents::TEST_STORE_PATH
+            .with(|path| *path.borrow_mut() = Some(base.join("recent-graphs.json")));
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(crate::fs::GraphState::default());
+        app.manage(super::IndexState::default());
+        app.manage(crate::background_task::BackgroundTaskState::default());
+        Self {
+            _dir: dir,
+            root,
+            settings,
+            app,
+        }
+    }
+
+    /// Write the settings with this graph's entry, or none.
+    fn settings(&self, entry: Option<Value>) {
+        let mut entries = serde_json::Map::new();
+        if let Some(entry) = entry {
+            entries.insert(self.root.to_string_lossy().into_owned(), entry);
+        }
+        let doc = serde_json::json!({ "localOnlyFolders": entries });
+        std::fs::write(&self.settings, doc.to_string()).unwrap();
+    }
+
+    fn open(&self) -> crate::fs::GraphInfo {
+        use tauri::Manager;
+        crate::fs::graph_open(self.root.to_string_lossy().into_owned(), self.app.state())
+            .expect("graph_open")
+    }
+
+    fn index_open(&self) {
+        use tauri::Manager;
+        super::index_open(self.app.state(), self.app.state(), self.app.state())
+            .expect("index_open");
+    }
+
+    fn sync_refusal(&self, generation: u64) -> Option<String> {
+        use tauri::Manager;
+        crate::fs::graph_for_sync(&self.app.state(), generation)
+            .err()
+            .map(|err| format!("{err:?}"))
+    }
+
+    fn chat_rows(&self) -> Value {
+        let conn = open_index_at(&self.root).unwrap();
+        run_query(&conn, "SELECT count(*) AS n FROM chat_messages", &[]).unwrap()[0]["n"].clone()
+    }
+}
+
+impl Drop for OpenFixture {
+    fn drop(&mut self) {
+        crate::settings::TEST_STORE_PATH.with(|path| *path.borrow_mut() = None);
+        crate::recents::TEST_STORE_PATH.with(|path| *path.borrow_mut() = None);
+    }
+}
+
+/// End to end through the commands, the load the open uses included: a
+/// graph whose entry disappears (a moved vault) keeps its recorded folders
+/// local-only, warns, and refuses to commit; a `released` list in its own
+/// entry resumes it, the next index open records the shorter list, and the
+/// chat history survives every step.
+#[test]
+fn a_disappearing_entry_pauses_and_a_release_resumes_without_touching_chat() {
+    use tauri::Manager;
+    let fixture = OpenFixture::new();
+    fixture.settings(Some(serde_json::json!({ "folders": ["secure"] })));
+    assert_eq!(fixture.open().local_only_folders, ["secure"]);
+    fixture.index_open();
+    assert_eq!(recorded_names(&fixture.root), ["secure"]);
+    {
+        let conn = open_index_at(&fixture.root).unwrap();
+        save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
+    }
+
+    // The entry disappears.
+    fixture.settings(None);
+    let info = fixture.open();
+    assert_eq!(info.local_only_folders, ["secure"]);
+    assert!(
+        info.local_only_warnings
+            .iter()
+            .any(|warning| warning.contains("no longer lists")),
+        "{:?}",
+        info.local_only_warnings
+    );
+    let committed = tauri::async_runtime::block_on(crate::git::git_commit_all(
+        "Update notes".into(),
+        info.generation,
+        fixture.app.state(),
+    ));
+    assert!(format!("{:?}", committed.expect_err("paused")).contains("Sync is paused"));
+    fixture.index_open();
+    assert_eq!(
+        recorded_names(&fixture.root),
+        ["secure"],
+        "the record is kept"
+    );
+
+    // A release in the graph's own entry resumes it.
+    fixture.settings(Some(
+        serde_json::json!({ "folders": [], "released": ["secure"] }),
+    ));
+    let info = fixture.open();
+    assert!(info.local_only_folders.is_empty());
+    assert!(info
+        .local_only_warnings
+        .iter()
+        .any(|warning| warning.contains("no longer local-only")));
+    assert_eq!(fixture.sync_refusal(info.generation), None);
+    fixture.index_open();
+    assert!(recorded_names(&fixture.root).is_empty());
+
+    // The leftover release is silent, and nothing was rebuilt.
+    let info = fixture.open();
+    assert!(!info
+        .local_only_warnings
+        .iter()
+        .any(|warning| warning.contains("no longer local-only")));
+    assert_eq!(fixture.sync_refusal(info.generation), None);
+    assert_eq!(fixture.chat_rows(), Value::from(1));
+}
+
+/// A record that does not parse fails closed: with no entry for the graph
+/// it pauses and stays as it is; an entry for the graph replaces it at the
+/// next index open (the control that the corruption, not the entry, paused).
+#[test]
+fn a_corrupt_record_pauses_until_an_entry_replaces_it() {
+    let fixture = OpenFixture::new();
+    {
+        let conn = open_index_at(&fixture.root).unwrap();
+        conn.execute(
+            "INSERT INTO index_meta(key, value) VALUES(?1, 'not json')",
+            [reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY],
+        )
+        .unwrap();
+    }
+    fixture.settings(None);
+    let info = fixture.open();
+    assert!(
+        info.local_only_warnings
+            .iter()
+            .any(|warning| warning.contains("could not read which folders")),
+        "{:?}",
+        info.local_only_warnings
+    );
+    assert!(fixture
+        .sync_refusal(info.generation)
+        .is_some_and(|reason| reason.contains("Sync is paused")));
+    fixture.index_open();
+    assert!(matches!(
+        super::recorded_local_only_folders(&fixture.root),
+        crate::fs::Recorded::Unreadable { corrupt: true, .. }
+    ));
+
+    fixture.settings(Some(serde_json::json!({ "folders": ["secure"] })));
+    let info = fixture.open();
+    assert!(
+        fixture.sync_refusal(info.generation).is_some(),
+        "paused this session"
+    );
+    assert!(
+        info.local_only_warnings
+            .iter()
+            .any(|warning| warning.contains("records \"secure\" from this graph's entry")),
+        "{:?}",
+        info.local_only_warnings
+    );
+    fixture.index_open();
+    assert_eq!(recorded_names(&fixture.root), ["secure"]);
+    let info = fixture.open();
+    assert_eq!(fixture.sync_refusal(info.generation), None);
+    assert_eq!(info.local_only_folders, ["secure"]);
+}
+
+/// Open the graph with `entry`, then the index: one session, and whether
+/// sync is paused in it.
+fn session(fixture: &OpenFixture, entry: Value) -> (crate::fs::GraphInfo, bool) {
+    fixture.settings(Some(entry));
+    let info = fixture.open();
+    fixture.index_open();
+    let paused = fixture.sync_refusal(info.generation).is_some();
+    (info, paused)
+}
+
+fn warns(info: &crate::fs::GraphInfo, text: &str) -> bool {
+    info.local_only_warnings
+        .iter()
+        .any(|warning| warning.contains(text))
+}
+
+/// While the configuration is paused the record only grows: a folder listed
+/// during the pause is remembered even if it is dropped before the pause
+/// lifts, so dropping it then pauses instead of silently unprotecting it.
+/// Control: a known open still replaces the record, so a release shrinks it.
+#[test]
+fn a_folder_listed_during_a_pause_is_remembered() {
+    let fixture = OpenFixture::new();
+    session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    let (_, paused) = session(&fixture, serde_json::json!({ "folders": ["kids"] }));
+    assert!(paused, "secure went missing");
+    assert_eq!(recorded_names(&fixture.root), ["secure", "kids"]);
+
+    let (info, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    assert!(paused && warns(&info, "no longer lists \"kids\""));
+    assert_eq!(info.local_only_folders, ["secure", "kids"]);
+
+    let (_, paused) = session(
+        &fixture,
+        serde_json::json!({ "folders": ["secure"], "released": ["kids"] }),
+    );
+    assert!(!paused);
+    assert_eq!(recorded_names(&fixture.root), ["secure"]);
+}
+
+/// The challenger's sequence: release `secure`, then list it again with the
+/// release left in place. The overlap pauses at the first open, where the
+/// record grows to hold `secure` again, so the leftover never sits quietly;
+/// removing it from `released` resumes with the folder local-only. Control:
+/// dropping it from `folders` instead is the release edit and lets it go.
+#[test]
+fn a_name_in_both_lists_pauses_until_one_list_drops_it() {
+    let fixture = OpenFixture::new();
+    let both = || serde_json::json!({ "folders": ["secure"], "released": ["secure"] });
+    session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    session(
+        &fixture,
+        serde_json::json!({ "folders": [], "released": ["secure"] }),
+    );
+    assert!(recorded_names(&fixture.root).is_empty());
+
+    let (info, paused) = session(&fixture, both());
+    assert!(paused && warns(&info, "in both \"folders\" and \"released\""));
+    assert_eq!(info.local_only_folders, ["secure"]);
+    assert_eq!(
+        recorded_names(&fixture.root),
+        ["secure"],
+        "recorded while paused"
+    );
+    let (info, paused) = session(
+        &fixture,
+        serde_json::json!({ "folders": ["secure"], "released": [] }),
+    );
+    assert!(!paused && info.local_only_folders == ["secure"]);
+
+    session(&fixture, both());
+    let (info, paused) = session(
+        &fixture,
+        serde_json::json!({ "folders": [], "released": ["secure"] }),
+    );
+    assert!(!paused && info.local_only_folders.is_empty());
+    assert!(warns(&info, "no longer local-only"));
+}
+
+/// A record that is not text is damaged content, not a failed read: it
+/// counts as a record that does not parse, so the graph's entry replaces it
+/// at the next index open, as it does a record that fails to parse, instead
+/// of pausing with no way out from the settings. Control: once replaced,
+/// the record reads as names again.
+#[test]
+fn a_record_that_is_not_text_counts_as_damaged() {
+    let fixture = OpenFixture::new();
+    open_index_at(&fixture.root)
+        .unwrap()
+        .execute(
+            "INSERT INTO index_meta(key, value) VALUES(?1, X'00ff')",
+            [reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY],
+        )
+        .unwrap();
+    assert!(matches!(
+        super::recorded_local_only_folders(&fixture.root),
+        crate::fs::Recorded::Unreadable { corrupt: true, .. }
+    ));
+    let (info, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    assert!(paused && warns(&info, "records \"secure\" from this graph's entry"));
+    assert_eq!(recorded_names(&fixture.root), ["secure"]);
+}
+
+/// A paused open that cannot read the record leaves it exactly as it is (and
+/// logs it): here a value that is not text with no entry for this graph, so
+/// every open keeps pausing. Control: once the entry names a folder, the
+/// next index open replaces the record.
+#[test]
+fn a_paused_open_leaves_a_record_it_cannot_read_unchanged() {
+    let fixture = OpenFixture::new();
+    let key = reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
+    open_index_at(&fixture.root)
+        .unwrap()
+        .execute(
+            "INSERT INTO index_meta(key, value) VALUES(?1, X'00ff')",
+            [key],
+        )
+        .unwrap();
+    let stored = || -> String {
+        open_index_at(&fixture.root)
+            .unwrap()
+            .query_row(
+                "SELECT typeof(value) || ':' || hex(value) FROM index_meta WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    fixture.settings(None);
+    for _ in 0..2 {
+        let info = fixture.open();
+        assert!(fixture.sync_refusal(info.generation).is_some(), "paused");
+        fixture.index_open();
+        assert_eq!(stored(), "blob:00FF");
+    }
+    let (_, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    assert!(paused);
+    assert_eq!(recorded_names(&fixture.root), ["secure"]);
+}

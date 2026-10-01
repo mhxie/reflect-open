@@ -66,6 +66,11 @@ export const mergeOutcomeSchema = z.object({
    * not be yet) to keep the index in step with the notes.
    */
   changedFiles: z.array(changedFileSchema),
+  /**
+   * Another device's changes inside this graph's local-only folders: kept in
+   * history, never written on this device (the folders stay frozen).
+   */
+  frozenPaths: z.array(z.string()).default([]),
 })
 export type MergeOutcome = z.infer<typeof mergeOutcomeSchema>
 

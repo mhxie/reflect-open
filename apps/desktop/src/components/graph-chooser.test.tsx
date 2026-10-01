@@ -55,7 +55,7 @@ beforeEach(() => {
           return null
         case 'graph_open':
         case 'graph_create':
-          return { root: String(args['path']), name: 'work', generation: 1 }
+          return { root: String(args['path']), name: 'work', generation: 1, localOnlyFolders: [] }
         case 'icloud_status':
           return icloudStatusResponse
         case 'index_open':

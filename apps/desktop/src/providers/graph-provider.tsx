@@ -30,6 +30,7 @@ import { reloadOpenDocuments } from '@/editor/open-documents.ts'
 import { resetNoteRowOverlays } from '@/hooks/note-row-overlay.ts'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { setIndexProgress } from '@/lib/index-progress.ts'
+import { reportLocalOnlyWarnings } from '@/lib/local-only-warnings.ts'
 import {
   dropIcloudStatusQuery,
   dropSimilarNotesQueries,
@@ -295,6 +296,7 @@ export function GraphProvider({
           setIndexGeneration(generation)
           setStatus('ready')
           opened = true
+          reportLocalOnlyWarnings(info)
           // Onboarding, considered exactly once per graph (the `welcomeSeeded`
           // meta marker): an empty graph gets the pinned "How to use Reflect"
           // note. Needs the index for the marker, so a graph whose index failed

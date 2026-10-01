@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readNoteLocal } from '../graph/commands.ts'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import {
   gatherAssetDescriptionBodies,
   gatherAssetDescriptionText,
@@ -16,16 +17,49 @@ const notFound = (): unknown => ({ kind: 'notFound', message: 'missing' })
 
 /** Description files keyed by their `.reflect.md` path. */
 const files = new Map<string, string>()
+/** Sidecar paths Rust resolves into a local-only folder. */
+const resolvedLocalOnly = new Set<string>()
 
 beforeEach(() => {
   files.clear()
+  resolvedLocalOnly.clear()
+  setLocalOnlyFolders([])
   vi.clearAllMocks()
   readNoteMock.mockImplementation(async (path: string) => {
     const value = files.get(path)
     if (value === undefined) {
       throw notFound()
     }
-    return { kind: 'content', content: value }
+    return { kind: 'content', content: value, localOnly: resolvedLocalOnly.has(path) }
+  })
+})
+
+describe('local-only assets', () => {
+  it('never folds a local-only asset description, and never reads it', async () => {
+    files.set('finance/secure/scan.png.reflect.md', 'Account number 1234.\n')
+    files.set('assets/a.png.reflect.md', 'Public diagram.\n')
+    setLocalOnlyFolders(['secure'])
+
+    const text = await gatherAssetDescriptionText(['finance/secure/scan.png', 'assets/a.png'])
+
+    expect(text).toBe('Public diagram.')
+    expect(readNoteMock).not.toHaveBeenCalledWith('finance/secure/scan.png.reflect.md')
+  })
+
+  it('skips a sidecar Rust resolves into a local-only folder despite its spelling', async () => {
+    // e.g. a case-folded spelling the name check cannot see.
+    files.set('people/\u{17F}ecure/scan.png.reflect.md', 'Passport scan.\n')
+    resolvedLocalOnly.add('people/\u{17F}ecure/scan.png.reflect.md')
+    setLocalOnlyFolders(['secure'])
+
+    expect(await gatherAssetDescriptionText(['people/\u{17F}ecure/scan.png'])).toBe('')
+  })
+
+  it('folds the same description when nothing is local-only (control)', async () => {
+    files.set('finance/secure/scan.png.reflect.md', 'Account number 1234.\n')
+    expect(await gatherAssetDescriptionText(['finance/secure/scan.png'])).toBe(
+      'Account number 1234.',
+    )
   })
 })
 

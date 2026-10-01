@@ -70,7 +70,9 @@ function Probe(): ReactElement {
   )
 }
 
-function renderProvider(graph = { root: '/graphs/notes', name: 'Notes', generation: 42 }) {
+function renderProvider(
+  graph = { root: '/graphs/notes', name: 'Notes', generation: 42, localOnlyFolders: [] },
+) {
   return render(
     <V1ImportProvider graph={graph}>
       <Probe />
@@ -205,7 +207,9 @@ describe('V1ImportProvider', () => {
     await expect.element(page.getByRole('dialog')).toBeInTheDocument()
 
     await view.rerender(
-      <V1ImportProvider graph={{ root: '/graphs/other', name: 'Other', generation: 43 }}>
+      <V1ImportProvider
+        graph={{ root: '/graphs/other', name: 'Other', generation: 43, localOnlyFolders: [] }}
+      >
         <Probe />
       </V1ImportProvider>,
     )

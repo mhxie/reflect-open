@@ -96,6 +96,9 @@ export function buildReadOneAsset(deps: ReadAssetDeps) {
       if (isAppError(cause) && cause.kind === 'notFound') {
         return { ok: false, path, error: NO_ASSET_DESCRIPTION_ERROR }
       }
+      if (isPrivateNoteError(cause)) {
+        return { ok: false, path, error: ASSET_UNAVAILABLE_ERROR }
+      }
       throw cause
     }
     const body = splitFrontmatter(source).body.trim()

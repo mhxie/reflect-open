@@ -703,6 +703,47 @@ describe('createSyncEngine', () => {
     engine.stop()
   })
 
+  it('reports remote changes a pull left frozen in local-only folders', async () => {
+    fakeGit((command) =>
+      command === 'git_merge_remote'
+        ? {
+            kind: 'fastForward',
+            conflictedPaths: [],
+            changedFiles: [{ path: 'notes/a.md', kind: 'upsert' }],
+            frozenPaths: ['finance/secure/remote.md'],
+          }
+        : defaultResponses(command),
+    )
+    const frozen: string[][] = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onLocalOnlyChangesSkipped: (paths) => {
+        frozen.push(paths)
+      },
+    })
+
+    await engine.syncNow()
+
+    expect(frozen).toEqual([['finance/secure/remote.md']])
+    engine.stop()
+  })
+
+  it('stays quiet when a pull froze nothing (control)', async () => {
+    fakeGit(defaultResponses)
+    const onLocalOnlyChangesSkipped = vi.fn()
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onLocalOnlyChangesSkipped,
+    })
+
+    await engine.syncNow()
+
+    expect(onLocalOnlyChangesSkipped).not.toHaveBeenCalled()
+    engine.stop()
+  })
+
   it('runs one cycle at a time and schedules a follow-up for mid-cycle edits', async () => {
     const pushGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
     const calls = fakeGit((command) => {

@@ -1,0 +1,24 @@
+{
+  "folders": ["secure"],
+  "cases": [
+    { "path": "finance/secure/bank.md", "localOnly": true },
+    { "path": "secure/top.md", "localOnly": true },
+    { "path": "projects/nested/secure/docs/scan.png", "localOnly": true },
+    { "path": "finance/SECURE/bank.md", "localOnly": true },
+    { "path": "finance/Secure/bank.md", "localOnly": true },
+    { "path": "./finance/./secure/bank.md", "localOnly": true },
+    { "path": "finance//secure/bank.md", "localOnly": true },
+    { "path": "finance/secure/../bank.md", "localOnly": true },
+    { "path": "finance/secure", "localOnly": false },
+    { "path": "notes/secure.md", "localOnly": false },
+    { "path": "secure.md", "localOnly": false },
+    { "path": "finance/secured/bank.md", "localOnly": false },
+    { "path": "finance/insecure/bank.md", "localOnly": false },
+    { "path": "finance/secure-notes/bank.md", "localOnly": false },
+    { "path": "finance/ſecure/bank.md", "localOnly": false },
+    { "path": "finance/sécure/bank.md", "localOnly": false },
+    { "path": "finance\\secure\\bank.md", "localOnly": false },
+    { "path": "", "localOnly": false },
+    { "path": "notes/a.md", "localOnly": false }
+  ]
+}

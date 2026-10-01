@@ -229,6 +229,12 @@ export type TranscribeSessionPartsOutcome =
   | { status: 'stale' }
   /** A segment tripped the size guard — skip the session, never tombstone. */
   | { status: 'oversize' }
+  /**
+   * The graph refused to read a segment (`traversal`: a local-only folder
+   * linked in as `audio-memos/`, or a path leaving the graph) — skip the
+   * session for good, recording nothing about it.
+   */
+  | { status: 'refused' }
 
 /**
  * Transcribe every uncached segment of one session, caching each result as
@@ -273,6 +279,9 @@ export async function transcribeSessionParts(
     } catch (cause) {
       if (isTranscriptionOversize(cause)) {
         return { status: 'oversize' }
+      }
+      if (isAppError(cause) && cause.kind === 'traversal') {
+        return { status: 'refused' }
       }
       if (!isTranscriptionRejected(cause)) {
         throw cause

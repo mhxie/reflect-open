@@ -12,6 +12,17 @@ export const graphInfoSchema = z.object({
    * one graph can never land in another graph's same-named file.
    */
   generation: z.number(),
+  /**
+   * The local-only folder names configured for this graph (empty when none):
+   * notes inside a folder with one of these names stay on this device —
+   * private, read-only, and never backed up. See `./local-only.ts`.
+   */
+  localOnlyFolders: z.array(z.string()),
+  /**
+   * Problems with that configuration the user must see (a dropped name, an
+   * unusable rawRoot, an unreadable settings file); absent or empty when none.
+   */
+  localOnlyWarnings: z.array(z.string()).optional(),
 })
 export type GraphInfo = z.infer<typeof graphInfoSchema>
 

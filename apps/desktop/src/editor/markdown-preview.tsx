@@ -1,6 +1,12 @@
+import {
+  localImagesOnly,
+  resolveNoXPost,
+  resolveNoYouTubeVideo,
+  withoutEmbedSnapshots,
+} from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
-import { useCallback, useEffect, useRef, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
 import { MarkdownView } from '@meowdown/react'
 import { useOpenExternalLink } from '@/editor/open-external-link.ts'
@@ -43,6 +49,14 @@ interface MarkdownPreviewProps {
    * or remote embeds.
    */
   interactive?: boolean
+  /**
+   * Whether the content may reach the network to render (default true): X
+   * post and YouTube embed lookups, saved embed snapshots (a YouTube card
+   * loads its thumbnail), and remote images. Off for content from a
+   * local-only note — embeds render as plain links and only graph
+   * attachments load.
+   */
+  remoteEmbeds?: boolean
   /** Extra classes for the rendered root. */
   className?: string
 }
@@ -53,13 +67,23 @@ export function MarkdownPreview({
   resolveWikiEmbed,
   onWikiLinkClick,
   interactive = true,
+  remoteEmbeds = true,
   className,
 }: MarkdownPreviewProps): ReactElement {
   const openExternalLink = useOpenExternalLink()
   // The click handler is read through a ref so a changing prop never gives
   // MarkdownView a new callback identity (which would re-render its whole
   // tree).
-  const resolveXPost = useXPostResolver()
+  const graphXPostResolver = useXPostResolver()
+  const resolveXPost = remoteEmbeds ? graphXPostResolver : resolveNoXPost
+  const imageResolver = useMemo(
+    () => (remoteEmbeds ? resolveImageUrl : localImagesOnly(resolveImageUrl)),
+    [remoteEmbeds, resolveImageUrl],
+  )
+  const markdown = useMemo(
+    () => (remoteEmbeds ? content : withoutEmbedSnapshots(content)),
+    [remoteEmbeds, content],
+  )
   const navigateRef = useRef(onWikiLinkClick)
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
@@ -80,13 +104,13 @@ export function MarkdownPreview({
   return (
     <MarkdownView
       resolveXPost={resolveXPost}
-      resolveYouTubeVideo={resolveYouTubeVideo}
+      resolveYouTubeVideo={remoteEmbeds ? resolveYouTubeVideo : resolveNoYouTubeVideo}
       mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
-      markdown={content}
+      markdown={markdown}
       markMode="hide"
       interactive={interactive}
       resolveWikilink={resolveWikilink}
-      {...(resolveImageUrl !== undefined ? { resolveImageUrl } : {})}
+      {...(imageResolver !== undefined ? { resolveImageUrl: imageResolver } : {})}
       {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
       {...(interactive ? { onLinkClick: openExternalLink } : {})}
       {...(navigates ? { onWikilinkClick: onWikilinkClickStable } : {})}

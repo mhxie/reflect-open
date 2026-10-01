@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { isAppError, readNote, splitFrontmatter } from '@reflect/core'
+import { isAppError, isLocalOnlyPath, readNote, splitFrontmatter } from '@reflect/core'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
@@ -62,6 +62,7 @@ export function NotePreview({ entry }: NotePreviewProps): ReactElement {
         content={body}
         resolveImageUrl={resolveImageUrl}
         resolveWikiEmbed={resolveWikiEmbed}
+        remoteEmbeds={!isLocalOnlyPath(entry.path)}
       />
     )
   }
