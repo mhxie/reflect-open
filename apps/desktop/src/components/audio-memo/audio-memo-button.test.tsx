@@ -7,6 +7,7 @@ const memo = vi.hoisted(() => ({
   phase: 'idle' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
   elapsedMs: 0,
   stream: null,
+  subscribeLevel: null,
   available: true,
   unavailableReason: null as string | null,
   error: null as string | null,

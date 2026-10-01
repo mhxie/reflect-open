@@ -391,8 +391,9 @@ function recordingLinks(session: AudioMemoSession): string {
     .join(' · ')
 }
 
-/** The category note every audio-memo section backlinks. */
-const MEMOS_NOTE_TITLE = 'Audio memos'
+/** The category note every audio-memo section backlinks; recordings that
+ * aren't meetings join the same section. */
+export const AUDIO_MEMOS_NOTE_TITLE = 'Audio memos'
 /**
  * Append the memo's wikilink once under `## [[Audio memos]]`, creating the
  * heading and daily file as needed. The watcher reindexes the direct write;
@@ -411,7 +412,7 @@ async function ensureDailyBacklink(
   const displayTitle = wikiLinkSafe(title) || memo.title
   const entry = `[[${memo.base}|${displayTitle}]]`
   const updated = appendListItemUnderBacklinkedHeading(source, memosNoteTitle, entry, [
-    MEMOS_NOTE_TITLE,
+    AUDIO_MEMOS_NOTE_TITLE,
   ])
   await writeNote(dailyPath(memo.date), updated, generation)
 }
@@ -642,7 +643,7 @@ export async function reconcileAudioMemos(
         if (!isSessionReady(session, nowMs)) {
           continue
         }
-        memosNoteTitle ??= await ensureBacklinkTarget(MEMOS_NOTE_TITLE, input.generation)
+        memosNoteTitle ??= await ensureBacklinkTarget(AUDIO_MEMOS_NOTE_TITLE, input.generation)
         if (stale()) return stalled()
         const note = transcriptionNote(
           memo,
@@ -676,7 +677,7 @@ export async function reconcileAudioMemos(
         // finished segments are cached; assembly waits for a later pass.
         continue
       }
-      memosNoteTitle ??= await ensureBacklinkTarget(MEMOS_NOTE_TITLE, input.generation)
+      memosNoteTitle ??= await ensureBacklinkTarget(AUDIO_MEMOS_NOTE_TITLE, input.generation)
       if (stale()) return stalled()
       const anyRejected = parts.results.some((result) => 'rejected' in result)
       const allRejected = parts.results.every((result) => 'rejected' in result)

@@ -12,6 +12,8 @@ export const SETTINGS_SECTIONS = [
   { id: 'search', title: 'Search' },
   { id: 'ai-providers', title: 'AI providers' },
   { id: 'audio-memos', title: 'Audio memos' },
+  // macOS only: the native recorder taps system audio through Core Audio.
+  { id: 'recording', title: 'Recording' },
   { id: 'ai-chat', title: 'AI chat' },
   { id: 'ai-prompts', title: 'AI prompts' },
   // macOS only — installs files under ~/.agents for terminal coding agents.

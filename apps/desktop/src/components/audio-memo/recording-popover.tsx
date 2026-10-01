@@ -1,5 +1,8 @@
-import type { ComponentProps, ReactElement } from 'react'
-import { RecordingWaveform } from '@/components/audio-memo/recording-waveform.tsx'
+import { useMemo, type ComponentProps, type ReactElement } from 'react'
+import {
+  RecordingWaveform,
+  type WaveformSource,
+} from '@/components/audio-memo/recording-waveform.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { PopoverContent } from '@/components/ui/popover.tsx'
 import { Spinner } from '@/components/ui/spinner.tsx'
@@ -23,6 +26,13 @@ export function RecordingPopover({
   anchor?: ComponentProps<typeof PopoverContent>['anchor']
 }): ReactElement {
   const memo = useAudioMemo()
+  const { stream, subscribeLevel } = memo
+  const waveformSource = useMemo((): WaveformSource | null => {
+    if (stream !== null) {
+      return { kind: 'stream', stream }
+    }
+    return subscribeLevel === null ? null : { kind: 'levels', subscribe: subscribeLevel }
+  }, [stream, subscribeLevel])
 
   return (
     <PopoverContent
@@ -54,7 +64,7 @@ export function RecordingPopover({
         </div>
       ) : (
         <div className="flex items-center gap-3">
-          {memo.stream ? <RecordingWaveform stream={memo.stream} /> : null}
+          {waveformSource === null ? null : <RecordingWaveform source={waveformSource} />}
           <span className="text-sm font-medium tabular-nums">
             {formatRecordingElapsed(memo.elapsedMs)}
           </span>

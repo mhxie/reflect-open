@@ -40,13 +40,29 @@ disk at call time), and it is covered by tests.
 - **When:** when you record a memo, and on retry for memos still awaiting
   transcription.
 - **On-device engine (macOS):** choosing *On this Mac* in Settings transcribes with a
-  Whisper model running locally on Metal; the recording never leaves the device. The
-  model downloads **from Hugging Face** when you ask for it (0.6–1.6 GB), carrying no
-  user data. While *Check for model updates* is on (the default), Reflect asks Hugging
-  Face at most once a day whether the downloaded model has newer weights; that request
+  Whisper or Qwen3-ASR model running locally on Metal; the recording never leaves the
+  device. The model downloads **from Hugging Face** when you ask for it (0.6–4.7 GB),
+  carrying no user data; Qwen3-ASR models download at a revision pinned in the app. While *Check for model updates* is on (the default), Reflect asks Hugging
+  Face at most once a day whether a downloaded Whisper model has newer weights; that request
   carries no user data either, and newer weights install only when you accept them.
   Nothing else leaves the device either: on-device memos skip the text-model pass,
   keeping the raw transcript and a title taken from its first words.
+
+## Recording on the Mac (macOS 14.2+, off until you start one)
+
+- **Where:** nowhere. Recording, transcription, and archiving all run on the Mac.
+- **What:** while a recording runs, Reflect captures the microphone and
+  everything the Mac plays (a Core Audio process tap; macOS shows its
+  recording indicator and asks for *System Audio Recording* access once). This
+  covers audio memos and calls alike. The audio waits in the app's data
+  folder, is transcribed with the on-device model above, and is then archived
+  as an m4a in the folder chosen in Settings → Recording. The transcript note
+  lands in `inbox/recordings/` in the open graph. Matching a recording to a
+  calendar event reads the local calendar the same way the events panel does.
+- **When:** only between an explicit start (sidebar microphone, palette, menu
+  bar item, or global shortcut) and stop, or until nothing has been heard for
+  fifteen minutes. Recording other people may require their consent where you
+  are.
 
 ## Semantic search (off by default)
 
@@ -291,6 +307,7 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | AI chat | Your chosen provider | Yes — private-note tool reads are blocked | Yes (needs your key) |
 | Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
 | On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |
+| Recording on the Mac | Nowhere (on-device) | — (audio and transcript stay on your Mac) | Yes (each recording is started by you) |
 | Transcription model update check | Hugging Face | No | On once the model is downloaded |
 | Embeddings | Nowhere (on-device) | — | Yes (opt-in download) |
 | Model download | Hugging Face | No | Yes (opt-in) |

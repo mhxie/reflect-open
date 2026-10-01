@@ -29,6 +29,7 @@ import {
   showRecordingReminder,
 } from '@/components/audio-memo/recording-reminder.ts'
 import { useAudioMemoPipeline } from '@/hooks/use-audio-memo-pipeline.ts'
+import { useRecorder } from '@/providers/recorder-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
 
@@ -55,6 +56,8 @@ interface AudioMemoContextValue {
   elapsedMs: number
   /** The live input stream, for the waveform. */
   stream: MediaStream | null
+  /** The native recorder's live level, for the waveform when there's no stream. */
+  subscribeLevel: ((listener: (level: number) => void) => () => void) | null
   /** Recordings committed but not yet written to the graph. */
   pendingCount: number
   /** False when no OpenAI/Gemini model is configured or the platform can't record. */
@@ -107,8 +110,14 @@ interface AudioMemoProviderProps {
 export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): ReactElement {
   // Keep the settings subscription alive at the provider (matches the
   // pipeline hook's own read), so the mic enables the moment a key is added.
-  useSettings()
+  const { settings } = useSettings()
   const { collapsed, toggleSidebar } = useSidebar()
+  // On a Mac that can tap system audio every recording goes through the
+  // native recorder (microphone and system audio, transcribed on the
+  // device); the webview recorder below serves every other platform. The
+  // pipeline stays mounted either way for memos that sync in from them.
+  const native = useRecorder()
+  const nativeRecorder = native.supported
 
   /** True from the stop click until the recorder hands over the blob. */
   const [stopping, setStopping] = useState(false)
@@ -227,6 +236,14 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
   })
 
   const toggle = useCallback((): void => {
+    if (nativeRecorder) {
+      if (native.recordingSince === null && collapsedRef.current) {
+        // Never start a recording without visible recording UI.
+        toggleSidebar()
+      }
+      native.toggle()
+      return
+    }
     if (recorder.status === 'recording') {
       if (stoppingRef.current) {
         // The click landed in the stop's await gap, where the button already
@@ -253,9 +270,22 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
     } else if (recorder.status === 'idle') {
       void start()
     }
-  }, [recorder.status, pipeline, stopAndSave, cancelRecorder, start, toggleSidebar])
+  }, [
+    nativeRecorder,
+    native,
+    recorder.status,
+    pipeline,
+    stopAndSave,
+    cancelRecorder,
+    start,
+    toggleSidebar,
+  ])
 
   const cancel = useCallback((): void => {
+    if (nativeRecorder) {
+      native.cancel()
+      return
+    }
     dismissRecordingReminder()
     const session = sessionRef.current
     if (session !== null) {
@@ -268,7 +298,7 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
       session.captured = []
     }
     cancelRecorder()
-  }, [cancelRecorder])
+  }, [nativeRecorder, native, cancelRecorder])
 
   // Collapsing the sidebar mid-flow: stop-and-save a live recording, and
   // abandon a pending permission request — a grant arriving after the
@@ -277,17 +307,42 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
     if (!collapsed) {
       return
     }
+    if (nativeRecorder) {
+      // A native recording stays visible in the menu bar; without that item
+      // it would be invisible, so it ends like a webview one.
+      if (native.recordingSince !== null && !settings.recordingMenuBar) {
+        native.toggle()
+      }
+      return
+    }
     if (recorder.status === 'recording') {
       void stopAndSave()
     } else if (recorder.status === 'requesting') {
       cancelRecorder()
     }
-  }, [collapsed, recorder.status, cancelRecorder, stopAndSave])
+  }, [
+    collapsed,
+    nativeRecorder,
+    native,
+    settings.recordingMenuBar,
+    recorder.status,
+    cancelRecorder,
+    stopAndSave,
+  ])
+
+  const nativeElapsedMs = useNativeElapsed(native.recordingSince)
 
   // A live capture owns the surface — a background save's failure parks and
   // shows after the stop, never yanking the waveform mid-recording.
-  const phase: AudioMemoPhase =
-    recorder.status === 'recording' && !stopping
+  const phase: AudioMemoPhase = nativeRecorder
+    ? native.recordingSince !== null
+      ? 'recording'
+      : pipeline.error !== null
+        ? 'error'
+        : native.transcribing || pipeline.pendingCount > 0 || pipeline.transcribing
+          ? 'transcribing'
+          : 'idle'
+    : recorder.status === 'recording' && !stopping
       ? 'recording'
       : recorder.status === 'requesting'
         ? 'requesting'
@@ -297,19 +352,22 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
             ? 'transcribing'
             : 'idle'
 
-  const unavailableReason = !supported
-    ? UNSUPPORTED_REASON
-    : !pipeline.hasTranscriptionConfig
-      ? pipeline.transcriptionEngine === 'local'
-        ? NO_LOCAL_MODEL_REASON
-        : NO_PROVIDER_REASON
-      : null
+  const unavailableReason = nativeRecorder
+    ? null
+    : !supported
+      ? UNSUPPORTED_REASON
+      : !pipeline.hasTranscriptionConfig
+        ? pipeline.transcriptionEngine === 'local'
+          ? NO_LOCAL_MODEL_REASON
+          : NO_PROVIDER_REASON
+        : null
 
   const value = useMemo<AudioMemoContextValue>(
     () => ({
       phase,
-      elapsedMs: recorder.elapsedMs,
-      stream: recorder.stream,
+      elapsedMs: nativeRecorder ? nativeElapsedMs : recorder.elapsedMs,
+      stream: nativeRecorder ? null : recorder.stream,
+      subscribeLevel: nativeRecorder ? native.subscribeLevel : null,
       pendingCount: pipeline.pendingCount,
       available: unavailableReason === null,
       unavailableReason,
@@ -322,6 +380,9 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
     }),
     [
       phase,
+      nativeRecorder,
+      nativeElapsedMs,
+      native.subscribeLevel,
       recorder.elapsedMs,
       recorder.stream,
       pipeline.pendingCount,
@@ -336,6 +397,19 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
   )
 
   return <AudioMemoContext value={value}>{children}</AudioMemoContext>
+}
+
+/** Milliseconds since `since`, ticking while a native recording runs. */
+function useNativeElapsed(since: number | null): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (since === null) {
+      return
+    }
+    const timer = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(timer)
+  }, [since])
+  return since === null ? 0 : Math.max(0, now - since)
 }
 
 /** Access the audio-memo surface. Use within an AudioMemoProvider. */

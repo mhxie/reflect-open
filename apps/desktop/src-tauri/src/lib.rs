@@ -10,6 +10,7 @@
 //! [`capture`] (link-capture inbox + native-messaging host plumbing),
 //! [`skill`] (per-graph agent-skill install under `~/.agents/skills/`),
 //! [`calendar`] (read-only Apple Calendar access),
+//! [`recorder`] (two-channel recording of the microphone and system audio),
 //! [`contacts`] (live Apple Contacts lookups),
 //! [`menu`] (the macOS app menu, incl. Paste and Match Style),
 //! [`error`] (the shared error contract).
@@ -63,6 +64,12 @@ mod local_transcription;
 #[cfg(not(target_os = "macos"))]
 #[path = "local_transcription_unsupported.rs"]
 mod local_transcription;
+// The recorder taps system audio through Core Audio (macOS 14.2+).
+#[cfg(target_os = "macos")]
+mod recorder;
+#[cfg(not(target_os = "macos"))]
+#[path = "recorder_unsupported.rs"]
+mod recorder;
 
 use tauri::{Emitter, Manager};
 
@@ -149,6 +156,10 @@ pub fn run() {
     // the frontend consumes URLs through `onOpenUrl`.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_deep_link::init());
+
+    // Recording starts and stops from whichever app has focus.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
     // Where the bundle doesn't register the scheme, do it at runtime: Linux
     // desktop entries, and Windows dev builds (the installer writes the
@@ -287,6 +298,7 @@ pub fn run() {
         .manage(windows::WindowInit::default())
         .manage(embed::EmbedState::default())
         .manage(local_transcription::LocalTranscriptionState::default())
+        .manage(recorder::RecorderState::default())
         .invoke_handler(tauri::generate_handler![
             fs::x_archive::x_archive_write,
             fs::x_archive::x_archive_resolve,
@@ -377,6 +389,14 @@ pub fn run() {
             local_transcription::local_transcription_transcribe,
             local_transcription::local_transcription_check_updates,
             local_transcription::local_transcription_skip_update,
+            recorder::recorder_status,
+            recorder::recorder_start,
+            recorder::recorder_stop,
+            recorder::recorder_cancel,
+            recorder::recorder_sessions,
+            recorder::recorder_transcribe,
+            recorder::recorder_archive,
+            recorder::recorder_configure,
             watcher::watch_start,
             watcher::watch_stop,
             menu::menu_install_paste_and_match_style,
@@ -504,6 +524,9 @@ pub fn run() {
                     let _ = app.emit("app:quit-requested", ());
                 }
             }
+            // A recording in progress keeps a valid file across a quit and
+            // is transcribed at the next launch.
+            tauri::RunEvent::Exit => recorder::shutdown(app),
             tauri::RunEvent::WindowEvent {
                 label,
                 event: tauri::WindowEvent::Destroyed,
