@@ -71,8 +71,12 @@ export async function gatherAssetDescriptionBodies(
     try {
       read = await readNoteLocal(descriptionPathFor(assetPath))
     } catch (cause) {
-      if (isAppError(cause) && cause.kind === 'notFound') {
-        continue // no description for this asset (not generated yet, or none)
+      // No description for this asset: not generated yet, or none. An asset
+      // behind a symlink that leaves the graph is refused as traversal; it
+      // cannot have a readable description either, and one such reference
+      // must not abort the whole index pass.
+      if (isAppError(cause) && (cause.kind === 'notFound' || cause.kind === 'traversal')) {
+        continue
       }
       throw cause
     }
