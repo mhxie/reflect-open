@@ -92,6 +92,15 @@ export {
 } from '../embeddings/models.ts'
 export { embedNote, backfillEmbeddings } from '../embeddings/pipeline.ts'
 export {
+  answerSearchIpcRequest,
+  respondSearchIpc,
+  startSearchIpc,
+  stopSearchIpc,
+  subscribeSearchIpcRequests,
+  type SearchIpcAnswer,
+  type SearchIpcRequest,
+} from '../embeddings/search-ipc.ts'
+export {
   retrieve,
   relatedNotes,
   fuseRanked,

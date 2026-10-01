@@ -4,7 +4,8 @@
 use std::fmt;
 
 /// Exit codes: `0` ok · `1` runtime error · `2` usage (clap) · `3` not found
-/// or private · `4` index missing/unusable (`search` only).
+/// or private · `4` index missing/unusable (`search` only) · `5` the app
+/// isn't serving the graph (`search --mode semantic|hybrid` only).
 #[derive(Debug)]
 pub enum CliError {
     /// IO/SQL/graph-resolution failures (exit 1).
@@ -16,6 +17,9 @@ pub enum CliError {
     Private(String),
     /// `search` needs the index and it is missing or unusable (exit 4).
     NoIndex(String),
+    /// Semantic and hybrid `search` need the running app serving this graph,
+    /// and it isn't reachable or couldn't answer (exit 5).
+    AppUnavailable(String),
 }
 
 impl CliError {
@@ -28,6 +32,7 @@ impl CliError {
             CliError::Runtime(_) => 1,
             CliError::NotFound(_) | CliError::Private(_) => 3,
             CliError::NoIndex(_) => 4,
+            CliError::AppUnavailable(_) => 5,
         }
     }
 }
@@ -38,7 +43,8 @@ impl fmt::Display for CliError {
             CliError::Runtime(message)
             | CliError::NotFound(message)
             | CliError::Private(message)
-            | CliError::NoIndex(message) => write!(formatter, "{message}"),
+            | CliError::NoIndex(message)
+            | CliError::AppUnavailable(message) => write!(formatter, "{message}"),
         }
     }
 }

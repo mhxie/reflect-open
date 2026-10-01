@@ -158,6 +158,9 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       case 'watch_stop':
       case 'background_task_end':
       case 'activity_end':
+      case 'search_ipc_start':
+      case 'search_ipc_stop':
+      case 'search_ipc_respond':
       case 'quit_confirm':
       case 'toggle_devtools':
         return null

@@ -2,7 +2,9 @@
 //!
 //! Self-contained: reads the graph's markdown files directly and opens
 //! `.reflect/index.sqlite` strictly read-only — no Node runtime, no running
-//! desktop app, no IPC. The modules mirror the small read-side contract owned
+//! desktop app. The one exception is `search --mode semantic|hybrid`, which
+//! asks the running app over a local socket (`app_search`) rather than load a
+//! model or read the vector table itself. The modules mirror the small read-side contract owned
 //! by `@reflect/core` (paths, fold keys, frontmatter, title derivation,
 //! hashing, FTS match syntax); each one names its TS counterpart and is
 //! parity-tested against the same expected values. Keep this surface frozen —
@@ -13,6 +15,7 @@
 //! — with no override flag. The resolved file's own frontmatter is checked,
 //! never just the index row, so a stale index can't leak a just-flagged note.
 
+pub mod app_search;
 pub mod commands;
 pub mod error;
 pub mod frontmatter;

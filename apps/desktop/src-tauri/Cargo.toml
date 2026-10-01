@@ -35,7 +35,7 @@ tauri-plugin-opener = "2.6.0"
 percent-encoding = "2.3.2"
 # `time` backs the bounded wait in `windows::close_note_windows` (tauri
 # already runs on tokio; this only makes the sleep primitive addressable).
-tokio = { version = "1.53.1", features = ["time", "sync", "fs", "io-util"] }
+tokio = { version = "1.53.1", features = ["time", "sync", "fs", "io-util", "net"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # `hooks` adds the authorizer API used to lock the read-only `db_query` bridge

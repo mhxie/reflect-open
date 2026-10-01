@@ -6,6 +6,7 @@ import { DailyContextSidebar } from '@/components/context-sidebar/daily-context-
 import { NoteContextSidebar } from '@/components/context-sidebar/note-context-sidebar.tsx'
 import type { ContextSidebarTarget } from '@/components/context-sidebar/sidebar-route.ts'
 import { EmbeddingsSync } from '@/components/embeddings-sync.tsx'
+import { SearchIpcResponder } from '@/components/search-ipc-responder.tsx'
 import { LocalModelUpdates } from '@/components/local-model-updates.tsx'
 import { NoteFindBar } from '@/components/note-find-bar.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
@@ -70,6 +71,7 @@ export function WorkspaceContent({ graph }: WorkspaceContentProps): ReactElement
         <TemplatePicker context={commandContext} />
         <TemplateCreateDialog context={commandContext} />
         <EmbeddingsSync />
+        <SearchIpcResponder />
         <LocalModelUpdates />
         {import.meta.env.DEV && import.meta.env.VITE_SEARCH_EVAL === '1' ? (
           <SearchEvalRunner />
