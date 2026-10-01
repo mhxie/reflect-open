@@ -183,7 +183,8 @@ export function useAppShortcuts(): CommandContext {
   const { toggleSidebar } = useSidebar()
   const { toggle: toggleAudioMemo } = useAudioMemo()
   const { newChat } = useChatSession()
-  const { updateSettings } = useSettings()
+  const { settings, updateSettings } = useSettings()
+  const semanticModel = settings.semanticModel
   const {
     openForPath: openNoteFindForPath,
     next: findNextInNote,
@@ -285,10 +286,11 @@ export function useAppShortcuts(): CommandContext {
         updateSettings({ semanticSearchEnabled: true })
         // EmbeddingsSync loads an untouched runtime; a `failed` one only
         // retries on an explicit action like this command.
-        void retryFailedEmbeddings()
+        void retryFailedEmbeddings(semanticModel)
       },
     }),
     [
+      semanticModel,
       queryClient,
       navigate,
       back,

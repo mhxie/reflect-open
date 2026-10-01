@@ -14,6 +14,7 @@ describe('settingsSchema', () => {
       sidebarWidth: 260,
       contextSidebarWidth: 320,
       semanticSearchEnabled: false,
+      semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
       transcriptionFormat: true,
       transcriptionPrompt: '',
@@ -226,6 +227,10 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ weekStartDay: 42 }).weekStartDay).toBe('monday')
     expect(settingsSchema.parse({ semanticSearchEnabled: 'yes' }).semanticSearchEnabled).toBe(false)
     expect(settingsSchema.parse({ semanticSearchEnabled: 1 }).semanticSearchEnabled).toBe(false)
+    // A model this build no longer offers reads as the default one.
+    expect(settingsSchema.parse({ semanticModel: 'retired-model' }).semanticModel).toBe(
+      'all-MiniLM-L6-v2',
+    )
     // `.catch(true)` keeps the resilient-degrade pattern: an invalid value falls
     // back to the default rather than failing the whole settings load.
     expect(settingsSchema.parse({ describeAssets: 'yes' }).describeAssets).toBe(true)
@@ -278,6 +283,7 @@ describe('settingsSchema', () => {
       sidebarWidth: 260,
       contextSidebarWidth: 320,
       semanticSearchEnabled: false,
+      semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
       transcriptionFormat: true,
       transcriptionPrompt: '',

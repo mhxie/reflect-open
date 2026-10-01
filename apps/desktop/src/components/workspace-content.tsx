@@ -14,6 +14,7 @@ import { Sidebar } from '@/components/sidebar/sidebar.tsx'
 import { SidebarResizeHandle } from '@/components/sidebar-resize-handle.tsx'
 import { TemplateCreateDialog } from '@/components/templates/template-create-dialog.tsx'
 import { TemplatePicker } from '@/components/templates/template-picker.tsx'
+import { SearchEvalRunner } from '@/dev/search-eval-runner.tsx'
 import { useDailyContextTarget } from '@/providers/focused-daily-provider.tsx'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
 import { useAppShortcuts } from '@/routing/app-shortcuts.ts'
@@ -70,6 +71,9 @@ export function WorkspaceContent({ graph }: WorkspaceContentProps): ReactElement
         <TemplateCreateDialog context={commandContext} />
         <EmbeddingsSync />
         <LocalModelUpdates />
+        {import.meta.env.DEV && import.meta.env.VITE_SEARCH_EVAL === '1' ? (
+          <SearchEvalRunner />
+        ) : null}
       </div>
     </AppShell>
   )

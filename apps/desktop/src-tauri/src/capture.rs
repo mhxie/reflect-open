@@ -47,7 +47,7 @@ const INBOX_DIR: &str = ".reflect/inbox";
 /// `settings.rs`/`recents.rs`; the shape is versioned so a future change reads
 /// as a typed host error, never a silent mis-spool.
 fn pointer_path() -> AppResult<PathBuf> {
-    let base = dirs::config_dir().ok_or_else(|| AppError::io("no OS config dir"))?;
+    let base = crate::dev_harness::config_dir()?;
     Ok(base.join("reflect-open").join("capture-pointer.json"))
 }
 
@@ -175,7 +175,7 @@ pub fn capture_host_register(state: State<GraphState>) -> AppResult<()> {
             tracing::warn!(path = %host_path.display(), "capture host binary not staged; skipping manifest registration");
             return Ok(());
         }
-        let app_support = dirs::config_dir().ok_or_else(|| AppError::io("no OS config dir"))?;
+        let app_support = crate::dev_harness::config_dir()?;
         let written = register_manifests(&app_support, &host_path)?;
         tracing::info!(written, "registered capture host manifests");
     }

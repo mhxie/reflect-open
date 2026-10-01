@@ -4,6 +4,7 @@ import {
   LOCAL_TRANSCRIPTION_MODEL_IDS,
 } from '../ai/local-transcription-models.ts'
 import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
+import { DEFAULT_SEMANTIC_MODEL, SEMANTIC_MODEL_IDS } from '../embeddings/models.ts'
 
 /**
  * The user-settings schema — the policy half of the settings store. Rust
@@ -204,6 +205,13 @@ export type AllNotesFilterTags = z.infer<typeof allNotesFilterTagsSchema>
  * (Plan 09). Later launches load the cached model because this flag is set.
  */
 export const semanticSearchEnabledSchema = z.boolean().catch(false)
+
+/**
+ * Which embedding model semantic search uses. Switching re-embeds the graph;
+ * an unknown id (a model this build no longer offers) falls back to the
+ * default rather than leaving semantic search unloadable.
+ */
+export const semanticModelSchema = z.enum(SEMANTIC_MODEL_IDS).catch(DEFAULT_SEMANTIC_MODEL)
 
 /**
  * Whether new eligible images/PDFs added under `assets/` are automatically
@@ -588,6 +596,7 @@ export const settingsSchema = z.looseObject({
   sidebarWidth: sidebarWidthSchema,
   contextSidebarWidth: contextSidebarWidthSchema,
   semanticSearchEnabled: semanticSearchEnabledSchema,
+  semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
   transcriptionFormat: transcriptionFormatSchema,
   transcriptionPrompt: transcriptionPromptSchema,

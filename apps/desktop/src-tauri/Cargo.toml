@@ -85,7 +85,8 @@ apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 # Apple Calendar read-only bridge (`src/calendar.rs`): EventKit through the
 # objc2 bindings, trimmed to the classes the modules touch. objc2-app-kit
 # backs EKCalendar's NSColor → hex conversion and the Edit menu's Paste and
-# Match Style item (`src/menu.rs`).
+# Match Style item (`src/menu.rs`); NSProcessInfo backs the App Nap
+# activities in `src/activity.rs`.
 objc2 = "0.6.4"
 block2 = "0.6.2"
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
@@ -97,6 +98,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSNotification",
   "NSObject",
   "NSOperation",
+  "NSProcessInfo",
   "NSString",
   "block2",
 ] }

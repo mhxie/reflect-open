@@ -2,8 +2,9 @@ import { readNoteLocal } from '../graph/commands.ts'
 import { isTemplatePath } from '../graph/paths.ts'
 import { gatherAssetDescriptionBodies } from '../indexing/asset-description-text.ts'
 import { db } from '../indexing/db.ts'
+import { hashContent } from '../indexing/hash.ts'
 import { parseNote } from '../markdown/index.ts'
-import { chunkAssetDescriptions, chunkNote } from './chunk.ts'
+import { chunkAssetDescriptions, chunkNote, type NoteChunk } from './chunk.ts'
 import { embedApply, embedRemove, embedTexts, type EmbedChunkPayload } from './commands.ts'
 
 /**
@@ -28,6 +29,25 @@ export interface EmbedNoteOptions {
 }
 
 /**
+ * Bump when {@link passageText} changes shape: every stored vector then
+ * re-embeds, because the hash of what it was computed from no longer matches.
+ */
+export const PASSAGE_VERSION = 1
+
+/** Passages per `embedTexts` call: the runtime's own batch size (`MODEL_BATCH_SIZE`). */
+const EMBED_CALL_SIZE = 8
+
+/**
+ * The text a chunk is embedded as: the note's title and the chunk's heading
+ * ahead of its own text, so a chunk deep in a note still says what the note
+ * is about. The stored chunk text (the hit's snippet) stays the raw chunk.
+ */
+export function passageText(title: string, chunk: Pick<NoteChunk, 'heading' | 'text'>): string {
+  const context = [title.trim(), chunk.heading?.trim() ?? ''].filter(Boolean).join(' › ')
+  return context === '' ? chunk.text : `${context}\n\n${chunk.text}`
+}
+
+/**
  * Bring one note's embeddings up to date. Returns the number of chunks that
  * were (re)embedded — 0 means the hash-skip caught everything.
  */
@@ -48,8 +68,9 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
       // iCloud-evicted: reading would force an on-demand download, and the
       // backfill sweeping a whole evicted graph would turn into thousands of
       // serial blocking downloads. The pre-eviction vectors stay valid (rows
-      // survive eviction); if the note re-materializes with new content, the
-      // index-applied follow-up re-embeds it then.
+      // survive eviction) until a model switch refits the table. A note that
+      // re-materializes with new content re-embeds in the index-applied
+      // follow-up; unchanged, it waits for the next backfill (one per open).
       return 0
     }
     content = read.content
@@ -75,6 +96,12 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     return 0
   }
 
+  // What each chunk is embedded as, hashed: the stored hash tracks the input
+  // its vector came from, so a renamed note or heading re-embeds too.
+  const passages = chunks.map((chunk) => passageText(parsed.title, chunk))
+  const passageHashes = await Promise.all(
+    passages.map((passage) => hashContent(`${PASSAGE_VERSION}\n${passage}`)),
+  )
   // Stored hash+model pairs, **counted**: duplicate identical sections mean
   // several chunks can share one hash, and only as many may skip embedding as
   // there are stored rows to pair with (apply_chunks pairs one row per
@@ -91,8 +118,8 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     available.set(key, (available.get(key) ?? 0) + 1)
   }
 
-  const skip = chunks.map((chunk) => {
-    const key = `${modelId} ${chunk.contentHash}`
+  const skip = passageHashes.map((hash) => {
+    const key = `${modelId} ${hash}`
     const remaining = available.get(key) ?? 0
     if (remaining > 0) {
       available.set(key, remaining - 1)
@@ -100,8 +127,13 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     }
     return false
   })
-  const toEmbed = chunks.filter((_, i) => !skip[i])
-  const vectors = toEmbed.length > 0 ? await embedTexts(toEmbed.map((chunk) => chunk.text)) : []
+  const toEmbed = passages.filter((_, i) => !skip[i])
+  const vectors: number[][] = []
+  // One call per few chunks: the model serves one call at a time, so a search
+  // typed during a long note's re-embed waits for a batch, not the whole note.
+  for (let at = 0; at < toEmbed.length; at += EMBED_CALL_SIZE) {
+    vectors.push(...(await embedTexts(toEmbed.slice(at, at + EMBED_CALL_SIZE), 'passage')))
+  }
   let vectorAt = 0
 
   const payload: EmbedChunkPayload[] = chunks.map((chunk, i) => ({
@@ -109,7 +141,7 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     posFrom: chunk.posFrom,
     posTo: chunk.posTo,
     text: chunk.text,
-    contentHash: chunk.contentHash,
+    contentHash: passageHashes[i]!,
     modelId,
     // A non-skipped chunk always has a freshly-embedded vector: `vectors` is
     // exactly as long as the non-skipped chunks, consumed in order here.

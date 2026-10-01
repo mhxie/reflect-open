@@ -1,8 +1,12 @@
 import { sql } from 'kysely'
+import { ReflectError } from '../errors.ts'
 import { db } from '../indexing/db.ts'
 import { searchWithFilters } from '../indexing/filtered-search.ts'
 import { literalSearchQuery } from '../indexing/filter-query.ts'
-import { embedTexts } from './commands.ts'
+import { HIGHLIGHT_END, HIGHLIGHT_START } from '../indexing/search.ts'
+import { buildFtsAnyMatch, isSentenceLike } from '../indexing/search-query.ts'
+import { embedStatus, embedTexts } from './commands.ts'
+import { semanticModel } from './models.ts'
 
 /**
  * The shared retrieval contract (Plan 09): one `retrieve()` for search and AI.
@@ -29,21 +33,23 @@ export interface RetrieveOptions {
   mode?: 'semantic' | 'lexical' | 'hybrid'
   /** AI callers set true: private hits keep title/flag but lose content. */
   excludePrivateContent?: boolean
+  /**
+   * Replace the embedding model's noise cutoff (its catalog
+   * `maxCosineDistance`) with this cosine distance; `2` keeps every neighbor.
+   * For calibrating a model, not for everyday callers.
+   */
+  maxDistance?: number
 }
 
-const KNN_CANDIDATES = 24
-
 /**
- * Neighbors farther than this cosine distance are noise, not matches: KNN
- * always fills the candidate list with the nearest chunks however unrelated
- * they are (worst in small graphs), so without a cutoff a gibberish query
- * still "finds" notes. 0.7 is the old app's tuned cutoff for the same model
- * family, carried over for parity; with all-MiniLM-L6-v2 it also separates
- * query→chunk matching cleanly (real matches land under ~0.65, gibberish and
- * unrelated queries at ~0.72+). The `embedding_vectors` table's metric is
- * cosine (migration 0003), so vec0 distances threshold directly.
+ * Nearest chunks fetched per query. Several chunks of one note often crowd
+ * the top, and {@link bestChunkPerNote} keeps one per note, so the candidate
+ * pool must run well past the note count a caller asks for.
  */
-const MAX_COSINE_DISTANCE = 0.7
+const KNN_CANDIDATES = 100
+
+/** Nearest chunks per seed vector in {@link relatedNotes}, which runs one query per seed. */
+const RELATED_KNN_CANDIDATES = 24
 
 export interface ChunkHitRow {
   path: string
@@ -51,27 +57,36 @@ export interface ChunkHitRow {
   heading: string | null
   text: string
   isPrivate: number
+  /** The model that embedded the chunk; its catalog entry holds the noise cutoff. */
+  modelId: string
   distance: number
+}
+
+export interface BestChunkOptions {
+  /** Drop this note: the seed note itself when the query came from its stored vectors. */
+  excludePath?: string
+  /** Overrides each row's model cutoff (see {@link RetrieveOptions.maxDistance}). */
+  maxDistance?: number
 }
 
 /**
  * Collapse KNN chunk rows (ordered nearest-first) into one hit per note —
- * the best chunk wins. Rows past {@link MAX_COSINE_DISTANCE} are dropped
- * rather than padded in, and `excludePath` removes the seed note itself when
- * the query came from a stored note vector. The score is cosine similarity
- * (the vec0 table's metric is cosine) for callers that want magnitudes.
+ * the best chunk wins. Rows past their model's `maxCosineDistance` are
+ * dropped rather than padded in (the `embedding_vectors` table's metric is
+ * cosine, migration 0003, so vec0 distances threshold directly). The score is
+ * cosine similarity for callers that want magnitudes.
  */
 export function bestChunkPerNote(
   rows: readonly ChunkHitRow[],
   limit: number,
-  excludePath?: string,
+  options: BestChunkOptions = {},
 ): RetrievalHit[] {
   const byNote = new Map<string, RetrievalHit>()
   for (const row of rows) {
-    if (row.distance > MAX_COSINE_DISTANCE) {
+    if (row.distance > (options.maxDistance ?? semanticModel(row.modelId).maxCosineDistance)) {
       continue
     }
-    if (row.path === excludePath || byNote.has(row.path)) {
+    if (row.path === options.excludePath || byNote.has(row.path)) {
       continue
     }
     byNote.set(row.path, {
@@ -86,24 +101,54 @@ export function bestChunkPerNote(
   return [...byNote.values()].slice(0, limit)
 }
 
-async function semanticHits(query: string, limit: number): Promise<RetrievalHit[]> {
-  const [vector] = await embedTexts([query])
+async function semanticHits(
+  query: string,
+  limit: number,
+  maxDistance: number | undefined,
+): Promise<RetrievalHit[]> {
+  const status = await embedStatus()
+  if (status.status !== 'ready') {
+    throw new ReflectError('io', 'embedding model is not loaded')
+  }
+  const [vector] = await embedTexts([query], 'query')
   const result = await sql<ChunkHitRow>`
     SELECT c.note_path AS path, n.title, c.heading, c.text,
-           n.is_private AS isPrivate, v.distance
+           n.is_private AS isPrivate, c.model_id AS modelId, v.distance
     FROM embedding_vectors v
     JOIN embedding_chunks c ON c.id = v.rowid
     JOIN notes n ON n.path = c.note_path
     WHERE v.embedding MATCH ${JSON.stringify(vector)} AND k = ${KNN_CANDIDATES}
     ORDER BY v.distance
   `.execute(db)
-  return bestChunkPerNote(result.rows, limit)
+  // Right after a model switch, until the table is refitted, it still holds
+  // the previous model's vectors; at the same width they compare without error
+  // but mean nothing to this query.
+  const sameModel = result.rows.filter((row) => row.modelId === status.model)
+  return bestChunkPerNote(sameModel, limit, maxDistance === undefined ? {} : { maxDistance })
 }
 
 async function lexicalHits(query: string, limit: number): Promise<RetrievalHit[]> {
   // Literal on purpose: retrieve() receives raw text (often from AI callers,
   // Plan 10) where palette filter tokens like "is:daily" inside a sentence
   // must stay search terms, not become constraints.
+  const everyTerm = await everyTermHits(query, limit)
+  if (everyTerm.length >= limit || !isSentenceLike(query)) {
+    return everyTerm
+  }
+  // A sentence rarely has every term in one note: fill the rest with the
+  // notes that share the most, and rarest, of its words. A few keywords stay
+  // strict, where a partial match is mostly noise.
+  const anyTerm = await anyTermHits(
+    query,
+    limit - everyTerm.length,
+    new Set(everyTerm.map((hit) => hit.path)),
+  )
+  // Scores stay rank order; raw bm25 scores are not comparable across legs.
+  return [...everyTerm, ...anyTerm].map((hit, index) => ({ ...hit, score: 1 / (1 + index) }))
+}
+
+/** The palette's search: every term must match, title matches first. */
+async function everyTermHits(query: string, limit: number): Promise<RetrievalHit[]> {
   const hits = await searchWithFilters(literalSearchQuery(query), { limit })
   if (hits.length === 0) {
     return []
@@ -118,14 +163,47 @@ async function lexicalHits(query: string, limit: number): Promise<RetrievalHit[]
     .select(['path', 'isPrivate'])
     .execute()
   const privateByPath = new Map(flags.map((row) => [row.path, row.isPrivate !== 0]))
-  return hits.map((hit, index) => ({
+  return hits.map((hit) => ({
     path: hit.path,
     title: hit.title,
-    score: 1 / (1 + index), // FTS rank order; raw bm25 scores are not exposed
+    score: 0,
     snippet: hit.snippet ?? '',
     heading: null,
     isPrivate: privateByPath.get(hit.path) ?? false,
   }))
+}
+
+/** Notes matching any word or CJK pair of `query`, best bm25 first, skipping `exclude`. */
+async function anyTermHits(
+  query: string,
+  limit: number,
+  exclude: ReadonlySet<string>,
+): Promise<RetrievalHit[]> {
+  const match = buildFtsAnyMatch(query)
+  if (match === null) {
+    return []
+  }
+  const result = await sql<{ path: string; title: string; snippet: string; isPrivate: number }>`
+    SELECT search_fts.path AS path, n.title AS title,
+           snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10) AS snippet,
+           n.is_private AS isPrivate
+    FROM search_fts
+    JOIN notes n ON n.path = search_fts.path
+    WHERE search_fts MATCH ${match} AND n.kind != 'template'
+    ORDER BY bm25(search_fts, 0, 10.0, 1.0, 1.0)
+    LIMIT ${limit + exclude.size}
+  `.execute(db)
+  return result.rows
+    .filter((row) => !exclude.has(row.path))
+    .slice(0, limit)
+    .map((row) => ({
+      path: row.path,
+      title: row.title,
+      score: 0,
+      snippet: row.snippet,
+      heading: null,
+      isPrivate: row.isPrivate !== 0,
+    }))
 }
 
 /** Reciprocal rank fusion: order-based, scale-free, deterministic. */
@@ -165,24 +243,28 @@ export async function retrieve(query: string, options?: RetrieveOptions): Promis
   const limit = options?.limit ?? 12
   const mode = options?.mode ?? 'hybrid'
   const excludePrivateContent = options?.excludePrivateContent ?? false
+  const maxDistance = options?.maxDistance
 
+  let hits: RetrievalHit[]
   if (mode === 'lexical') {
-    return withPrivacy(await lexicalHits(query, limit), excludePrivateContent)
+    hits = await lexicalHits(query, limit)
+  } else if (mode === 'semantic') {
+    hits = await semanticHits(query, limit, maxDistance)
+  } else {
+    // Hybrid degrades, never breaks: a failing semantic leg (embed error, vec
+    // query error — even while the runtime claims ready) must not take
+    // lexical search down with it. A failing lexical leg is a real error and
+    // throws.
+    const [lexical, semantic] = await Promise.all([
+      lexicalHits(query, limit),
+      semanticHits(query, limit, maxDistance).catch((cause): RetrievalHit[] => {
+        console.error('semantic leg failed; serving lexical only:', cause)
+        return []
+      }),
+    ])
+    hits = fuseRanked([lexical, semantic], limit)
   }
-  if (mode === 'semantic') {
-    return withPrivacy(await semanticHits(query, limit), excludePrivateContent)
-  }
-  // Hybrid degrades, never breaks: a failing semantic leg (embed error, vec
-  // query error — even while the runtime claims ready) must not take lexical
-  // search down with it. A failing lexical leg is a real error and throws.
-  const [lexical, semantic] = await Promise.all([
-    lexicalHits(query, limit),
-    semanticHits(query, limit).catch((cause): RetrievalHit[] => {
-      console.error('semantic leg failed; serving lexical only:', cause)
-      return []
-    }),
-  ])
-  return withPrivacy(fuseRanked([lexical, semantic], limit), excludePrivateContent)
+  return withPrivacy(hits.slice(0, limit), excludePrivateContent)
 }
 
 /**
@@ -212,9 +294,9 @@ const MAX_RELATED_SEEDS = 16
  * nearest-first, so a multi-topic note — a daily note above all — surfaces
  * neighbors for anything written in it, not just its lead paragraph.
  * Returns [] when the note has no vectors yet (model never enabled, or not
- * yet embedded). Candidates past {@link MAX_COSINE_DISTANCE} are dropped
- * rather than padded in, so a sparse graph shows few (or no) neighbors
- * instead of wrong ones.
+ * yet embedded). Candidates past the model's noise cutoff are dropped rather
+ * than padded in, so a sparse graph shows few (or no) neighbors instead of
+ * wrong ones.
  */
 export async function relatedNotes(path: string, limit = 10): Promise<RetrievalHit[]> {
   const seeds = await sql<{ vec: string }>`
@@ -232,16 +314,16 @@ export async function relatedNotes(path: string, limit = 10): Promise<RetrievalH
     seeds.rows.map(async (seed) => {
       const result = await sql<ChunkHitRow>`
         SELECT c.note_path AS path, n.title, c.heading, c.text,
-               n.is_private AS isPrivate, v.distance
+               n.is_private AS isPrivate, c.model_id AS modelId, v.distance
         FROM embedding_vectors v
         JOIN embedding_chunks c ON c.id = v.rowid
         JOIN notes n ON n.path = c.note_path
-        WHERE v.embedding MATCH ${seed.vec} AND k = ${KNN_CANDIDATES}
+        WHERE v.embedding MATCH ${seed.vec} AND k = ${RELATED_KNN_CANDIDATES}
           AND n.is_private = 0
         ORDER BY v.distance
       `.execute(db)
       return result.rows
     }),
   )
-  return bestChunkPerNote(mergeNearestFirst(neighborLists), limit, path)
+  return bestChunkPerNote(mergeNearestFirst(neighborLists), limit, { excludePath: path })
 }

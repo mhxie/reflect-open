@@ -6,6 +6,7 @@ import { render } from 'vitest-browser-react'
 import { setBridge, type EmbedStatus, type GraphInfo } from '@reflect/core'
 import { formatFullDate } from '@/lib/dates.ts'
 import { resetOperations } from '@/lib/operations.ts'
+import { setSemanticIndexProgress } from '@/lib/semantic-index-progress.ts'
 import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
 import { ShortcutsProvider } from '@/providers/shortcuts-provider.tsx'
 import { SettingsProvider } from '@/providers/settings-provider.tsx'
@@ -61,11 +62,13 @@ vi.mock('@/providers/v1-import-provider.tsx', () => ({
 let stored: Record<string, unknown>
 let saved: unknown[]
 let invoked: string[]
+let ensured: unknown[]
 let embedStatus: EmbedStatus
 
 function installFakeBridge(): void {
   saved = []
   invoked = []
+  ensured = []
   setBridge({
     invoke: async (command, args) => {
       invoked.push(command)
@@ -75,8 +78,10 @@ function installFakeBridge(): void {
         case 'settings_save':
           saved.push(args['settings'])
           return null
-        case 'embed_status':
         case 'embed_ensure':
+          ensured.push(args['model'])
+          return embedStatus
+        case 'embed_status':
           return embedStatus
         case 'list_files':
           return []
@@ -142,6 +147,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   setBridge(null)
+  setSemanticIndexProgress(null)
   queryClient.clear()
 })
 
@@ -290,6 +296,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -347,6 +354,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -418,6 +426,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -496,6 +505,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -553,6 +563,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -603,6 +614,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -662,6 +674,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -718,6 +731,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -780,6 +794,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -848,6 +863,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -898,6 +914,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -977,6 +994,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1025,6 +1043,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: true,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1073,12 +1092,10 @@ describe('SettingsScreen', () => {
 
   it('shows the downloaded model once ready and persists a disable', async () => {
     stored = { semanticSearchEnabled: true }
-    embedStatus = { status: 'ready', model: 'all-MiniLM-L6-v2' }
+    embedStatus = { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
     await renderScreen()
 
-    await expect
-      .element(page.getByText(/model downloaded \(all-MiniLM-L6-v2\)/i))
-      .toBeInTheDocument()
+    await expect.element(page.getByText(/model downloaded \(MiniLM\)/i)).toBeInTheDocument()
 
     await page.getByRole('button', { name: /disable/i }).click()
 
@@ -1095,6 +1112,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1155,6 +1173,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: true,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1184,6 +1203,55 @@ describe('SettingsScreen', () => {
     )
   })
 
+  it('offers the model choice only once semantic search is on', async () => {
+    await renderScreen()
+    await expect
+      .element(page.getByText(/enabling downloads MiniLM \(91 MB\) once/))
+      .toBeInTheDocument()
+    await expect.element(page.getByText('Semantic search model')).not.toBeInTheDocument()
+
+    await page.getByRole('button', { name: /enable semantic search/i }).click()
+
+    await expect.element(page.getByText('Semantic search model')).toBeInTheDocument()
+  })
+
+  it('choosing a semantic model persists it', async () => {
+    stored = { semanticSearchEnabled: true }
+    embedStatus = { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
+    await renderScreen()
+
+    await pickRadio(/EmbeddingGemma/)
+
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({ semanticModel: 'embeddinggemma-300m' }),
+    )
+    await expect.element(radio(/EmbeddingGemma/)).toBeChecked()
+  })
+
+  it('choosing a model after a failed load retries with that model', async () => {
+    stored = { semanticSearchEnabled: true }
+    embedStatus = { status: 'failed', message: 'offline' }
+    await renderScreen()
+
+    await pickRadio(/EmbeddingGemma/)
+
+    await vi.waitFor(() => expect(ensured).toEqual(['embeddinggemma-300m']))
+  })
+
+  it('shows the embedding pass that follows a model switch', async () => {
+    stored = { semanticSearchEnabled: true }
+    embedStatus = { status: 'ready', model: 'embeddinggemma-300m', dims: 768 }
+    setSemanticIndexProgress({ done: 1200, total: 6000 })
+    await renderScreen()
+
+    await expect
+      .element(page.getByRole('progressbar', { name: /semantic index/i }))
+      .toHaveAttribute('aria-valuenow', '20')
+    await expect
+      .element(page.getByText('Updating the semantic index: 1,200 of 6,000 notes'))
+      .toBeInTheDocument()
+  })
+
   it('surfaces a failed load with retry and disable affordances', async () => {
     stored = { semanticSearchEnabled: true }
     embedStatus = { status: 'failed', message: 'no disk space' }
@@ -1209,6 +1277,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1349,6 +1418,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1415,6 +1485,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1472,6 +1543,7 @@ describe('SettingsScreen', () => {
           sidebarWidth: 260,
           contextSidebarWidth: 320,
           semanticSearchEnabled: false,
+          semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           transcriptionFormat: true,
           transcriptionPrompt: '',

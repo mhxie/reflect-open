@@ -162,7 +162,7 @@ describe('searchWithFilters', () => {
     expect(sql).toContain('instr("filtered_notes"."title_key"')
     // Term needles probe a space-prefixed title key — word-start anchoring.
     expect(sql).toContain(`instr(' ' || "filtered_notes"."title_key"`)
-    expect(sql).toContain('bm25(search_fts, 0, 10.0, 1.0)')
+    expect(sql).toContain('bm25(search_fts, 0, 10.0, 1.0, 1.0)')
     expect(sql).toContain('"filtered_notes"."is_pinned" desc')
     expect(sql).toContain('"filtered_notes"."mtime" desc')
     expect(sql).toContain('"filtered_notes"."path" asc')
@@ -171,7 +171,7 @@ describe('searchWithFilters', () => {
     // The folded exact-title key, the title/body-prefix FTS expression, and the
     // word-start-anchored recall needle.
     expect(params).toContain('quokka')
-    expect(params).toContain('(title : "quokka"* OR body : "quokka"*)')
+    expect(params).toContain('(title : "quokka"* OR body : "quokka"* OR cjk : "quokka"*)')
     expect(params).toContain(' quokka')
   })
 

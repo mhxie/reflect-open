@@ -96,6 +96,9 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         // Browser previews are never suspended like an iOS process, so the
         // native finite-length assertion is honestly unavailable.
         return null
+      case 'activity_begin':
+        // Nor napped like a hidden macOS app: any token will do.
+        return 'activity-dev'
       case 'plugin:mobile-haptics|impact_light':
         return null
       case 'plugin:app-store|get_environment':
@@ -154,6 +157,7 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       case 'watch_start':
       case 'watch_stop':
       case 'background_task_end':
+      case 'activity_end':
       case 'quit_confirm':
       case 'toggle_devtools':
         return null
@@ -285,9 +289,13 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       case 'index_reconcile_scan':
         return reconcileScan(files, index)
       case 'index_clear': {
+        // The browser index has no real vectors (vec0 is stubbed out), so
+        // there is nothing for `keepEmbeddings` to preserve.
         index.clear()
         return null
       }
+      case 'index_prune_embeddings':
+        return 0
       case 'index_meta_set': {
         const { key, value } = metaArgsSchema.parse(args)
         index.setMeta(key, value)

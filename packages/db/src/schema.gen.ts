@@ -116,6 +116,7 @@ export interface Notes {
 
 export interface SearchFts {
   body: string | null;
+  cjk: string | null;
   path: string | null;
   title: string | null;
 }

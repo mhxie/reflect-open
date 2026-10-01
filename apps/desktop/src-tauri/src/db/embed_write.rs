@@ -3,7 +3,7 @@
 //! layer ([`super`]) owns transactions and generation gating, mirroring
 //! `write.rs`.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
@@ -139,4 +139,38 @@ pub(super) fn remove_chunks(conn: &Connection, note_path: &str) -> AppResult<()>
     conn.prepare_cached("DELETE FROM embedding_chunks WHERE note_path = ?1")?
         .execute(params![note_path])?;
     Ok(())
+}
+
+/// The `index_meta` key naming the model the stored vectors came from.
+const EMBEDDING_MODEL_KEY: &str = "embeddingModel";
+/// Indexes written before the key existed hold this model's vectors.
+const ORIGINAL_EMBEDDING_MODEL: &str = "all-MiniLM-L6-v2";
+
+/// Make the vector table fit `model` (`dims` wide): when the stored vectors
+/// came from another model, recreate `embedding_vectors` at the new width —
+/// vec0 can't alter a column — and drop every chunk, so the backfill embeds
+/// the graph afresh. Returns whether anything was reset.
+pub(super) fn prepare_vectors(conn: &Connection, model: &str, dims: usize) -> AppResult<bool> {
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            params![EMBEDDING_MODEL_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if stored.as_deref().unwrap_or(ORIGINAL_EMBEDDING_MODEL) == model {
+        return Ok(false);
+    }
+    conn.execute_batch(&format!(
+        "DELETE FROM embedding_chunks;
+         DROP TABLE embedding_vectors;
+         CREATE VIRTUAL TABLE embedding_vectors
+           USING vec0(embedding float[{dims}] distance_metric=cosine);"
+    ))?;
+    conn.execute(
+        "INSERT INTO index_meta(key, value) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![EMBEDDING_MODEL_KEY, model],
+    )?;
+    Ok(true)
 }

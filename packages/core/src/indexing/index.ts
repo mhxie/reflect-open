@@ -24,6 +24,7 @@ export {
 export { setLocalWriteEcho, subscribeOwnWrites } from './local-write-echo.ts'
 export { subscribeIcloudConflicts, subscribeIcloudWatchFailed } from './icloud-conflicts.ts'
 export { subscribeIndexApplied, type IndexAppliedListener } from './index-applied.ts'
+export { cjkColumnText } from './cjk.ts'
 export { INDEX_WRITTEN_EVENT, subscribeIndexWritten } from './index-written.ts'
 export { NOTE_MOVED_EVENT, subscribeNoteMoved } from './note-moved.ts'
 export {

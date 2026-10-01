@@ -98,10 +98,15 @@ Search over note titles and bodies, ranked like the app: exact, prefix, and
 per-term title matches lead, followed by title-boosted bm25 matches. Title
 and body terms match at word starts (`car` finds `Car log`, never `Oscar party`);
 terms in scripts written without spaces (Japanese, Chinese, Korean, Thai, …)
-match anywhere in the title, since FTS alone cannot see inside their
-uninterrupted title runs. A partial query such as `authent migr` finds
-`authentication migration`, and terms can match across the title and body; body
-matches include snippets. Terms are matched literally (FTS5 operators in the
+match anywhere in the title or body: the index also stores their runs as
+overlapping character pairs, and a term matches as the phrase of its pairs (a
+single character matches wherever it falls). A Latin word written against such
+a run (`Python` in `用Python写脚本`) is found too. A partial query such as
+`authent migr` finds `authentication migration`, and terms can match across the
+title and body; body matches include snippets. Every term must match, except
+that a query reading as a sentence (four words or more, two CJK characters
+counting as one) is topped up, after the notes holding all its words, with the
+notes holding the most and rarest of them, ranked by bm25. Terms are matched literally (FTS5 operators in the
 query have no special meaning); a term the tokenizer finds no word in, such as
 a lone `-`, is ignored entirely. JSON results without a body match have an empty
 snippet; title-prefix recall scores `0`, while tokenizer-normalized title matches

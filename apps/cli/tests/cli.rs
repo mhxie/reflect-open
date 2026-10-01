@@ -15,6 +15,7 @@ use reflect_cli::hash::hash_content;
 use reflect_cli::keys::fold_key;
 use reflect_cli::note_file::parse_note_meta;
 use reflect_cli::paths::{daily_path, today_date};
+use reflect_index_schema::cjk::cjk_column_text;
 
 /// `note_claims.tier` values (the desktop's `claim_tier`): lower wins.
 const TIER_DAILY_DATE: i64 = 1;
@@ -107,9 +108,15 @@ impl Fixture {
                 )
                 .unwrap();
             }
+            // The `cjk` column as the desktop writer fills it (`db/write.rs`).
+            let cjk = format!(
+                "{} {}",
+                cjk_column_text(&meta.title),
+                cjk_column_text(&content)
+            );
             conn.execute(
-                "INSERT INTO search_fts(path, title, body) VALUES(?1, ?2, ?3)",
-                params![note.rel_path, meta.title, content],
+                "INSERT INTO search_fts(path, title, body, cjk) VALUES(?1, ?2, ?3, ?4)",
+                params![note.rel_path, meta.title, content, cjk.trim()],
             )
             .unwrap();
         }
@@ -328,6 +335,87 @@ fn search_finds_a_short_japanese_term_inside_a_title() {
     let multi_term = stdout(&reflect(&fixture, &["search", "東京 旅行"]));
     assert!(multi_term.contains("notes/title-hit.md"));
     assert!(!multi_term.contains("notes/body-hit.md"));
+}
+
+/// `unicode61` indexes a clause as one token, so a CJK word inside it — or a
+/// Latin word written against it, or a lone character ending it — is found
+/// only through the `cjk` column.
+#[test]
+fn search_finds_words_inside_cjk_clauses_through_the_cjk_column() {
+    let fixture = graph();
+    fixture.write_note(
+        "notes/clause.md",
+        "# 周记\n我们下周去東京旅行，今天看了Transformer的论文。还有我和小王\n",
+    );
+    fixture.write_note("notes/other.md", "# Other\nnothing relevant here\n");
+    fixture.build_index();
+
+    for query in ["東京", "transformer", "王", "看了Transformer"] {
+        let text = stdout(&reflect(&fixture, &["search", query]));
+        assert!(
+            text.contains("notes/clause.md"),
+            "expected {query:?} to find the clause note:\n{text}"
+        );
+        assert!(!text.contains("notes/other.md"));
+    }
+}
+
+/// A sentence rarely has every word in one note, so it is topped up with the
+/// notes sharing the most, and rarest, of its words, after any note that holds
+/// them all; a few keywords stay strict. Private notes never surface.
+#[test]
+fn search_tops_up_a_sentence_with_partial_matches() {
+    let fixture = graph();
+    fixture.write_note(
+        "notes/storage.md",
+        "# Storage\nWombat keeps columnar data on disk.\n",
+    );
+    fixture.write_note(
+        "notes/formats.md",
+        "# Formats\ncolumnar formats compress well\n",
+    );
+    fixture.write_note(
+        "notes/secret.md",
+        "---\nprivate: true\n---\n# Secret\ncolumnar wombat storage formats\n",
+    );
+    fixture.write_note("notes/unrelated.md", "# Garden\ntomatoes and basil\n");
+    fixture.build_index();
+
+    let sentence = "how does wombat store columnar formats on disk";
+    let value = json(&reflect(&fixture, &["search", sentence, "--json"]));
+    let paths: Vec<&str> = value["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["notes/storage.md", "notes/formats.md"], "{value}");
+
+    // Two keywords that no note holds together: strict, so nothing.
+    let strict = stdout(&reflect(&fixture, &["search", "wombat tomatoes"]));
+    assert!(strict.trim().is_empty(), "{strict}");
+}
+
+/// An index the app hasn't migrated to the `cjk` column yet (schema 22) is
+/// searched by title and body alone rather than failing on the column.
+#[test]
+fn search_on_an_index_without_the_cjk_column_still_answers() {
+    let fixture = graph();
+    fixture.write_note("notes/tokyo.md", "# 東京\nbody\n");
+    fixture.build_index();
+    let conn = rusqlite::Connection::open(fixture.root().join(".reflect/index.sqlite")).unwrap();
+    conn.execute_batch(
+        "DROP TABLE search_fts;
+         CREATE VIRTUAL TABLE search_fts USING fts5(path UNINDEXED, title, body);
+         INSERT INTO search_fts(path, title, body) VALUES('notes/tokyo.md', '東京', 'body');
+         PRAGMA user_version = 22;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let output = reflect(&fixture, &["search", "東京"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("notes/tokyo.md"));
 }
 
 /// Title recall anchors space-delimited terms at word starts: `car` leads

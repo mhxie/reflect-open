@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { isNotePath, mayContainNotes } from '../graph/paths.ts'
 import { foldKey, parseNote } from '../markdown/index.ts'
 import { hashContent } from './hash.ts'
+import { cjkColumnText } from './cjk.ts'
 import { buildIndexedNote } from './indexed-note.ts'
-import { buildFtsMatch } from './search-query.ts'
+import { buildFtsAnyMatch, buildFtsMatch, isSentenceLike } from './search-query.ts'
 
 /**
  * The TS side of the TS↔Rust parity contract (see `fixtures/parity/README.txt`).
@@ -38,11 +39,18 @@ interface ExpectedParity {
   notes: Record<string, ExpectedNote>
   foldKey: Record<string, string>
   ftsMatch: Record<string, string | null>
+  /** The `search_fts.cjk` text: written by Rust, queried by both sides. */
+  cjkColumn: Record<string, string>
+  ftsAnyMatch: Record<string, string | null>
+  sentenceLike: Record<string, boolean>
 }
 
 interface ScalarInputs {
   foldKey: string[]
   ftsMatch: string[]
+  cjkColumn: string[]
+  ftsAnyMatch: string[]
+  sentenceLike: string[]
 }
 
 /** Graph-relative paths of every eligible fixture note, mirroring the CLI's
@@ -95,6 +103,13 @@ async function deriveExpectations(): Promise<ExpectedParity> {
     notes,
     foldKey: Object.fromEntries(scalars.foldKey.map((input) => [input, foldKey(input)])),
     ftsMatch: Object.fromEntries(scalars.ftsMatch.map((input) => [input, buildFtsMatch(input)])),
+    cjkColumn: Object.fromEntries(scalars.cjkColumn.map((input) => [input, cjkColumnText(input)])),
+    ftsAnyMatch: Object.fromEntries(
+      scalars.ftsAnyMatch.map((input) => [input, buildFtsAnyMatch(input)]),
+    ),
+    sentenceLike: Object.fromEntries(
+      scalars.sentenceLike.map((input) => [input, isSentenceLike(input)]),
+    ),
   }
 }
 

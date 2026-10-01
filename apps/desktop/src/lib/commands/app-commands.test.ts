@@ -370,7 +370,7 @@ describe('app commands', () => {
   it('index.rebuild re-runs the embedding backfill when the model is ready', async () => {
     try {
       rebuildIndex.mockResolvedValueOnce(undefined)
-      embedStatus.mockResolvedValueOnce({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+      embedStatus.mockResolvedValueOnce({ status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 })
       const { context } = fakeContext()
       await command('index.rebuild').run(context)
       // index_clear wiped the embedding tables; rebuild must repopulate them.

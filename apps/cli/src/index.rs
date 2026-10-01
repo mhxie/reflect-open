@@ -16,6 +16,7 @@ use std::time::Duration;
 use reflect_graph_paths::LocalOnlyFolders;
 use rusqlite::{Connection, OpenFlags};
 
+use reflect_index_schema::cjk::COLUMN_SCHEMA_VERSION;
 use reflect_index_schema::{
     INDEX_FILE, LATEST_SCHEMA_VERSION, LOCAL_ONLY_FOLDERS_KEY, REFLECT_DIR,
 };
@@ -30,6 +31,9 @@ pub struct OpenIndex {
     /// The index was written by a newer schema than this CLI knows — queries
     /// against the stable subset are attempted, but callers should warn.
     pub newer_schema: bool,
+    /// The index has the `search_fts.cjk` column; one the app hasn't migrated
+    /// since that migration lacks it.
+    pub cjk_column: bool,
 }
 
 /// The three ways opening can go; callers decide how each degrades per command
@@ -70,6 +74,7 @@ pub fn open_read_only(root: &Path) -> IndexOpen {
     IndexOpen::Opened(OpenIndex {
         conn,
         newer_schema: version > LATEST_SCHEMA_VERSION as i64,
+        cjk_column: version >= COLUMN_SCHEMA_VERSION as i64,
     })
 }
 

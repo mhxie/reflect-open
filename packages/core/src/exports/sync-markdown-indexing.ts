@@ -141,6 +141,7 @@ export {
   subscribeIcloudWatchFailed,
   applyIndexChanges,
   hashContent,
+  cjkColumnText,
   buildIndexedNote,
   CLAIM_TIER,
   decodeTaskBreadcrumbs,

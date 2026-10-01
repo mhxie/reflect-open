@@ -14,6 +14,7 @@
 //! [`menu`] (the macOS app menu, incl. Paste and Match Style),
 //! [`error`] (the shared error contract).
 
+mod activity;
 mod background_task;
 mod blocking;
 mod calendar;
@@ -21,6 +22,7 @@ mod capture;
 mod conflict;
 mod contacts;
 mod db;
+mod dev_harness;
 mod devtools;
 mod editor_link_preview;
 mod error;
@@ -274,6 +276,7 @@ pub fn run() {
         )
         .manage(fs::GraphState::default())
         .manage(background_task::BackgroundTaskState::default())
+        .manage(activity::ActivityState::default())
         .manage(fs::ImportCancel::default())
         .manage(fs::assets::AssetUploads::default())
         .manage(db::IndexState::default())
@@ -290,6 +293,8 @@ pub fn run() {
             app_version,
             background_task::background_task_begin,
             background_task::background_task_end,
+            activity::activity_begin,
+            activity::activity_end,
             icloud::storage::mobile_storage,
             icloud::storage::mobile_storage_local,
             icloud::storage::icloud_download_pending,
@@ -346,6 +351,7 @@ pub fn run() {
             db::index_apply_batch,
             db::index_remove,
             db::index_clear,
+            db::index_prune_embeddings,
             db::index_move,
             db::index_reconcile_scan,
             db::index_touch,
@@ -355,6 +361,7 @@ pub fn run() {
             db::chat_message_save,
             db::chat_conversation_delete,
             db::embed_apply,
+            db::embed_prepare_index,
             db::embed_remove,
             embed::embed_status,
             embed::embed_ensure,
@@ -402,6 +409,8 @@ pub fn run() {
             windows::window_bootstrap,
             windows::close_note_windows,
             devtools::toggle_devtools,
+            dev_harness::dev_search_eval_poll,
+            dev_harness::dev_search_eval_finish,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

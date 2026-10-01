@@ -97,8 +97,12 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * 20 - `notes.has_content` records whether a note would render blank, and
  * `search_fts.body` now carries the raw Markdown body, so every note must
  * reproject.
+ * 21 - `search_fts.cjk` (migration 0023) indexes CJK runs as character pairs
+ * and final characters, plus the letters and digits glued to them; the
+ * migration recreates the table empty, so every note must reproject. The
+ * rebuild keeps embeddings: their chunk text didn't change.
  */
-export const PROJECTION_VERSION = 20
+export const PROJECTION_VERSION = 21
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the

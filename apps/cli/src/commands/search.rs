@@ -3,6 +3,7 @@
 //! never builds or repairs the index — that's the desktop app's job). A stale
 //! index warns and still returns rows.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use reflect_index_schema::{INDEX_FILE, REFLECT_DIR};
@@ -14,7 +15,9 @@ use crate::graph::Graph;
 use crate::index::{detect_staleness, local_only_folders, open_read_only, IndexOpen};
 use crate::keys::fold_key;
 use crate::note_file::{read_note, subject_display_title};
-use crate::search::{build_fts_match, search_index, SearchHit};
+use crate::search::{
+    any_term_index, build_fts_any_match, build_fts_match, is_sentence_like, search_index, SearchHit,
+};
 
 /// The privacy re-check: the index row said public, but the file's own
 /// frontmatter is the truth — a note flagged private after the last index run
@@ -52,10 +55,23 @@ pub fn run(graph: &Graph, json: bool, query: &str, limit: usize) -> Result<(), C
         ));
     }
 
-    let hits: Vec<SearchHit> = match build_fts_match(query) {
+    let mut hits: Vec<SearchHit> = match build_fts_match(query, opened.cjk_column) {
         Some(match_expr) => search_index(&opened.conn, &match_expr, &fold_key(query), limit)?,
         None => Vec::new(),
     };
+    // A sentence rarely has every word in one note: top it up with the notes
+    // sharing the most, and rarest, of its words, as the app's search does.
+    if hits.len() < limit && is_sentence_like(query) {
+        if let Some(any_match) = build_fts_any_match(query, opened.cjk_column) {
+            let listed: HashSet<String> = hits.iter().map(|hit| hit.path.clone()).collect();
+            hits.extend(any_term_index(
+                &opened.conn,
+                &any_match,
+                limit - hits.len(),
+                &listed,
+            )?);
+        }
+    }
     let hits: Vec<SearchHit> = hits
         .into_iter()
         .filter(|hit| still_public_on_disk(&graph.root, &hit.path, local_only.as_ref()))

@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version that rebuilds has_content and the FTS body', () => {
-    expect(PROJECTION_VERSION).toBe(20)
+  it('carries the projection version that rebuilds the FTS table with CJK pairs', () => {
+    expect(PROJECTION_VERSION).toBe(21)
   })
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {

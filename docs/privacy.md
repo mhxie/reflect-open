@@ -50,10 +50,12 @@ disk at call time), and it is covered by tests.
 
 ## Semantic search (off by default)
 
-- Embeddings are computed **on-device** (a bundled ONNX runtime; `all-MiniLM-L6-v2`)
-  and stored in `.reflect/`. Note content never leaves the machine for embedding.
-- Enabling it downloads the model (~90 MB) **from Hugging Face, once**. That request
-  carries no user data; the model is cached locally afterwards.
+- Embeddings are computed **on-device** (a bundled ONNX runtime running the model
+  chosen in Settings → Search) and stored in `.reflect/`. Note content never leaves
+  the machine for embedding.
+- Enabling it downloads the chosen model (91 MB or 1.3 GB) **from Hugging Face, once**;
+  choosing another model downloads that one. These requests carry no user data; models
+  are cached locally afterwards.
 
 ## Backup & sync (off until you connect)
 
