@@ -58,9 +58,10 @@ export interface UseAudioRecorderValue {
 }
 
 /**
- * Preference order matters per platform: Chrome/WebView2 take the opus-in-webm
- * entries; WKWebView supports none of them and falls through to `audio/mp4`
- * (AAC). Both containers are accepted by the transcription providers.
+ * Preference order matters per platform: Chrome/WebView2 and current WKWebView
+ * take the opus-in-webm entries; older WKWebView supports none of them and
+ * falls through to `audio/mp4` (AAC). Both containers are accepted by the
+ * transcription providers and the on-device engine.
  */
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
 

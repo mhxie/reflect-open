@@ -6,13 +6,16 @@ import {
   type AiProvidersState,
   type AudioMemoSource,
   type GraphInfo,
+  type TranscriptionEngine,
 } from '@reflect/core'
 import { useMainWindowEffect } from '@/hooks/use-main-window-effect.ts'
 import { startOperation } from '@/lib/operations.ts'
 import {
   createTranscriptionReconciler,
+  type TranscriptionChoice,
   type TranscriptionReconciler,
 } from '@/lib/transcription-reconciler.ts'
+import { useLocalModelStatus } from '@/lib/use-local-model-status.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 
 /**
@@ -71,8 +74,13 @@ export interface UseAudioMemoPipelineValue {
   pendingCount: number
   /** True while a reconcile pass has memos to transcribe. */
   transcribing: boolean
-  /** False when no OpenAI/Gemini model is configured. */
+  /**
+   * False when the chosen engine can't transcribe yet: no OpenAI/Gemini model
+   * for the cloud engine, or no downloaded model for the on-device one.
+   */
   hasTranscriptionConfig: boolean
+  /** The engine `hasTranscriptionConfig` was judged for. */
+  transcriptionEngine: TranscriptionEngine
   /** The failure shown in the error phase. */
   error: string | null
   /** True when a retry can re-run a failed capture. */
@@ -102,11 +110,14 @@ export function useAudioMemoPipeline(
   const [error, setError] = useState<string | null>(null)
   const [resume, setResume] = useState<PendingAudioCapture | null>(null)
 
-  const hasTranscriptionConfig =
-    pickTranscriptionConfig({
-      providers: settings.aiProviders,
-      defaultProviderId: settings.defaultAiProviderId,
-    }) !== null
+  const localEngine = settings.transcriptionEngine === 'local'
+  const localStatus = useLocalModelStatus(settings.localTranscriptionModel, localEngine)
+  const hasTranscriptionConfig = localEngine
+    ? localStatus.status === 'ready'
+    : pickTranscriptionConfig({
+        providers: settings.aiProviders,
+        defaultProviderId: settings.defaultAiProviderId,
+      }) !== null
 
   /** Committed recordings waiting their turn; the pump owns the head. */
   const queueRef = useRef<PendingAudioCapture[]>([])
@@ -146,6 +157,18 @@ export function useAudioMemoPipeline(
   useEffect(() => {
     transcriptionPromptRef.current = settings.transcriptionPrompt
   })
+  const transcriptionChoiceRef = useRef<TranscriptionChoice>({
+    engine: settings.transcriptionEngine,
+    localModel: settings.localTranscriptionModel,
+    language: settings.transcriptionLanguage,
+  })
+  useEffect(() => {
+    transcriptionChoiceRef.current = {
+      engine: settings.transcriptionEngine,
+      localModel: settings.localTranscriptionModel,
+      language: settings.transcriptionLanguage,
+    }
+  })
 
   // One reconciler per graph session (the hosting provider remounts per
   // graph). It owns the launch pass and all retry triggers; the pump only
@@ -161,6 +184,7 @@ export function useAudioMemoPipeline(
       getProviders: () => providersRef.current,
       getTranscriptionFormat: () => transcriptionFormatRef.current,
       getTranscriptionPrompt: () => transcriptionPromptRef.current,
+      getTranscriptionChoice: () => transcriptionChoiceRef.current,
     })
     setReconciler(next)
     reconcilerRef.current = next
@@ -296,6 +320,7 @@ export function useAudioMemoPipeline(
     pendingCount,
     transcribing,
     hasTranscriptionConfig,
+    transcriptionEngine: settings.transcriptionEngine,
     error,
     canRetry: resume !== null,
     enqueue,

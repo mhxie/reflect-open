@@ -87,6 +87,8 @@ interface LiveSession {
 }
 
 const NO_PROVIDER_REASON = 'Add an OpenAI or Gemini model in Settings to record audio memos'
+const NO_LOCAL_MODEL_REASON =
+  'Download the on-device transcription model in Settings to record audio memos'
 const UNSUPPORTED_REASON = 'Audio recording is not supported on this platform'
 
 /** Same macOS check as `hasMacosTitleBarOverlay` — settings paths differ per OS. */
@@ -298,7 +300,9 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
   const unavailableReason = !supported
     ? UNSUPPORTED_REASON
     : !pipeline.hasTranscriptionConfig
-      ? NO_PROVIDER_REASON
+      ? pipeline.transcriptionEngine === 'local'
+        ? NO_LOCAL_MODEL_REASON
+        : NO_PROVIDER_REASON
       : null
 
   const value = useMemo<AudioMemoContextValue>(

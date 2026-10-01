@@ -6,7 +6,9 @@ import {
   reconcileAudioMemos,
   subscribeFileChanges,
   type AiProvidersState,
+  type LocalTranscriptionModelId,
   type ReconcileStop,
+  type TranscriptionEngine,
 } from '@reflect/core'
 import { createBackgroundReconciler } from '@/lib/background-reconciler.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -47,6 +49,15 @@ export interface TranscriptionReconcilerOptions {
   getTranscriptionFormat: () => boolean
   /** Read lazily so a hint edit applies to the next reconcile pass. */
   getTranscriptionPrompt: () => string
+  /** Read lazily so an engine, model, or language change applies to the next pass. */
+  getTranscriptionChoice: () => TranscriptionChoice
+}
+
+/** The engine settings a pass transcribes with. */
+export interface TranscriptionChoice {
+  engine: TranscriptionEngine
+  localModel: LocalTranscriptionModelId
+  language: string
 }
 
 /** Build the reconciler for one graph session. `dispose()` is terminal. */
@@ -83,11 +94,13 @@ export function createTranscriptionReconciler(
     startOperation('Transcribing audio memo').fail(stopped.message)
   }
 
-  /** One pass: transcribe pending memos, gated behind a transcription-capable model. */
+  /** One pass: transcribe pending memos, gated behind a usable engine. */
   const reconcile = async (isStale: () => boolean): Promise<void> => {
-    // Gate before any IO: without a transcription-capable model every pass
-    // would list the graph just to stop on `config`.
-    if (pickTranscriptionConfig(options.getProviders()) === null) {
+    const choice = options.getTranscriptionChoice()
+    // Gate before any IO: without a transcription-capable cloud model every
+    // pass would list the graph just to stop on `config`. The on-device
+    // engine's model check is itself one cheap IPC, made inside the pass.
+    if (choice.engine === 'cloud' && pickTranscriptionConfig(options.getProviders()) === null) {
       return
     }
     const outcome = await reconcileAudioMemos({
@@ -95,6 +108,9 @@ export function createTranscriptionReconciler(
       generation: options.generation,
       formatTranscript: options.getTranscriptionFormat(),
       transcriptionPrompt: options.getTranscriptionPrompt(),
+      engine: choice.engine,
+      localModel: choice.localModel,
+      transcriptionLanguage: choice.language,
       fetchFn: providerFetch,
       isStale,
       onPending: (count) => setTranscribing(count > 0),

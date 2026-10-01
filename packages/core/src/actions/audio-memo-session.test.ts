@@ -120,6 +120,19 @@ describe('transcript cache codec', () => {
     expect(decodePartResult('{"other": 1}')).toBeNull()
   })
 
+  it('keeps on-device timing and still reads caches written before it existed', () => {
+    const timed = {
+      text: 'hello there',
+      segments: [
+        { startMs: 0, endMs: 900, text: 'hello' },
+        { startMs: 900, endMs: 1600, text: 'there' },
+      ],
+    }
+    expect(decodePartResult(encodePartResult(timed))).toEqual(timed)
+    expect(decodePartResult('{"text":"from an older app"}')).toEqual({ text: 'from an older app' })
+    expect(decodePartResult('{"text":"x","segments":[{"startMs":-1}]}')).toBeNull()
+  })
+
   it('names the cache entry after the segment file', () => {
     expect(partTranscriptName(part({ part: 2 }))).toBe(`${MEMO.base}.part-002.m4a.json`)
   })

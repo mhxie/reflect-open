@@ -4,6 +4,8 @@ import type { EmbedProgress } from '@reflect/core'
 interface ModelDownloadProgressProps {
   /** Byte counts from an active download, once the runtime has reported them. */
   progress?: EmbedProgress | undefined
+  /** The progressbar's accessible name. */
+  ariaLabel?: string | undefined
 }
 
 function formatMegabytes(bytes: number): string {
@@ -16,7 +18,10 @@ function formatMegabytes(bytes: number): string {
  * moments around them (before the download starts, and the model-load
  * phase after the last byte lands).
  */
-export function ModelDownloadProgress({ progress }: ModelDownloadProgressProps): ReactElement {
+export function ModelDownloadProgress({
+  progress,
+  ariaLabel = 'Semantic search model download',
+}: ModelDownloadProgressProps): ReactElement {
   const fraction =
     progress !== undefined && progress.total > 0
       ? Math.min(progress.downloaded / progress.total, 1)
@@ -30,7 +35,7 @@ export function ModelDownloadProgress({ progress }: ModelDownloadProgressProps):
     <div>
       <div
         role="progressbar"
-        aria-label="Semantic search model download"
+        aria-label={ariaLabel}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={fraction !== null ? Math.round(fraction * 100) : undefined}

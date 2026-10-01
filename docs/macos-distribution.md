@@ -51,6 +51,15 @@ The helper lives at `apps/desktop/scripts/release-macos.mjs` and is exposed as
 Nothing signing-related is committed to the repo: contributors without the certificate
 can still build unsigned bundles with plain `pnpm tauri build`.
 
+To run your own build day to day, `pnpm tauri:build:local` makes an ad-hoc-signed
+`Reflect.app` under its own identifier (`app.reflect.desktop.local`), without the
+iCloud entitlements or provisioning profile that need Reflect's certificate, and with
+update checks off so the release feed never replaces it. Settings and recent graphs
+are shared with every other flavor; app data such as downloaded models is not.
+`pnpm tauri:install:local` builds it, quits the running copy, installs it as
+`/Applications/Reflect.app`, and relaunches it; it refuses to replace any other app.
+macOS ties microphone permission to the signature, so each ad-hoc build asks again.
+
 ## What `pnpm release:macos` does
 
 1. Auto-detects the Developer ID identity from the keychain and derives the team ID.

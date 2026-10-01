@@ -48,6 +48,8 @@ export interface TranscriptionRequest {
   mimeType: string
   /** User transcription hint, if any. */
   prompt?: string | undefined
+  /** Spoken language as an ISO 639 code; absent or empty lets the provider detect it. */
+  language?: string | undefined
   /**
    * Host transport — the desktop app passes the Tauri HTTP plugin's fetch
    * (CORS-free); `@reflect/core` itself stays platform-agnostic.
@@ -114,6 +116,9 @@ async function transcribeWithOpenAi(request: TranscriptionRequest): Promise<stri
     form.append('model', model)
     if (request.prompt) {
       form.append('prompt', request.prompt)
+    }
+    if (request.language) {
+      form.append('language', request.language)
     }
     return send(
       fetchFn,
@@ -182,9 +187,13 @@ async function transcribeWithGemini(request: TranscriptionRequest): Promise<stri
   }
   const fetchFn = request.fetchFn ?? fetch
   const data = bytesToBase64(new Uint8Array(await request.audio.arrayBuffer()))
-  const instruction = request.prompt
-    ? `${GEMINI_INSTRUCTION}\n${request.prompt}`
-    : GEMINI_INSTRUCTION
+  const instruction = [
+    GEMINI_INSTRUCTION,
+    request.language ? `The spoken language is ISO 639 "${request.language}".` : '',
+    request.prompt ?? '',
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
   const attempt = (model: string): Promise<Response> =>
     send(
       fetchFn,

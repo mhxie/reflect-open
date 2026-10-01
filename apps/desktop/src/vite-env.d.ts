@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly TAURI_ENV_PLATFORM?: string
   /** Public Sentry project endpoint injected only into official release builds. */
   readonly VITE_SENTRY_DSN?: string
+  /** `off` in local builds (`pnpm tauri:build:local`): no update checks or update UI. */
+  readonly VITE_UPDATES?: string
 }
 
 /** App version injected from the canonical Tauri configuration by Vite. */

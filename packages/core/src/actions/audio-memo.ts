@@ -31,10 +31,15 @@ import {
   transcribeSessionParts,
   type AudioMemoPart,
   type AudioMemoSession,
+  type SegmentTranscriber,
 } from './audio-memo-session.ts'
 import { AUDIO_MEMOS_DIR, audioMemoPath, dailyPath, notePath } from '../graph/paths.ts'
 import { appendListItemUnderBacklinkedHeading, wikiLinkSafe } from '../markdown/edit.ts'
 import { getSecret } from '../secrets/keychain.ts'
+import { localModelStatus } from '../ai/local-transcription.ts'
+import type { LocalTranscriptionModelId } from '../ai/local-transcription-models.ts'
+import type { TranscriptionEngine } from '../settings/schema.ts'
+import { cloudSegmentTranscriber, localSegmentTranscriber } from './audio-memo-transcribers.ts'
 import { ensureBacklinkTarget } from './backlink-target.ts'
 
 /**
@@ -445,12 +450,114 @@ export interface ReconcileAudioMemosInput {
   formatTranscript: boolean
   /** User transcription hint, sent with every segment. */
   transcriptionPrompt: string
+  /** Which engine transcribes: the configured cloud provider, or on-device. */
+  engine: TranscriptionEngine
+  /** The on-device model, used when `engine` is `local`. */
+  localModel: LocalTranscriptionModelId
+  /** Spoken language as an ISO 639 code; empty detects it. */
+  transcriptionLanguage: string
   /** Host transport for the provider call (the Tauri HTTP plugin's fetch). */
   fetchFn?: typeof fetch
   /** Abort gate, checked between memos (graph switch / unmount). */
   isStale?: () => boolean
   /** Observes how many memos need transcription, before work starts. */
   onPending?: (count: number) => void
+}
+
+/** The engine a reconcile pass transcribes with, or why it can't run. */
+interface ResolvedTranscriptionEngine {
+  transcriber: SegmentTranscriber
+  /** The text model that titles (and optionally formats) each transcript. */
+  enrichmentCredentials: AudioMemoEnrichmentCredentials | null
+  /** The App Review demo key: canned transcripts, no provider calls. */
+  stubbed: boolean
+}
+
+/**
+ * Resolve the pass's engine. Re-resolved on every pass (not once at record
+ * time): a pass after the user fixes their configuration must see the fix.
+ * The on-device engine needs its model downloaded and makes no network call
+ * at all: its transcripts are never sent to a text model, so they keep their
+ * raw body and a title taken from their own first words. The cloud engine
+ * needs a provider entry with a key, and its configured text model titles
+ * (and optionally formats) each transcript.
+ */
+async function resolveTranscriptionEngine(
+  input: ReconcileAudioMemosInput,
+  isStale: () => boolean,
+): Promise<ResolvedTranscriptionEngine | { stopped: ReconcileStop }> {
+  if (input.engine === 'local') {
+    const status = await localModelStatus(input.localModel).catch(() => null)
+    if (status?.status !== 'ready') {
+      return {
+        stopped: {
+          reason: 'config',
+          message: 'The on-device transcription model is not downloaded.',
+        },
+      }
+    }
+    return {
+      transcriber: localSegmentTranscriber({
+        model: input.localModel,
+        prompt: input.transcriptionPrompt,
+        language: input.transcriptionLanguage,
+        generation: input.generation,
+      }),
+      enrichmentCredentials: null,
+      stubbed: false,
+    }
+  }
+
+  // Keys are read at most once per entry per pass.
+  const keys = new Map<string, Promise<string | null>>()
+  const getKey = (id: string): Promise<string | null> => {
+    let key = keys.get(id)
+    if (key === undefined) {
+      key = getSecret(aiKeySecretName(id)).catch(() => null)
+      keys.set(id, key)
+    }
+    return key
+  }
+  const target = await resolveTranscriptionTarget(input.providers, getKey)
+  if (target === 'no-provider') {
+    return { stopped: { reason: 'config', message: 'No OpenAI or Gemini model is configured.' } }
+  }
+  if (target === 'no-key') {
+    const preferred = pickTranscriptionConfig(input.providers)
+    return {
+      stopped: {
+        reason: 'config',
+        message: `The API key for the configured ${preferred?.provider ?? 'transcription'} model is missing from the keychain.`,
+      },
+    }
+  }
+  const { config, apiKey } = target
+  const enrichmentConfig = pickAudioMemoEnrichmentConfig(input.providers)
+  const enrichmentApiKey =
+    enrichmentConfig === null
+      ? null
+      : enrichmentConfig.id === config.id
+        ? apiKey
+        : await aiApiKeyForConfig(enrichmentConfig).catch(() => null)
+  const fallbackEnrichmentConfig = audioMemoEnrichmentConfig(config)
+  return {
+    transcriber: cloudSegmentTranscriber({
+      provider: config.provider,
+      apiKey,
+      prompt: input.transcriptionPrompt,
+      language: input.transcriptionLanguage,
+      generation: input.generation,
+      fetchFn: input.fetchFn,
+      isStale,
+    }),
+    enrichmentCredentials:
+      enrichmentConfig !== null && enrichmentApiKey !== null
+        ? { config: enrichmentConfig, apiKey: enrichmentApiKey }
+        : fallbackEnrichmentConfig !== null
+          ? { config: fallbackEnrichmentConfig, apiKey }
+          : null,
+    stubbed: apiKey === APP_REVIEW_STUB_KEY,
+  }
 }
 
 export interface ReconcileAudioMemosOutcome {
@@ -498,65 +605,22 @@ export async function reconcileAudioMemos(
     return { pending: 0, transcribed: 0, rejected: 0, stopped: null }
   }
 
-  // Re-resolved on every pass (not once at record time): a pass after the
-  // user fixes their model configuration must see the fix. Keys are read at
-  // most once per entry per pass.
-  const keys = new Map<string, Promise<string | null>>()
-  const getKey = (id: string): Promise<string | null> => {
-    let key = keys.get(id)
-    if (key === undefined) {
-      key = getSecret(aiKeySecretName(id)).catch(() => null)
-      keys.set(id, key)
-    }
-    return key
-  }
-  const target = await resolveTranscriptionTarget(input.providers, getKey)
-  if (target === 'no-provider') {
-    return {
-      pending: sessions.length,
-      transcribed: 0,
-      rejected: 0,
-      stopped: { reason: 'config', message: 'No OpenAI or Gemini model is configured.' },
-    }
-  }
-  if (target === 'no-key') {
-    const preferred = pickTranscriptionConfig(input.providers)
-    return {
-      pending: sessions.length,
-      transcribed: 0,
-      rejected: 0,
-      stopped: {
-        reason: 'config',
-        message: `The API key for the configured ${preferred?.provider ?? 'transcription'} model is missing from the keychain.`,
-      },
-    }
-  }
-  const { config, apiKey } = target
-  const enrichmentConfig = pickAudioMemoEnrichmentConfig(input.providers)
-  const enrichmentApiKey =
-    enrichmentConfig === null
-      ? null
-      : enrichmentConfig.id === config.id
-        ? apiKey
-        : await aiApiKeyForConfig(enrichmentConfig).catch(() => null)
-  const fallbackEnrichmentConfig = audioMemoEnrichmentConfig(config)
-  const enrichmentCredentials: AudioMemoEnrichmentCredentials | null =
-    enrichmentConfig !== null && enrichmentApiKey !== null
-      ? { config: enrichmentConfig, apiKey: enrichmentApiKey }
-      : fallbackEnrichmentConfig !== null
-        ? { config: fallbackEnrichmentConfig, apiKey }
-        : null
-
-  let transcribed = 0
-  let rejected = 0
-  let sawOversize = false
-  let memosNoteTitle: string | null = null
   // The gate is consulted again after every slow await (the asset read, the
   // provider call), not just per session: a graph switch mid-transcription
   // must not bill another provider call or touch any note. Reads and writes
   // are additionally generation-pinned in Rust, so even the unguardable gap
   // between a gate check and the IPC call cannot cross graphs.
   const stale = (): boolean => input.isStale?.() === true
+  const engine = await resolveTranscriptionEngine(input, stale)
+  if ('stopped' in engine) {
+    return { pending: sessions.length, transcribed: 0, rejected: 0, stopped: engine.stopped }
+  }
+  const { transcriber, enrichmentCredentials } = engine
+
+  let transcribed = 0
+  let rejected = 0
+  let sawOversize = false
+  let memosNoteTitle: string | null = null
   const stalled = (): ReconcileAudioMemosOutcome => ({
     pending: sessions.length,
     transcribed,
@@ -570,7 +634,7 @@ export async function reconcileAudioMemos(
     }
     const memo = session.memo
     try {
-      if (apiKey === APP_REVIEW_STUB_KEY) {
+      if (engine.stubbed) {
         // The App Review demo key writes a canned transcript — no provider
         // calls, no per-segment cache.
         if (!isSessionReady(session, nowMs)) {
@@ -591,11 +655,8 @@ export async function reconcileAudioMemos(
       }
       const parts = await transcribeSessionParts({
         session,
-        provider: config.provider,
-        apiKey,
-        prompt: input.transcriptionPrompt,
+        transcriber,
         generation: input.generation,
-        fetchFn: input.fetchFn,
         isStale: stale,
       })
       if (parts.status === 'stale') {

@@ -129,6 +129,25 @@ export { base64ToBytes } from '../lib/base64.ts'
 export { isTranscriptionRejected, TranscriptionRejectedError } from '../ai/transcribe-http.ts'
 export { transcribeAudio, type TranscriptionRequest } from '../ai/transcribe.ts'
 export {
+  checkLocalModelUpdates,
+  deleteLocalModel,
+  downloadLocalModel,
+  localModelStatus,
+  skipLocalModelUpdate,
+  subscribeLocalModelStatus,
+  type LocalModelStatus,
+  type LocalModelUpdateReport,
+  type TranscriptSegment,
+} from '../ai/local-transcription.ts'
+export {
+  DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
+  LOCAL_TRANSCRIPTION_MODEL_IDS,
+  LOCAL_TRANSCRIPTION_MODELS,
+  localTranscriptionModel,
+  type LocalTranscriptionModel,
+  type LocalTranscriptionModelId,
+} from '../ai/local-transcription-models.ts'
+export {
   audioMemoFromPath,
   audioMemoIdentity,
   audioMemoPartFromPath,

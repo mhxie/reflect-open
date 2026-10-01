@@ -17,6 +17,10 @@ describe('settingsSchema', () => {
       describeAssets: true,
       transcriptionFormat: true,
       transcriptionPrompt: '',
+      transcriptionEngine: 'cloud',
+      localTranscriptionModel: 'large-v3-turbo',
+      transcriptionLanguage: '',
+      localTranscriptionUpdateChecks: true,
       contactsEnabled: false,
       mobileOnboarded: false,
       mobileStorage: 'local',
@@ -113,6 +117,29 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ semanticSearchEnabled: false }).semanticSearchEnabled).toBe(false)
     expect(settingsSchema.parse({ describeAssets: true }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: false }).describeAssets).toBe(false)
+    expect(settingsSchema.parse({ transcriptionEngine: 'local' }).transcriptionEngine).toBe('local')
+    expect(settingsSchema.parse({ transcriptionEngine: 'whisper' }).transcriptionEngine).toBe(
+      'cloud',
+    )
+    expect(
+      settingsSchema.parse({ localTranscriptionModel: 'large-v3-q5_0' }).localTranscriptionModel,
+    ).toBe('large-v3-q5_0')
+    expect(settingsSchema.parse({ localTranscriptionModel: 'tiny' }).localTranscriptionModel).toBe(
+      'large-v3-turbo',
+    )
+    expect(settingsSchema.parse({ transcriptionLanguage: ' ZH ' }).transcriptionLanguage).toBe('zh')
+    expect(settingsSchema.parse({ transcriptionLanguage: 'yue' }).transcriptionLanguage).toBe('yue')
+    expect(settingsSchema.parse({ transcriptionLanguage: 'Chinese' }).transcriptionLanguage).toBe(
+      '',
+    )
+    expect(settingsSchema.parse({ transcriptionLanguage: 7 }).transcriptionLanguage).toBe('')
+    expect(
+      settingsSchema.parse({ localTranscriptionUpdateChecks: false })
+        .localTranscriptionUpdateChecks,
+    ).toBe(false)
+    expect(
+      settingsSchema.parse({ localTranscriptionUpdateChecks: 'no' }).localTranscriptionUpdateChecks,
+    ).toBe(true)
     expect(settingsSchema.parse({ transcriptionFormat: true }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionFormat: false }).transcriptionFormat).toBe(false)
     expect(settingsSchema.parse({ transcriptionPrompt: 'Ocavue' }).transcriptionPrompt).toBe(
@@ -244,6 +271,10 @@ describe('settingsSchema', () => {
       describeAssets: true,
       transcriptionFormat: true,
       transcriptionPrompt: '',
+      transcriptionEngine: 'cloud',
+      localTranscriptionModel: 'large-v3-turbo',
+      transcriptionLanguage: '',
+      localTranscriptionUpdateChecks: true,
       contactsEnabled: false,
       mobileOnboarded: false,
       mobileStorage: 'local',
