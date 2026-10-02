@@ -11,6 +11,7 @@ import '@/test-utils/locator.ts'
 import { hover, unhover } from '@/test-utils/mouse.ts'
 import type { XPost } from '@post-embed/types'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
+import { createPdfPagesView } from './pdf-pages-view.ts'
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(async () => {}),
@@ -630,7 +631,7 @@ describe('NoteEditor file pills', () => {
 describe('NoteEditor file paste', () => {
   it('persists a pasted file through saveFile and inserts its destination', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    const saveFile = vi.fn(async () => 'assets/report.pdf')
+    const saveFile = vi.fn(async () => 'assets/q3.zip')
     await render(
       <NoteEditor
         initialContent=""
@@ -641,12 +642,27 @@ describe('NoteEditor file paste', () => {
     )
     await expect.element(pmRoot).toBeInTheDocument()
 
-    const pasted = new File([new Uint8Array(4)], 'q3.pdf', { type: 'application/pdf' })
+    const pasted = new File([new Uint8Array(4)], 'q3.zip', { type: 'application/zip' })
     pasteFiles(pmRoot.element(), [pasted])
 
-    await expect.element(pmRoot.getByTestId('file-pill')).toMatchTextContent('q3.pdf')
+    await expect.element(pmRoot.getByTestId('file-pill')).toMatchTextContent('q3.zip')
     expect(saveFile).toHaveBeenCalledExactlyOnceWith(pasted)
-    expect(handleRef.current?.getMarkdown()).toBe('[q3.pdf](assets/report.pdf)\n')
+    expect(handleRef.current?.getMarkdown()).toBe('[q3.zip](assets/q3.zip)\n')
+  })
+
+  it('embeds a pasted PDF as an inline preview', async () => {
+    const handleRef = createRef<NoteEditorHandle>()
+    const saveFile = vi.fn(async () => 'assets/q3.pdf')
+    await render(<NoteEditor initialContent="" handleRef={handleRef} saveFile={saveFile} />)
+    await expect.element(pmRoot).toBeInTheDocument()
+
+    pasteFiles(pmRoot.element(), [
+      new File([new Uint8Array(4)], 'q3.pdf', { type: 'application/pdf' }),
+    ])
+
+    await vi.waitFor(() => {
+      expect(handleRef.current?.getMarkdown()).toBe('![](assets/q3.pdf)\n')
+    })
   })
 
   it('declines the paste when saveFile returns null', async () => {
@@ -661,5 +677,52 @@ describe('NoteEditor file paste', () => {
       expect(saveFile).toHaveBeenCalled()
     })
     expect(handleRef.current?.getMarkdown()).toBe('\n')
+  })
+})
+
+describe('NoteEditor PDF embeds', () => {
+  function renderPdfNote(
+    openAsset: (path: string) => Promise<void> | void,
+  ): ReturnType<typeof render> {
+    return render(
+      <NoteEditor
+        initialContent="![](assets/paper.pdf)"
+        resolveEmbed={(src) => {
+          if (src !== 'assets/paper.pdf') {
+            return
+          }
+          const view = createPdfPagesView({
+            name: 'paper.pdf',
+            pages: [{ width: 600, height: 800 }],
+            pageUrl: () => 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+            onOpen: () => void openAsset('assets/paper.pdf'),
+          })
+          return { element: view.element, width: 600, height: 800, destroy: view.destroy }
+        }}
+        resolveAssetOpenPath={(src) => (src === 'assets/paper.pdf' ? src : null)}
+        openAsset={openAsset}
+      />,
+    )
+  }
+
+  it('renders the PDF preview in place of an image', async () => {
+    await renderPdfNote(vi.fn())
+    await expect.element(pmRoot.getByTestId('pdf-embed')).toBeInTheDocument()
+  })
+
+  it('opens the PDF on a double-click, not on a single click', async () => {
+    const openAsset = vi.fn(async () => {})
+    await renderPdfNote(openAsset)
+    const pageImage = pmRoot.getByAltText('Page 1 of paper.pdf')
+
+    await pageImage.click()
+    await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
+    expect(openAsset).not.toHaveBeenCalled()
+
+    await pageImage.dblClick()
+    await vi.waitFor(() => {
+      expect(openAsset).toHaveBeenCalledWith('assets/paper.pdf')
+    })
+    await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
   })
 })

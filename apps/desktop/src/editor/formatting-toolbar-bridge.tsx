@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useEditor } from '@meowdown/react'
 import { buildFileMarkdown, type EditorExtension } from '@meowdown/core'
+import { shouldEmbedFile } from '@/editor/embed-file.ts'
 import { toPortableImageFile } from '@/lib/image-file.ts'
 import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
 import { whenEditorMounted } from './when-editor-mounted.ts'
@@ -105,7 +106,7 @@ export function FormattingToolbarBridge({
             // skipped and the ones that did are still linked.
             const destination = await save(file)
             if (destination !== undefined) {
-              markdown.push(buildFileMarkdown(file, destination))
+              markdown.push(buildFileMarkdown(file, destination, shouldEmbedFile))
             }
           }
           // The picker outlives the keyboard, and on iOS the sheet took focus

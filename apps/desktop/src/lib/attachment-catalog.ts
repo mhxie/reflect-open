@@ -2,12 +2,13 @@ import { useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   isAttachmentPath,
+  isPdfAttachmentPath,
   subscribeReconcileRequests,
   type AttachmentCatalog,
   type FileChange,
 } from '@reflect/core'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
-import { invalidateAttachmentCatalog, queryClient } from '@/lib/query-client.ts'
+import { invalidateAttachmentCatalog, queryClient, resetPdfInfo } from '@/lib/query-client.ts'
 import { createAttachmentCatalogQueryOptions } from '@/lib/query-options.ts'
 import { useFileChanges } from '@/lib/use-file-changes.ts'
 
@@ -39,6 +40,9 @@ export function useAttachmentCatalogSync(generation: number | null): void {
     useCallback((changes: FileChange[]) => {
       if (changes.some((change) => isAttachmentPath(change.path))) {
         invalidateAttachmentCatalog()
+      }
+      if (changes.some((change) => isPdfAttachmentPath(change.path))) {
+        resetPdfInfo()
       }
     }, []),
   )

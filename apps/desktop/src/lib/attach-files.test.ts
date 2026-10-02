@@ -65,7 +65,7 @@ afterEach(() => {
 })
 
 describe('attachFilesToNote', () => {
-  it('imports each pick and inserts one link per line at the caret', async () => {
+  it('imports each pick and inserts one per line at the caret, embedding PDFs', async () => {
     const invoke = vi.fn(async (_command: string, args: Record<string, unknown>) =>
       typeof args['desiredName'] === 'string' ? `assets/${args['desiredName'] as string}` : null,
     )
@@ -82,22 +82,22 @@ describe('attachFilesToNote', () => {
       generation: 4,
     })
     expect(handle.insertMarkdown).toHaveBeenCalledWith(
-      '[Q3 Report.pdf](assets/q3-report.pdf)\n[archive.tar.gz](assets/archive-tar.gz)',
+      '![](assets/q3-report.pdf)\n[archive.tar.gz](assets/archive-tar.gz)',
     )
     unregisterNoteEditorHandle('notes/plan.md', handle)
   })
 
   it('escapes bracketed filenames in the link label', async () => {
-    const invoke = vi.fn(async () => 'assets/report-v2.pdf')
+    const invoke = vi.fn(async () => 'assets/report-v2.docx')
     setBridge({ invoke, listen: async () => () => {} })
-    openMock.mockResolvedValue('/tmp/report [v2].pdf')
+    openMock.mockResolvedValue('/tmp/report [v2].docx')
     const handle = editorHandle()
     registerNoteEditorHandle('notes/plan.md', handle)
 
     await attachFilesToNote(contextFor('notes/plan.md', 4))
 
     expect(handle.insertMarkdown).toHaveBeenCalledWith(
-      String.raw`[report \[v2\].pdf](assets/report-v2.pdf)`,
+      String.raw`[report \[v2\].docx](assets/report-v2.docx)`,
     )
     unregisterNoteEditorHandle('notes/plan.md', handle)
   })
@@ -158,7 +158,7 @@ describe('attachFilesToNote', () => {
     await attachFilesToNote(contextFor('notes/plan.md', 4))
 
     expect(handle.insertMarkdown).toHaveBeenCalledWith(
-      '[good.pdf](assets/good.pdf)\n[also good.pdf](assets/also-good.pdf)',
+      '![](assets/good.pdf)\n![](assets/also-good.pdf)',
     )
     unregisterNoteEditorHandle('notes/plan.md', handle)
   })

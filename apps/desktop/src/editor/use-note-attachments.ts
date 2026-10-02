@@ -3,6 +3,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
 import {
   isLocalOnlyPath,
+  isPdfAttachmentPath,
   resolveAttachmentLink,
   resolveWikiEmbedTarget,
   type AttachmentCatalog,
@@ -34,8 +35,9 @@ export function attachmentUrl(generation: number, path: string): string {
 }
 
 /**
- * An attachment renders as an image or a file pill, a note as a link chip to
- * it (note content is never transcluded), and an unsafe path stays literal.
+ * An attachment renders as an image, a PDF preview (through the image view's
+ * `resolveEmbed`), or a file pill, a note as a link chip to it (note content
+ * is never transcluded), and an unsafe path stays literal.
  */
 const resolveWikiEmbed: WikiEmbedResolver = ({ target }) => {
   const embed = resolveWikiEmbedTarget(target)
@@ -45,9 +47,9 @@ const resolveWikiEmbed: WikiEmbedResolver = ({ target }) => {
   if (embed.kind === 'note') {
     return { kind: 'note' }
   }
-  return embed.kind === 'image'
-    ? { kind: 'image', src: embed.source }
-    : { kind: 'file', href: embed.source }
+  return embed.kind === 'file'
+    ? { kind: 'file', href: embed.source }
+    : { kind: 'image', src: embed.source }
 }
 
 /** Attachment resolution for rendering `notePath` in graph session `generation`. */
@@ -65,7 +67,8 @@ export function createNoteAttachments(
       if (/^https?:\/\//i.test(src)) {
         return remoteAllowed ? src : undefined
       }
-      if (generation === null) {
+      // A PDF previews through `resolveEmbed`; its bytes never go to an <img>.
+      if (generation === null || isPdfAttachmentPath(src)) {
         return
       }
       const url = (catalog: AttachmentCatalog | null): string | undefined => {

@@ -127,6 +127,12 @@ export const queryKeys = {
       return [...this.all, generation] as const
     },
   },
+  pdf: {
+    all: ['pdf'] as const,
+    info(generation: number, path: string, size: number | undefined) {
+      return [...this.all, generation, path, size ?? null] as const
+    },
+  },
   settings: {
     all: ['settings'] as const,
   },
@@ -400,6 +406,14 @@ export function invalidateChatQueries(): void {
  */
 export function invalidateAttachmentCatalog(): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.attachments.all })
+}
+
+/**
+ * Forget every PDF's page sizes; called when the watcher reports a PDF
+ * changing, so the next preview reads the file again even at the same size.
+ */
+export function resetPdfInfo(): void {
+  queryClient.removeQueries({ queryKey: queryKeys.pdf.all })
 }
 
 /** Re-read archived X posts; called after a capture pass writes archive JSON. */

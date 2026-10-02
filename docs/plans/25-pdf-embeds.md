@@ -86,11 +86,12 @@ could be offered upstream later):
 Wiki embeds need no API change: Reflect's `resolveWikiEmbed` returns
 `{ kind: 'image', src }` for a PDF, which routes it into the same mark view.
 
-Clicks need no API change: `image-click.ts` resolves the preview's `<img>`, and the
-page images are `<img>`s, so `onImageClick` fires with the markdown `src` and the
-originating `event`. Reflect opens only on a double-click (`MouseEvent.detail >= 2`)
-or a `KeyboardEvent` (`Enter` on the selected embed); a single click does nothing
-beyond selection. *Verify* that the resize handle and scroll gestures do not fire it.
+Clicks need no API change. `image-click.ts` resolves the preview's `<img>`, and the
+page images are `<img>`s, so `onImageClick` fires with the markdown `src`; Reflect
+ignores a mouse click on a PDF (selection only) and opens it on a `KeyboardEvent`
+(`Enter` on the selected embed). ProseMirror reports only single clicks to
+`handleClick`, so a double-click is handled by the embed element's own `dblclick`
+listener.
 
 Tests (browser, in Meowdown): sync and async `resolveEmbed`, persisted-size
 placeholder, ratio-locked resize writing both syntaxes, `update()` resizing a host
@@ -196,8 +197,10 @@ iOS build, the Linux CI build, and `cargo test --workspace` green.
   `handleImageClick` branches on a PDF `src` *before* calling `resolveImageUrl` (which
   now returns `undefined` for PDFs, and the handler bails on `undefined`): a
   double-click or `Enter` goes to `openAsset`, a single click is ignored.
-- `lib/attach-files.ts`: build links with Meowdown's `buildFileMarkdown` and the
-  same predicate, so the attach picker embeds PDFs too.
+- `lib/attach-files.ts`: build markdown with Meowdown's `buildFileMarkdown`, embedding
+  PDFs; other picked files keep their `[name](assets/…)` link as before.
+- `editor/formatting-toolbar-bridge.tsx`: the toolbar's attach button uses the same
+  `shouldEmbedFile` as paste/drop.
 - `dev/dev-bridge.ts`: `pdf_info` answers `unsupported` (browser dev shows the card).
 
 Scrolling past the last page continues scrolling the note (browser default
@@ -223,4 +226,7 @@ the "can't preview" card with the file name and no open action.
 
 - **Second-window reading** (⌘-click opens the PDF next to the note); it needs a
   full viewer.
+- **Read-only previews.** Notes shown through `MarkdownPreview` (local-only notes,
+  protected notes) render no PDF box; `resolveImageUrl` returns nothing for a PDF.
+- **Remote PDFs** (`![](https://…/x.pdf)`) are not previewed.
 - **iOS.**

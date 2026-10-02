@@ -11,9 +11,10 @@ import {
   type ReactNode,
   type Ref,
 } from 'react'
-import { errorMessage, type TimeFormat } from '@reflect/core'
+import { errorMessage, isPdfAttachmentPath, type TimeFormat } from '@reflect/core'
 import type {
   AcceptPendingReplacementOptions,
+  EmbedResolver,
   ExitBoundaryHandler,
   FileClickHandler,
   FileInfoResolver,
@@ -41,6 +42,7 @@ import {
   type WikilinkSearchHandler,
 } from '@meowdown/react'
 import { EditorInputTraits } from '@/editor/editor-input-traits.tsx'
+import { shouldEmbedFile } from '@/editor/embed-file.ts'
 import { FormattingToolbarBridge } from '@/editor/formatting-toolbar-bridge.tsx'
 import { MediaLightbox } from '@/editor/media-lightbox.tsx'
 import { isOpenableExternalUrl } from '@/editor/open-external-link.ts'
@@ -149,6 +151,11 @@ interface NoteEditorProps {
    */
   resolveImageUrl?: ImageUrlResolver
   /**
+   * Render an embed source as host content (an inline PDF preview) instead of
+   * an image; `undefined` defers to {@link resolveImageUrl}.
+   */
+  resolveEmbed?: EmbedResolver
+  /**
    * Classify Obsidian `![[target]]` embeds as images, file pills, or note
    * chips; `undefined` leaves the source literal.
    */
@@ -163,7 +170,7 @@ interface NoteEditorProps {
   /**
    * Persist a pasted/dropped file (any kind) and return its markdown
    * destination, or null to decline. meowdown inserts `![](dest)` for images
-   * and `[name](dest)` for everything else.
+   * and PDFs and `[name](dest)` for everything else.
    */
   saveFile?: (file: File) => Promise<string | null>
   /**
@@ -254,6 +261,7 @@ export function NoteEditor({
   bulletAfterHeading = false,
   blockHandle = false,
   resolveImageUrl,
+  resolveEmbed,
   resolveWikiEmbed,
   resolveAssetOpenPath,
   openAsset,
@@ -291,6 +299,7 @@ export function NoteEditor({
   const onNoteLinkClickRef = useRef(onNoteLinkClick)
   const onTagClickRef = useRef(onTagClick)
   const resolveImageUrlRef = useRef(resolveImageUrl)
+  const resolveEmbedRef = useRef(resolveEmbed)
   const resolveWikiEmbedRef = useRef(resolveWikiEmbed)
   const resolveAssetOpenPathRef = useRef(resolveAssetOpenPath)
   const openAssetRef = useRef(openAsset)
@@ -303,6 +312,7 @@ export function NoteEditor({
     onNoteLinkClickRef.current = onNoteLinkClick
     onTagClickRef.current = onTagClick
     resolveImageUrlRef.current = resolveImageUrl
+    resolveEmbedRef.current = resolveEmbed
     resolveWikiEmbedRef.current = resolveWikiEmbed
     resolveAssetOpenPathRef.current = resolveAssetOpenPath
     openAssetRef.current = openAsset
@@ -361,6 +371,7 @@ export function NoteEditor({
     (src) => resolveImageUrlRef.current?.(src),
     [],
   )
+  const handleResolveEmbed: EmbedResolver = useCallback((src) => resolveEmbedRef.current?.(src), [])
   const handleResolveWikiEmbed: WikiEmbedResolver = useCallback(
     (embed) => resolveWikiEmbedRef.current?.(embed),
     [],
@@ -417,7 +428,21 @@ export function NoteEditor({
     // Touch surfaces deliver the tap's `touchend` instead of a click —
     // meowdown cancels it so iOS WebKit can't focus the editor (and raise
     // the keyboard) under the opening lightbox.
-    ({ src, alt, element }) => {
+    ({ src, alt, element, event }) => {
+      if (isPdfAttachmentPath(src)) {
+        // A click on a PDF embed's page only selects it (the box scrolls).
+        // Enter on the selected embed opens the PDF in the default app, as
+        // a double-click does through the embed itself.
+        if (event instanceof KeyboardEvent) {
+          const openPath = resolveAssetOpenPathRef.current?.(src) ?? null
+          if (openPath !== null) {
+            void Promise.resolve(openAssetRef.current?.(openPath)).catch((cause) => {
+              console.error('open PDF failed:', errorMessage(cause))
+            })
+          }
+        }
+        return
+      }
       void Promise.resolve(resolveImageUrlRef.current?.(src)).then((displayUrl) => {
         if (displayUrl === undefined) {
           return
@@ -514,9 +539,11 @@ export function NoteEditor({
         {...(onPendingReplacementResolve !== undefined ? { onPendingReplacementResolve } : {})}
         {...(onSlashMenuSearch !== undefined ? { onSlashMenuSearch } : {})}
         resolveImageUrl={handleResolveImageUrl}
+        resolveEmbed={handleResolveEmbed}
         resolveWikiEmbed={handleResolveWikiEmbed}
         resolveWikilink={resolveWikilink}
         onFilePaste={handleFilePaste}
+        shouldEmbedFile={shouldEmbedFile}
         {...(resolveFileLink !== undefined ? { resolveFileLink } : {})}
         resolveFileInfo={handleResolveFileInfo}
         onFileClick={handleFileClick}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  EmbedResolver,
   FileInfo,
   FileLinkResolver,
   ImageUrlResolver,
@@ -14,6 +15,7 @@ import {
   resolveAttachmentLink,
   revealAsset as revealAssetCommand,
 } from '@reflect/core'
+import { createPdfEmbedResolver } from '@/editor/pdf-embed-resolver.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { formatBytes } from '@/lib/format-bytes.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -52,6 +54,8 @@ export interface AssetSaveError {
 export interface AssetPersistence {
   /** Resolve an image source in the note to a displayable URL, possibly later. */
   resolveImageUrl: ImageUrlResolver
+  /** Render the note's PDF embeds as inline page-by-page previews. */
+  resolveEmbed: EmbedResolver
   /**
    * Resolve an image source or link destination in the note to the
    * graph-relative attachment {@link openAsset} opens (null for remote,
@@ -166,6 +170,15 @@ export function useAssetPersistence(generation: number | null, path: string): As
     },
     [generation],
   )
+  const resolveEmbed = useMemo(
+    () =>
+      createPdfEmbedResolver({
+        generation,
+        notePath: path,
+        openAsset: (assetPath) => void openAsset(assetPath),
+      }),
+    [generation, path, openAsset],
+  )
 
   const saveFile = useCallback(
     async (file: File): Promise<string | null> => {
@@ -243,6 +256,7 @@ export function useAssetPersistence(generation: number | null, path: string): As
   return useMemo<AssetPersistence>(
     () => ({
       resolveImageUrl,
+      resolveEmbed,
       resolveAssetOpenPath,
       resolveWikiEmbed,
       resolveFileLink,
@@ -253,6 +267,7 @@ export function useAssetPersistence(generation: number | null, path: string): As
     }),
     [
       resolveImageUrl,
+      resolveEmbed,
       resolveAssetOpenPath,
       resolveWikiEmbed,
       resolveFileLink,

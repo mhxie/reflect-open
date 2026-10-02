@@ -1,5 +1,12 @@
 import { open } from '@tauri-apps/plugin-dialog'
-import { assetFileName, errorMessage, importAsset, isLocalOnlyPath } from '@reflect/core'
+import { buildFileMarkdown } from '@meowdown/core'
+import {
+  assetFileName,
+  errorMessage,
+  importAsset,
+  isLocalOnlyPath,
+  isPdfAttachmentPath,
+} from '@reflect/core'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -9,15 +16,16 @@ function basenameOf(sourcePath: string): string {
   return segments[segments.length - 1] ?? sourcePath
 }
 
-/** Escape `\`, `[`, and `]` so a filename stays inside its `[text]` label. */
-function escapeLinkLabel(name: string): string {
-  return name.replaceAll(/[\\[\]]/g, String.raw`\$&`)
+/** A PDF embeds as an inline preview; every other attachment is linked. */
+function embedsAsPreview(file: { name: string }): boolean {
+  return isPdfAttachmentPath(file.name)
 }
 
 /**
  * The Attach file… command: native file picker → each pick copied
  * file-to-file into the graph's `assets/` (the bytes never enter the
- * webview) → one `[original name](assets/…)` link per file inserted at the
+ * webview) → one `[original name](assets/…)` link per file (a PDF embeds as
+ * `![](assets/…)`, its inline preview) inserted at the
  * caret of the current note's editor — the same markdown a drag-and-drop
  * produces, so the two entry points can't drift.
  *
@@ -50,7 +58,7 @@ export async function attachFilesToNote(context: CommandContext): Promise<void> 
     const name = basenameOf(source)
     try {
       const assetPath = await importAsset(source, assetFileName(name), generation)
-      links.push(`[${escapeLinkLabel(name)}](${assetPath})`)
+      links.push(buildFileMarkdown({ name }, assetPath, embedsAsPreview))
       attachedNames.push(name)
     } catch (cause) {
       failures.push({ name, cause })

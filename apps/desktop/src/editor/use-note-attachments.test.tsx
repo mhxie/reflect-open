@@ -124,22 +124,36 @@ describe('useNoteAttachments', () => {
   })
 
   it('hands out embed sources that read back as the same file', async () => {
-    installVault(['Media/my photo #1.png', 'Media/100%.pdf'])
+    installVault(['Media/my photo #1.png', 'Media/100%.zip'])
     await renderAttachments('Home.md')
 
     const image = attachments?.resolveWikiEmbed(embed('Media/my photo #1.png'))
-    const file = attachments?.resolveWikiEmbed(embed('100%.pdf'))
+    const file = attachments?.resolveWikiEmbed(embed('100%.zip'))
     expect(image).toEqual({ kind: 'image', src: '/Media/my%20photo%20%231.png' })
     await vi.waitFor(() => {
       expect(attachments?.resolveAttachmentPath('/Media/my%20photo%20%231.png')).toBe(
         'Media/my photo #1.png',
       )
       expect(file?.kind === 'file' && attachments?.resolveAttachmentPath(file.href ?? '')).toBe(
-        'Media/100%.pdf',
+        'Media/100%.zip',
       )
     })
     expect(attachments?.resolveWikiEmbed(embed('Deep Work'))).toEqual({ kind: 'note' })
     expect(attachments?.resolveWikiEmbed(embed('../outside.png'))).toBeUndefined()
+  })
+})
+
+describe('PDF embeds', () => {
+  it('routes a PDF embed to the image view and never to an <img>', async () => {
+    installVault(['Papers/paper.pdf'])
+    await renderAttachments('Home.md')
+
+    expect(attachments?.resolveWikiEmbed(embed('Papers/paper.pdf'))).toEqual({
+      kind: 'image',
+      src: '/Papers/paper.pdf',
+    })
+    expect(attachments?.resolveImageUrl('Papers/paper.pdf')).toBeUndefined()
+    expect(attachments?.resolveImageUrl('/Papers/paper.pdf')).toBeUndefined()
   })
 })
 
