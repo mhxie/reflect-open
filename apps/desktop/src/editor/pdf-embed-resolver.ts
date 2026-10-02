@@ -10,6 +10,7 @@ import { createPdfErrorView } from '@/editor/pdf-error-view.ts'
 import { createPdfPagesView, type PdfEmbedView } from '@/editor/pdf-pages-view.ts'
 import { attachmentUrl } from '@/editor/use-note-attachments.ts'
 import { loadAttachmentCatalog, peekAttachmentCatalog } from '@/lib/attachment-catalog.ts'
+import { isMobileSurface } from '@/lib/platform-surface.ts'
 import { queryClient } from '@/lib/query-client.ts'
 import { createPdfInfoQueryOptions } from '@/lib/query-options.ts'
 
@@ -80,11 +81,14 @@ async function resolvePdfEmbed(
     return hostEmbed(view, info.pages[0] ?? CARD_SIZE)
   } catch (cause) {
     const error = toAppError(cause)
+    // Off the Mac (iOS) there is no preview and no default app to hand the
+    // PDF to; on the Mac, `unsupported` means the file is past the size limit.
+    const onMobile = isMobileSurface()
     return hostEmbed(
       createPdfErrorView({
         name,
-        message: previewFailureMessage(error),
-        ...(error.kind === 'unsupported' ? {} : { onOpen: () => openAsset(path) }),
+        message: previewFailureMessage(error, onMobile),
+        ...(error.kind === 'unsupported' && onMobile ? {} : { onOpen: () => openAsset(path) }),
       }),
       CARD_SIZE,
     )
@@ -96,10 +100,10 @@ function hostEmbed(view: PdfEmbedView, size: PdfPageSize): HostEmbed {
 }
 
 /** Why a PDF has no preview, as the card says it. */
-function previewFailureMessage(error: AppError): string {
+function previewFailureMessage(error: AppError, onMobile: boolean): string {
   switch (error.kind) {
     case 'unsupported':
-      return 'PDF previews are available in the Mac app.'
+      return onMobile ? 'PDF previews are available in the Mac app.' : asSentence(error.message)
     case 'locked':
       return 'This PDF is password-protected.'
     case 'invalid':
@@ -109,4 +113,10 @@ function previewFailureMessage(error: AppError): string {
     default:
       return 'This PDF couldn’t be previewed.'
   }
+}
+
+/** A Rust error message as a card sentence: capitalized, ending in a period. */
+function asSentence(message: string): string {
+  const sentence = message.charAt(0).toUpperCase() + message.slice(1)
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`
 }

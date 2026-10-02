@@ -1,6 +1,7 @@
 import type { HostEmbed } from '@meowdown/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReflectError, setBridge } from '@reflect/core'
+import { setPlatformSurface } from '@/lib/platform-surface.ts'
 import { queryClient } from '@/lib/query-client.ts'
 import { createPdfEmbedResolver, pdfPageUrl } from './pdf-embed-resolver.ts'
 
@@ -37,6 +38,7 @@ async function resolve(src: string, openAsset = vi.fn()): Promise<HostEmbed | un
 
 afterEach(() => {
   setBridge(null)
+  setPlatformSurface({ mobileApp: false })
   queryClient.clear()
 })
 
@@ -105,13 +107,31 @@ describe('createPdfEmbedResolver', () => {
     expect(openAsset).toHaveBeenCalledWith('assets/secret.pdf')
   })
 
-  it('shows a card with no open action where previews are unsupported', async () => {
+  it('shows a card with no open action on iOS, where previews are unsupported', async () => {
+    setPlatformSurface({ mobileApp: true })
     installBridge(['assets/paper.pdf'], () => {
-      throw new ReflectError('unsupported', 'PDF previews need the macOS app')
+      throw new ReflectError('unsupported', 'PDF previews are only available on macOS')
     })
     const embed = await resolve('assets/paper.pdf')
 
     expect(embed?.element.textContent).toContain('PDF previews are available in the Mac app.')
     expect(embed?.element.querySelector('button')).toBeNull()
+  })
+
+  it('explains a PDF past the size limit on the Mac and still offers to open it', async () => {
+    installBridge(['assets/scan.pdf'], () => {
+      throw new ReflectError(
+        'unsupported',
+        'PDF previews are limited to 200 MB; this file is 312 MB',
+      )
+    })
+    const openAsset = vi.fn()
+    const embed = await resolve('assets/scan.pdf', openAsset)
+
+    expect(embed?.element.textContent).toContain(
+      'PDF previews are limited to 200 MB; this file is 312 MB.',
+    )
+    embed?.element.querySelector('button')?.click()
+    expect(openAsset).toHaveBeenCalledWith('assets/scan.pdf')
   })
 })
