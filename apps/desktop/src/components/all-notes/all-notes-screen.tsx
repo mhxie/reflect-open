@@ -11,7 +11,7 @@ import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useScrollToIndexBridge } from '@/lib/use-scroll-to-index-bridge.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath, type AllNotesFilter } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
 import { AllNotesTable } from './all-notes-table.tsx'
@@ -21,16 +21,16 @@ import { useAllNotesKeyboard } from './use-all-notes-keyboard.ts'
 import { isModEvent } from '@meowdown/core'
 
 interface AllNotesScreenProps {
-  /** Active tag filter carried by the route (`null` = all non-daily notes). */
-  tag: string | null
+  /** Active filter carried by the route (`null` = all non-daily notes). */
+  filter: AllNotesFilter | null
 }
 
 /**
  * The All Notes screen (a routed view, like settings): every non-daily note,
- * newest first, filterable by tag. The active tag lives on the route so
- * back/forward and "open a note, come back" keep the filter. Daily notes are
- * deliberately absent from the unfiltered view, but appear when they match the
- * active tag.
+ * newest first, filterable by a tag or an attachment type. The active filter
+ * lives on the route so back/forward and "open a note, come back" keep it.
+ * Daily notes are deliberately absent from the unfiltered view, but appear when
+ * they match the active filter.
  *
  * Rows are multi-selectable (V1 parity): click to select (⌘ toggle, Shift
  * range), the indicator gutter toggles, the subject or a double-click opens.
@@ -41,7 +41,7 @@ interface AllNotesScreenProps {
  * so the header and filter bar stay put while the virtualized table scrolls,
  * wired to the router's per-entry scroll memory by hand.
  */
-export function AllNotesScreen({ tag }: AllNotesScreenProps): ReactElement {
+export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const { graph } = useGraph()
   const { navigate } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
@@ -58,8 +58,21 @@ export function AllNotesScreen({ tag }: AllNotesScreenProps): ReactElement {
   const enabled = bridgeReady && graph !== null
 
   const { data: notes } = useQuery({
-    queryKey: queryKeys.index.allNotesWithTag(graph?.root, tag === null ? null : foldTag(tag)),
-    queryFn: () => listNotes({ tag }),
+    queryKey:
+      filter?.kind === 'attachment'
+        ? queryKeys.index.allNotesWithAttachment(graph?.root, filter.type)
+        : queryKeys.index.allNotesWithTag(
+            graph?.root,
+            filter === null ? null : foldTag(filter.tag),
+          ),
+    queryFn: () =>
+      listNotes(
+        filter === null
+          ? {}
+          : filter.kind === 'tag'
+            ? { tag: filter.tag }
+            : { attachment: filter.type },
+      ),
     enabled,
   })
   const { data: facets } = useQuery({
@@ -83,7 +96,7 @@ export function AllNotesScreen({ tag }: AllNotesScreenProps): ReactElement {
     [navigateNoteLink],
   )
   const handleFilterSelect = useCallback(
-    (next: string | null) => navigate({ kind: 'allNotes', tag: next }),
+    (next: AllNotesFilter | null) => navigate({ kind: 'allNotes', filter: next }),
     [navigate],
   )
 
@@ -152,7 +165,7 @@ export function AllNotesScreen({ tag }: AllNotesScreenProps): ReactElement {
               </span>
             </Button>
           ) : null}
-          <AllNotesFilters tag={tag} facets={facets ?? []} onSelect={handleFilterSelect} />
+          <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
           <NewNoteButton />
         </div>
       </header>
@@ -164,7 +177,7 @@ export function AllNotesScreen({ tag }: AllNotesScreenProps): ReactElement {
       >
         <AllNotesTable
           notes={notes}
-          tag={tag}
+          filter={filter}
           selection={selection}
           onOpen={openNote}
           registerScrollToIndex={registerScrollToIndex}

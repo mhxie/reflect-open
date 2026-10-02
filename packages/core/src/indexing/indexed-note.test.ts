@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version that rebuilds tasks by AST path', () => {
-    expect(PROJECTION_VERSION).toBe(22)
+  it('carries the projection version that adds recording audio to assets', () => {
+    expect(PROJECTION_VERSION).toBe(23)
   })
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {
@@ -150,6 +150,41 @@ describe('buildIndexedNote', () => {
     expect(indexed.preview).toBe('First body line. #CAFÉ')
     // Folding is Unicode-aware — exactly what SQLite's ASCII-only lower() misses.
     expect(indexed.tags).toEqual([{ tag: 'CAFÉ', tagKey: 'café' }])
+  })
+
+  it('projects the out-of-graph audio of a recording note as an asset', () => {
+    const recording = [
+      '---',
+      'source: reflect-recording',
+      'audio: /Users/me/Library/Application Support/app/recordings/recording-1.m4a',
+      '---',
+      '',
+      '# Weekly Sync',
+      '',
+      '## Transcript',
+    ].join('\n')
+    const indexed = buildIndexedNote(
+      parseNote({ path: 'inbox/recordings/r.md', source: recording }),
+      {
+        fileHash: 'h',
+        mtime: 0,
+        source: recording,
+      },
+    )
+    expect(indexed.assets).toEqual([
+      '/Users/me/Library/Application Support/app/recordings/recording-1.m4a',
+    ])
+
+    // Only a string naming an audio file counts.
+    for (const audio of ['true', 'notes.pdf', '"  "', 'audio']) {
+      const source = `---\naudio: ${audio}\n---\n\n# N`
+      const other = buildIndexedNote(parseNote({ path: 'notes/n.md', source }), {
+        fileHash: 'h',
+        mtime: 0,
+        source,
+      })
+      expect(other.assets).toEqual([])
+    }
   })
 
   it('folds asset description text from meta, defaulting to empty', () => {

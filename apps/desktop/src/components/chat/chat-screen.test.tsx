@@ -493,7 +493,7 @@ describe('ChatScreen', () => {
     await userEvent.type(view.getByLabelText('Chat message'), 'what have I been reading?{Enter}')
 
     await view.getByRole('button', { name: '#book' }).click()
-    expect(probedRoute).toEqual({ kind: 'allNotes', tag: 'book' })
+    expect(probedRoute).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'book' } })
     await view.getByRole('button', { name: 'Atlas', exact: true }).click()
     expect(probedRoute).toEqual({ kind: 'note', path: 'notes/atlas.md' })
     // A refused listing shows the refusal, not a misleading count.

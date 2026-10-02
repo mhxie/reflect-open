@@ -7,14 +7,19 @@
  * note route carries `path` — the reserved frontmatter `id` can join it later
  * without breaking the shape.
  */
-import { dailyPath, dateFromDailyPath, isDaily } from '@reflect/core'
+import { dailyPath, dateFromDailyPath, isDaily, type NoteAttachmentType } from '@reflect/core'
 import { isIsoDate } from '@/lib/dates.ts'
+
+/** What the All Notes list is narrowed to: one tag or one attachment type. */
+export type AllNotesFilter =
+  | { kind: 'tag'; tag: string }
+  | { kind: 'attachment'; type: NoteAttachmentType }
 
 export type Route =
   | { kind: 'today' }
   | { kind: 'daily'; date: string }
   | { kind: 'note'; path: string }
-  | { kind: 'allNotes'; tag: string | null }
+  | { kind: 'allNotes'; filter: AllNotesFilter | null }
   | { kind: 'search'; query: string }
   | { kind: 'tasks' }
   | { kind: 'chat' }
@@ -43,10 +48,31 @@ export function routesEqual(a: Route, b: Route): boolean {
     case 'note':
       return a.path === (b as Extract<Route, { kind: 'note' }>).path
     case 'allNotes':
-      return a.tag === (b as Extract<Route, { kind: 'allNotes' }>).tag
+      return allNotesFiltersEqual(a.filter, (b as Extract<Route, { kind: 'allNotes' }>).filter)
     case 'search':
       return a.query === (b as Extract<Route, { kind: 'search' }>).query
   }
+}
+
+/** The All Notes route narrowed to `tag`, or listing every note for `null`. */
+export function allNotesRoute(tag: string | null): Extract<Route, { kind: 'allNotes' }> {
+  return { kind: 'allNotes', filter: tag === null ? null : { kind: 'tag', tag } }
+}
+
+/** The tag an All Notes filter narrows to, or null for no filter or a type filter. */
+export function allNotesFilterTag(filter: AllNotesFilter | null): string | null {
+  return filter?.kind === 'tag' ? filter.tag : null
+}
+
+/** Structural equality of two All Notes filters. */
+export function allNotesFiltersEqual(a: AllNotesFilter | null, b: AllNotesFilter | null): boolean {
+  if (a === null || b === null) {
+    return a === b
+  }
+  if (a.kind === 'tag') {
+    return b.kind === 'tag' && a.tag === b.tag
+  }
+  return b.kind === 'attachment' && a.type === b.type
 }
 
 /**

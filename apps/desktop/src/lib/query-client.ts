@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query'
+import type { NoteAttachmentType } from '@reflect/core'
 
 type GraphRoot = string | undefined
 type PaletteSearchMode = 'hybrid' | 'lexical'
@@ -15,6 +16,9 @@ export const queryKeys = {
     },
     allNotesWithTag(root: GraphRoot, foldedTag: string | null) {
       return [...this.allNotes(root), 'tag', foldedTag] as const
+    },
+    allNotesWithAttachment(root: GraphRoot, type: NoteAttachmentType) {
+      return [...this.allNotes(root), 'attachment', type] as const
     },
     allNotesTags(root: GraphRoot) {
       return [...this.graph(root), 'all-notes-tags'] as const

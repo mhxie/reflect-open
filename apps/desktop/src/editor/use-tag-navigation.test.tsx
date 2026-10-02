@@ -34,7 +34,10 @@ describe('useTagNavigation', () => {
     const view = await renderHost()
     lastHandler?.('book')
     await vi.waitFor(() => {
-      expect(JSON.parse(currentRoute(view))).toEqual({ kind: 'allNotes', tag: 'book' })
+      expect(JSON.parse(currentRoute(view))).toEqual({
+        kind: 'allNotes',
+        filter: { kind: 'tag', tag: 'book' },
+      })
     })
     await view.unmount()
   })

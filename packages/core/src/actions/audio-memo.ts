@@ -371,7 +371,8 @@ export async function listAudioMemoSegments(
 /**
  * The note declares its base name as an alias so the daily-note link
  * (`[[<base>|…]]`) resolves through the index — and keeps resolving if the
- * user renames the title.
+ * user renames the title. The links to the original recording close the note,
+ * after the transcript they came from.
  */
 function transcriptionNote(
   memo: AudioMemoIdentity,
@@ -379,7 +380,7 @@ function transcriptionNote(
   body: string,
   recordings: string,
 ): string {
-  return `---\naliases: [${memo.base}]\n---\n\n# ${title}\n\n${recordings}\n\n${body}\n`
+  return `---\naliases: [${memo.base}]\n---\n\n# ${title}\n\n${body}\n\n${recordings}\n`
 }
 
 /** The note's link line: every segment stays reachable from the transcript. */

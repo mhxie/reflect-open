@@ -316,6 +316,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -377,6 +378,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -452,6 +454,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -534,6 +537,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -595,6 +599,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -649,6 +654,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -712,6 +718,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'dmy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -772,6 +779,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'iso',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -838,6 +846,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'sunday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -910,6 +919,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -964,6 +974,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person', 'meeting'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1047,6 +1058,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1057,6 +1069,24 @@ describe('SettingsScreen', () => {
           aiPrompts: [],
         },
       ]),
+    )
+  })
+
+  it('toggles an All Notes attachment filter off and back on, in a fixed order', async () => {
+    stored = { allNotesFilterAttachments: ['video', 'pdf'] }
+    await renderScreen()
+    const audio = page.getByRole('switch', { name: 'Show the Audio filter' })
+    const video = page.getByRole('switch', { name: 'Show the Video filter' })
+    await expect.element(video).toHaveAttribute('aria-checked', 'true')
+    await expect.element(audio).toHaveAttribute('aria-checked', 'false')
+
+    await audio.click()
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({ allNotesFilterAttachments: ['pdf', 'audio', 'video'] }),
+    )
+    await video.click()
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({ allNotesFilterAttachments: ['pdf', 'audio'] }),
     )
   })
 
@@ -1099,6 +1129,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1171,6 +1202,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1235,6 +1267,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1342,6 +1375,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1486,6 +1520,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1556,6 +1591,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1617,6 +1653,7 @@ describe('SettingsScreen', () => {
           dateFormat: 'mdy',
           weekStartDay: 'monday',
           allNotesFilterTags: ['book', 'link', 'person'],
+          allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},

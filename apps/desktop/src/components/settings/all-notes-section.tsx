@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import { foldTag, isTagName } from '@reflect/core'
 import { X } from 'lucide-react'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { AllNotesAttachmentFiltersField } from './all-notes-attachment-filters-field.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsSection } from './section.tsx'
 
@@ -15,9 +16,9 @@ function normalizeTagInput(value: string): string {
 }
 
 /**
- * Which tags the All Notes screen pins as one-click filter tabs. Tags beyond
- * this list stay reachable through the screen's Custom menu, so removing one
- * here hides the tab, never the notes.
+ * Which tags and attachment types the All Notes screen pins as one-click filter
+ * tabs. Tags beyond this list stay reachable through the screen's Custom menu,
+ * so removing one here hides the tab, never the notes.
  */
 export function AllNotesSection(): ReactElement {
   const { settings, updateSettings } = useSettings()
@@ -111,6 +112,7 @@ export function AllNotesSection(): ReactElement {
           </p>
         ) : null}
       </SettingsField>
+      <AllNotesAttachmentFiltersField />
     </SettingsSection>
   )
 }

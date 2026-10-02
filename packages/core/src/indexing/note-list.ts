@@ -1,13 +1,19 @@
 import { sql } from 'kysely'
+import {
+  ATTACHMENT_TYPE_EXTENSIONS,
+  YOUTUBE_VIDEO_URL_FRAGMENTS,
+  type NoteAttachmentType,
+} from '../graph/attachment-types.ts'
+import { AUDIO_MEMOS_DIR } from '../graph/paths.ts'
 import { foldTag } from '../markdown/index.ts'
 import { db } from './db.ts'
 import { recallOrder } from './filtered-search.ts'
 
 /**
  * The All Notes list: every regular note, pinned first then newest, optionally
- * narrowed to one tag. The unfiltered list excludes daily notes — the stream is
- * their home — but a tag filter includes tagged daily notes alongside regular
- * notes. Templates remain boilerplate, not graph content.
+ * narrowed to one tag or one attachment type. The unfiltered list excludes
+ * daily notes — the stream is their home — but a filter includes matching daily
+ * notes alongside regular notes. Templates remain boilerplate, not graph content.
  * Uncapped: the screen virtualizes, the row
  * snippet is the stored `preview` column (derived once at index time), and
  * neither query carries a per-row parameter, so list size has no SQL ceiling.
@@ -30,44 +36,129 @@ export interface NoteListEntry {
 export interface NoteListOptions {
   /** Only notes carrying this tag (case-insensitive). `null` lists all. */
   tag?: string | null
+  /**
+   * Only notes referencing an attachment of this type (see
+   * {@link notesWithAttachment}). One filter at a time: ignored with a `tag`.
+   */
+  attachment?: NoteAttachmentType | null
+}
+
+/**
+ * Asset paths inside an `audio-memos/` tree, as a note links them (a link from
+ * `notes/` is also stored source-relative, `notes/audio-memos/…`). Recordings
+ * there are audio whatever their container: the recorder may save `.webm`.
+ */
+const AUDIO_MEMO_PATTERNS = [`${AUDIO_MEMOS_DIR}/%`, `%/${AUDIO_MEMOS_DIR}/%`]
+
+/**
+ * Paths of notes referencing an attachment of `type` by extension (a missing
+ * file still counts). Audio adds everything under `audio-memos/`, which video
+ * excludes; video adds YouTube links. `LIKE` is ASCII case-insensitive.
+ */
+function notesWithAttachment(type: NoteAttachmentType) {
+  const files = db
+    .selectFrom('assets')
+    .select('assets.notePath as path')
+    .where((eb) => {
+      const byExtension = eb.or(
+        ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) =>
+          eb('assets.assetPath', 'like', `%.${extension}`),
+        ),
+      )
+      const isAudioMemo = eb.or(
+        AUDIO_MEMO_PATTERNS.map((pattern) => eb('assets.assetPath', 'like', pattern)),
+      )
+      if (type === 'audio') {
+        return eb.or([byExtension, isAudioMemo])
+      }
+      return type === 'video' ? eb.and([byExtension, eb.not(isAudioMemo)]) : byExtension
+    })
+  if (type !== 'video') {
+    return files
+  }
+  return files.union(
+    db
+      .selectFrom('links')
+      .select('links.sourcePath as path')
+      .where('links.kind', '=', 'md')
+      .where((eb) =>
+        eb.or(
+          YOUTUBE_VIDEO_URL_FRAGMENTS.map((fragment) =>
+            eb('links.targetRaw', 'like', `%${fragment}%`),
+          ),
+        ),
+      ),
+  )
+}
+
+/** The columns of one All Notes row. */
+const NOTE_LIST_COLUMNS = [
+  'notes.path',
+  'notes.title',
+  'notes.mtime',
+  'notes.preview',
+  'notes.isPinned',
+  'notes.pinnedOrder',
+] as const
+
+/** The All Notes rows for one filter (or none), before ordering. */
+function noteListQuery(tag: string | null, attachment: NoteAttachmentType | null) {
+  if (tag !== null) {
+    return db
+      .selectFrom('tags')
+      .innerJoin('notes', 'notes.path', 'tags.notePath')
+      .where('tags.tagKey', '=', foldTag(tag))
+      .where('notes.kind', 'in', ['note', 'daily'])
+      .select(NOTE_LIST_COLUMNS)
+      .distinct()
+  }
+  if (attachment !== null) {
+    return db
+      .selectFrom('notes')
+      .where('notes.kind', 'in', ['note', 'daily'])
+      .where('notes.path', 'in', notesWithAttachment(attachment))
+      .select(NOTE_LIST_COLUMNS)
+  }
+  return db.selectFrom('notes').where('notes.kind', '=', 'note').select(NOTE_LIST_COLUMNS)
+}
+
+/**
+ * The tags of {@link noteListQuery}'s notes, by join or subquery: an `IN (…)`
+ * list of paths would hit SQLite's bound-parameter ceiling. Ordered on the
+ * folded key, like the facet list.
+ */
+function noteListTagsQuery(tag: string | null, attachment: NoteAttachmentType | null) {
+  const tags = db
+    .selectFrom('tags')
+    .innerJoin('notes', 'notes.path', 'tags.notePath')
+    .select(['tags.notePath', 'tags.tag'])
+    .orderBy('tags.tagKey')
+  if (tag !== null) {
+    return tags
+      .innerJoin('tags as filterTags', 'filterTags.notePath', 'notes.path')
+      .where('filterTags.tagKey', '=', foldTag(tag))
+      .where('notes.kind', 'in', ['note', 'daily'])
+      .distinct()
+  }
+  if (attachment !== null) {
+    return tags
+      .where('notes.kind', 'in', ['note', 'daily'])
+      .where('notes.path', 'in', notesWithAttachment(attachment))
+  }
+  return tags.where('notes.kind', '=', 'note')
 }
 
 /**
  * Notes for the All Notes screen: unfiltered lists include non-daily notes only;
- * tag-filtered lists include both regular and daily notes carrying the tag.
+ * a tag or attachment filter includes both regular and daily notes that match.
  * Pinned notes appear first (explicit pin order, then unordered pins), then most
  * recently edited — V1's list order.
  */
 export async function listNotes(options: NoteListOptions = {}): Promise<NoteListEntry[]> {
   const tag = options.tag ?? null
+  const attachment = tag === null ? (options.attachment ?? null) : null
 
-  let listQuery =
-    tag === null
-      ? db
-          .selectFrom('notes')
-          .where('notes.kind', '=', 'note')
-          .select([
-            'notes.path',
-            'notes.title',
-            'notes.mtime',
-            'notes.preview',
-            'notes.isPinned',
-            'notes.pinnedOrder',
-          ])
-      : db
-          .selectFrom('tags')
-          .innerJoin('notes', 'notes.path', 'tags.notePath')
-          .where('tags.tagKey', '=', foldTag(tag))
-          .where('notes.kind', 'in', ['note', 'daily'])
-          .select([
-            'notes.path',
-            'notes.title',
-            'notes.mtime',
-            'notes.preview',
-            'notes.isPinned',
-            'notes.pinnedOrder',
-          ])
-          .distinct()
+  let listQuery = noteListQuery(tag, attachment)
   for (const order of recallOrder(true)) {
     listQuery = listQuery.orderBy(order)
   }
@@ -77,30 +168,7 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     return []
   }
 
-  // Tags for the same note set, via the same predicates — a join rather than a
-  // `note_path IN (…)` list, which would put a per-row parameter between the
-  // list and SQLite's bound-parameter ceiling.
-  const tagRows =
-    tag === null
-      ? await db
-          .selectFrom('tags')
-          .innerJoin('notes', 'notes.path', 'tags.notePath')
-          .where('notes.kind', '=', 'note')
-          .select(['tags.notePath', 'tags.tag'])
-          // Order on the folded key so a row's tags read in the same alphabetical
-          // order as the facet list, regardless of display casing.
-          .orderBy('tags.tagKey')
-          .execute()
-      : await db
-          .selectFrom('tags')
-          .innerJoin('notes', 'notes.path', 'tags.notePath')
-          .innerJoin('tags as filterTags', 'filterTags.notePath', 'notes.path')
-          .where('filterTags.tagKey', '=', foldTag(tag))
-          .where('notes.kind', 'in', ['note', 'daily'])
-          .select(['tags.notePath', 'tags.tag'])
-          .distinct()
-          .orderBy('tags.tagKey')
-          .execute()
+  const tagRows = await noteListTagsQuery(tag, attachment).execute()
   const tagsByPath = new Map<string, string[]>()
   for (const row of tagRows) {
     const tags = tagsByPath.get(row.notePath)

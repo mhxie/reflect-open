@@ -30,7 +30,7 @@ import {
 } from '@/mobile/top-bar.tsx'
 import { useArrivalFocus } from '@/mobile/use-arrival-focus.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { allNotesRoute, routeForPath } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 
 /** A search hit resolved into the shared row shape. */
@@ -174,7 +174,7 @@ export function MobileAllNotes({
               onFiltersChange={onFiltersChange}
               facets={facets ?? []}
               routeTag={tag}
-              onClearRouteTag={() => navigate({ kind: 'allNotes', tag: null })}
+              onClearRouteTag={() => navigate(allNotesRoute(null))}
             />
           )}
         </MobileTopBarScrollableRow>

@@ -6,6 +6,7 @@ import type { ReactElement } from 'react'
 import { setBridge } from '@reflect/core'
 import { resetOperations, useOperations } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
+import type { AllNotesFilter } from '@/routing/route.ts'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { AllNotesScreen } from './all-notes-screen.tsx'
@@ -16,9 +17,15 @@ import { AllNotesScreen } from './all-notes-screen.tsx'
  * query, and navigation through the real router.
  */
 
-const settingsState = vi.hoisted((): { dateFormat: 'mdy' | 'dmy' | 'iso' } => ({
-  dateFormat: 'mdy',
-}))
+const settingsState = vi.hoisted(
+  (): {
+    dateFormat: 'mdy' | 'dmy' | 'iso'
+    allNotesFilterAttachments: ('pdf' | 'image' | 'audio' | 'video')[]
+  } => ({
+    dateFormat: 'mdy',
+    allNotesFilterAttachments: ['pdf', 'video'],
+  }),
+)
 const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
 
 vi.mock('@/providers/graph-provider.tsx', () => ({
@@ -35,6 +42,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
       timeFormat: '12h',
       dateFormat: settingsState.dateFormat,
       allNotesFilterTags: ['book', 'person'],
+      allNotesFilterAttachments: settingsState.allNotesFilterAttachments,
     },
     updateSettings: () => {},
   }),
@@ -106,6 +114,7 @@ function mockManyNotes(): void {
 beforeEach(() => {
   resetOperations()
   settingsState.dateFormat = 'mdy'
+  settingsState.allNotesFilterAttachments = ['pdf', 'video']
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
   mockInvoke.mockReset()
   mockInvoke.mockImplementation(async (command, args) => {
@@ -122,6 +131,10 @@ beforeEach(() => {
       // has matches in this fixture.
       if (sql.includes('from "tags"')) {
         return params.includes('travel') ? [taggedDailyRow] : []
+      }
+      // An attachment-filtered list: only Tokyo references a PDF.
+      if (sql.includes('from "assets"')) {
+        return params.includes('%.pdf') ? [noteRows[1]] : []
       }
       return noteRows
     }
@@ -151,7 +164,7 @@ function OperationsProbe(): ReactElement {
 
 function RoutedScreen(): ReactElement {
   const { route } = useRouter()
-  return <AllNotesScreen tag={route.kind === 'allNotes' ? route.tag : null} />
+  return <AllNotesScreen filter={route.kind === 'allNotes' ? route.filter : null} />
 }
 
 /** Navigates to the already-active route — the sidebar-click-while-here case. */
@@ -161,17 +174,20 @@ function ReArrive(): ReactElement {
     <button
       type="button"
       data-testid="re-arrive"
-      onClick={() => navigate({ kind: 'allNotes', tag: null })}
+      onClick={() => navigate({ kind: 'allNotes', filter: null })}
     >
       re-arrive
     </button>
   )
 }
 
-function renderScreen(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+function renderScreen(
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  filter: AllNotesFilter | null = null,
+) {
   return render(
     <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'allNotes', tag: null }}>
+      <RouterProvider initialRoute={{ kind: 'allNotes', filter }}>
         {/* The screen fills its container (`h-full`); hand it the viewport
             height so the scroll container gets a real, bounded size. */}
         <div style={{ height: '100vh' }}>
@@ -280,7 +296,7 @@ describe('AllNotesScreen', () => {
         path: 'notes/health.md',
       }),
     )
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: null })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     expect(view.getByRole('button', { name: /Trash \(/ }).query()).toBeNull()
     await view.unmount()
   })
@@ -298,7 +314,7 @@ describe('AllNotesScreen', () => {
       }),
     )
     expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: null })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
 
@@ -309,9 +325,49 @@ describe('AllNotesScreen', () => {
     await expect.element(view.getByRole('button', { name: '#person' })).toBeInTheDocument()
     await view.getByRole('button', { name: '#book' }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: 'book' })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'book' } })
     await expect.element(view.getByText('No notes tagged #book.')).toBeInTheDocument()
     expect(view.getByText('Health Stacked').query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('renders enabled attachment types as tabs and filters through the route', async () => {
+    const view = await renderScreen()
+    await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
+
+    await expect.element(view.getByRole('button', { name: 'Video' })).toBeInTheDocument()
+    expect(view.getByRole('button', { name: 'Images' }).query()).toBeNull()
+    expect(view.getByRole('button', { name: 'Audio' }).query()).toBeNull()
+    await view.getByRole('button', { name: 'PDF' }).click()
+
+    expect(probedRoute(view)).toEqual({
+      kind: 'allNotes',
+      filter: { kind: 'attachment', type: 'pdf' },
+    })
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
+    expect(view.getByText('Health Stacked').query()).toBeNull()
+    await expect
+      .element(view.getByRole('button', { name: 'PDF' }))
+      .toHaveAttribute('aria-pressed', 'true')
+    await view.unmount()
+  })
+
+  it('says when no notes reference the chosen attachment type', async () => {
+    const view = await renderScreen()
+    await view.getByRole('button', { name: 'Video' }).click()
+
+    await expect.element(view.getByText('No notes with video.')).toBeInTheDocument()
+    await view.unmount()
+  })
+
+  it('keeps the active type tab when settings switched that type off', async () => {
+    settingsState.allNotesFilterAttachments = []
+    const view = await renderScreen(undefined, { kind: 'attachment', type: 'image' })
+
+    await expect
+      .element(view.getByRole('button', { name: 'Images' }))
+      .toHaveAttribute('aria-pressed', 'true')
+    expect(view.getByRole('button', { name: 'PDF' }).query()).toBeNull()
     await view.unmount()
   })
 
@@ -391,7 +447,7 @@ describe('AllNotesScreen', () => {
 
     await page.getByRole('option', { name: /#travel/ }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: 'travel' })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('June 9, 2026')).toBeInTheDocument()
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
     expect(view.getByText('Health Stacked').query()).toBeNull()
@@ -419,7 +475,7 @@ describe('AllNotesScreen', () => {
     await input.fill('#zettel')
     await page.getByRole('option', { name: 'Filter by #zettel' }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: 'zettel' })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'zettel' } })
     await expect.element(view.getByText('No notes tagged #zettel.')).toBeInTheDocument()
     await view.unmount()
   })
@@ -439,7 +495,7 @@ describe('AllNotesScreen', () => {
     expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
 
     await page.getByRole('option', { name: /#travel/ }).click()
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: 'travel' })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await view.unmount()
   })
 })
@@ -451,12 +507,12 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     // Clicking the row body (the snippet, not a button) selects without opening.
     await view.getByText('Shop your health goals.').click()
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: null })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     const trashButton = view.getByRole('button', { name: /Trash \(1\)/ })
     await expect.element(trashButton).toBeInTheDocument()
-    expect(
-      view.getByRole('group', { name: 'Filter by tag' }).element().previousElementSibling,
-    ).toBe(trashButton.element())
+    expect(view.getByRole('group', { name: 'Filter notes' }).element().previousElementSibling).toBe(
+      trashButton.element(),
+    )
 
     // ⌘-click a second row extends the selection.
     await view.getByText('Dandelion chocolate.').click({ modifiers: ['ControlOrMeta'] })
@@ -534,7 +590,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
       }),
     )
     expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: null })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
 
@@ -621,7 +677,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
       )
 
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', tag: null })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
 
