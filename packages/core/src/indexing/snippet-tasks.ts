@@ -1,6 +1,7 @@
-import type { SyntaxNode } from '@meowdown/markdown'
+import { LEZER_NODE_IDS, parseMarkdownAst, type SyntaxNode, type Tree } from '@meowdown/markdown'
 import { parseBody } from '../markdown/grammar.ts'
-import { parseTaskMarker } from '../markdown/task-marker.ts'
+import { getRoundTasks, type TaskLocator } from '../markdown/task-ast.ts'
+import type { BlockContextSource } from './block-context.ts'
 
 /**
  * Task checkboxes inside a backlink snippet, anchored back to the source note.
@@ -9,9 +10,8 @@ import { parseTaskMarker } from '../markdown/task-marker.ts'
  * lines, rendered read-only through meowdown's `MarkdownView`. When the view
  * reports a checkbox click it identifies the task only by its document-order
  * index among the rendered checkboxes; this module enumerates the *same*
- * checkboxes from the snippet Markdown and pairs each with the write-back
- * coordinates ({@link TaskMarker}: whole-file `markerOffset` + `raw`) that the
- * task-toggle edit path already guards against staleness.
+ * checkboxes from the snippet Markdown and pairs each with the source task's
+ * AST locator, which the task write path guards against staleness.
  *
  * The enumeration must mirror meowdown's rendering rule exactly — a drifted
  * index would toggle a *different* task, silently. Both sides parse with
@@ -24,41 +24,80 @@ import { parseTaskMarker } from '../markdown/task-marker.ts'
 
 /** One rendered checkbox in a snippet, with its source-note write-back anchor. */
 export interface SnippetTask {
-  /**
-   * Whole-file offset of the marker's `[` in the source note, as of the read
-   * that produced the snippet ({@link TaskMarker.markerOffset}). `-1` when the
-   * snippet line had no recorded origin: the toggle's staleness guard then has
-   * no positional trust and only accepts a unique `raw` relocation, refusing
-   * an ambiguous line instead of guessing.
-   */
-  markerOffset: number
-  /** The source marker line from `[` to the physical line end ({@link TaskMarker.raw}). */
-  raw: string
+  /** The source task this checkbox writes to, or null when it is read-only. */
+  locator: TaskLocator | null
   /** `[x]`/`[X]` → true, `[ ]` → false. */
   checked: boolean
-  /**
-   * True for Reflect's round task syntax (a `+` bullet) — the only kind the
-   * Tasks projection covers and the only kind the snippet toggle writes.
-   */
-  round: boolean
   /** The line's content after the marker and one space — the view's click payload `text`. */
   text: string
 }
 
-function rawLineFor(
-  snippet: string,
-  starts: readonly number[],
-  line: number,
-  lineEnd: number,
-  column: number,
-  lineSourceTexts: readonly string[],
-): string {
-  const snippetLine = snippet.slice(starts[line]!, lineEnd)
-  const sourceLine = lineSourceTexts[line]
-  if (sourceLine === undefined || sourceLine.length < column + 3) {
-    return snippetLine
+/** The source task whose marker `[` sits at a whole-file offset, if it is a round task. */
+export type SourceTaskLocate = (markerOffset: number) => TaskLocator | undefined
+
+/**
+ * Map the whole-file marker offsets of a source note's round tasks to their
+ * AST locators. The Lezer tree and the AST share one block grammar, so their
+ * round tasks line up in document order; the pairing is still verified item by
+ * item, and any disagreement leaves every checkbox of the note read-only.
+ */
+export function createSourceTaskLocator(source: BlockContextSource): SourceTaskLocate {
+  const none: SourceTaskLocate = () => undefined
+  const markerOffsets = collectRoundTaskMarkerOffsets(source.tree, source.body)
+  const entries = getRoundTasks(parseMarkdownAst(source.body))
+  if (entries.length !== markerOffsets.length) {
+    return none
   }
-  return sourceLine
+  const locators = new Map<number, TaskLocator>()
+  for (const [i, offset] of markerOffsets.entries()) {
+    const entry = entries[i]
+    if (entry === undefined) {
+      return none
+    }
+    const locator: TaskLocator = {
+      astPath: entry.astPath,
+      markdown: entry.markdown,
+      checked: entry.checked,
+    }
+    if (!matchesFirstLine(source.body, offset, locator)) {
+      return none
+    }
+    locators.set(source.bodyOffset + offset, locator)
+  }
+  return (markerOffset) => locators.get(markerOffset)
+}
+
+/** Offsets of the `[` of every `Task` under a `+` bullet, in document order. */
+function collectRoundTaskMarkerOffsets(tree: Tree, body: string): number[] {
+  const offsets: number[] = []
+  tree.iterate({
+    enter: (node) => {
+      if (node.type.id !== LEZER_NODE_IDS.Task) {
+        return
+      }
+      const item = node.node.parent
+      const mark = item?.firstChild
+      if (
+        item?.type.id === LEZER_NODE_IDS.ListItem &&
+        mark?.type.id === LEZER_NODE_IDS.ListMark &&
+        body.slice(mark.from, mark.to) === '+'
+      ) {
+        offsets.push(node.from)
+      }
+    },
+  })
+  return offsets
+}
+
+/** Both sides drop surrounding whitespace, as the projected Markdown does. */
+function matchesFirstLine(body: string, markerOffset: number, locator: TaskLocator): boolean {
+  const checked = body[markerOffset + 1] !== ' '
+  const contentStart = markerOffset + 3
+  const newline = body.indexOf('\n', contentStart)
+  const lineEnd = newline === -1 ? body.length : newline
+  const firstLine = body.slice(contentStart, lineEnd).trim()
+  const [expected = ''] = locator.markdown.split('\n')
+  return checked === locator.checked && firstLine === expected.trim()
 }
 
 /** Start offset of every line of `text`. */
@@ -91,16 +130,13 @@ function isCheckboxTask(task: SyntaxNode): boolean {
 /**
  * Enumerate the checkboxes of one snippet in document order — the same order
  * (and count) meowdown's `MarkdownView` renders and reports click indexes in —
- * each anchored to its source-note marker offset via `lineOrigins`, the
- * per-line origins from `blockContextLinesAt`. When present,
- * `lineSourceTexts` carries the untrimmed source line for each displayed
- * snippet line, letting `raw` preserve trailing bytes that the snippet trims
- * away for rendering.
+ * each anchored to its source task through `lineOrigins`, the per-line origins
+ * from `blockContextLinesAt`, and `locate`, the source note's task locator.
  */
 export function extractSnippetTasks(
   snippet: string,
   lineOrigins: readonly number[],
-  lineSourceTexts: readonly string[] = [],
+  locate: SourceTaskLocate,
 ): SnippetTask[] {
   if (snippet === '') {
     return []
@@ -113,25 +149,18 @@ export function extractSnippetTasks(
         return
       }
       const markerFrom = node.from
-      const marker = parseTaskMarker(snippet.slice(markerFrom, markerFrom + 3))
       const line = lineIndexAt(starts, markerFrom)
-      const lineEndRaw = snippet.indexOf('\n', markerFrom)
-      const lineEnd = lineEndRaw === -1 ? snippet.length : lineEndRaw
       const column = markerFrom - starts[line]!
       const origin = lineOrigins[line]
-      const bullet = snippet.slice(starts[line]!, markerFrom)
-      const sourceLine = rawLineFor(snippet, starts, line, lineEnd, column, lineSourceTexts)
+      const lineEndRaw = snippet.indexOf('\n', markerFrom)
+      const lineEnd = lineEndRaw === -1 ? snippet.length : lineEndRaw
       let textStart = markerFrom + 3
       if (snippet[textStart] === ' ') {
         textStart += 1
       }
       tasks.push({
-        markerOffset: origin === undefined ? -1 : origin + column,
-        raw: sourceLine.slice(column),
-        // A `Task` node always carries a valid GFM marker; the parse is the
-        // defensive read the toggle repeats against the live source.
-        checked: marker?.checked === true,
-        round: /^[\t ]*\+[\t ]+$/.test(bullet),
+        locator: origin === undefined ? null : (locate(origin + column) ?? null),
+        checked: snippet[markerFrom + 1] !== ' ',
         text: snippet.slice(textStart, lineEnd),
       })
     },

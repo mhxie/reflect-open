@@ -8,7 +8,7 @@ import {
   markRecentlyCompleted,
 } from '@/lib/tasks/recently-completed.ts'
 import { asCompleted, asOpen, withoutTasks } from '@/lib/tasks/task-cache.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import { type TaskCacheSnapshot, useTaskCacheWriter } from '@/lib/tasks/use-task-cache.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 
@@ -44,7 +44,7 @@ export function useTaskCheckboxAction(): TaskCheckboxAction {
     mutationFn: ({ task, generation }: ToggleTaskInput) => toggleTask(task, generation),
     onMutate: async ({ task }: ToggleTaskInput): Promise<ToggleTaskContext> => {
       const snapshot = await cache.snapshot()
-      const key = taskKey(task)
+      const key = getTaskKey(task)
       const wasRecentlyCompleted = hasRecentlyCompleted(root, key)
       if (task.checked) {
         cache.patch(
@@ -66,7 +66,7 @@ export function useTaskCheckboxAction(): TaskCheckboxAction {
       if (task.checked && context?.wasRecentlyCompleted) {
         markRecentlyCompleted(root, [task])
       } else if (!task.checked) {
-        forgetRecentlyCompleted(root, [taskKey(task)])
+        forgetRecentlyCompleted(root, [getTaskKey(task)])
       }
     },
   })

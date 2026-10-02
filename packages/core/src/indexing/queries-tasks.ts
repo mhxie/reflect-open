@@ -1,18 +1,21 @@
-import type { TaskMarker } from '../markdown/index.ts'
+import {
+  compareTaskPaths,
+  decodeTaskPath,
+  renderInlineText,
+  type TaskLocator,
+} from '../markdown/index.ts'
 import { db } from './db.ts'
 import { decodeTaskBreadcrumbs } from './indexed-note.ts'
 
 /**
- * One open task plus the note context the Tasks view (Plan 18) groups and
- * renders by.
+ * One task plus the note context the Tasks view (Plan 18) groups and renders
+ * by. `astPath`, `markdown`, and `checked` address the task for writes.
  */
-export interface OpenTask extends TaskMarker {
+export interface OpenTask extends TaskLocator {
   notePath: string
-  /** Whether the checkbox is ticked. Open lists are all `false`; archived rows are `true`. */
-  checked: boolean
-  /** Display text, markdown stripped. */
+  /** `markdown` rendered to plain text, for search and labels. */
   text: string
-  /** Parent outline/list item text, top-down, displayed above the task row. */
+  /** Ancestor list items' labels, outermost first, rendered to plain text. */
   breadcrumbs: readonly string[]
   noteTitle: string
   /** The task's explicit `[[YYYY-MM-DD]]` due date, or null. */
@@ -32,9 +35,8 @@ function taskRowsQuery() {
     .where('notes.kind', '!=', 'template')
     .select([
       'tasks.notePath',
-      'tasks.markerOffset',
-      'tasks.raw',
-      'tasks.text',
+      'tasks.astPath',
+      'tasks.markdown',
       'tasks.breadcrumbs',
       'tasks.checked',
       'tasks.dueDate',
@@ -46,23 +48,52 @@ function taskRowsQuery() {
     ])
 }
 
-/** Map one raw SQL row to its domain shape: 0/1 flags to booleans, the
- * breadcrumbs column decoded. The raw fields are destructured away so the
- * stored `breadcrumbs: string` never leaks past this boundary. */
-function toTaskRow<Row extends { checked: number; isPinned: number; breadcrumbs: string }>(
-  row: Row,
-): Omit<Row, 'checked' | 'isPinned' | 'breadcrumbs'> & {
-  checked: boolean
-  isPinned: boolean
-  breadcrumbs: readonly string[]
-} {
-  const { checked, isPinned, breadcrumbs, ...task } = row
-  return {
-    ...task,
-    checked: checked !== 0,
-    isPinned: isPinned !== 0,
-    breadcrumbs: decodeTaskBreadcrumbs(breadcrumbs),
+interface TaskRow {
+  notePath: string
+  astPath: string
+  markdown: string
+  breadcrumbs: string
+  checked: number
+  dueDate: string | null
+  noteTitle: string
+  dailyDate: string | null
+  isPinned: number
+  pinnedOrder: number | null
+  updatedAt: number
+}
+
+/**
+ * Map stored rows to their domain shape. A row whose address or breadcrumbs
+ * do not decode is skipped and reported instead of failing the whole read: the
+ * projection is rebuilt from Markdown, so such a row is a bug, not data.
+ */
+function toTaskRows(rows: readonly TaskRow[]): OpenTask[] {
+  const tasks: OpenTask[] = []
+  for (const row of rows) {
+    const { astPath, markdown, breadcrumbs, checked, isPinned, ...rest } = row
+    try {
+      tasks.push({
+        ...rest,
+        astPath: decodeTaskPath(astPath),
+        markdown,
+        text: renderInlineText(markdown),
+        breadcrumbs: decodeTaskBreadcrumbs(breadcrumbs).map((label) => renderInlineText(label)),
+        checked: checked !== 0,
+        isPinned: isPinned !== 0,
+      })
+    } catch (cause) {
+      console.error(`tasks: skipping an unreadable row in ${row.notePath} (${astPath})`, cause)
+    }
   }
+  return tasks
+}
+
+/** Note path first, then the task's place in that note. */
+export function compareTasksByNote(left: OpenTask, right: OpenTask): number {
+  if (left.notePath !== right.notePath) {
+    return left.notePath < right.notePath ? -1 : 1
+  }
+  return compareTaskPaths(left.astPath, right.astPath)
 }
 
 /**
@@ -70,12 +101,8 @@ function toTaskRow<Row extends { checked: number; isPinned: number; breadcrumbs:
  * Private notes' tasks are included because this is a local-only surface.
  */
 export async function getOpenTasks(): Promise<OpenTask[]> {
-  const rows = await taskRowsQuery()
-    .where('tasks.checked', '=', 0)
-    .orderBy('tasks.notePath')
-    .orderBy('tasks.markerOffset')
-    .execute()
-  return rows.map(toTaskRow)
+  const rows = await taskRowsQuery().where('tasks.checked', '=', 0).execute()
+  return toTaskRows(rows).sort(compareTasksByNote)
 }
 
 /**
@@ -83,10 +110,8 @@ export async function getOpenTasks(): Promise<OpenTask[]> {
  * Tasks view's "show archived" surface.
  */
 export async function getCompletedTasks(): Promise<OpenTask[]> {
-  const rows = await taskRowsQuery()
-    .where('tasks.checked', '=', 1)
-    .orderBy('notes.updatedAt', 'desc')
-    .orderBy('tasks.markerOffset')
-    .execute()
-  return rows.map(toTaskRow)
+  const rows = await taskRowsQuery().where('tasks.checked', '=', 1).execute()
+  return toTaskRows(rows).sort(
+    (left, right) => right.updatedAt - left.updatedAt || compareTasksByNote(left, right),
+  )
 }

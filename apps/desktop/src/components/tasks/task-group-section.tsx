@@ -3,7 +3,7 @@ import { Plus } from 'lucide-react'
 import { groupTaskContexts, type OpenTask, type TaskGroup } from '@reflect/core'
 import { addTargetForGroup, taskGroupHeaderStyle } from '@/lib/tasks/task-group-presentation.tsx'
 import type { InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import type { TaskSelection } from '@/lib/tasks/use-task-selection.ts'
 import type { TaskRowEditHandlers } from '@/lib/tasks/use-task-row-handlers.ts'
 import { cn } from '@/lib/utils.ts'
@@ -88,13 +88,13 @@ export function TaskGroupSection({
           contexts.map((context) => {
             const firstTask = context.tasks[0]!
             return (
-              <Fragment key={taskKey(firstTask)}>
+              <Fragment key={getTaskKey(firstTask)}>
                 <TaskBreadcrumbs
                   breadcrumbs={context.visibleBreadcrumbs}
-                  onSelect={() => selection.select(context.tasks.map(taskKey))}
+                  onSelect={() => selection.select(context.tasks.map(getTaskKey))}
                 />
                 {context.tasks.map((task) => {
-                  const key = taskKey(task)
+                  const key = getTaskKey(task)
                   const selected = selection.isSelected(key)
                   return (
                     <TaskRow

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button.tsx'
 import { Spinner } from '@/components/ui/spinner.tsx'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { useRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import { useTaskFilters } from '@/lib/tasks/task-filters.ts'
 import type { InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
 import { todaysDailyTarget } from '@/lib/tasks/task-navigation.ts'
@@ -51,7 +51,7 @@ export function MobileTasks(): ReactElement {
   const [query, setQuery] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
-  // The one row whose swipe actions are showing (its taskKey), across all groups.
+  // The one row whose swipe actions are showing (its getTaskKey), across all groups.
   const [revealedTaskKey, setRevealedTaskKey] = useState<string | null>(null)
   // The sheet's task sticks around after close so the exit animation has
   // content; `sheetOpen` alone drives visibility.
@@ -107,8 +107,10 @@ export function MobileTasks(): ReactElement {
     if (editingTask === null) {
       return null
     }
-    const key = taskKey(editingTask)
-    return groups.flatMap((group) => group.tasks).find((row) => taskKey(row) === key) ?? editingTask
+    const key = getTaskKey(editingTask)
+    return (
+      groups.flatMap((group) => group.tasks).find((row) => getTaskKey(row) === key) ?? editingTask
+    )
   }, [groups, editingTask])
 
   const editTask = (task: OpenTask, options?: { autoFocus?: boolean; haptic?: boolean }): void => {
@@ -226,7 +228,7 @@ export function MobileTasks(): ReactElement {
       </Button>
       {liveEditingTask !== null ? (
         <MobileTaskEditSheet
-          key={taskKey(liveEditingTask)}
+          key={getTaskKey(liveEditingTask)}
           task={liveEditingTask}
           open={sheetOpen}
           onOpenChange={setSheetOpen}

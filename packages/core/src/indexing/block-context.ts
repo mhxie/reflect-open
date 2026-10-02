@@ -124,16 +124,14 @@ function lineEndAt(body: string, pos: number): number {
 interface ContextLines {
   lines: string[]
   origins: number[]
-  sourceLines: string[]
 }
 
 /** Drop trailing all-whitespace lines, then trailing whitespace of the last line. */
 function trimTrailing(context: ContextLines): ContextLines {
-  const { lines, origins, sourceLines } = context
+  const { lines, origins } = context
   while (lines.length > 0 && lines[lines.length - 1]!.trim() === '') {
     lines.pop()
     origins.pop()
-    sourceLines.pop()
   }
   if (lines.length > 0) {
     lines[lines.length - 1] = lines[lines.length - 1]!.replace(/\s+$/, '')
@@ -151,17 +149,15 @@ function dedentedSlice(body: string, from: number, to: number, prefix: string): 
   const end = to > from && body[to - 1] === '\n' ? to - 1 : to
   const lines: string[] = []
   const origins: number[] = []
-  const sourceLines: string[] = []
   let lineStart = start
   for (const raw of body.slice(start, lineEndAt(body, end)).split('\n')) {
     const stripped = prefix !== '' && raw.startsWith(prefix)
     const line = stripped ? raw.slice(prefix.length) : raw
     lines.push(line)
-    sourceLines.push(line)
     origins.push(stripped ? lineStart + prefix.length : lineStart)
     lineStart += raw.length + 1
   }
-  return trimTrailing({ lines, origins, sourceLines })
+  return trimTrailing({ lines, origins })
 }
 
 /**
@@ -262,7 +258,6 @@ function listItemContext(
   return {
     lines: pieces.flatMap((piece) => piece.lines),
     origins: pieces.flatMap((piece) => piece.origins),
-    sourceLines: pieces.flatMap((piece) => piece.sourceLines),
   }
 }
 
@@ -303,11 +298,6 @@ export interface BlockContextLines {
   text: string
   /** Whole-file offset of each snippet line's first character. */
   lineOrigins: number[]
-  /**
-   * Each snippet line's exact source text from `lineOrigins[i]` to the physical
-   * line end, before display-only trailing whitespace trimming.
-   */
-  lineSourceTexts: string[]
 }
 
 function contextLinesAt(
@@ -358,7 +348,6 @@ function contextLinesAt(
     context: {
       lines: [raw.trim()],
       origins: [lineStart + leading],
-      sourceLines: [raw.slice(leading)],
     },
     bodyOffset,
   }
@@ -391,8 +380,8 @@ export function blockContextAt(
  * {@link blockContextAt} plus each snippet line's whole-file origin, for
  * mapping an interaction inside the rendered snippet (a task checkbox click)
  * back to the exact source offset it came from. Origins are as of this read;
- * a later edit can drift them, which the task toggle's staleness guard
- * ({@link toggleTaskMarker}) turns into a refusal rather than a wrong write.
+ * a later edit can drift them, which the task write's staleness guard turns
+ * into a refusal rather than a wrong write.
  */
 export function blockContextLinesAt(
   source: string | BlockContextSource,
@@ -403,6 +392,5 @@ export function blockContextLinesAt(
   return {
     text: context.lines.join('\n'),
     lineOrigins: context.origins.map((origin) => origin + bodyOffset),
-    lineSourceTexts: context.sourceLines,
   }
 }

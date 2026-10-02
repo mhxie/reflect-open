@@ -3,7 +3,7 @@ import { Plus } from 'lucide-react'
 import { groupTaskContexts, type OpenTask, type TaskGroup } from '@reflect/core'
 import { TaskBreadcrumbs } from '@/components/tasks/task-breadcrumbs.tsx'
 import { addTargetForGroup, taskGroupHeaderStyle } from '@/lib/tasks/task-group-presentation.tsx'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import type { InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
 import { cn } from '@/lib/utils.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
@@ -21,7 +21,7 @@ interface MobileTaskGroupProps {
   onOpen: (notePath: string) => void
   /** Delete a task from its swipe action. */
   onDelete: (task: OpenTask) => void
-  /** The `taskKey` of the one row whose swipe actions are showing, across all groups. */
+  /** The `getTaskKey` of the one row whose swipe actions are showing, across all groups. */
   revealedTaskKey: string | null
   setRevealedTaskKey: Dispatch<SetStateAction<string | null>>
 }
@@ -88,10 +88,10 @@ export function MobileTaskGroup({
       </div>
       <ul className="flex flex-col">
         {contexts.map((context) => (
-          <Fragment key={taskKey(context.tasks[0]!)}>
+          <Fragment key={getTaskKey(context.tasks[0]!)}>
             <TaskBreadcrumbs breadcrumbs={context.visibleBreadcrumbs} className="px-4 pb-1 pt-3" />
             {context.tasks.map((task) => {
-              const key = taskKey(task)
+              const key = getTaskKey(task)
               return (
                 <MobileTaskRow
                   key={key}

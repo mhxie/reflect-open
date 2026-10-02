@@ -15,6 +15,7 @@ import {
 import { hasSearchableChar } from '../lib/searchable-char.ts'
 import {
   detectConflictMarkers,
+  encodeTaskPath,
   extractEmailFields,
   foldEmail,
   foldKey,
@@ -101,8 +102,10 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * and final characters, plus the letters and digits glued to them; the
  * migration recreates the table empty, so every note must reproject. The
  * rebuild keeps embeddings: their chunk text didn't change.
+ * 22 - tasks are keyed by AST path (`tasks.ast_path`, migration 0024) and
+ * store Markdown instead of plain text, so every note's tasks must reproject.
  */
-export const PROJECTION_VERSION = 21
+export const PROJECTION_VERSION = 22
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -183,14 +186,12 @@ export function decodeTaskBreadcrumbs(column: string): readonly string[] {
 }
 
 export const indexedTaskSchema = z.object({
-  /** Character offset of the marker's `[` in the file (UTF-16 units) — the row PK with `path`. */
-  markerOffset: z.number(),
-  /** Display/search text of the task's marker line, markdown stripped. */
-  text: z.string(),
-  /** Parent outline/list item text, top-down, displayed in the Tasks view. */
+  /** The task's address in the note body's AST (`encodeTaskPath`) — the row PK with `path`. */
+  astPath: z.string(),
+  /** The task's first paragraph as Markdown, marker excluded. */
+  markdown: z.string(),
+  /** Ancestor list items' first paragraphs as Markdown, outermost first. */
   breadcrumbs: taskBreadcrumbsSchema,
-  /** The marker line verbatim — the surgical write-back's staleness guard. */
-  raw: z.string(),
   checked: z.boolean(),
   /** Explicit due date (first `[[YYYY-MM-DD]]` in the item), or null — drives Overdue. */
   dueDate: z.string().nullable(),
@@ -406,10 +407,9 @@ export function buildIndexedNote(
     // projection stores each path once.
     assets: [...new Set(parsed.assets.map((asset) => asset.path))],
     tasks: parsed.tasks.map((task) => ({
-      markerOffset: task.markerOffset,
-      text: task.text,
+      astPath: encodeTaskPath(task.astPath),
+      markdown: task.markdown,
       breadcrumbs: task.breadcrumbs,
-      raw: task.raw,
       checked: task.checked,
       dueDate: task.dueDate,
     })),

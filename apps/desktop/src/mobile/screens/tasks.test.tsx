@@ -144,6 +144,8 @@ const editTask = vi.hoisted(() => vi.fn())
 const insertTask = vi.hoisted(() => vi.fn())
 const continueTaskInContext = vi.hoisted(() => vi.fn())
 const convertTaskToBullet = vi.hoisted(() => vi.fn())
+const editAndToggleTask = vi.hoisted(() => vi.fn())
+const editAndConvertTaskToBullet = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/note-task.ts', () => ({
   toggleTask,
   deleteTask,
@@ -151,7 +153,12 @@ vi.mock('@/lib/note-task.ts', () => ({
   insertTask,
   continueTaskInContext,
   convertTaskToBullet,
+  editAndToggleTask,
+  editAndConvertTaskToBullet,
 }))
+
+/** The result of a write that changed nothing the cache needs to re-address. */
+const WRITTEN = { source: '', moved: [], inserted: [], tasks: [] }
 
 const fail = vi.hoisted(() => vi.fn())
 const startOperation = vi.hoisted(() => vi.fn(() => ({ fail })))
@@ -255,17 +262,24 @@ beforeEach(async () => {
   getCompletedTasks.mockReset()
   getCompletedTasks.mockResolvedValue([])
   toggleTask.mockReset()
+  toggleTask.mockResolvedValue(WRITTEN)
   deleteTask.mockReset()
+  deleteTask.mockResolvedValue(WRITTEN)
   editTask.mockReset()
+  editTask.mockResolvedValue(WRITTEN)
   insertTask.mockReset()
-  insertTask.mockResolvedValue(0)
+  insertTask.mockResolvedValue({ astPath: [0], markdown: '', breadcrumbs: [], checked: false })
   continueTaskInContext.mockReset()
   continueTaskInContext.mockResolvedValue({
-    created: { markerOffset: 0, raw: '[ ] ' },
-    offsetChanges: [],
+    created: { astPath: [0], markdown: '', breadcrumbs: [], checked: false },
+    moved: [],
   })
   convertTaskToBullet.mockReset()
-  convertTaskToBullet.mockResolvedValue(undefined)
+  convertTaskToBullet.mockResolvedValue(WRITTEN)
+  editAndToggleTask.mockReset()
+  editAndToggleTask.mockResolvedValue(WRITTEN)
+  editAndConvertTaskToBullet.mockReset()
+  editAndConvertTaskToBullet.mockResolvedValue(WRITTEN)
   startOperation.mockClear()
   fail.mockReset()
   resolveOrCreateNoteWithTitle.mockReset()
@@ -289,16 +303,16 @@ describe('MobileTasks', () => {
         text: 'jotted today',
         dailyDate: '2026-06-14',
         notePath: 'daily/2026-06-14.md',
-        markerOffset: 0,
+        astPath: [0],
       }),
       task({
         text: 'late',
         dueDate: '2026-06-01',
         dailyDate: '2026-06-01',
         notePath: 'daily/2026-06-01.md',
-        markerOffset: 0,
+        astPath: [0],
       }),
-      task({ text: 'undated', markerOffset: 0 }),
+      task({ text: 'undated', astPath: [0] }),
     ])
     const view = await renderScreen()
 
@@ -313,10 +327,10 @@ describe('MobileTasks', () => {
 
   it('renders one read-only breadcrumb per consecutive task context', async () => {
     getOpenTasks.mockResolvedValue([
-      task({ markerOffset: 2, text: 'first', breadcrumbs: ['Project', 'Release'] }),
-      task({ markerOffset: 20, text: 'second', breadcrumbs: ['Project', 'Release'] }),
-      task({ markerOffset: 40, text: 'third', breadcrumbs: ['Project', 'Later'] }),
-      task({ markerOffset: 60, text: 'fourth', breadcrumbs: ['Project', 'Release'] }),
+      task({ astPath: [2], text: 'first', breadcrumbs: ['Project', 'Release'] }),
+      task({ astPath: [20], text: 'second', breadcrumbs: ['Project', 'Release'] }),
+      task({ astPath: [40], text: 'third', breadcrumbs: ['Project', 'Later'] }),
+      task({ astPath: [60], text: 'fourth', breadcrumbs: ['Project', 'Release'] }),
     ])
     const view = await renderScreen()
 
@@ -328,7 +342,7 @@ describe('MobileTasks', () => {
 
   it('hides a lone generic task breadcrumb', async () => {
     getOpenTasks.mockResolvedValue([
-      task({ markerOffset: 2, text: 'project task', breadcrumbs: ['Tasks:'] }),
+      task({ astPath: [2], text: 'project task', breadcrumbs: ['Tasks:'] }),
     ])
     const view = await renderScreen()
 
@@ -464,7 +478,7 @@ describe('MobileTasks', () => {
 
   it('clears the due date from the schedule row', async () => {
     getOpenTasks.mockResolvedValue([
-      task({ text: 'late [[2026-06-01]]', raw: '[ ] late [[2026-06-01]]', dueDate: '2026-06-01' }),
+      task({ text: 'late [[2026-06-01]]', markdown: 'late [[2026-06-01]]', dueDate: '2026-06-01' }),
     ])
     const user = userEvent
     const view = await renderScreen()
@@ -488,11 +502,12 @@ describe('MobileTasks', () => {
     await user.type(input, 'buy oat milk')
     await user.click(view.getByRole('button', { name: 'Complete', exact: true }))
 
-    await waitFor(() => expect(editTask).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(toggleTask).toHaveBeenCalledTimes(1))
-    // One write path: dismissal must not commit again after the action closed
-    // the sheet.
-    expect(editTask).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(editAndToggleTask).toHaveBeenCalledTimes(1))
+    expect(editAndToggleTask).toHaveBeenCalledWith(expect.anything(), 'buy oat milk', 1)
+    // One write: dismissal must not commit again after the action closed the
+    // sheet, and the draft is not saved separately.
+    expect(editTask).not.toHaveBeenCalled()
+    expect(toggleTask).not.toHaveBeenCalled()
     await view.unmount()
   })
 
@@ -584,7 +599,7 @@ describe('MobileTasks', () => {
   })
 
   it('opens the source note of an untouched empty task without deleting it', async () => {
-    getOpenTasks.mockResolvedValue([task({ text: '', raw: '[ ] ' })])
+    getOpenTasks.mockResolvedValue([task({ text: '', markdown: '' })])
     const user = userEvent
     const view = await renderScreen()
 
@@ -762,7 +777,7 @@ describe('MobileTasks', () => {
   it('reveals the completed history behind “Show archived”', async () => {
     getOpenTasks.mockResolvedValue([task({ text: 'still open' })])
     getCompletedTasks.mockResolvedValue([
-      task({ text: 'long done', markerOffset: 40, checked: true, raw: '[x] long done' }),
+      task({ text: 'long done', astPath: [40], checked: true, markdown: 'long done' }),
     ])
     const user = userEvent
     const view = await renderScreen()
@@ -779,8 +794,8 @@ describe('MobileTasks', () => {
 
   it('filters rows by the search text', async () => {
     getOpenTasks.mockResolvedValue([
-      task({ text: 'buy milk', markerOffset: 0 }),
-      task({ text: 'call mum', markerOffset: 10 }),
+      task({ text: 'buy milk', astPath: [0] }),
+      task({ text: 'call mum', astPath: [10] }),
     ])
     const user = userEvent
     const view = await renderScreen()

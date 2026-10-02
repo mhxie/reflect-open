@@ -1,19 +1,17 @@
-import type { OpenTask } from '@reflect/core'
+import { renderInlineText, type OpenTask } from '@reflect/core'
 
 /**
  * An open-task row with sensible defaults for tests; override only what a
- * case needs. The row renders `raw`, so it tracks `text` (the marker line)
- * unless a case pins `raw` explicitly.
+ * case needs. `text` tracks `markdown` unless a case pins it explicitly.
  */
 export function makeOpenTask(overrides: Partial<OpenTask> = {}): OpenTask {
-  const text = overrides.text ?? 'do it'
-  const checked = overrides.checked ?? false
+  const markdown = overrides.markdown ?? overrides.text ?? 'do it'
   return {
     notePath: 'notes/n.md',
-    markerOffset: 2,
-    raw: `[${checked ? 'x' : ' '}] ${text}`,
-    checked,
-    text,
+    astPath: [0],
+    markdown,
+    checked: false,
+    text: renderInlineText(markdown),
     breadcrumbs: [],
     noteTitle: 'N',
     dueDate: null,

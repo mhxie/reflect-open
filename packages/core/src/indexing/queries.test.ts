@@ -646,10 +646,9 @@ describe('getOpenTasks', () => {
     mockInvoke.mockResolvedValue([
       {
         note_path: 'notes/project.md',
-        marker_offset: 12,
-        raw: '[ ] ship it',
-        text: 'ship it',
-        breadcrumbs: '["StartupToolbox","Reflections"]',
+        ast_path: '[2,1]',
+        markdown: 'ship [[it]] **now**',
+        breadcrumbs: '["StartupToolbox","*Reflections*"]',
         checked: 0,
         due_date: null,
         note_title: 'Project',
@@ -663,9 +662,9 @@ describe('getOpenTasks', () => {
     await expect(getOpenTasks()).resolves.toEqual([
       {
         notePath: 'notes/project.md',
-        markerOffset: 12,
-        raw: '[ ] ship it',
-        text: 'ship it',
+        astPath: [2, 1],
+        markdown: 'ship [[it]] **now**',
+        text: 'ship it now',
         breadcrumbs: ['StartupToolbox', 'Reflections'],
         checked: false,
         dueDate: null,
@@ -676,6 +675,59 @@ describe('getOpenTasks', () => {
         updatedAt: 123,
       },
     ])
+  })
+
+  it('sorts rows by note path, then by their place in the note', async () => {
+    const row = (notePath: string, astPath: string) => ({
+      note_path: notePath,
+      ast_path: astPath,
+      markdown: astPath,
+      breadcrumbs: '[]',
+      checked: 0,
+      due_date: null,
+      note_title: 'N',
+      daily_date: null,
+      is_pinned: 0,
+      pinned_order: null,
+      updated_at: 0,
+    })
+    mockInvoke.mockResolvedValue([
+      row('notes/b.md', '[0]'),
+      row('notes/a.md', '[10]'),
+      row('notes/a.md', '[2,1]'),
+      row('notes/a.md', '[2]'),
+    ])
+
+    const tasks = await getOpenTasks()
+    expect(tasks.map((task) => [task.notePath, task.astPath])).toEqual([
+      ['notes/a.md', [2]],
+      ['notes/a.md', [2, 1]],
+      ['notes/a.md', [10]],
+      ['notes/b.md', [0]],
+    ])
+  })
+
+  it('skips a row whose stored path does not decode', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const row = (astPath: string) => ({
+      note_path: 'notes/a.md',
+      ast_path: astPath,
+      markdown: 'x',
+      breadcrumbs: '[]',
+      checked: 0,
+      due_date: null,
+      note_title: 'N',
+      daily_date: null,
+      is_pinned: 0,
+      pinned_order: null,
+      updated_at: 0,
+    })
+    mockInvoke.mockResolvedValue([row('not json'), row('[1]'), row('[]')])
+
+    const tasks = await getOpenTasks()
+    expect(tasks.map((task) => task.astPath)).toEqual([[1]])
+    expect(error).toHaveBeenCalledTimes(2)
+    error.mockRestore()
   })
 
   it('never surfaces template checkboxes — boilerplate, not real tasks', async () => {

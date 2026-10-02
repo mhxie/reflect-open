@@ -1,10 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { errorMessage, type OpenTask } from '@reflect/core'
-import type { TaskMarkerOffsetChange } from '@/lib/note-task.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import { withRelocatedTaskMarkers } from '@/lib/tasks/task-cache.ts'
-import { sameTask } from '@/lib/tasks/task-identity.ts'
+import { withRelocatedTasks, type TaskMoves } from '@/lib/tasks/task-cache.ts'
+import { isSameTask } from '@/lib/tasks/task-identity.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 
 /** Updates a cached task list in place; returning the same `undefined` is a no-op. */
@@ -23,12 +22,12 @@ export interface TaskCacheWriter {
   patch: (open: TaskListPatch, completed: TaskListPatch) => void
   /**
    * Upsert one optimistic open row (Return-to-add) and remove the same identity
-   * from completed. Contextual callers relocate shifted source rows first so the
-   * new marker cannot collide with an existing cache identity.
+   * from completed. Contextual callers relocate moved source rows first so the
+   * new address cannot collide with an existing cache identity.
    */
   addOpen: (task: OpenTask) => void
-  /** Re-key existing rows shifted by a contextual write, in both task caches. */
-  relocate: (notePath: string, changes: readonly TaskMarkerOffsetChange[]) => void
+  /** Re-key existing rows a note write moved, in both task caches. */
+  relocate: (notePath: string, moved: TaskMoves) => void
   /** Restore both lists from a snapshot and surface the failure once (single-write undo). */
   rollback: (captured: TaskCacheSnapshot | undefined, label: string, cause: unknown) => void
   /**
@@ -75,15 +74,15 @@ export function useTaskCacheWriter(): TaskCacheWriter {
 
   const addOpen = (task: OpenTask): void => {
     patch(
-      (rows) => [...(rows ?? []).filter((row) => !sameTask(row, task)), task],
-      (rows) => rows?.filter((row) => !sameTask(row, task)),
+      (rows) => [...(rows ?? []).filter((row) => !isSameTask(row, task)), task],
+      (rows) => rows?.filter((row) => !isSameTask(row, task)),
     )
   }
 
-  const relocate = (notePath: string, changes: readonly TaskMarkerOffsetChange[]): void => {
+  const relocate = (notePath: string, moved: TaskMoves): void => {
     patch(
-      (rows) => withRelocatedTaskMarkers(rows, notePath, changes),
-      (rows) => withRelocatedTaskMarkers(rows, notePath, changes),
+      (rows) => withRelocatedTasks(rows, notePath, moved),
+      (rows) => withRelocatedTasks(rows, notePath, moved),
     )
   }
 

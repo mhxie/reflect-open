@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OpenTask } from '@reflect/core'
 import { MOD_KEY } from '@/test-utils/mod-key.ts'
 import { makeOpenTask as task } from './open-task-fixture.ts'
-import { taskKey } from './task-identity.ts'
+import { getTaskKey } from './task-identity.ts'
 import type { TaskActions } from './use-task-actions.ts'
 import type { TaskSelection } from './use-task-selection.ts'
 import { useTaskKeyboard } from './use-task-keyboard.ts'
@@ -145,7 +145,7 @@ describe('useTaskKeyboard', () => {
   })
 
   it('toggles the resolved selection on ⌘↵ and deletes it on ⌘⌫', async () => {
-    const t = task({ notePath: 'notes/a.md', markerOffset: 2 })
+    const t = task({ notePath: 'notes/a.md', astPath: [2] })
     const selection = makeSelection({
       selected: new Set(['k']),
       selectedCount: 1,
@@ -222,8 +222,8 @@ describe('useTaskKeyboard', () => {
   })
 
   it('plain ⌫ removes a single empty row and selects the previous (V1)', async () => {
-    const a = task({ notePath: 'notes/a.md', markerOffset: 2, text: 'first' })
-    const empty = task({ notePath: 'notes/b.md', markerOffset: 2, text: '' })
+    const a = task({ notePath: 'notes/a.md', astPath: [2], text: 'first' })
+    const empty = task({ notePath: 'notes/b.md', astPath: [2], text: '' })
     const selection = makeSelection({
       selected: new Set(['b']),
       selectedCount: 1,
@@ -242,7 +242,7 @@ describe('useTaskKeyboard', () => {
     press(root, 'Backspace')
     expect(actions.remove).toHaveBeenCalledWith([empty])
     // Lands on the previous row so the keyboard flow continues.
-    expect(selection.clickSelect).toHaveBeenCalledWith(taskKey(a), {
+    expect(selection.clickSelect).toHaveBeenCalledWith(getTaskKey(a), {
       metaKey: false,
       ctrlKey: false,
       shiftKey: false,
@@ -250,10 +250,10 @@ describe('useTaskKeyboard', () => {
   })
 
   it('plain ⌫ leaves a multi-selection untouched (ambiguous, V1)', async () => {
-    const empty = task({ notePath: 'notes/a.md', markerOffset: 2, text: '' })
+    const empty = task({ notePath: 'notes/a.md', astPath: [2], text: '' })
     const full = task({
       notePath: 'notes/b.md',
-      markerOffset: 2,
+      astPath: [2],
       text: 'keep',
     })
     const selection = makeSelection({
@@ -334,7 +334,7 @@ describe('useTaskKeyboard', () => {
   it('Return adds a task to today’s daily when nothing is selected', async () => {
     const created = task({
       notePath: 'daily/2026-06-15.md',
-      markerOffset: 0,
+      astPath: [0],
       text: '',
     })
     const insert = vi.fn().mockResolvedValue(created)
@@ -353,7 +353,7 @@ describe('useTaskKeyboard', () => {
       pinnedOrder: null,
     })
     await flush()
-    expect(selection.clickSelect).toHaveBeenCalledWith(taskKey(created), {
+    expect(selection.clickSelect).toHaveBeenCalledWith(getTaskKey(created), {
       metaKey: false,
       ctrlKey: false,
       shiftKey: false,

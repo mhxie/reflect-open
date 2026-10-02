@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { ArrowRight, CalendarDays, Check, CircleCheck, List, Trash2, Undo2, X } from 'lucide-react'
 import { Priority } from '@meowdown/core'
 import { useKeymap } from '@meowdown/react'
-import type { OpenTask } from '@reflect/core'
+import { getTaskDueDate, type OpenTask } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer.tsx'
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
@@ -14,7 +14,7 @@ import { addDaysIso, formatDayLabel } from '@/lib/dates.ts'
 import type { TaskActions } from '@/lib/tasks/use-task-actions.ts'
 import { cn } from '@/lib/utils.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
-import { draftDueDate, withDraftDueDate } from '@/mobile/task-draft.ts'
+import { withDraftDueDate } from '@/mobile/task-draft.ts'
 import { TaskScheduleGrid } from '@/mobile/task-schedule-grid.tsx'
 import { useTaskSheetFinalizer } from '@/mobile/use-task-sheet-finalizer.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -100,7 +100,7 @@ export function MobileTaskEditSheet({
         setEditorSeed((seed) => seed + 1)
       },
     })
-  const dueDate = draftDueDate(draft)
+  const dueDate = getTaskDueDate(draft)
 
   const handleChange = (markdown: string): void => {
     liveDraftRef.current = { seed: editorSeed, markdown }

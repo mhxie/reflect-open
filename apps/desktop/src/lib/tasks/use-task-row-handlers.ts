@@ -6,7 +6,7 @@ import {
   insertTargetForTask,
   previousTaskKey,
 } from '@/lib/tasks/task-navigation.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import type { TaskActions } from '@/lib/tasks/use-task-actions.ts'
 import type { TaskSelection } from '@/lib/tasks/use-task-selection.ts'
 
@@ -85,7 +85,7 @@ export function useTaskRowHandlers({
         }
         void actions.insertAfter(task, content, target).then((created) => {
           if (created !== null) {
-            selectExclusively(taskKey(created))
+            selectExclusively(getTaskKey(created))
           } else {
             selection.clear()
           }

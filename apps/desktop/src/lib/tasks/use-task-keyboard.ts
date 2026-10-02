@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { OpenTask } from '@reflect/core'
 import { getIsComposing, isModEvent } from '@meowdown/core'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import {
   insertTargetForBucket,
   insertTargetForTask,
@@ -185,7 +185,7 @@ export function useTaskKeyboard({
               : actions.insert(taskTarget)
           void insertion.then((created) => {
             if (created !== null) {
-              selectExclusively(taskKey(created))
+              selectExclusively(getTaskKey(created))
             }
           })
         }

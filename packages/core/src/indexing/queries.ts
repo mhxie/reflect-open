@@ -17,7 +17,12 @@ export {
   type BacklinkContextPageOptions,
   type BacklinkSourceCursor,
 } from './queries-backlinks.ts'
-export { getCompletedTasks, getOpenTasks, type OpenTask } from './queries-tasks.ts'
+export {
+  compareTasksByNote,
+  getCompletedTasks,
+  getOpenTasks,
+  type OpenTask,
+} from './queries-tasks.ts'
 export {
   getWikiAddressForPath,
   suggestTags,

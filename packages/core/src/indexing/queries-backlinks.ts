@@ -7,7 +7,12 @@ import {
   type BlockContextSource,
 } from './block-context.ts'
 import { db } from './db.ts'
-import { extractSnippetTasks, type SnippetTask } from './snippet-tasks.ts'
+import {
+  createSourceTaskLocator,
+  extractSnippetTasks,
+  type SnippetTask,
+  type SourceTaskLocate,
+} from './snippet-tasks.ts'
 
 export type Backlink = Pick<
   Selectable<Database['backlinks']>,
@@ -38,8 +43,8 @@ export interface BacklinkContext {
   posFrom: number
   /**
    * The snippet's rendered task checkboxes in document order, each anchored to
-   * its source-note marker ({@link extractSnippetTasks}), so a checkbox click
-   * in the panel can write the toggle through to the source note.
+   * its source task ({@link extractSnippetTasks}), so a checkbox click in the
+   * panel can write the toggle through to the source note.
    */
   tasks: SnippetTask[]
 }
@@ -205,15 +210,19 @@ export async function getBacklinksWithContext(
   // One read *and one parse* per distinct source: a well-linked source
   // contributes many rows, and context extraction walks the parsed body.
   const sources = new Map<string, BlockContextSource | null>()
+  const locators = new Map<string, SourceTaskLocate>()
   await Promise.all(
     pageSources.map(async ({ sourcePath }) => {
       try {
-        sources.set(sourcePath, prepareBlockContext(await readNote(sourcePath)))
+        const source = prepareBlockContext(await readNote(sourcePath))
+        sources.set(sourcePath, source)
+        locators.set(sourcePath, createSourceTaskLocator(source))
       } catch {
         sources.set(sourcePath, null)
       }
     }),
   )
+  const noLocator: SourceTaskLocate = () => undefined
 
   const results: BacklinkContext[] = []
   for (const pageSource of pageSources) {
@@ -222,7 +231,7 @@ export async function getBacklinksWithContext(
     for (const posFrom of positionsBySource.get(pageSource.sourcePath) ?? []) {
       const context =
         source == null
-          ? { text: '', lineOrigins: [], lineSourceTexts: [] }
+          ? { text: '', lineOrigins: [] }
           : blockContextLinesAt(source, posFrom, targetKeys)
       const snippet = context.text
       if (snippet !== '') {
@@ -236,7 +245,11 @@ export async function getBacklinksWithContext(
         sourceTitle: pageSource.sourceTitle,
         snippet,
         posFrom,
-        tasks: extractSnippetTasks(snippet, context.lineOrigins, context.lineSourceTexts),
+        tasks: extractSnippetTasks(
+          snippet,
+          context.lineOrigins,
+          locators.get(pageSource.sourcePath) ?? noLocator,
+        ),
       })
     }
   }

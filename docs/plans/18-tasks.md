@@ -92,38 +92,34 @@ markers in markdown, AI task extraction (later, over this projection), CLI
 ### Contract sketches
 
 ```ts
-// extract.ts — ParsedNote grows:
+// markdown/task-ast.ts: the projection (the historical sketch keyed tasks by a
+// character offset plus the raw line; tasks are now addressed in the block AST):
 interface ParsedTask {
-  text: string          // inline text of the item's first paragraph, markdown stripped
-  raw: string           // exact source slice of that line (the write-back guard)
+  astPath: number[]     // child indexes from the body's AST root, e.g. [2, 1]
+  markdown: string      // the item's first paragraph, marker excluded
+  breadcrumbs: string[] // ancestor items' first paragraphs, outermost first
   checked: boolean
-  markerOffset: number  // string index of `[ ]`/`[x]` in the source — UTF-16 code
-                        // units, as Lezer positions are (never UTF-8 bytes)
-  scheduled: string | null // ISO date per the resolution rules above
+  dueDate: string | null // ISO date per the resolution rules above
 }
 
-// markdown/edit.ts — the guarded toggle (pure; the command wraps read→edit→write):
-export function toggleTaskMarker(
-  source: string,
-  markerOffset: number,
-  expectedRaw: string,
-): { source: string; checked: boolean } // throws TaskStaleError on any mismatch
+// markdown/task-ast.ts: the guarded edit (pure; the command wraps read, edit, write).
+// Every locator describes the note as the index last saw it; a path hit must
+// match `markdown` and `checked`, else a unique match, else TaskStaleError.
+export function applyTaskEdits(source: string, edits: readonly TaskEdit[]): TaskEditResult
 ```
 
 ```sql
--- crates/index-schema/migrations/0009_tasks.sql (+ LATEST_SCHEMA_VERSION bump →
--- projection wipe/rebuild on first open; chat_* untouched as always)
+-- crates/index-schema/migrations/0024_task_ast_path.sql (projection wipe/rebuild
+-- on first open; chat_* untouched as always)
 CREATE TABLE tasks (
-  note_path     TEXT NOT NULL REFERENCES notes(path)
-                  ON UPDATE CASCADE ON DELETE CASCADE,
-  marker_offset INTEGER NOT NULL,  -- JS string index (UTF-16 units), not bytes
-  text          TEXT NOT NULL,
-  raw           TEXT NOT NULL,
-  checked       INTEGER NOT NULL,
-  scheduled     TEXT,             -- ISO date or NULL
-  PRIMARY KEY (note_path, marker_offset)
+  note_path   TEXT NOT NULL REFERENCES notes(path) ON DELETE CASCADE,
+  ast_path    TEXT NOT NULL,            -- JSON array of child indexes
+  markdown    TEXT NOT NULL,            -- plain text is derived at read time
+  checked     INTEGER NOT NULL,
+  due_date    TEXT,                     -- ISO date or NULL
+  breadcrumbs TEXT NOT NULL DEFAULT '[]',
+  PRIMARY KEY (note_path, ast_path)
 );
-CREATE INDEX tasks_open_by_date ON tasks (checked, scheduled);
 ```
 
 ```ts
@@ -149,10 +145,11 @@ CREATE INDEX tasks_open_by_date ON tasks (checked, scheduled);
    Rust `index_apply` payload/write path (`db/write.rs`). Only extracted `+ [ ]` task
    rows enter the table; square checklist rows never reach the projection.
 
-4. **Toggle write path.** `toggleTaskMarker` in `markdown/edit.ts` (pure, tested);
-   a core command (`indexing/commands.ts` family) doing read → toggle → `note_write`
-   → reindex, surfacing `TaskStaleError` as a reviewable refusal. If the note is open
-   in the editor, the existing external-change reconciliation picks the write up.
+4. **Write path.** `applyTaskEdits` in `markdown/task-ast.ts` (pure, tested):
+   parse the body to meowdown's block AST, resolve every locator against the
+   pre-edit tree, mutate, serialize once. The desktop wraps it as read → edit →
+   `note_write` → reindex, surfacing `TaskStaleError` as a reviewable refusal; an
+   open note takes the same transform through its session's `commitSourceEdit`.
 
 5. **Task vs checklist marker contract.** Extraction accepts only task-list rows whose
    physical marker is `+`; `-`, `*`, ordered checkbox items, and fenced-code examples
@@ -199,9 +196,10 @@ CREATE INDEX tasks_open_by_date ON tasks (checked, scheduled);
   expose checkbox clicks cleanly through `defineEditorExtension()`. Fallback is the
   proven house pattern: decorations over literal text, like wiki-links/images. Keep
   all meowdown contact inside `editor/meowdown.ts`.
-- **Offset-keyed write-back races edits.** The `raw`-match guard + loud refusal is
-  the defense; the acceptance test for the stale path is non-negotiable
-  (fail-loud, never silent-wrong).
+- **Path-keyed write-back races edits.** The `markdown` + `checked` guard and loud
+  refusal are the defense; the acceptance test for the stale path is non-negotiable
+  (fail-loud, never silent-wrong). A format-only rewrite of the note does not move
+  an AST path; only adding or removing blocks above the task does.
 - **Serializer normalizations vs the protection guard.** meowdown normalizes
   `[X]`→`[x]` and loose single-paragraph lists→tight (accepted, pinned in tests);
   externally-authored files using those shapes open protected today and will continue

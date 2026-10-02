@@ -4,7 +4,7 @@ import type { OpenTask } from '@reflect/core'
 import { getIsComposing } from '@meowdown/core'
 import { TaskText } from '@/components/tasks/task-text.tsx'
 import { formatShortDate } from '@/lib/dates.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import { useTaskCheckboxToggle } from '@/lib/tasks/use-task-checkbox-toggle.ts'
 import { cn } from '@/lib/utils.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
@@ -65,7 +65,10 @@ export function MobileTaskRow({
   })
 
   return (
-    <li data-task-key={taskKey(task)} className="relative overflow-hidden border-b border-border">
+    <li
+      data-task-key={getTaskKey(task)}
+      className="relative overflow-hidden border-b border-border"
+    >
       <div
         className="absolute inset-y-0 right-0 flex"
         style={{ width: ACTION_WIDTH }}

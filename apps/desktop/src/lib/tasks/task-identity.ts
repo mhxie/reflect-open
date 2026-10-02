@@ -1,19 +1,19 @@
-import type { OpenTask } from '@reflect/core'
+import { encodeTaskPath, isSameTaskPath, type OpenTask } from '@reflect/core'
 
-/** The fields that identify a task: its note and the marker's offset in that note. */
-type TaskIdentity = Pick<OpenTask, 'notePath' | 'markerOffset'>
+/** The fields that identify a task: its note and its address in that note's AST. */
+type TaskIdentity = Pick<OpenTask, 'notePath' | 'astPath'>
 
 /**
- * A task's stable key — its note path and the marker's offset within that file.
- * The Tasks view's React keys and its optimistic-update predicate ({@link
- * sameTask}) derive from the same definition, so a row's key can't drift from
- * the row the completion mutation removes.
+ * A task's key: its note path and its AST path within that note. The Tasks
+ * view's React keys and its optimistic-update predicate ({@link isSameTask})
+ * derive from the same definition, so a row's key can't drift from the row the
+ * completion mutation removes.
  */
-export function taskKey(task: TaskIdentity): string {
-  return `${task.notePath}:${task.markerOffset}`
+export function getTaskKey(task: TaskIdentity): string {
+  return `${task.notePath}:${encodeTaskPath(task.astPath)}`
 }
 
-/** Whether two task references point at the same checkbox. */
-export function sameTask(a: TaskIdentity, b: TaskIdentity): boolean {
-  return a.notePath === b.notePath && a.markerOffset === b.markerOffset
+/** Whether two task references point at the same list item. */
+export function isSameTask(a: TaskIdentity, b: TaskIdentity): boolean {
+  return a.notePath === b.notePath && isSameTaskPath(a.astPath, b.astPath)
 }

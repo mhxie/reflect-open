@@ -1,6 +1,6 @@
 import { dailyPath, taskDateBucket, type OpenTask } from '@reflect/core'
 import type { InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
-import { sameTask, taskKey } from '@/lib/tasks/task-identity.ts'
+import { isSameTask, getTaskKey } from '@/lib/tasks/task-identity.ts'
 
 /**
  * Shared Tasks-view navigation helpers (Plan 18, V1 parity). The keyboard
@@ -55,12 +55,12 @@ export function insertTargetForBucket(task: OpenTask, today: string): InsertTask
  * the new first). `null` when it was the only row, so the caller clears.
  */
 export function previousTaskKey(ordered: readonly OpenTask[], task: OpenTask): string | null {
-  const index = ordered.findIndex((row) => sameTask(row, task))
+  const index = ordered.findIndex((row) => isSameTask(row, task))
   if (index === -1) {
     return null
   }
   const previous = ordered[index === 0 ? 1 : index - 1]
-  return previous ? taskKey(previous) : null
+  return previous ? getTaskKey(previous) : null
 }
 
 /**

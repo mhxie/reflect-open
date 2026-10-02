@@ -1,30 +1,33 @@
 import { useMutation } from '@tanstack/react-query'
-import type { OpenTask } from '@reflect/core'
+import type { OpenTask, TaskEditResult } from '@reflect/core'
 import {
   convertTaskToBullet,
   deleteTask,
+  editAndConvertTaskToBullet,
+  editAndToggleTask,
   editTask,
   insertTask,
   toggleTask,
 } from '@/lib/note-task.ts'
 import { mutationKeys } from '@/lib/query-client.ts'
-import { editAndToggleError, isEditAndToggleError } from '@/lib/tasks/edit-and-toggle-error.ts'
 import {
   archiveRecentlyCompleted,
   forgetRecentlyCompleted,
   hasRecentlyCompleted,
   markRecentlyCompleted,
+  relocateRecentlyCompleted,
 } from '@/lib/tasks/recently-completed.ts'
-import { scheduledContent } from '@/lib/tasks/task-schedule-content.ts'
+import { getScheduledMarkdown } from '@/lib/tasks/task-schedule-content.ts'
 import {
   asCompleted,
   asOpen,
-  taskRawWithContent,
   withEditedTask,
   withoutTasks,
+  withRelocatedTasks,
+  type TaskMoves,
 } from '@/lib/tasks/task-cache.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
-import { insertedTaskRow, type InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
+import { createInsertedTaskRow, type InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
 import { useTaskCheckboxAction } from '@/lib/tasks/use-task-checkbox-action.ts'
 import { useTaskCacheWriter } from '@/lib/tasks/use-task-cache.ts'
 import { useTaskContextInsert } from '@/lib/tasks/use-task-context-insert.ts'
@@ -41,8 +44,8 @@ import { useGraph } from '@/providers/graph-provider.tsx'
  *
  * Writes within a batch run **sequentially**: tasks can share a note, and two
  * concurrent edits to one file would race (the loser's read predates the
- * winner's write). The core edits relocate by the task's `raw`, so the offset
- * drift a prior edit causes in the same note is tolerated, not a wrong write.
+ * winner's write). Each write reports where the note's tasks moved, and the
+ * rest of the batch is re-addressed from that before its own write.
  */
 export interface TaskActions {
   complete: (tasks: OpenTask[]) => void
@@ -53,7 +56,7 @@ export interface TaskActions {
    */
   toggle: (tasks: OpenTask[]) => void
   remove: (tasks: OpenTask[]) => void
-  /** Replace one task's content from the inline editor (Plan 18). */
+  /** Replace one task's Markdown from the inline editor (Plan 18). */
   edit: (task: OpenTask, content: string) => void
   /** Toggle one row checkbox with exact rollback semantics for inline-editor checkbox clicks. */
   checkboxToggle: (task: OpenTask) => void
@@ -74,11 +77,7 @@ export interface TaskActions {
     content: string | null,
     target: InsertTaskTarget,
   ) => Promise<OpenTask | null>
-  /**
-   * Save an inline edit and toggle the task checkbox in one go. The two writes
-   * run **sequentially** — edit then toggle the rebuilt line — so they can't race
-   * each other on the same note line.
-   */
+  /** Save an inline edit and toggle the task checkbox in one write. */
   editAndToggle: (task: OpenTask, content: string) => void
   /**
    * Schedule a selection (⌘⇧S / the calendar, V1): set each task's due date to
@@ -88,16 +87,13 @@ export interface TaskActions {
   schedule: (tasks: OpenTask[], isoDate: string | null) => void
   /**
    * Convert a selection to plain bullets (⌘⇧K, V1's "Convert to checklist"
-   * restated for markdown): strip each task's `[ ]`/`[x]` marker so it leaves
-   * the Tasks view but stays in its note as an ordinary list item.
+   * restated for markdown): drop each task's checkbox so it leaves the Tasks
+   * view but stays in its note as an ordinary list item.
    */
   convertToBullet: (tasks: OpenTask[]) => void
   /**
-   * Convert the inline-edited task to a bullet, saving its edit first (⌘⇧K while
-   * editing). The two writes run **sequentially** — edit then strip the marker
-   * from the rebuilt line — so the unsaved draft is never lost to the convert
-   * landing first; the convert is given the post-edit `raw`, like {@link
-   * editAndToggle}.
+   * Convert the inline-edited task to a bullet, saving its edit in the same
+   * write (⌘⇧K while editing), so the unsaved draft is never lost to the convert.
    */
   editAndConvertToBullet: (task: OpenTask, content: string) => void
   /** Archive (⌘⇧↵): stop showing the session's completed tasks in the active list. */
@@ -112,6 +108,30 @@ export function useTaskActions(): TaskActions {
   const checkboxAction = useTaskCheckboxAction()
   const contextInsert = useTaskContextInsert()
 
+  /** Re-key the cached rows and the session's struck set from a write's `moved` map. */
+  const relocate = (notePath: string, moved: TaskMoves): void => {
+    cache.relocate(notePath, moved)
+    relocateRecentlyCompleted(root, notePath, moved)
+  }
+
+  /**
+   * Write `tasks` one at a time. Tasks can share a note, and a removal moves
+   * the items below it, so after each write the rest of the batch is
+   * re-addressed from the write's `moved` map before its own write.
+   */
+  async function writeEach(
+    tasks: readonly OpenTask[],
+    write: (task: OpenTask) => Promise<TaskEditResult>,
+  ): Promise<void> {
+    let pending: readonly OpenTask[] = tasks
+    for (let task = pending[0]; task !== undefined; task = pending[0]) {
+      const result = await write(task)
+      relocate(task.notePath, result.moved)
+      const rest: readonly OpenTask[] = pending.slice(1)
+      pending = withRelocatedTasks(rest, task.notePath, result.moved)
+    }
+  }
+
   const completeMutation = useMutation({
     mutationKey: mutationKeys.tasks.complete(graph?.root),
     mutationFn: async (tasks: OpenTask[]) => {
@@ -119,9 +139,7 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      for (const task of tasks) {
-        await toggleTask(task, generation)
-      }
+      await writeEach(tasks, (task) => toggleTask(task, generation))
     },
     onMutate: async (tasks: OpenTask[]) => {
       const snapshot = await cache.snapshot()
@@ -139,7 +157,7 @@ export function useTaskActions(): TaskActions {
       // A batch can fail after earlier writes landed — refetch truth rather than
       // restore a snapshot that would un-do the ones that persisted.
       cache.reconcile('Completing tasks', cause)
-      forgetRecentlyCompleted(root, tasks.map(taskKey))
+      forgetRecentlyCompleted(root, tasks.map(getTaskKey))
     },
   })
 
@@ -150,9 +168,7 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      for (const task of tasks) {
-        await toggleTask(task, generation) // [x] → [ ]
-      }
+      await writeEach(tasks, (task) => toggleTask(task, generation)) // [x] → [ ]
     },
     onMutate: async (tasks: OpenTask[]) => {
       const snapshot = await cache.snapshot()
@@ -162,7 +178,7 @@ export function useTaskActions(): TaskActions {
         (rows) => asOpen(rows, tasks),
         (rows) => withoutTasks(rows, tasks),
       )
-      forgetRecentlyCompleted(root, tasks.map(taskKey))
+      forgetRecentlyCompleted(root, tasks.map(getTaskKey))
       return snapshot
     },
     onError: (cause) => cache.reconcile('Reopening tasks', cause),
@@ -175,9 +191,7 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      for (const task of tasks) {
-        await deleteTask(task, generation)
-      }
+      await writeEach(tasks, (task) => deleteTask(task, generation))
     },
     onMutate: async (tasks: OpenTask[]) => {
       const snapshot = await cache.snapshot()
@@ -187,7 +201,7 @@ export function useTaskActions(): TaskActions {
         (rows) => withoutTasks(rows, tasks),
       )
       // A deleted task must not linger struck in the session's completed set.
-      forgetRecentlyCompleted(root, tasks.map(taskKey))
+      forgetRecentlyCompleted(root, tasks.map(getTaskKey))
       return snapshot
     },
     onError: (cause, tasks) => {
@@ -231,11 +245,9 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      // Sequential, like the other batch writes — tasks can share a note, and the
-      // core edit relocates by `raw`, so a same-note batch tolerates offset drift.
-      for (const task of tasks) {
-        await editTask(task, scheduledContent(task, isoDate), generation)
-      }
+      await writeEach(tasks, (task) =>
+        editTask(task, getScheduledMarkdown(task, isoDate), generation),
+      )
     },
     onMutate: async ({ tasks, isoDate }: { tasks: OpenTask[]; isoDate: string | null }) => {
       const snapshot = await cache.snapshot()
@@ -243,7 +255,7 @@ export function useTaskActions(): TaskActions {
       // reindex re-derives the due date (V1 likewise defers the move).
       const patch = (rows: OpenTask[] | undefined): OpenTask[] | undefined =>
         tasks.reduce<OpenTask[] | undefined>(
-          (acc, task) => withEditedTask(acc, task, scheduledContent(task, isoDate)),
+          (acc, task) => withEditedTask(acc, task, getScheduledMarkdown(task, isoDate)),
           rows,
         )
       cache.patch(patch, patch)
@@ -259,11 +271,7 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      // Sequential, like the other batch writes — tasks can share a note, and the
-      // core edit relocates by `raw`, so a same-note batch tolerates offset drift.
-      for (const task of tasks) {
-        await convertTaskToBullet(task, generation)
-      }
+      await writeEach(tasks, (task) => convertTaskToBullet(task, generation))
     },
     onMutate: async (tasks: OpenTask[]) => {
       const snapshot = await cache.snapshot()
@@ -274,7 +282,7 @@ export function useTaskActions(): TaskActions {
         (rows) => withoutTasks(rows, tasks),
       )
       // A converted task must not linger struck in the session's completed set.
-      forgetRecentlyCompleted(root, tasks.map(taskKey))
+      forgetRecentlyCompleted(root, tasks.map(getTaskKey))
       return snapshot
     },
     onError: (cause, tasks) => {
@@ -296,12 +304,8 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      // Edit, then strip the marker off the *rewritten* line — sequential, and the
-      // convert is given the post-edit `raw` so it locates the line the edit just
-      // wrote (the marker offset is unchanged; only the content after it moved).
-      // Saving first is what keeps the inline draft from being lost to the convert.
-      await editTask(task, content, generation)
-      await convertTaskToBullet({ ...task, raw: taskRawWithContent(task, content) }, generation)
+      const result = await editAndConvertTaskToBullet(task, content, generation)
+      relocate(task.notePath, result.moved)
     },
     onMutate: async ({ task }: { task: OpenTask; content: string }) => {
       const snapshot = await cache.snapshot()
@@ -311,10 +315,15 @@ export function useTaskActions(): TaskActions {
         (rows) => withoutTasks(rows, [task]),
         (rows) => withoutTasks(rows, [task]),
       )
-      forgetRecentlyCompleted(root, [taskKey(task)])
+      forgetRecentlyCompleted(root, [getTaskKey(task)])
       return snapshot
     },
-    onError: (cause) => cache.reconcile('Converting task', cause),
+    onError: (cause, { task }, context) => {
+      cache.rollback(context, 'Converting task', cause)
+      if (task.checked) {
+        markRecentlyCompleted(root, [task])
+      }
+    },
   })
 
   const insertMutation = useMutation({
@@ -336,30 +345,18 @@ export function useTaskActions(): TaskActions {
       if (generation === undefined) {
         throw new Error('No graph is open.')
       }
-      // Edit, then toggle the *rewritten* line — sequential, and the toggle is
-      // given the post-edit `raw` so it locates the line the edit just wrote
-      // (the marker offset is unchanged; only the content after it moved).
-      try {
-        await editTask(task, content, generation)
-      } catch (cause) {
-        throw editAndToggleError('edit', cause)
-      }
-      try {
-        await toggleTask({ ...task, raw: taskRawWithContent(task, content) }, generation)
-      } catch (cause) {
-        throw editAndToggleError('toggle', cause)
-      }
+      await editAndToggleTask(task, content, generation)
     },
     onMutate: async ({ task, content }: { task: OpenTask; content: string }) => {
       const snapshot = await cache.snapshot()
       const edited = withEditedTask([task], task, content)?.[0] ?? task
-      const wasRecentlyCompleted = hasRecentlyCompleted(root, taskKey(task))
+      const wasRecentlyCompleted = hasRecentlyCompleted(root, getTaskKey(task))
       if (task.checked) {
         cache.patch(
           (rows) => asOpen(rows, [edited]),
           (rows) => withoutTasks(rows, [task]),
         )
-        forgetRecentlyCompleted(root, [taskKey(task)])
+        forgetRecentlyCompleted(root, [getTaskKey(task)])
       } else {
         // Surface the *edited* row struck (its new text), in both the completed
         // cache (archived on) and the session set (off) — not the pre-edit task.
@@ -369,17 +366,15 @@ export function useTaskActions(): TaskActions {
         )
         markRecentlyCompleted(root, [edited])
       }
-      return { snapshot, edited, wasRecentlyCompleted }
+      return { snapshot, wasRecentlyCompleted }
     },
     onError: (cause, { task }, context) => {
-      const failure = isEditAndToggleError(cause) ? cause : null
-      // Two sequential writes (edit then toggle) — if the toggle fails after the
-      // edit lands, refetch rather than roll back over the persisted edit.
-      cache.reconcile(task.checked ? 'Reopening task' : 'Completing task', failure?.cause ?? cause)
+      // One write: nothing landed, so the pre-write lists are the truth.
+      cache.rollback(context?.snapshot, task.checked ? 'Reopening task' : 'Completing task', cause)
       if (task.checked && context?.wasRecentlyCompleted) {
-        markRecentlyCompleted(root, [failure?.phase === 'toggle' ? context.edited : task])
+        markRecentlyCompleted(root, [task])
       } else if (!task.checked) {
-        forgetRecentlyCompleted(root, [taskKey(task)])
+        forgetRecentlyCompleted(root, [getTaskKey(task)])
       }
     },
   })
@@ -448,15 +443,13 @@ export function useTaskActions(): TaskActions {
       if (graph?.generation === undefined) {
         return null
       }
-      let markerOffset: number
       try {
-        markerOffset = await insertMutation.mutateAsync(target)
+        const created = createInsertedTaskRow(target, await insertMutation.mutateAsync(target))
+        cache.addOpen(created)
+        return created
       } catch {
         return null // reconcile already surfaced the failure
       }
-      const created = insertedTaskRow(target, markerOffset)
-      cache.addOpen(created)
-      return created
     },
     insertAfter: async (task, content, target) => {
       if (graph?.generation === undefined) {
@@ -475,21 +468,19 @@ export function useTaskActions(): TaskActions {
         return null
       }
       // Resolve the current row first and *await* it, so the append reads the
-      // settled source — the new offset can't drift when the line above resized.
-      // Emptied content (the row was cleared) deletes that row rather than leaving
-      // a bare `+ [ ]` ghost; a real change persists; null (unchanged) is left be.
+      // settled source. Emptied content (the row was cleared) deletes that row
+      // rather than leaving a bare `+ [ ]` ghost; a real change persists; null
+      // (unchanged) is left be.
       if (!(await persistTaskDraft(task, content))) {
         return null // the edit/delete rollback already surfaced the failure
       }
-      let markerOffset: number
       try {
-        markerOffset = await insertMutation.mutateAsync(target)
+        const created = createInsertedTaskRow(target, await insertMutation.mutateAsync(target))
+        cache.addOpen(created)
+        return created
       } catch {
         return null
       }
-      const created = insertedTaskRow(target, markerOffset)
-      cache.addOpen(created)
-      return created
     },
     editAndToggle: (task, content) => {
       if (graph?.generation !== undefined && !editAndToggleMutation.isPending) {

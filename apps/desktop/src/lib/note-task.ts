@@ -1,43 +1,30 @@
 import {
-  appendTaskToContext,
-  appendTaskLine,
-  editTaskLine,
+  applyTaskEdits,
   isAppError,
   isLocalOnlyPath,
-  parseNote,
   readNote,
-  removeTaskLine,
-  taskLineToBullet,
-  toggleTaskMarker,
   writeNote,
-  type TaskMarker,
+  type TaskEdit,
+  type TaskEditResult,
+  type TaskLocator,
+  type TaskSnapshot,
 } from '@reflect/core'
-import type { NoteSession } from '@/editor/note-session.ts'
 import { openSession } from '@/editor/open-documents.ts'
 
-/** The marker coordinates ({@link TaskMarker}) plus the note they live in. */
-export interface TaskRef extends TaskMarker {
+/** A task's locator ({@link TaskLocator}) plus the note it lives in. */
+export interface TaskRef extends TaskLocator {
   notePath: string
 }
 
-export interface TaskMarkerOffsetChange {
-  /** Marker offset before the contextual write. */
-  readonly from: number
-  /** Exact pre-write marker line, used to relocate a stale indexed offset safely. */
-  readonly fromRaw: string
-  /** Marker after the write, or null when the original task was removed. */
-  readonly marker: TaskMarker | null
-}
-
 export interface ContinuedTaskInContext {
-  /** The newly inserted empty task's exact persisted marker identity. */
-  readonly created: TaskMarker
-  /** Relocations for pre-existing task markers shifted by the atomic write. */
-  readonly offsetChanges: readonly TaskMarkerOffsetChange[]
+  /** The new empty task, as the written note addresses it. */
+  readonly created: TaskSnapshot
+  /** Where every pre-existing task of the note ended up after the write. */
+  readonly moved: TaskEditResult['moved']
 }
 
 /**
- * A task couldn't be toggled because its note is open with unsaved edits that
+ * A task couldn't be written because its note is open with unsaved edits that
  * the session can't persist right now — it's read-only/protected, or a sync
  * conflict is parked. Distinct from `TaskStaleError` (a stale index): the
  * recovery is "save or resolve the note", not "reindex". We refuse rather than
@@ -84,193 +71,190 @@ function serializeByPath<T>(path: string, op: () => Promise<T>): Promise<T> {
   return result
 }
 
+interface WriteTaskEditsOptions {
+  /** Treat a missing note as empty: the first task creates it (today's daily). */
+  readonly createIfMissing?: boolean
+}
+
+async function readSource(notePath: string, createIfMissing: boolean): Promise<string> {
+  try {
+    return await readNote(notePath)
+  } catch (cause) {
+    if (createIfMissing && isAppError(cause) && cause.kind === 'notFound') {
+      return ''
+    }
+    throw cause
+  }
+}
+
 /**
- * Apply a Tasks-view change (toggle / edit / delete, Plan 18) and persist it,
- * routing the same way every time: when the note is **open**, through its live
- * session — which edits its in-memory buffer synchronously, so unsaved edits
- * survive and there's no read-then-write gap for a concurrent keystroke. The
- * session declines (and we refuse rather than clobber via disk) only when it
- * can't persist now (loading, protected/read-only, or a parked conflict),
- * surfaced as {@link NoteBusyError}. When the note is **not** open, disk is the
- * source of truth. A stale or ambiguous index surfaces as `TaskStaleError`
- * (from the core edit) rather than a silent wrong write.
+ * Apply Tasks-view edits (Plan 18) to one note and persist them, routing the
+ * same way every time: when the note is **open**, through its live session,
+ * which transforms its in-memory buffer synchronously, so unsaved edits survive
+ * and there's no read-then-write gap for a concurrent keystroke. The session
+ * declines (and we refuse rather than clobber via disk) only when it can't
+ * persist now (loading, protected/read-only, or a parked conflict), surfaced as
+ * {@link NoteBusyError}. When the note is **not** open, disk is the source of
+ * truth. Every locator in `edits` describes the note as the index last saw it;
+ * one whose task is gone surfaces as `TaskStaleError` from the core edit
+ * rather than a silent wrong write. The result reports where every task of
+ * the note ended up, so callers can re-address cached rows before the reindex.
  */
-function applyTaskChange(
-  task: TaskRef,
+export function writeTaskEdits(
+  notePath: string,
+  edits: readonly TaskEdit[],
   generation: number,
-  viaSession: (owner: NoteSession, marker: TaskMarker) => Promise<boolean>,
-  viaDisk: (source: string, marker: TaskMarker) => string,
-): Promise<void> {
+  options: WriteTaskEditsOptions = {},
+): Promise<TaskEditResult> {
   // Serialize per note: a concurrent change to the same note must not read the
   // pre-write source and clobber this one.
-  return serializeByPath(task.notePath, async () => {
-    // Pass only the marker coordinates onward — neither the session nor the disk
-    // edit needs (or should depend on) the note path beyond locating the owner.
-    const marker: TaskMarker = { markerOffset: task.markerOffset, raw: task.raw }
-    const owner = openSession(task.notePath)
+  return serializeByPath(notePath, async (): Promise<TaskEditResult> => {
+    const owner = openSession(notePath)
     if (owner !== null) {
-      if (await viaSession(owner, marker)) {
-        return
+      let result: TaskEditResult | undefined
+      const applied = await owner.commitSourceEdit((source) => {
+        result = applyTaskEdits(source, edits)
+        return result.source
+      })
+      if (!applied || result === undefined) {
+        throw new NoteBusyError('This note can’t be updated right now — try again in a moment.')
       }
-      throw new NoteBusyError('This note can’t be updated right now — try again in a moment.')
+      return result
     }
-    const source = await readNote(task.notePath)
-    await writeNote(task.notePath, viaDisk(source, marker), generation)
+    const source = await readSource(notePath, options.createIfMissing === true)
+    const result = applyTaskEdits(source, edits)
+    await writeNote(notePath, result.source, generation)
+    return result
   })
+}
+
+/** Only the locator goes to the core edit: the note path merely picks the owner. */
+function toLocator(task: TaskRef): TaskLocator {
+  return { astPath: task.astPath, markdown: task.markdown, checked: task.checked }
+}
+
+function requireInserted(result: TaskEditResult): TaskSnapshot {
+  const created = result.inserted[0]
+  if (created === undefined) {
+    throw new Error('The new task was not written.')
+  }
+  return created
 }
 
 /**
  * Toggle a task's checkbox from the Tasks view (Plan 18). The open-tasks view
- * only ever flips `[ ]`→`[x]`, but the primitive toggles, hence the name; the
- * disk path is byte-exact (only the three marker characters change).
+ * only ever flips `[ ]`→`[x]`, but the primitive toggles, hence the name.
  */
-export function toggleTask(task: TaskRef, generation: number): Promise<void> {
-  return applyTaskChange(
-    task,
-    generation,
-    (owner, marker) => owner.commitTaskToggle(marker),
-    (source, marker) => toggleTaskMarker(source, marker).source,
-  )
+export function toggleTask(task: TaskRef, generation: number): Promise<TaskEditResult> {
+  return writeTaskEdits(task.notePath, [{ kind: 'toggle', task: toLocator(task) }], generation)
 }
 
 /**
- * Replace a task's text from the inline Tasks editor (Plan 18), preserving its
- * marker (and so its checked state). `content` is one line of markdown.
+ * Replace a task's Markdown from the inline Tasks editor (Plan 18), keeping its
+ * checked state. `markdown` is the task's first paragraph without the marker.
  */
-export function editTask(task: TaskRef, content: string, generation: number): Promise<void> {
-  return applyTaskChange(
-    task,
+export function editTask(
+  task: TaskRef,
+  markdown: string,
+  generation: number,
+): Promise<TaskEditResult> {
+  return writeTaskEdits(
+    task.notePath,
+    [{ kind: 'setMarkdown', task: toLocator(task), markdown }],
     generation,
-    (owner, marker) => owner.commitTaskEdit(marker, content),
-    (source, marker) => editTaskLine(source, marker, content),
   )
 }
 
-/** Delete a task's whole line from the Tasks view (Plan 18) — the ⌫/⌘⌫ path. */
-export function deleteTask(task: TaskRef, generation: number): Promise<void> {
-  return applyTaskChange(
-    task,
-    generation,
-    (owner, marker) => owner.commitTaskRemove(marker),
-    (source, marker) => removeTaskLine(source, marker),
-  )
+/** Delete a task from the Tasks view (Plan 18), the ⌫/⌘⌫ path. Nested items move up. */
+export function deleteTask(task: TaskRef, generation: number): Promise<TaskEditResult> {
+  return writeTaskEdits(task.notePath, [{ kind: 'remove', task: toLocator(task) }], generation)
 }
 
 /**
  * Demote a task to a plain bullet from the Tasks view — "Convert to bullet"
- * (Plan 18 follow-up). Strips just the `[ ]`/`[x]` marker, keeping the bullet and
- * content, so the item drops out of the Tasks projection while staying in the
- * note. Routes session-or-disk and is guarded by the task's `raw` like its
- * siblings.
+ * (Plan 18 follow-up). Drops just the checkbox, keeping the bullet and its
+ * content, so the item leaves the Tasks projection while staying in the note.
  */
-export function convertTaskToBullet(task: TaskRef, generation: number): Promise<void> {
-  return applyTaskChange(
-    task,
+export function convertTaskToBullet(task: TaskRef, generation: number): Promise<TaskEditResult> {
+  return writeTaskEdits(task.notePath, [{ kind: 'toBullet', task: toLocator(task) }], generation)
+}
+
+/**
+ * Save an inline edit and toggle the task's checkbox in one write. Both edits
+ * address the task as the index knew it; the batch resolves them before it
+ * changes anything, so the toggle lands on the rewritten task.
+ */
+export function editAndToggleTask(
+  task: TaskRef,
+  markdown: string,
+  generation: number,
+): Promise<TaskEditResult> {
+  const locator = toLocator(task)
+  return writeTaskEdits(
+    task.notePath,
+    [
+      { kind: 'setMarkdown', task: locator, markdown },
+      { kind: 'toggle', task: locator },
+    ],
     generation,
-    (owner, marker) => owner.commitTaskToBullet(marker),
-    (source, marker) => taskLineToBullet(source, marker),
+  )
+}
+
+/** Save an inline edit and convert the task to a bullet in one write. */
+export function editAndConvertTaskToBullet(
+  task: TaskRef,
+  markdown: string,
+  generation: number,
+): Promise<TaskEditResult> {
+  const locator = toLocator(task)
+  return writeTaskEdits(
+    task.notePath,
+    [
+      { kind: 'setMarkdown', task: locator, markdown },
+      { kind: 'toBullet', task: locator },
+    ],
+    generation,
   )
 }
 
 /**
- * Continue entry from a grouped task by atomically resolving the current draft
- * and adding a new empty task to the same parent-list context. Changed content
- * replaces the anchor line; cleared content removes it. The returned marker
- * identities reflect the final source so the Tasks view can immediately address
- * the new row and relocate shifted cached rows before reindexing catches up.
+ * Continue entry from a grouped task: resolve the current draft and add a new
+ * empty task at the end of the same parent item, in one write. Changed content
+ * replaces the anchor's Markdown; cleared content removes the anchor. The
+ * result addresses the new row and every moved row in the written note, so the
+ * Tasks view can select the new task and re-key cached rows before reindexing
+ * catches up.
  */
-export function continueTaskInContext(
+export async function continueTaskInContext(
   task: TaskRef,
   content: string | null,
   generation: number,
 ): Promise<ContinuedTaskInContext> {
-  return serializeByPath(task.notePath, async () => {
-    if (openSession(task.notePath) !== null) {
-      throw new NoteBusyError('This note is open — add the task in the note itself.')
-    }
-    const source = await readNote(task.notePath)
-    const originalTasks = parseNote({ path: task.notePath, source }).tasks
-    const marker: TaskMarker = { markerOffset: task.markerOffset, raw: task.raw }
-    const inserted = appendTaskToContext(source, marker)
-    const resolvedMarker: TaskMarker = { markerOffset: inserted.anchorOffset, raw: task.raw }
-    const insertionLength = inserted.source.length - source.length
-    let nextSource = inserted.source
-    let markerOffset = inserted.markerOffset
-    let anchorDelta = 0
-
-    if (content === '') {
-      const withoutAnchor = removeTaskLine(nextSource, resolvedMarker)
-      anchorDelta = withoutAnchor.length - nextSource.length
-      markerOffset += anchorDelta
-      nextSource = withoutAnchor
-    } else if (content !== null) {
-      const withEditedAnchor = editTaskLine(nextSource, resolvedMarker, content)
-      anchorDelta = withEditedAnchor.length - nextSource.length
-      markerOffset += anchorDelta
-      nextSource = withEditedAnchor
-    }
-
-    const finalTasksByOffset = new Map(
-      parseNote({ path: task.notePath, source: nextSource }).tasks.map((row) => [
-        row.markerOffset,
-        row,
-      ]),
-    )
-    const offsetChanges = originalTasks.map<TaskMarkerOffsetChange>((original) => {
-      if (content === '' && original.markerOffset === inserted.anchorOffset) {
-        return { from: original.markerOffset, fromRaw: original.raw, marker: null }
-      }
-      const shiftedOffset =
-        original.markerOffset +
-        (original.markerOffset >= inserted.insertionOffset ? insertionLength : 0) +
-        (original.markerOffset > inserted.anchorOffset ? anchorDelta : 0)
-      const shifted = finalTasksByOffset.get(shiftedOffset)
-      if (shifted === undefined) {
-        throw new Error(`contextual task relocation failed at offset ${original.markerOffset}`)
-      }
-      return {
-        from: original.markerOffset,
-        fromRaw: original.raw,
-        marker: { markerOffset: shifted.markerOffset, raw: shifted.raw },
-      }
-    })
-    const created = finalTasksByOffset.get(markerOffset)
-    if (created === undefined) {
-      throw new Error(`contextual task insertion failed at offset ${markerOffset}`)
-    }
-    await writeNote(task.notePath, nextSource, generation)
-    return {
-      created: { markerOffset: created.markerOffset, raw: created.raw },
-      offsetChanges,
-    }
-  })
+  const locator = toLocator(task)
+  const edits: TaskEdit[] = [
+    { kind: 'insert', at: { kind: 'contextEnd', task: locator }, markdown: '' },
+  ]
+  if (content === '') {
+    edits.push({ kind: 'remove', task: locator })
+  } else if (content !== null) {
+    edits.push({ kind: 'setMarkdown', task: locator, markdown: content })
+  }
+  const result = await writeTaskEdits(task.notePath, edits, generation)
+  return { created: requireInserted(result), moved: result.moved }
 }
 
 /**
- * Insert a new empty `+ [ ] ` task at the end of `notePath` (Plan 18's Return-to-
- * add) and return its marker offset, so the Tasks view can select the new row and
- * open its inline editor. A missing note — today's daily not yet created — starts
- * empty. Refuses an **open** note via {@link NoteBusyError}: appending through
- * disk would clobber its live buffer, and the Tasks view rarely targets one.
- * Serialized per path with the other task writes.
+ * Insert a new empty `+ [ ]` task at the end of `notePath` (Plan 18's Return-
+ * to-add) and return its address, so the Tasks view can select the new row and
+ * open its inline editor. A missing note (today's daily not yet created)
+ * starts empty.
  */
-export function insertTask(notePath: string, generation: number): Promise<number> {
-  return serializeByPath(notePath, async () => {
-    if (openSession(notePath) !== null) {
-      throw new NoteBusyError('This note is open — add the task in the note itself.')
-    }
-    let source: string
-    try {
-      source = await readNote(notePath)
-    } catch (cause) {
-      if (isAppError(cause) && cause.kind === 'notFound') {
-        source = '' // a not-yet-created daily note: the first task creates it
-      } else {
-        throw cause
-      }
-    }
-    const { source: next, markerOffset } = appendTaskLine(source)
-    await writeNote(notePath, next, generation)
-    return markerOffset
-  })
+export async function insertTask(notePath: string, generation: number): Promise<TaskSnapshot> {
+  const result = await writeTaskEdits(
+    notePath,
+    [{ kind: 'insert', at: { kind: 'documentEnd' }, markdown: '' }],
+    generation,
+    { createIfMissing: true },
+  )
+  return requireInserted(result)
 }

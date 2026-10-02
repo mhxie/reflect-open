@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { OpenTask } from '@reflect/core'
-import type { TaskMarkerOffsetChange } from '@/lib/note-task.ts'
-import { withCheckedMarker, withRelocatedTaskMarkers } from '@/lib/tasks/task-cache.ts'
-import { taskKey } from '@/lib/tasks/task-identity.ts'
+import { withChecked, withRelocatedTasks, type TaskMoves } from '@/lib/tasks/task-cache.ts'
+import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 
 /**
  * The "recently completed" set (Plan 18) — V1's middle state where a checked task
@@ -47,18 +46,18 @@ function adopt(root: string | null): void {
 
 /**
  * Keep `completed` showing struck (checked) in the active list until archived.
- * Stored as a fresh checked copy, deduped by {@link taskKey}. The marker in `raw`
- * is flipped to `[x]` to match disk — these rows outlive the reindex, so a stale
- * `[ ]` would later fail the reopen/edit/delete write-back ({@link withCheckedMarker}).
+ * Stored as a fresh checked copy, deduped by {@link getTaskKey}. `checked` is
+ * set to match disk: these rows outlive the reindex, and the write-back guards
+ * on it, so a stale `false` would later fail a reopen/edit/delete.
  */
 export function markRecentlyCompleted(root: string | null, completed: readonly OpenTask[]): void {
   if (completed.length === 0) {
     return
   }
   adopt(root)
-  const byKey = new Map(tasks.map((task) => [taskKey(task), task]))
+  const byKey = new Map(tasks.map((task) => [getTaskKey(task), task]))
   for (const task of completed) {
-    byKey.set(taskKey(task), withCheckedMarker(task, true))
+    byKey.set(getTaskKey(task), withChecked(task, true))
   }
   tasks = [...byKey.values()]
   emit()
@@ -70,7 +69,7 @@ export function forgetRecentlyCompleted(root: string | null, keys: readonly stri
     return
   }
   const drop = new Set(keys)
-  const next = tasks.filter((task) => !drop.has(taskKey(task)))
+  const next = tasks.filter((task) => !drop.has(getTaskKey(task)))
   if (next.length !== tasks.length) {
     tasks = next
     emit()
@@ -79,26 +78,23 @@ export function forgetRecentlyCompleted(root: string | null, keys: readonly stri
 
 /** Whether a task is currently being kept visible by the session's struck set. */
 export function hasRecentlyCompleted(root: string | null, key: string): boolean {
-  return root === graphRoot && tasks.some((task) => taskKey(task) === key)
+  return root === graphRoot && tasks.some((task) => getTaskKey(task) === key)
 }
 
 /**
- * Apply a contextual note write's marker relocations to the session's struck
- * rows. Unlike the query caches, this singleton is not rebuilt by an open-task
- * refetch, so shifted completed rows must be re-keyed explicitly.
+ * Apply a note write's task moves to the session's struck rows. Unlike the
+ * query caches, this singleton is not rebuilt by an open-task refetch, so moved
+ * completed rows must be re-keyed explicitly.
  */
 export function relocateRecentlyCompleted(
   root: string | null,
   notePath: string,
-  changes: readonly TaskMarkerOffsetChange[],
+  moved: TaskMoves,
 ): void {
-  if (root !== graphRoot || changes.length === 0) {
+  if (root !== graphRoot || moved.length === 0) {
     return
   }
-  const next =
-    withRelocatedTaskMarkers(tasks, notePath, changes, {
-      matchUniqueRaw: true,
-    }) ?? tasks
+  const next = withRelocatedTasks(tasks, notePath, moved)
   if (next !== tasks) {
     tasks = next
     emit()
@@ -126,9 +122,9 @@ function withoutReopened(
   if (struck.length === 0 || open.length === 0) {
     return struck
   }
-  const liveByKey = new Map(open.map((row) => [taskKey(row), row]))
+  const liveByKey = new Map(open.map((row) => [getTaskKey(row), row]))
   const next = struck.filter((task) => {
-    const live = liveByKey.get(taskKey(task))
+    const live = liveByKey.get(getTaskKey(task))
     return live === undefined || live.updatedAt <= task.updatedAt
   })
   return next.length === struck.length ? struck : next

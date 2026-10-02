@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type { OpenTask } from '@reflect/core'
-import { resolveTaskEdit, taskContent, type TaskEditResult } from '@/lib/tasks/task-content.ts'
+import { resolveTaskEdit, type TaskEditResult } from '@/lib/tasks/task-content.ts'
 
 /** The two writes the finalizer itself performs; {@link TaskActions} satisfies it. */
 export interface TaskSheetWriteActions {
@@ -9,7 +9,7 @@ export interface TaskSheetWriteActions {
 }
 
 export interface TaskSheetFinalizerDeps {
-  /** The task's **live** row — writes relocate by its current raw. */
+  /** The task's **live** row; writes address it by its current locator. */
   task: OpenTask
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -55,7 +55,7 @@ export interface TaskSheetFinalizer {
  *   over the external change.
  * - The sheet stays mounted after closing (the exit animation needs content),
  *   so **reopening reseeds everything** — baseline and draft from the row's
- *   current raw (an action may have rewritten it), the handled flag, and the
+ *   current Markdown (an action may have rewritten it), the handled flag, and the
  *   caller's presentation via `onReseed` — else a visit after Complete/
  *   Convert/Open note would silently drop its edits on dismiss.
  * - **Abandoning** (dismissal gesture, or a route change unmounting the open
@@ -74,7 +74,7 @@ export function useTaskSheetFinalizer({
   onReseed,
   readDraft,
 }: TaskSheetFinalizerDeps): TaskSheetFinalizer {
-  const liveContent = taskContent(task.raw)
+  const liveContent = task.markdown
   const [initial, setInitial] = useState(liveContent)
   const [draft, setDraft] = useState(liveContent)
   // Set once an action button has already written/closed, so the dismissal

@@ -1,4 +1,4 @@
-import type { OpenTask } from '@reflect/core'
+import { renderInlineText, type OpenTask, type TaskSnapshot } from '@reflect/core'
 
 /**
  * The note a new task is added to (Return-to-add, V1): its path plus the context
@@ -12,20 +12,15 @@ export interface InsertTaskTarget {
   pinnedOrder: number | null
 }
 
-/** Build the optimistic open row for a just-written empty task. */
-export function insertedTaskRow(
-  target: InsertTaskTarget,
-  markerOffset: number,
-  breadcrumbs: readonly string[] = [],
-  raw = '[ ] ',
-): OpenTask {
+/** Build the optimistic open row for a just-written task from its persisted address. */
+export function createInsertedTaskRow(target: InsertTaskTarget, created: TaskSnapshot): OpenTask {
   return {
     notePath: target.notePath,
-    markerOffset,
-    raw,
-    checked: false,
-    text: '',
-    breadcrumbs,
+    astPath: created.astPath,
+    markdown: created.markdown,
+    checked: created.checked,
+    text: renderInlineText(created.markdown),
+    breadcrumbs: created.breadcrumbs.map((label) => renderInlineText(label)),
     noteTitle: target.noteTitle,
     dueDate: null,
     dailyDate: target.dailyDate,

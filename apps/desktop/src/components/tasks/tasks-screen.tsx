@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input.tsx'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
-import { sameTask, taskKey } from '@/lib/tasks/task-identity.ts'
+import { isSameTask, getTaskKey } from '@/lib/tasks/task-identity.ts'
 import type { InsertTaskTarget } from '@/lib/tasks/task-insert-target.ts'
 import { scrollTaskIntoView } from '@/lib/tasks/task-navigation.ts'
 import { useTaskActions } from '@/lib/tasks/use-task-actions.ts'
@@ -117,9 +117,9 @@ export function TasksScreen(): ReactElement {
 
   // The flat, render-order list of tasks the selection and its shortcuts act on.
   const orderedTasks = useMemo(() => groups.flatMap((group) => group.tasks), [groups])
-  const orderedKeys = useMemo(() => orderedTasks.map(taskKey), [orderedTasks])
+  const orderedKeys = useMemo(() => orderedTasks.map(getTaskKey), [orderedTasks])
   const tasksByKey = useMemo(
-    () => new Map(orderedTasks.map((task) => [taskKey(task), task])),
+    () => new Map(orderedTasks.map((task) => [getTaskKey(task), task])),
     [orderedTasks],
   )
   const selection = useTaskSelection(orderedKeys)
@@ -151,7 +151,7 @@ export function TasksScreen(): ReactElement {
       setQuery('')
       void actions.insert(target).then((created) => {
         if (created !== null) {
-          const key = taskKey(created)
+          const key = getTaskKey(created)
           selection.clickSelect(key, { metaKey: false, ctrlKey: false, shiftKey: false })
           scrollToKey(key)
         }
@@ -172,7 +172,7 @@ export function TasksScreen(): ReactElement {
   const onSelectionCheckboxToggle = useCallback(
     (task: OpenTask) => {
       const tasks = selectedTasks()
-      if (tasks.length <= 1 || !tasks.some((selectedTask) => sameTask(selectedTask, task))) {
+      if (tasks.length <= 1 || !tasks.some((selectedTask) => isSameTask(selectedTask, task))) {
         actions.checkboxToggle(task)
         return
       }

@@ -4,7 +4,7 @@ import { continueTaskInContext, type ContinuedTaskInContext } from '@/lib/note-t
 import { mutationKeys } from '@/lib/query-client.ts'
 import { relocateRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
 import { withEditedTask, withoutTasks } from '@/lib/tasks/task-cache.ts'
-import { insertedTaskRow } from '@/lib/tasks/task-insert-target.ts'
+import { createInsertedTaskRow } from '@/lib/tasks/task-insert-target.ts'
 import { insertTargetForTask } from '@/lib/tasks/task-navigation.ts'
 import { useTaskCacheWriter } from '@/lib/tasks/use-task-cache.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -26,9 +26,9 @@ export interface TaskContextInsert {
 }
 
 /**
- * Context-preserving continuous entry for grouped Tasks rows. The disk transform
- * and optimistic cache update stay atomic from the caller's perspective, including
- * replacing a cleared row and displacing a stale offset collision until reindexing.
+ * Context-preserving continuous entry for grouped Tasks rows. The note write
+ * and optimistic cache update stay atomic from the caller's perspective, and the
+ * rows the write moved are re-addressed from its result until reindexing.
  */
 export function useTaskContextInsert(): TaskContextInsert {
   const { graph } = useGraph()
@@ -63,14 +63,9 @@ export function useTaskContextInsert(): TaskContextInsert {
         content,
         generation,
       })
-      cache.relocate(task.notePath, result.offsetChanges)
-      relocateRecentlyCompleted(root, task.notePath, result.offsetChanges)
-      const created = insertedTaskRow(
-        insertTargetForTask(task),
-        result.created.markerOffset,
-        task.breadcrumbs,
-        result.created.raw,
-      )
+      cache.relocate(task.notePath, result.moved)
+      relocateRecentlyCompleted(root, task.notePath, result.moved)
+      const created = createInsertedTaskRow(insertTargetForTask(task), result.created)
       cache.addOpen(created)
       return created
     },

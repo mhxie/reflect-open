@@ -87,6 +87,8 @@ Step-by-step walkthroughs for the most common kinds of change:
   defaults-by-construction, the settings screen. (No Rust involved.)
 - [Editor architecture](docs/contributing/editor-architecture.md) — the
   session/adapter split, the save loop, and where new editor code goes.
+- [Upgrading dependencies](docs/contributing/upgrading-dependencies.md) —
+  age gates, manifests, local checks, draft PRs.
 
 ## "Plan NN" in comments?
 

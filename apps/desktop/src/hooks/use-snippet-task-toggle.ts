@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { errorMessage, isLocalOnlyPath, type SnippetTask } from '@reflect/core'
+import { errorMessage, isLocalOnlyPath, type SnippetTask, type TaskLocator } from '@reflect/core'
 import type { TaskClickHandler, TaskClickPayload } from '@meowdown/react'
 import { toggleTask } from '@/lib/note-task.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -9,7 +9,8 @@ import { useGraph } from '@/providers/graph-provider.tsx'
 
 interface SnippetToggleInput {
   notePath: string
-  task: SnippetTask
+  locator: TaskLocator
+  checked: boolean
   generation: number
 }
 
@@ -34,8 +35,8 @@ function anchorFor(tasks: readonly SnippetTask[], payload: TaskClickPayload): Sn
  * context. Routes through {@link toggleTask}: the same session-aware,
  * per-note-serialized, staleness-guarded path the Tasks view uses, so an open
  * source note keeps its live buffer and a drifted note refuses instead of
- * toggling the wrong line. Only round `+ [ ]` Reflect tasks toggle (V1's
- * contextHtml checkboxes were Reflect tasks); a square GFM box is plain
+ * toggling the wrong task. Only round `+ [ ]` Reflect tasks carry a locator
+ * (V1's contextHtml checkboxes were Reflect tasks); a square GFM box is plain
  * markdown, outside the tasks projection, and stays read-only. There is no
  * optimistic flip: the write reindexes the source, which refreshes the
  * backlinks query and re-renders the snippet with the new marker.
@@ -48,10 +49,10 @@ export function useSnippetTaskToggle(
 
   const mutation = useMutation({
     mutationKey: mutationKeys.tasks.snippetToggle(graph?.root),
-    mutationFn: ({ notePath: path, task, generation }: SnippetToggleInput) =>
-      toggleTask({ notePath: path, markerOffset: task.markerOffset, raw: task.raw }, generation),
-    onError: (cause, { task }) => {
-      startOperation(task.checked ? 'Reopening task' : 'Completing task').fail(errorMessage(cause))
+    mutationFn: ({ notePath: path, locator, generation }: SnippetToggleInput) =>
+      toggleTask({ notePath: path, ...locator }, generation),
+    onError: (cause, { checked }) => {
+      startOperation(checked ? 'Reopening task' : 'Completing task').fail(errorMessage(cause))
     },
   })
   const { mutate, isPending } = mutation
@@ -67,14 +68,16 @@ export function useSnippetTaskToggle(
         startOperation('Updating task').fail('The note has changed — try again in a moment.')
         return
       }
-      if (!anchor.round) {
+      if (anchor.locator === null) {
         return
       }
-      mutate({ notePath, task: anchor, generation })
+      mutate({ notePath, locator: anchor.locator, checked: anchor.checked, generation })
     },
     [notePath, tasks, generation, isPending, mutate],
   )
 
   // A local-only source note is read-only: its checkboxes stay inert.
-  return tasks.some((task) => task.round) && !isLocalOnlyPath(notePath) ? handler : undefined
+  return tasks.some((task) => task.locator !== null) && !isLocalOnlyPath(notePath)
+    ? handler
+    : undefined
 }

@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version that rebuilds the FTS table with CJK pairs', () => {
-    expect(PROJECTION_VERSION).toBe(21)
+  it('carries the projection version that rebuilds tasks by AST path', () => {
+    expect(PROJECTION_VERSION).toBe(22)
   })
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {
@@ -291,22 +291,8 @@ describe('buildIndexedNote', () => {
       source,
     })
     expect(indexed.tasks).toEqual([
-      {
-        markerOffset: source.indexOf('[ ]'),
-        text: 'buy milk',
-        breadcrumbs: [],
-        raw: '[ ] buy milk',
-        checked: false,
-        dueDate: null,
-      },
-      {
-        markerOffset: source.indexOf('[x] call'),
-        text: 'call mum',
-        breadcrumbs: [],
-        raw: '[x] call mum',
-        checked: true,
-        dueDate: null,
-      },
+      { astPath: '[1]', markdown: 'buy milk', breadcrumbs: [], checked: false, dueDate: null },
+      { astPath: '[5]', markdown: 'call mum', breadcrumbs: [], checked: true, dueDate: null },
     ])
   })
 

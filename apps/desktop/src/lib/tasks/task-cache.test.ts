@@ -1,18 +1,27 @@
 import { describe, expect, it } from 'vitest'
+import type { TaskSnapshot } from '@reflect/core'
 import { makeOpenTask as task } from './open-task-fixture.ts'
 import {
   asCompleted,
   asOpen,
-  taskRawWithContent,
-  withCheckedMarker,
+  withChecked,
   withEditedTask,
-  withRelocatedTaskMarkers,
   withoutTasks,
+  withRelocatedTasks,
 } from './task-cache.ts'
 
-const a = task({ markerOffset: 1, text: 'a' })
-const b = task({ markerOffset: 2, text: 'b' })
-const c = task({ markerOffset: 3, text: 'c' })
+const a = task({ astPath: [1], text: 'a' })
+const b = task({ astPath: [2], text: 'b' })
+const c = task({ astPath: [3], text: 'c' })
+
+function snapshot(
+  astPath: number[],
+  markdown: string,
+  checked = false,
+  breadcrumbs: string[] = [],
+): TaskSnapshot {
+  return { astPath, markdown, breadcrumbs, checked }
+}
 
 describe('withoutTasks', () => {
   it('drops every matching row and keeps the rest', () => {
@@ -24,78 +33,96 @@ describe('withoutTasks', () => {
   })
 })
 
-describe('withRelocatedTaskMarkers', () => {
+describe('withRelocatedTasks', () => {
   it('moves and removes same-note rows while preserving unrelated rows', () => {
-    const moved = task({ notePath: 'a.md', markerOffset: 20, raw: '[ ] moved' })
-    const removed = task({ notePath: 'a.md', markerOffset: 40, raw: '[ ] removed' })
-    const unrelated = task({ notePath: 'b.md', markerOffset: 20, raw: '[ ] other' })
+    const moved = task({ notePath: 'a.md', astPath: [0, 2], markdown: 'moved' })
+    const removed = task({ notePath: 'a.md', astPath: [0, 4], markdown: 'removed' })
+    const unrelated = task({ notePath: 'b.md', astPath: [0, 2], markdown: 'other' })
 
     expect(
-      withRelocatedTaskMarkers([moved, removed, unrelated], 'a.md', [
-        {
-          from: 20,
-          fromRaw: '[ ] moved',
-          marker: { markerOffset: 36, raw: '[ ] moved' },
-        },
-        { from: 40, fromRaw: '[ ] removed', marker: null },
+      withRelocatedTasks([moved, removed, unrelated], 'a.md', [
+        { from: snapshot([0, 2], 'moved'), to: snapshot([0, 3], 'moved') },
+        { from: snapshot([0, 4], 'removed'), to: null },
       ]),
-    ).toEqual([{ ...moved, markerOffset: 36 }, unrelated])
+    ).toEqual([{ ...moved, astPath: [0, 3] }, unrelated])
   })
 
-  it('returns the same list when every matched marker is unchanged', () => {
-    const rows = [task({ notePath: 'a.md', markerOffset: 20, raw: '[ ] same' })]
+  it('returns the same list when every matched task is unchanged', () => {
+    const rows = [task({ notePath: 'a.md', astPath: [2], markdown: 'same' })]
     expect(
-      withRelocatedTaskMarkers(rows, 'a.md', [
-        {
-          from: 20,
-          fromRaw: '[ ] same',
-          marker: { markerOffset: 20, raw: '[ ] same' },
-        },
+      withRelocatedTasks(rows, 'a.md', [
+        { from: snapshot([2], 'same'), to: snapshot([2], 'same') },
       ]),
     ).toBe(rows)
   })
 
-  it('does not mistake an optimistically edited anchor for another source row', () => {
-    const editedAnchor = task({
-      notePath: 'a.md',
-      markerOffset: 2,
-      raw: '[ ] duplicate',
-    })
-    const rows = [editedAnchor]
-
+  it('refreshes text and due date when the persisted Markdown changed', () => {
+    const rows = [task({ notePath: 'a.md', astPath: [2], markdown: 'old' })]
     expect(
-      withRelocatedTaskMarkers(rows, 'a.md', [
-        {
-          from: 2,
-          fromRaw: '[ ] original',
-          marker: { markerOffset: 2, raw: '[ ] duplicate' },
-        },
-        {
-          from: 40,
-          fromRaw: '[ ] duplicate',
-          marker: { markerOffset: 56, raw: '[ ] duplicate' },
-        },
+      withRelocatedTasks(rows, 'a.md', [
+        { from: snapshot([2], 'old'), to: snapshot([2], 'edited [[2026-07-01]]', true) },
       ]),
-    ).toBe(rows)
+    ).toEqual([
+      {
+        ...rows[0],
+        markdown: 'edited [[2026-07-01]]',
+        text: 'edited 2026-07-01',
+        checked: true,
+        dueDate: '2026-07-01',
+      },
+    ])
+  })
+
+  it('follows a row whose indexed path is stale by its content', () => {
+    // Indexed before a paragraph was added above: `a` is now at [1], where `b` was.
+    const rows = [
+      task({ notePath: 'a.md', astPath: [0], markdown: 'a' }),
+      task({ notePath: 'a.md', astPath: [1], markdown: 'b' }),
+    ]
+    expect(
+      withRelocatedTasks(rows, 'a.md', [
+        { from: snapshot([1], 'a'), to: snapshot([1], 'a', true) },
+        { from: snapshot([2], 'b'), to: snapshot([2], 'b') },
+      ]),
+    ).toEqual([
+      { ...rows[0], astPath: [1], checked: true },
+      { ...rows[1], astPath: [2] },
+    ])
+  })
+
+  it('renders the breadcrumbs the write left the task under', () => {
+    const rows = [task({ notePath: 'a.md', astPath: [0, 1], markdown: 'x', breadcrumbs: ['Old'] })]
+    expect(
+      withRelocatedTasks(rows, 'a.md', [
+        { from: snapshot([0, 1], 'x', false, ['Old']), to: snapshot([1], 'x', false, ['[[New]]']) },
+      ]),
+    ).toEqual([{ ...rows[0], astPath: [1], breadcrumbs: ['New'] }])
+  })
+
+  it('leaves rows the write did not know about alone', () => {
+    const rows = [task({ notePath: 'a.md', astPath: [9], markdown: 'new' })]
+    expect(withRelocatedTasks(rows, 'a.md', [{ from: snapshot([0], 'other'), to: null }])).toBe(
+      rows,
+    )
+    expect(withRelocatedTasks(rows, 'a.md', [])).toBe(rows)
+    expect(
+      withRelocatedTasks(undefined, 'a.md', [{ from: snapshot([9], 'new'), to: null }]),
+    ).toBeUndefined()
   })
 })
 
-describe('withCheckedMarker', () => {
-  it('flips the marker in raw to match the new checked state', () => {
-    expect(withCheckedMarker(a, true)).toEqual({ ...a, checked: true, raw: '[x] a' })
-    expect(withCheckedMarker({ ...a, checked: true, raw: '[x] a' }, false)).toEqual({
-      ...a,
-      checked: false,
-      raw: '[ ] a',
-    })
+describe('withChecked', () => {
+  it('sets the checked state, returning the same row when it already matches', () => {
+    expect(withChecked(a, true)).toEqual({ ...a, checked: true })
+    expect(withChecked(a, false)).toBe(a)
   })
 })
 
 describe('asCompleted', () => {
-  it('prepends the tasks as checked (raw flipped to [x]), de-duping any already present', () => {
-    const existingChecked = withCheckedMarker(b, true)
+  it('prepends the tasks as checked, de-duping any already present', () => {
+    const existingChecked = withChecked(b, true)
     const result = asCompleted([existingChecked], [a, b])
-    expect(result).toEqual([withCheckedMarker(a, true), withCheckedMarker(b, true)])
+    expect(result).toEqual([withChecked(a, true), withChecked(b, true)])
   })
 
   it('is a no-op when the completed list is not loaded', () => {
@@ -105,54 +132,34 @@ describe('asCompleted', () => {
 
 describe('asOpen', () => {
   it('appends the tasks as unchecked, de-duping any already present', () => {
-    const checked = withCheckedMarker(a, true)
+    const checked = withChecked(a, true)
     const result = asOpen([b, checked], [checked])
     expect(result).toEqual([b, a])
   })
 
   it('materializes an undefined open list with the reopened rows', () => {
-    expect(asOpen(undefined, [withCheckedMarker(a, true)])).toEqual([a])
-  })
-})
-
-describe('taskRawWithContent', () => {
-  it('keeps an open marker', () => {
-    expect(taskRawWithContent(task({ raw: '[ ] old' }), 'buy oat milk')).toBe('[ ] buy oat milk')
-  })
-
-  it('keeps a checked marker', () => {
-    expect(taskRawWithContent(task({ checked: true, raw: '[x] old' }), 'really done')).toBe(
-      '[x] really done',
-    )
-  })
-
-  it('preserves the indexed line’s exact marker casing (GitHub `[X]`)', () => {
-    expect(taskRawWithContent(task({ checked: true, raw: '[X] old' }), 'edited')).toBe('[X] edited')
-  })
-
-  it('preserves a CRLF raw line’s carriage return', () => {
-    expect(taskRawWithContent(task({ raw: '[ ] old\r' }), 'edited')).toBe('[ ] edited\r')
-  })
-
-  it('clears to a bare marker when content is empty', () => {
-    expect(taskRawWithContent(task({ raw: '[ ] old' }), '')).toBe('[ ]')
+    expect(asOpen(undefined, [withChecked(a, true)])).toEqual([a])
   })
 })
 
 describe('withEditedTask', () => {
-  it('rewrites the matching row’s text and raw, leaving others', () => {
+  it('rewrites the matching row’s Markdown and text, leaving others', () => {
     expect(withEditedTask([a, b], b, 'edited')).toEqual([
       a,
-      { ...b, raw: '[ ] edited', text: 'edited' },
+      { ...b, markdown: 'edited', text: 'edited' },
     ])
   })
 
-  it('stores plain text (markdown stripped) while raw keeps the markup', () => {
+  it('stores plain text (markdown stripped) while markdown keeps the markup', () => {
     const [edited] = withEditedTask([a], a, 'see [[Foo]] now') ?? []
-    expect(edited?.raw).toBe('[ ] see [[Foo]] now')
+    expect(edited?.markdown).toBe('see [[Foo]] now')
     // `text` drives search + the row label, so it must be the plain rendering.
-    expect(edited?.text).not.toContain('[[')
-    expect(edited?.text).toContain('Foo')
+    expect(edited?.text).toBe('see Foo now')
+  })
+
+  it('keeps the row’s due date until the reindex re-derives it', () => {
+    const [edited] = withEditedTask([a], a, 'ship [[2026-07-01]]') ?? []
+    expect(edited?.dueDate).toBeNull()
   })
 
   it('leaves an undefined list untouched', () => {

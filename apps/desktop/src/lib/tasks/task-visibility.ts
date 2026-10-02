@@ -1,5 +1,5 @@
 import { groupTasks, type OpenTask, type TaskGroup } from '@reflect/core'
-import { sameTask, taskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey, isSameTask } from '@/lib/tasks/task-identity.ts'
 import type { TaskFilters } from '@/lib/tasks/task-filters.ts'
 
 /** Keep only the groups the active filters allow (V1's per-bucket toggles). */
@@ -33,7 +33,7 @@ export interface TaskListSources {
 }
 
 function taskMatchesNeedle(task: OpenTask, needle: string): boolean {
-  return [task.text, task.noteTitle, ...task.breadcrumbs].some((text) =>
+  return [task.text, task.markdown, task.noteTitle, ...task.breadcrumbs].some((text) =>
     text.toLowerCase().includes(needle),
   )
 }
@@ -71,12 +71,12 @@ export function composeVisibleTaskGroups({
     ? [
         ...(completed ?? []),
         ...recentlyCompleted.filter(
-          (task) => !(completed ?? []).some((row) => sameTask(row, task)),
+          (task) => !(completed ?? []).some((row) => isSameTask(row, task)),
         ),
       ]
     : recentlyCompleted
-  const completedKeys = new Set(completedRows.map(taskKey))
-  const all = [...open.filter((task) => !completedKeys.has(taskKey(task))), ...completedRows]
+  const completedKeys = new Set(completedRows.map(getTaskKey))
+  const all = [...open.filter((task) => !completedKeys.has(getTaskKey(task))), ...completedRows]
   const matched = needle ? all.filter((task) => taskMatchesNeedle(task, needle)) : all
   return visibleGroups(groupTasks(matched, today), filters)
 }
