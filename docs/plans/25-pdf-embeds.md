@@ -88,8 +88,9 @@ Wiki embeds need no API change: Reflect's `resolveWikiEmbed` returns
 
 Clicks need no API change. `image-click.ts` resolves the preview's `<img>`, and the
 page images are `<img>`s, so `onImageClick` fires with the markdown `src`; Reflect
-ignores a mouse click on a PDF (selection only) and opens it on a `KeyboardEvent`
-(`Enter` on the selected embed). ProseMirror reports only single clicks to
+ignores a mouse click on a PDF (meowdown consumes it, so it neither moves the caret
+nor selects the embed; arrow keys select it, as with images) and opens it on a
+`KeyboardEvent` (`Enter` on the selected embed). ProseMirror reports only single clicks to
 `handleClick`, so a double-click is handled by the embed element's own `dblclick`
 listener.
 
@@ -153,7 +154,8 @@ iOS build, the Linux CI build, and `cargo test --workspace` green.
   1920, capped), so dragging the resize handle does not re-render continuously.
   The frontend requests `display width × devicePixelRatio`.
 - **Cache:** rendered PNGs under `.reflect/cache/pdf-pages/`, keyed by
-  blake3(path, size, mtime) + page + width, only for buckets actually requested.
+  the first 16 bytes of SHA-256 over (format version, path, size, mtime) + page +
+  width, only for buckets actually requested.
   Written through `resolve_write` like the transcript cache (`fs/mod.rs:797`), so a
   symlinked cache directory cannot redirect writes into a local-only raw store.
   Bounded: a total size cap with a least-recently-used sweep at graph open, next to
@@ -195,8 +197,9 @@ iOS build, the Linux CI build, and `cargo test --workspace` green.
   appears on hover.
 - `note-editor.tsx`: pass `resolveEmbed` and `shouldEmbedFile` (images + PDFs).
   `handleImageClick` branches on a PDF `src` *before* calling `resolveImageUrl` (which
-  now returns `undefined` for PDFs, and the handler bails on `undefined`): a
-  double-click or `Enter` goes to `openAsset`, a single click is ignored.
+  now returns `undefined` for PDFs, and the handler bails on `undefined`):
+  `Enter` goes to `openAsset` (a double-click opens through the embed's own
+  listener), a single click is ignored.
 - `lib/attach-files.ts`: build markdown with Meowdown's `buildFileMarkdown`, embedding
   PDFs; other picked files keep their `[name](assets/…)` link as before.
 - `editor/formatting-toolbar-bridge.tsx`: the toolbar's attach button uses the same

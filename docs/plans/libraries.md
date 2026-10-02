@@ -44,7 +44,7 @@ and MIT-licensed, so there is no copyleft constraint.
 | SQLite (bundled, FTS5) | `rusqlite` (feature `bundled`) | 04 |
 | Vector search | `sqlite-vec` | 09 |
 | File watching | `notify` + `notify-debouncer-full` | 02 / 04 |
-| Content hashing (change detection) | `blake3` | 04 |
+| Content hashing (change detection) | SHA-256 (`crypto.subtle` in TS, `sha2` in Rust) | 04 |
 | Atomic writes (temp + rename) | `tempfile` | 02 |
 | Delete to OS trash | `trash` | 02 |
 | Note IDs (ULID) | `ulid` | 02 |

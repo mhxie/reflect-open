@@ -430,9 +430,9 @@ export function NoteEditor({
     // the keyboard) under the opening lightbox.
     ({ src, alt, element, event }) => {
       if (isPdfAttachmentPath(src)) {
-        // A click on a PDF embed's page only selects it (the box scrolls).
-        // Enter on the selected embed opens the PDF in the default app, as
-        // a double-click does through the embed itself.
+        // A click on a PDF embed's page does nothing (the box scrolls).
+        // Enter on the embed, selected with the arrow keys, opens the PDF in
+        // the default app, as a double-click does through the embed itself.
         if (event instanceof KeyboardEvent) {
           const openPath = resolveAssetOpenPathRef.current?.(src) ?? null
           if (openPath !== null) {
