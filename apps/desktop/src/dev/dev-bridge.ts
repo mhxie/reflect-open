@@ -257,6 +257,10 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         return null
       case 'asset_reveal':
         return null
+      // Pages are rasterized natively on macOS; the browser preview shows the
+      // "can't preview" card.
+      case 'pdf_info':
+        throw new ReflectError('unsupported', 'PDF previews need the macOS app')
 
       case 'db_query': {
         const { sql, params } = dbQueryArgsSchema.parse(args)

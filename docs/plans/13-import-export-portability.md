@@ -27,9 +27,11 @@ it is not an import and does not rearrange its files.
 - Eligible Markdown can live at the graph root or in visible nested folders. Reflect
   keeps adopted paths intact. Hidden trees, `assets/`/`audio-memos/`, well-known
   dependency directories (`node_modules` and friends, plus anything stamped with a
-  `CACHEDIR.TAG`), and paths matched by the vault's own `.gitignore` or a
-  `.reflectignore` file are excluded from discovery; the scan reports a skipped
-  count so an excluded file is always explainable.
+  `CACHEDIR.TAG`), and paths matched by a `.reflectignore` file are excluded from
+  discovery; the scan reports a skipped count so an excluded file is always
+  explainable. The vault's `.gitignore` is not consulted: it decides what Git
+  syncs, not what Reflect shows, so a file kept out of the repository still
+  lists and renders locally (Plan 25).
 - Reflect-created regular notes live in `notes/`, daily notes in `daily/`, and pasted
   files in `assets/`; those defaults do not constrain files created by other tools.
 - `.reflect/` is excluded from the portability contract. It is a rebuildable local

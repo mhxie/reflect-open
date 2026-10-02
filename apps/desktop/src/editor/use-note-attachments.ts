@@ -3,6 +3,8 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
 import {
   isLocalOnlyPath,
+  isPdfAttachmentPath,
+  pdfPageWidthBucket,
   resolveAttachmentLink,
   resolveWikiEmbedTarget,
   type AttachmentCatalog,
@@ -20,8 +22,9 @@ export interface NoteAttachments {
   /**
    * A displayable URL for an image source: http(s) as-is (never for a note in
    * a local-only folder, which must not reach the network), a local
-   * attachment as a generation-pinned `reflect-asset://` URL. Answers
-   * synchronously once the catalog is loaded and waits for it before that.
+   * attachment as a generation-pinned `reflect-asset://` URL, a PDF as its
+   * first page. Answers synchronously once the catalog is loaded and waits
+   * for it before that.
    */
   resolveImageUrl: ImageUrlResolver
   /** Classifies an Obsidian `![[target]]` embed. */
@@ -33,9 +36,15 @@ export function attachmentUrl(generation: number, path: string): string {
   return convertFileSrc(`${generation}/${path}`, 'reflect-asset')
 }
 
+/** The `reflect-asset://` URL of a PDF page rendered at a width bucket. */
+export function pdfPageUrl(generation: number, path: string, page: number, width: number): string {
+  return `${attachmentUrl(generation, path)}?reflect-preview=pdf-page&page=${page}&width=${width}`
+}
+
 /**
- * An attachment renders as an image or a file pill, a note as a link chip to
- * it (note content is never transcluded), and an unsafe path stays literal.
+ * An attachment renders as an image, a PDF preview (through the image view's
+ * `resolveEmbed`), or a file pill, a note as a link chip to it (note content
+ * is never transcluded), and an unsafe path stays literal.
  */
 const resolveWikiEmbed: WikiEmbedResolver = ({ target }) => {
   const embed = resolveWikiEmbedTarget(target)
@@ -45,9 +54,9 @@ const resolveWikiEmbed: WikiEmbedResolver = ({ target }) => {
   if (embed.kind === 'note') {
     return { kind: 'note' }
   }
-  return embed.kind === 'image'
-    ? { kind: 'image', src: embed.source }
-    : { kind: 'file', href: embed.source }
+  return embed.kind === 'file'
+    ? { kind: 'file', href: embed.source }
+    : { kind: 'image', src: embed.source }
 }
 
 /** Attachment resolution for rendering `notePath` in graph session `generation`. */
@@ -68,9 +77,17 @@ export function createNoteAttachments(
       if (generation === null) {
         return
       }
+      // The editor previews a PDF's pages through `resolveEmbed` first; a
+      // read-only preview shows its first page at the smallest width. Its
+      // bytes never reach an <img>.
       const url = (catalog: AttachmentCatalog | null): string | undefined => {
         const path = resolvePath(src, catalog)
-        return path === null ? undefined : attachmentUrl(generation, path)
+        if (path === null) {
+          return
+        }
+        return isPdfAttachmentPath(path)
+          ? pdfPageUrl(generation, path, 1, pdfPageWidthBucket(0))
+          : attachmentUrl(generation, path)
       }
       const catalog = peekAttachmentCatalog(generation)
       return catalog === null

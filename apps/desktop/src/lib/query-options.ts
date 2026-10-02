@@ -8,6 +8,7 @@ import {
   listChatConversations,
   listTemplates,
   loadSettings,
+  pdfInfo,
   saveSettings,
 } from '@reflect/core'
 import { mutationKeys, mutationScopeIds, queryKeys } from '@/lib/query-client.ts'
@@ -55,6 +56,24 @@ export function createAttachmentCatalogQueryOptions(generation: number) {
     queryKey: queryKeys.attachments.catalog(generation),
     queryFn: async () => createAttachmentCatalog(await listAttachments(generation)),
     staleTime: Infinity,
+  })
+}
+
+/**
+ * A PDF's page sizes for its inline preview, keyed by the catalog size so a
+ * rewritten file reads again; `resetPdfInfo` covers a same-size rewrite. A
+ * failure is not retried: the preview shows why instead.
+ */
+export function createPdfInfoQueryOptions(
+  generation: number,
+  path: string,
+  size: number | undefined,
+) {
+  return queryOptions({
+    queryKey: queryKeys.pdf.info(generation, path, size),
+    queryFn: () => pdfInfo(path, generation),
+    staleTime: Infinity,
+    retry: false,
   })
 }
 

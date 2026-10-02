@@ -254,11 +254,17 @@ function assertSerializable(document: MarkdownDocument): void {
     return
   }
   const reparsed = parseMarkdownAst(serializeMarkdownAst(document))
-  if (JSON.stringify(reparsed) !== JSON.stringify(document)) {
+  if (structureOf(reparsed) !== structureOf(document)) {
     throw new NoteNotSerializableError(
       'This note cannot be rewritten faithfully. Edit the task in the note itself.',
     )
   }
+}
+
+/** A document's blocks without their source offsets, which shift whenever
+ * serializing normalizes layout or line endings. */
+function structureOf(document: MarkdownDocument): string {
+  return JSON.stringify(document, (key, value: unknown) => (key === 'position' ? undefined : value))
 }
 
 function hasSameContent(entry: TaskLocator, locator: TaskLocator): boolean {

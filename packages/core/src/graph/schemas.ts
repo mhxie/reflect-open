@@ -113,3 +113,16 @@ export const graphImportProgressSchema = z.object({
   total: z.number(),
 })
 export type GraphImportProgress = z.infer<typeof graphImportProgressSchema>
+
+/** One PDF page's size in points, crop box with rotation applied (Plan 25). */
+export const pdfPageSizeSchema = z.object({
+  width: z.number().positive(),
+  height: z.number().positive(),
+})
+export type PdfPageSize = z.infer<typeof pdfPageSizeSchema>
+
+/** A PDF's page sizes in document order, as `pdf_info` reports them. */
+export const pdfInfoSchema = z.object({
+  pages: z.array(pdfPageSizeSchema).min(1),
+})
+export type PdfInfo = z.infer<typeof pdfInfoSchema>

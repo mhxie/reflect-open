@@ -4,6 +4,7 @@ import { parseNote } from '../markdown/extract.ts'
 import {
   createAttachmentCatalog,
   isImageAttachmentPath,
+  isPdfAttachmentPath,
   resolveAttachmentLink,
   resolveWikiEmbedTarget,
   type AttachmentCatalog,
@@ -140,8 +141,13 @@ describe('resolveWikiEmbedTarget', () => {
     )
   })
 
-  it('renders non-image attachments as files and note targets as notes', () => {
-    expect(resolveWikiEmbedTarget('report.pdf')).toEqual({ kind: 'file', source: 'report.pdf' })
+  it('renders PDFs as previews, other attachments as files, and note targets as notes', () => {
+    expect(resolveWikiEmbedTarget('report.pdf')).toEqual({ kind: 'pdf', source: 'report.pdf' })
+    expect(resolveWikiEmbedTarget('Papers/Report.PDF')).toEqual({
+      kind: 'pdf',
+      source: '/Papers/Report.PDF',
+    })
+    expect(resolveWikiEmbedTarget('notes.docx')).toEqual({ kind: 'file', source: 'notes.docx' })
     expect(resolveWikiEmbedTarget('Deep Work#Rules')).toEqual({ kind: 'note' })
     expect(resolveWikiEmbedTarget('Projects/Garden redesign')).toEqual({ kind: 'note' })
   })
@@ -149,6 +155,17 @@ describe('resolveWikiEmbedTarget', () => {
   it('returns null for attachments at unsafe paths', () => {
     expect(resolveWikiEmbedTarget('../outside.png')).toBeNull()
     expect(resolveWikiEmbedTarget('.obsidian/icon.png')).toBeNull()
+  })
+})
+
+describe('isPdfAttachmentPath', () => {
+  it('matches the .pdf extension in any case, ignoring a query or fragment', () => {
+    expect(isPdfAttachmentPath('assets/report.pdf')).toBe(true)
+    expect(isPdfAttachmentPath('Report.PDF')).toBe(true)
+    expect(isPdfAttachmentPath('assets/report.pdf#page=3')).toBe(true)
+    expect(isPdfAttachmentPath('assets/report.pdf?v=2')).toBe(true)
+    expect(isPdfAttachmentPath('assets/report.pdf.png')).toBe(false)
+    expect(isPdfAttachmentPath('assets/pdf')).toBe(false)
   })
 })
 
