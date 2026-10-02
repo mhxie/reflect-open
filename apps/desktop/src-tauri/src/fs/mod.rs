@@ -70,6 +70,7 @@ pub(crate) use self::resolve::resolve as resolve_in_graph;
 /// The sharing guard, shared with on-device transcription: its transcript
 /// lands in an ordinary note, so a recording in a local-only folder is
 /// never read.
+#[cfg(target_os = "macos")]
 pub(crate) use self::resolve::resolve_shareable as resolve_shareable_in_graph;
 /// The write-side guard, shared with the Git merge: a path the filesystem
 /// resolves into a local-only folder (or out of the graph) is never written.

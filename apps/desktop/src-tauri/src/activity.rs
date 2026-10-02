@@ -50,9 +50,12 @@ pub fn activity_end(token: String, state: State<'_, ActivityState>) {
     }
 }
 
-/// An activity Rust code holds for as long as the guard lives.
+/// An activity Rust code holds for as long as the guard lives (the macOS
+/// recorder's).
+#[cfg(target_os = "macos")]
 pub(crate) struct ActivityGuard(Option<platform::Activity>);
 
+#[cfg(target_os = "macos")]
 impl ActivityGuard {
     /// Something is being recorded: hold off App Nap and idle sleep.
     pub(crate) fn recording() -> Self {
@@ -65,6 +68,7 @@ impl ActivityGuard {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for ActivityGuard {
     fn drop(&mut self) {
         if let Some(activity) = self.0.take() {

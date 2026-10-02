@@ -512,8 +512,13 @@ mod tests {
         for variant in variants {
             if !folds_onto_existing(&real.root, variant) {
                 // Control: where the filesystem keeps the spellings apart the
-                // variant is a different, ordinary folder.
-                assert!(resolve_write(&real.root, variant, Some(&real.folders)).is_ok());
+                // variant is a different, ordinary folder, unless its name
+                // matches lexically (ASCII case).
+                assert_eq!(
+                    resolve_write(&real.root, variant, Some(&real.folders)).is_ok(),
+                    !real.folders.covers(variant),
+                    "control write through {variant:?}"
+                );
                 continue;
             }
             assert!(

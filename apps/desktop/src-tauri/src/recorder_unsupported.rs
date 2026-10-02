@@ -7,8 +7,10 @@ use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult};
 
+// Braced, not a unit struct, so `lib.rs` builds it with `::default()` like
+// the macOS state.
 #[derive(Default)]
-pub struct RecorderState;
+pub struct RecorderState {}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

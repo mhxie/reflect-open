@@ -8,8 +8,10 @@ use tauri::State;
 use crate::error::{AppError, AppResult};
 use crate::fs::GraphState;
 
+// Braced, not a unit struct, so `lib.rs` builds it with `::default()` like
+// the macOS state.
 #[derive(Default)]
-pub struct LocalTranscriptionState;
+pub struct LocalTranscriptionState {}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status")]
