@@ -232,6 +232,18 @@ impl ReadTarget {
     pub(crate) fn path(&self) -> PathBuf {
         self.base.join(&self.rest)
     }
+
+    /// Open the file for reading. A local-only entry opens from its
+    /// raw-store directory with every component below it policed
+    /// (`io::open_no_follow`); anything else opens the ordinary way, already
+    /// vetted by the symlink-aware guard that produced this target.
+    pub(crate) fn open(&self) -> std::io::Result<std::fs::File> {
+        if self.local_only {
+            super::io::open_no_follow(&self.base, &self.rest)
+        } else {
+            std::fs::File::open(self.path())
+        }
+    }
 }
 
 /// Resolve a graph-relative path for a **read**: [`resolve`], except that a

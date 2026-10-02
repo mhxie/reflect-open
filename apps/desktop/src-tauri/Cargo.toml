@@ -145,10 +145,29 @@ objc2-core-audio-types = { version = "0.3.2", default-features = false, features
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
   "std",
   "CFArray",
+  "CFData",
   "CFDictionary",
   "CFNumber",
   "CFString",
   "CFURL",
+] }
+# Inline PDF embeds (`src/fs/pdf_render/`): CoreGraphics parses the PDF from
+# bytes Rust already read and rasterizes one page into an sRGB bitmap;
+# ImageIO encodes it as PNG for the `reflect-asset://` protocol.
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "CGBitmapContext",
+  "CGColorSpace",
+  "CGContext",
+  "CGDataProvider",
+  "CGImage",
+  "CGPDFDocument",
+  "CGPDFPage",
+] }
+objc2-image-io = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "CGImageDestination",
+  "objc2-core-graphics",
 ] }
 # Meeting capture (`src/meeting_capture/`): a Core Audio process tap and
 # private aggregate device record the microphone and system audio on one
@@ -270,3 +289,11 @@ dbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rus
 tauri = { workspace = true, features = ["test"] }
 # Proves the assembled Qwen tokenizer.json loads (`local_transcription/qwen.rs`).
 tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
+
+# The PDF-preview tests (`src/fs/pdf_render/`) have CoreGraphics write their
+# password-protected fixtures.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = [
+  "CGDataConsumer",
+  "CGPDFContext",
+] }

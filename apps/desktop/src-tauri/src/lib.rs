@@ -339,6 +339,7 @@ pub fn run() {
             fs::transcript_cache_read,
             fs::transcript_cache_write,
             fs::asset_open,
+            fs::pdf_render::pdf_info,
             fs::asset_reveal,
             fs::assets::asset_upload_begin,
             fs::assets::asset_upload_append,

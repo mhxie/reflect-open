@@ -62,6 +62,8 @@ and MIT-licensed, so there is no copyleft constraint.
 | Auto-update | `tauri-plugin-updater` | 15 |
 | Window-state restore | `tauri-plugin-window-state` | 15 |
 | Mobile keyboard bridge | first-party `tauri-plugin-keyboard` | 19 |
+| PDF page rendering for inline embeds (macOS: parse from bytes, rasterize) | `objc2-core-graphics` (`CGPDFDocument`, `CGBitmapContext`) | 25 |
+| PNG encoding of rendered PDF pages (macOS) | `objc2-image-io` (`CGImageDestination`) | 25 |
 
 ## Notes & caveats
 

@@ -130,6 +130,12 @@ jobs:
       - name: Check desktop library
         run: cargo check -p reflect-open --lib
 
+      # PDF embeds render through CoreGraphics (Plan 25), so their rendering
+      # tests only exist on macOS; ubuntu's `cargo test --workspace` runs the
+      # platform-neutral rest.
+      - name: Test PDF rendering
+        run: cargo test -p reflect-open --lib pdf
+
       # The TestFlight workflow is the only full iOS build and it never runs on
       # pull requests, so type-check the iOS target here with the same feature
       # set `tauri ios` builds with.

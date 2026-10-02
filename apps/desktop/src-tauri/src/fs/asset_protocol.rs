@@ -20,13 +20,25 @@
 //! Passive previews append `?reflect-preview=raster`; those responses are
 //! served only when byte sniffing identifies PNG, JPEG, GIF, or WebP content,
 //! so an SVG renamed with a raster extension cannot load subresources there.
+//!
+//! PDF embeds ask for one rendered page instead of the file:
+//! `?reflect-preview=pdf-page&page=N&width=W` (Plan 25, `pdf_render`). The
+//! request passes the same generation check and read guard, then answers
+//! with a PNG that Rust rendered; the PDF's own bytes never reach the
+//! webview.
 
 use std::borrow::Cow;
+use std::io::Read;
+use std::path::PathBuf;
+use std::sync::Arc;
 
+use reflect_graph_paths::LocalOnlyFolders;
 use tauri::http::{header, Request, Response, StatusCode};
 use tauri::utils::mime_type::MimeType;
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
+use super::pdf_render::{self, PageLookup, PageRequest, PdfError};
+use super::resolve::ReadTarget;
 use super::GraphState;
 
 /// The scheme name, shared with the `lib.rs` registration. The frontend and
@@ -51,8 +63,19 @@ pub(crate) fn handle<R: Runtime>(
         super::x_media_protocol::handle(app, request, request_path, responder);
         return;
     }
-    let preview_raster_only = requests_preview_raster(request.uri().query());
     let method_allowed = request.method() == tauri::http::Method::GET;
+    if let Some(page) = PageRequest::from_query(request.uri().query()) {
+        tauri::async_runtime::spawn(async move {
+            let response = match page {
+                _ if !method_allowed => status_response(StatusCode::METHOD_NOT_ALLOWED),
+                Err(status) => status_response(status),
+                Ok(page) => pdf_page_response(app, request_path, page).await,
+            };
+            responder.respond(response);
+        });
+        return;
+    }
+    let preview_raster_only = requests_preview_raster(request.uri().query());
     tauri::async_runtime::spawn_blocking(move || {
         if !method_allowed {
             responder.respond(status_response(StatusCode::METHOD_NOT_ALLOWED));
@@ -107,32 +130,111 @@ fn status_response(status: StatusCode) -> Response<Cow<'static, [u8]>> {
         .expect("a status-only response always builds")
 }
 
-fn serve<R: Runtime>(
-    app: &AppHandle<R>,
-    request_path: &str,
-) -> Result<(String, Vec<u8>), StatusCode> {
+/// A request resolved against the graph session it was issued for.
+struct Located {
+    root: PathBuf,
+    local_only: Option<Arc<LocalOnlyFolders>>,
+    /// The graph-relative path as requested.
+    rel: String,
+    target: ReadTarget,
+}
+
+/// The shared front half of every request: the generation pin, then the
+/// symlink-aware read guard (which grants the one local-only hop). File IO,
+/// so it runs on the blocking pool.
+fn locate<R: Runtime>(app: &AppHandle<R>, request_path: &str) -> Result<Located, StatusCode> {
     let (generation, rel) = parse_request_path(request_path)?;
     let state = app.state::<GraphState>();
     let (root, local_only) =
         super::graph_for(&state, Some(generation)).map_err(|_| StatusCode::FORBIDDEN)?;
     let target = super::resolve::resolve_read(&root, rel, local_only.as_deref())
         .map_err(|_| StatusCode::FORBIDDEN)?;
-    // On an iCloud graph this read blocks until the file is materialized on
-    // the device — acceptable here on the blocking pool, and exactly the wait
-    // that must never happen on the UI thread. A local-only attachment opens
-    // from its raw-store directory with every component below it policed.
-    let read = if target.local_only {
-        super::io::read_bytes_no_follow(&target.base, &target.rest)
-    } else {
-        std::fs::read(target.path())
-    };
-    let bytes = read.map_err(|err| match err.kind() {
+    Ok(Located {
+        root,
+        local_only,
+        rel: rel.to_owned(),
+        target,
+    })
+}
+
+fn io_status(err: &std::io::Error) -> StatusCode {
+    match err.kind() {
         std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
         std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
-    })?;
-    let mime = MimeType::parse(&bytes, rel);
+    }
+}
+
+fn serve<R: Runtime>(
+    app: &AppHandle<R>,
+    request_path: &str,
+) -> Result<(String, Vec<u8>), StatusCode> {
+    let located = locate(app, request_path)?;
+    // On an iCloud graph this read blocks until the file is materialized on
+    // the device — acceptable here on the blocking pool, and exactly the wait
+    // that must never happen on the UI thread.
+    let mut bytes = Vec::new();
+    located
+        .target
+        .open()
+        .and_then(|mut file| file.read_to_end(&mut bytes))
+        .map_err(|err| io_status(&err))?;
+    let mime = MimeType::parse(&bytes, &located.rel);
     Ok((mime, bytes))
+}
+
+async fn pdf_page_response<R: Runtime>(
+    app: AppHandle<R>,
+    request_path: String,
+    page: PageRequest,
+) -> Response<Cow<'static, [u8]>> {
+    match serve_pdf_page(app, request_path.clone(), page).await {
+        // Set explicitly: sniffing would go by the `.pdf` path.
+        Ok(png) => Response::builder()
+            .header(header::CONTENT_TYPE, "image/png")
+            .header(header::CONTENT_LENGTH, png.len())
+            .body(Cow::Owned(png))
+            .unwrap_or_else(|_| status_response(StatusCode::INTERNAL_SERVER_ERROR)),
+        Err(status) => {
+            tracing::warn!(path = request_path, %status, "asset protocol refused a PDF page");
+            status_response(status)
+        }
+    }
+}
+
+/// One rendered PDF page as PNG bytes. The cheap half (resolve, stat, cache
+/// lookup) runs straight away on the blocking pool; a render waits for one
+/// of `pdf_render`'s render slots, so a note full of PDFs cannot saturate
+/// the CPU while cached pages keep loading.
+async fn serve_pdf_page<R: Runtime>(
+    app: AppHandle<R>,
+    request_path: String,
+    page: PageRequest,
+) -> Result<Vec<u8>, StatusCode> {
+    let lookup = tauri::async_runtime::spawn_blocking(move || {
+        let located = locate(&app, &request_path)?;
+        pdf_render::lookup_page(
+            &located.root,
+            located.local_only.as_deref(),
+            &located.rel,
+            &located.target,
+            page,
+        )
+        .map_err(page_status)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    match lookup {
+        PageLookup::Cached(png) => Ok(png),
+        PageLookup::Render(render) => render.run().await.map_err(page_status),
+    }
+}
+
+/// The status for a failed page, keeping the reason in the debug log (the
+/// status alone cannot tell a corrupt PDF from an unreadable page).
+fn page_status(err: PdfError) -> StatusCode {
+    tracing::debug!(error = ?err, "PDF page failed");
+    err.status()
 }
 
 /// Split `<generation>/<graph-relative path>` and vet the path shape. Any
@@ -257,6 +359,99 @@ mod tests {
                 serve(app.handle(), "3/finance/secure/scan.png").unwrap_err(),
                 StatusCode::FORBIDDEN
             );
+        }
+    }
+
+    /// Command tier: a PDF page comes back as a PNG with its own content
+    /// type, lands in the page cache, and a repeat is served from there;
+    /// a local-only PDF renders through its link; failures map to statuses.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn serves_rendered_pdf_pages_as_png_and_repeats_from_the_pdf_page_cache() {
+        use super::super::pdf_render::fixtures::{decode, request, sample};
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, raw) = (base.join("graph"), base.join("raw"));
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::create_dir_all(root.join("finance")).unwrap();
+        std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
+        std::fs::write(root.join("assets/paper.pdf"), sample()).unwrap();
+        std::fs::write(root.join("assets/fake.pdf"), b"\x89PNG\r\n\x1a\n").unwrap();
+        std::fs::write(raw.join("finance/secure/scan.pdf"), sample()).unwrap();
+        symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(GraphState::default());
+        {
+            let state = app.state::<GraphState>();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 4;
+            inner.root = Some(root.clone());
+            inner.set_local_only(Some(LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap()));
+        }
+        let serve_page = |path: &str, page| {
+            tauri::async_runtime::block_on(serve_pdf_page(
+                app.handle().clone(),
+                path.to_owned(),
+                page,
+            ))
+        };
+        let cached_pages = || -> Vec<std::path::PathBuf> {
+            let cache = root.join(".reflect/cache/pdf-pages");
+            let Ok(documents) = std::fs::read_dir(cache) else {
+                return Vec::new();
+            };
+            documents
+                .flatten()
+                .flat_map(|document| std::fs::read_dir(document.path()).unwrap().flatten())
+                .map(|entry| entry.path())
+                .collect()
+        };
+
+        let response = tauri::async_runtime::block_on(pdf_page_response(
+            app.handle().clone(),
+            "4/assets/paper.pdf".into(),
+            request(1, 300),
+        ));
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+        let png = response.body().to_vec();
+        assert_eq!(decode(&png).dimensions(), (480, 240));
+        let cached = cached_pages();
+        assert_eq!(cached.len(), 1);
+        assert!(cached[0].ends_with("1-480.png"));
+        assert_eq!(std::fs::read(&cached[0]).unwrap(), png);
+
+        // A repeat (any width in the same bucket) is the cached entry.
+        let marker = b"\x89PNG\r\n\x1a\nmarker".to_vec();
+        std::fs::write(&cached[0], &marker).unwrap();
+        assert_eq!(
+            serve_page("4/assets/paper.pdf", request(1, 480)).unwrap(),
+            marker
+        );
+
+        let local = serve_page("4/finance/secure/scan.pdf", request(2, 960)).unwrap();
+        assert_eq!(decode(&local).dimensions(), (960, 1920));
+        assert_eq!(cached_pages().len(), 2);
+
+        for (path, page, status) in [
+            ("4/assets/paper.pdf", request(4, 480), StatusCode::NOT_FOUND),
+            (
+                "4/assets/missing.pdf",
+                request(1, 480),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                "4/assets/fake.pdf",
+                request(1, 480),
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ),
+            ("3/assets/paper.pdf", request(1, 480), StatusCode::FORBIDDEN),
+            ("4/notes/paper.md", request(1, 480), StatusCode::FORBIDDEN),
+        ] {
+            assert_eq!(serve_page(path, page).unwrap_err(), status, "{path}");
         }
     }
 
