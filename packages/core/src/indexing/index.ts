@@ -107,6 +107,13 @@ export {
   type TaskGroupKind,
 } from './group-tasks.ts'
 export {
+  sortNoteListRows,
+  chooseNoteListSort,
+  reverseNoteListSort,
+  type NoteListSort,
+  type NoteListSortKey,
+} from './note-list-sort.ts'
+export {
   listNotes,
   listNoteTags,
   listRecentNotes,

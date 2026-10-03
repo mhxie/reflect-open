@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type ReactElement } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
-import type { NoteListEntry } from '@reflect/core'
+import type { NoteListEntry, NoteListSort, NoteListSortKey } from '@reflect/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
 import { ALL_NOTES_GRID, AllNotesRow } from './all-notes-row.tsx'
 import { ATTACHMENT_FILTER_NOUNS } from './attachment-filter-labels.ts'
+import { SortHeader } from './sort-header.tsx'
 
 interface AllNotesTableProps {
   /** `undefined` while the index query settles (renders nothing, not "empty"). */
   notes: NoteListEntry[] | undefined
   /** The active filter, for the empty state's wording. */
   filter: AllNotesFilter | null
+  /** The order `notes` arrive in, shown on the sortable column headers. */
+  sort: NoteListSort
+  /** Order the list by a column (a header click). */
+  onSort: (key: NoteListSortKey) => void
   /** The shared row selection (click/keyboard); rows read their selected state from it. */
   selection: ListSelection
   onOpen: (path: string, event?: ModClickEvent) => void
@@ -38,6 +43,8 @@ const ESTIMATED_ROW_HEIGHT = 48
 export function AllNotesTable({
   notes,
   filter,
+  sort,
+  onSort,
   selection,
   onOpen,
   registerScrollToIndex,
@@ -75,10 +82,10 @@ export function AllNotesTable({
           'sticky top-0 z-10 border-b border-border bg-surface py-3 text-[13px] font-medium leading-none text-text-secondary shadow-sm',
         )}
       >
-        <span>Subject</span>
+        <SortHeader label="Subject" sortKey="title" sort={sort} onSort={onSort} />
         <span>Snippet</span>
         <span className="text-right">Tags</span>
-        <span className="text-right">Updated</span>
+        <SortHeader label="Updated" sortKey="updated" sort={sort} onSort={onSort} alignEnd />
       </div>
       {notes.length === 0 ? (
         <p className="py-8 pl-12 pr-7 text-sm text-text-muted">{emptyListMessage(filter)}</p>

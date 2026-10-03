@@ -6,6 +6,11 @@ import {
 import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
 import { DEFAULT_SEMANTIC_MODEL, SEMANTIC_MODEL_IDS } from '../embeddings/models.ts'
 import { NOTE_ATTACHMENT_TYPES } from '../graph/attachment-types.ts'
+import {
+  DEFAULT_NOTE_LIST_SORT,
+  NOTE_LIST_SORT_KEYS,
+  SORT_DIRECTIONS,
+} from '../indexing/note-list-sort.ts'
 
 /**
  * The user-settings schema — the policy half of the settings store. Rust
@@ -199,6 +204,16 @@ export function weekStartDow(weekStartDay: WeekStartDay): 0 | 1 | 6 {
 export const allNotesFilterTagsSchema = z.array(z.string()).catch(['book', 'link', 'person'])
 
 export type AllNotesFilterTags = z.infer<typeof allNotesFilterTagsSchema>
+
+/**
+ * The All Notes order. An unknown value (a key from a newer build) reads as
+ * the default.
+ */
+export const allNotesSortSchema = z
+  .object({ key: z.enum(NOTE_LIST_SORT_KEYS), direction: z.enum(SORT_DIRECTIONS) })
+  .catch({ ...DEFAULT_NOTE_LIST_SORT })
+
+export type AllNotesSort = z.infer<typeof allNotesSortSchema>
 
 /**
  * Attachment types offered as one-click filters on the All Notes screen, after
@@ -661,6 +676,7 @@ export const settingsSchema = z.looseObject({
   weekStartDay: weekStartDaySchema,
   allNotesFilterTags: allNotesFilterTagsSchema,
   allNotesFilterAttachments: allNotesFilterAttachmentsSchema,
+  allNotesSort: allNotesSortSchema,
   calendarEnabled: calendarEnabledSchema,
   calendarIds: calendarIdsSchema,
   graphColors: graphColorsSchema,

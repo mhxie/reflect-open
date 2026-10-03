@@ -185,7 +185,7 @@ export function useAppShortcuts(): CommandContext {
   const { toggleSidebar } = useSidebar()
   const { toggle: toggleAudioMemo } = useAudioMemo()
   const { newChat } = useChatSession()
-  const { settings, updateSettings } = useSettings()
+  const { settings, updateSettings, updateSettingsWith } = useSettings()
   const semanticModel = settings.semanticModel
   const {
     openForPath: openNoteFindForPath,
@@ -295,6 +295,8 @@ export function useAppShortcuts(): CommandContext {
         // retries on an explicit action like this command.
         void retryFailedEmbeddings(semanticModel)
       },
+      sortAllNotes: (update) =>
+        updateSettingsWith((current) => ({ allNotesSort: update(current.allNotesSort) })),
     }),
     [
       semanticModel,
@@ -317,6 +319,7 @@ export function useAppShortcuts(): CommandContext {
       findPreviousInNote,
       toggleAudioMemo,
       updateSettings,
+      updateSettingsWith,
     ],
   )
 

@@ -42,6 +42,7 @@ function commandContext(notePath: string | null): CommandContext {
     openTemplateCreate: vi.fn(),
     openHeadingPicker: vi.fn(),
     enableSemanticSearch: vi.fn(),
+    sortAllNotes: vi.fn(),
   }
 }
 

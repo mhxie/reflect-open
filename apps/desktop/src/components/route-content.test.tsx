@@ -102,6 +102,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
     settings: {
       editorMarkdownSyntax: 'hide',
       allNotesFilterTags: ['book', 'link', 'person'],
+      allNotesSort: { key: 'updated', direction: 'desc' },
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       aiProviders: [],
       defaultAiProviderId: null,

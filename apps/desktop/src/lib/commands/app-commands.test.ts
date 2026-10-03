@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { EmbedStatus } from '@reflect/core'
+import type { EmbedStatus, NoteListSort } from '@reflect/core'
 import { notePathForRoute, type Route } from '@/routing/route.ts'
 import type { NavigateOptions } from '@/routing/router.tsx'
 import { resetOperations } from '@/lib/operations.ts'
@@ -90,6 +90,7 @@ function fakeContext(overrides?: Partial<CommandContext>) {
     openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
+    sortAllNotes: vi.fn(),
     ...overrides,
   }
   return { context, navigated, navigateOptions }
@@ -153,6 +154,35 @@ describe('app commands', () => {
     expect(context.toggleSidebar).toHaveBeenCalled()
     await command('audioMemo.toggle').run(context)
     expect(context.toggleAudioMemo).toHaveBeenCalled()
+  })
+
+  it('All Notes sort commands persist the order and show the list', async () => {
+    let sort: NoteListSort = { key: 'updated', direction: 'desc' }
+    const sortAllNotes = vi.fn((update: (current: NoteListSort) => NoteListSort) => {
+      sort = update(sort)
+    })
+    const { context, navigated } = fakeContext({ sortAllNotes })
+
+    await command('allNotes.sortByTitle').run(context)
+    expect(sort).toEqual({ key: 'title', direction: 'asc' })
+    expect(navigated).toEqual([{ kind: 'allNotes', filter: null }])
+
+    await command('allNotes.reverseOrder').run(context)
+    expect(sort).toEqual({ key: 'title', direction: 'desc' })
+
+    await command('allNotes.sortByUpdated').run(context)
+    expect(sort).toEqual({ key: 'updated', direction: 'desc' })
+  })
+
+  it('All Notes sort commands keep the active filter when already on the list', async () => {
+    const { context, navigated } = fakeContext({
+      route: () => ({ kind: 'allNotes', filter: { kind: 'tag', tag: 'book' } }),
+    })
+
+    await command('allNotes.sortByTitle').run(context)
+
+    expect(context.sortAllNotes).toHaveBeenCalledTimes(1)
+    expect(navigated).toEqual([])
   })
 
   it('settings.open navigates to the settings screen', async () => {

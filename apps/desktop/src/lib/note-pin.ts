@@ -39,9 +39,11 @@ function applyPinnedState(input: NoteActionInput, note: PinnedNote, isPinned: bo
     }
     return current.some((entry) => entry.path === path) ? current : insertPinnedNote(current, note)
   })
+  // All Notes orders pins by shelf position, so it travels with the flag.
+  const pinnedOrder = isPinned ? (note.pinnedOrder ?? null) : null
   queryClient.setQueriesData<NoteListEntry[]>(
     { queryKey: queryKeys.index.allNotes(root) },
-    (rows) => rows?.map((row) => (row.path === path ? { ...row, isPinned } : row)),
+    (rows) => rows?.map((row) => (row.path === path ? { ...row, isPinned, pinnedOrder } : row)),
   )
   queryClient.setQueriesData<FilteredSearchHit[]>(
     { queryKey: queryKeys.index.mobileAllNotes(root) },
