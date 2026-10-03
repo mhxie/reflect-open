@@ -14,6 +14,8 @@ import { isIsoDate } from '@/lib/dates.ts'
 export type AllNotesFilter =
   | { kind: 'tag'; tag: string }
   | { kind: 'attachment'; type: NoteAttachmentType }
+  /** Notes last edited on this local day (ISO `YYYY-MM-DD`). */
+  | { kind: 'updated'; date: string }
 
 export type Route =
   | { kind: 'today' }
@@ -69,10 +71,14 @@ export function allNotesFiltersEqual(a: AllNotesFilter | null, b: AllNotesFilter
   if (a === null || b === null) {
     return a === b
   }
-  if (a.kind === 'tag') {
-    return b.kind === 'tag' && a.tag === b.tag
+  switch (a.kind) {
+    case 'tag':
+      return b.kind === 'tag' && a.tag === b.tag
+    case 'attachment':
+      return b.kind === 'attachment' && a.type === b.type
+    case 'updated':
+      return b.kind === 'updated' && a.date === b.date
   }
-  return b.kind === 'attachment' && a.type === b.type
 }
 
 /**

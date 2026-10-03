@@ -215,6 +215,9 @@ export const allNotesSortSchema = z
 
 export type AllNotesSort = z.infer<typeof allNotesSortSchema>
 
+/** Show the journaling heatmap in the daily sidebar. On by default. */
+export const activityHeatmapEnabledSchema = z.boolean().catch(true)
+
 /**
  * Attachment types offered as one-click filters on the All Notes screen, after
  * the pinned tags: all four by default. Stored entries are normalized to the
@@ -677,6 +680,7 @@ export const settingsSchema = z.looseObject({
   allNotesFilterTags: allNotesFilterTagsSchema,
   allNotesFilterAttachments: allNotesFilterAttachmentsSchema,
   allNotesSort: allNotesSortSchema,
+  activityHeatmapEnabled: activityHeatmapEnabledSchema,
   calendarEnabled: calendarEnabledSchema,
   calendarIds: calendarIdsSchema,
   graphColors: graphColorsSchema,

@@ -1,4 +1,5 @@
-import { sql } from 'kysely'
+import { sql, type RawBuilder, type SqlBool } from 'kysely'
+import { isIsoDate } from '@reflect/utils'
 import {
   ATTACHMENT_TYPE_EXTENSIONS,
   YOUTUBE_VIDEO_URL_FRAGMENTS,
@@ -7,14 +8,15 @@ import {
 import { AUDIO_MEMOS_DIR } from '../graph/paths.ts'
 import { foldTag } from '../markdown/index.ts'
 import { db } from './db.ts'
+import { localDayStartMs } from './filter-query.ts'
 import { recallOrder } from './filtered-search.ts'
 
 /**
  * The All Notes list: every regular note, pinned first then newest, optionally
- * narrowed to one tag or one attachment type. The unfiltered list excludes
- * daily notes — the stream is their home — but a filter includes matching daily
- * notes alongside regular notes. Templates remain boilerplate, not graph content.
- * Uncapped: the screen virtualizes, the row
+ * narrowed to one tag, attachment type, or edit day. The unfiltered list
+ * excludes daily notes — the stream is their home — but a filter includes
+ * matching daily notes alongside regular notes. Templates remain boilerplate,
+ * not graph content. Uncapped: the screen virtualizes, the row
  * snippet is the stored `preview` column (derived once at index time), and
  * neither query carries a per-row parameter, so list size has no SQL ceiling.
  */
@@ -43,6 +45,12 @@ export interface NoteListOptions {
    * {@link notesWithAttachment}). One filter at a time: ignored with a `tag`.
    */
   attachment?: NoteAttachmentType | null
+  /**
+   * Only notes last edited on this local day (ISO `YYYY-MM-DD`), plus that
+   * day's daily note; an invalid date lists nothing. One filter at a time:
+   * ignored with a `tag` or `attachment`.
+   */
+  updatedOn?: string | null
 }
 
 /**
@@ -93,6 +101,16 @@ function notesWithAttachment(type: NoteAttachmentType) {
   )
 }
 
+/**
+ * Notes last edited on the local day `date`, plus that day's daily note — an
+ * edit made later (or a sync re-stamping mtimes) must not hide the entry the
+ * day is named after. Raw, like `recallOrder`, so differently-rooted queries
+ * can share it.
+ */
+function editedOnDay(date: string): RawBuilder<SqlBool> {
+  return sql<SqlBool>`(("notes"."mtime" >= ${localDayStartMs(date)} and "notes"."mtime" < ${localDayStartMs(date, 1)}) or "notes"."daily_date" = ${date})`
+}
+
 /** The columns of one All Notes row. */
 const NOTE_LIST_COLUMNS = [
   'notes.path',
@@ -104,7 +122,11 @@ const NOTE_LIST_COLUMNS = [
 ] as const
 
 /** The All Notes rows for one filter (or none), before ordering. */
-function noteListQuery(tag: string | null, attachment: NoteAttachmentType | null) {
+function noteListQuery(
+  tag: string | null,
+  attachment: NoteAttachmentType | null,
+  updatedOn: string | null,
+) {
   if (tag !== null) {
     return db
       .selectFrom('tags')
@@ -121,6 +143,13 @@ function noteListQuery(tag: string | null, attachment: NoteAttachmentType | null
       .where('notes.path', 'in', notesWithAttachment(attachment))
       .select(NOTE_LIST_COLUMNS)
   }
+  if (updatedOn !== null) {
+    return db
+      .selectFrom('notes')
+      .where('notes.kind', 'in', ['note', 'daily'])
+      .where(editedOnDay(updatedOn))
+      .select(NOTE_LIST_COLUMNS)
+  }
   return db.selectFrom('notes').where('notes.kind', '=', 'note').select(NOTE_LIST_COLUMNS)
 }
 
@@ -129,7 +158,11 @@ function noteListQuery(tag: string | null, attachment: NoteAttachmentType | null
  * list of paths would hit SQLite's bound-parameter ceiling. Ordered on the
  * folded key, like the facet list.
  */
-function noteListTagsQuery(tag: string | null, attachment: NoteAttachmentType | null) {
+function noteListTagsQuery(
+  tag: string | null,
+  attachment: NoteAttachmentType | null,
+  updatedOn: string | null,
+) {
   const tags = db
     .selectFrom('tags')
     .innerJoin('notes', 'notes.path', 'tags.notePath')
@@ -147,21 +180,28 @@ function noteListTagsQuery(tag: string | null, attachment: NoteAttachmentType | 
       .where('notes.kind', 'in', ['note', 'daily'])
       .where('notes.path', 'in', notesWithAttachment(attachment))
   }
+  if (updatedOn !== null) {
+    return tags.where('notes.kind', 'in', ['note', 'daily']).where(editedOnDay(updatedOn))
+  }
   return tags.where('notes.kind', '=', 'note')
 }
 
 /**
  * Notes for the All Notes screen: unfiltered lists include non-daily notes only;
- * a tag or attachment filter includes both regular and daily notes that match.
- * Pinned notes appear first (explicit pin order, then unordered pins), then most
- * recently edited — V1's list order. `sortNoteListRows` reorders the result
- * for another sort without a new query.
+ * a tag, attachment, or edited-on-day filter includes both regular and daily
+ * notes that match. Pinned notes appear first (explicit pin order, then
+ * unordered pins), then most recently edited — V1's list order.
+ * `sortNoteListRows` reorders the result for another sort without a new query.
  */
 export async function listNotes(options: NoteListOptions = {}): Promise<NoteListEntry[]> {
   const tag = options.tag ?? null
   const attachment = tag === null ? (options.attachment ?? null) : null
+  const updatedOn = tag === null && attachment === null ? (options.updatedOn ?? null) : null
+  if (updatedOn !== null && !isIsoDate(updatedOn)) {
+    return []
+  }
 
-  let listQuery = noteListQuery(tag, attachment)
+  let listQuery = noteListQuery(tag, attachment, updatedOn)
   for (const order of recallOrder(true)) {
     listQuery = listQuery.orderBy(order)
   }
@@ -171,7 +211,7 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     return []
   }
 
-  const tagRows = await noteListTagsQuery(tag, attachment).execute()
+  const tagRows = await noteListTagsQuery(tag, attachment, updatedOn).execute()
   const tagsByPath = new Map<string, string[]>()
   for (const row of tagRows) {
     const tags = tagsByPath.get(row.notePath)

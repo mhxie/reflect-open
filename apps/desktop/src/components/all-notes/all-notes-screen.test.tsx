@@ -170,6 +170,11 @@ beforeEach(() => {
       if (sql.includes('from "tags"')) {
         return params.includes('travel') ? [taggedDailyRow] : []
       }
+      // An edit-day list: only Health was last edited on 2020-01-15.
+      if (sql.includes('"notes"."mtime" >=')) {
+        const start = params.find((value) => typeof value === 'number')
+        return start === new Date(2020, 0, 15).getTime() ? [noteRows[0]] : []
+      }
       // An attachment-filtered list: only Tokyo references a PDF.
       if (sql.includes('from "assets"')) {
         return params.includes('%.pdf') ? [noteRows[1]] : []
@@ -395,6 +400,29 @@ describe('AllNotesScreen', () => {
     await view.getByRole('button', { name: 'Video' }).click()
 
     await expect.element(view.getByText('No notes with video.')).toBeInTheDocument()
+    await view.unmount()
+  })
+
+  it('lists the notes edited on a day set by the heatmap, and All clears it', async () => {
+    const view = await renderScreen(undefined, { kind: 'updated', date: '2020-01-15' })
+
+    await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
+    expect(view.getByText('Tokyo Gâteau').query()).toBeNull()
+    await expect
+      .element(view.getByRole('button', { name: 'Edited 1/15/2020' }))
+      .toHaveAttribute('aria-pressed', 'true')
+
+    await view.getByRole('button', { name: 'All', exact: true }).click()
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
+    expect(view.getByRole('button', { name: /^Edited/ }).query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('says when no notes were edited on the chosen day', async () => {
+    const view = await renderScreen(undefined, { kind: 'updated', date: '2020-01-01' })
+
+    await expect.element(view.getByText('No notes edited on 1/1/2020.')).toBeInTheDocument()
     await view.unmount()
   })
 

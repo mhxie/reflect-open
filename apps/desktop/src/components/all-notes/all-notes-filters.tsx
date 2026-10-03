@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { foldTag, NOTE_ATTACHMENT_TYPES, type NoteTagFacet } from '@reflect/core'
+import { formatShortDate } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { AllNotesFilter } from '@/routing/route.ts'
 import { ATTACHMENT_FILTER_LABELS } from './attachment-filter-labels.ts'
@@ -15,11 +16,12 @@ interface AllNotesFiltersProps {
 }
 
 /**
- * The All Notes filter bar: an All tab, one tab per pinned tag (the
- * `allNotesFilterTags` setting), one per enabled attachment type (the
- * `allNotesFilterAttachments` setting), and a Custom combobox offering every
- * remaining tag plus free entry of any tag name. One filter at a time. Tag
- * matching is case-insensitive throughout, same as the `#tag` search token.
+ * The All Notes filter bar: an All tab, the edit day when one is set,
+ * one tab per pinned tag (the `allNotesFilterTags` setting), one per enabled
+ * attachment type (the `allNotesFilterAttachments` setting), and a Custom
+ * combobox offering every remaining tag plus free entry of any tag name. One
+ * filter at a time. Tag matching is case-insensitive throughout, same as the
+ * `#tag` search token.
  */
 export function AllNotesFilters({ filter, facets, onSelect }: AllNotesFiltersProps): ReactElement {
   const { settings } = useSettings()
@@ -54,6 +56,13 @@ export function AllNotesFilters({ filter, facets, onSelect }: AllNotesFiltersPro
       className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-surface shadow-sm"
     >
       <FilterTab label="All" active={filter === null} onClick={() => onSelect(null)} />
+      {filter?.kind === 'updated' ? (
+        <FilterTab
+          label={`Edited ${formatShortDate(filter.date, settings.dateFormat)}`}
+          active
+          onClick={() => onSelect(filter)}
+        />
+      ) : null}
       {pinned.map((pinnedTag) => (
         <FilterTab
           key={foldTag(pinnedTag)}

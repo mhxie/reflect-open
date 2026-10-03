@@ -98,6 +98,15 @@ export {
   type WikiLinkSuggestionResult,
 } from './queries.ts'
 export { resolveNoteTarget } from './resolve-target.ts'
+export { listDailyActivity, type DailyActivity } from './daily-activity.ts'
+export {
+  activityLevel,
+  activityThresholds,
+  heatmapWeeks,
+  monthLabelColumns,
+  type ActivityLevel,
+  type ActivityThresholds,
+} from './activity-scale.ts'
 export { listOnThisDay, type OnThisDayEntry } from './on-this-day.ts'
 export {
   groupTaskContexts,

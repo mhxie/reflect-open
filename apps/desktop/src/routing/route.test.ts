@@ -26,6 +26,16 @@ describe('routeForPath', () => {
 })
 
 describe('routesEqual', () => {
+  it('compares allNotes routes by their edit day', () => {
+    const editedOn = (date: string) =>
+      ({ kind: 'allNotes', filter: { kind: 'updated', date } }) as const
+    expect(routesEqual(editedOn('2026-10-02'), editedOn('2026-10-02'))).toBe(true)
+    expect(routesEqual(editedOn('2026-10-02'), editedOn('2026-10-01'))).toBe(false)
+    expect(
+      routesEqual(editedOn('2026-10-02'), { kind: 'allNotes', filter: { kind: 'tag', tag: 'x' } }),
+    ).toBe(false)
+  })
+
   it('compares allNotes routes by their tag filter', () => {
     expect(
       routesEqual({ kind: 'allNotes', filter: null }, { kind: 'allNotes', filter: null }),

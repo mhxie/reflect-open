@@ -170,6 +170,46 @@ describe('listNotes', () => {
     }
   })
 
+  it('narrows both queries to notes edited on a local day, plus that day’s daily note', async () => {
+    mockInvoke
+      .mockResolvedValueOnce([
+        {
+          path: 'daily/2026-10-02.md',
+          title: '2026-10-02',
+          mtime: 1,
+          preview: '',
+          is_pinned: 0,
+          pinned_order: null,
+        },
+      ])
+      .mockResolvedValueOnce([])
+
+    await listNotes({ updatedOn: '2026-10-02' })
+
+    const start = new Date(2026, 9, 2).getTime()
+    const end = new Date(2026, 9, 3).getTime()
+    expect(mockInvoke.mock.calls).toHaveLength(2)
+    for (const [, args] of mockInvoke.mock.calls) {
+      expect(String(args['sql'])).toContain('"notes"."daily_date" =')
+      expect(args['params']).toEqual(
+        expect.arrayContaining(['note', 'daily', start, end, '2026-10-02']),
+      )
+    }
+  })
+
+  it('lists nothing for an invalid edit day', async () => {
+    await expect(listNotes({ updatedOn: '2026-02-31' })).resolves.toEqual([])
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it('lets a tag filter win over an edit day', async () => {
+    mockInvoke.mockResolvedValue([])
+
+    await listNotes({ tag: 'book', updatedOn: '2026-10-02' })
+
+    expect(String(mockInvoke.mock.calls[0]![1]['sql'])).not.toContain('mtime" >=')
+  })
+
   it('counts YouTube links as video alongside local video files', async () => {
     mockInvoke.mockResolvedValue([])
 

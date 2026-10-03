@@ -7,6 +7,7 @@ import {
   listNotes,
   listNoteTags,
   sortNoteListRows,
+  type NoteListOptions,
   type NoteListSortKey,
 } from '@reflect/core'
 import { Trash2 } from 'lucide-react'
@@ -29,6 +30,34 @@ import { NewNoteButton } from './new-note-button.tsx'
 import { useAllNotesKeyboard } from './use-all-notes-keyboard.ts'
 import { isModEvent } from '@meowdown/core'
 
+/** The `listNotes` options for a route filter. */
+function noteListOptions(filter: AllNotesFilter | null): NoteListOptions {
+  switch (filter?.kind) {
+    case undefined:
+      return {}
+    case 'tag':
+      return { tag: filter.tag }
+    case 'attachment':
+      return { attachment: filter.type }
+    case 'updated':
+      return { updatedOn: filter.date }
+  }
+}
+
+/** The list query's cache key for a route filter. */
+function allNotesQueryKey(root: string | undefined, filter: AllNotesFilter | null) {
+  switch (filter?.kind) {
+    case undefined:
+      return queryKeys.index.allNotesWithTag(root, null)
+    case 'tag':
+      return queryKeys.index.allNotesWithTag(root, foldTag(filter.tag))
+    case 'attachment':
+      return queryKeys.index.allNotesWithAttachment(root, filter.type)
+    case 'updated':
+      return queryKeys.index.allNotesUpdatedOn(root, filter.date)
+  }
+}
+
 interface AllNotesScreenProps {
   /** Active filter carried by the route (`null` = all non-daily notes). */
   filter: AllNotesFilter | null
@@ -38,7 +67,7 @@ interface AllNotesScreenProps {
  * The All Notes screen (a routed view, like settings): every non-daily note,
  * newest first or in the order chosen from the column headers (the
  * `allNotesSort` setting, so it holds across filters and restarts), filterable
- * by a tag or an attachment type. The active filter lives on the route so
+ * by a tag, an attachment type, or the day notes were last edited. The active filter lives on the route so
  * back/forward and "open a note, come back" keep it.
  * Daily notes are deliberately absent from the unfiltered view, but appear when
  * they match the active filter.
@@ -71,21 +100,8 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const enabled = bridgeReady && graph !== null
 
   const { data: notes } = useQuery({
-    queryKey:
-      filter?.kind === 'attachment'
-        ? queryKeys.index.allNotesWithAttachment(graph?.root, filter.type)
-        : queryKeys.index.allNotesWithTag(
-            graph?.root,
-            filter === null ? null : foldTag(filter.tag),
-          ),
-    queryFn: () =>
-      listNotes(
-        filter === null
-          ? {}
-          : filter.kind === 'tag'
-            ? { tag: filter.tag }
-            : { attachment: filter.type },
-      ),
+    queryKey: allNotesQueryKey(graph?.root, filter),
+    queryFn: () => listNotes(noteListOptions(filter)),
     enabled,
   })
   const { data: facets } = useQuery({
