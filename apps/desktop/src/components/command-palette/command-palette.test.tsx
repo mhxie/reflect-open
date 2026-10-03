@@ -101,6 +101,7 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     openPalette: vi.fn(),
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
+    openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     ...context,

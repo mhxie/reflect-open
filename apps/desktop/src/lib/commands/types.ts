@@ -58,6 +58,8 @@ export interface CommandContext {
   openTemplatePicker: () => void
   /** Open the "New template" name dialog. */
   openTemplateCreate: () => void
+  /** Open the "Jump to heading…" picker over {@link notePath}'s outline. */
+  openHeadingPicker: () => void
   /**
    * Persist the semantic-search opt-in (`semanticSearchEnabled`).
    * EmbeddingsSync reacts to the setting by loading — first time:

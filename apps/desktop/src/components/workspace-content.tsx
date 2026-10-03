@@ -9,6 +9,7 @@ import { EmbeddingsSync } from '@/components/embeddings-sync.tsx'
 import { SearchIpcResponder } from '@/components/search-ipc-responder.tsx'
 import { LocalModelUpdates } from '@/components/local-model-updates.tsx'
 import { NoteFindBar } from '@/components/note-find-bar.tsx'
+import { HeadingPicker } from '@/components/outline/heading-picker.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { ShortcutsDialog } from '@/components/shortcuts-dialog.tsx'
 import { Sidebar } from '@/components/sidebar/sidebar.tsx'
@@ -69,6 +70,7 @@ export function WorkspaceContent({ graph }: WorkspaceContentProps): ReactElement
         <CommandPalette context={commandContext} />
         <ShortcutsDialog />
         <TemplatePicker context={commandContext} />
+        <HeadingPicker context={commandContext} />
         <TemplateCreateDialog context={commandContext} />
         <EmbeddingsSync />
         <SearchIpcResponder />

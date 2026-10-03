@@ -79,6 +79,9 @@ importers:
       '@post-embed/types':
         specifier: ^0.5.0
         version: 0.5.0
+      '@prosekit/core':
+        specifier: ^0.13.3
+        version: 0.13.3(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.1)
       '@reflect/core':
         specifier: workspace:*
         version: link:../../packages/core

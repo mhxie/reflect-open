@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { NoteActionsSection } from './note-actions-section.tsx'
+import { OutlineSection } from './outline-section.tsx'
 import { PublishedUrlSection } from './published-url-section.tsx'
 import { SimilarNotesSection } from './similar-notes-section.tsx'
 
@@ -9,8 +10,8 @@ interface NoteContextSidebarProps {
 }
 
 /**
- * An ordinary note's contextual sidebar: note actions, then the note's
- * semantic neighbors — the only place similar notes appear. Inbound links
+ * An ordinary note's contextual sidebar: note actions, the note's outline,
+ * then its semantic neighbors — the only place similar notes appear. Inbound links
  * live under the note itself (the incoming-backlinks panel), not here.
  * Rendered in the AppShell's right region on `note` routes.
  */
@@ -20,6 +21,7 @@ export function NoteContextSidebar({ path }: NoteContextSidebarProps): ReactElem
       <div className="my-4 space-y-4 pb-4">
         <NoteActionsSection path={path} showTrash />
         <PublishedUrlSection path={path} />
+        <OutlineSection path={path} />
         <SimilarNotesSection path={path} />
       </div>
     </div>

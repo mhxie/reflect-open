@@ -33,6 +33,7 @@ function contextFor(notePath: string | null, generation: number | null): Command
     openPalette: vi.fn(),
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
+    openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     clearScrollState: vi.fn(),
