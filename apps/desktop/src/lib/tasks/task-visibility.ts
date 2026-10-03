@@ -39,6 +39,15 @@ function taskMatchesNeedle(task: OpenTask, needle: string): boolean {
 }
 
 /**
+ * Open rows plus struck rows, dropping open rows that are also struck: a
+ * refetch can restore a just-completed task before the reindex lands.
+ */
+export function withStruckRows(open: readonly OpenTask[], struck: readonly OpenTask[]): OpenTask[] {
+  const struckKeys = new Set(struck.map(getTaskKey))
+  return [...open.filter((task) => !struckKeys.has(getTaskKey(task))), ...struck]
+}
+
+/**
  * The Tasks list every surface renders (Plan 18): open rows merged with the
  * struck "completed" rows, searched, grouped ({@link groupTasks}) and narrowed to
  * the buckets the filters allow. Shared by the desktop screen and the mobile
@@ -75,8 +84,7 @@ export function composeVisibleTaskGroups({
         ),
       ]
     : recentlyCompleted
-  const completedKeys = new Set(completedRows.map(getTaskKey))
-  const all = [...open.filter((task) => !completedKeys.has(getTaskKey(task))), ...completedRows]
+  const all = withStruckRows(open, completedRows)
   const matched = needle ? all.filter((task) => taskMatchesNeedle(task, needle)) : all
   return visibleGroups(groupTasks(matched, today), filters)
 }

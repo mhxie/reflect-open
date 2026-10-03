@@ -3,6 +3,7 @@ import {
   groupTaskContexts,
   groupTasks,
   taskDateBucket,
+  tasksForDay,
   visibleTaskBreadcrumbs,
 } from './group-tasks.ts'
 import type { OpenTask } from './queries.ts'
@@ -234,5 +235,40 @@ describe('groupTasks', () => {
     const reversed = groupTasks([...rows].reverse(), TODAY).map((group) => group.kind)
     expect(forward).toEqual(reversed)
     expect(forward).toEqual(['overdue', 'upcoming', 'note'])
+  })
+})
+
+describe('tasksForDay', () => {
+  const todayTask = task({ notePath: `daily/${TODAY}.md`, dailyDate: TODAY, text: 'today' })
+  const staleTask = task({ notePath: `daily/${PAST}.md`, dailyDate: PAST, text: 'stale' })
+  const overdueTask = task({ notePath: 'notes/plan.md', dueDate: PAST, text: 'overdue' })
+  const dueTodayTask = task({
+    notePath: 'notes/plan.md',
+    astPath: [1],
+    dueDate: TODAY,
+    text: 'due',
+  })
+  const futureTask = task({ notePath: `daily/${FUTURE}.md`, dailyDate: FUTURE, text: 'future' })
+  const undatedTask = task({ notePath: 'notes/someday.md', text: 'undated' })
+  const all = [staleTask, futureTask, undatedTask, overdueTask, dueTodayTask, todayTask]
+  const texts = (tasks: readonly OpenTask[]): string[] => tasks.map((each) => each.text)
+
+  it("lists today's overdue tasks, then current ones newest first", () => {
+    const day = tasksForDay(all, TODAY, TODAY)
+
+    expect(texts(day.overdue)).toEqual(['overdue'])
+    expect(texts(day.due)).toEqual(['today', 'due', 'stale'])
+  })
+
+  it("lists only another day's own tasks, whether written or due that day", () => {
+    expect(tasksForDay(all, FUTURE, TODAY)).toEqual({ overdue: [], due: [futureTask] })
+    expect(tasksForDay(all, PAST, TODAY)).toEqual({ overdue: [], due: [staleTask, overdueTask] })
+  })
+
+  it('dates a task by its due date over its daily note', () => {
+    const moved = task({ notePath: `daily/${PAST}.md`, dailyDate: PAST, dueDate: FUTURE })
+
+    expect(tasksForDay([moved], PAST, TODAY).due).toEqual([])
+    expect(tasksForDay([moved], FUTURE, TODAY).due).toEqual([moved])
   })
 })

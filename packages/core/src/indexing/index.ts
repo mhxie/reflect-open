@@ -103,6 +103,8 @@ export {
   groupTaskContexts,
   groupTasks,
   taskDateBucket,
+  tasksForDay,
+  type DayTasks,
   type TaskContext,
   type TaskGroup,
   type TaskGroupKind,
