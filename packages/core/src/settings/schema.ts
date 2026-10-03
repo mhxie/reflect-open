@@ -457,8 +457,9 @@ export const graphColorsSchema = z
   })
 
 /*
- * `localOnlyFolders` is deliberately absent: Rust owns it (`fs/local_only.rs`),
- * and `settings_save` keeps the copy on disk whatever this document holds.
+ * `localOnlyFolders` and `backupMaxFileMiB` are deliberately absent: Rust owns
+ * them (`fs/local_only.rs`, `git/max_file_size.rs`), and `settings_save` keeps
+ * the copy on disk whatever this document holds.
  */
 
 /**

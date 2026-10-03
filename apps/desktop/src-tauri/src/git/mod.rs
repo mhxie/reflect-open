@@ -17,6 +17,7 @@
 
 mod commit;
 mod commit_message;
+mod max_file_size;
 mod merge;
 mod remote;
 mod repo;
@@ -37,8 +38,11 @@ use self::commit::CommitOutcome;
 use self::merge::MergeOutcome;
 use self::remote::{PushOutcome, RemoteDelta};
 
-/// GitHub rejects files over 100 MB, failing the whole push; stop just under.
-const MAX_FILE_BYTES: u64 = 95 * 1024 * 1024;
+/// The open graph's backup size limit, loaded at graph open (`fs::activate`).
+pub(crate) use self::max_file_size::load_for_root as load_max_file_size;
+/// The settings key holding every graph's backup size limit (Rust owns it:
+/// `settings_save` keeps the copy on disk).
+pub(crate) use self::max_file_size::SETTINGS_KEY as MAX_FILE_SIZE_SETTINGS_KEY;
 
 /// Snapshot of the graph's backup repository for the UI and the sync engine.
 /// Deliberately cheap — refs and config only, no working-tree scan.
@@ -158,7 +162,8 @@ pub async fn git_clone(url: String, path: String, token: Option<String>) -> AppR
 }
 
 /// Commit every pending change (no-op when clean), never staging the graph's
-/// local-only folders. See [`commit::commit_all`].
+/// local-only folders or changes to files at or above its backup size limit.
+/// See [`commit::commit_all`].
 #[tauri::command]
 pub async fn git_commit_all(
     message: String,
@@ -166,9 +171,11 @@ pub async fn git_commit_all(
     state: State<'_, GraphState>,
 ) -> AppResult<CommitOutcome> {
     let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
+    let max_file_bytes = crate::fs::backup_max_file_bytes(&state, generation)?
+        .unwrap_or(max_file_size::DEFAULT_MAX_FILE_BYTES);
     let started = std::time::Instant::now();
     let outcome = run_blocking(move || {
-        commit::commit_all(&root, &message, MAX_FILE_BYTES, local_only.as_deref())
+        commit::commit_all(&root, &message, max_file_bytes, local_only.as_deref())
     })
     .await;
     if let Ok(outcome) = &outcome {

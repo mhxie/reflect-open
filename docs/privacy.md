@@ -83,6 +83,21 @@ disk at call time), and it is covered by tests.
   one exception is [local-only folders](#local-only-folders-macos), which are
   never staged.
 - **When:** after you connect, on the background backup cadence and on "Back up now".
+- **Large files stay out.** A file of 95 MiB or more is never committed (GitHub
+  rejects files over 100 MB, failing the whole push); Reflect reports each one whose
+  changes it withheld. To lower the limit for a graph, add an entry to the settings
+  file (`~/Library/Application Support/reflect-open/settings.json`), keyed by the
+  graph's root path, giving a whole number of MiB from 1 to 95:
+
+  ```json
+  "backupMaxFileMiB": { "/Users/me/Notes": 32 }
+  ```
+
+  It applies the next time the graph opens, and Reflect keeps the entry as written
+  when it saves its own settings, as it does for
+  [local-only folders](#local-only-folders-macos). A value outside that range, or an
+  entry for a path that does not exist, is shown as a warning when the graph opens,
+  and the 95 MiB limit applies.
 - GitHub sign-in uses the OAuth device flow against `github.com`; the token is stored
   in the OS keychain.
 

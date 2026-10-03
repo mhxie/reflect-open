@@ -27,6 +27,8 @@ let pendingOpens: Map<string, () => void>
 let failOpens: boolean
 /** The `localOnlyWarnings` a `graph_open` reports. */
 let openWarnings: string[]
+/** The `backupWarnings` a `graph_open` reports. */
+let openBackupWarnings: string[]
 /** What `recent_graphs` returns — set before render to simulate prior opens. */
 let storedRecents: Array<{ root: string; name: string; openedMs: number }>
 /** What `list_files` returns — set before render to simulate existing notes. */
@@ -58,6 +60,7 @@ function installFakeBridge(): void {
   pendingOpens = new Map()
   failOpens = false
   openWarnings = []
+  openBackupWarnings = []
   storedRecents = []
   storedFiles = []
   metaStore = {}
@@ -99,6 +102,7 @@ function installFakeBridge(): void {
             generation,
             localOnlyFolders: [],
             localOnlyWarnings: openWarnings,
+            backupWarnings: openBackupWarnings,
           }
         }
         case 'recent_graphs':
@@ -248,6 +252,39 @@ describe('GraphProvider open sequencing', () => {
       message: openWarnings[0],
     })
     dismissOperation(localOnlyOperations()[0]!.id)
+  })
+
+  it('shows a graph’s backup size limit problems when it opens', async () => {
+    const backupOperations = () =>
+      getOperations().filter((operation) => operation.label === 'Backup size limit')
+    for (const operation of backupOperations()) {
+      dismissOperation(operation.id)
+    }
+    const { result, act } = await renderHook(() => useGraph(), { wrapper })
+    await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
+
+    await act(async () => {
+      const opening = result.current.openRecent('/clean')
+      await vi.waitFor(() => expect(invokeLog).toContain('graph_open:/clean'))
+      resolveOpen('/clean')
+      await opening
+    })
+    expect(backupOperations()).toEqual([])
+
+    openBackupWarnings = ['The backup size limit for this graph must be a whole number of MiB.']
+    await act(async () => {
+      const opening = result.current.openRecent('/notes')
+      await vi.waitFor(() => expect(invokeLog).toContain('graph_open:/notes'))
+      resolveOpen('/notes')
+      await opening
+    })
+    await vi.waitFor(() => expect(backupOperations()).toHaveLength(1))
+    expect(backupOperations()[0]).toMatchObject({
+      status: 'warning',
+      persistent: true,
+      message: openBackupWarnings[0],
+    })
+    dismissOperation(backupOperations()[0]!.id)
   })
 
   it('closes note windows BEFORE the backend open bumps the session', async () => {
