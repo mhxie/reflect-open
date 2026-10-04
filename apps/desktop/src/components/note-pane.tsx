@@ -335,15 +335,21 @@ export function NotePaneComponent({
       : document.initialContent
     return (
       <div className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
-        <LocalOnlyNotice className="mb-3" />
-        <MarkdownPreview
-          content={body}
-          resolveImageUrl={resolveImageUrl}
-          resolveWikiEmbed={resolveWikiEmbed}
-          onWikiLinkClick={onWikiLinkClick}
-          remoteEmbeds={false}
-          className={cn('reflect-note-surface', editorClassName)}
-        />
+        {/* A dashed sheet sets the read-only, device-bound note apart at a glance. */}
+        <div
+          data-testid="local-only-sheet"
+          className="rounded-xl border border-dashed border-border bg-surface-sunken/40 px-5 py-4"
+        >
+          <LocalOnlyNotice className="mb-3" />
+          <MarkdownPreview
+            content={body}
+            resolveImageUrl={resolveImageUrl}
+            resolveWikiEmbed={resolveWikiEmbed}
+            onWikiLinkClick={onWikiLinkClick}
+            remoteEmbeds={false}
+            className={cn('reflect-note-surface', editorClassName)}
+          />
+        </div>
         {showBacklinks ? <BacklinksPanel path={path} /> : null}
       </div>
     )

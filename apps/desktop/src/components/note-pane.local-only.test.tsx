@@ -92,6 +92,7 @@ it('opens a local-only note as a rendered read-only view, with nothing remote', 
   const view = await renderNote('finance/secure/bank.md')
 
   await expect.element(page.getByTestId('local-only-notice')).toBeVisible()
+  await expect.element(page.getByTestId('local-only-sheet')).toBeVisible()
   await expect.element(page.getByText('Account notes.')).toBeVisible()
   expect(document.querySelector('[contenteditable="true"]')).toBeNull()
   expect(document.querySelector('img[src^="https://"]')).toBeNull()

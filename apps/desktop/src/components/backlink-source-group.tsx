@@ -5,6 +5,7 @@ import { BacklinkSnippet } from '@/components/backlink-snippet.tsx'
 import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import type { BacklinkSource } from '@/lib/group-backlinks.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
 
 interface BacklinkSourceGroupProps {
   source: BacklinkSource
@@ -67,6 +68,7 @@ export function BacklinkSourceGroup({
           onClick={(event) => onOpen(source.path, event)}
           className="min-w-0 cursor-pointer truncate text-left text-xs text-accent"
         >
+          <LocalOnlyMark path={source.path} className="mr-1" />
           {displayNoteTitle(source.title)}
         </button>
 
