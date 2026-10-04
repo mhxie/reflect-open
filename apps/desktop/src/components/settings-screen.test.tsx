@@ -319,6 +319,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -383,6 +384,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -461,6 +463,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -546,6 +549,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -610,6 +614,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -667,6 +672,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -733,6 +739,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -796,6 +803,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -829,6 +837,17 @@ describe('SettingsScreen', () => {
 
     await expect.element(toggle).toHaveAttribute('aria-checked', 'false')
     await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ activityHeatmapEnabled: false }))
+  })
+
+  it('toggling the status bar off persists', async () => {
+    await renderScreen()
+    const toggle = page.getByRole('switch', { name: /status bar/i })
+    await expect.element(toggle).toHaveAttribute('aria-checked', 'true')
+
+    await toggle.click()
+
+    await expect.element(toggle).toHaveAttribute('aria-checked', 'false')
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ statusBarEnabled: false }))
   })
 
   it('selecting Sunday persists the week start day', async () => {
@@ -876,6 +895,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -951,6 +971,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1008,6 +1029,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1094,6 +1116,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1167,6 +1190,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1242,6 +1266,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1309,6 +1334,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1419,6 +1445,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1566,6 +1593,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1639,6 +1667,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1703,6 +1732,7 @@ describe('SettingsScreen', () => {
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
           activityHeatmapEnabled: true,
+          statusBarEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},

@@ -37,6 +37,7 @@ describe('settingsSchema', () => {
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       allNotesSort: { key: 'updated', direction: 'desc' },
       activityHeatmapEnabled: true,
+      statusBarEnabled: true,
       calendarEnabled: false,
       calendarIds: [],
       graphColors: {},
@@ -211,6 +212,8 @@ describe('settingsSchema', () => {
       false,
     )
     expect(settingsSchema.parse({ activityHeatmapEnabled: 'no' }).activityHeatmapEnabled).toBe(true)
+    expect(settingsSchema.parse({ statusBarEnabled: false }).statusBarEnabled).toBe(false)
+    expect(settingsSchema.parse({ statusBarEnabled: 'no' }).statusBarEnabled).toBe(true)
     expect(settingsSchema.parse({ calendarEnabled: true }).calendarEnabled).toBe(true)
     expect(settingsSchema.parse({ calendarEnabled: false }).calendarEnabled).toBe(false)
     expect(settingsSchema.parse({ calendarIds: ['cal-1', 'cal-2'] }).calendarIds).toEqual([
@@ -356,6 +359,7 @@ describe('settingsSchema', () => {
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       allNotesSort: { key: 'updated', direction: 'desc' },
       activityHeatmapEnabled: true,
+      statusBarEnabled: true,
       calendarEnabled: false,
       calendarIds: [],
       graphColors: {},
