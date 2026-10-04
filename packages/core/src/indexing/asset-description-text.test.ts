@@ -81,6 +81,15 @@ describe('gatherAssetDescriptionText', () => {
     expect(text).toBe('Still local.')
   })
 
+  it('skips an asset whose description path resolves outside the graph', async () => {
+    files.set('assets/b.pdf.reflect.md', '---\nreflectAsset: true\n---\n\nStill indexed.\n')
+    readNoteMock.mockRejectedValueOnce({
+      kind: 'traversal',
+      message: 'path resolves outside the graph: "raw/a.png.reflect.md"',
+    })
+    expect(await gatherAssetDescriptionText(['raw/a.png', 'assets/b.pdf'])).toBe('Still indexed.')
+  })
+
   it('propagates a non-notFound read error', async () => {
     readNoteMock.mockRejectedValueOnce({ kind: 'io', message: 'disk error' })
     await expect(gatherAssetDescriptionText(['assets/a.png'])).rejects.toMatchObject({ kind: 'io' })
