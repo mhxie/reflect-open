@@ -123,8 +123,10 @@ export {
 export {
   appendEvent,
   buildHistory,
+  HISTORY_WITHHELD_NOTICE,
   isToolPending,
   NO_REPLY_NOTICE,
+  showsHistoryWithheld,
   userMessage,
   type AssistantPart,
   type ChatAttachment,

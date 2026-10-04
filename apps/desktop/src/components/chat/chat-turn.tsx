@@ -31,6 +31,10 @@ interface ChatTurnProps {
 export function ChatTurn({ turn }: ChatTurnProps): ReactElement {
   const navigateWikiLink = useWikiLinkNavigation(null)
   const replyMarkdown = turn.status === 'done' ? assistantReplyMarkdown(turn) : null
+  // The withheld-history notice arrives before the provider answers, so it
+  // must not end the "Thinking…" state the way a first reply part does.
+  const awaitingReply =
+    turn.status === 'streaming' && turn.parts.every((part) => part.kind === 'history-withheld')
 
   return (
     <MessageGroup className="gap-6">
@@ -49,14 +53,14 @@ export function ChatTurn({ turn }: ChatTurnProps): ReactElement {
 
       <Message align="start">
         <MessageContent className="group/assistant-response w-fit max-w-full gap-2">
-          {turn.parts.length === 0 && turn.status === 'streaming' ? (
+          {turn.parts.map((part, index) => (
+            <ChatAssistantPart key={index} part={part} onWikiLinkClick={navigateWikiLink} />
+          ))}
+          {awaitingReply ? (
             <Marker className="animate-pulse text-sm text-text-muted">
               <MarkerContent>Thinking…</MarkerContent>
             </Marker>
           ) : null}
-          {turn.parts.map((part, index) => (
-            <ChatAssistantPart key={index} part={part} onWikiLinkClick={navigateWikiLink} />
-          ))}
           {replyMarkdown !== null ? (
             <MessageFooter className="pointer-events-none -mt-1 opacity-0 transition-opacity duration-100 group-hover/assistant-response:pointer-events-auto group-hover/assistant-response:opacity-100 group-focus-within/assistant-response:pointer-events-auto group-focus-within/assistant-response:opacity-100">
               <ChatCopyButton text={replyMarkdown} />

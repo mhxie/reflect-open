@@ -4,6 +4,7 @@ import {
   appendEvent,
   buildHistory,
   NO_REPLY_NOTICE,
+  showsHistoryWithheld,
   userMessage,
   type AssistantPart,
   type ChatAttachment,
@@ -150,6 +151,54 @@ describe('appendEvent', () => {
       { type: 'error', message: 'connection lost', messages: [] },
     ])
     expect(errored[0]).toMatchObject({ kind: 'tool', result: null, error: 'connection lost' })
+  })
+
+  it('marks withheld history ahead of the reply', () => {
+    expect(
+      fold([
+        { type: 'history-withheld' },
+        { type: 'text-delta', text: 'Answer.' },
+        { type: 'complete', messages: [] },
+      ]),
+    ).toEqual([{ kind: 'history-withheld' }, { kind: 'text', text: 'Answer.' }])
+  })
+
+  it('still flags a missing reply when only the withheld-history notice arrived', () => {
+    // The notice is chrome, not an answer: the no-reply backstop must fire.
+    const parts = fold([{ type: 'history-withheld' }, { type: 'complete', messages: [] }])
+    expect(parts).toEqual([
+      { kind: 'history-withheld' },
+      { kind: 'notice', tone: 'info', text: NO_REPLY_NOTICE },
+    ])
+  })
+})
+
+describe('showsHistoryWithheld', () => {
+  function turnWith(parts: AssistantPart[]): ChatTurn {
+    return {
+      id: 'turn',
+      userText: 'q',
+      attachments: [],
+      parts,
+      responseMessages: [],
+      status: 'done',
+    }
+  }
+
+  it('finds the notice on any earlier turn', () => {
+    expect(
+      showsHistoryWithheld([
+        turnWith([{ kind: 'text', text: 'One.' }]),
+        turnWith([{ kind: 'history-withheld' }, { kind: 'text', text: 'Two.' }]),
+      ]),
+    ).toBe(true)
+  })
+
+  it('is false for a transcript without it', () => {
+    expect(showsHistoryWithheld([])).toBe(false)
+    expect(
+      showsHistoryWithheld([turnWith([{ kind: 'notice', tone: 'info', text: 'Stopped.' }])]),
+    ).toBe(false)
   })
 })
 

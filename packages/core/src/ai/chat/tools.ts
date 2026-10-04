@@ -32,9 +32,10 @@ import {
  * and — deliberately in the same module — everything else that knows their
  * names: the {@link NoteToolCall}/{@link NoteToolResult} unions the engine
  * streams and the UI renders, and the mappers from SDK stream parts onto
- * them. Adding a tool means registering it here (batch executors live in
- * sibling `read-*.ts` modules) and extending the chip that renders it;
- * nothing else switches on tool names.
+ * them, and the parser that names what a stored result read
+ * ({@link toolResultSources}). Adding a tool means registering it here (batch
+ * executors live in sibling `read-*.ts` modules), naming its sources, and
+ * extending the chip that renders it; nothing else switches on tool names.
  *
  * Note content enters tool outputs only as {@link CloudSafe} values, minted
  * by the privacy gate in `../../privacy/checkers` — search drops private hits entirely,
@@ -410,4 +411,85 @@ export function noteToolResult(part: TypedToolResult<NoteTools>): NoteToolResult
         days: part.output.days.map(listingSummary),
       }
   }
+}
+
+/** The graph paths a stored tool result carries content from. */
+export interface ToolResultSources {
+  /** Notes behind search hits, listing rows, and note reads. */
+  notes: string[]
+  /** Attachments whose descriptions read_assets returned. */
+  assets: string[]
+}
+
+const sourceSchema = z.object({ path: z.string() })
+
+/** A read_notes entry, or a whole legacy read_note output. */
+const noteReadSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), note: sourceSchema }),
+  z.object({ ok: z.literal(false) }),
+])
+
+const assetReadSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), asset: sourceSchema }),
+  z.object({ ok: z.literal(false) }),
+])
+
+function noteSources(entries: readonly { path: string }[]): ToolResultSources {
+  return { notes: entries.map((entry) => entry.path), assets: [] }
+}
+
+/**
+ * Every output shape the note tools have ever persisted, reduced to its
+ * sources. `read_note` is the single-note read that `read_notes` replaced,
+ * and the first `list_recent_notes` returned its listing without `ok`.
+ */
+const storedResultSources = new Map<string, z.ZodType<ToolResultSources>>([
+  [
+    'search_notes',
+    z.object({ hits: z.array(sourceSchema) }).transform(({ hits }) => noteSources(hits)),
+  ],
+  [
+    'read_notes',
+    z
+      .object({ notes: z.array(noteReadSchema) })
+      .transform(({ notes }) =>
+        noteSources(notes.flatMap((entry) => (entry.ok ? [entry.note] : []))),
+      ),
+  ],
+  ['read_note', noteReadSchema.transform((entry) => noteSources(entry.ok ? [entry.note] : []))],
+  [
+    'read_assets',
+    z.object({ assets: z.array(assetReadSchema) }).transform(({ assets }) => ({
+      notes: [],
+      assets: assets.flatMap((entry) => (entry.ok ? [entry.asset.path] : [])),
+    })),
+  ],
+  [
+    'list_recent_notes',
+    z
+      .union([
+        z.object({ ok: z.literal(false) }),
+        z.object({ ok: z.literal(true).optional(), notes: z.array(sourceSchema) }),
+      ])
+      .transform((output) => noteSources('notes' in output ? output.notes : [])),
+  ],
+  [
+    'list_daily_notes',
+    z.object({ days: z.array(sourceSchema) }).transform(({ days }) => noteSources(days)),
+  ],
+])
+
+/**
+ * The note and asset paths a stored tool result (its JSON output, as
+ * persisted in a turn's model messages) carries content from, so a resend
+ * can re-check them (`./history-privacy`). Only entries holding something read
+ * from the graph count: search hits, listing rows, and successful reads. A
+ * refused or missing read echoes the model's own path with a fixed message.
+ *
+ * Returns `null` for a tool this module does not know or an output that does
+ * not parse, so the caller can fail closed.
+ */
+export function toolResultSources(toolName: string, output: unknown): ToolResultSources | null {
+  const parsed = storedResultSources.get(toolName)?.safeParse(output)
+  return parsed?.success === true ? parsed.data : null
 }

@@ -95,6 +95,7 @@ const partSchema = z.discriminatedUnion('kind', [
     error: z.string().nullable(),
   }),
   z.object({ kind: z.literal('notice'), tone: z.enum(['error', 'info']), text: z.string() }),
+  z.object({ kind: z.literal('history-withheld') }),
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {

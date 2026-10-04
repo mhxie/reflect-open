@@ -54,8 +54,16 @@ export const resolvedPostSchema = z.object({
 export function resolveArchivedPost(generation: number, postId: string) {
   return call('x_archive_resolve', { generation, postId }, resolvedPostSchema.nullable())
 }
+/**
+ * Whether an asset lives in the X archive folder, where an archived post's
+ * JSON can own it: such an asset can be referenced through a note's post link
+ * as well as directly ({@link getXArchiveOwners}).
+ */
+export function isXArchiveAssetPath(assetPath: string): boolean {
+  return assetPath.startsWith('assets/x/')
+}
 export function getXArchiveOwners(assetPath: string, generation?: number) {
-  if (!assetPath.startsWith('assets/x/')) return Promise.resolve([] as string[])
+  if (!isXArchiveAssetPath(assetPath)) return Promise.resolve([] as string[])
   return call('x_archive_owners', { assetPath, generation }, z.array(z.string()))
 }
 

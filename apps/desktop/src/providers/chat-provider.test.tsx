@@ -220,6 +220,46 @@ describe('ChatProvider persistence', () => {
     expect(saved.turn.parts.at(-1)).toEqual(notice)
   })
 
+  it('saves the withheld-history notice on the first turn that withheld, not later ones', async () => {
+    const withheldTurn = (text: string): ChatStreamEvent[] => [
+      { type: 'history-withheld' },
+      { type: 'text-delta', text },
+      { type: 'complete', messages: [{ role: 'assistant', content: text }] },
+    ]
+    const { act } = await renderProvider()
+    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
+
+    scriptTurn(withheldTurn('First.'))
+    await act(() => session?.send('one'))
+    scriptTurn(withheldTurn('Second.'))
+    await act(() => session?.send('two'))
+
+    expect(session?.turns.map((turn) => turn.parts)).toEqual([
+      [{ kind: 'history-withheld' }, { kind: 'text', text: 'First.' }],
+      [{ kind: 'text', text: 'Second.' }],
+    ])
+    const saved = core.saveChatMessage.mock.calls.at(-1)![0] as { turn: ChatTurn }
+    expect(saved.turn.parts).toEqual([{ kind: 'text', text: 'Second.' }])
+  })
+
+  it('does not repeat a withheld-history notice a restored conversation already shows', async () => {
+    core.listChatConversations.mockResolvedValue([conversation()])
+    core.loadChatMessages.mockResolvedValue([
+      { ...RESTORED_TURN, parts: [{ kind: 'history-withheld' }, ...RESTORED_TURN.parts] },
+    ])
+    scriptTurn([
+      { type: 'history-withheld' },
+      { type: 'text-delta', text: 'More.' },
+      { type: 'complete', messages: [{ role: 'assistant', content: 'More.' }] },
+    ])
+    const { act } = await renderProvider()
+    await vi.waitFor(() => expect(session?.turns).toHaveLength(1))
+
+    await act(() => session?.send('and today?'))
+
+    expect(session?.turns.at(-1)?.parts).toEqual([{ kind: 'text', text: 'More.' }])
+  })
+
   it('saves later turns into the restored conversation', async () => {
     core.listChatConversations.mockResolvedValue([conversation()])
     scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'More.' }] }])
