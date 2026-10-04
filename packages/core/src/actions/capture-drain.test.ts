@@ -5,9 +5,11 @@ vi.mock('../x-archive', async (importOriginal) => ({
 import { drainCaptureInbox } from './capture-drain.ts'
 import fixtures from './bookmark-envelope.fixtures.json' with { type: 'json' }
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
 import {
   addSpool,
   CAPTURED_AT,
+  CHANGED_ON_DISK,
   DAILY,
   describeMock,
   drain,
@@ -17,6 +19,7 @@ import {
   inboxRemoveMock,
   promoteMock,
   raceNextWrite,
+  raceWrites,
   rejected,
   scrapeMock,
   spool,
@@ -500,6 +503,34 @@ describe('drainCaptureInbox', () => {
     expect(daily.match(/\[\[capture-2026-06-11-153022-845-7c9e/g)).toHaveLength(1)
   })
 
+  it('a daily that keeps changing stops the pass; the next pass links the capture once', async () => {
+    files.set(DAILY, '# Thursday\n')
+    addSpool(envelope(), { screenshot: false })
+    let edits = 0
+    raceWrites(
+      DAILY,
+      (daily) => {
+        edits += 1
+        return `${daily ?? ''}\nedit ${edits}\n`
+      },
+      PATCH_NOTE_ATTEMPTS,
+    )
+
+    const stopped = await drain()
+
+    expect(stopped.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
+    expect(files.get(DAILY)).toBe('# Thursday\n\nedit 1\n\nedit 2\n\nedit 3\n')
+    expect(spool.size).toBe(1) // kept for the next pass
+
+    const resumed = await drain()
+
+    expect(resumed).toEqual({ pending: 1, drained: 1, deduped: 0, invalid: 0, stopped: null })
+    const daily = files.get(DAILY) ?? ''
+    expect(daily).toContain('edit 3')
+    expect(daily.match(/\[\[capture-2026-06-11-153022-845-7c9e/g)).toHaveLength(1)
+    expect(spool.size).toBe(0)
+  })
+
   it('keeps a file an interrupted drain left at the capture path and still links it', async () => {
     files.set(IDENTITY.notePath, '# An article\n\nEdited before the spool was removed.\n')
     addSpool(envelope(), { screenshot: false })
@@ -637,6 +668,33 @@ describe('drainCaptureInbox (text captures)', () => {
     await drain()
 
     expect(files.get(DAILY)).toBe('- morning standup\n- typed meanwhile\n- call the bank\n')
+  })
+
+  it('a daily that keeps changing keeps the spool, with nothing appended', async () => {
+    files.set(DAILY, '- morning standup\n')
+    addTextSpool(textEnvelope())
+    let edits = 0
+    raceWrites(
+      DAILY,
+      (daily) => {
+        edits += 1
+        return `${daily ?? ''}- edit ${edits}\n`
+      },
+      PATCH_NOTE_ATTEMPTS,
+    )
+
+    const stopped = await drain()
+
+    expect(stopped.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
+    expect(files.get(DAILY)).toBe('- morning standup\n- edit 1\n- edit 2\n- edit 3\n')
+    expect(spool.size).toBe(1)
+
+    await drain()
+
+    expect(files.get(DAILY)).toBe(
+      '- morning standup\n- edit 1\n- edit 2\n- edit 3\n- call the bank\n',
+    )
+    expect(spool.size).toBe(0)
   })
 
   it('appends a duplicate line — identical text twice is two entries', async () => {

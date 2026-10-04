@@ -15,6 +15,12 @@ import { useGraph } from '@/providers/graph-provider.tsx'
 interface SyncConflictNoticeProps {
   /** Graph-relative path of the open note. */
   path: string
+  /**
+   * The file text the conflict view beside the notice shows. Resolution
+   * splices exactly this text and never lands over a newer version. Omit it
+   * where no conflict view renders; resolution then reads the file at click.
+   */
+  shownContent?: string
   className?: string
 }
 
@@ -40,10 +46,11 @@ interface SyncConflictNoticeProps {
  */
 export function SyncConflictNotice({
   path,
+  shownContent,
   className,
 }: SyncConflictNoticeProps): ReactElement | null {
   const { graph } = useGraph()
-  const { busy, error, resolve } = useConflictResolution(path)
+  const { busy, error, resolve } = useConflictResolution(path, shownContent)
   const bridgeReady = useBridgeReady()
   const { data } = useQuery({
     queryKey: queryKeys.index.noteConflict(graph?.root, path),

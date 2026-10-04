@@ -128,14 +128,26 @@ export function reconcile(overrides: Partial<ReconcileCaptureEnrichmentInput> = 
  * between a pass's read and its write.
  */
 export function raceNextWrite(path: string, edit: (current: string | undefined) => string): void {
+  raceWrites(path, edit, 1)
+}
+
+/**
+ * Stage a note that keeps changing: the next `times` writes to `path` each
+ * find it changed by `edit` just before they are checked, so each is refused.
+ */
+export function raceWrites(
+  path: string,
+  edit: (current: string | undefined) => string,
+  times: number,
+): void {
   const write = writeNoteMock.getMockImplementation()
   if (write === undefined) {
     throw new Error('wireCaptureMocks() must run first')
   }
-  let armed = true
+  let remaining = times
   writeNoteMock.mockImplementation(async (target, contents, generation, expectedContents) => {
-    if (armed && target === path) {
-      armed = false
+    if (remaining > 0 && target === path) {
+      remaining -= 1
       files.set(path, edit(files.get(path)))
     }
     await write(target, contents, generation, expectedContents)

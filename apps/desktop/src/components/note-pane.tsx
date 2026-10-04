@@ -360,11 +360,12 @@ export function NotePaneComponent({
     // conflict notice — with its raw-text resolution actions — leads the
     // view, and the file renders with each block's sides color-coded instead
     // of the generic read-only dump (whose converter-gap alert would only
-    // double up on the conflict explanation).
+    // double up on the conflict explanation). The notice resolves the text
+    // rendered here, so a version that lands unseen is refused, not resolved.
     const conflicted = detectConflictMarkers(document.initialContent)
     return (
       <div className={cn(gutterClassName, className)}>
-        <SyncConflictNotice path={path} className="mb-4" />
+        <SyncConflictNotice path={path} shownContent={document.initialContent} className="mb-4" />
         {conflicted ? (
           <ConflictNoteView content={document.initialContent} />
         ) : (

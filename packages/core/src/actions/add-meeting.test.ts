@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ensurePersonNote } from '../contacts/person.ts'
 import { noteExists, readNote, writeNote } from '../graph/commands.ts'
 import { createNoteWithTitle } from '../graph/create-note.ts'
+import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
 import { resolveWikiTarget } from '../indexing/queries.ts'
 import { setBridge } from '../ipc/bridge.ts'
 import { resolved, unresolved } from '../markdown/resolve.ts'
@@ -301,6 +302,24 @@ describe('addMeetingToDaily', () => {
 
     expect(outcome).toEqual({ appended: false, createdNotes: [] })
     expect(writeNoteMock).toHaveBeenCalledTimes(1)
+    expect(ensurePersonMock).not.toHaveBeenCalled()
+  })
+
+  it(`surfaces a daily that keeps changing after ${PATCH_NOTE_ATTEMPTS} writes, creating nothing`, async () => {
+    let version = 0
+    readNoteMock.mockImplementation(async () => {
+      version += 1
+      return `## Meetings\n\n- [[Kickoff]]\n\nedit ${version}\n`
+    })
+    for (let attempt = 0; attempt < PATCH_NOTE_ATTEMPTS; attempt += 1) {
+      writeNoteMock.mockRejectedValueOnce(CHANGED_ON_DISK)
+    }
+
+    await expect(
+      addMeetingToDaily(input({ attendees: [{ name: 'Carol' }] })),
+    ).rejects.toMatchObject(CHANGED_ON_DISK)
+    expect(writeNoteMock).toHaveBeenCalledTimes(PATCH_NOTE_ATTEMPTS)
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(ensurePersonMock).not.toHaveBeenCalled()
   })
 

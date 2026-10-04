@@ -1,4 +1,4 @@
-import { patchNote, upsertFrontmatter } from '@reflect/core'
+import { patchNote, ReflectError, upsertFrontmatter } from '@reflect/core'
 import { frontmatterPatchToYaml, type FrontmatterPatch } from '@/editor/note-session.ts'
 import { openSession } from '@/editor/open-documents.ts'
 import { readNoteOrEmpty } from '@/lib/note-read.ts'
@@ -36,7 +36,9 @@ export async function readNoteSource(path: string): Promise<string> {
  *
  * A missing note (a daily before its first keystroke) is created holding just
  * the frontmatter, but only while it is still missing: a file that appears in
- * between is re-read and patched instead, never replaced by the stub.
+ * between is re-read and patched instead, never replaced by the stub. A note
+ * deleted while the patch is in flight stays deleted, and the patch fails
+ * rather than bringing it back as a frontmatter-only file.
  */
 export async function commitNoteFrontmatter(
   path: string,
@@ -48,9 +50,15 @@ export async function commitNoteFrontmatter(
     return
   }
   const yaml = frontmatterPatchToYaml(patch)
+  let firstRead = true
   await patchNote(
     path,
     (source) => {
+      const missingFromStart = firstRead
+      firstRead = false
+      if (source === null && !missingFromStart) {
+        throw new ReflectError('notFound', `${path} was deleted`)
+      }
       const onDisk = source ?? ''
       const patched = upsertFrontmatter(onDisk, yaml)
       return patched === onDisk ? null : patched

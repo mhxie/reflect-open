@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isAppError } from '../errors.ts'
+import { subscribeFileChanges } from '../indexing/file-changes.ts'
+import { setLocalWriteEcho } from '../indexing/local-write-echo.ts'
 import { setBridge } from '../ipc/bridge.ts'
 import { CHANGED_ON_DISK, fakeNoteStore, type FakeNoteStore } from '../testing/fake-note-store.ts'
 import {
@@ -29,6 +31,7 @@ function appendLine(line: string): (source: string | null) => string {
 
 afterEach(() => {
   setBridge(null)
+  setLocalWriteEcho(false)
 })
 
 describe('patchNoteWith', () => {
@@ -94,15 +97,19 @@ describe('patchNoteWith', () => {
   it('stops once a re-applied patch finds nothing left to do', async () => {
     const store = fakeNoteStore({ [PATH]: '# Plan\n' })
     store.beforeWrite = () => {
-      store.files.set(PATH, '# Plan\n- step\n')
+      store.files.set(PATH, '# Plan\n- step\n- from the phone\n')
     }
     const once = (source: string | null): string | null =>
       source?.includes('- step') === true ? null : appendLine('- step')(source)
 
     const result = await patchNoteWith(storeIo(store), PATH, once)
 
-    expect(result).toEqual({ source: '# Plan\n- step\n', patched: null, written: false })
-    expect(store.files.get(PATH)).toBe('# Plan\n- step\n')
+    expect(result).toEqual({
+      source: '# Plan\n- step\n- from the phone\n',
+      patched: null,
+      written: false,
+    })
+    expect(store.files.get(PATH)).toBe('# Plan\n- step\n- from the phone\n')
   })
 
   it(`surfaces the conflict after ${PATCH_NOTE_ATTEMPTS} refused writes`, async () => {
@@ -138,6 +145,20 @@ describe('patchNoteWith', () => {
       patchNoteWith(storeIo(store), PATH, appendLine('- step'), { attempts: 2 }),
     ).rejects.toBeInstanceOf(NoteChangedError)
     expect(store.refused).toBe(2)
+  })
+
+  it('counts a concurrent writer that produced the same text as written', async () => {
+    const store = fakeNoteStore({ [PATH]: '# Plan\n' })
+    store.beforeWrite = () => {
+      store.files.set(PATH, '# Plan\n- step\n')
+    }
+    const patch = vi.fn(appendLine('- step'))
+
+    const result = await patchNoteWith(storeIo(store), PATH, patch)
+
+    expect(result).toEqual({ source: '# Plan\n', patched: '# Plan\n- step\n', written: true })
+    expect(patch).toHaveBeenCalledTimes(1)
+    expect(store.files.get(PATH)).toBe('# Plan\n- step\n')
   })
 
   it('surfaces a real write failure at once when the file did not change', async () => {
@@ -216,5 +237,40 @@ describe('patchNote', () => {
       checkContents: true,
       expectedContents: null,
     })
+  })
+
+  it('never applies a patch twice when its write fails only after landing', async () => {
+    const files = new Map([[PATH, '# Plan\n']])
+    let writes = 0
+    setBridge({
+      invoke: async (command: string, args: Record<string, unknown>) => {
+        if (command === 'note_read') {
+          return files.get(String(args['path']))
+        }
+        if (command === 'note_write') {
+          writes += 1
+          files.set(String(args['path']), String(args['contents']))
+          return 1_234
+        }
+        throw new Error(`unexpected command ${command}`)
+      },
+      listen: async () => () => {},
+    })
+    // Mobile echoes a landed write in-process, so a throwing change listener
+    // rejects a write whose bytes are already on disk.
+    setLocalWriteEcho(true)
+    const unsubscribe = await subscribeFileChanges(() => {
+      throw new Error('listener failed')
+    })
+
+    try {
+      const result = await patchNote(PATH, appendLine('- step'), 7)
+
+      expect(result).toEqual({ source: '# Plan\n', patched: '# Plan\n- step\n', written: true })
+      expect(writes).toBe(1)
+      expect(files.get(PATH)).toBe('# Plan\n- step\n')
+    } finally {
+      unsubscribe()
+    }
   })
 })

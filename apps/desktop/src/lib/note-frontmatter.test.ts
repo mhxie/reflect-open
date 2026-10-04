@@ -150,4 +150,23 @@ describe('commitNoteFrontmatter', () => {
       '# Appeared\n',
     )
   })
+
+  it('never brings back a note deleted while the patch was in flight', async () => {
+    readNote
+      .mockResolvedValueOnce('# A\n')
+      .mockRejectedValue({ kind: 'notFound', message: 'no such note' })
+    writeNote.mockRejectedValueOnce(CHANGED_ON_DISK)
+
+    await expect(commitNoteFrontmatter('notes/a.md', { pinned: true }, 3)).rejects.toMatchObject({
+      kind: 'notFound',
+    })
+    // Only the write checked against the note as read was ever offered.
+    expect(writeNote).toHaveBeenCalledTimes(1)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\npinned: true\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
+  })
 })

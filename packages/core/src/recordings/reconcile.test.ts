@@ -7,6 +7,7 @@ import {
   type CalendarEvent,
 } from '../calendar/commands.ts'
 import { createNoteIfAbsent, readNote, writeNote } from '../graph/commands.ts'
+import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
 import {
   archiveRecording,
   finishedRecordings,
@@ -206,6 +207,44 @@ describe('reconcileRecordings', () => {
 
     expect(daily).toContain('Typed while the recording finished.')
     expect(daily.split(`[[${BASE}|`)).toHaveLength(2) // exactly one link
+  })
+
+  it('a daily that keeps changing stops the pass; the next links the kept transcript', async () => {
+    eventsMock.mockResolvedValue([])
+    const created = new Set<string>()
+    createNoteMock.mockImplementation(async (path) => {
+      if (created.has(path)) {
+        return { kind: 'collision' }
+      }
+      created.add(path)
+      return { kind: 'created', modifiedMs: 1 }
+    })
+    const write = writeNoteMock.getMockImplementation()!
+    let edits = 0
+    writeNoteMock.mockImplementation(async (...args) => {
+      if (edits < PATCH_NOTE_ATTEMPTS) {
+        edits += 1
+        daily = `${daily}edit ${edits}\n`
+      }
+      await write(...args)
+    })
+
+    const stopped = await reconcileRecordings(input())
+
+    expect(stopped).toEqual({
+      written: [],
+      stopped: { reason: 'io', message: 'Note changed on disk; reload before retrying' },
+    })
+    expect(daily).toBe('edit 1\nedit 2\nedit 3\n')
+    expect(archiveMock).not.toHaveBeenCalled() // still staged for the next pass
+
+    const resumed = await reconcileRecordings(input())
+
+    expect(resumed).toEqual({ written: [`inbox/recordings/${BASE}.md`], stopped: null })
+    expect(await createNoteMock.mock.results.at(-1)?.value).toEqual({ kind: 'collision' })
+    expect(daily).toContain('edit 3')
+    expect(daily.split(`[[${BASE}|`)).toHaveLength(2)
+    expect(archiveMock).toHaveBeenCalledTimes(1)
   })
 
   it('only archives a recording whose transcript link already exists', async () => {

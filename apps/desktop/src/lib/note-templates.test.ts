@@ -167,6 +167,29 @@ describe('renameTemplate', () => {
     )
   })
 
+  it('surfaces a template that keeps changing after three refused writes', async () => {
+    const changed = { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+    templateSlugPathForTitle.mockResolvedValueOnce('templates/journal.md')
+    readNote
+      .mockResolvedValueOnce('# Journal\n\nedit 1\n')
+      .mockResolvedValueOnce('# Journal\n\nedit 2\n')
+      .mockResolvedValueOnce('# Journal\n\nedit 3\n')
+      .mockResolvedValueOnce('# Journal\n\nedit 4\n')
+    writeNote
+      .mockRejectedValueOnce(changed)
+      .mockRejectedValueOnce(changed)
+      .mockRejectedValueOnce(changed)
+
+    await expect(renameTemplate('templates/journal.md', 'Log', 7)).rejects.toMatchObject(changed)
+    expect(writeNote).toHaveBeenCalledTimes(3)
+    expect(writeNote).toHaveBeenLastCalledWith(
+      'templates/journal.md',
+      '# Log\n\nedit 3\n',
+      7,
+      '# Journal\n\nedit 3\n',
+    )
+  })
+
   it('a no-op rename neither moves nor writes (its own path counts as free)', async () => {
     templateSlugPathForTitle.mockResolvedValueOnce('templates/journal.md')
     readNote.mockResolvedValueOnce('# Journal\n\nMood:\n')

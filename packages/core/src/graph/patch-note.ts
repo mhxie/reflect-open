@@ -44,7 +44,10 @@ export interface PatchNoteResult {
   readonly source: string | null
   /** What the final patch returned: the note's next source, or `null` if it declined. */
   readonly patched: string | null
-  /** Whether a write landed — false when the patch declined or changed nothing. */
+  /**
+   * Whether the note now holds `patched` — false when the patch declined or
+   * changed nothing. A write that reported failure after landing counts.
+   */
   readonly written: boolean
 }
 
@@ -103,11 +106,14 @@ async function rereadAfterRefusal(
 
 /**
  * Apply `patch` to the note at `path` through `io` (see {@link patchNote}).
- * After a refused write the note is re-read: unchanged bytes mean the write
- * failed for its own reason (a full disk, a graph switch), which surfaces as
- * is; changed bytes are a concurrent change, and the patch runs again on them
- * until `attempts` writes have been refused, when {@link NoteChangedError}
- * surfaces.
+ * After a refused write the note is re-read. Bytes equal to the patched text
+ * mean the write landed and failed only afterwards (a throwing change
+ * listener), or a concurrent writer produced the same text: either way it is
+ * written, and running the patch again would apply it twice. Unchanged bytes
+ * mean the write failed for its own reason (a full disk, a graph switch),
+ * which surfaces as is. Other bytes are a concurrent change, and the patch
+ * runs again on them until `attempts` writes have been refused, when
+ * {@link NoteChangedError} surfaces.
  */
 export async function patchNoteWith(
   io: NotePatchIo,
@@ -127,6 +133,9 @@ export async function patchNoteWith(
       return { source, patched, written: true }
     } catch (refusal) {
       const current = await rereadAfterRefusal(io, path, refusal)
+      if (current === patched) {
+        return { source, patched, written: true }
+      }
       if (current === source) {
         throw refusal
       }

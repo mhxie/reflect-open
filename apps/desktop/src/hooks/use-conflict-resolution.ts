@@ -20,15 +20,23 @@ export interface ConflictResolutionState {
 
 /**
  * Resolution of sync conflict markers for one note, as raw-text surgery:
- * read the file, splice the kept side(s) (`resolveConflictMarkers` — markers
- * don't survive the editor round-trip, so the editor can't do this), write it
- * back, reindex, and notify open sessions. The conflict flag is a projection
- * of the file content, so consumers (the notice banner) clear themselves once
- * the resolved file reindexes. The write is checked against the text the
- * splice ran on: a version that lands in between is refused, not overwritten
- * — the user decides again on what is there now.
+ * splice the kept side(s) into the file's text (`resolveConflictMarkers` —
+ * markers don't survive the editor round-trip, so the editor can't do this),
+ * write it back, reindex, and notify open sessions. The conflict flag is a
+ * projection of the file content, so consumers (the notice banner) clear
+ * themselves once the resolved file reindexes.
+ *
+ * `shownContent` is the file text the user is deciding on (the protected
+ * conflict view). The splice runs on exactly that text and the write is
+ * checked against it, so a version that landed after the view rendered is
+ * refused rather than resolved unseen; the view refreshes from disk and the
+ * user decides again. Without it (no conflict view on screen) the splice runs
+ * on a fresh read, and the write is checked against that.
  */
-export function useConflictResolution(path: string): ConflictResolutionState {
+export function useConflictResolution(
+  path: string,
+  shownContent?: string,
+): ConflictResolutionState {
   const { graph, indexGeneration } = useGraph()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +50,7 @@ export function useConflictResolution(path: string): ConflictResolutionState {
     setError(null)
     let wrote = false
     try {
-      const source = await readNote(path)
+      const source = shownContent ?? (await readNote(path))
       const resolved = resolveConflictMarkers(source, keep)
       await writeNote(path, resolved, writeGeneration, source)
       wrote = true

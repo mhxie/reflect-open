@@ -1750,6 +1750,23 @@ mod note_revision_tests {
         assert!(write_note_revision(directory.path(), &target, "second", None).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "first");
     }
+
+    /// An empty file and a missing one are different revisions: a writer that
+    /// read nothing must not land over an empty file, nor the reverse.
+    #[test]
+    fn an_empty_file_is_not_a_missing_one() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("daily.md");
+        assert!(write_note_revision(directory.path(), &target, "text", Some("")).is_err());
+        assert!(!target.exists());
+
+        fs::write(&target, "").unwrap();
+        assert!(write_note_revision(directory.path(), &target, "text", None).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "");
+
+        write_note_revision(directory.path(), &target, "text", Some("")).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "text");
+    }
 }
 
 #[cfg(test)]
