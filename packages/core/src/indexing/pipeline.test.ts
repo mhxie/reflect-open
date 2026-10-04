@@ -533,6 +533,9 @@ describe('reconcileIndex move healing (Plan 17)', () => {
           stalePlaceholders: [],
         }
       }
+      if (command === 'note_exists') {
+        return args['path'] !== OLD // the orphan's file is gone
+      }
       if (command === 'note_read') {
         if (args['path'] === target) {
           return options.content ?? CONTENT

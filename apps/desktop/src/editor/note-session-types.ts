@@ -117,6 +117,22 @@ export interface NoteSession {
    * the old path.
    */
   retarget: (to: string) => void
+  /**
+   * A pull moved this note's file aside to `to` (`name (this device).ext`)
+   * and wrote the other device's note at the session's path, whose bytes
+   * were `incomingAtFrom` (`null` when they couldn't be read). The document
+   * follows its bytes to `to` when the moved note was kept out (`keptOut`),
+   * the buffer is dirty, a conflict is parked, or the live header reads as
+   * private: otherwise its next save would put this device's text back over
+   * the other device's note. Following first drops a parked conflict equal
+   * to `incomingAtFrom` (that note keeps the old path), or any parked
+   * conflict when `incomingAtFrom` is unknown, then reconciles against
+   * `to` — equal bytes change nothing, a dirty buffer parks them, a clean
+   * one adopts them. A clean, public note stays and adopts the
+   * incoming note instead. Returns whether the session moved; the caller
+   * re-keys the open-documents registry and announces the move.
+   */
+  followDisplacement: (to: string, incomingAtFrom: string | null, keptOut: boolean) => boolean
   /** Read the note and emit `ready` (or `error`). Call once after creation. */
   load: () => void
   /** Every editor document change enters the pipeline here. */

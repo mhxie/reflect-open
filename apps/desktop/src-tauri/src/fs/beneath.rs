@@ -19,6 +19,13 @@
 //! the path-based OS-trash call that follows names a place nothing else can
 //! occupy. `.reflect/recovery/` keeps one unsaved buffer per note.
 //!
+//! Git sync's pull walks the graph the same way before it moves an entry
+//! out of a path it writes (`git::displace`): it inspects entries without
+//! following them ([`entry_beneath`], [`names_beneath`],
+//! [`read_link_beneath`]), moves them only with the exclusive
+//! [`rename_beneath`], and deletes nothing but files and links
+//! ([`remove_beneath`]).
+//!
 //! Unix-only: directory descriptors are a unix API, and the module is absent
 //! from other builds.
 
@@ -655,6 +662,99 @@ fn rename_error(errno: Errno) -> BeneathError {
     } else {
         errno.into()
     }
+}
+
+/// What a directory entry is, seen without following it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EntryKind {
+    Directory,
+    File,
+    Symlink,
+    /// A FIFO, socket, or device node.
+    Other,
+}
+
+/// A directory entry as `lstat` reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EntryStat {
+    pub(crate) kind: EntryKind,
+    /// Its size in bytes (for a link, the length of its target).
+    pub(crate) size: u64,
+    /// Its inode: two spellings that reach one inode name one entry.
+    pub(crate) inode: i128,
+}
+
+/// What `name` in `dir` is, without following it; `None` when nothing holds
+/// the name. On a volume that folds case or Unicode normalization another
+/// spelling of an existing name reaches that entry, and [`names_beneath`]
+/// gives its on-disk spelling.
+pub(crate) fn entry_beneath(
+    dir: &BeneathDir,
+    name: impl AsRef<OsStr>,
+) -> BeneathResult<Option<EntryStat>> {
+    let name = plain_name(name.as_ref())?;
+    let stat = match rustix::fs::statat(&dir.file, name, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(stat) => stat,
+        Err(Errno::NOENT) => return Ok(None),
+        Err(errno) => return Err(errno.into()),
+    };
+    let kind = match FileType::from_raw_mode(stat.st_mode) {
+        FileType::Directory => EntryKind::Directory,
+        FileType::RegularFile => EntryKind::File,
+        FileType::Symlink => EntryKind::Symlink,
+        _ => EntryKind::Other,
+    };
+    Ok(Some(EntryStat {
+        kind,
+        size: u64::try_from(stat.st_size).unwrap_or(0),
+        inode: i128::from(stat.st_ino),
+    }))
+}
+
+/// Open the directory `name` below `dir` without following it, refusing it
+/// as every walk here does when it is a Git work tree of its own.
+pub(crate) fn subdir_beneath(
+    dir: &BeneathDir,
+    name: impl AsRef<OsStr>,
+) -> BeneathResult<BeneathDir> {
+    descend(dir, plain_name(name.as_ref())?, None)
+}
+
+/// Every name in `dir`, never `.` or `..`, with its inode, in the
+/// directory's own order: how an entry another spelling reached is spelled
+/// on disk.
+pub(crate) fn names_beneath(dir: &BeneathDir) -> BeneathResult<Vec<(std::ffi::OsString, i128)>> {
+    let mut listing = rustix::fs::Dir::read_from(&dir.file)?;
+    let mut names = Vec::new();
+    while let Some(entry) = listing.read() {
+        let entry = entry?;
+        let name = entry.file_name().to_bytes();
+        if name == b"." || name == b".." {
+            continue;
+        }
+        names.push((
+            OsStr::from_bytes(name).to_os_string(),
+            i128::from(entry.ino()),
+        ));
+    }
+    Ok(names)
+}
+
+/// The target of the symlink `name` in `dir`, as raw bytes.
+pub(crate) fn read_link_beneath(
+    dir: &BeneathDir,
+    name: impl AsRef<OsStr>,
+) -> BeneathResult<Vec<u8>> {
+    let name = plain_name(name.as_ref())?;
+    Ok(rustix::fs::readlinkat(&dir.file, name, Vec::new())?.into_bytes())
+}
+
+/// Remove the file or symlink `name` from `dir`. A link goes, never what it
+/// points at, and a directory is refused: nothing here deletes a folder.
+pub(crate) fn remove_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> BeneathResult<()> {
+    let name = plain_name(name.as_ref())?;
+    rustix::fs::unlinkat(&dir.file, name, AtFlags::empty())?;
+    Ok(())
 }
 
 /// Move `name` out of `dir` into a fresh `.reflect/trash/<128-bit random>/`
@@ -1660,6 +1760,71 @@ mod tests {
             Err(BeneathError::Traversal(_))
         ));
         assert_eq!(snapshot(&notes), before);
+    }
+
+    #[test]
+    fn entries_are_inspected_and_removed_without_following_links() {
+        let fixture = Fixture::new();
+        let dir = fixture.raw_dir("");
+        let notes = fixture.graph.join("notes");
+        fs::write(fixture.raw.join("note.md"), "# Note\n").unwrap();
+        fs::create_dir(fixture.raw.join("folder")).unwrap();
+        symlink(&notes, fixture.raw.join("link")).unwrap();
+        let before = snapshot(&notes);
+
+        let note = entry_beneath(&dir, "note.md").unwrap().unwrap();
+        assert_eq!((note.kind, note.size), (EntryKind::File, 7));
+        let folder = entry_beneath(&dir, "folder").unwrap().unwrap();
+        assert_eq!(folder.kind, EntryKind::Directory);
+        let link = entry_beneath(&dir, "link").unwrap().unwrap();
+        assert_eq!(link.kind, EntryKind::Symlink);
+        assert_eq!(entry_beneath(&dir, "missing.md").unwrap(), None);
+        assert_eq!(
+            read_link_beneath(&dir, "link").unwrap(),
+            notes.as_os_str().as_bytes()
+        );
+        assert!(matches!(
+            subdir_beneath(&dir, "link"),
+            Err(BeneathError::Traversal(_))
+        ));
+        assert!(subdir_beneath(&dir, "folder").is_ok());
+
+        let mut names = names_beneath(&dir).unwrap();
+        names.sort();
+        let listed: Vec<&str> = names
+            .iter()
+            .map(|(name, _)| name.to_str().unwrap())
+            .collect();
+        assert_eq!(listed, vec!["folder", "link", "note.md"]);
+        assert!(names.contains(&("note.md".into(), note.inode)));
+
+        remove_beneath(&dir, "link").unwrap();
+        remove_beneath(&dir, "note.md").unwrap();
+        assert!(remove_beneath(&dir, "folder").is_err());
+        assert_eq!(entries(&fixture.raw), vec!["folder"]);
+        assert_eq!(snapshot(&notes), before);
+    }
+
+    /// On a volume that folds case another spelling reaches the entry, and
+    /// the listing gives the spelling on disk; elsewhere it reaches nothing.
+    #[test]
+    fn a_folded_spelling_reaches_the_entry_the_listing_spells() {
+        let fixture = Fixture::new();
+        let dir = fixture.raw_dir("");
+        fs::write(fixture.raw.join("Plan.md"), "# Plan\n").unwrap();
+        let folds = fixture.raw.join("plan.md").exists();
+
+        let found = entry_beneath(&dir, "plan.md").unwrap();
+        assert_eq!(found.is_some(), folds);
+        if let Some(found) = found {
+            let spelled: Vec<_> = names_beneath(&dir)
+                .unwrap()
+                .into_iter()
+                .filter(|(_, inode)| *inode == found.inode)
+                .map(|(name, _)| name)
+                .collect();
+            assert_eq!(spelled, vec![std::ffi::OsString::from("Plan.md")]);
+        }
     }
 
     #[test]

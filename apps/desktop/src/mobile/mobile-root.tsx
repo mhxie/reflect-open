@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { setLocalWriteEcho, type AppPlatform } from '@reflect/core'
+import { NoteDisplacements } from '@/components/note-displacements.tsx'
 import { Toaster } from '@/components/ui/toast.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { setPlatformSurface } from '@/lib/platform-surface.ts'
@@ -25,6 +26,7 @@ setPlatformSurface({ touchEditor: true, mobileApp: true })
 export function MobileRoot({ platform }: { platform: AppPlatform }): ReactElement {
   return (
     <GraphProvider platform={platform}>
+      <NoteDisplacements />
       <TooltipProvider>
         <MobileApp />
         <Toaster position="top-center" />

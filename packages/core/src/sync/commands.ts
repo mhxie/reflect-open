@@ -57,8 +57,30 @@ export const changedFileSchema = z.object({
 })
 export type ChangedFile = z.infer<typeof changedFileSchema>
 
+/**
+ * One of this device's entries a pull moved out of a path it wrote, so the
+ * other device's file could take the path: `to` is `name (this device).ext`.
+ */
+export const displacedFileSchema = z.object({
+  /** Where the entry was, spelled as on disk (the path the index knows). */
+  from: z.string(),
+  /** Where it is now. */
+  to: z.string(),
+  /** The moved note is locked (or its frontmatter can't be read). */
+  keptOut: z.boolean(),
+  /** It was tracked: its uncommitted bytes differed from the last commit. */
+  tracked: z.boolean(),
+  /** The incoming note carries another frontmatter id: a different note took the path. */
+  differentNote: z.boolean().default(false),
+})
+export type DisplacedFile = z.infer<typeof displacedFileSchema>
+
 export const mergeOutcomeSchema = z.object({
-  kind: z.enum(['upToDate', 'fastForward', 'merged', 'mergedWithConflicts']),
+  /**
+   * `deferred`: a save raced the cycle's commit, so the pull wrote nothing;
+   * the engine commits and pulls again.
+   */
+  kind: z.enum(['upToDate', 'fastForward', 'merged', 'mergedWithConflicts', 'deferred']),
   conflictedPaths: z.array(z.string()),
   /**
    * Every file the merge changed. The caller reindexes these directly —
@@ -71,6 +93,11 @@ export const mergeOutcomeSchema = z.object({
    * history, never written on this device (the folders stay frozen).
    */
   frozenPaths: z.array(z.string()).default([]),
+  /**
+   * This device's entries the pull moved aside instead of overwriting.
+   * Their new paths are in `changedFiles` too.
+   */
+  displaced: z.array(displacedFileSchema).default([]),
 })
 export type MergeOutcome = z.infer<typeof mergeOutcomeSchema>
 
@@ -135,7 +162,9 @@ export async function gitFetch(token: string | null, generation: number): Promis
 /**
  * Merge the fetched remote branch. Conflicts are committed into the notes as
  * labeled markers — the repo is never left mid-merge, and the indexer turns
- * the markers into `Needs review` flags.
+ * the markers into `Needs review` flags. Uncommitted bytes in the pull's way
+ * move aside (`displaced`, each also broadcast on `note:displaced`); a save
+ * that raced the cycle's commit comes back `deferred`.
  */
 export async function gitMergeRemote(generation: number): Promise<MergeOutcome> {
   return await call('git_merge_remote', { generation }, mergeOutcomeSchema)

@@ -17,6 +17,7 @@
 
 mod commit;
 mod commit_message;
+mod displace;
 mod history_roots;
 mod max_file_size;
 mod merge;
@@ -207,24 +208,66 @@ pub async fn git_fetch(
     run_blocking(move || remote::fetch(&root, token)).await
 }
 
+/// Broadcast fired for every entry a pull moved out of a path it wrote and
+/// left moved, whether the pull succeeded or failed: every window's open
+/// editor on `from` decides whether to follow it to `to`. Without it, an
+/// editor holding the moved note would save it back over the other device's
+/// file at `from`.
+const NOTE_DISPLACED_EVENT: &str = "note:displaced";
+
+/// The `note:displaced` payload.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteDisplaced<'a> {
+    generation: u64,
+    from: &'a str,
+    to: &'a str,
+    kept_out: bool,
+}
+
 /// Merge the fetched remote branch; conflicts are committed into the notes as
 /// labeled markers (see [`merge`]). The repo is never left mid-merge, the
-/// graph's local-only folders are never written, and a pull that would join
-/// a history the graph has not accepted pauses instead (see
+/// graph's local-only folders are never written, this device's uncommitted
+/// entries in the pull's way move aside rather than being overwritten (see
+/// [`displace`]), each announced on `note:displaced`, and a pull that would
+/// join a history the graph has not accepted pauses instead (see
 /// [`history_roots`]).
 #[tauri::command]
-pub async fn git_merge_remote(
+pub async fn git_merge_remote<R: tauri::Runtime>(
     generation: u64,
+    app: tauri::AppHandle<R>,
     state: State<'_, GraphState>,
 ) -> AppResult<MergeOutcome> {
+    use tauri::Emitter;
     let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
     let accepted = crate::fs::accepted_history_roots(&state, generation)?;
-    let outcome =
-        run_blocking(move || merge::merge_remote(&root, local_only.as_deref(), &accepted)).await;
-    // Invalidate on both arms: a failed merge can still have moved the tree
-    // partway through checkout, and a stale catalog would pin the old view.
+    let max_file_bytes = crate::fs::backup_max_file_bytes(&state, generation)?
+        .unwrap_or(max_file_size::DEFAULT_MAX_FILE_BYTES);
+    let (outcome, displaced) = run_blocking(move || {
+        let policy = merge::PullPolicy {
+            local_only: local_only.as_deref(),
+            accepted_roots: &accepted,
+            max_file_bytes,
+        };
+        let mut displaced = Vec::new();
+        let outcome = merge::merge_remote(&root, &policy, &mut displaced);
+        Ok((outcome, displaced))
+    })
+    .await?;
     let root = crate::fs::root_for_generation(&state, generation)?;
+    // A failed merge can still have changed the source graph's working tree.
     crate::fs::invalidate_file_catalog(&state, &root);
+    for file in &displaced {
+        let payload = NoteDisplaced {
+            generation,
+            from: &file.from,
+            to: &file.to,
+            kept_out: file.kept_out,
+        };
+        if let Err(err) = app.emit(NOTE_DISPLACED_EVENT, payload) {
+            tracing::warn!(?err, from = %file.from, "could not announce a displaced note");
+        }
+    }
     outcome
 }
 

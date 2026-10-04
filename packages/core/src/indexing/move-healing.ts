@@ -1,6 +1,8 @@
-import { readNote } from '../graph/commands.ts'
+import { noteExists, readNote } from '../graph/commands.ts'
+import { foldGraphPath } from '../graph/paths.ts'
 import { parseNote } from '../markdown/index.ts'
 import { pairMovesById, type DetectedMove } from './move-detection.ts'
+import { isRecentlyDisplaced } from './note-displaced.ts'
 import { getNoteIdsByPath } from './queries.ts'
 
 /**
@@ -36,6 +38,16 @@ export interface ExternalMoveScan {
  * unreadable arrival simply can't pair (the caller's plain path retries the
  * read); an ambiguous id never pairs (see {@link pairMovesById}). An abort
  * mid-scan returns no moves — the caller is about to bail anyway.
+ *
+ * Two shapes that look like a move are not one, and never pair:
+ * - an orphan whose path holds a file again by the time of pairing (a pull
+ *   moved this device's note aside and wrote the other device's there);
+ * - a pair a pull recorded as moved aside ({@link isRecentlyDisplaced}),
+ *   where the other device deleted the path.
+ * Healing either would retarget an open editor onto the wrong note. A
+ * rename that changed only the case or Unicode normalization of a path
+ * still pairs: on a volume that folds names, the old spelling's existence
+ * probe would find the arrival itself.
  */
 export async function detectExternalMoves(
   orphanPaths: string[],
@@ -46,7 +58,11 @@ export async function detectExternalMoves(
   if (orphanPaths.length === 0 || arrivalPaths.length === 0) {
     return { moves: [], content }
   }
-  const orphanIds = await getNoteIdsByPath(orphanPaths)
+  const missing = await withoutPresentPaths(orphanPaths, arrivalPaths)
+  if (missing.length === 0 || options?.signal?.aborted) {
+    return { moves: [], content }
+  }
+  const orphanIds = await getNoteIdsByPath(missing)
   const arrivalIds = new Map<string, string | null>()
   for (const path of arrivalPaths) {
     if (options?.signal?.aborted) {
@@ -61,5 +77,34 @@ export async function detectExternalMoves(
       // Unreadable arrival: it can't pair; the caller's plain path retries.
     }
   }
-  return { moves: pairMovesById(orphanIds, arrivalIds), content }
+  const moves = pairMovesById(orphanIds, arrivalIds).filter(
+    (move) => !isRecentlyDisplaced(move.from, move.to),
+  )
+  return { moves, content }
+}
+
+/**
+ * The orphans whose file is still gone. An orphan whose path folds
+ * ({@link foldGraphPath}) onto a differently spelled arrival is not probed:
+ * on a volume that folds case and normalization, the probe would answer for
+ * that arrival, and the pair is a rename of the spelling alone. A probe that
+ * fails counts as present: the orphan then takes the plain delete+create
+ * path, which always converges.
+ */
+async function withoutPresentPaths(paths: string[], arrivals: string[]): Promise<string[]> {
+  const spellings = new Map<string, string[]>()
+  for (const arrival of arrivals) {
+    const key = foldGraphPath(arrival)
+    spellings.set(key, [...(spellings.get(key) ?? []), arrival])
+  }
+  const present = await Promise.all(
+    paths.map(async (path) => {
+      const respelled = spellings.get(foldGraphPath(path))?.some((arrival) => arrival !== path)
+      if (respelled === true) {
+        return false
+      }
+      return await noteExists(path).catch(() => true)
+    }),
+  )
+  return paths.filter((_path, position) => present[position] !== true)
 }

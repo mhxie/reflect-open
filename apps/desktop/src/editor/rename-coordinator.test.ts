@@ -112,6 +112,7 @@ function fakeSession(content: string): NoteSession & {
     retarget: vi.fn((to: string) => {
       path = to
     }),
+    followDisplacement: () => false,
     load: () => {},
     editorChanged: () => {},
     externalChanged: () => {},

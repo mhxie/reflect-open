@@ -5763,6 +5763,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trash",
+ "unicase",
+ "unicode-normalization",
  "url",
  "walkdir",
  "whisper-rs",
