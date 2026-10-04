@@ -143,6 +143,13 @@ function pressFrom(target: EventTarget, key: string, options: KeyboardEventInit 
   )
 }
 
+/** Release a mouse button over `target`; returns whether a listener cancelled it. */
+function releaseMouseButton(button: number, target: EventTarget = window): boolean {
+  const event = new MouseEvent('mouseup', { button, cancelable: true, bubbles: true })
+  target.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
 describe('app shortcuts', () => {
   it('CMD+O updates the shelf before the file write resolves', async () => {
     const client = new QueryClient()
@@ -315,6 +322,69 @@ describe('app shortcuts', () => {
     await act(() => press(']', { code: 'BracketLeft' }))
     expect(result.current.router.route).toEqual({ kind: 'today' })
     expect(result.current.router.canForward).toBe(false)
+  })
+
+  it('mouse back and forward buttons traverse history', async () => {
+    const { result, act } = await shortcutsHook()
+    await act(() => press('n'))
+    const opened = result.current.router.route
+    await act(() => press('d'))
+
+    let cancelled = false
+    await act(() => {
+      cancelled = releaseMouseButton(3)
+    })
+    expect(result.current.router.route).toEqual(opened)
+    expect(cancelled).toBe(true)
+
+    await act(() => {
+      cancelled = releaseMouseButton(4)
+    })
+    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(cancelled).toBe(true)
+  })
+
+  it('mouse history buttons still traverse when the surface under the pointer swallows them', async () => {
+    const { result, act } = await shortcutsHook()
+    await act(() => press('n'))
+    const opened = result.current.router.route
+    await act(() => press('d'))
+
+    const editor = document.createElement('div')
+    document.body.append(editor)
+    editor.addEventListener('mouseup', (event) => event.stopPropagation())
+
+    try {
+      await act(() => releaseMouseButton(3, editor))
+      expect(result.current.router.route).toEqual(opened)
+    } finally {
+      editor.remove()
+    }
+  })
+
+  it('ignores other mouse buttons and mutes history buttons behind the palette', async () => {
+    const { result, act } = await shortcutsHook()
+    await act(() => press('n'))
+    const opened = result.current.router.route
+    await act(() => press('d'))
+
+    let cancelled = true
+    await act(() => {
+      cancelled = releaseMouseButton(0) || releaseMouseButton(1) || releaseMouseButton(2)
+    })
+    expect(cancelled).toBe(false)
+    expect(result.current.router.route).toEqual({ kind: 'today' })
+
+    await act(() => result.current.palette.openPalette())
+    await act(() => {
+      cancelled = releaseMouseButton(3)
+    })
+    expect(cancelled).toBe(false)
+    expect(result.current.router.route).toEqual({ kind: 'today' })
+
+    await act(() => result.current.palette.closePalette())
+    await act(() => releaseMouseButton(3))
+    expect(result.current.router.route).toEqual(opened)
   })
 
   it('⌘K opens the palette', async () => {
