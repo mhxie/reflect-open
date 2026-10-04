@@ -1,6 +1,6 @@
-import type { ReactElement } from 'react'
+import { useState, type DragEvent, type ReactElement } from 'react'
 import { isUntitledNotePath, type GraphInfo } from '@reflect/core'
-import { ListChecks, MessageSquare, SquarePen } from 'lucide-react'
+import { FilePlus, ListChecks, MessageSquare, SquarePen } from 'lucide-react'
 import { AudioMemoButton } from '@/components/audio-memo/audio-memo-button.tsx'
 import { RecordingStrip } from '@/components/audio-memo/recording-strip.tsx'
 import { ListIcon } from '@/components/icons/list-icon.tsx'
@@ -8,6 +8,7 @@ import { PencilIcon } from '@/components/icons/pencil-icon.tsx'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { keybindingFor } from '@/lib/commands/app-commands.ts'
 import { runCommand } from '@/lib/commands/registry.ts'
+import { createNoteFromFiles } from '@/lib/create-note-from-files.ts'
 import { useToday } from '@/lib/use-today.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { hasMacosTitleBarOverlay } from '@/lib/window-chrome.ts'
@@ -47,10 +48,38 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
   // share one icon footprint.
   const lucideBox = 'flex size-6 shrink-0 items-center justify-center'
 
+  const generation = graph.generation
+  const [dropping, setDropping] = useState(false)
+  const carriesFiles = (event: DragEvent<HTMLDivElement>): boolean =>
+    event.dataTransfer.types.includes('Files')
+
   return (
     <div
+      onDragOver={(event) => {
+        if (carriesFiles(event)) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          setDropping(true)
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setDropping(false)
+        }
+      }}
+      onDrop={(event) => {
+        if (!carriesFiles(event)) {
+          return
+        }
+        event.preventDefault()
+        setDropping(false)
+        const files = [...event.dataTransfer.files]
+        if (files.length > 0) {
+          void createNoteFromFiles(files, generation, context.navigate)
+        }
+      }}
       className={cn(
-        'flex h-full min-h-0 flex-col',
+        'relative flex h-full min-h-0 flex-col',
         // With the overlaid macOS title bar, the traffic lights and the
         // WindowDragRegion strip own the top 28px — start content below them.
         hasMacosTitleBarOverlay ? 'pt-2' : 'pt-2.5',
@@ -136,6 +165,16 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
       </div>
 
       <GraphFooter graph={graph} context={context} />
+
+      {dropping ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-2 z-20 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent bg-accent-soft/80 text-sm font-medium text-accent backdrop-blur-[1px]"
+        >
+          <FilePlus strokeWidth={1.75} className="size-6" />
+          Drop to create a note
+        </div>
+      ) : null}
     </div>
   )
 }
