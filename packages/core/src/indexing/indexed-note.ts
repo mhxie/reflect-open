@@ -109,8 +109,10 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * 23 - a recording note's `audio:` frontmatter file joins `assets` (see
  * {@link recordingAudio}), so the All Notes audio filter finds recordings
  * already on disk.
+ * 24 - `notes.body_chars` (migration 0025) sizes every note for the activity
+ * heatmap.
  */
-export const PROJECTION_VERSION = 23
+export const PROJECTION_VERSION = 24
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -225,6 +227,8 @@ export const indexedNoteSchema = z.object({
   hasConflict: z.boolean(),
   /** The note is not blank: it has display text, or a body the FTS can match. */
   hasContent: z.boolean(),
+  /** Characters of display text (code points, like SQLite `length`). */
+  bodyChars: z.number().int().nonnegative(),
   /** The published gist's html url, or null when the note has none. */
   gistUrl: z.string().nullable(),
   /** The body changed since it was last published to the gist. */
@@ -418,6 +422,7 @@ export function buildIndexedNote(
     assetText: meta.assetText ?? '',
     preview: previewSnippet(parsed.displayText, parsed.title),
     hasContent: parsed.displayText !== '' || hasSearchableChar(body),
+    bodyChars: Array.from(parsed.displayText).length,
     links: [...wikiLinks, ...mdLinks],
     tags: parsed.tags.map((tag) => ({ tag, tagKey: foldTag(tag) })),
     aliases,
