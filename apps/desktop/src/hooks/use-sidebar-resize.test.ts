@@ -5,6 +5,7 @@ describe('effectiveSidebarWidths', () => {
   it('honors both preferences when the viewport has room', () => {
     expect(effectiveSidebarWidths(1600, 480, 480)).toEqual({ workspace: 480, context: 480 })
     expect(effectiveSidebarWidths(1024, 260, 320)).toEqual({ workspace: 260, context: 320 })
+    expect(effectiveSidebarWidths(1024, 160, 320)).toEqual({ workspace: 160, context: 320 })
   })
 
   it('scales both rails proportionally when they cannot both fit', () => {
@@ -19,9 +20,9 @@ describe('effectiveSidebarWidths', () => {
   })
 
   it('never shrinks a rail below its range minimum', () => {
-    // A 500px window leaves a 140px budget; the rail floors at its 200px
+    // A 500px window leaves a 140px budget; the rail floors at its 160px
     // minimum and the editor gives way instead.
-    expect(effectiveSidebarWidths(500, 480, 480)).toEqual({ workspace: 200, context: 480 })
+    expect(effectiveSidebarWidths(500, 480, 480)).toEqual({ workspace: 160, context: 480 })
   })
 
   it('clamps out-of-range preferences before budgeting', () => {

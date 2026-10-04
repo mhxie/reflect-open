@@ -123,6 +123,7 @@ const APP_COMMANDS: AppCommand[] = [
     id: 'nav.attachments',
     title: 'Attachments',
     keywords: ['all attachments', 'media', 'images', 'photos', 'gallery', 'pdf', 'video', 'audio'],
+    keybinding: 'Mod-Shift-m',
     run: (context) => context.navigate({ kind: 'attachments', type: null, tag: null }),
   },
   {
@@ -143,11 +144,11 @@ const APP_COMMANDS: AppCommand[] = [
     keywords: ['all notes', 'sort', 'ascending', 'descending', 'oldest'],
     run: (context) => sortAllNotes(context, reverseNoteListSort),
   },
-  // No default keybinding: the palette and the sidebar row keep it reachable.
   {
     id: 'nav.wiki',
     title: 'Wiki',
     keywords: ['knowledge', 'claims', 'sources', 'topics', 'certified', 'translation'],
+    keybinding: 'Mod-Shift-w',
     run: (context) => context.navigate(wikiRoute()),
   },
   // No default keybinding: the palette and the note sidebar's language

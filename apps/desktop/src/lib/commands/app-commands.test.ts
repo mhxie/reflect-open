@@ -109,6 +109,8 @@ describe('keybindingFor', () => {
   it('returns the binding UI hints derive from', () => {
     expect(keybindingFor('nav.today')).toBe('Mod-d')
     expect(keybindingFor('nav.allNotes')).toBe('Mod-Shift-a')
+    expect(keybindingFor('nav.wiki')).toBe('Mod-Shift-w')
+    expect(keybindingFor('nav.attachments')).toBe('Mod-Shift-m')
     expect(keybindingFor('palette.open')).toBe('Mod-k')
   })
 

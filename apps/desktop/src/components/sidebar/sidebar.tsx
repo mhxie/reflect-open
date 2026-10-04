@@ -169,6 +169,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
               </span>
             }
             label="Attachments"
+            binding={keybindingFor('nav.attachments') ?? undefined}
             active={route.kind === 'attachments'}
             onClick={() => void runCommand('nav.attachments', context)}
           />

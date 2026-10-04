@@ -113,6 +113,7 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ editorFullWidth: false }).editorFullWidth).toBe(false)
     expect(settingsSchema.parse({ editorFullWidth: true }).editorFullWidth).toBe(true)
     expect(settingsSchema.parse({ sidebarWidth: 300 }).sidebarWidth).toBe(300)
+    expect(settingsSchema.parse({ sidebarWidth: 160 }).sidebarWidth).toBe(160)
     expect(settingsSchema.parse({ sidebarWidth: 200 }).sidebarWidth).toBe(200)
     expect(settingsSchema.parse({ sidebarWidth: 480 }).sidebarWidth).toBe(480)
     expect(settingsSchema.parse({ contextSidebarWidth: 360 }).contextSidebarWidth).toBe(360)
@@ -290,7 +291,7 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ sidebarWidth: 'wide' }).sidebarWidth).toBe(260)
     // Out-of-range numbers clamp instead of resetting: a near-miss hand-edit
     // keeps its intent.
-    expect(settingsSchema.parse({ sidebarWidth: 100 }).sidebarWidth).toBe(200)
+    expect(settingsSchema.parse({ sidebarWidth: 100 }).sidebarWidth).toBe(160)
     expect(settingsSchema.parse({ sidebarWidth: 9000 }).sidebarWidth).toBe(480)
     expect(settingsSchema.parse({ sidebarWidth: 315.4 }).sidebarWidth).toBe(315)
     expect(settingsSchema.parse({ contextSidebarWidth: 'wide' }).contextSidebarWidth).toBe(320)
