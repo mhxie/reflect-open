@@ -286,7 +286,11 @@ export function NotePaneComponent({
       ? document.initialContent
       : null
   const xPostsReady = useXPostPreload(editorContent)
-  const publishStatus = useNoteStatusPublisher(path, editorContent)
+  // Read-only views (protected, local-only) are counted too, from the file they show.
+  const publishStatus = useNoteStatusPublisher(
+    path,
+    document.status === 'ready' ? document.initialContent : null,
+  )
   const { onEditorChange } = document
   const handleEditorChange = useCallback(
     (markdown: string) => {
