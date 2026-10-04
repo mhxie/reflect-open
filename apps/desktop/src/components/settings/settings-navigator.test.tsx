@@ -7,11 +7,12 @@ import { SETTINGS_SECTIONS, settingsSectionDomId } from './sections.ts'
 import { SettingsNavigator } from './settings-navigator.tsx'
 
 // No bridge is installed here, so the platform-gated entries are hidden
-// (Integrations needs the Rust contacts answer; Agents needs `isMacosDesktop`,
-// which requires a Tauri webview) — the navigator lists the sections every
-// platform shows.
+// (Integrations needs the Rust contacts answer; Agents and Meetings need
+// `isMacosDesktop`, which requires a Tauri webview) — the navigator lists the
+// sections every platform shows.
 const VISIBLE_SECTIONS = SETTINGS_SECTIONS.filter(
-  (section) => section.id !== 'integrations' && section.id !== 'agents',
+  (section) =>
+    section.id !== 'integrations' && section.id !== 'agents' && section.id !== 'recording',
 )
 
 /**

@@ -328,6 +328,36 @@ export const transcriptionLanguageSchema = z
 export const localTranscriptionUpdateChecksSchema = z.boolean().catch(true)
 
 /**
+ * Whether the recorder (macOS 14.2+) shows its item in the menu bar,
+ * where a recording is started and stopped while another app has focus.
+ */
+export const recordingMenuBarSchema = z.boolean().catch(true)
+
+/** The global shortcut that starts and stops a recording. */
+export const DEFAULT_RECORDING_SHORTCUT = 'Control+Option+Command+M'
+
+/**
+ * The recording shortcut, an accelerator the OS registers globally
+ * (validated natively when applied). Empty turns the shortcut off.
+ */
+export const recordingShortcutSchema = z
+  .string()
+  .catch(DEFAULT_RECORDING_SHORTCUT)
+  .transform((value) => value.trim())
+
+/**
+ * Absolute folder that transcribed recordings are archived to as
+ * m4a. Empty (the default) keeps them in the app's data folder.
+ */
+export const recordingsFolderSchema = z
+  .string()
+  .catch('')
+  .transform((value) => {
+    const folder = value.trim()
+    return folder.startsWith('/') ? folder : ''
+  })
+
+/**
  * Whether the user has finished the mobile onboarding choice (Plan 19, step
  * 6): iCloud Drive or this device. Off by default — a fresh install shows
  * the onboarding screen before anything seeds a graph. Once set, later
@@ -668,6 +698,9 @@ export const settingsSchema = z.looseObject({
   localTranscriptionModel: localTranscriptionModelSchema,
   transcriptionLanguage: transcriptionLanguageSchema,
   localTranscriptionUpdateChecks: localTranscriptionUpdateChecksSchema,
+  recordingMenuBar: recordingMenuBarSchema,
+  recordingShortcut: recordingShortcutSchema,
+  recordingsFolder: recordingsFolderSchema,
   contactsEnabled: contactsEnabledSchema,
   mobileOnboarded: mobileOnboardedSchema,
   mobileStorage: mobileStorageKindSchema,

@@ -253,6 +253,48 @@ export {
   type MeetingAttendee,
 } from '../actions/add-meeting.ts'
 export {
+  dropEchoRepeats,
+  ECHO_MIN_WEIGHT,
+  echoScore,
+  formatClock,
+  RECORDING_TRANSCRIPTS_DIR,
+  recordingIdentity,
+  recordingTitle,
+  mergeTurns,
+  renderRecordingTranscript,
+  textWeight,
+  type EchoFilterOptions,
+  type RecordingIdentity,
+  type RecordingSegment,
+  type RecordingSpeaker,
+  type RecordingNoteInput,
+} from '../recordings/transcript.ts'
+export { MEETING_EVENT_LEAD_MS, pickMeetingEvent } from '../recordings/event-match.ts'
+export {
+  archiveRecording,
+  cancelRecorder,
+  configureRecorder,
+  finishedRecordings,
+  recorderStatus,
+  startRecorder,
+  stopRecorder,
+  subscribeRecorderStatus,
+  subscribeRecorderLevel,
+  subscribeRecorderWarnings,
+  subscribeRecorderFinished,
+  transcribeRecording,
+  type FinishedRecording,
+  type RecorderConfig,
+  type RecorderStatus,
+  type RecordingChannels,
+  type TranscribeRecordingInput,
+} from '../recordings/commands.ts'
+export {
+  reconcileRecordings,
+  type ReconcileRecordingsInput,
+  type ReconcileRecordingsOutcome,
+} from '../recordings/reconcile.ts'
+export {
   resolveMeetingAttendees,
   resolveMeetingAttendeeTargets,
   type ResolvedMeetingAttendee,

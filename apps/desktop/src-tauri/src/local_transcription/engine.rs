@@ -6,16 +6,77 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// One transcribed stretch of the recording, in milliseconds from its start.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSegment {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+}
+
+/// A segment with whisper's confidence in it.
+#[derive(Clone, Debug)]
+pub struct ScoredSegment {
+    pub segment: TranscriptSegment,
+    /// Whisper's estimate that the window held no speech at all.
+    pub no_speech_probability: f32,
+    /// The mean natural-log probability of the segment's tokens.
+    pub mean_log_probability: f32,
+}
+
+/// Sign-offs whisper writes over music, applause, or silence: lines from the
+/// subtitles of the videos it learned from, never what a recording held.
+/// Compared after [`stock_key`].
+const STOCK_PHRASES: [&str; 14] = [
+    "ご視聴ありがとうございました",
+    "thanksforwatching",
+    "thankyouforwatching",
+    "thankyousomuchforwatching",
+    "pleasesubscribe",
+    "subtitlesbytheamaraorgcommunity",
+    "字幕由amaraorg社区提供",
+    "请不吝点赞订阅转发打赏支持明镜与点点栏目",
+    "明镜与点点栏目",
+    "谢谢观看",
+    "謝謝觀看",
+    "感谢观看",
+    "感謝觀看",
+    "多谢收看",
+];
+
+/// Sign-offs that are also real replies: dropped only when whisper itself
+/// leans toward the window holding no speech.
+const AMBIGUOUS_STOCK_PHRASES: [&str; 6] = ["thankyou", "thanks", "you", "bye", "谢谢", "謝謝"];
+const AMBIGUOUS_NO_SPEECH: f32 = 0.2;
+
+/// Lowercased letters and digits only.
+fn stock_key(text: &str) -> String {
+    text.chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+impl ScoredSegment {
+    /// Text whisper probably invented: a stock sign-off it writes over music
+    /// or silence, or its own test (the window probably held no speech and
+    /// the decoder wasn't confident in what it wrote anyway).
+    pub fn is_probably_invented(&self) -> bool {
+        let key = stock_key(&self.segment.text);
+        if STOCK_PHRASES.contains(&key.as_str()) {
+            return true;
+        }
+        if AMBIGUOUS_STOCK_PHRASES.contains(&key.as_str())
+            && self.no_speech_probability > AMBIGUOUS_NO_SPEECH
+        {
+            return true;
+        }
+        self.no_speech_probability > 0.6 && self.mean_log_probability < -1.0
+    }
 }
 
 /// How long a loaded model survives without use.
@@ -51,6 +112,23 @@ impl Engine {
         language: Option<&str>,
         prompt: Option<&str>,
     ) -> Result<Vec<TranscriptSegment>, String> {
+        Ok(self
+            .transcribe_scored(model_path, samples, language, prompt)?
+            .into_iter()
+            .filter(|scored| !scored.is_probably_invented())
+            .map(|scored| scored.segment)
+            .collect())
+    }
+
+    /// [`Engine::transcribe`], keeping whisper's own confidence in each
+    /// segment so a caller can drop text invented over noise.
+    pub fn transcribe_scored(
+        &self,
+        model_path: &Path,
+        samples: &[f32],
+        language: Option<&str>,
+        prompt: Option<&str>,
+    ) -> Result<Vec<ScoredSegment>, String> {
         // A recording stopped before any audio has nothing to say, and
         // whisper.cpp's language detection fails on an empty input.
         if samples.is_empty() {
@@ -83,13 +161,17 @@ impl Engine {
             .map_err(|err| format!("transcribing: {err}"))?;
         let segments = (0..state.full_n_segments())
             .filter_map(|index| state.get_segment(index))
-            .map(|segment| TranscriptSegment {
-                start_ms: centiseconds_to_ms(segment.start_timestamp()),
-                end_ms: centiseconds_to_ms(segment.end_timestamp()),
-                text: segment
-                    .to_str_lossy()
-                    .map(|text| text.into_owned())
-                    .unwrap_or_default(),
+            .map(|segment| ScoredSegment {
+                no_speech_probability: segment.no_speech_probability(),
+                mean_log_probability: mean_log_probability(&segment),
+                segment: TranscriptSegment {
+                    start_ms: centiseconds_to_ms(segment.start_timestamp()),
+                    end_ms: centiseconds_to_ms(segment.end_timestamp()),
+                    text: segment
+                        .to_str_lossy()
+                        .map(|text| text.into_owned())
+                        .unwrap_or_default(),
+                },
             })
             .collect();
         self.touch();
@@ -173,6 +255,18 @@ fn thread_count() -> i32 {
         .unwrap_or(4)
 }
 
+fn mean_log_probability(segment: &whisper_rs::WhisperSegment<'_>) -> f32 {
+    let count = segment.n_tokens();
+    if count <= 0 {
+        return 0.0;
+    }
+    let total: f32 = (0..count)
+        .filter_map(|index| segment.get_token(index))
+        .map(|token| token.token_probability().max(1e-9).ln())
+        .sum();
+    total / count as f32
+}
+
 fn centiseconds_to_ms(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0) * 10
 }
@@ -245,6 +339,25 @@ mod tests {
             join_segments(&segments),
             "测试一下 How do you do? Fine. 好的。"
         );
+    }
+
+    fn scored(text: &str, no_speech_probability: f32) -> ScoredSegment {
+        ScoredSegment {
+            segment: segment(text),
+            no_speech_probability,
+            mean_log_probability: -0.3,
+        }
+    }
+
+    #[test]
+    fn drops_stock_sign_offs_whisper_writes_over_music() {
+        assert!(scored("ご視聴ありがとうございました", 0.0).is_probably_invented());
+        assert!(scored(" Thanks for watching!", 0.0).is_probably_invented());
+        assert!(scored("字幕由Amara.org社区提供", 0.0).is_probably_invented());
+        assert!(scored("Thank you.", 0.5).is_probably_invented());
+        assert!(!scored("Thank you.", 0.05).is_probably_invented());
+        assert!(!scored("Thanks for watching the build for me.", 0.5).is_probably_invented());
+        assert!(!scored("我们下周发布。", 0.5).is_probably_invented());
     }
 
     #[test]

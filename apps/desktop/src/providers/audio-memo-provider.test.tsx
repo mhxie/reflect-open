@@ -142,6 +142,18 @@ const SETTINGS = vi.hoisted(() => ({
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({ settings: SETTINGS.current as unknown as Settings }),
 }))
+// The webview recorder path: the native recorder (macOS 14.2+) is absent.
+vi.mock('@/providers/recorder-provider.tsx', () => ({
+  useRecorder: () => ({
+    supported: false,
+    recordingSince: null,
+    transcribing: false,
+    defaultRecordingsFolder: '',
+    toggle: () => {},
+    cancel: () => {},
+    subscribeLevel: () => () => {},
+  }),
+}))
 vi.mock('@/providers/sidebar-provider.tsx', () => ({
   useSidebar: () => ({ collapsed: sidebarState.collapsed, toggleSidebar }),
 }))

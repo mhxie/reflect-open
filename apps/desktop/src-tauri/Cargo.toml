@@ -28,7 +28,7 @@ http-range-header = "0.4"
 
 # `devtools` compiles the web inspector into release builds too (it is otherwise
 # debug-only), so a shipped app stays debuggable — see `src/devtools.rs`.
-tauri = { workspace = true, features = ["devtools"] }
+tauri = { workspace = true, features = ["devtools", "tray-icon"] }
 tauri-plugin-opener = "2.7.0"
 # Decodes `reflect-asset://` request paths (`fs/asset_protocol.rs`); the same
 # crate tauri itself uses for its protocol URLs.
@@ -107,6 +107,8 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSOperation",
   "NSProcessInfo",
   "NSString",
+  "NSUUID",
+  "NSValue",
   "block2",
 ] }
 objc2-event-kit = { version = "0.3.2", default-features = false, features = [
@@ -138,6 +140,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
 whisper-rs = { version = "0.16.0", features = ["metal", "tracing_backend"] }
 objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
   "std",
+  "AudioFile",
   "ExtendedAudioFile",
   "objc2-core-audio-types",
   "objc2-core-foundation",
@@ -173,6 +176,27 @@ objc2-image-io = { version = "0.3.2", default-features = false, features = [
   "CGImageDestination",
   "objc2-core-graphics",
 ] }
+# Meeting capture (`src/meeting_capture/`): a Core Audio process tap and
+# private aggregate device record the microphone and system audio on one
+# clock (macOS 14.2+); rtrb carries frames off the realtime IO thread;
+# realfft runs the echo suppressor's STFT; the global
+# shortcut starts and stops a recording from whichever app has focus.
+objc2-core-audio = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "AudioHardware",
+  "block2",
+  "dispatch2",
+  "objc2",
+  "objc2-core-audio-types",
+  "objc2-foundation",
+] }
+realfft = "3.5.0"
+rtrb = "0.4.0"
+# Qwen3-ASR (`src/local_transcription/qwen.rs`), the second on-device model
+# family: candle on Metal, no Python. Its own Hugging Face loader is left off;
+# downloads go through hf-hub like whisper's.
+qwen3-asr = { version = "0.2.2", default-features = false, features = ["metal"] }
+tauri-plugin-global-shortcut = "2.3.1"
 # WebKit's MediaRecorder writes WebM/Opus, which AudioToolbox can't open:
 # symphonia demuxes it and libopus (built from source) decodes straight to 16 kHz.
 symphonia = { version = "0.6.1", default-features = false, features = ["mkv"] }
@@ -269,6 +293,9 @@ dbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rus
 
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
+# Proves the assembled Qwen tokenizer.json loads (`local_transcription/qwen.rs`).
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
+
 # The PDF-preview tests (`src/fs/pdf_render/`) have CoreGraphics write their
 # password-protected fixtures.
 [target.'cfg(target_os = "macos")'.dev-dependencies]

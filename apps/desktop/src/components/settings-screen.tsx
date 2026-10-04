@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { isMacosDesktop } from '@/lib/platform.ts'
 import { AboutSection } from './settings/about-section.tsx'
 import { AgentsSection } from './settings/agents-section.tsx'
 import { AiChatSection } from './settings/ai-chat-section.tsx'
@@ -11,6 +12,7 @@ import { DateTimeSection } from './settings/date-time-section.tsx'
 import { DestructiveSection } from './settings/destructive-section.tsx'
 import { EditorSection } from './settings/editor-section.tsx'
 import { ImportSection } from './settings/import-section.tsx'
+import { RecordingSection } from './settings/recording-section.tsx'
 import { IntegrationsSection } from './settings/integrations-section.tsx'
 import { SearchSection } from './settings/search-section.tsx'
 import { SyncSection } from './settings/sync-section.tsx'
@@ -34,6 +36,7 @@ export function SettingsScreen(): ReactElement {
         <SearchSection />
         <AiProvidersSection />
         <AudioMemosSection />
+        {isMacosDesktop ? <RecordingSection /> : null}
         <AiChatSection />
         <AiPromptsSection />
         <AgentsSection />

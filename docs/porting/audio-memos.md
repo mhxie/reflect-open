@@ -47,10 +47,13 @@ touches a Reflect server, because there isn't one.
   the note stores the raw provider transcript. Formatting failures also fall
   back to the raw text and a local title rather than retrying speech-to-text.
 - **On-device engine (macOS).** Settings → Audio memos can switch the engine
-  to *On this Mac*: whisper.cpp on Metal
-  (`apps/desktop/src-tauri/src/local_transcription/`) reads each segment in
+  to *On this Mac*: whisper.cpp on Metal, or Qwen3-ASR through candle
+  (`apps/desktop/src-tauri/src/local_transcription/`), reads each segment in
   place from the graph, so no provider, key, or size ceiling is involved, and
-  its cached result also keeps per-segment timings. WebM/Opus recordings are
+  its cached result also keeps per-segment timings. Qwen3-ASR returns no
+  timestamps and decodes short stretches, so its recordings are cut into
+  speech regions first and timed by their edges; its checkpoints are pinned to
+  a revision in the catalog and offer no update checks. WebM/Opus recordings are
   demuxed by symphonia and decoded at 16 kHz by libopus; other containers go
   through AudioToolbox's ExtAudioFile. A file that isn't decodable audio gets
   one failure line rather than a retry every pass. The model downloads on demand from
@@ -66,6 +69,12 @@ touches a Reflect server, because there isn't one.
   transcript note, resolves or creates the `Audio memos` category note, and
   backlinks both from the daily note under `## [[Audio memos]]`. Pending memos
   retry in the background.
+- **Native recorder (macOS 14.2+, fork).** On a Mac that can tap system
+  audio, the microphone button, `Mod-Shift-R`, the menu bar item, and a global
+  shortcut all drive one native recorder instead of the webview's: it captures
+  the microphone and system audio, transcribes on the device, and files the
+  transcript under `inbox/recordings/` (see [docs/recording.md](../recording.md)).
+  The pipeline here keeps serving memos recorded on the other platforms.
 - **No key configured.** The mic button is disabled with a tooltip pointing
   at Settings — there is no metered fallback tier to fall back to.
 

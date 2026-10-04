@@ -1,4 +1,5 @@
-//! On-device audio-memo transcription (macOS): whisper.cpp on Metal. Models
+//! On-device transcription (macOS): whisper.cpp on Metal, or Qwen3-ASR on
+//! Metal through candle (`qwen`). Models
 //! download on demand into app data, never bundled, and transcription runs
 //! off the UI thread. Recordings never leave the device; the only network
 //! traffic is the model download and the optional update check, both against
@@ -6,10 +7,12 @@
 //! audio untouched: a recording that isn't decodable audio is reported once,
 //! and any other failure leaves the memo pending for the next pass.
 
-mod audio;
-mod engine;
+pub(crate) mod audio;
+pub(crate) mod engine;
 mod models;
+pub(crate) mod qwen;
 mod updates;
+pub(crate) mod utterances;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,7 +27,9 @@ use crate::error::{AppError, AppResult};
 use crate::fs::GraphState;
 use engine::{Engine, TranscriptSegment};
 use models::{ModelSpec, MODEL_REPO};
+use qwen::{QwenEngine, QwenModel};
 use updates::UpdateReport;
+use utterances::{speech_regions, ChunkPlan, QWEN_PLAN, WHISPER_PLAN};
 
 /// Where recordings live; transcription reads nothing else.
 const AUDIO_MEMOS_PREFIX: &str = "audio-memos/";
@@ -106,6 +111,139 @@ pub enum LocalTranscript {
 pub struct LocalTranscriptionState {
     downloads: Mutex<HashMap<&'static str, ModelStatus>>,
     engine: Engine,
+    qwen: QwenEngine,
+}
+
+/// The Qwen3-ASR checkpoints, pinned: a new revision arrives by moving the
+/// pin here, never on its own. Ids mirror the frontend catalog.
+const QWEN_MODELS: [QwenModel; 2] = [
+    QwenModel {
+        id: "qwen3-asr-1.7b",
+        repo: "Qwen/Qwen3-ASR-1.7B",
+        revision: "7278e1e70fe206f11671096ffdd38061171dd6e5",
+    },
+    QwenModel {
+        id: "qwen3-asr-0.6b",
+        repo: "Qwen/Qwen3-ASR-0.6B",
+        revision: "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+    },
+];
+
+/// A settings model id, resolved to its family.
+#[derive(Clone, Copy)]
+enum CatalogModel {
+    Whisper(&'static ModelSpec),
+    Qwen(&'static QwenModel),
+}
+
+impl CatalogModel {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Whisper(spec) => spec.id,
+            Self::Qwen(model) => model.id,
+        }
+    }
+}
+
+const NOT_DOWNLOADED: &str = "the on-device transcription model is not downloaded";
+
+/// A downloaded model, ready to transcribe regions of 16 kHz mono audio.
+pub(crate) enum LocalModel {
+    Whisper { engine: Engine, path: PathBuf },
+    Qwen { engine: QwenEngine, dir: PathBuf },
+}
+
+impl LocalModel {
+    /// How audio is cut into regions for this model.
+    pub(crate) fn plan(&self) -> ChunkPlan {
+        match self {
+            Self::Whisper { .. } => WHISPER_PLAN,
+            Self::Qwen { .. } => QWEN_PLAN,
+        }
+    }
+
+    /// Transcribe one speech region; segment times are relative to it.
+    /// Text the model probably invented (whisper's no-speech test, or more
+    /// characters than the region could hold) is dropped. Blocking.
+    pub(crate) fn transcribe_region(
+        &self,
+        samples: &[f32],
+        language: Option<&str>,
+        prompt: Option<&str>,
+    ) -> Result<Vec<TranscriptSegment>, String> {
+        match self {
+            Self::Whisper { engine, path } => Ok(engine
+                .transcribe_scored(path, samples, language, prompt)?
+                .into_iter()
+                .filter(|scored| !scored.is_probably_invented())
+                .map(|scored| TranscriptSegment {
+                    text: scored.segment.text.trim().to_string(),
+                    ..scored.segment
+                })
+                .filter(|segment| !segment.text.is_empty())
+                .collect()),
+            Self::Qwen { engine, dir } => {
+                let text = engine.transcribe(dir, samples, language)?;
+                let seconds = samples.len() as f32 / audio::SAMPLE_RATE as f32;
+                let plausible = qwen::is_plausible(&text, seconds);
+                Ok(plausible
+                    .then_some(TranscriptSegment {
+                        start_ms: 0,
+                        end_ms: (seconds * 1_000.0) as u64,
+                        text,
+                    })
+                    .into_iter()
+                    .collect())
+            }
+        }
+    }
+
+    /// Cut `samples` into speech regions and transcribe each, timing every
+    /// segment from the start of `samples`.
+    pub(crate) fn transcribe_regions(
+        &self,
+        samples: &[f32],
+        language: Option<&str>,
+        prompt: Option<&str>,
+    ) -> Result<Vec<TranscriptSegment>, String> {
+        let mut segments = Vec::new();
+        for region in speech_regions(samples, self.plan()) {
+            let start_ms = region.start as u64 * 1_000 / u64::from(audio::SAMPLE_RATE);
+            let end_ms = region.end as u64 * 1_000 / u64::from(audio::SAMPLE_RATE);
+            for segment in self.transcribe_region(&samples[region], language, prompt)? {
+                segments.push(TranscriptSegment {
+                    start_ms: start_ms + segment.start_ms,
+                    end_ms: (start_ms + segment.end_ms).min(end_ms),
+                    text: segment.text,
+                });
+            }
+        }
+        Ok(segments)
+    }
+}
+
+/// The downloaded model with settings id `model`, sharing the process-wide
+/// engines so audio memos and meetings reuse one loaded model.
+pub(crate) fn local_model(
+    app: &AppHandle,
+    state: &LocalTranscriptionState,
+    model: &str,
+) -> AppResult<LocalModel> {
+    let cache = cache_dir(app)?;
+    match spec(model)? {
+        CatalogModel::Whisper(spec) => models::find_cached(&cache, spec.file)
+            .map(|cached| LocalModel::Whisper {
+                engine: state.engine.clone(),
+                path: cached.path,
+            })
+            .ok_or_else(|| AppError::not_found(NOT_DOWNLOADED)),
+        CatalogModel::Qwen(model) => qwen::is_downloaded(&cache, model)
+            .then(|| LocalModel::Qwen {
+                engine: state.qwen.clone(),
+                dir: qwen::model_dir(&cache, model),
+            })
+            .ok_or_else(|| AppError::not_found(NOT_DOWNLOADED)),
+    }
 }
 
 fn lock_downloads<'a>(
@@ -117,8 +255,15 @@ fn lock_downloads<'a>(
         .map_err(|_| AppError::io("transcription download state lock poisoned"))
 }
 
-fn spec(model: &str) -> AppResult<&'static ModelSpec> {
+fn spec(model: &str) -> AppResult<CatalogModel> {
     models::model_spec(model)
+        .map(CatalogModel::Whisper)
+        .or_else(|| {
+            QWEN_MODELS
+                .iter()
+                .find(|candidate| candidate.id == model)
+                .map(CatalogModel::Qwen)
+        })
         .ok_or_else(|| AppError::not_found(format!("unknown transcription model: {model}")))
 }
 
@@ -140,13 +285,16 @@ fn endpoint() -> String {
     std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_string())
 }
 
-fn status_of(state: &LocalTranscriptionState, cache: &Path, spec: &ModelSpec) -> ModelStatus {
+fn status_of(state: &LocalTranscriptionState, cache: &Path, model: CatalogModel) -> ModelStatus {
     let tracked = state
         .downloads
         .lock()
         .ok()
-        .and_then(|downloads| downloads.get(spec.id).cloned());
-    let cached = models::find_cached(cache, spec.file).is_some();
+        .and_then(|downloads| downloads.get(model.id()).cloned());
+    let cached = match model {
+        CatalogModel::Whisper(spec) => models::find_cached(cache, spec.file).is_some(),
+        CatalogModel::Qwen(model) => qwen::is_downloaded(cache, model),
+    };
     match tracked {
         Some(status @ ModelStatus::Downloading { .. }) => status,
         Some(status @ ModelStatus::Failed { .. }) if !cached => status,
@@ -155,19 +303,13 @@ fn status_of(state: &LocalTranscriptionState, cache: &Path, spec: &ModelSpec) ->
     }
 }
 
-fn emit_status(app: &AppHandle, spec: &'static ModelSpec, status: ModelStatus) {
-    let _ = app.emit(
-        STATUS_EVENT,
-        StatusEvent {
-            model: spec.id,
-            status,
-        },
-    );
+fn emit_status(app: &AppHandle, id: &'static str, status: ModelStatus) {
+    let _ = app.emit(STATUS_EVENT, StatusEvent { model: id, status });
 }
 
 struct DownloadTally {
     app: AppHandle,
-    spec: &'static ModelSpec,
+    id: &'static str,
     downloaded: u64,
     total: u64,
     emitted: u64,
@@ -182,9 +324,9 @@ impl DownloadTally {
         });
         let state = self.app.state::<LocalTranscriptionState>();
         if let Ok(mut downloads) = state.downloads.lock() {
-            downloads.insert(self.spec.id, ModelStatus::Downloading { progress });
+            downloads.insert(self.id, ModelStatus::Downloading { progress });
         }
-        emit_status(&self.app, self.spec, ModelStatus::Downloading { progress });
+        emit_status(&self.app, self.id, ModelStatus::Downloading { progress });
     }
 }
 
@@ -209,10 +351,41 @@ impl Progress for DownloadProgress {
     fn finish(&mut self) {}
 }
 
+fn download(app: &AppHandle, cache: &Path, model: CatalogModel) -> Result<(), String> {
+    match model {
+        CatalogModel::Whisper(spec) => download_whisper(app, cache, spec),
+        CatalogModel::Qwen(model) => download_qwen(app, cache, model),
+    }
+}
+
+/// Fetch the pinned Qwen snapshot, counting the weights as they arrive.
+fn download_qwen(app: &AppHandle, cache: &Path, model: &'static QwenModel) -> Result<(), String> {
+    let tally = Arc::new(Mutex::new(DownloadTally {
+        app: app.clone(),
+        id: model.id,
+        downloaded: 0,
+        total: 0,
+        emitted: 0,
+    }));
+    let sized = Arc::clone(&tally);
+    qwen::download(
+        cache,
+        endpoint(),
+        model,
+        move |total| {
+            if let Ok(mut tally) = sized.lock() {
+                tally.total = total;
+                tally.emit();
+            }
+        },
+        DownloadProgress(tally),
+    )
+}
+
 /// Fetch the model's current upstream bytes, verify them against their
 /// SHA-256 etag, and prune the copy they supersede. A failed or corrupt
 /// download leaves any earlier copy in place.
-fn download(app: &AppHandle, cache: &Path, spec: &'static ModelSpec) -> Result<(), String> {
+fn download_whisper(app: &AppHandle, cache: &Path, spec: &'static ModelSpec) -> Result<(), String> {
     let previous = models::find_cached(cache, spec.file).map(|copy| copy.etag);
     let api = ApiBuilder::new()
         .with_cache_dir(cache.to_path_buf())
@@ -225,7 +398,7 @@ fn download(app: &AppHandle, cache: &Path, spec: &'static ModelSpec) -> Result<(
         .map_err(|err| format!("sizing {}: {err}", spec.file))?;
     let mut tally = DownloadTally {
         app: app.clone(),
-        spec,
+        id: spec.id,
         downloaded: 0,
         total: metadata.size() as u64,
         emitted: 0,
@@ -255,8 +428,7 @@ pub fn local_transcription_status(
     app: AppHandle,
     state: State<LocalTranscriptionState>,
 ) -> AppResult<ModelStatus> {
-    let spec = spec(&model)?;
-    Ok(status_of(&state, &cache_dir(&app)?, spec))
+    Ok(status_of(&state, &cache_dir(&app)?, spec(&model)?))
 }
 
 /// Download the model, or its newer upstream revision when one is already on
@@ -268,23 +440,24 @@ pub async fn local_transcription_download(
     app: AppHandle,
     state: State<'_, LocalTranscriptionState>,
 ) -> AppResult<ModelStatus> {
-    let spec = spec(&model)?;
+    let model = spec(&model)?;
+    let id = model.id();
     let cache = cache_dir(&app)?;
     {
         let mut downloads = lock_downloads(&state)?;
-        if let Some(status @ ModelStatus::Downloading { .. }) = downloads.get(spec.id) {
+        if let Some(status @ ModelStatus::Downloading { .. }) = downloads.get(id) {
             return Ok(status.clone());
         }
-        downloads.insert(spec.id, ModelStatus::Downloading { progress: None });
+        downloads.insert(id, ModelStatus::Downloading { progress: None });
     }
-    emit_status(&app, spec, ModelStatus::Downloading { progress: None });
+    emit_status(&app, id, ModelStatus::Downloading { progress: None });
 
     // From here every path must settle the entry: a stuck `Downloading`
     // would make every later download return early.
     let task_app = app.clone();
     let task_cache = cache.clone();
     let result =
-        match tauri::async_runtime::spawn_blocking(move || download(&task_app, &task_cache, spec))
+        match tauri::async_runtime::spawn_blocking(move || download(&task_app, &task_cache, model))
             .await
         {
             Ok(result) => result,
@@ -293,9 +466,9 @@ pub async fn local_transcription_download(
     {
         let mut downloads = lock_downloads(&state)?;
         match &result {
-            Ok(()) => downloads.remove(spec.id),
+            Ok(()) => downloads.remove(id),
             Err(message) => downloads.insert(
-                spec.id,
+                id,
                 ModelStatus::Failed {
                     message: message.clone(),
                 },
@@ -304,10 +477,10 @@ pub async fn local_transcription_download(
     }
     if result.is_ok() {
         // An update replaced the weights; the next memo loads them fresh.
-        state.engine.release();
+        release(&state, model);
     }
-    let status = status_of(&state, &cache, spec);
-    emit_status(&app, spec, status.clone());
+    let status = status_of(&state, &cache, model);
+    emit_status(&app, id, status.clone());
     result.map_err(AppError::io)?;
     Ok(status)
 }
@@ -319,24 +492,33 @@ pub fn local_transcription_delete(
     app: AppHandle,
     state: State<LocalTranscriptionState>,
 ) -> AppResult<ModelStatus> {
-    let spec = spec(&model)?;
+    let model = spec(&model)?;
+    let id = model.id();
     let cache = cache_dir(&app)?;
     {
         let mut downloads = lock_downloads(&state)?;
-        if matches!(
-            downloads.get(spec.id),
-            Some(ModelStatus::Downloading { .. })
-        ) {
+        if matches!(downloads.get(id), Some(ModelStatus::Downloading { .. })) {
             return Err(AppError::io("the model is still downloading"));
         }
-        downloads.remove(spec.id);
+        downloads.remove(id);
     }
-    state.engine.release();
-    models::remove_cached(&cache, spec.file, None)
-        .map_err(|err| AppError::io(format!("deleting the model: {err}")))?;
-    let status = status_of(&state, &cache, spec);
-    emit_status(&app, spec, status.clone());
+    release(&state, model);
+    match model {
+        CatalogModel::Whisper(spec) => models::remove_cached(&cache, spec.file, None),
+        CatalogModel::Qwen(model) => qwen::remove(&cache, model),
+    }
+    .map_err(|err| AppError::io(format!("deleting the model: {err}")))?;
+    let status = status_of(&state, &cache, model);
+    emit_status(&app, id, status.clone());
     Ok(status)
+}
+
+/// Drop `model`'s family's loaded weights, so the next use reads the files.
+fn release(state: &LocalTranscriptionState, model: CatalogModel) {
+    match model {
+        CatalogModel::Whisper(_) => state.engine.release(),
+        CatalogModel::Qwen(_) => state.qwen.release(),
+    }
 }
 
 /// One recording to transcribe and how.
@@ -382,14 +564,10 @@ pub async fn local_transcription_transcribe(
         language,
         prompt,
     } = request;
-    let spec = spec(&model)?;
     let recording = recording_path(&graph, generation, &path)?;
-    let model_path = models::find_cached(&cache_dir(&app)?, spec.file)
-        .ok_or_else(|| AppError::not_found("the on-device transcription model is not downloaded"))?
-        .path;
+    let model = local_model(&app, &state, &model)?;
     let language = language.filter(|code| !code.is_empty() && code != "auto");
     let prompt = prompt.filter(|hint| !hint.trim().is_empty());
-    let engine = state.engine.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let samples = match audio::decode_channels(&recording) {
             Ok(tracks) => audio::downmix(tracks),
@@ -402,12 +580,15 @@ pub async fn local_transcription_transcribe(
                 return Err(format!("the recording couldn't be read ({detail})"))
             }
         };
-        let segments = engine.transcribe(
-            &model_path,
-            &samples,
-            language.as_deref(),
-            prompt.as_deref(),
-        )?;
+        let segments = match &model {
+            LocalModel::Whisper { engine, path } => {
+                engine.transcribe(path, &samples, language.as_deref(), prompt.as_deref())?
+            }
+            // No timestamps and short decodes: transcribe speech regions.
+            LocalModel::Qwen { .. } => {
+                model.transcribe_regions(&samples, language.as_deref(), prompt.as_deref())?
+            }
+        };
         Ok(LocalTranscript::Transcribed {
             text: engine::join_segments(&segments),
             segments: segments
@@ -433,7 +614,10 @@ pub async fn local_transcription_check_updates(
     force: bool,
     app: AppHandle,
 ) -> AppResult<UpdateReport> {
-    let spec = spec(&model)?;
+    // Qwen checkpoints are pinned in the catalog; there is nothing to offer.
+    let CatalogModel::Whisper(spec) = spec(&model)? else {
+        return Ok(UpdateReport::default());
+    };
     let cache = cache_dir(&app)?;
     let data = app_data(&app)?;
     tauri::async_runtime::spawn_blocking(move || {

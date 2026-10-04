@@ -22,6 +22,9 @@ describe('settingsSchema', () => {
       localTranscriptionModel: 'large-v3-turbo',
       transcriptionLanguage: '',
       localTranscriptionUpdateChecks: true,
+      recordingMenuBar: true,
+      recordingShortcut: 'Control+Option+Command+M',
+      recordingsFolder: '',
       contactsEnabled: false,
       mobileOnboarded: false,
       mobileStorage: 'local',
@@ -129,6 +132,9 @@ describe('settingsSchema', () => {
     expect(
       settingsSchema.parse({ localTranscriptionModel: 'large-v3-q5_0' }).localTranscriptionModel,
     ).toBe('large-v3-q5_0')
+    expect(
+      settingsSchema.parse({ localTranscriptionModel: 'qwen3-asr-1.7b' }).localTranscriptionModel,
+    ).toBe('qwen3-asr-1.7b')
     expect(settingsSchema.parse({ localTranscriptionModel: 'tiny' }).localTranscriptionModel).toBe(
       'large-v3-turbo',
     )
@@ -145,6 +151,19 @@ describe('settingsSchema', () => {
     expect(
       settingsSchema.parse({ localTranscriptionUpdateChecks: 'no' }).localTranscriptionUpdateChecks,
     ).toBe(true)
+    expect(settingsSchema.parse({ recordingMenuBar: false }).recordingMenuBar).toBe(false)
+    expect(settingsSchema.parse({ recordingMenuBar: 'off' }).recordingMenuBar).toBe(true)
+    expect(settingsSchema.parse({ recordingShortcut: ' Shift+Command+R ' }).recordingShortcut).toBe(
+      'Shift+Command+R',
+    )
+    expect(settingsSchema.parse({ recordingShortcut: '' }).recordingShortcut).toBe('')
+    expect(settingsSchema.parse({ recordingShortcut: 3 }).recordingShortcut).toBe(
+      'Control+Option+Command+M',
+    )
+    expect(settingsSchema.parse({ recordingsFolder: '/Users/a/Meetings' }).recordingsFolder).toBe(
+      '/Users/a/Meetings',
+    )
+    expect(settingsSchema.parse({ recordingsFolder: 'relative/path' }).recordingsFolder).toBe('')
     expect(settingsSchema.parse({ transcriptionFormat: true }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionFormat: false }).transcriptionFormat).toBe(false)
     expect(settingsSchema.parse({ transcriptionPrompt: 'Ocavue' }).transcriptionPrompt).toBe(
@@ -325,6 +344,9 @@ describe('settingsSchema', () => {
       localTranscriptionModel: 'large-v3-turbo',
       transcriptionLanguage: '',
       localTranscriptionUpdateChecks: true,
+      recordingMenuBar: true,
+      recordingShortcut: 'Control+Option+Command+M',
+      recordingsFolder: '',
       contactsEnabled: false,
       mobileOnboarded: false,
       mobileStorage: 'local',
