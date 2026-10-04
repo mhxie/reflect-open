@@ -37,9 +37,13 @@ const readNoteSummarySchema = z.object({
   error: z.string().nullable(),
 })
 
+/** One asset's outcome in a persisted read_assets chip. */
+const readAssetSummarySchema = z.object({ path: z.string(), error: z.string().nullable() })
+
 const toolCallSchema = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('search'), toolCallId: z.string(), query: z.string() }),
   z.object({ tool: z.literal('read'), toolCallId: z.string(), paths: z.array(z.string()) }),
+  z.object({ tool: z.literal('assets'), toolCallId: z.string(), paths: z.array(z.string()) }),
   z.object({ tool: z.literal('recents'), toolCallId: z.string(), tag: z.string().nullable() }),
   z.object({
     tool: z.literal('dailies'),
@@ -60,6 +64,11 @@ const toolResultSchema = z.discriminatedUnion('tool', [
     tool: z.literal('read'),
     toolCallId: z.string(),
     notes: z.array(readNoteSummarySchema),
+  }),
+  z.object({
+    tool: z.literal('assets'),
+    toolCallId: z.string(),
+    assets: z.array(readAssetSummarySchema),
   }),
   z.object({
     tool: z.literal('recents'),
