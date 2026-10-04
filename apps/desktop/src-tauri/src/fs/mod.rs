@@ -115,7 +115,11 @@ pub struct GraphInner {
     /// The open graph's Git backup size limit in bytes (`git::max_file_size`),
     /// loaded with the root; `None` until a graph opens.
     backup_max_file_bytes: Option<u64>,
-    /// The backup size limit's configuration problems found at open.
+    /// The open graph's accepted history roots (`git::history_roots`), loaded
+    /// with the root: the starting commits Git sync may join.
+    accepted_history_roots: Vec<git2::Oid>,
+    /// The backup settings' configuration problems found at open (the size
+    /// limit and the accepted history roots).
     backup_warnings: Vec<String>,
     /// Cached vault catalog for the current root, dropped on every write path
     /// and watcher/iCloud change so listings never pin deleted files.
@@ -149,6 +153,12 @@ impl GraphInner {
         self.local_only_unknown = true;
         self.local_only_grow_record = true;
     }
+
+    /// Install accepted history roots directly, for command-tier tests.
+    #[cfg(test)]
+    pub(crate) fn set_accepted_history_roots(&mut self, roots: Vec<git2::Oid>) {
+        self.accepted_history_roots = roots;
+    }
 }
 
 /// Tauri-managed state holding the currently open graph (root + generation).
@@ -171,8 +181,9 @@ pub struct GraphInfo {
     /// Problems with that configuration the user must see (dropped names,
     /// an unusable rawRoot, an unreadable settings file); empty when none.
     pub local_only_warnings: Vec<String>,
-    /// Problems with the graph's backup size limit the user must see (a value
-    /// out of range, a key naming a missing folder); empty when none.
+    /// Problems with the graph's backup settings the user must see (a size
+    /// limit out of range, a malformed accepted history root, a key naming a
+    /// missing folder); empty when none.
     pub backup_warnings: Vec<String>,
 }
 
@@ -247,6 +258,16 @@ fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
     for warning in &backup_limit.warnings {
         tracing::warn!(root = %root.display(), "backup size limit: {warning}");
     }
+    let history_roots = crate::git::load_accepted_history_roots(root);
+    for warning in &history_roots.warnings {
+        tracing::warn!(root = %root.display(), "accepted history roots: {warning}");
+    }
+    let backup_warnings: Vec<String> = backup_limit
+        .warnings
+        .iter()
+        .chain(&history_roots.warnings)
+        .cloned()
+        .collect();
     let generation = {
         let mut inner = lock_graph(state)?;
         inner.generation += 1;
@@ -256,7 +277,8 @@ fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
         inner.local_only_unknown = loaded.unknown;
         inner.local_only_grow_record = !loaded.record;
         inner.backup_max_file_bytes = Some(backup_limit.max_file_bytes);
-        inner.backup_warnings = backup_limit.warnings.clone();
+        inner.accepted_history_roots = history_roots.roots;
+        inner.backup_warnings = backup_warnings.clone();
         inner.catalog = None;
         inner.catalog_revision = inner.catalog_revision.wrapping_add(1);
         inner.generation
@@ -266,7 +288,7 @@ fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
         generation,
         loaded.folders.as_deref(),
         &loaded.warnings,
-        &backup_limit.warnings,
+        &backup_warnings,
     );
     // Recents is a convenience cache: a failure to persist it must not fail the
     // open (which would leave Rust treating the graph as open while the command
@@ -351,6 +373,22 @@ pub(crate) fn backup_max_file_bytes(state: &GraphState, generation: u64) -> AppR
         ));
     }
     Ok(inner.backup_max_file_bytes)
+}
+
+/// The open graph's accepted history roots, verified against the generation
+/// the sync command was issued for (like [`root_for_generation`]); empty
+/// when the open loaded none.
+pub(crate) fn accepted_history_roots(
+    state: &GraphState,
+    generation: u64,
+) -> AppResult<Vec<git2::Oid>> {
+    let inner = lock_graph(state)?;
+    if generation != inner.generation {
+        return Err(AppError::io(
+            "the graph changed since this command was issued; dropping it",
+        ));
+    }
+    Ok(inner.accepted_history_roots.clone())
 }
 
 /// Why sync refuses while the local-only configuration is unknown.
@@ -1118,6 +1156,7 @@ pub fn graph_delete(generation: u64, state: State<GraphState>) -> AppResult<()> 
             inner.local_only_unknown = false;
             inner.local_only_grow_record = false;
             inner.backup_max_file_bytes = None;
+            inner.accepted_history_roots = Vec::new();
             inner.backup_warnings = Vec::new();
             inner.generation += 1;
             inner.catalog = None;
@@ -1413,6 +1452,7 @@ mod file_catalog_tests {
             local_only_unknown: false,
             local_only_grow_record: false,
             backup_max_file_bytes: None,
+            accepted_history_roots: Vec::new(),
             backup_warnings: Vec::new(),
             catalog: None,
             catalog_revision: 0,

@@ -24,8 +24,9 @@ export const graphInfoSchema = z.object({
    */
   localOnlyWarnings: z.array(z.string()).optional(),
   /**
-   * Problems with the graph's Git backup size limit (`backupMaxFileMiB` in
-   * the settings file) the user must see; absent or empty when none.
+   * Problems with the graph's Git backup settings (`backupMaxFileMiB` and
+   * `acceptedHistoryRoots` in the settings file) the user must see; absent
+   * or empty when none.
    */
   backupWarnings: z.array(z.string()).optional(),
 })

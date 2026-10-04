@@ -80,6 +80,40 @@ disk at call time), and it is covered by tests.
   [local-only folders](#local-only-folders-macos). A value outside that range, or an
   entry for a path that does not exist, is shown as a warning when the graph opens,
   and the 95 MiB limit applies.
+- **Separate histories are never joined on their own** (this fork). Every backup
+  history starts from a root commit. Reflect pauses sync instead of pulling in commits
+  that start from a root this graph has not accepted, whether they arrive as a merge
+  of two unrelated histories or as a fast-forward that carries one in (a device still
+  on a history you replaced merging it back in), and it refuses to push a history
+  whose root the backup lacks, checked against the backup as it stands when the push
+  starts. The pause comes before your notes, the branch, the index, or the merge
+  state change (the fetch that found the other history has already downloaded its
+  commits into the graph's `.git` folder), shows in Settings → Backup, and names each
+  commit. If the other history is expected (say, a device that started its own graph
+  joined this backup), list the full 40-character ids under the graph's root path in
+  the settings file, then reopen the graph:
+
+  ```json
+  "acceptedHistoryRoots": { "/Users/me/Notes": ["<40-character commit id>"] }
+  ```
+
+  Connecting a graph that already has history (local history included) to an
+  existing backup is such a join: its first sync pauses, naming the backup's root
+  and the graph's own, until both are listed. Once a device joins, every other device
+  running this fork pauses on that device's root at its next pull, and needs the same
+  entry in its own settings file. If the other history is not expected, don't accept
+  it: when the backup's history is the one to keep (it was rewritten on purpose, say),
+  re-clone this graph from the backup; otherwise restore the backup repository from a
+  good copy (see [generic git remotes](./generic-git-remotes.md#when-it-fails)). Roots
+  already in this graph's history are never checked again; a graph with no commits
+  yet adopts the backup's history as before, and the first push to an empty backup
+  goes out as before. The check compares root commits only: a rewrite that kept the
+  original root (one that removed files the first commit never held, say) is not a
+  separate history to it, so a device still on the old history would merge it back in
+  without a pause. Stop those devices before such a rewrite. Reflect keeps the entry
+  as written when it saves its own settings; an id that is not a full commit id, or an
+  entry for a path that does not exist, is shown as a warning when the graph opens and
+  is ignored.
 - GitHub sign-in uses the OAuth device flow against `github.com`; the token is stored
   in the OS keychain.
 
@@ -138,6 +172,23 @@ sit inside the synced graph.
   Mac, and Reflect warns when a pull skips one. Files committed before a
   folder became local-only stay frozen: never updated, deleted, or checked
   out again here.
+- **Git pulls never start tracking a folder this Mac's history does not
+  track.** If the backup gains files inside a local-only folder this Mac's
+  history does not track (another device added them, or a bad merge brought
+  them back), sync pauses before your notes, the branch, or the index change:
+  once tracked, they would ride along in every later backup from this Mac.
+  Reflect never deletes them itself. To go on, remove them from the backup in
+  a separate clone (`git rm -r --cached <folder>`, then commit and push), or
+  restore the backup repository from a good copy. A folder this Mac's history
+  already tracks (say, one committed before it became local-only) keeps
+  following the backup in history, new files included, and is still never
+  written here; the same command, run in this graph, takes it out of the
+  backup's later commits at the next sync (the files stay on this Mac's disk
+  and in history). Either way, every other device that tracks the folder, the
+  phone included, deletes its copies at its next sync (history keeps them):
+  copy what you need off those devices first, and stop editing the folder
+  there, or an edit made there brings the files back and this Mac's next pull
+  pauses again.
 - **How to configure:** add an entry for the graph to the settings file
   (`~/Library/Application Support/reflect-open/settings.json`), keyed by the
   graph's root path. It applies the next time the graph opens (switch to it
