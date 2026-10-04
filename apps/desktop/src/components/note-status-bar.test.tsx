@@ -119,4 +119,23 @@ describe('NoteStatusBar', () => {
       .element(page.getByRole('status', { name: 'Note status' }))
       .toHaveTextContent('38 / 1,234 chars')
   })
+
+  it('fades out while typing in an editor and returns on a mouse move', async () => {
+    publishNoteStatus('notes/a.md', owner, {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+    })
+    const view = await renderBar({ kind: 'note', path: 'notes/a.md' })
+    const editor = document.createElement('div')
+    editor.contentEditable = 'true'
+    view.container.append(editor)
+    const bar = () => view.container.querySelector<HTMLElement>('[role="status"]')!
+
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    await vi.waitFor(() => expect(bar().className).toContain('opacity-0'))
+
+    document.dispatchEvent(new MouseEvent('mousemove'))
+    await vi.waitFor(() => expect(bar().className).not.toContain('opacity-0'))
+  })
 })
