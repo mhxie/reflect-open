@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState, type ReactElement } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
 import {
   detectConflictMarkers,
@@ -7,7 +7,9 @@ import {
   isTemplatePath,
   isUntitledNotePath,
   splitFrontmatter,
+  splitWikiLinkTarget,
   untitledNoteSeed,
+  wikiClaimHeadingText,
 } from '@reflect/core'
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
 import { ConflictNoteView } from '@/components/conflict-note-view.tsx'
@@ -29,7 +31,11 @@ import {
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
+import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
+import type { NoteReveal } from '@/lib/note-reveal.ts'
+import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
 import { OutlineBridge } from '@/editor/outline/outline-bridge.tsx'
+import { WikiAnchorsBridge } from '@/editor/wiki-anchors/wiki-anchors-bridge.tsx'
 import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useNoteDocument } from '@/editor/use-note-document.ts'
@@ -114,6 +120,15 @@ interface NotePaneProps {
    * did, so the editor consumes the key.
    */
   onExitBoundary?: (date: string, direction: 'up' | 'down') => boolean
+  /** Scroll to a followed link's heading once the editor shows the note; once per `key`. */
+  reveal?: NoteReveal | undefined
+  /** The pane scrolled to {@link reveal}, so a host can stop asking (a remount would ask again). */
+  onRevealed?: ((key: number) => void) | undefined
+}
+
+/** Scroll `editor` to the heading `fragment` names; a wiki claim's `^cN` is its `[CN]` heading. */
+function revealFragment(editor: NoteEditorHandle, fragment: string): void {
+  editor.revealHeading(wikiClaimHeadingText(editor.getMarkdown(), fragment) ?? fragment)
 }
 
 /**
@@ -145,6 +160,8 @@ export function NotePaneComponent({
   dailyDate,
   registerHandle,
   onExitBoundary,
+  reveal,
+  onRevealed,
 }: NotePaneProps): ReactElement {
   const { graph } = useGraph()
   const { settings } = useSettings()
@@ -209,7 +226,7 @@ export function NotePaneComponent({
   })
   // Without a generation the navigation only resolves: a link from a
   // local-only note must never create a note.
-  const onWikiLinkClick = useWikiLinkNavigation(localOnly ? null : generation)
+  const followWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
   const onNoteLinkClick = useMarkdownLinkNavigation(generation, path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete()
@@ -246,10 +263,24 @@ export function NotePaneComponent({
   const onSlashMenuSearch = useTemplateSlashItems(
     useCallback(() => registeredHandle.current?.handle ?? null, []),
   )
+  // The mounted editor as state, so a reveal request can wait for it.
+  const [revealEditor, setRevealEditor] = useState<NoteEditorHandle | null>(null)
+  const paneRef = useRef<HTMLDivElement>(null)
+  const revealInPane = useCallback(
+    (fragment: string): void => {
+      if (revealEditor !== null) {
+        revealFragment(revealEditor, fragment)
+      } else if (localOnly && document.status === 'ready' && paneRef.current !== null) {
+        revealPreviewHeading(paneRef.current, document.initialContent, fragment)
+      }
+    },
+    [revealEditor, localOnly, document.status, document.initialContent],
+  )
   const handleRef = useCallback(
     (handle: NoteEditorHandle | null) => {
       bindEditor(handle)
       aiEditorRef.current = handle
+      setRevealEditor(handle)
       if (handle === null) {
         if (registeredHandle.current !== null) {
           unregisterNoteEditorHandle(registeredHandle.current.path, registeredHandle.current.handle)
@@ -276,6 +307,42 @@ export function NotePaneComponent({
     [bindEditor, path, dailyDate, registerHandle, autoFocus, autoFocusSelection, onAutoFocused],
   )
 
+  const revealedKey = useRef<number | null>(null)
+  useEffect(() => {
+    if (
+      reveal === undefined ||
+      (revealEditor === null && !(localOnly && document.status === 'ready')) ||
+      revealedKey.current === reveal.key
+    ) {
+      return
+    }
+    // A frame later, so the host's own arrival scroll (a parent's effect)
+    // doesn't land on top of the reveal.
+    const frame = requestAnimationFrame(() => {
+      revealedKey.current = reveal.key
+      revealInPane(reveal.fragment)
+      onRevealed?.(reveal.key)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [reveal, revealEditor, localOnly, document.status, revealInPane, onRevealed])
+
+  // A link to a heading in this same note, `[[#Heading]]`, scrolls here —
+  // as a link intent of its own, so a slower link still resolving can't
+  // navigate away afterwards.
+  const beginLinkIntent = useLinkIntentGuard()
+  const onWikiLinkClick = useCallback(
+    (options: { target: string; openInNewWindow: boolean; peek?: boolean }) => {
+      const { name, fragment } = splitWikiLinkTarget(options.target)
+      if (name.trim() === '' && fragment !== null) {
+        beginLinkIntent()
+        revealInPane(fragment)
+        return
+      }
+      followWikiLink(options)
+    },
+    [beginLinkIntent, followWikiLink, revealInPane],
+  )
+
   const aiMenu = useEditorAiMenu({
     path,
     sessionEpoch: document.sessionEpoch,
@@ -297,7 +364,6 @@ export function NotePaneComponent({
       : null
   const xPostsReady = useXPostPreload(editorContent)
   // Read-only views (protected, local-only) are counted too, from the file they show.
-  const paneRef = useRef<HTMLDivElement>(null)
   const getSelectedText = useCallback(() => aiEditorRef.current?.getSelectedText() ?? '', [])
   const publishStatus = useNoteStatusPublisher(
     path,
@@ -334,7 +400,7 @@ export function NotePaneComponent({
       ? splitFrontmatter(document.initialContent).body
       : document.initialContent
     return (
-      <div className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
+      <div ref={paneRef} className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
         {/* A dashed sheet sets the read-only, device-bound note apart at a glance. */}
         <div
           data-testid="local-only-sheet"
@@ -451,6 +517,7 @@ export function NotePaneComponent({
       >
         <EditorAiKeymap onTrigger={aiMenu.openMenu} />
         {outline ? <OutlineBridge path={path} /> : null}
+        <WikiAnchorsBridge />
       </NoteEditor>
 
       {showBacklinks ? (

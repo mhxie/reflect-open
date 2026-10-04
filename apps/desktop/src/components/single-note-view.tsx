@@ -1,5 +1,7 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useMemo, type ReactElement, type ReactNode } from 'react'
 import { NotePane } from '@/components/note-pane.tsx'
+import type { NoteReveal } from '@/lib/note-reveal.ts'
+import { useRouter } from '@/routing/router.tsx'
 import { ScrollRestored } from '@/routing/scroll-restore.tsx'
 
 interface SingleNoteViewProps {
@@ -28,6 +30,15 @@ interface SingleNoteViewProps {
  * included) focuses it.
  */
 export function SingleNoteView({ path, dailyDate, heading }: SingleNoteViewProps): ReactElement {
+  // A followed link's `#fragment` scrolls the arriving note to that heading.
+  const { arrivalRevealHeading, arrivalSeq } = useRouter()
+  const reveal = useMemo(
+    (): NoteReveal | undefined =>
+      arrivalRevealHeading === null
+        ? undefined
+        : { fragment: arrivalRevealHeading, key: arrivalSeq },
+    [arrivalRevealHeading, arrivalSeq],
+  )
   return (
     <ScrollRestored className="h-full overflow-auto px-0">
       <div className="mx-auto flex min-h-full w-full max-w-full flex-col py-8">
@@ -41,6 +52,7 @@ export function SingleNoteView({ path, dailyDate, heading }: SingleNoteViewProps
           className="flex grow flex-col"
           gutterClassName="reflect-content-gutter"
           editorClassName="grow"
+          reveal={reveal}
         />
       </div>
     </ScrollRestored>

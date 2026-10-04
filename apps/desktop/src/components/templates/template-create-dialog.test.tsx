@@ -45,6 +45,7 @@ async function renderDialog(): Promise<CommandContext> {
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
   }
   await render(
     <NoteTemplatesProvider>

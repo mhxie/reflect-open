@@ -85,10 +85,23 @@ export function AllNotesTable({
           'sticky top-0 z-10 border-b border-border bg-surface py-3 text-[13px] font-medium leading-none text-text-secondary shadow-sm',
         )}
       >
-        <SortHeader label="Subject" sortKey="title" sort={sort} onSort={onSort} />
+        <SortHeader
+          label="Subject"
+          sortKey="title"
+          sort={sort}
+          onSort={onSort}
+          directionLabels={{ asc: 'A to Z', desc: 'Z to A' }}
+        />
         <span>Snippet</span>
         <span className="text-right">Tags</span>
-        <SortHeader label="Updated" sortKey="updated" sort={sort} onSort={onSort} alignEnd />
+        <SortHeader
+          label="Updated"
+          sortKey="updated"
+          sort={sort}
+          onSort={onSort}
+          directionLabels={{ asc: 'oldest first', desc: 'newest first' }}
+          alignEnd
+        />
       </div>
       {notes.length === 0 ? (
         <p className="py-8 pl-12 pr-7 text-sm text-text-muted">

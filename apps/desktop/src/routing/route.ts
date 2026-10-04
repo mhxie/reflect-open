@@ -7,7 +7,14 @@
  * note route carries `path` — the reserved frontmatter `id` can join it later
  * without breaking the shape.
  */
-import { dailyPath, dateFromDailyPath, isDaily, type NoteAttachmentType } from '@reflect/core'
+import {
+  dailyPath,
+  dateFromDailyPath,
+  isDaily,
+  wikiFiltersEqual,
+  type NoteAttachmentType,
+  type WikiFilter,
+} from '@reflect/core'
 import { isIsoDate } from '@/lib/dates.ts'
 
 /** What the All Notes list is narrowed to: one tag or one attachment type. */
@@ -27,6 +34,11 @@ export type Route =
    * and/or to files linked from notes carrying a tag.
    */
   | { kind: 'attachments'; type: NoteAttachmentType | null; tag: string | null }
+  // The graph's wiki entries. `filter` narrows the list; `language` is the
+  // folder of the language entries open in (a `WikiLanguage.folder`), or null
+  // for the source. Both live on the route so back/forward and "open an
+  // entry, come back" keep them.
+  | { kind: 'wiki'; filter: WikiFilter | null; language: string | null }
   | { kind: 'search'; query: string }
   | { kind: 'tasks' }
   | { kind: 'chat' }
@@ -60,6 +72,10 @@ export function routesEqual(a: Route, b: Route): boolean {
       const other = b as Extract<Route, { kind: 'attachments' }>
       return a.type === other.type && a.tag === other.tag
     }
+    case 'wiki': {
+      const other = b as Extract<Route, { kind: 'wiki' }>
+      return a.language === other.language && wikiFiltersEqual(a.filter, other.filter)
+    }
     case 'search':
       return a.query === (b as Extract<Route, { kind: 'search' }>).query
   }
@@ -68,6 +84,13 @@ export function routesEqual(a: Route, b: Route): boolean {
 /** The All Notes route narrowed to `tag`, or listing every note for `null`. */
 export function allNotesRoute(tag: string | null): Extract<Route, { kind: 'allNotes' }> {
   return { kind: 'allNotes', filter: tag === null ? null : { kind: 'tag', tag } }
+}
+
+/** The Wiki route: every entry, opening in the source language, unless told otherwise. */
+export function wikiRoute(
+  options: { filter?: WikiFilter | null; language?: string | null } = {},
+): Extract<Route, { kind: 'wiki' }> {
+  return { kind: 'wiki', filter: options.filter ?? null, language: options.language ?? null }
 }
 
 /** The tag an All Notes filter narrows to, or null for no filter or a type filter. */

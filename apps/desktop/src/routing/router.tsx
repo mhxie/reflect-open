@@ -60,6 +60,14 @@ interface RouterValue {
    * moves clear it, so it can never leak onto a later, unrelated arrival.
    */
   arrivalFocusEditor: boolean
+  /**
+   * The heading the latest arrival asked the destination note to scroll to
+   * (`navigate(route, { revealHeading })`) — a link fragment such as
+   * `Next steps` or a wiki claim's `^c3` — or null. One-shot like
+   * {@link arrivalFocusEditor}: the next navigate overwrites it and history
+   * moves clear it; a view pairs it with {@link arrivalSeq} to act once.
+   */
+  arrivalRevealHeading: string | null
   navigate: (route: Route, options?: NavigateOptions) => void
   back: () => void
   forward: () => void
@@ -106,6 +114,12 @@ export interface NavigateOptions {
    * autofocuses every arrival and ignores it.
    */
   focusEditor?: boolean
+  /**
+   * Ask the destination note to scroll to this heading on arrival — see
+   * {@link RouterValue.arrivalRevealHeading}. Wiki-link clicks pass the
+   * link's `#fragment`.
+   */
+  revealHeading?: string
 }
 
 /**
@@ -150,6 +164,7 @@ export function RouterProvider({
   })
   const [arrivalSeq, setArrivalSeq] = useState(0)
   const [arrivalFocusEditor, setArrivalFocusEditor] = useState(false)
+  const [arrivalRevealHeading, setArrivalRevealHeading] = useState<string | null>(null)
   const nextId = useRef(1)
   const navigationRevisionRef = useRef(0)
   /** Scroll offsets by entry id — a ref so scroll reporting never re-renders. */
@@ -223,6 +238,7 @@ export function RouterProvider({
       })
       setArrivalSeq((seq) => seq + 1)
       setArrivalFocusEditor(options?.focusEditor === true)
+      setArrivalRevealHeading(options?.revealHeading ?? null)
     })
   }, [])
 
@@ -233,6 +249,7 @@ export function RouterProvider({
     navigationRevisionRef.current += 1
     startTransition(() => {
       setArrivalFocusEditor(false) // history moves are never focus arrivals
+      setArrivalRevealHeading(null)
       setHistory((current) =>
         current.index > 0 ? { ...current, index: current.index - 1 } : current,
       )
@@ -246,6 +263,7 @@ export function RouterProvider({
     navigationRevisionRef.current += 1
     startTransition(() => {
       setArrivalFocusEditor(false)
+      setArrivalRevealHeading(null)
       setHistory((current) =>
         current.index < current.stack.length - 1
           ? { ...current, index: current.index + 1 }
@@ -306,6 +324,7 @@ export function RouterProvider({
       arrivalSeq,
       navigationRevision,
       arrivalFocusEditor,
+      arrivalRevealHeading,
       navigate,
       back,
       forward,
@@ -321,6 +340,7 @@ export function RouterProvider({
     arrivalSeq,
     navigationRevision,
     arrivalFocusEditor,
+    arrivalRevealHeading,
     navigate,
     back,
     forward,

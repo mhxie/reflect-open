@@ -147,3 +147,23 @@ export function formatRecencyLabel(
       return format(date, 'M/d/yyyy')
   }
 }
+
+/**
+ * {@link formatRecencyLabel} for a calendar day (ISO `YYYY-MM-DD`) rather than
+ * an instant: `Today` where that shows the time, then the weekday within the
+ * current week, the short date otherwise. `now` is injectable for tests.
+ */
+export function formatDayRecencyLabel(
+  date: string,
+  prefs: Pick<DateTimePrefs, 'dateFormat'>,
+  now: Date = new Date(),
+): string {
+  const day = parseIsoDate(date)
+  if (isSameDay(day, now)) {
+    return 'Today'
+  }
+  if (isSameWeek(day, now)) {
+    return format(day, 'EEE')
+  }
+  return formatShortDate(date, prefs.dateFormat)
+}

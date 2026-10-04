@@ -452,6 +452,19 @@ describe('resolveOrCreateNoteWithTitle', () => {
     )
   })
 
+  it('names a note created from a heading link after the note, not the heading', async () => {
+    const invoke = bindBridge()
+
+    await expect(resolveOrCreateNoteWithTitle('Brand New#^c1', 7)).resolves.toEqual({
+      kind: 'created',
+      path: 'notes/brand-new.md',
+    })
+    const write = invoke.mock.calls.find(([command]) => command === 'note_create')
+    const args = write?.[1] as { contents: string }
+    expect(args.contents).toContain('# Brand New\n')
+    expect(args.contents).not.toContain('#^c1')
+  })
+
   it('creates a colon-prefixed title as an ordinary note', async () => {
     const invoke = bindBridge()
 

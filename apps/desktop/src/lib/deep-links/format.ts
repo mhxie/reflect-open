@@ -19,8 +19,8 @@ export function dailyDeepLink(date: string): string {
 
 /**
  * The deep link addressing a route, or null for screens the grammar
- * deliberately doesn't name (all-notes, attachments, chat, settings — in-app surfaces, not
- * addresses). Note routes are path-shaped here; "Copy deep link" prefers the
+ * deliberately doesn't name (all-notes, attachments, wiki, chat, settings).
+ * Note routes are path-shaped here; "Copy deep link" prefers the
  * id form via {@link noteDeepLink} so the link survives renames.
  */
 export function deepLinkForRoute(route: Route): string | null {
@@ -37,6 +37,7 @@ export function deepLinkForRoute(route: Route): string | null {
       return noteDeepLink(route.path)
     case 'allNotes':
     case 'attachments':
+    case 'wiki':
     case 'chat':
     case 'settings':
     case 'graphs':

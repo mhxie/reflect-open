@@ -17,6 +17,7 @@ import { RouterProvider } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 
 const getPinnedNotes = vi.hoisted(() => vi.fn<() => Promise<PinnedNote[]>>(async () => []))
+const hasWikiEntries = vi.hoisted(() => vi.fn<() => Promise<boolean>>(async () => false))
 const revealItemInDir = vi.hoisted(() => vi.fn<(path: string) => Promise<void>>(async () => {}))
 const openUrl = vi.hoisted(() => vi.fn<(url: string) => Promise<void>>(async () => {}))
 const openRouteInNewWindow = vi.hoisted(() => vi.fn<(route: NoteRoute) => Promise<boolean>>())
@@ -56,6 +57,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   getPinnedNotes,
+  hasWikiEntries,
 }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir, openUrl }))
 vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
@@ -79,7 +81,14 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 }))
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
-    settings: { dateFormat: 'mdy', graphColors: {} },
+    settings: {
+      dateFormat: 'mdy',
+      graphColors: {},
+      wikiLanguages: [
+        { label: 'English', folder: 'wiki' },
+        { label: '简体中文', folder: 'wiki-cn' },
+      ],
+    },
     updateSettings: () => {},
     updateSettingsWith,
   }),
@@ -125,6 +134,7 @@ beforeEach(() => {
   // The hoisted mock is shared module state — restore it so mic-related cases
   // can't inherit mutations from earlier tests.
   getPinnedNotes.mockReset().mockResolvedValue([])
+  hasWikiEntries.mockReset().mockResolvedValue(false)
   audioMemo.available = true
   audioMemo.unavailableReason = null
   audioMemo.toggle.mockReset()
@@ -170,6 +180,7 @@ async function renderSidebar(overrides?: Partial<CommandContext>, initialRoute?:
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
     ...overrides,
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -269,6 +280,46 @@ describe('Sidebar', () => {
     const { view } = await renderSidebar(undefined, { kind: 'note', path: untitledNotePath() })
     await expect
       .element(view.getByRole('button', { name: /new note/i }))
+      .toHaveAttribute('aria-current', 'page')
+    await expect
+      .element(view.getByRole('button', { name: /all notes/i }))
+      .not.toHaveAttribute('aria-current')
+  })
+
+  it('shows Wiki below All notes only for a graph with a wiki, opening the Wiki screen', async () => {
+    const without = await renderSidebar(undefined, { kind: 'settings' })
+    await vi.waitFor(() => expect(hasWikiEntries).toHaveBeenCalled())
+    expect(without.view.getByRole('button', { name: 'Wiki', exact: true }).query()).toBeNull()
+    await without.view.unmount()
+
+    hasWikiEntries.mockResolvedValue(true)
+    const { view, navigate } = await renderSidebar(undefined, { kind: 'settings' })
+    const wiki = view.getByRole('button', { name: 'Wiki', exact: true })
+    await expect.element(wiki).toBeInTheDocument()
+
+    const rows = view
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('button')
+      .elements()
+      .map((row) => row.textContent ?? '')
+    const allNotes = rows.findIndex((label) => /all notes/i.test(label))
+    expect(rows[allNotes + 1]).toBe('Wiki')
+
+    await wiki.click()
+    await vi.waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({ kind: 'wiki', filter: null, language: null }),
+    )
+  })
+
+  it('lights Wiki, not All notes, while a wiki entry or its translation is open', async () => {
+    hasWikiEntries.mockResolvedValue(true)
+    const { view } = await renderSidebar(undefined, {
+      kind: 'note',
+      path: 'wiki-cn/memory/Spacing Effect.md',
+    })
+
+    await expect
+      .element(view.getByRole('button', { name: 'Wiki', exact: true }))
       .toHaveAttribute('aria-current', 'page')
     await expect
       .element(view.getByRole('button', { name: /all notes/i }))

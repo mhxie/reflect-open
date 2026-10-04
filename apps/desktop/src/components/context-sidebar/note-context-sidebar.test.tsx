@@ -18,7 +18,10 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 }))
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
-    settings: { semanticSearchEnabled: true },
+    settings: {
+      semanticSearchEnabled: true,
+      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+    },
     updateSettings: () => {},
   }),
 }))

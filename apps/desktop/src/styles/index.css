@@ -328,6 +328,13 @@ html:root {
   padding-inline: var(--editor-content-gutter, max(2rem, calc((100% - 42rem) / 2)));
 }
 
+/* A wiki `anchors` fence the caret is outside of, folded away while its source
+   chips render in its place (editor/wiki-anchors). Un-layered, so it beats
+   meowdown's layered code-block display rules. */
+[data-wiki-anchors-folded] {
+  display: none;
+}
+
 /* Outline jump tail space (sized in editor/outline/outline-scroll.ts). A
    pseudo-element, since the note column's `min-h-full` absorbs padding. */
 [data-outline-tail-space]::after {

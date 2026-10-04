@@ -1,43 +1,44 @@
 import type { ReactElement } from 'react'
-import { ArrowDown, ArrowUp } from 'lucide-react'
-import type { NoteListSort, NoteListSortKey } from '@reflect/core'
+import { ArrowDown, ArrowUp, type LucideIcon } from 'lucide-react'
+import type { SortDirection } from '@reflect/core'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { cn } from '@/lib/utils.ts'
 
-interface SortHeaderProps {
+interface SortHeaderProps<Key extends string> {
   label: string
-  sortKey: NoteListSortKey
-  sort: NoteListSort
-  onSort: (key: NoteListSortKey) => void
-  /** Right-align the label and arrow (the Updated column). */
+  sortKey: Key
+  sort: { readonly key: Key; readonly direction: SortDirection }
+  onSort: (key: Key) => void
+  /** How each direction of this column is announced, e.g. A to Z / Z to A. */
+  directionLabels: Readonly<Record<SortDirection, string>>
+  /** Right-align the label and arrow (a numeric or date column). */
   alignEnd?: boolean
-}
-
-/** How each key's active direction is announced. */
-const DIRECTION_LABELS: Record<NoteListSortKey, Record<NoteListSort['direction'], string>> = {
-  title: { asc: 'A to Z', desc: 'Z to A' },
-  updated: { asc: 'oldest first', desc: 'newest first' },
+  /** Shown in place of the label, for a narrow column; the label becomes its tooltip. */
+  icon?: LucideIcon | undefined
 }
 
 /**
- * An All Notes column header that sorts by its key, or flips the direction
- * when the list is already sorted by it.
+ * A sortable column header (All Notes, Wiki): sorts by its key, or flips the
+ * direction when the list is already sorted by it.
  */
-export function SortHeader({
+export function SortHeader<Key extends string>({
   label,
   sortKey,
   sort,
   onSort,
+  directionLabels,
   alignEnd = false,
-}: SortHeaderProps): ReactElement {
+  icon: Icon,
+}: SortHeaderProps<Key>): ReactElement {
   const active = sort.key === sortKey
   const Arrow = sort.direction === 'asc' ? ArrowUp : ArrowDown
-  return (
+  const button = (
     <button
       type="button"
       onClick={() => onSort(sortKey)}
       aria-label={
         active
-          ? `${label}, sorted ${DIRECTION_LABELS[sortKey][sort.direction]}`
+          ? `${label}, sorted ${directionLabels[sort.direction]}`
           : `Sort by ${label.toLowerCase()}`
       }
       className={cn(
@@ -46,8 +47,17 @@ export function SortHeader({
         active && 'text-text',
       )}
     >
-      <span>{label}</span>
+      {Icon === undefined ? <span>{label}</span> : <Icon aria-hidden className="size-3.5" />}
       {active ? <Arrow aria-hidden className="size-3" strokeWidth={2} /> : null}
     </button>
+  )
+  if (Icon === undefined) {
+    return button
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger render={button} />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
