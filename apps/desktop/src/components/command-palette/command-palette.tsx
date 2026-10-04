@@ -1,9 +1,10 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { Command } from 'cmdk'
-import { displayNoteTitle, parseHighlights } from '@reflect/core'
+import { cleanSnippetText, displayNoteTitle, parseHighlights } from '@reflect/core'
 import { CalendarDays, FileText } from 'lucide-react'
 import { getIsComposing, isModEvent } from '@meowdown/core'
 import { Kbd } from '@/components/kbd.tsx'
+import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { ShortcutKeys } from '@/components/shortcut-keys.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { runCommand } from '@/lib/commands/registry.ts'
@@ -38,7 +39,7 @@ interface CommandPaletteProps {
 const Snippet = memo(function Snippet({ snippet }: { snippet: string }): ReactElement {
   return (
     <span className="block truncate text-xs text-text-muted">
-      {parseHighlights(snippet).map((segment, i) =>
+      {parseHighlights(cleanSnippetText(snippet)).map((segment, i) =>
         segment.highlighted ? (
           <mark key={i} className="rounded-sm bg-accent-soft px-0.5">
             {segment.text}
@@ -55,6 +56,8 @@ interface PendingNoteOpen {
   /** The clicked note, or `null` for a key press on the highlighted item. */
   path: string | null
   openInNewWindow: boolean
+  /** Shift (without ⌘): peek the note over the editor instead of navigating. */
+  peek: boolean
 }
 
 export function CommandPalette({ context }: CommandPaletteProps): ReactElement | null {
@@ -62,6 +65,7 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
   const { settings } = useSettings()
   const { sections, resultsSettled, searchFailed } = usePaletteResults(open, query)
   const navigateNoteLink = useNoteLinkNavigation()
+  const peekNoteLink = usePeekNavigation()
   // cmdk's `onSelect` exposes only the selected value, not its originating
   // click or key press. Capture the modifiers before cmdk's own handler, then
   // consume them exactly once from `onSelect`.
@@ -115,12 +119,11 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
   const openNote = (entry: NoteEntry): void => {
     const pending = pendingNoteOpenRef.current
     pendingNoteOpenRef.current = null
-    navigateNoteLink({
+    const forThisEntry = pending !== null && (pending.path === null || pending.path === entry.path)
+    const follow = forThisEntry && pending.peek ? peekNoteLink : navigateNoteLink
+    follow({
       target: routeForPath(entry.path),
-      openInNewWindow:
-        pending !== null &&
-        pending.openInNewWindow &&
-        (pending.path === null || pending.path === entry.path),
+      openInNewWindow: forThisEntry && pending.openInNewWindow,
     })
     closePalette()
   }
@@ -167,7 +170,11 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
             // Overwrite any abandoned pointer intent so Enter can never
             // inherit it.
             if (event.key === 'Enter') {
-              pendingNoteOpenRef.current = { path: null, openInNewWindow: isModEvent(event) }
+              pendingNoteOpenRef.current = {
+                path: null,
+                openInNewWindow: isModEvent(event),
+                peek: event.shiftKey && !isModEvent(event),
+              }
             }
             if (event.key === 'Escape') {
               event.preventDefault()
@@ -210,6 +217,7 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                           pendingNoteOpenRef.current = {
                             path: entry.path,
                             openInNewWindow: isModEvent(event),
+                            peek: event.shiftKey && !isModEvent(event),
                           }
                         }}
                         onSelect={() => openNote(entry)}
@@ -231,6 +239,11 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                                     : displayNoteTitle(entry.title)}
                               </span>
                               <LocalOnlyMark path={entry.path} />
+                              {entry.related ? (
+                                <span className="shrink-0 rounded-sm bg-surface-active px-1 text-2xs text-text-muted">
+                                  Related
+                                </span>
+                              ) : null}
                             </span>
                             {entry.phrase !== null && entry.date !== null ? (
                               <span className="block truncate text-xs text-text-muted">
@@ -312,6 +325,12 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
             {splitLayout ? (
               <span className="flex items-center gap-1.5">
                 <ShortcutKeys binding="Mod-Enter" /> Open in new window
+              </span>
+            ) : null}
+            {splitLayout ? (
+              <span className="flex items-center gap-1.5">
+                <Kbd>⇧</Kbd>
+                <Kbd>↩</Kbd> Peek
               </span>
             ) : null}
             <span className="flex items-center gap-1.5">

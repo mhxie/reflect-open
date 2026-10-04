@@ -117,6 +117,7 @@ describe('buildPaletteSections', () => {
         snippet: null,
         phrase: null,
         alias: null,
+        related: false,
       },
     ])
   })
@@ -222,5 +223,19 @@ describe('buildPaletteSections', () => {
       ],
     })
     expect(result.notes[0]!.date).toBe('2026-06-09')
+  })
+
+  it('marks a hit found by meaning alone as related', () => {
+    const result = sections({
+      query: 'habits',
+      hits: [
+        { path: 'notes/a.md', title: 'A', dailyDate: null, snippet: 'x', related: true },
+        { path: 'notes/b.md', title: 'B', dailyDate: null, snippet: 'y' },
+      ],
+    })
+    expect(result.notes.map((entry) => [entry.path, entry.related])).toEqual([
+      ['notes/a.md', true],
+      ['notes/b.md', false],
+    ])
   })
 })

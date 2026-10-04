@@ -8,6 +8,7 @@ import { formatBinding, isApplePlatform } from '@/lib/keybindings.ts'
 import type { NoteRoute } from '@/routing/route.ts'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { CommandPalette } from './command-palette.tsx'
 import { PaletteProvider, usePalette } from './palette-provider.tsx'
 
@@ -77,6 +78,11 @@ function RouteProbe(): ReactNode {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
+function PeekProbe(): ReactNode {
+  const target = usePeek()?.target ?? null
+  return <output data-testid="peek">{JSON.stringify(target)}</output>
+}
+
 async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const navigate = vi.fn()
   const fullContext: CommandContext = {
@@ -111,11 +117,14 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const view = await render(
     <QueryClientProvider client={client}>
       <RouterProvider>
-        <PaletteProvider>
-          <OpenOnMount query={query} />
-          <CommandPalette context={fullContext} />
-          <RouteProbe />
-        </PaletteProvider>
+        <PeekProvider>
+          <PaletteProvider>
+            <OpenOnMount query={query} />
+            <CommandPalette context={fullContext} />
+            <RouteProbe />
+            <PeekProbe />
+          </PaletteProvider>
+        </PeekProvider>
       </RouterProvider>
     </QueryClientProvider>,
   )
@@ -187,6 +196,38 @@ describe('CommandPalette', () => {
     await expect.element(view.getByTestId('route')).toMatchTextContent('notes/rust.md')
     expect(openRouteInNewWindow).not.toHaveBeenCalled()
     expect(view.getByTestId('palette-overlay').query()).toBeNull()
+  })
+
+  it('Shift-Enter peeks the highlighted note instead of navigating', async () => {
+    suggestWikiTargets.mockResolvedValue([])
+    searchWithFilters.mockResolvedValue([
+      { path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null },
+    ])
+    const { view } = await renderPalette('rust')
+    await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
+
+    await userEvent.keyboard('{Shift>}{Enter}{/Shift}')
+
+    await expect.element(view.getByTestId('peek')).toMatchTextContent('"path":"notes/rust.md"')
+    await expect.element(view.getByTestId('route')).toMatchTextContent('"kind":"today"')
+    expect(view.getByTestId('palette-overlay').query()).toBeNull()
+  })
+
+  it('shows snippets without Markdown syntax', async () => {
+    suggestWikiTargets.mockResolvedValue([])
+    searchWithFilters.mockResolvedValue([
+      {
+        path: 'notes/clear.md',
+        title: 'James Clear',
+        snippet: '# James Clear\n- Author of [[Atomic \u{1}Habits\u{2}]]',
+        dailyDate: null,
+      },
+    ])
+    const { view } = await renderPalette('habits')
+    await expect.element(view.getByText('Habits', { exact: true })).toBeInTheDocument()
+
+    const snippet = view.getByText('Habits', { exact: true }).element().parentElement!
+    expect(snippet.textContent).toBe('James Clear Author of Atomic Habits')
   })
 
   it('modifier-click opens one note window and closes the palette synchronously', async () => {

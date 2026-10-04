@@ -20,6 +20,23 @@ export interface HighlightSegment {
   highlighted: boolean
 }
 
+/**
+ * A body snippet without the Markdown syntax a reader never sees: heading and
+ * list markers and task boxes at line starts, wiki-link brackets (an alias
+ * shows as itself), a link's URL, emphasis and code ticks; lines run together.
+ * Tags and highlight markers survive, so it can run before
+ * {@link parseHighlights}.
+ */
+export function cleanSnippetText(snippet: string): string {
+  return snippet
+    .replaceAll(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
+    .replaceAll(/\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]/g, '$1')
+    .replaceAll(/\[\[|\]\]/g, '')
+    .replaceAll(/(^|\n)[ \t]*(?:#{1,6}|[-+*](?:[ \t]+\[[ x]\])?|\d+[.)])[ \t]+/gi, '$1')
+    .replaceAll(/\*\*|__|~~|`/g, '')
+    .replaceAll(/\s*\n\s*/g, ' ')
+}
+
 /** Split a marker-bearing snippet into renderable segments. */
 export function parseHighlights(snippet: string): HighlightSegment[] {
   const segments: HighlightSegment[] = []
