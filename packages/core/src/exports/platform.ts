@@ -292,6 +292,8 @@ export {
   GRAPH_COLOR_IDS,
   aiProviderIdSchema,
   openAiCompatibleBaseUrlSchema,
+  onDeviceAttestationSchema,
+  MIN_CONTEXT_WINDOW,
   aiProviderConfigSchema,
   aiProvidersSchema,
   defaultAiProviderIdSchema,
@@ -322,6 +324,7 @@ export {
   type AiProviderConfig,
   type HostedAiProviderConfig,
   type OpenAiCompatibleProviderConfig,
+  type OnDeviceAttestation,
   type AiPrompt,
   type AiPromptMode,
 } from '../settings/schema.ts'

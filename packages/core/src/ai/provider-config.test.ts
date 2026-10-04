@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import type { AiProviderConfig, HostedAiProviderConfig } from '../settings/schema.ts'
+import type {
+  AiProviderConfig,
+  HostedAiProviderConfig,
+  OpenAiCompatibleProviderConfig,
+} from '../settings/schema.ts'
 import {
   apiKeyHint,
   defaultAiProvider,
   pickTranscriptionConfig,
   resolveTranscriptionTarget,
   withAiProviderAdded,
+  withAiProviderCapabilities,
+  withAiProviderModel,
+  withAiProviderOnDevice,
   withAiProviderRemoved,
   type AiProvidersState,
 } from './provider-config.ts'
@@ -23,6 +30,81 @@ function config(overrides: Partial<HostedAiProviderConfig>): HostedAiProviderCon
 function state(providers: AiProviderConfig[], defaultProviderId: string | null): AiProvidersState {
   return { providers, defaultProviderId }
 }
+
+function local(
+  overrides: Partial<OpenAiCompatibleProviderConfig> = {},
+): OpenAiCompatibleProviderConfig {
+  return {
+    id: 'ollama',
+    provider: 'openai-compatible',
+    model: 'llama3.2',
+    baseUrl: 'http://localhost:11434/v1',
+    keyHint: '',
+    ...overrides,
+  }
+}
+
+const ATTESTATION = { baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' }
+
+describe('withAiProviderModel', () => {
+  it('drops an attestation for another model and keeps one for the same model', () => {
+    const attested = local({ onDevice: ATTESTATION })
+    const other = config({ id: 'other' })
+
+    expect(withAiProviderModel([attested, other], 'ollama', 'qwen3')).toEqual([
+      { ...attested, model: 'qwen3', onDevice: null },
+      other,
+    ])
+    expect(withAiProviderModel([attested], 'ollama', 'llama3.2')).toEqual([attested])
+    expect(withAiProviderModel([other], 'other', 'gpt-5.5')).toEqual([
+      { ...other, model: 'gpt-5.5' },
+    ])
+  })
+})
+
+describe('withAiProviderOnDevice', () => {
+  it('attests the entry for exactly its current endpoint and model', () => {
+    expect(withAiProviderOnDevice([local()], 'ollama', true)).toEqual([
+      local({ onDevice: ATTESTATION }),
+    ])
+  })
+
+  it('refuses to attest an endpoint off this Mac, or a hosted entry', () => {
+    const lan = local({ baseUrl: 'http://192.168.1.5:11434/v1' })
+    const hosted = config({ id: 'hosted' })
+    expect(withAiProviderOnDevice([lan, hosted], 'ollama', true)).toEqual([lan, hosted])
+    expect(withAiProviderOnDevice([lan, hosted], 'hosted', true)).toEqual([lan, hosted])
+  })
+
+  it('withdraws an attestation, even a stale one', () => {
+    const stale = local({ baseUrl: 'http://192.168.1.5:11434/v1', onDevice: ATTESTATION })
+    expect(withAiProviderOnDevice([stale], 'ollama', false)).toEqual([{ ...stale, onDevice: null }])
+  })
+})
+
+describe('withAiProviderCapabilities', () => {
+  it('sets and clears image support and the context window', () => {
+    const withBoth = withAiProviderCapabilities([local()], 'ollama', {
+      supportsImages: true,
+      contextWindow: 32_768,
+    })
+    expect(withBoth).toEqual([local({ supportsImages: true, contextWindow: 32_768 })])
+    expect(withAiProviderCapabilities(withBoth, 'ollama', { contextWindow: null })).toEqual([
+      local({ supportsImages: true }),
+    ])
+  })
+
+  it('ignores a context window that is too small or fractional, and hosted entries', () => {
+    const entry = local({ contextWindow: 8192 })
+    for (const contextWindow of [1024, 8192.5, NaN]) {
+      expect(withAiProviderCapabilities([entry], 'ollama', { contextWindow })).toEqual([entry])
+    }
+    const hosted = config({ id: 'hosted' })
+    expect(withAiProviderCapabilities([hosted], 'hosted', { supportsImages: true })).toEqual([
+      hosted,
+    ])
+  })
+})
 
 describe('apiKeyHint', () => {
   it('keeps only the trailing characters of a key', () => {

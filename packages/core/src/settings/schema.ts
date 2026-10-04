@@ -500,7 +500,8 @@ export const openAiCompatibleBaseUrlSchema = z
  * is the app-wide default is a sibling scalar (`defaultAiProviderId`), not a
  * per-entry flag, so "at most one default" holds by construction.
  * OpenAI-compatible entries additionally carry their API base URL, because it
- * is user configuration rather than a fixed catalog endpoint.
+ * is user configuration rather than a fixed catalog endpoint, plus the
+ * optional on-device attestation, context window and image capability.
  */
 const aiProviderConfigBaseSchema = z.object({
   id: z.string().min(1),
@@ -533,9 +534,35 @@ const hostedAiProviderConfigSchema = z.union([
 
 export type HostedAiProviderConfig = z.infer<typeof hostedAiProviderConfigSchema>
 
+/**
+ * The user's statement that an OpenAI-compatible entry runs its model on this
+ * Mac. It names the exact endpoint and model it was given for and counts only
+ * while both still match the resolved config (`resolveOnDeviceTarget` in
+ * `privacy/on-device.ts`), so it never carries over to another model.
+ */
+export const onDeviceAttestationSchema = z.object({
+  baseUrl: openAiCompatibleBaseUrlSchema,
+  model: z.string().min(1),
+})
+
+export type OnDeviceAttestation = z.infer<typeof onDeviceAttestationSchema>
+
+/** The smallest context window, in tokens, an OpenAI-compatible entry may declare. */
+export const MIN_CONTEXT_WINDOW = 2048
+
 const openAiCompatibleProviderConfigSchema = aiProviderConfigBaseSchema.extend({
   provider: z.literal('openai-compatible'),
   baseUrl: openAiCompatibleBaseUrlSchema,
+  /** The on-device attestation; absent, null and malformed all mean "not attested". */
+  onDevice: onDeviceAttestationSchema.nullable().catch(null).optional(),
+  /**
+   * The context window the server runs the model with, when the user set
+   * one. A malformed value is dropped rather than the whole entry, whose
+   * keychain key would otherwise be orphaned.
+   */
+  contextWindow: z.number().int().min(MIN_CONTEXT_WINDOW).optional().catch(undefined),
+  /** Whether the model accepts image input; absent or malformed means no. */
+  supportsImages: z.boolean().catch(false).optional(),
 })
 
 export type OpenAiCompatibleProviderConfig = z.infer<typeof openAiCompatibleProviderConfigSchema>

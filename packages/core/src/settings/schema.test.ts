@@ -468,6 +468,68 @@ describe('settingsSchema', () => {
       expect(settingsSchema.parse({ aiProviders: 'nope' }).aiProviders).toEqual([])
       expect(settingsSchema.parse({ aiProviders: { id: 'x' } }).aiProviders).toEqual([])
     })
+
+    describe('on-device fields', () => {
+      const local = {
+        id: 'ollama',
+        provider: 'openai-compatible',
+        model: 'llama3.2',
+        baseUrl: 'http://localhost:11434/v1',
+        keyHint: '',
+      }
+
+      function parsedEntry(entry: Record<string, unknown>): Record<string, unknown> {
+        const [parsed] = settingsSchema.parse({ aiProviders: [entry] }).aiProviders
+        expect(parsed).toBeDefined()
+        return { ...parsed }
+      }
+
+      it('reads a missing or malformed attestation as not attested', () => {
+        // Absent stays absent (zod keeps an optional key optional); a
+        // malformed value becomes null. Both mean "not attested".
+        expect(parsedEntry(local)['onDevice'] ?? null).toBeNull()
+        for (const onDevice of ['yes', { baseUrl: 'file:///tmp/x' }, { baseUrl: local.baseUrl }]) {
+          expect(parsedEntry({ ...local, onDevice })['onDevice']).toBeNull()
+        }
+      })
+
+      it('keeps an attestation, a context window and image support across a save and load', () => {
+        const entry = {
+          ...local,
+          onDevice: { baseUrl: 'http://localhost:11434/v1/', model: 'llama3.2' },
+          contextWindow: 32_768,
+          supportsImages: true,
+        }
+        const loaded = settingsSchema.parse({ aiProviders: [entry] })
+        // Through JSON, as `settings_save` writes the document to disk.
+        const written = JSON.stringify(loaded)
+        const reloaded = settingsSchema.parse(JSON.parse(written))
+        expect(reloaded.aiProviders).toEqual([
+          { ...entry, onDevice: { baseUrl: local.baseUrl, model: 'llama3.2' } },
+        ])
+      })
+
+      it('drops a malformed context window or image flag without dropping the entry', () => {
+        expect(parsedEntry({ ...local, contextWindow: 1024 })).toEqual(local)
+        expect(parsedEntry({ ...local, contextWindow: 4096.5 })).toEqual(local)
+        expect(parsedEntry({ ...local, supportsImages: 'yes' })).toEqual({
+          ...local,
+          supportsImages: false,
+        })
+      })
+
+      it('strips the fields from hosted entries', () => {
+        const hosted = { id: 'openai', provider: 'openai', model: 'gpt-5.5', keyHint: 'wxyz1' }
+        expect(
+          parsedEntry({
+            ...hosted,
+            onDevice: { baseUrl: 'http://localhost:11434/v1', model: 'gpt-5.5' },
+            contextWindow: 8192,
+            supportsImages: true,
+          }),
+        ).toEqual(hosted)
+      })
+    })
   })
 
   describe('aiPrompts', () => {

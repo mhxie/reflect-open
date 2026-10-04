@@ -24,8 +24,12 @@ export {
   apiKeyHint,
   withAiProviderAdded,
   withAiProviderRemoved,
+  withAiProviderModel,
+  withAiProviderOnDevice,
+  withAiProviderCapabilities,
   defaultAiProvider,
   pickTranscriptionConfig,
+  type AiProviderCapabilities,
   type AiProvidersState,
   type TranscriptionConfig,
   type TranscriptionProvider,
@@ -59,6 +63,20 @@ export {
   type CloudSearchHit,
   type CloudSendable,
 } from '../privacy/checkers.ts'
+export {
+  isLoopbackHttpUrl,
+  isOnDeviceOption,
+  modelTarget,
+  pickOnDeviceProvider,
+  resolveOnDeviceTarget,
+  verifyOnDeviceServer,
+  type CloudTarget,
+  type ModelTarget,
+  type OnDeviceServerRefusal,
+  type OnDeviceServerVerdict,
+  type OnDeviceTarget,
+} from '../privacy/on-device.ts'
+export { languageModelFor, type TargetModel } from '../ai/language-model.ts'
 export {
   buildNoteTools,
   MAX_DAILY_NOTE_DAYS,

@@ -1,14 +1,15 @@
 import { generateText } from '@reflect/modules/ai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
-import type { AiProviderConfig } from '../settings/schema.ts'
+import { modelTarget, resolveOnDeviceTarget } from '../privacy/on-device.ts'
+import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
 import { fakeOnDeviceServer } from '../testing/fake-on-device-server.ts'
 import {
   ANTHROPIC_DIRECT_BROWSER_ACCESS_HEADER,
   ANTHROPIC_DIRECT_BROWSER_ACCESS_VALUE,
 } from './anthropic-headers.ts'
 import { APP_REVIEW_STUB_KEY, DEMO_REPLY_TEXT } from './app-review-demo.ts'
-import { languageModel } from './language-model.ts'
+import { languageModel, languageModelFor } from './language-model.ts'
 
 interface RecordedCall {
   readonly url: string
@@ -52,7 +53,7 @@ const OPENAI_COMPATIBLE_CONFIG: AiProviderConfig = {
   keyHint: '',
 }
 
-const ON_DEVICE_CONFIG: AiProviderConfig = {
+const ON_DEVICE_CONFIG: OpenAiCompatibleProviderConfig = {
   id: 'cfg-local',
   provider: 'openai-compatible',
   model: 'llama-local',
@@ -300,5 +301,42 @@ describe('languageModel', () => {
       maxRetries: 0,
     })
     expect(result.text).toBe(DEMO_REPLY_TEXT)
+  })
+})
+
+describe('languageModelFor', () => {
+  it('builds an on-device target over the loopback transport, never the cloud fetch', async () => {
+    const server = fakeOnDeviceServer(() => ({
+      headers: [['content-type', 'application/json']],
+      chunks: [chatCompletion(ON_DEVICE_CONFIG.model)],
+    }))
+    setBridge(server.bridge)
+    const target = resolveOnDeviceTarget({
+      ...ON_DEVICE_CONFIG,
+      onDevice: { baseUrl: ON_DEVICE_CONFIG.baseUrl, model: ON_DEVICE_CONFIG.model },
+    })!
+    const cloudFetch = vi.fn<typeof fetch>()
+
+    const bound = await languageModelFor(target, '', cloudFetch)
+    const result = await generateText({ model: bound.model, prompt: 'hello', maxRetries: 0 })
+
+    expect(bound.target).toBe(target)
+    expect(Object.isFrozen(bound)).toBe(true)
+    expect(result.text).toBe('ok')
+    expect(cloudFetch).not.toHaveBeenCalled()
+    expect(server.requests.map((request) => request.url)).toEqual([
+      'http://localhost:1234/v1/chat/completions',
+    ])
+  })
+
+  it('builds a cloud target over the cloud fetch', async () => {
+    const calls: RecordedCall[] = []
+    const target = modelTarget(OPENROUTER_CONFIG)
+
+    const bound = await languageModelFor(target, 'sk-or-v1-test', recordingOpenRouterFetch(calls))
+    await generateText({ model: bound.model, prompt: 'hello', maxRetries: 0 })
+
+    expect(bound.target.kind).toBe('cloud')
+    expect(calls.map((call) => call.url)).toEqual(['https://openrouter.ai/api/v1/chat/completions'])
   })
 })
