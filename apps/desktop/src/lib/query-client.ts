@@ -66,6 +66,9 @@ export const queryKeys = {
     noteConflictLabels(root: GraphRoot, path: string) {
       return [...this.graph(root), 'note-conflict-labels', path] as const
     },
+    noteFrontmatterPrivacy(root: GraphRoot, path: string) {
+      return [...this.graph(root), 'note-frontmatter-privacy', path] as const
+    },
     openTasks(root: GraphRoot) {
       return [...this.graph(root), 'tasks'] as const
     },

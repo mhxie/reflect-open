@@ -268,6 +268,19 @@ describe('NoteActionsMenu', () => {
     await expect.element(view.getByRole('button', { name: 'Lock note' })).toBeInTheDocument()
   })
 
+  it('shows unreadable frontmatter as locked and disables the privacy action', async () => {
+    currentNoteRow = noteRow('notes/meeting.md', true)
+    noteSource.value = '---\nprivate: no\ntitle: [unclosed\n---\n# A\n'
+    const { view } = await mount()
+
+    await openActions()
+    await expect
+      .element(view.getByRole('button', { name: "Frontmatter can't be read — treated as locked" }))
+      .toBeDisabled()
+    expect(view.getByRole('button', { name: 'Unlock note' }).query()).toBeNull()
+    expect(commitNoteFrontmatter).not.toHaveBeenCalled()
+  })
+
   it('disables the privacy action until the note row query settles', async () => {
     currentNoteRow = null
     currentNoteRowSettled = false

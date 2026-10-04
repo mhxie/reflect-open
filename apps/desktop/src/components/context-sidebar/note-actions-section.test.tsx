@@ -233,6 +233,18 @@ describe('NoteActionsSection private toggle', () => {
     await view.unmount()
   })
 
+  it('shows unreadable frontmatter as locked and disables the toggle', async () => {
+    getNote.mockResolvedValue(noteRow('notes/a.md', true))
+    noteSource.value = '---\nprivate: maybe\n---\n# A\n'
+    const view = await renderSection('notes/a.md')
+    await expect
+      .element(view.getByRole('button', { name: /Frontmatter can't be read — treated as locked/ }))
+      .toBeDisabled()
+    expect(view.getByRole('button', { name: /Unlock note/ }).query()).toBeNull()
+    expect(commitNoteFrontmatter).not.toHaveBeenCalled()
+    await view.unmount()
+  })
+
   it('restores the private label when a write fails', async () => {
     commitNoteFrontmatter.mockRejectedValueOnce({ kind: 'io', message: 'disk on fire' })
     const view = await renderSection('notes/a.md')

@@ -105,6 +105,32 @@ describe('toggleNotePrivate', () => {
     expect(writeNote).toHaveBeenCalledWith('daily/2026-06-10.md', '---\nprivate: true\n---\n\n', 3)
   })
 
+  it('refuses to toggle a note whose frontmatter cannot be read, writing nothing', async () => {
+    const queryKey = queryKeys.index.note('/g', 'notes/a.md')
+    client.setQueryData(queryKey, { ...cachedRow(), isPrivate: true })
+    for (const source of [
+      '---\nprivate: maybe\n---\n# A\n',
+      '---\nprivate: no\ntitle: [unclosed\n---\n# A\n',
+      '\u{FEFF}---\nprivate: true\n---\n# A\n',
+    ]) {
+      readNote.mockResolvedValue(source)
+      await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
+    }
+    expect(writeNote).not.toHaveBeenCalled()
+    expect(operationFail).toHaveBeenCalledTimes(3)
+    expect(operationFail).toHaveBeenLastCalledWith(expect.stringContaining("can't be read"))
+    // Never predicted unlocked, not even for a moment.
+    expect(client.getQueryData<NoteRow>(queryKey)?.isPrivate).toBe(true)
+  })
+
+  it('leaves an open session with unreadable frontmatter untouched', async () => {
+    const { session, commitFrontmatter } = fakeSession('---\nprivate: maybe\n---\n# A\n')
+    openSession.mockReturnValue(session)
+    await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
+    expect(commitFrontmatter).not.toHaveBeenCalled()
+    expect(operationFail).toHaveBeenCalledOnce()
+  })
+
   it('reports non-notFound read failures through operations', async () => {
     openSession.mockReturnValue(null)
     readNote.mockRejectedValue({ kind: 'io', message: 'disk on fire' })

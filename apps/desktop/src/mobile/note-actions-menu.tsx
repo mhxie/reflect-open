@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button.tsx'
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer.tsx'
 import { useNoteRowState } from '@/hooks/use-note-row.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
+import { useUnreadableFrontmatter } from '@/hooks/use-unreadable-frontmatter.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { toggleNotePinned } from '@/lib/note-pin.ts'
-import { toggleNotePrivate } from '@/lib/note-private.ts'
+import { toggleNotePrivate, UNREADABLE_FRONTMATTER_LABEL } from '@/lib/note-private.ts'
 import { NoteDeleteDrawer } from '@/mobile/note-delete-drawer.tsx'
 import { shareNote } from '@/mobile/share.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -23,7 +24,9 @@ interface NoteActionsMenuProps {
  * The note screen's "⋯" action sheet (Plan 19): pin/unpin, lock/unlock from
  * external services, share, and delete-to-trash. Pin reflects the index's
  * pinned set; privacy reflects the note's indexed `private: true` flag,
- * both updated in the shared query cache while the index catches up. {@link shareNote} hands the note's body to the OS share sheet via
+ * both updated in the shared query cache while the index catches up (a note
+ * whose frontmatter can't be read shows as locked, with the toggle
+ * disabled). {@link shareNote} hands the note's body to the OS share sheet via
  * the Web Share API (`navigator.share`); delete confirms first (it's
  * destructive, even if recoverable from `.reflect/trash/`) and routes through
  * {@link deleteOpenNote} so the open session is discarded rather than flushed.
@@ -36,11 +39,14 @@ export function NoteActionsMenu({ path, onDeleted }: NoteActionsMenuProps): Reac
   const [actionsOpen, setActionsOpen] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const isPrivate = noteRow?.isPrivate ?? false
+  const unreadable = useUnreadableFrontmatter(path, isPrivate)
   const privacyActionLabel = !privacyReady
     ? 'Loading privacy…'
-    : isPrivate
-      ? 'Unlock note'
-      : 'Lock note'
+    : unreadable
+      ? UNREADABLE_FRONTMATTER_LABEL
+      : isPrivate
+        ? 'Unlock note'
+        : 'Lock note'
 
   const pin = (): void => {
     if (graph !== null) {
@@ -92,13 +98,17 @@ export function NoteActionsMenu({ path, onDeleted }: NoteActionsMenuProps): Reac
               variant="ghost"
               size="lg"
               className="h-12 justify-start gap-3 text-base"
-              disabled={!privacyReady}
+              disabled={!privacyReady || unreadable}
               onClick={() => {
                 void togglePrivate()
                 setActionsOpen(false)
               }}
             >
-              {privacyReady && isPrivate ? <LockOpen aria-hidden /> : <Lock aria-hidden />}
+              {privacyReady && isPrivate && !unreadable ? (
+                <LockOpen aria-hidden />
+              ) : (
+                <Lock aria-hidden />
+              )}
               {privacyActionLabel}
             </Button>
             <Button
