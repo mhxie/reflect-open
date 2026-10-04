@@ -40,6 +40,7 @@ function contextFor(notePath: string | null, generation: number | null): Command
     findNextInNote: vi.fn(),
     findPreviousInNote: vi.fn(),
     switchGraph: vi.fn(),
+    openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
     generation: () => generation,
     graphRoot: () => '/g',

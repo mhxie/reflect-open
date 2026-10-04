@@ -41,6 +41,8 @@ export interface CommandContext {
   findPreviousInNote: () => void
   /** Switch to a recent graph by zero-based position in the graph switcher. */
   switchGraph: (index: number) => void
+  /** Open a pinned note by zero-based position in the current sidebar order. */
+  openPinnedNote: (index: number) => void
   /** Start an audio memo, or stop-and-save the one recording. */
   toggleAudioMemo: () => void
   /**

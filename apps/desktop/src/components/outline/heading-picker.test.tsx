@@ -33,6 +33,7 @@ function commandContext(notePath: string | null): CommandContext {
     findNextInNote: vi.fn(),
     findPreviousInNote: vi.fn(),
     switchGraph: vi.fn(),
+    openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
     generation: () => 1,
     graphRoot: () => '/notes',

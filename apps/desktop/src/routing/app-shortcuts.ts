@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import type { PinnedNote } from '@reflect/core'
 import { toggleNotePinned } from '@/lib/note-pin.ts'
 import { toggleNotePrivate } from '@/lib/note-private.ts'
 import { getIsComposing } from '@meowdown/core'
 import { usePalette } from '@/components/command-palette/palette-provider.tsx'
 import { registerKeymap } from '@/editor/keymap.ts'
+import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { APP_COMMANDS } from '@/lib/commands/app-commands.ts'
 import { isApplePlatform, normalizeBinding } from '@/lib/keybindings.ts'
 import { runCommand } from '@/lib/commands/registry.ts'
@@ -13,6 +15,7 @@ import { setMenuCommandDispatch } from '@/lib/native-menu/dispatch.ts'
 import { isNativeMenuInstalled } from '@/lib/native-menu/menu.ts'
 import { isMacosDesktop } from '@/lib/platform.ts'
 import { retryFailedEmbeddings } from '@/lib/semantic.ts'
+import { queryKeys } from '@/lib/query-client.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
 import { useChatSession } from '@/providers/chat-provider.tsx'
@@ -26,7 +29,7 @@ import { useShortcuts } from '@/providers/shortcuts-provider.tsx'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
 import { useTheme } from '@/providers/theme-provider.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
-import { focusedNotePathForRoute } from './route.ts'
+import { focusedNotePathForRoute, routeForPath } from './route.ts'
 import { useRouter } from './router.tsx'
 
 /**
@@ -110,7 +113,7 @@ function physicalDigitKeyFor(event: KeyboardEvent): string | null {
   }
   const digit = match[1]!
   // Some layouts type number-row digits with Shift. Treat that as the same
-  // graph-switch shortcut, but don't make US-style Cmd+Shift+@ mean Cmd+2.
+  // digit shortcut, but don't make US-style Cmd+Shift+@ mean Cmd+2.
   if (event.shiftKey && event.key !== digit) {
     return null
   }
@@ -175,6 +178,8 @@ export function useAppShortcuts(): CommandContext {
   const peekedPath = usePeekedNotePath()
   const { resolvedTheme, setTheme } = useTheme()
   const { graph, recents, openRecent } = useGraph()
+  // Keep the shared pinned query active when the workspace sidebar is collapsed.
+  usePinnedNotes()
   const { openPalette, open: paletteOpen } = usePalette()
   const { openShortcuts, closeShortcuts, open: shortcutsOpen } = useShortcuts()
   const {
@@ -275,6 +280,18 @@ export function useAppShortcuts(): CommandContext {
       },
       findNextInNote,
       findPreviousInNote,
+      openPinnedNote: (index) => {
+        const root = graphRootRef.current
+        if (root === null) {
+          return
+        }
+        const note = queryClient.getQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes(root))?.[
+          index
+        ]
+        if (note !== undefined) {
+          navigate(routeForPath(note.path), { focusEditor: true })
+        }
+      },
       switchGraph: (index) => {
         const recent = recentsRef.current[index]
         if (recent === undefined || recent.root === graphRootRef.current) {

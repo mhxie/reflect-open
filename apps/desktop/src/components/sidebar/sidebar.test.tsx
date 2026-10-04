@@ -176,6 +176,7 @@ async function renderSidebar(overrides?: Partial<CommandContext>, initialRoute?:
     findNextInNote: vi.fn(),
     findPreviousInNote: vi.fn(),
     switchGraph: vi.fn(),
+    openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
     generation: () => 1,
     graphRoot: () => '/notes',
@@ -374,6 +375,29 @@ describe('Sidebar', () => {
     expect(roadmapPreview?.getAttribute('class')).toContain('dark:text-accent')
   })
 
+  it('assigns floating number hints to only the first ten pinned notes', async () => {
+    getPinnedNotes.mockResolvedValue(
+      Array.from({ length: 11 }, (_, index) => ({
+        path: `notes/pin-${index + 1}.md`,
+        title: `Pin ${index + 1}`,
+        dailyDate: null,
+      })),
+    )
+    const { view } = await renderSidebar()
+    const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+
+    for (const [index, digit] of digits.entries()) {
+      const row = view.getByRole('button', { name: `Pin ${index + 1}`, exact: true })
+      await expect.element(row).toBeInTheDocument()
+      const hint = row.element().querySelector('[aria-hidden="true"]')
+      expect(hint).not.toBeNull()
+      expect(hint?.textContent).toMatch(new RegExp(`${digit}$`))
+    }
+    const last = view.getByRole('button', { name: 'Pin 11', exact: true })
+    await expect.element(last).toBeInTheDocument()
+    expect(last.element().querySelector('[aria-hidden="true"]')).toBeNull()
+  })
+
   it('modifier-click opens a pinned note in a new window without changing routes', async () => {
     getPinnedNotes.mockResolvedValue([
       { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
@@ -488,9 +512,7 @@ describe('Sidebar', () => {
     await view.getByRole('button', { name: /Notes/ }).click()
     const work = page.getByRole('menuitem', { name: 'Work', exact: true })
     await expect.element(work).toBeVisible()
-    expect(
-      [...work.element().querySelectorAll('kbd')].map((keycap) => keycap.textContent),
-    ).toContain('2')
+    expect(work.element().querySelector('kbd')).toBeNull()
     await work.click()
     expect(openRecent).toHaveBeenCalledWith('/work')
 

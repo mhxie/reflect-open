@@ -18,10 +18,12 @@ import { isModEvent } from '@meowdown/core'
 
 interface SidebarSortablePinnedRowProps {
   note: PinnedNote
+  binding?: string | undefined
 }
 
 export const SidebarSortablePinnedRow = memo(function SidebarSortablePinnedRow({
   note,
+  binding,
 }: SidebarSortablePinnedRowProps): ReactElement {
   const { route } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
@@ -78,10 +80,15 @@ export const SidebarSortablePinnedRow = memo(function SidebarSortablePinnedRow({
         onClick={(event) => navigateNoteLink({ target, openInNewWindow: isModEvent(event) })}
         onContextMenu={handleContextMenu}
         aria-current={active ? 'page' : undefined}
-        className="block w-full"
+        className="group block w-full"
         {...listeners}
       >
-        <SidebarPinnedRowPreview active={active} label={label} placeholder={isDragging} />
+        <SidebarPinnedRowPreview
+          active={active}
+          label={label}
+          placeholder={isDragging}
+          binding={binding}
+        />
       </button>
     </li>
   )
