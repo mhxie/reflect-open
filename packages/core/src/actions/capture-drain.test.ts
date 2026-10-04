@@ -16,6 +16,7 @@ import {
   IDENTITY,
   inboxRemoveMock,
   promoteMock,
+  raceNextWrite,
   rejected,
   scrapeMock,
   spool,
@@ -32,6 +33,7 @@ vi.mock('../graph/commands', () => ({
   captureInboxReject: vi.fn(),
   captureInboxRemove: vi.fn(),
   captureLinkPreview: vi.fn(),
+  createNoteIfAbsent: vi.fn(),
   listFiles: vi.fn(),
   promoteCaptureScreenshot: vi.fn(),
   readAsset: vi.fn(),
@@ -485,6 +487,52 @@ describe('drainCaptureInbox', () => {
     expect(spool.size).toBe(2)
   })
 
+  it('keeps a daily edit that lands mid-drain and links the capture exactly once', async () => {
+    files.set(DAILY, '# Thursday\n')
+    addSpool(envelope(), { screenshot: false })
+    raceNextWrite(DAILY, (daily) => `${daily ?? ''}\nTyped while the capture drained.\n`)
+
+    const outcome = await drain()
+
+    expect(outcome).toEqual({ pending: 1, drained: 1, deduped: 0, invalid: 0, stopped: null })
+    const daily = files.get(DAILY) ?? ''
+    expect(daily).toContain('Typed while the capture drained.')
+    expect(daily.match(/\[\[capture-2026-06-11-153022-845-7c9e/g)).toHaveLength(1)
+  })
+
+  it('keeps a file an interrupted drain left at the capture path and still links it', async () => {
+    files.set(IDENTITY.notePath, '# An article\n\nEdited before the spool was removed.\n')
+    addSpool(envelope(), { screenshot: false })
+
+    const outcome = await drain()
+
+    expect(outcome).toEqual({ pending: 1, drained: 1, deduped: 0, invalid: 0, stopped: null })
+    expect(files.get(IDENTITY.notePath)).toBe(
+      '# An article\n\nEdited before the spool was removed.\n',
+    )
+    expect(files.get(DAILY)).toContain('[[capture-2026-06-11-153022-845-7c9e|An article]]')
+    expect(spool.size).toBe(0)
+  })
+
+  it('never refreshes over a capture note edited after it was matched', async () => {
+    addSpool(
+      envelope({
+        id: '00000000-0000-4000-8000-000000000001',
+        capturedAt: new Date(2026, 5, 11, 9, 30, 0, 0).toISOString(),
+      }),
+    )
+    await drain()
+    const originalNotePath = 'notes/capture-2026-06-11-093000-000-0000.md'
+    addSpool(envelope())
+    raceNextWrite(originalNotePath, (note) => `${note ?? ''}\nMy own notes.\n`)
+
+    const outcome = await drain()
+
+    expect(outcome.stopped).toMatchObject({ reason: 'io' })
+    expect(files.get(originalNotePath)).toContain('My own notes.')
+    expect(spool.size).toBe(2) // kept: the next pass re-matches and retries
+  })
+
   it('a write failure stops the pass with the error kind', async () => {
     addSpool(envelope())
     writeNoteMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
@@ -579,6 +627,16 @@ describe('drainCaptureInbox (text captures)', () => {
     await drain()
 
     expect(files.get(DAILY)).toBe('- morning standup\r\n- call the bank\r\n')
+  })
+
+  it('keeps a daily edit that lands mid-drain, appending after it', async () => {
+    files.set(DAILY, '- morning standup\n')
+    addTextSpool(textEnvelope())
+    raceNextWrite(DAILY, (daily) => `${daily ?? ''}- typed meanwhile\n`)
+
+    await drain()
+
+    expect(files.get(DAILY)).toBe('- morning standup\n- typed meanwhile\n- call the bank\n')
   })
 
   it('appends a duplicate line — identical text twice is two entries', async () => {

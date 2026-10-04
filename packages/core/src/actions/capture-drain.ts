@@ -6,10 +6,12 @@ import {
   captureInboxRead,
   captureInboxReject,
   captureInboxRemove,
+  createNoteIfAbsent,
   promoteCaptureScreenshot,
   readNote,
   writeNote,
 } from '../graph/commands.ts'
+import { patchNote } from '../graph/patch-note.ts'
 import { dailyPath, notePath } from '../graph/paths.ts'
 import { hashContent } from '../indexing/hash.ts'
 import {
@@ -87,6 +89,8 @@ interface SameDayCapture {
   identity: CaptureIdentity
   /** The existing note's display title — what the daily's link text mirrors. */
   title: string
+  /** The existing note's source as matched: the bytes a refresh replaces. */
+  source: string
 }
 
 /**
@@ -138,7 +142,7 @@ async function findSameDayCapture(
     }
     const meta = captureNoteMeta(parseFrontmatter(splitFrontmatter(source).raw).data)
     if (meta && meta.captureUrl === url && meta.captureSelectionHash === selectionHash) {
-      return { identity, title: parseNote({ path: identity.notePath, source }).title }
+      return { identity, title: parseNote({ path: identity.notePath, source }).title, source }
     }
   }
   return null
@@ -261,34 +265,51 @@ export async function drainCaptureInbox(
         }
       }
 
-      await writeNote(
-        identity.notePath,
-        await captureNoteSource(envelope, identity, {
-          hasScreenshot,
-          status,
-          selectionHash,
-        }),
+      const captureSource = await captureNoteSource(envelope, identity, {
+        hasScreenshot,
+        status,
+        selectionHash,
+      })
+      if (existing === null) {
+        // The fresh path is this envelope's own: a file already there is an
+        // earlier drain of it that stopped before removing the spool. Keep
+        // that file and finish linking it.
+        await createNoteIfAbsent(identity.notePath, captureSource, input.generation)
+      } else {
+        // A refresh replaces only the note it matched; if that changed since,
+        // the write is refused and the kept spool retries on the next pass.
+        await writeNote(identity.notePath, captureSource, input.generation, existing.source)
+      }
+      const freshTitle = displayTitle(envelope)
+      await patchNote(
+        daily,
+        (current) => {
+          let updatedDaily = current ?? ''
+          if (existing !== null) {
+            // The refresh reset the note's H1 to the fresh tab title; keep the
+            // daily's link text in step.
+            updatedDaily = retitleDailyEntry(
+              updatedDaily,
+              identity.base,
+              existing.title,
+              freshTitle,
+            )
+          }
+          updatedDaily = upgradeSectionHeadingBacklink(updatedDaily, linksNoteTitle, [
+            LINKS_NOTE_TITLE,
+          ])
+          if (!updatedDaily.includes(`[[${identity.base}`)) {
+            updatedDaily = appendListItemUnderBacklinkedHeading(
+              updatedDaily,
+              linksNoteTitle,
+              `[[${identity.base}|${freshTitle}]]`,
+              [LINKS_NOTE_TITLE],
+            )
+          }
+          return updatedDaily === (current ?? '') ? null : updatedDaily
+        },
         input.generation,
       )
-      const freshTitle = displayTitle(envelope)
-      let updatedDaily = dailySource
-      if (existing !== null) {
-        // The refresh reset the note's H1 to the fresh tab title; keep the
-        // daily's link text in step.
-        updatedDaily = retitleDailyEntry(updatedDaily, identity.base, existing.title, freshTitle)
-      }
-      updatedDaily = upgradeSectionHeadingBacklink(updatedDaily, linksNoteTitle, [LINKS_NOTE_TITLE])
-      if (!updatedDaily.includes(`[[${identity.base}`)) {
-        updatedDaily = appendListItemUnderBacklinkedHeading(
-          updatedDaily,
-          linksNoteTitle,
-          `[[${identity.base}|${freshTitle}]]`,
-          [LINKS_NOTE_TITLE],
-        )
-      }
-      if (updatedDaily !== dailySource) {
-        await writeNote(daily, updatedDaily, input.generation)
-      }
       await captureInboxRemove(name, input.generation)
       if (envelope.screenshotRef) {
         await captureInboxRemove(envelope.screenshotRef, input.generation)
@@ -333,11 +354,14 @@ function parseEnvelope(raw: string): InboxEnvelope | null {
  */
 async function drainTextCapture(envelope: TextCaptureEnvelope, generation: number): Promise<void> {
   const daily = dailyPath(captureLocalDate(new Date(envelope.capturedAt)))
-  const dailySource = await noteSource(daily, generation)
   // `task` is Reflect's round `+` checkbox, the only marker the Tasks
   // projection reads; `checkbox` is the square `- [ ]`, an inert daily item.
   const kind: ListItemKind = envelope.kind === 'append' ? 'bullet' : envelope.kind
-  await writeNote(daily, appendListItem(dailySource, envelope.text, kind), generation)
+  await patchNote(
+    daily,
+    (dailySource) => appendListItem(dailySource ?? '', envelope.text, kind),
+    generation,
+  )
 }
 
 async function sweepOrphanSpools(

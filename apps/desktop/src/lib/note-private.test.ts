@@ -9,11 +9,16 @@ const readNote = vi.hoisted(() => vi.fn<(path: string) => Promise<string>>())
 const writeNote = vi.hoisted(() => vi.fn(async () => {}))
 const openSession = vi.hoisted(() => vi.fn<(path: string) => NoteSession | null>(() => null))
 
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote,
-  writeNote,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    readNote,
+    writeNote,
+    patchNote: patchNoteOver(core, { readNote, writeNote }),
+  }
+})
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 
 const { hasUnreadableLock, toggleNotePrivate } = await import('./note-private.ts')
@@ -49,13 +54,23 @@ describe('toggleNotePrivate', () => {
   it('marks an unopened note private via read-patch-write on disk', async () => {
     readNote.mockResolvedValue('# A\n')
     await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\nprivate: true\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\nprivate: true\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
   })
 
   it('un-marks on disk by removing the key (back to no frontmatter)', async () => {
     readNote.mockResolvedValue('---\nprivate: true\n---\n# A\n')
     await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '# A\n',
+      3,
+      '---\nprivate: true\n---\n# A\n',
+    )
   })
 
   it('treats the YAML 1.1-style `private: yes` as private and un-marking clears it', async () => {
@@ -63,13 +78,23 @@ describe('toggleNotePrivate', () => {
     // honours it, so the toggle must too — re-marking would be a silent no-op.
     readNote.mockResolvedValue('---\nprivate: yes\n---\n# A\n')
     await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '# A\n',
+      3,
+      '---\nprivate: yes\n---\n# A\n',
+    )
   })
 
   it('replaces an explicit `private: false` with `private: true` when toggling on', async () => {
     readNote.mockResolvedValue('---\nprivate: false\n---\n# A\n')
     await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\nprivate: true\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\nprivate: true\n---\n\n# A\n',
+      3,
+      '---\nprivate: false\n---\n# A\n',
+    )
   })
 
   it('routes through the live session, which owns landing the patch', async () => {
@@ -93,7 +118,12 @@ describe('toggleNotePrivate', () => {
     openSession.mockReturnValue(session)
     readNote.mockResolvedValue('# A\n')
     await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\nprivate: true\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\nprivate: true\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
   })
 
   it('marks a not-yet-created note private by creating its file (the lazy contract)', async () => {
@@ -102,7 +132,12 @@ describe('toggleNotePrivate', () => {
     openSession.mockReturnValue(session)
     readNote.mockRejectedValue({ kind: 'notFound', message: 'no such note' })
     await expect(toggleNotePrivate(input('daily/2026-06-10.md'))).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('daily/2026-06-10.md', '---\nprivate: true\n---\n\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'daily/2026-06-10.md',
+      '---\nprivate: true\n---\n\n',
+      3,
+      null,
+    )
   })
 
   it('refuses to toggle a note whose frontmatter cannot be read, writing nothing', async () => {
@@ -183,7 +218,12 @@ describe('privacy feedback', () => {
     readNote.mockResolvedValue('---\nprivate: true\n---\n# A\n')
     await toggleNotePrivate(input())
     expect(client.getQueryData<NoteRow>(queryKey)?.isPrivate).toBe(false)
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '# A\n',
+      3,
+      '---\nprivate: true\n---\n# A\n',
+    )
   })
 
   it('reports a real session write failure, preserves typed text, and allows retry', async () => {

@@ -1,4 +1,5 @@
 import { isLocalOnlyPath } from '../graph/local-only.ts'
+import { patchNoteWith } from '../graph/patch-note.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
 import { foldKey } from '../markdown/keys.ts'
@@ -23,8 +24,12 @@ export interface RenameIo {
   /** Links that currently resolve to the renamed note's subject path. */
   backlinks: (path: string) => Promise<RenameBacklink[]>
   read: (path: string) => Promise<string>
-  /** Write with the graph generation pre-bound (stale → loud rejection). */
-  write: (path: string, content: string) => Promise<void>
+  /**
+   * A checked write with the graph generation pre-bound (stale → loud
+   * rejection): it lands only while the file still holds `expectedContents`,
+   * the source the rewrite was computed from.
+   */
+  write: (path: string, content: string, expectedContents: string | null) => Promise<void>
   resolve: (target: string) => Promise<Resolution>
 }
 
@@ -74,7 +79,9 @@ export interface TitleRenameRewriteResult {
  * note's old title, and update pipe displays that still mirror the old title
  * on any link resolving to the same subject. Serialized (ordering stays
  * deterministic and progress means something); a failing source is skipped,
- * not fatal. The old-title alias keeps its links resolving.
+ * not fatal. The old-title alias keeps its links resolving. Each write is
+ * checked against the text it rewrote: a source edited meanwhile is re-read
+ * and rewritten again (`patchNoteWith`), never overwritten.
  */
 export async function rewriteLinksForTitleChange(
   options: TitleRenameRewriteOptions,
@@ -183,10 +190,12 @@ export async function rewriteLinksForTitleChange(
   let done = 0
   for (const source of sources) {
     try {
-      const content = await io.read(source)
-      const next = retitleWikiLinks(content, { repoint, display, subjectTargetKeys })
-      if (next !== content) {
-        await io.write(source, next)
+      const result = await patchNoteWith(io, source, (content) =>
+        content === null
+          ? null
+          : retitleWikiLinks(content, { repoint, display, subjectTargetKeys }),
+      )
+      if (result.written) {
         rewritten.push(source)
       }
     } catch {
@@ -239,8 +248,8 @@ export interface PathLinkRewriteIo {
   /** Distinct source paths of links whose folded target path key matches. */
   pathLinkSources: (targetPathKey: string) => Promise<string[]>
   read: (path: string) => Promise<string>
-  /** Write with the graph generation pre-bound (stale → loud rejection). */
-  write: (path: string, content: string) => Promise<void>
+  /** A checked write, as {@link RenameIo.write}. */
+  write: (path: string, content: string, expectedContents: string | null) => Promise<void>
 }
 
 /** What {@link rewritePathLinksForMove} touched, mirroring the title result. */
@@ -282,10 +291,10 @@ export async function rewritePathLinksForMove(
   const failed: string[] = []
   for (const source of sources) {
     try {
-      const content = await io.read(source)
-      const next = repointPathWikiLinks(content, { fromPathKey, to })
-      if (next !== content) {
-        await io.write(source, next)
+      const result = await patchNoteWith(io, source, (content) =>
+        content === null ? null : repointPathWikiLinks(content, { fromPathKey, to }),
+      )
+      if (result.written) {
         rewritten.push(source)
       }
     } catch {

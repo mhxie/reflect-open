@@ -58,6 +58,7 @@ function outcome(
     skippedUnreferenced: 0,
     skippedPrivate: 0,
     skippedUserAuthored: 0,
+    skippedChanged: 0,
     skippedOversize: 0,
     refused: 0,
     describedAssetPaths: [],

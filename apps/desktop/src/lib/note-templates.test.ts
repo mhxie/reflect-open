@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NoteCreateOutcome } from '@reflect/core'
 
 const readNote = vi.hoisted(() => vi.fn())
 const writeNote = vi.hoisted(() =>
-  vi.fn<(path: string, content: string, generation: number) => Promise<void>>(
-    async () => undefined,
-  ),
+  vi.fn<
+    (path: string, content: string, generation: number, expected: string | null) => Promise<void>
+  >(async () => undefined),
+)
+const createNoteIfAbsent = vi.hoisted(() =>
+  vi.fn<() => Promise<NoteCreateOutcome>>(async () => ({ kind: 'created', modifiedMs: null })),
 )
 const availableTemplatePath = vi.hoisted(() => vi.fn(async () => 'templates/daily-review.md'))
 const templateSlugPathForTitle = vi.hoisted(() => vi.fn())
@@ -14,13 +18,19 @@ const operationFail = vi.hoisted(() => vi.fn())
 const startOperation = vi.hoisted(() =>
   vi.fn(() => ({ progress: vi.fn(), done: vi.fn(), fail: operationFail })),
 )
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote,
-  writeNote,
-  availableTemplatePath,
-  templateSlugPathForTitle,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    readNote,
+    writeNote,
+    createNoteIfAbsent,
+    availableTemplatePath,
+    templateSlugPathForTitle,
+    patchNote: patchNoteOver(core, { readNote, writeNote }),
+  }
+})
 vi.mock('@/editor/move-note.ts', () => ({ moveNoteCarryingSession }))
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 vi.mock('@/lib/operations.ts', async (importOriginal) => ({
@@ -91,8 +101,23 @@ describe('createTemplate', () => {
   it('names the template via frontmatter so insertion never injects the name', async () => {
     await expect(createTemplate('  Daily Review ', 7)).resolves.toBe('templates/daily-review.md')
     expect(availableTemplatePath).toHaveBeenCalledWith('daily-review')
-    expect(writeNote).toHaveBeenCalledWith(
+    expect(createNoteIfAbsent).toHaveBeenCalledWith(
       'templates/daily-review.md',
+      '---\ntitle: Daily Review\n---\n\n',
+      7,
+    )
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+
+  it('keeps a file that claimed the probed path first and takes the next free one', async () => {
+    availableTemplatePath
+      .mockResolvedValueOnce('templates/daily-review.md')
+      .mockResolvedValueOnce('templates/daily-review-2.md')
+    createNoteIfAbsent.mockResolvedValueOnce({ kind: 'collision' })
+
+    await expect(createTemplate('Daily Review', 7)).resolves.toBe('templates/daily-review-2.md')
+    expect(createNoteIfAbsent).toHaveBeenLastCalledWith(
+      'templates/daily-review-2.md',
       '---\ntitle: Daily Review\n---\n\n',
       7,
     )
@@ -113,11 +138,32 @@ describe('renameTemplate', () => {
       7,
     )
     // The retitle reads and writes the moved file.
-    expect(readNote).toHaveBeenCalledWith('templates/weekly-journal.md')
+    expect(readNote).toHaveBeenCalledWith('templates/weekly-journal.md', 7)
     expect(writeNote).toHaveBeenCalledWith(
       'templates/weekly-journal.md',
       '# Weekly Journal\n\nMood:\n',
       7,
+      '# Journal\n\nMood:\n',
+    )
+  })
+
+  it('retitles a concurrent edit instead of writing over it', async () => {
+    templateSlugPathForTitle.mockResolvedValueOnce('templates/journal.md')
+    readNote
+      .mockResolvedValueOnce('# Journal\n\nMood:\n')
+      .mockResolvedValue('# Journal\n\nMood: calm\n')
+    writeNote.mockRejectedValueOnce({
+      kind: 'io',
+      message: 'Note changed on disk; reload before retrying',
+    })
+
+    await renameTemplate('templates/journal.md', 'Log', 7)
+
+    expect(writeNote).toHaveBeenLastCalledWith(
+      'templates/journal.md',
+      '# Log\n\nMood: calm\n',
+      7,
+      '# Journal\n\nMood: calm\n',
     )
   })
 
@@ -141,6 +187,7 @@ describe('renameTemplate', () => {
       'templates/journal.md',
       '---\nprivate: true\n---\n# Log\n\n- Mood:\n',
       7,
+      '---\nprivate: true\n---\n# Journal\n\n- Mood:\n',
     )
   })
 

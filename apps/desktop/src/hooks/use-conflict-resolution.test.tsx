@@ -54,7 +54,8 @@ describe('useConflictResolution', () => {
     })
 
     const resolved = resolveConflictMarkers(SOURCE, 'ours')
-    expect(vi.mocked(writeNote)).toHaveBeenCalledWith('notes/clash.md', resolved, 3)
+    // Checked against the text the splice ran on.
+    expect(vi.mocked(writeNote)).toHaveBeenCalledWith('notes/clash.md', resolved, 3, SOURCE)
     expect(vi.mocked(indexNote)).toHaveBeenCalledWith('notes/clash.md', {
       generation: 7,
       content: resolved,
@@ -78,6 +79,23 @@ describe('useConflictResolution', () => {
     expect(result.current.error).toBe('disk full')
     expect(vi.mocked(emitFileChanges)).not.toHaveBeenCalled()
     expect(vi.mocked(invalidateIndexQueries)).not.toHaveBeenCalled()
+  })
+
+  it('a version that lands after the read is refused, never overwritten', async () => {
+    vi.mocked(writeNote).mockRejectedValueOnce({
+      kind: 'io',
+      message: 'Note changed on disk; reload before retrying',
+    })
+    const { result, act } = await renderHook(() => useConflictResolution('notes/clash.md'))
+
+    await act(async () => {
+      await result.current.resolve('ours')
+    })
+
+    expect(vi.mocked(writeNote)).toHaveBeenCalledTimes(1)
+    expect(result.current.error).toBe('Note changed on disk; reload before retrying')
+    expect(vi.mocked(indexNote)).not.toHaveBeenCalled()
+    expect(vi.mocked(emitFileChanges)).not.toHaveBeenCalled()
   })
 
   it('a failed reindex still notifies — the file on disk did change', async () => {

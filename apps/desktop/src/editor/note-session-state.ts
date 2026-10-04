@@ -407,9 +407,10 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
         }
       } else {
         // Keep both conflict resolutions consistent with the persisted flag.
+        // The parked text is what disk held: a newer version is refused.
         const patched = upsertFrontmatter(conflict, frontmatterPatchToYaml(patch))
         if (patched !== conflict) {
-          await io.write(path, patched)
+          await io.write(path, patched, conflict)
           conflict = patched
           disk = patched
           emit()

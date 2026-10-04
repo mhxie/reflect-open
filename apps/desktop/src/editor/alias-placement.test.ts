@@ -9,11 +9,16 @@ const io = vi.hoisted(() => ({
   readNote: vi.fn(),
   writeNote: vi.fn(),
 }))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote: io.readNote,
-  writeNote: io.writeNote,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    readNote: io.readNote,
+    writeNote: io.writeNote,
+    patchNote: patchNoteOver(core, { readNote: io.readNote, writeNote: io.writeNote }),
+  }
+})
 
 const docs = vi.hoisted(() => ({ openSession: vi.fn() }))
 vi.mock('./open-documents', () => ({
@@ -24,6 +29,7 @@ const { placeOldTitleAlias } = await import('./alias-placement.ts')
 
 const PATH = 'notes/subject.md'
 const RENAME = { from: 'Old Title', to: 'New Title', previousAutoAliases: [] }
+const CHANGED_ON_DISK = { kind: 'io', message: 'Note changed on disk; reload before retrying' }
 
 beforeEach(() => {
   io.readNote.mockReset()
@@ -52,6 +58,32 @@ describe('placeOldTitleAlias', () => {
     expect(content).toContain('Old Title')
     expect(content).toContain('# Old Title\n\nbody\n') // body untouched
     expect(generation).toBe(7)
+    // Checked against the text the aliases were computed from.
+    expect(io.writeNote.mock.calls[0]![3]).toBe('# Old Title\n\nbody\n')
+  })
+
+  it('recomputes the aliases over a concurrent change instead of clobbering it', async () => {
+    const gained = '---\naliases:\n  - Gained Elsewhere\n---\n# Old Title\n\nbody\n'
+    io.readNote.mockResolvedValueOnce('# Old Title\n\nbody\n').mockResolvedValue(gained)
+    io.writeNote.mockRejectedValueOnce(CHANGED_ON_DISK)
+
+    const added = await placeOldTitleAlias(PATH, RENAME, 7)
+
+    expect(added).toEqual(['Old Title'])
+    expect(io.writeNote).toHaveBeenCalledTimes(2)
+    const [, content, , expected] = io.writeNote.mock.calls[1]!
+    expect(content).toContain('Gained Elsewhere')
+    expect(content).toContain('Old Title')
+    expect(expected).toBe(gained)
+  })
+
+  it('surfaces the conflict after three refused writes', async () => {
+    let version = 0
+    io.readNote.mockImplementation(async () => `# Old Title\n\nv${version++}\n`)
+    io.writeNote.mockRejectedValue(CHANGED_ON_DISK)
+
+    await expect(placeOldTitleAlias(PATH, RENAME, 7)).rejects.toMatchObject(CHANGED_ON_DISK)
+    expect(io.writeNote).toHaveBeenCalledTimes(3)
   })
 
   it('routes through a live session: frontmatter channel, then flush, no disk write', async () => {

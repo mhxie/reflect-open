@@ -5,8 +5,8 @@ import {
   matchContactForTitle,
   noteHasContactDetails,
   parseNote,
+  patchNote,
   splitFrontmatter,
-  writeNote,
   type ContactMatch,
 } from '@reflect/core'
 import { openSession } from '@/editor/open-documents.ts'
@@ -32,8 +32,27 @@ import { commitNoteFrontmatter, readNoteSource } from '@/lib/note-frontmatter.ts
  */
 async function sourceIfStillMatching(path: string, contact: ContactMatch): Promise<string | null> {
   const source = await readNoteSource(path)
-  const title = parseNote({ path, source }).title
-  return matchContactForTitle(title, [contact]) === null ? null : source
+  return titleMatches(path, source, contact) ? source : null
+}
+
+function titleMatches(path: string, source: string, contact: ContactMatch): boolean {
+  return matchContactForTitle(parseNote({ path, source }).title, [contact]) !== null
+}
+
+const TITLE_MISMATCH = 'The note title no longer matches this contact.'
+
+/**
+ * The details block `contact` would add to `source`, or `null` when there is
+ * nothing to add. The same content gate the card renders through: a body
+ * that already carries contact details — a previous Add's block, or an email
+ * the user typed under a still-cached card — must not get a (second) block.
+ * The body-aware block also drops the `- Type: #person` line when the note
+ * was already typed at creation (meeting flow, link menu).
+ */
+function contactBlock(source: string, contact: ContactMatch): string | null {
+  const body = splitFrontmatter(source).body
+  const details = contactDetailsMarkdown(contact, body)
+  return details === '' || noteHasContactDetails(body) ? null : details
 }
 
 /**
@@ -42,8 +61,9 @@ async function sourceIfStillMatching(path: string, contact: ContactMatch): Promi
  * the live session when the note is open — the card sits above an open
  * editor, so unsaved edits must survive — and refuses rather than clobber
  * when the session can't take it (loading, protected, or a parked conflict).
- * A closed note is patched on disk. Retry-safe: a body that already carries
- * the details is left alone.
+ * A closed note is patched on disk, re-validated against the exact bytes the
+ * checked write replaces. Retry-safe: a body that already carries the details
+ * is left alone.
  */
 export async function addContactToNote(
   path: string,
@@ -52,16 +72,10 @@ export async function addContactToNote(
 ): Promise<void> {
   const source = await sourceIfStillMatching(path, contact)
   if (source === null) {
-    throw new Error('The note title no longer matches this contact.')
+    throw new Error(TITLE_MISMATCH)
   }
-  const body = splitFrontmatter(source).body
-  // The same content gate the card renders through: a body that already
-  // carries contact details — a previous Add's block, or an email the user
-  // typed under a still-cached card — must not get a (second) block. The
-  // body-aware block also drops the `- Type: #person` line when the note was
-  // already typed at creation (meeting flow, link menu).
-  const details = contactDetailsMarkdown(contact, body)
-  if (details === '' || noteHasContactDetails(body)) {
+  const details = contactBlock(source, contact)
+  if (details === null) {
     return
   }
   const owner = openSession(path)
@@ -71,9 +85,16 @@ export async function addContactToNote(
     }
     return
   }
-  // Reuse the validated snapshot — with no session, `source` came from disk.
-  // A second read here would reopen the window between the check and the write.
-  await writeNote(path, appendContactDetails(source, contact), generation)
+  await patchNote(
+    path,
+    (current) => {
+      if (current === null || !titleMatches(path, current, contact)) {
+        throw new Error(TITLE_MISMATCH)
+      }
+      return contactBlock(current, contact) === null ? null : appendContactDetails(current, contact)
+    },
+    generation,
+  )
 }
 
 /**

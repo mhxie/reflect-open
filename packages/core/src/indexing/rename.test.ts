@@ -29,7 +29,7 @@ function fakeIo(
       }
       return content
     },
-    write: async (path, content) => {
+    write: async (path, content, _expectedContents) => {
       writes[path] = content
     },
     resolve: async (target) => {
@@ -255,9 +255,9 @@ describe('rewriteLinksForTitleChange stable-target displays', () => {
     )
     const write = io.write
     let writeCount = 0
-    io.write = async (path, content) => {
+    io.write = async (path, content, expected) => {
       writeCount += 1
-      await write(path, content)
+      await write(path, content, expected)
     }
 
     await rewriteLinksForTitleChange({
@@ -478,11 +478,11 @@ describe('rewriteLinksForTitleChange write failures', () => {
       'notes/ok.md': '[[Old]]\n',
     })
     const write = io.write
-    io.write = async (path, content) => {
+    io.write = async (path, content, expected) => {
       if (path === 'notes/fail.md') {
         throw new Error('write failed')
       }
-      await write(path, content)
+      await write(path, content, expected)
     }
     const result = await rewriteLinksForTitleChange({
       path: 'notes/target.md',
@@ -494,6 +494,93 @@ describe('rewriteLinksForTitleChange write failures', () => {
     expect(result.rewritten).toEqual(['notes/ok.md'])
     expect(writes['notes/ok.md']).toBe('[[New]]\n')
     expect(writes['notes/fail.md']).toBeUndefined()
+  })
+})
+
+describe('checked rewrites', () => {
+  const CHANGED_ON_DISK = { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+
+  /** A fake IO whose writes keep Rust's rule: they land only over `expected`. */
+  function checkedIo(
+    files: Record<string, string>,
+    beforeWrite: (path: string) => void = () => {},
+  ) {
+    const { io } = fakeIo(files)
+    const calls: Array<[string, string, string | null]> = []
+    io.write = async (path, content, expected) => {
+      calls.push([path, content, expected])
+      beforeWrite(path)
+      if ((files[path] ?? null) !== expected) {
+        throw CHANGED_ON_DISK
+      }
+      files[path] = content
+    }
+    return { io, calls }
+  }
+
+  it('hands the write callback the content that was read', async () => {
+    const files = { 'notes/a.md': 'See [[Old]].\n' }
+    const { io, calls } = checkedIo(files)
+
+    await rewriteLinksForTitleChange({ path: 'notes/target.md', from: 'Old', to: 'New', io })
+
+    expect(calls).toEqual([['notes/a.md', 'See [[New]].\n', 'See [[Old]].\n']])
+  })
+
+  it('rewrites a source edited mid-rename again instead of clobbering the edit', async () => {
+    const files: Record<string, string> = { 'notes/a.md': 'See [[Old]].\n' }
+    let raced = false
+    const { io } = checkedIo(files, (path) => {
+      if (!raced) {
+        raced = true
+        files[path] = 'See [[Old]].\nAlso [[Old]] here.\n'
+      }
+    })
+
+    const result = await rewriteLinksForTitleChange({
+      path: 'notes/target.md',
+      from: 'Old',
+      to: 'New',
+      io,
+    })
+
+    expect(result.rewritten).toEqual(['notes/a.md'])
+    expect(files['notes/a.md']).toBe('See [[New]].\nAlso [[New]] here.\n')
+  })
+
+  it('reports a source that keeps changing as failed, leaving its latest text', async () => {
+    const files: Record<string, string> = { 'notes/a.md': '[[Old]] v0\n' }
+    let version = 0
+    const { io } = checkedIo(files, (path) => {
+      version += 1
+      files[path] = `[[Old]] v${version}\n`
+    })
+
+    const result = await rewriteLinksForTitleChange({
+      path: 'notes/target.md',
+      from: 'Old',
+      to: 'New',
+      io,
+    })
+
+    expect(result.failed).toEqual(['notes/a.md'])
+    expect(files['notes/a.md']).toBe(`[[Old]] v${version}\n`)
+  })
+
+  it('checks path-link rewrites against the content that was read', async () => {
+    const files: Record<string, string> = { 'Journal.md': 'See [[notes/plan-2]].' }
+    const calls: Array<[string, string, string | null]> = []
+    const result = await rewritePathLinksForMove('notes/plan-2.md', 'notes/roadmap.md', {
+      pathLinkSources: async () => ['Journal.md'],
+      read: async (path) => files[path] ?? '',
+      write: async (path, content, expected) => {
+        calls.push([path, content, expected])
+        files[path] = content
+      },
+    })
+
+    expect(result.rewritten).toEqual(['Journal.md'])
+    expect(calls).toEqual([['Journal.md', 'See [[notes/roadmap]].', 'See [[notes/plan-2]].']])
   })
 })
 

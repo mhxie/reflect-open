@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssetDescriptionRejectedError, describeAsset } from '../ai/describe-asset.ts'
 import type { AiProvidersState } from '../ai/provider-config.ts'
 import { ReflectError } from '../errors.ts'
-import { listDir, readAsset, readNote, writeNote } from '../graph/commands.ts'
+import { createNoteIfAbsent, listDir, readAsset, readNote, writeNote } from '../graph/commands.ts'
 import { assetReferencingNotePaths } from '../indexing/asset-refs.ts'
 import { hashContent } from '../indexing/hash.ts'
 import { getSecret } from '../secrets/keychain.ts'
@@ -19,6 +19,7 @@ import {
 } from './asset-description.ts'
 
 vi.mock('../graph/commands', () => ({
+  createNoteIfAbsent: vi.fn(),
   listDir: vi.fn(),
   readAsset: vi.fn(),
   readNote: vi.fn(),
@@ -40,6 +41,7 @@ const listDirMock = vi.mocked(listDir)
 const readAssetMock = vi.mocked(readAsset)
 const readNoteMock = vi.mocked(readNote)
 const writeNoteMock = vi.mocked(writeNote)
+const createNoteMock = vi.mocked(createNoteIfAbsent)
 const assetRefsMock = vi.mocked(assetReferencingNotePaths)
 const getSecretMock = vi.mocked(getSecret)
 const describeMock = vi.mocked(describeAsset)
@@ -75,8 +77,20 @@ beforeEach(() => {
     }
     return value
   })
-  writeNoteMock.mockImplementation(async (path: string, contents: string) => {
+  // Rust's write rules: a write lands only over the contents it names, and a
+  // create never replaces an existing file.
+  writeNoteMock.mockImplementation(async (path, contents, _generation, expectedContents) => {
+    if ((files.get(path) ?? null) !== expectedContents) {
+      throw { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+    }
     files.set(path, contents)
+  })
+  createNoteMock.mockImplementation(async (path, contents) => {
+    if (files.has(path)) {
+      return { kind: 'collision' }
+    }
+    files.set(path, contents)
+    return { kind: 'created', modifiedMs: null }
   })
   readAssetMock.mockImplementation(async (path: string) => {
     const value = assets.get(path)
@@ -229,11 +243,13 @@ describe('reconcileAssetDescriptions', () => {
     expect(written).toContain('A flow diagram.')
     expect(written).toContain('provider: anthropic')
     expect(written).toContain('generatedAt: 2026-06-16T00:00:00.000Z')
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    // No description existed, so it is only ever created.
+    expect(createNoteMock).toHaveBeenCalledWith(
       'assets/a.png.reflect.md',
       expect.any(String),
       GENERATION,
     )
+    expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
   it('skips an up-to-date managed description without calling the provider', async () => {
@@ -314,6 +330,8 @@ describe('reconcileAssetDescriptions', () => {
 
     expect(outcome.described).toBe(1)
     expect(files.get('assets/a.png.reflect.md')).toContain('A flow diagram.')
+    // The regeneration replaces exactly the managed bytes it read.
+    expect(writeNoteMock.mock.calls[0]?.[3]).toContain('sourceHash: oldhash')
   })
 
   it('never overwrites a user-authored description', async () => {
@@ -328,6 +346,85 @@ describe('reconcileAssetDescriptions', () => {
     expect(outcome.described).toBe(0)
     expect(files.get('assets/a.png.reflect.md')).toBe('# My own caption\n')
     expect(describeMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a user-authored file that replaced the managed description mid-describe', async () => {
+    assets.set('assets/a.png', 'bmV3Qnl0ZXM=')
+    assets.set('assets/b.png', 'aGVsbG8=')
+    files.set('notes/pub.md', '# Both\n\n![](assets/a.png)\n![](assets/b.png)\n')
+    refs.set('assets/a.png', ['notes/pub.md'])
+    refs.set('assets/b.png', ['notes/pub.md'])
+    files.set(
+      'assets/a.png.reflect.md',
+      buildDescriptionSource(
+        {
+          source: 'assets/a.png',
+          sourceHash: 'oldhash',
+          sourceSize: 5,
+          provider: 'anthropic',
+          model: 'm',
+          generatedAt: 'x',
+        },
+        'old',
+      ),
+    )
+    describeMock.mockImplementationOnce(async () => {
+      files.set('assets/a.png.reflect.md', '# My own caption\n')
+      return 'A flow diagram.'
+    })
+
+    const outcome = await reconcileAssetDescriptions(
+      input({ changed: ['assets/a.png', 'assets/b.png'] }),
+    )
+
+    expect(files.get('assets/a.png.reflect.md')).toBe('# My own caption\n')
+    expect(outcome.skippedChanged).toBe(1)
+    expect(outcome.described).toBe(1)
+    expect(outcome.describedAssetPaths).toEqual(['assets/b.png'])
+    expect(outcome.stopped).toBeNull()
+  })
+
+  it('keeps a description that appeared mid-describe where none existed', async () => {
+    assets.set('assets/a.png', 'aGVsbG8=')
+    files.set('notes/pub.md', publicNote('assets/a.png'))
+    refs.set('assets/a.png', ['notes/pub.md'])
+    describeMock.mockImplementationOnce(async () => {
+      files.set('assets/a.png.reflect.md', '# Synced from the phone\n')
+      return 'A flow diagram.'
+    })
+
+    const outcome = await reconcileAssetDescriptions(input())
+
+    expect(files.get('assets/a.png.reflect.md')).toBe('# Synced from the phone\n')
+    expect(outcome.skippedChanged).toBe(1)
+    expect(outcome.described).toBe(0)
+  })
+
+  it('a real write failure still stops the pass', async () => {
+    assets.set('assets/a.png', 'bmV3Qnl0ZXM=')
+    files.set('notes/pub.md', publicNote('assets/a.png'))
+    refs.set('assets/a.png', ['notes/pub.md'])
+    files.set(
+      'assets/a.png.reflect.md',
+      buildDescriptionSource(
+        {
+          source: 'assets/a.png',
+          sourceHash: 'oldhash',
+          sourceSize: 5,
+          provider: 'anthropic',
+          model: 'm',
+          generatedAt: 'x',
+        },
+        'old',
+      ),
+    )
+    writeNoteMock.mockRejectedValueOnce({ kind: 'io', message: 'disk full' })
+
+    const outcome = await reconcileAssetDescriptions(input())
+
+    expect(outcome.stopped).toEqual({ reason: 'io', message: 'disk full' })
+    expect(outcome.skippedChanged).toBe(0)
+    expect(files.get('assets/a.png.reflect.md')).toContain('sourceHash: oldhash')
   })
 
   it('blocks an asset referenced by a private note', async () => {

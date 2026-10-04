@@ -15,7 +15,8 @@ import {
 } from '../calendar/commands.ts'
 import { dayRange, defaultAttendees } from '../calendar/events.ts'
 import { errorMessage, isAppError, toAppError } from '../errors.ts'
-import { createNoteIfAbsent, readNote, writeNote } from '../graph/commands.ts'
+import { createNoteIfAbsent, readNote } from '../graph/commands.ts'
+import { patchNote } from '../graph/patch-note.ts'
 import { dailyPath } from '../graph/paths.ts'
 import {
   appendListItemUnderBacklinkedHeading,
@@ -258,18 +259,18 @@ async function writeRecording(
       generation: input.generation,
     })
   }
-  const source = await dailySource(identity.date, input.generation)
-  if (!hasTranscriptLink(source, identity)) {
-    await writeNote(
-      dailyPath(identity.date),
-      appendListItemUnderHeading(
-        source,
-        MEETINGS_HEADING,
-        `[[${identity.base}|${eventTitle} transcript]]`,
-      ),
-      input.generation,
-    )
-  }
+  await patchNote(
+    dailyPath(identity.date),
+    (source) =>
+      source !== null && hasTranscriptLink(source, identity)
+        ? null
+        : appendListItemUnderHeading(
+            source ?? '',
+            MEETINGS_HEADING,
+            `[[${identity.base}|${eventTitle} transcript]]`,
+          ),
+    input.generation,
+  )
   return 'written'
 }
 
@@ -280,14 +281,15 @@ async function linkMemo(
   generation: number,
 ): Promise<void> {
   const memosNoteTitle = await ensureBacklinkTarget(AUDIO_MEMOS_NOTE_TITLE, generation)
-  const source = await dailySource(identity.date, generation)
-  if (hasTranscriptLink(source, identity)) {
-    return
-  }
   const entry = `[[${identity.base}|${wikiLinkSafe(title) || identity.base}]]`
-  await writeNote(
+  await patchNote(
     dailyPath(identity.date),
-    appendListItemUnderBacklinkedHeading(source, memosNoteTitle, entry, [AUDIO_MEMOS_NOTE_TITLE]),
+    (source) =>
+      source !== null && hasTranscriptLink(source, identity)
+        ? null
+        : appendListItemUnderBacklinkedHeading(source ?? '', memosNoteTitle, entry, [
+            AUDIO_MEMOS_NOTE_TITLE,
+          ]),
     generation,
   )
 }

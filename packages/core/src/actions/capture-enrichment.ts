@@ -13,8 +13,8 @@ import {
   readAsset,
   readNote,
   writeAsset,
-  writeNote,
 } from '../graph/commands.ts'
+import { patchNote } from '../graph/patch-note.ts'
 import { dailyPath } from '../graph/paths.ts'
 import { hashContent } from '../indexing/hash.ts'
 import { parseFrontmatter, splitFrontmatter, upsertFrontmatter } from '../markdown/frontmatter.ts'
@@ -23,6 +23,7 @@ import type { ReconcileStop } from './audio-memo.ts'
 import {
   finishCaptureWrite,
   hasCaptureWriteTransaction,
+  pendingCaptureSnapshot,
   persistCaptureEnrichment,
   readPendingCaptureSnapshot,
   type PendingCaptureSnapshot,
@@ -222,22 +223,23 @@ export async function reconcileCaptureEnrichment(
     skipped,
     stopped,
   })
-  const markSkipped = async (source: string, identity: CaptureIdentity): Promise<void> => {
-    await writeNote(
+  // Stamps only a capture that is still pending in the bytes the write
+  // replaces: one another device finished meanwhile keeps its status.
+  const skipPending = async (identity: CaptureIdentity): Promise<void> => {
+    const stamped = await patchNote(
       identity.notePath,
-      upsertFrontmatter(source, {
-        captureStatus: 'skipped',
-        captureDailyFromTitle: undefined,
-        captureFinalizeStatus: undefined,
-      }),
+      (source) =>
+        source !== null && pendingCaptureSnapshot(identity, source) !== null
+          ? upsertFrontmatter(source, {
+              captureStatus: 'skipped',
+              captureDailyFromTitle: undefined,
+              captureFinalizeStatus: undefined,
+            })
+          : null,
       input.generation,
     )
-    skipped += 1
-  }
-  const skipPending = async (identity: CaptureIdentity): Promise<void> => {
-    const snapshot = await readPendingCaptureSnapshot(identity, input.generation)
-    if (snapshot !== null) {
-      await markSkipped(snapshot.source, identity)
+    if (stamped.patched !== null) {
+      skipped += 1
     }
   }
   const currentCapture = async (
@@ -255,7 +257,7 @@ export async function reconcileCaptureEnrichment(
       notePrivate(dailySource) ||
       bodyHash !== (expectedHash ?? snapshot.meta.captureHash)
     ) {
-      await markSkipped(snapshot.source, identity)
+      await skipPending(identity)
       return null
     }
     return snapshot

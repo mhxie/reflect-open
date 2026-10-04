@@ -3,7 +3,7 @@ import { defaultAiProvider, type AiProvidersState } from '../ai/provider-config.
 import { aiApiKeyForConfig } from '../ai/secrets.ts'
 import { base64ToBytes } from '../lib/base64.ts'
 import { errorMessage, isAppError, toAppError } from '../errors.ts'
-import { listDir, readAsset, readNote, writeNote } from '../graph/commands.ts'
+import { createNoteIfAbsent, listDir, readAsset, readNote, writeNote } from '../graph/commands.ts'
 import { ASSETS_DIR, descriptionPathFor } from '../graph/paths.ts'
 import type { FileMeta } from '../graph/schemas.ts'
 import { hashContent } from '../indexing/hash.ts'
@@ -81,6 +81,11 @@ export interface ReconcileAssetDescriptionsOutcome {
   skippedPrivate: number
   /** Skipped — an existing description was user-authored, never overwritten. */
   skippedUserAuthored: number
+  /**
+   * Skipped — the description file changed while the asset was being
+   * described (a sync pull, the user); the new file is kept as it is.
+   */
+  skippedChanged: number
   /** Skipped — larger than the size cap. */
   skippedOversize: number
   /** Permanent provider refusals — logged, no description written. */
@@ -101,6 +106,7 @@ type AssetSkipReason =
   | 'unreferenced'
   | 'private'
   | 'user-authored'
+  | 'changed'
   | 'oversize'
   | 'gone'
 
@@ -118,6 +124,7 @@ interface AssetTally {
   skippedUnreferenced: number
   skippedPrivate: number
   skippedUserAuthored: number
+  skippedChanged: number
   skippedOversize: number
   refused: number
 }
@@ -133,6 +140,7 @@ const SKIP_COUNTER: Readonly<Record<AssetSkipReason, keyof AssetTally>> = {
   gone: 'skippedUnreferenced',
   private: 'skippedPrivate',
   'user-authored': 'skippedUserAuthored',
+  changed: 'skippedChanged',
   oversize: 'skippedOversize',
 }
 
@@ -261,22 +269,48 @@ async function processAsset(assetPath: string, ctx: AssetContext): Promise<Asset
     return { kind: 'refused' } // an empty description is as useless as a refusal
   }
 
-  await writeNote(
-    descriptionPath,
-    buildDescriptionSource(
-      {
-        source: assetPath,
-        sourceHash,
-        sourceSize,
-        provider: ctx.config.provider,
-        model: ctx.config.model,
-        generatedAt: ctx.now().toISOString(),
-      },
-      body,
-    ),
-    ctx.generation,
+  const description = buildDescriptionSource(
+    {
+      source: assetPath,
+      sourceHash,
+      sourceSize,
+      provider: ctx.config.provider,
+      model: ctx.config.model,
+      generatedAt: ctx.now().toISOString(),
+    },
+    body,
   )
-  return { kind: 'described' }
+  return (await persistDescription(descriptionPath, description, existing, ctx.generation))
+    ? { kind: 'described' }
+    : { kind: 'skipped', reason: 'changed' }
+}
+
+/**
+ * Write the description over exactly the bytes the user-authored check saw:
+ * created only while no file exists, or replacing only the managed
+ * description that was read. A slow provider call sits between that check and
+ * this write, so a sync pull or the user may have put a file there since; it
+ * is kept and the asset skipped (`false`). A write refused while the file is
+ * unchanged is a real failure: it rethrows and stops the pass.
+ */
+async function persistDescription(
+  path: string,
+  description: string,
+  existing: string | null,
+  generation: number,
+): Promise<boolean> {
+  if (existing === null) {
+    return (await createNoteIfAbsent(path, description, generation)).kind === 'created'
+  }
+  try {
+    await writeNote(path, description, generation, existing)
+    return true
+  } catch (cause) {
+    if ((await readDescriptionSource(path, generation)) !== existing) {
+      return false
+    }
+    throw cause
+  }
 }
 
 interface AssetCandidates {
@@ -336,6 +370,7 @@ export async function reconcileAssetDescriptions(
     skippedUnreferenced: 0,
     skippedPrivate: 0,
     skippedUserAuthored: 0,
+    skippedChanged: 0,
     skippedOversize: 0,
     refused: 0,
   }

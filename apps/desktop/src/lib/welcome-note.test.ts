@@ -15,6 +15,8 @@ interface FakeGraph {
 function installFakeBridge(options: {
   stats?: { notes?: number; attachments?: number; skipped?: number }
   meta?: Record<string, string>
+  /** A file that reached the welcome path after the scan (a first sync pull). */
+  occupied?: boolean
 }): FakeGraph {
   const graph: FakeGraph = { written: [], meta: { ...options.meta } }
   setBridge({
@@ -26,9 +28,12 @@ function installFakeBridge(options: {
             attachments: options.stats?.attachments ?? 0,
             skipped: options.stats?.skipped ?? 0,
           }
-        case 'note_write':
+        case 'note_create':
+          if (options.occupied === true) {
+            return { kind: 'collision' }
+          }
           graph.written.push({ path: String(args['path']), contents: String(args['contents']) })
-          return null
+          return { kind: 'created', modifiedMs: null }
         case 'index_meta_set':
           graph.meta[String(args['key'])] = String(args['value'])
           return null
@@ -76,6 +81,13 @@ describe('ensureWelcomeNote', () => {
     { label: 'only skipped entries (unreadable content)', stats: { skipped: 1 } },
   ])('marks a vault with $label without writing into it', async ({ stats }) => {
     const graph = installFakeBridge({ stats })
+    expect(await ensureWelcomeNote(GENERATIONS)).toBe(false)
+    expect(graph.written).toHaveLength(0)
+    expect(graph.meta[WELCOME_SEEDED_META_KEY]).toBe('true')
+  })
+
+  it('never writes over a file that reached the path after the scan, and still marks', async () => {
+    const graph = installFakeBridge({ occupied: true })
     expect(await ensureWelcomeNote(GENERATIONS)).toBe(false)
     expect(graph.written).toHaveLength(0)
     expect(graph.meta[WELCOME_SEEDED_META_KEY]).toBe('true')

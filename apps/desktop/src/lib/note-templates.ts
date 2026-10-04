@@ -1,14 +1,16 @@
 import {
   availableTemplatePath,
+  createNoteIfAbsent,
   errorMessage,
   hasAuthoredTitle,
   parseNote,
+  patchNote,
   readNote,
+  ReflectError,
   slugForTitle,
   splitFrontmatter,
   templateSlugPathForTitle,
   upsertFrontmatter,
-  writeNote,
 } from '@reflect/core'
 import { moveNoteCarryingSession } from '@/editor/move-note.ts'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
@@ -53,6 +55,9 @@ export async function insertTemplate(
   }
 }
 
+/** Probes per create: each lost claim means a file just appeared on the path. */
+const CREATE_TEMPLATE_ATTEMPTS = 3
+
 /**
  * Create a template named `name` at a collision-free `templates/<slug>.md`
  * (the `-2` suffix policy notes use), named via frontmatter `title:` — the
@@ -61,12 +66,19 @@ export async function insertTemplate(
  * authored H1 still works (and inserts) when the user wants one. Returns the
  * new graph-relative path. The first template write also creates the
  * `templates/` folder — it is not bootstrapped with the graph (no-litter).
+ * The file is claimed with the no-clobber create: a file that lands on the
+ * probed path first (a sync pull) is kept, and the next free path is probed.
  */
 export async function createTemplate(name: string, generation: number): Promise<string> {
   const title = name.trim()
-  const path = await availableTemplatePath(slugForTitle(title))
-  await writeNote(path, upsertFrontmatter('', { title }), generation)
-  return path
+  const source = upsertFrontmatter('', { title })
+  for (let attempt = 1; attempt <= CREATE_TEMPLATE_ATTEMPTS; attempt += 1) {
+    const path = await availableTemplatePath(slugForTitle(title))
+    if ((await createNoteIfAbsent(path, source, generation)).kind === 'created') {
+      return path
+    }
+  }
+  throw new Error(`No free template path for "${title}"`)
 }
 
 /**
@@ -95,20 +107,30 @@ export async function renameTemplate(
   return target
 }
 
-/** Rewrite the file's authored title to `title`, if it authors one. */
+/**
+ * Rewrite the file's authored title to `title`, if it authors one — a checked
+ * write over the bytes the rewrite came from (`patchNote`).
+ */
 async function retitleTemplate(path: string, title: string, generation: number): Promise<void> {
-  const source = await readNote(path)
+  await patchNote(
+    path,
+    (source) => {
+      if (source === null) {
+        throw new ReflectError('notFound', `${path} does not exist`)
+      }
+      return retitledSource(path, source, title)
+    },
+    generation,
+  )
+}
+
+/** `source` with its authored title set to `title`, or `null` when nothing changes. */
+function retitledSource(path: string, source: string, title: string): string | null {
   const parsed = parseNote({ path, source })
   const h1 = parsed.headings.find((heading) => heading.level === 1 && heading.text)
   if (h1 !== undefined && h1.text === parsed.title) {
-    if (h1.text === title) {
-      return
-    }
-    await writeNote(path, `${source.slice(0, h1.from)}# ${title}${source.slice(h1.to)}`, generation)
-    return
+    return h1.text === title ? null : `${source.slice(0, h1.from)}# ${title}${source.slice(h1.to)}`
   }
-  if (hasAuthoredTitle(parsed)) {
-    // No display-driving H1, so the authored title is frontmatter `title:`.
-    await writeNote(path, upsertFrontmatter(source, { title }), generation)
-  }
+  // No display-driving H1, so the authored title is frontmatter `title:`.
+  return hasAuthoredTitle(parsed) ? upsertFrontmatter(source, { title }) : null
 }

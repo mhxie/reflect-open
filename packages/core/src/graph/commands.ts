@@ -211,8 +211,11 @@ export async function readNoteShareable(
  * `GraphInfo`) pins the write to the graph it was issued for — Rust rejects it
  * if the graph switched in between.
  *
- * `expectedContents` rejects a stale source revision; null requires a missing
- * file, while omission keeps an unconditional write.
+ * `expectedContents` is the source the write replaces, exactly as it was read;
+ * `null` means the file must not exist yet. Rust compares it with the file
+ * and refuses a mismatch with an `io` error, leaving the newer bytes in place.
+ * There is no unconditional write: a read-modify-write caller goes through
+ * `patchNote`, which re-reads and re-applies its patch on a mismatch.
  *
  * The echo carries the file's on-disk mtime, which Rust returns from the
  * write: the index row it produces must compare equal to a later `listFiles`
@@ -224,16 +227,11 @@ export async function writeNote(
   path: string,
   contents: string,
   generation: number,
-  expectedContents?: string | null,
+  expectedContents: string | null,
 ): Promise<void> {
   const modifiedMs = await call(
     'note_write',
-    {
-      path,
-      contents,
-      generation,
-      ...(expectedContents === undefined ? {} : { checkContents: true, expectedContents }),
-    },
+    { path, contents, generation, checkContents: true, expectedContents },
     z.number().nullable(),
   )
   echoLocalWrite({ path, kind: 'upsert', modifiedMs: modifiedMs ?? Date.now() })

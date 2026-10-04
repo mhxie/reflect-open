@@ -734,6 +734,13 @@ static NOTE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Atomically write a note's markdown by graph-relative path. `generation` pins
 /// the write to the graph it was issued for (see `root_for_generation`).
+///
+/// Every write is checked: `check_contents` must be `true`, and the file must
+/// still hold `expected_contents` (`None`: the file must not exist), or the
+/// write is refused and the file is left as it is. A writer that skipped the
+/// check could put back text over bytes a sync pull or another device just
+/// wrote.
+///
 /// Returns the written file's on-disk mtime (epoch ms, `None` when the
 /// platform can't provide one) so the caller's index echo can stamp the row
 /// with the value a later `list_files` will report — a `Date.now()` stamp
@@ -747,15 +754,14 @@ pub fn note_write(
     expected_contents: Option<String>,
     state: State<GraphState>,
 ) -> AppResult<Option<u64>> {
+    if check_contents != Some(true) {
+        return Err(AppError::parse(
+            "a note write must name the contents it replaces",
+        ));
+    }
     let (root, local_only) = graph_for(&state, Some(generation))?;
     let target = resolve_write(&root, &path, local_only.as_deref())?;
-    let modified_ms = write_note_revision(
-        &root,
-        &target,
-        &contents,
-        check_contents == Some(true),
-        expected_contents.as_deref(),
-    )?;
+    let modified_ms = write_note_revision(&root, &target, &contents, expected_contents.as_deref())?;
     invalidate_file_catalog(&state, &root);
     Ok(modified_ms)
 }
@@ -764,26 +770,23 @@ fn write_note_revision(
     root: &Path,
     target: &Path,
     contents: &str,
-    checked: bool,
     expected: Option<&str>,
 ) -> AppResult<Option<u64>> {
     let _guard = NOTE_WRITE_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if checked {
-        // The graph root may legitimately sit behind a symlink (`/var`, a
-        // linked `~/Dropbox`): canonicalize it once, police the rest.
-        let rest = target
-            .strip_prefix(root)
-            .map_err(|_| AppError::traversal("note path is outside the graph"))?;
-        let current = match io::read_note_no_follow(&root.canonicalize()?, rest) {
-            Ok(value) => Some(value),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
-        if current.as_deref() != expected {
-            return Err(AppError::io("Note changed on disk; reload before retrying"));
-        }
+    // The graph root may legitimately sit behind a symlink (`/var`, a linked
+    // `~/Dropbox`): canonicalize it once, police the rest.
+    let rest = target
+        .strip_prefix(root)
+        .map_err(|_| AppError::traversal("note path is outside the graph"))?;
+    let current = match io::read_note_no_follow(&root.canonicalize()?, rest) {
+        Ok(value) => Some(value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    if current.as_deref() != expected {
+        return Err(AppError::io("Note changed on disk; reload before retrying"));
     }
     atomic_write(root, target, contents)
 }
@@ -1713,7 +1716,7 @@ mod note_revision_tests {
         });
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("note.md");
-        write_note_revision(directory.path(), &target, "saved", true, None).unwrap();
+        write_note_revision(directory.path(), &target, "saved", None).unwrap();
         assert_eq!(fs::read_to_string(target).unwrap(), "saved");
     }
 
@@ -1722,20 +1725,14 @@ mod note_revision_tests {
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("daily.md");
         fs::write(&target, "user edited this").unwrap();
-        assert!(write_note_revision(
-            directory.path(),
-            &target,
-            "bookmark",
-            true,
-            Some("old text")
-        )
-        .is_err());
+        assert!(
+            write_note_revision(directory.path(), &target, "bookmark", Some("old text")).is_err()
+        );
         assert_eq!(fs::read_to_string(&target).unwrap(), "user edited this");
         write_note_revision(
             directory.path(),
             &target,
             "user edited this\nbookmark",
-            true,
             Some("user edited this"),
         )
         .unwrap();
@@ -1749,9 +1746,100 @@ mod note_revision_tests {
     fn missing_revision_never_clobbers_an_existing_daily() {
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("daily.md");
-        write_note_revision(directory.path(), &target, "first", true, None).unwrap();
-        assert!(write_note_revision(directory.path(), &target, "second", true, None).is_err());
+        write_note_revision(directory.path(), &target, "first", None).unwrap();
+        assert!(write_note_revision(directory.path(), &target, "second", None).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "first");
+    }
+}
+
+#[cfg(test)]
+mod note_write_command_tests {
+    //! The command-tier contract: `note_write` writes only with a revision
+    //! check, whatever the caller sends.
+    use super::*;
+    use tauri::Manager;
+
+    struct Session {
+        app: tauri::App<tauri::test::MockRuntime>,
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+    }
+
+    /// An open graph holding one note, `notes/plan.md`.
+    fn session() -> Session {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(GraphState::default());
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap().join("graph");
+        io::bootstrap(&root).unwrap();
+        fs::write(root.join("notes/plan.md"), "# Plan").unwrap();
+        {
+            let state: State<GraphState> = app.state();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 1;
+            inner.root = Some(root.clone());
+        }
+        Session {
+            app,
+            _dir: dir,
+            root,
+        }
+    }
+
+    fn write(
+        session: &Session,
+        path: &str,
+        check_contents: Option<bool>,
+        expected_contents: Option<&str>,
+    ) -> AppResult<Option<u64>> {
+        note_write(
+            path.to_string(),
+            "# Replaced".to_string(),
+            1,
+            check_contents,
+            expected_contents.map(str::to_string),
+            session.app.state(),
+        )
+    }
+
+    #[test]
+    fn an_unchecked_write_is_refused_and_leaves_the_note_intact() {
+        let session = session();
+        for check_contents in [None, Some(false)] {
+            for expected_contents in [None, Some("# Plan")] {
+                let refused = write(&session, "notes/plan.md", check_contents, expected_contents)
+                    .expect_err("an unchecked write must be refused");
+                assert!(matches!(refused, AppError::Parse { .. }), "{refused:?}");
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(session.root.join("notes/plan.md")).unwrap(),
+            "# Plan"
+        );
+        // An unchecked write never creates a file either.
+        assert!(write(&session, "notes/new.md", None, None).is_err());
+        assert!(!session.root.join("notes/new.md").exists());
+    }
+
+    #[test]
+    fn a_checked_write_lands_only_over_the_contents_it_names() {
+        let session = session();
+        let plan = session.root.join("notes/plan.md");
+        assert!(write(&session, "notes/plan.md", Some(true), Some("# Stale")).is_err());
+        assert!(write(&session, "notes/plan.md", Some(true), None).is_err());
+        assert_eq!(fs::read_to_string(&plan).unwrap(), "# Plan");
+
+        write(&session, "notes/plan.md", Some(true), Some("# Plan")).unwrap();
+        assert_eq!(fs::read_to_string(&plan).unwrap(), "# Replaced");
+
+        // `None` names a file that must not exist yet.
+        write(&session, "notes/new.md", Some(true), None).unwrap();
+        assert_eq!(
+            fs::read_to_string(session.root.join("notes/new.md")).unwrap(),
+            "# Replaced"
+        );
     }
 }
 
@@ -1916,7 +2004,11 @@ mod local_only_command_tests {
         let state = || session.app.state::<GraphState>();
         if folds(&session) {
             let created = "people/\u{17f}ecure/new.md".to_string();
-            assert!(note_write(FOLDED.to_string(), "x".into(), 1, None, None, state()).is_err());
+            // Checked against the file's real bytes, so only the path refuses.
+            let visa = Some("# Visa".to_string());
+            assert!(
+                note_write(FOLDED.to_string(), "x".into(), 1, Some(true), visa, state()).is_err()
+            );
             assert!(note_create(created, "x".into(), 1, state()).is_err());
             assert!(note_delete(FOLDED.to_string(), 1, state()).is_err());
             let folders = LocalOnlyFolders::new(["secure"], None);

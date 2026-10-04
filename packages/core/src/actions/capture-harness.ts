@@ -7,6 +7,7 @@ import {
   captureInboxReject,
   captureInboxRemove,
   captureLinkPreview,
+  createNoteIfAbsent,
   listFiles,
   promoteCaptureScreenshot,
   readAsset,
@@ -31,6 +32,9 @@ import { scrapePageMeta } from './meta-scrape.ts'
  * drains, and to the enrichment pass — the cross-step behavior the contracts
  * are about.
  *
+ * The note commands keep Rust's checked-write rules (see `writeNoteMock`), so
+ * a test stages a concurrent change by editing `files` from a mock hook.
+ *
  * `vi.mock(...)` calls are hoisted per test file and cannot live here: each
  * test file declares its own mock blocks for `../graph/commands`,
  * `./meta-scrape`, `../ai/describe-page`, and `../secrets/keychain`, then
@@ -42,6 +46,7 @@ export const inboxReadMock = vi.mocked(captureInboxRead)
 export const inboxRejectMock = vi.mocked(captureInboxReject)
 export const inboxRemoveMock = vi.mocked(captureInboxRemove)
 export const linkPreviewMock = vi.mocked(captureLinkPreview)
+export const createNoteMock = vi.mocked(createNoteIfAbsent)
 export const listFilesMock = vi.mocked(listFiles)
 export const promoteMock = vi.mocked(promoteCaptureScreenshot)
 export const readAssetMock = vi.mocked(readAsset)
@@ -65,6 +70,12 @@ export const DAILY = 'daily/2026-06-11.md'
 export const CAPTURE_URL = 'https://example.com/article'
 
 const notFound = () => ({ kind: 'notFound', message: 'missing' })
+
+/** Rust's refusal of a write whose expected contents no longer match the file. */
+export const CHANGED_ON_DISK = {
+  kind: 'io',
+  message: 'Note changed on disk; reload before retrying',
+} as const
 
 /** The in-memory graph: note/asset paths to contents. */
 export const files = new Map<string, string>()
@@ -111,6 +122,26 @@ export function reconcile(overrides: Partial<ReconcileCaptureEnrichmentInput> = 
   return reconcileCaptureEnrichment({ providers: PROVIDERS, generation: 3, ...overrides })
 }
 
+/**
+ * Stage a concurrent change: just before the next write to `path` is checked,
+ * the file becomes `edit(current)` — a sync pull or an editor save landing
+ * between a pass's read and its write.
+ */
+export function raceNextWrite(path: string, edit: (current: string | undefined) => string): void {
+  const write = writeNoteMock.getMockImplementation()
+  if (write === undefined) {
+    throw new Error('wireCaptureMocks() must run first')
+  }
+  let armed = true
+  writeNoteMock.mockImplementation(async (target, contents, generation, expectedContents) => {
+    if (armed && target === path) {
+      armed = false
+      files.set(path, edit(files.get(path)))
+    }
+    await write(target, contents, generation, expectedContents)
+  })
+}
+
 /** Reset the maps and point every mocked command at them; call from `beforeEach`. */
 export function wireCaptureMocks(): void {
   vi.clearAllMocks()
@@ -148,8 +179,20 @@ export function wireCaptureMocks(): void {
     if (contents === undefined) throw notFound()
     return contents
   })
-  writeNoteMock.mockImplementation(async (path, contents) => {
+  // Rust's write rules: a write lands only over the contents it names, and a
+  // create never replaces an existing file.
+  writeNoteMock.mockImplementation(async (path, contents, _generation, expectedContents) => {
+    if ((files.get(path) ?? null) !== expectedContents) {
+      throw { ...CHANGED_ON_DISK }
+    }
     files.set(path, contents)
+  })
+  createNoteMock.mockImplementation(async (path, contents) => {
+    if (files.has(path)) {
+      return { kind: 'collision' }
+    }
+    files.set(path, contents)
+    return { kind: 'created', modifiedMs: null }
   })
   listFilesMock.mockImplementation(async () =>
     [...files.keys()].map((path) => ({ path, size: 1, modifiedMs: 0 })),

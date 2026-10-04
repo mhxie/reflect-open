@@ -139,7 +139,11 @@ beforeEach(() => {
     }
     return daily
   })
-  writeNoteMock.mockImplementation(async (_path, contents) => {
+  // Rust's write rule: a write lands only over the contents it names.
+  writeNoteMock.mockImplementation(async (_path, contents, _generation, expectedContents) => {
+    if ((daily === '' ? null : daily) !== expectedContents) {
+      throw { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+    }
     daily = contents
   })
   addMeetingMock.mockImplementation(async () => {
@@ -181,12 +185,27 @@ describe('reconcileRecordings', () => {
       DAILY,
       expect.stringContaining(`- [[${BASE}|Weekly sync transcript]]`),
       4,
+      '## Meetings\n\n- 1:59pm met with [[Ada Lovelace]] for [[Weekly sync]]\n',
     )
     expect(daily).toContain('for [[Weekly sync]]')
     expect(archiveMock).toHaveBeenCalledWith(
       MEETING.id,
       `/Users/someone/Notes/cache/meetings/${BASE}.m4a`,
     )
+  })
+
+  it('keeps a daily edit that lands before the link write, linking it once', async () => {
+    eventsMock.mockResolvedValue([])
+    const write = writeNoteMock.getMockImplementation()!
+    writeNoteMock.mockImplementationOnce(async (...args) => {
+      daily = `${daily}Typed while the recording finished.\n`
+      await write(...args)
+    })
+
+    await reconcileRecordings(input())
+
+    expect(daily).toContain('Typed while the recording finished.')
+    expect(daily.split(`[[${BASE}|`)).toHaveLength(2) // exactly one link
   })
 
   it('only archives a recording whose transcript link already exists', async () => {

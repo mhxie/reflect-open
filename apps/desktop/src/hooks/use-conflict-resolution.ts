@@ -24,7 +24,9 @@ export interface ConflictResolutionState {
  * don't survive the editor round-trip, so the editor can't do this), write it
  * back, reindex, and notify open sessions. The conflict flag is a projection
  * of the file content, so consumers (the notice banner) clear themselves once
- * the resolved file reindexes.
+ * the resolved file reindexes. The write is checked against the text the
+ * splice ran on: a version that lands in between is refused, not overwritten
+ * — the user decides again on what is there now.
  */
 export function useConflictResolution(path: string): ConflictResolutionState {
   const { graph, indexGeneration } = useGraph()
@@ -42,7 +44,7 @@ export function useConflictResolution(path: string): ConflictResolutionState {
     try {
       const source = await readNote(path)
       const resolved = resolveConflictMarkers(source, keep)
-      await writeNote(path, resolved, writeGeneration)
+      await writeNote(path, resolved, writeGeneration, source)
       wrote = true
       if (indexGeneration !== null) {
         await indexNote(path, { generation: indexGeneration, content: resolved })

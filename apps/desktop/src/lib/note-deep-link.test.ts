@@ -6,12 +6,17 @@ const writeNote = vi.hoisted(() => vi.fn(async () => {}))
 const indexNote = vi.hoisted(() => vi.fn(async () => {}))
 const openSession = vi.hoisted(() => vi.fn<(path: string) => NoteSession | null>(() => null))
 
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote,
-  writeNote,
-  indexNote,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    readNote,
+    writeNote,
+    indexNote,
+    patchNote: patchNoteOver(core, { readNote, writeNote }),
+  }
+})
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 
 const { deepLinkForNote } = await import('./note-deep-link.ts')
@@ -73,7 +78,7 @@ describe('deepLinkForNote', () => {
 
     const id = decodeURIComponent(url.replace('reflect://note/', ''))
     expect(id).toMatch(ULID_RE)
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', `---\nid: ${id}\n---\n\n# A\n`, 3)
+    expect(writeNote).toHaveBeenCalledWith('notes/a.md', `---\nid: ${id}\n---\n\n# A\n`, 3, '# A\n')
     // The index trails local writes by a watcher debounce; without this the
     // just-copied link answers "Note not found" until the reindex.
     expect(indexNote).toHaveBeenCalledWith('notes/a.md', { generation: 3 })

@@ -18,6 +18,7 @@ import {
 } from './audio-memo.ts'
 import { APP_REVIEW_STUB_KEY } from '../ai/app-review-demo.ts'
 import {
+  createNoteIfAbsent,
   importAudioMemo,
   listDir,
   listFiles,
@@ -32,6 +33,7 @@ import { transcribeAudio } from '../ai/transcribe.ts'
 import { localModelStatus, transcribeLocally } from '../ai/local-transcription.ts'
 import { TranscriptionRejectedError } from '../ai/transcribe-http.ts'
 import { getSecret } from '../secrets/keychain.ts'
+import { fakeNoteStore, type FakeNoteStore } from '../testing/fake-note-store.ts'
 
 const generateAudioMemoTitleMock = vi.hoisted(() =>
   vi.fn<(request: GenerateAudioMemoTitleRequest) => Promise<string>>(),
@@ -42,6 +44,7 @@ const formatAudioMemoTranscriptMock = vi.hoisted(() =>
 const ensureBacklinkTargetMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../graph/commands', () => ({
+  createNoteIfAbsent: vi.fn(),
   importAudioMemo: vi.fn(),
   listDir: vi.fn(),
   listFiles: vi.fn(),
@@ -85,6 +88,7 @@ const importAudioMemoMock = vi.mocked(importAudioMemo)
 const readTranscriptCacheMock = vi.mocked(readTranscriptCache)
 const writeTranscriptCacheMock = vi.mocked(writeTranscriptCache)
 const writeNoteMock = vi.mocked(writeNote)
+const createNoteMock = vi.mocked(createNoteIfAbsent)
 const transcribeMock = vi.mocked(transcribeAudio)
 const localModelStatusMock = vi.mocked(localModelStatus)
 const transcribeLocallyMock = vi.mocked(transcribeLocally)
@@ -133,6 +137,7 @@ beforeEach(() => {
   readTranscriptCacheMock.mockRejectedValue({ kind: 'notFound', message: 'no cached transcript' })
   writeTranscriptCacheMock.mockResolvedValue(undefined)
   writeNoteMock.mockResolvedValue(undefined)
+  createNoteMock.mockResolvedValue({ kind: 'created', modifiedMs: null })
   getSecretMock.mockResolvedValue('sk-live-key')
   transcribeMock.mockResolvedValue('memo transcript')
   localModelStatusMock.mockResolvedValue({ status: 'ready' })
@@ -282,18 +287,26 @@ describe('reconcileAudioMemos', () => {
     // The note lands first — it carries the transcript; the backlink follows.
     // The link targets the base (unique per recording), resolved through the
     // note's frontmatter alias; the title alone repeats within a second.
-    expect(writeNoteMock.mock.calls).toEqual([
+    // The note is only ever created, and the daily write names the bytes it
+    // read.
+    expect(createNoteMock.mock.calls).toEqual([
       [
         MEMO.notePath,
         '---\naliases: [audio-memo-2026-06-11-153022-845]\n---\n\n# Memo Transcript\n\nmemo transcript\n\n[Recording](audio-memos/audio-memo-2026-06-11-153022-845.webm)\n',
         3,
       ],
+    ])
+    expect(writeNoteMock.mock.calls).toEqual([
       [
         'daily/2026-06-11.md',
         'morning thoughts\n\n## [[Audio memos]]\n\n- [[audio-memo-2026-06-11-153022-845|Memo Transcript]]\n',
         3,
+        'morning thoughts\n',
       ],
     ])
+    expect(createNoteMock.mock.invocationCallOrder[0]).toBeLessThan(
+      writeNoteMock.mock.invocationCallOrder[0]!,
+    )
     expect(ensureBacklinkTargetMock).toHaveBeenCalledWith('Audio memos', 3)
     expect(generateAudioMemoTitleMock).toHaveBeenCalledWith({
       credentials: {
@@ -335,7 +348,7 @@ describe('reconcileAudioMemos', () => {
       }),
       3,
     )
-    expect(writeNoteMock.mock.calls[0]?.[1]).toContain('\n\nlocal transcript\n')
+    expect(createNoteMock.mock.calls[0]?.[1]).toContain('\n\nlocal transcript\n')
     // Nothing leaves the device: no formatting pass, and the title is derived
     // locally (no credentials) even with a provider and auto-format configured.
     expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
@@ -361,6 +374,7 @@ describe('reconcileAudioMemos', () => {
       },
     })
     expect(transcribeLocallyMock).not.toHaveBeenCalled()
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
@@ -399,7 +413,7 @@ describe('reconcileAudioMemos', () => {
       fallbackTitle: 'Audio memo 2026-06-11 15:30:22',
     })
     expect(generateAudioMemoTitleMock).not.toHaveBeenCalled()
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining(
         '# Planning the launch\n\nWe reviewed the launch.\n\n## Next steps\n\n- Invite beta users\n\n[Recording](audio-memos/audio-memo-2026-06-11-153022-845.webm)\n',
@@ -410,6 +424,7 @@ describe('reconcileAudioMemos', () => {
       'daily/2026-06-11.md',
       expect.stringContaining('- [[audio-memo-2026-06-11-153022-845|Planning the launch]]'),
       3,
+      'morning thoughts\n',
     )
   })
 
@@ -475,14 +490,14 @@ describe('reconcileAudioMemos', () => {
     const outcome = await reconcile()
 
     expect(outcome).toEqual({ pending: 2, transcribed: 1, rejected: 1, stopped: null })
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       earlier.notePath,
       expect.stringContaining(
         'Transcription failed: openai rejected the recording (413): too large',
       ),
       3,
     )
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining('second transcript'),
       3,
@@ -509,8 +524,8 @@ describe('reconcileAudioMemos', () => {
       const outcome = await reconcile({ engine })
 
       expect(outcome).toEqual({ pending: 2, transcribed: 1, rejected: 0, stopped: null })
-      expect(writeNoteMock).toHaveBeenCalledWith(MEMO.notePath, expect.any(String), 3)
-      for (const [path, content] of writeNoteMock.mock.calls) {
+      expect(createNoteMock).toHaveBeenCalledWith(MEMO.notePath, expect.any(String), 3)
+      for (const [path, content] of [...createNoteMock.mock.calls, ...writeNoteMock.mock.calls]) {
         expect(path).not.toBe(earlier.notePath)
         expect(content).not.toContain(earlierName)
       }
@@ -532,12 +547,13 @@ describe('reconcileAudioMemos', () => {
       rejected: 0,
       stopped: { reason: 'io', message: 'Sharing is paused' },
     })
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
   it('a failed note write stops before the backlink — the transcript is never tombstoned away', async () => {
     listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
-    writeNoteMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
+    createNoteMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
 
     const outcome = await reconcile()
 
@@ -549,8 +565,9 @@ describe('reconcileAudioMemos', () => {
     })
     // Only the note write was attempted: no backlink means no tombstone, so
     // the next pass retries this memo instead of dropping its transcript.
-    expect(writeNoteMock).toHaveBeenCalledTimes(1)
-    expect(writeNoteMock.mock.calls[0]?.[0]).toBe(MEMO.notePath)
+    expect(createNoteMock).toHaveBeenCalledTimes(1)
+    expect(createNoteMock.mock.calls[0]?.[0]).toBe(MEMO.notePath)
+    expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
   it('creates the daily note when the day has none yet', async () => {
@@ -563,6 +580,7 @@ describe('reconcileAudioMemos', () => {
       'daily/2026-06-11.md',
       '## [[Audio memos]]\n\n- [[audio-memo-2026-06-11-153022-845|Memo Transcript]]\n',
       3,
+      null,
     )
   })
 
@@ -578,6 +596,7 @@ describe('reconcileAudioMemos', () => {
       'daily/2026-06-11.md',
       '## [[Audio memos]]\n\n- [[audio-memo-2026-06-10-090000-000|Yesterday]]\n- [[audio-memo-2026-06-11-153022-845|Memo Transcript]]\n',
       3,
+      '## Audio memos\n\n- [[audio-memo-2026-06-10-090000-000|Yesterday]]\n',
     )
   })
 
@@ -593,6 +612,7 @@ describe('reconcileAudioMemos', () => {
       'daily/2026-06-11.md',
       '## [[Audio memos]]\n\n- [[audio-memo-2026-06-10-090000-000|Yesterday]]\n- [[audio-memo-2026-06-11-153022-845|Memo Transcript]]\n\nScratchpad for later.\n',
       3,
+      '## [[Audio memos]]\n\n- [[audio-memo-2026-06-10-090000-000|Yesterday]]\n\nScratchpad for later.\n',
     )
   })
 
@@ -606,6 +626,7 @@ describe('reconcileAudioMemos', () => {
       'daily/2026-06-11.md',
       expect.stringContaining('## [[Voice notes]]'),
       3,
+      'morning thoughts\n',
     )
   })
 
@@ -621,6 +642,7 @@ describe('reconcileAudioMemos', () => {
       rejected: 0,
       stopped: { reason: 'io', message: 'disk full' },
     })
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
     expect(transcribeMock).toHaveBeenCalledTimes(1)
   })
@@ -637,6 +659,7 @@ describe('reconcileAudioMemos', () => {
     expect(outcome).toEqual({ pending: 0, transcribed: 0, rejected: 0, stopped: null })
     expect(onPending).toHaveBeenCalledWith(0)
     expect(transcribeMock).not.toHaveBeenCalled()
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
@@ -652,7 +675,7 @@ describe('reconcileAudioMemos', () => {
 
     expect(outcome).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
     expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining('memo transcript'),
       3,
@@ -667,7 +690,7 @@ describe('reconcileAudioMemos', () => {
 
     expect(outcome).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
     expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining('No speech detected.'),
       3,
@@ -704,6 +727,7 @@ describe('reconcileAudioMemos', () => {
       stopped: { reason: 'network', message: 'provider down' },
     })
     expect(transcribeMock).toHaveBeenCalledTimes(1)
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
@@ -714,6 +738,7 @@ describe('reconcileAudioMemos', () => {
     const offline = await reconcile()
 
     expect(offline).toMatchObject({ pending: 1, transcribed: 0, stopped: { reason: 'network' } })
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
 
     // Nothing about the pending memo lives in memory: a later pass — the next
@@ -722,7 +747,7 @@ describe('reconcileAudioMemos', () => {
     const relaunched = await reconcile()
 
     expect(relaunched).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining('memo transcript'),
       3,
@@ -731,6 +756,7 @@ describe('reconcileAudioMemos', () => {
       'daily/2026-06-11.md',
       expect.stringContaining('- [[audio-memo-2026-06-11-153022-845|Memo Transcript]]'),
       3,
+      'morning thoughts\n',
     )
   })
 
@@ -742,7 +768,7 @@ describe('reconcileAudioMemos', () => {
 
     expect(outcome).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
     expect(generateAudioMemoTitleMock).not.toHaveBeenCalled()
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining('# Audio memo 2026-06-11 15:30:22'),
       3,
@@ -753,6 +779,7 @@ describe('reconcileAudioMemos', () => {
         '- [[audio-memo-2026-06-11-153022-845|Audio memo 2026-06-11 15:30:22]]',
       ),
       3,
+      'morning thoughts\n',
     )
   })
 
@@ -766,7 +793,7 @@ describe('reconcileAudioMemos', () => {
     expect(transcribeMock).not.toHaveBeenCalled()
     expect(generateAudioMemoTitleMock).not.toHaveBeenCalled()
     expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
-    expect(writeNoteMock).toHaveBeenCalledWith(
+    expect(createNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining('demo transcription'),
       3,
@@ -777,6 +804,7 @@ describe('reconcileAudioMemos', () => {
         '- [[audio-memo-2026-06-11-153022-845|Audio memo 2026-06-11 15:30:22]]',
       ),
       3,
+      'morning thoughts\n',
     )
   })
 
@@ -846,6 +874,7 @@ describe('reconcileAudioMemos', () => {
       stopped: { reason: 'stale' },
     })
     expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
@@ -868,6 +897,7 @@ describe('reconcileAudioMemos', () => {
       stopped: { reason: 'stale' },
     })
     expect(formatAudioMemoTranscriptMock).toHaveBeenCalledTimes(1)
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
@@ -886,6 +916,7 @@ describe('reconcileAudioMemos', () => {
       transcribed: 0,
       stopped: { reason: 'stale' },
     })
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
   })
 
@@ -911,7 +942,116 @@ describe('reconcileAudioMemos daily-note handling', () => {
     const outcome = await reconcile()
 
     expect(outcome).toMatchObject({ stopped: { reason: 'io', message: 'disk gone' } })
+    expect(createNoteMock).not.toHaveBeenCalled()
     expect(writeNoteMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('reconcileAudioMemos never writes over a concurrent writer', () => {
+  const DAILY = 'daily/2026-06-11.md'
+  let store: FakeNoteStore
+
+  beforeEach(() => {
+    store = fakeNoteStore()
+    readNoteMock.mockImplementation(store.readNote)
+    writeNoteMock.mockImplementation(store.writeNote)
+    createNoteMock.mockImplementation(store.createNoteIfAbsent)
+  })
+
+  it('keeps another device’s transcript byte-identical, adds no backlink, and moves on', async () => {
+    const earlier = audioMemoIdentity(new Date(2026, 5, 10, 9, 0, 0, 0), 'audio/mp4')
+    listDirMock.mockResolvedValue([fileMeta(earlier.audioPath), fileMeta(MEMO.audioPath)])
+    const theirs = `---\naliases: [${earlier.base}]\n---\n\n# Transcribed on the phone\n`
+    // The other device's note lands while this pass waits on the enrichment call.
+    generateAudioMemoTitleMock.mockImplementationOnce(async () => {
+      store.files.set(earlier.notePath, theirs)
+      return 'Memo Transcript'
+    })
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({ pending: 2, transcribed: 1, rejected: 0, stopped: null })
+    expect(store.files.get(earlier.notePath)).toBe(theirs)
+    expect(store.files.has('daily/2026-06-10.md')).toBe(false)
+    expect(store.files.get(MEMO.notePath)).toContain('memo transcript')
+    expect(store.files.get(DAILY)).toContain(`[[${MEMO.base}|Memo Transcript]]`)
+  })
+
+  it('a stub-key pass that collides also leaves the existing file intact', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    getSecretMock.mockResolvedValue(APP_REVIEW_STUB_KEY)
+    const theirs = '# Transcribed on the phone\n'
+    ensureBacklinkTargetMock.mockImplementation(async () => {
+      store.files.set(MEMO.notePath, theirs)
+      return 'Audio memos'
+    })
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({ pending: 1, transcribed: 0, rejected: 0, stopped: null })
+    expect(store.files.get(MEMO.notePath)).toBe(theirs)
+    expect(store.files.has(DAILY)).toBe(false)
+  })
+
+  it('keeps a daily edit made between read and write, with exactly one backlink', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    store.files.set(DAILY, 'morning thoughts\n')
+    let raced = false
+    store.beforeWrite = (path) => {
+      if (path === DAILY && !raced) {
+        raced = true
+        store.files.set(path, 'morning thoughts\nlunch with Ada\n')
+      }
+    }
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
+    const daily = store.files.get(DAILY) ?? ''
+    expect(daily).toContain('lunch with Ada')
+    expect(daily.split(`[[${MEMO.base}|`)).toHaveLength(2) // exactly one backlink
+  })
+
+  it('stops when the backlink arrived in the race instead of adding a second', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    const synced = `## [[Audio memos]]\n\n- [[${MEMO.base}|From the phone]]\n`
+    store.beforeWrite = (path) => {
+      if (path === DAILY) {
+        store.files.set(path, synced)
+      }
+    }
+
+    await reconcile()
+
+    expect(store.files.get(DAILY)).toBe(synced)
+    expect(store.refused).toBe(1)
+  })
+
+  it('skips the backlink after losing the race twice, keeping the transcript', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    let version = 0
+    store.beforeWrite = (path) => {
+      if (path === DAILY) {
+        version += 1
+        store.files.set(path, `edit ${version}\n`)
+      }
+    }
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
+    expect(store.files.get(MEMO.notePath)).toContain('memo transcript')
+    expect(store.files.get(DAILY)).toBe('edit 2\n')
+    expect(store.refused).toBe(2)
+  })
+
+  it('a real write failure on the daily note still stops the pass', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    writeNoteMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
+
+    const outcome = await reconcile()
+
+    expect(outcome.stopped).toEqual({ reason: 'io', message: 'disk full' })
   })
 })
 

@@ -13,6 +13,7 @@ import {
   IDENTITY,
   linkPreviewMock,
   NO_PROVIDERS,
+  raceNextWrite,
   readAssetMock,
   reconcile,
   scrapeMock,
@@ -31,6 +32,7 @@ vi.mock('../graph/commands', () => ({
   captureInboxReject: vi.fn(),
   captureInboxRemove: vi.fn(),
   captureLinkPreview: vi.fn(),
+  createNoteIfAbsent: vi.fn(),
   listFiles: vi.fn(),
   promoteCaptureScreenshot: vi.fn(),
   readAsset: vi.fn(),
@@ -856,6 +858,36 @@ describe('reconcileCaptureEnrichment', () => {
     const daily = files.get(DAILY) ?? ''
     expect(daily).toContain('- jotted down mid-enrichment')
     expect(daily).toContain('|A Cleaned Up Article]]')
+  })
+
+  it('keeps a daily edit that lands during the retitle write and still retitles', async () => {
+    await drainOne()
+    describeMock.mockResolvedValue({
+      title: 'A Cleaned Up Article',
+      description: 'An AI description of the page.',
+    })
+    raceNextWrite(DAILY, (daily) => `${daily ?? ''}\n- typed during the write\n`)
+
+    const outcome = await reconcile()
+
+    expect(outcome.enriched).toBe(1)
+    const daily = files.get(DAILY) ?? ''
+    expect(daily).toContain('- typed during the write')
+    expect(daily).toContain('|A Cleaned Up Article]]')
+  })
+
+  it('judges a capture edit that lands during a checkpoint write, never overwriting it', async () => {
+    await drainOne()
+    raceNextWrite(IDENTITY.notePath, (note) => (note ?? '').replace('# An article', '# Mine'))
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({ pending: 1, enriched: 0, skipped: 1, stopped: null })
+    const note = files.get(IDENTITY.notePath) ?? ''
+    expect(note).toContain('# Mine')
+    expect(note).not.toContain('captureMetadataStatus: done')
+    expect(note).toContain('captureStatus: skipped')
+    expect(describeMock).not.toHaveBeenCalled()
   })
 
   it('resumes the exact metadata checkpoint when its daily write fails', async () => {

@@ -26,7 +26,7 @@ describe('local write echo (Plan 19, decision 5)', () => {
       seen.push(changes)
     })
 
-    await writeNote('daily/2026-06-12.md', 'hello', 1)
+    await writeNote('daily/2026-06-12.md', 'hello', 1, null)
 
     expect(seen).toHaveLength(1)
     expect(seen[0]![0]).toMatchObject({ path: 'daily/2026-06-12.md', kind: 'upsert' })
@@ -61,7 +61,7 @@ describe('local write echo (Plan 19, decision 5)', () => {
       seen.push(changes)
     })
 
-    await writeNote('notes/a.md', 'hello', 1)
+    await writeNote('notes/a.md', 'hello', 1, null)
 
     expect(seen).toEqual([[{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1_234 }]])
     unlisten()
@@ -72,7 +72,7 @@ describe('local write echo (Plan 19, decision 5)', () => {
     const handler = vi.fn()
     const unlisten = await subscribeFileChanges(handler)
 
-    await writeNote('daily/2026-06-12.md', 'hello', 1)
+    await writeNote('daily/2026-06-12.md', 'hello', 1, null)
 
     expect(handler).not.toHaveBeenCalled()
     unlisten()
@@ -89,7 +89,7 @@ describe('local write echo (Plan 19, decision 5)', () => {
     const handler = vi.fn()
     const unlisten = await subscribeFileChanges(handler)
 
-    await expect(writeNote('daily/2026-06-12.md', 'hello', 1)).rejects.toThrow()
+    await expect(writeNote('daily/2026-06-12.md', 'hello', 1, null)).rejects.toThrow()
 
     expect(handler).not.toHaveBeenCalled()
     unlisten()

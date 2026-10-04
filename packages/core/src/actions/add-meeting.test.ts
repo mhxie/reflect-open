@@ -41,6 +41,7 @@ const resolveAttendeesMock = vi.mocked(resolveMeetingAttendeeTargets)
 
 const DAILY = 'daily/2026-07-01.md'
 const GENERATION = 3
+const CHANGED_ON_DISK = { kind: 'io', message: 'Note changed on disk; reload before retrying' }
 
 function input(overrides: Partial<AddMeetingInput> = {}): AddMeetingInput {
   return {
@@ -139,6 +140,7 @@ describe('addMeetingToDaily', () => {
       DAILY,
       '## Meetings\n\n- 9:00am met with [[Ada Lovelace]] for Standup\n',
       GENERATION,
+      null,
     )
     expect(ensurePersonMock).toHaveBeenCalledWith({
       title: 'Ada Lovelace',
@@ -171,6 +173,7 @@ describe('addMeetingToDaily', () => {
       DAILY,
       '## Meetings\n\n- [[Kickoff]]\n- [[Planning]]\n- [[Standup]]\n\nScratchpad for later.\n',
       GENERATION,
+      '## Meetings\n\n- [[Kickoff]]\n- [[Planning]]\n\nScratchpad for later.\n',
     )
   })
 
@@ -198,6 +201,7 @@ describe('addMeetingToDaily', () => {
       DAILY,
       '> ## Meetings\n> - [[Standup]]\n\n## Meetings\n\n- [[Standup]]\n',
       GENERATION,
+      '> ## Meetings\n> - [[Standup]]\n',
     )
   })
 
@@ -263,8 +267,41 @@ describe('addMeetingToDaily', () => {
       DAILY,
       '## Meetings\n\n- Met with [[Ada Lovelace]] for Standup\n',
       GENERATION,
+      null,
     )
     expect(ensurePersonMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a daily edit that lands while attendees resolve', async () => {
+    readNoteMock
+      .mockResolvedValueOnce('## Meetings\n\n- [[Kickoff]]\n')
+      .mockResolvedValueOnce('## Meetings\n\n- [[Kickoff]]\n')
+      .mockResolvedValue('## Meetings\n\n- [[Kickoff]]\n\nTyped meanwhile.\n')
+    writeNoteMock.mockRejectedValueOnce(CHANGED_ON_DISK)
+
+    const outcome = await addMeetingToDaily(input())
+
+    expect(outcome.appended).toBe(true)
+    expect(writeNoteMock).toHaveBeenLastCalledWith(
+      DAILY,
+      '## Meetings\n\n- [[Kickoff]]\n- [[Standup]]\n\nTyped meanwhile.\n',
+      GENERATION,
+      '## Meetings\n\n- [[Kickoff]]\n\nTyped meanwhile.\n',
+    )
+  })
+
+  it('a meeting linked meanwhile still makes the call a no-op', async () => {
+    readNoteMock
+      .mockRejectedValueOnce({ kind: 'notFound', message: 'missing' })
+      .mockRejectedValueOnce({ kind: 'notFound', message: 'missing' })
+      .mockResolvedValue('## Meetings\n\n- [[Standup]]\n')
+    writeNoteMock.mockRejectedValueOnce(CHANGED_ON_DISK)
+
+    const outcome = await addMeetingToDaily(input({ attendees: [{ name: 'Carol' }] }))
+
+    expect(outcome).toEqual({ appended: false, createdNotes: [] })
+    expect(writeNoteMock).toHaveBeenCalledTimes(1)
+    expect(ensurePersonMock).not.toHaveBeenCalled()
   })
 
   it('rejects an empty meeting name before writing', async () => {
@@ -304,6 +341,7 @@ describe('attendee identity outcomes', () => {
       DAILY,
       '## Meetings\n\n- Met with [[Jane Doe]] for Standup\n',
       GENERATION,
+      null,
     )
     expect(ensurePersonMock).not.toHaveBeenCalled()
     expect(outcome.createdNotes).toEqual([])
@@ -338,6 +376,7 @@ describe('attendee identity outcomes', () => {
         DAILY,
         '## Meetings\n\n- Met with Jane Doe for Standup\n',
         GENERATION,
+        null,
       )
       expect(ensurePersonMock).not.toHaveBeenCalled()
     },

@@ -26,18 +26,23 @@ const io = vi.hoisted(() => ({
   slugPathForTitle: vi.fn(),
   moveNoteIndexed: vi.fn(),
 }))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  rewriteLinksForTitleChange: io.rewriteLinksForTitleChange,
-  getBacklinks: io.getBacklinks,
-  getLinkSources: io.getLinkSources,
-  getPathLinkSources: io.getPathLinkSources,
-  readNote: io.readNote,
-  writeNote: io.writeNote,
-  resolveWikiTarget: io.resolveWikiTarget,
-  slugPathForTitle: io.slugPathForTitle,
-  moveNoteIndexed: io.moveNoteIndexed,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    rewriteLinksForTitleChange: io.rewriteLinksForTitleChange,
+    getBacklinks: io.getBacklinks,
+    getLinkSources: io.getLinkSources,
+    getPathLinkSources: io.getPathLinkSources,
+    readNote: io.readNote,
+    writeNote: io.writeNote,
+    resolveWikiTarget: io.resolveWikiTarget,
+    slugPathForTitle: io.slugPathForTitle,
+    moveNoteIndexed: io.moveNoteIndexed,
+    patchNote: patchNoteOver(core, { readNote: io.readNote, writeNote: io.writeNote }),
+  }
+})
 
 interface RecordedOperation {
   label: string
@@ -173,15 +178,21 @@ describe('rename coordinator', () => {
       path: string
       from: string
       to: string
-      io: { write: (path: string, contents: string) => Promise<void> }
+      io: { write: (path: string, contents: string, expected: string | null) => Promise<void> }
     }
     expect(rewrite).toMatchObject({ path: PATH, from: 'Old Title', to: 'New Title' })
-    await rewrite.io.write('notes/linker.md', 'patched')
-    expect(io.writeNote).toHaveBeenCalledWith('notes/linker.md', 'patched', 4)
+    // The rewrite's writes are checked against the text they rewrote.
+    await rewrite.io.write('notes/linker.md', 'patched', 'linker before the rewrite')
+    expect(io.writeNote).toHaveBeenCalledWith(
+      'notes/linker.md',
+      'patched',
+      4,
+      'linker before the rewrite',
+    )
 
     // No live session → the alias lands via a direct disk write.
     const expected = upsertFrontmatter(content, { aliases: ['Old Title'] })
-    expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 4)
+    expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 4, content)
     expect(operationLog.records).toEqual([
       { label: 'Renaming "Old Title" → "New Title"', outcome: 'done', message: null },
     ])
@@ -214,7 +225,7 @@ describe('rename coordinator', () => {
 
       expect(session.flush).not.toHaveBeenCalled()
       const expected = upsertFrontmatter('# New Title\n', { aliases: ['Old Title'] })
-      expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 7)
+      expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 7, '# New Title\n')
     } finally {
       unregister()
     }
@@ -251,7 +262,7 @@ describe('rename coordinator', () => {
     await renameOnce(coordinator, 'Old Title', 'New Title')
 
     const expected = upsertFrontmatter('# New Title\n', { aliases: ['Old Title'] })
-    expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 7)
+    expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 7, '# New Title\n')
     expect(operationLog.records[0]!.outcome).toBe('done')
   })
 
@@ -263,7 +274,7 @@ describe('rename coordinator', () => {
     await renameOnce(coordinator, 'Old Title', 'New Title')
 
     const expected = upsertFrontmatter('# New Title\n', { aliases: ['Old Title'] })
-    expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 7)
+    expect(io.writeNote).toHaveBeenCalledWith(PATH, expected, 7, '# New Title\n')
     expect(operationLog.records[0]!.outcome).toBe('failed')
     expect(operationLog.records[0]!.message).toContain('index unavailable')
     expect(operationLog.records[0]!.message).toContain('kept as an alias')
@@ -473,6 +484,7 @@ describe('rename coordinator', () => {
       PATH,
       upsertFrontmatter('# New Title\n', { aliases: ['Old Title'] }),
       7,
+      '# New Title\n',
     )
     expect(operationLog.records).toEqual([
       { label: 'Renaming "Old Title" → "New Title"', outcome: 'done', message: null },
@@ -528,6 +540,7 @@ describe('rename coordinator', () => {
       `notes/${base}.md`,
       upsertFrontmatter(newSource, { aliases: [base, 'Old Title'] }),
       7,
+      newSource,
     )
     expect(io.slugPathForTitle).not.toHaveBeenCalled()
     expect(io.moveNoteIndexed).not.toHaveBeenCalled()

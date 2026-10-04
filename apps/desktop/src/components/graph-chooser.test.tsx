@@ -65,6 +65,9 @@ beforeEach(() => {
           return []
         case 'vault_scan_stats':
           return { notes: 0, attachments: 0, skipped: 0 }
+        case 'note_create':
+          // The empty graph's welcome note.
+          return { kind: 'created', modifiedMs: null }
         case 'settings_load':
           return storedSettings
         default:
