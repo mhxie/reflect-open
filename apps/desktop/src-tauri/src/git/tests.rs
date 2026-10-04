@@ -1104,6 +1104,90 @@ fn local_only_folders_are_never_staged_even_without_an_ignore_pattern() {
     assert!(!again.committed, "only local-only content changed");
 }
 
+/// `graph_with_local_only_folders`'s configuration with `secure` editable.
+#[cfg(unix)]
+fn editable_secure(base: &Path, name: &str) -> reflect_graph_paths::LocalOnlyFolders {
+    reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&base.join(format!("{name}-raw"))))
+        .unwrap()
+        .with_editable(["secure"])
+        .0
+}
+
+/// A merge's conflict writes keep the strict guard: a pull never writes
+/// into a local-only folder, editable or not.
+#[cfg(unix)]
+#[test]
+fn a_merge_never_writes_into_an_editable_local_only_folder() {
+    let dir = tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let root = graph_with_local_only_folders(&base, "graph");
+    let folders = editable_secure(&base, "graph");
+    let repo = Repository::open(&root).unwrap();
+    let blob = repo.blob(b"# From the other device\n").unwrap();
+    for rel in [
+        "finance/secure/bank.md",
+        "finance/secure/new.md",
+        "people/secure/passport.md",
+        "people/secure/new.md",
+    ] {
+        assert!(
+            super::merge::write_blob(&repo, &root, rel, blob, Some(&folders)).is_err(),
+            "{rel}"
+        );
+    }
+    assert_eq!(
+        read(&base.join("graph-raw"), "finance/secure/bank.md"),
+        "# Bank\n\naccount 1234\n"
+    );
+    assert!(!base.join("graph-raw/finance/secure/new.md").exists());
+    assert_eq!(read(&root, "people/secure/passport.md"), "# Passport\n");
+    assert!(!root.join("people/secure/new.md").exists());
+    // Control: an ordinary path is written.
+    super::merge::write_blob(&repo, &root, "notes/public.md", blob, Some(&folders)).unwrap();
+    assert_eq!(read(&root, "notes/public.md"), "# From the other device\n");
+}
+
+/// Editable local-only folders (linked and real, attachments included) and
+/// Reflect's own trash and recovery stores never enter a backup commit.
+#[cfg(unix)]
+#[test]
+fn editable_local_only_folders_and_reflect_stores_are_never_staged() {
+    let dir = tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let root = graph_with_local_only_folders(&base, "graph");
+    let folders = editable_secure(&base, "graph");
+    write(
+        &base.join("graph-raw"),
+        "finance/secure/assets/scan.png",
+        "png",
+    );
+    write(&root, "people/secure/assets/id.png", "png");
+    write(&root, ".reflect/trash/0123abcd/bank.md", "# Bank\n");
+    write(&root, ".reflect/recovery/0123abcd.json", "{}");
+
+    let outcome = commit_all(&root, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(outcome.committed);
+    let paths = head_tree_paths(&root);
+    assert!(paths.contains(&"notes/public.md".to_string()), "{paths:?}");
+    assert!(
+        !paths
+            .iter()
+            .any(|path| path.contains("secure") || path.starts_with(".reflect")),
+        "{paths:?}"
+    );
+
+    // Later edits there commit nothing.
+    write(
+        &base.join("graph-raw"),
+        "finance/secure/bank.md",
+        "# Bank\n\nedited\n",
+    );
+    write(&root, "people/secure/passport.md", "# Passport\n\nedited\n");
+    write(&root, ".reflect/recovery/4567.json", "{}");
+    let again = commit_all(&root, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(!again.committed);
+}
+
 #[test]
 fn tracked_files_inside_a_local_only_folder_are_frozen_not_updated() {
     // A folder committed before it was configured local-only: the ignore

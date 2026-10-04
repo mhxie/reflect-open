@@ -87,6 +87,7 @@ export function IncomingBacklinkGroup({
               key={snippet.key}
               text={snippet.text}
               notePath={source.path}
+              sourcePrivate={source.isPrivate}
               tasks={snippet.tasks}
               onWikilinkClick={onWikilinkClick}
             />

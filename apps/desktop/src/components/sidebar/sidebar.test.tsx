@@ -123,7 +123,13 @@ vi.mock('@/providers/audio-memo-provider.tsx', () => ({
 const createNoteFromFiles = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('@/lib/create-note-from-files.ts', () => ({ createNoteFromFiles }))
 
-const GRAPH: GraphInfo = { root: '/notes', name: 'Notes', generation: 1, localOnlyFolders: [] }
+const GRAPH: GraphInfo = {
+  root: '/notes',
+  name: 'Notes',
+  generation: 1,
+  localOnlyFolders: [],
+  localOnlyEditableFolders: [],
+}
 
 // Import after the core mock so the command registry sees the mocked module.
 const { Sidebar } = await import('./sidebar.tsx')

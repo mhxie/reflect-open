@@ -19,6 +19,7 @@ function context(sourcePath: string, snippet: string, posFrom: number): Backlink
   return {
     sourcePath,
     sourceTitle: sourcePath,
+    sourcePrivate: false,
     snippet,
     posFrom,
     tasks: [],
@@ -97,6 +98,7 @@ describe('useBacklinkSources', () => {
       {
         path: 'notes/a.md',
         title: 'notes/a.md',
+        isPrivate: false,
         snippets: [
           { key: 'notes/a.md:1', text: 'shared context', tasks: [] },
           { key: 'notes/a.md:2', text: 'first-page context', tasks: [] },
@@ -105,6 +107,7 @@ describe('useBacklinkSources', () => {
       {
         path: 'notes/b.md',
         title: 'notes/b.md',
+        isPrivate: false,
         snippets: [{ key: 'notes/b.md:3', text: 'second-page context', tasks: [] }],
       },
     ])

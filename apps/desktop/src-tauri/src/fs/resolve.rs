@@ -6,14 +6,20 @@
 //! symlink-aware check ([`resolve`]) canonicalizing the deepest existing
 //! ancestor so a symlink planted inside the graph can't redirect IO outside it.
 //!
-//! Local-only folders get two more entry points. [`resolve_read`] grants the
-//! one sanctioned exception, a single hop through an allowed local-only link
-//! into its validated target, and reports whether the read lands in a
-//! local-only folder. [`resolve_write`] refuses every write, create, delete,
-//! and move touching one. Both decide by the requested path **and** by the
-//! entry the filesystem resolves it to: APFS folds Unicode case and
-//! normalization (`ſecure` opens `secure`), and an in-graph symlink can alias
-//! a real local-only folder under another name.
+//! Local-only folders get three more entry points. [`resolve_read`] grants
+//! the one sanctioned exception, a single hop through an allowed local-only
+//! link into its validated target, and reports whether the read lands in a
+//! local-only folder. [`resolve_write`], the strict default, refuses every
+//! write, create, delete, and move touching one: pulls, imports, captures,
+//! and background passes never write there. [`resolve_note_edit`] is the one
+//! door for the user's own edits (note saves, creates, deletes, moves, and
+//! attachment intake): it takes the same hop into a folder whose every
+//! configured name is editable, and hands back a canonical base plus the
+//! rest below it for the directory-fd IO in `beneath`, which never follows a
+//! link. All of them decide by the requested path **and** by the entry the
+//! filesystem resolves it to: APFS folds Unicode case and normalization
+//! (`ſecure` opens `secure`), and an in-graph symlink can alias a real
+//! local-only folder under another name.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -279,13 +285,30 @@ fn local_only_read_target(
     folders: &LocalOnlyFolders,
 ) -> AppResult<Option<ReadTarget>> {
     let rel = ensure_relative(rel)?;
-    let parts: Vec<&std::ffi::OsStr> = rel
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(part) => Some(part),
-            _ => None,
-        })
-        .collect();
+    Ok(local_only_hop(root, &rel, folders)?.map(|hop| ReadTarget {
+        base: hop.target,
+        rest: hop.rest,
+        local_only: true,
+    }))
+}
+
+/// One sanctioned hop through a local-only link.
+struct Hop {
+    /// The link's graph-relative path, as requested.
+    link: PathBuf,
+    /// The link's validated canonical target, under the raw-store root.
+    target: PathBuf,
+    /// The path below the link, as requested; no existing component of it
+    /// is a symlink.
+    rest: PathBuf,
+}
+
+/// The hop through the first allowed local-only link on `rel`'s directory
+/// components, or `None` when the path crosses none. The link is re-validated
+/// on every call ([`LocalOnlyFolders::link_target`]), so a retargeted link
+/// never keeps a stale grant, and nothing below it may be a symlink.
+fn local_only_hop(root: &Path, rel: &Path, folders: &LocalOnlyFolders) -> AppResult<Option<Hop>> {
+    let parts = normal_parts(rel);
     let mut link = PathBuf::new();
     for (index, part) in parts.iter().enumerate().take(parts.len().saturating_sub(1)) {
         link.push(part);
@@ -300,13 +323,238 @@ fn local_only_read_target(
         };
         let rest: PathBuf = parts[index + 1..].iter().collect();
         ensure_no_symlinks_below(&target, &rest)?;
-        return Ok(Some(ReadTarget {
-            base: target,
-            rest,
-            local_only: true,
-        }));
+        return Ok(Some(Hop { link, target, rest }));
     }
     Ok(None)
+}
+
+/// `rel`'s plain components (`.` dropped); callers have already refused
+/// anything else ([`ensure_relative`]).
+fn normal_parts(rel: &Path) -> Vec<&std::ffi::OsStr> {
+    rel.components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What an edit writes, which decides the name rule inside a local-only
+/// folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TargetKind {
+    /// The note at the path: inside a local-only folder only `.md` names.
+    Note,
+    /// An attachment for the note at the path: it lands in that note's
+    /// local-only folder (`<folder>/assets/`), never at the path itself, so
+    /// the `.md` rule does not apply.
+    Attachment,
+}
+
+/// Where a user edit lands ([`resolve_note_edit`]).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EditTarget {
+    /// An ordinary path, absolute and vetted exactly like [`resolve_write`]:
+    /// the graph's usual atomic IO applies.
+    Graph(PathBuf),
+    /// A path inside editable local-only folders: only the directory-fd IO
+    /// in `beneath` touches it.
+    LocalOnly(LocalOnlyEntry),
+}
+
+/// A path inside editable local-only folders, split for the no-follow walk.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LocalOnlyEntry {
+    /// The canonical graph root: where `.reflect/` (staging, trash,
+    /// recovery) is walked from.
+    pub(crate) graph_root: PathBuf,
+    /// Canonical, symlink-free directory the walk starts from: a local-only
+    /// link's validated target, or the canonical graph root for a real
+    /// local-only directory.
+    pub(crate) base: PathBuf,
+    /// The path below `base`, as requested; the walk refuses a symlink, a
+    /// non-directory, or a Git work tree at any directory of it.
+    pub(crate) rest: PathBuf,
+    /// The graph-relative local-only folder the path lies in
+    /// ([`LocalOnlyFolders::folder_root`]), spelled as requested.
+    pub(crate) folder_root: String,
+    /// `folder_root` below `base` (empty when the folder is the link
+    /// itself): where the folder's own files, such as `assets/`, go.
+    pub(crate) folder_dir: PathBuf,
+}
+
+/// Resolve a graph-relative path for a **user edit** (a note save, create,
+/// delete, or move, or attachment intake for the note at the path).
+///
+/// Without local-only folders this is [`resolve`]. A path outside them
+/// resolves exactly like [`resolve_write`] ([`EditTarget::Graph`]), which
+/// also refuses one the filesystem resolves into a local-only folder (an
+/// alias or folded spelling). A path inside them is [`EditTarget::LocalOnly`]
+/// only when all of these hold, and refused otherwise:
+///
+/// - it is not the folder entry itself, and no component is hidden;
+/// - a note ([`TargetKind::Note`]) has a `.md` name (ASCII case-insensitive);
+/// - every configured name on it is editable, both as requested and as the
+///   filesystem spells the existing part of it, so a folded spelling of a
+///   read-only folder never passes as an editable one;
+/// - through a link, the link is allowed ([`LocalOnlyFolders::link_target`],
+///   re-validated on every call), nothing below it is a symlink, and no
+///   directory from the raw-store root down to the link's target holds a
+///   `.git` entry (the IO checks every directory below the target the same
+///   way);
+/// - in a real directory, the path stays inside the graph and crosses no
+///   symlink;
+/// - the local-only folder it lies in exists: an edit creates notes and
+///   directories inside a local-only folder, never the folder itself (a
+///   save after its link went missing must not quietly start a new folder
+///   in the graph).
+pub(crate) fn resolve_note_edit(
+    root: &Path,
+    rel: &str,
+    local_only: Option<&LocalOnlyFolders>,
+    kind: TargetKind,
+) -> AppResult<EditTarget> {
+    let Some(folders) = local_only else {
+        return Ok(EditTarget::Graph(resolve(root, rel)?));
+    };
+    let rel_path = ensure_relative(rel)?;
+    if folders.is_folder_entry(rel) {
+        return Err(AppError::traversal(format!(
+            "a local-only folder itself is never edited: {rel}"
+        )));
+    }
+    if !folders.contains(rel) {
+        return Ok(EditTarget::Graph(resolve_write(root, rel, Some(folders))?));
+    }
+    let parts = normal_parts(&rel_path);
+    if parts
+        .iter()
+        .any(|part| part.as_encoded_bytes().starts_with(b"."))
+    {
+        return Err(AppError::traversal(format!(
+            "hidden names are never edited in a local-only folder: {rel}"
+        )));
+    }
+    if kind == TargetKind::Note
+        && !rel_path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    {
+        return Err(AppError::traversal(format!(
+            "only .md notes are edited in a local-only folder: {rel}"
+        )));
+    }
+    if !folders.editable_contains(rel) {
+        return Err(read_only(rel));
+    }
+    let folder_root = folders.folder_root(rel).ok_or_else(|| read_only(rel))?;
+    let entry = match local_only_hop(root, &rel_path, folders)? {
+        Some(hop) => {
+            let graph_root = root.canonicalize()?;
+            if !folders.editable_contains(&on_disk_through(&graph_root, root, &hop)?) {
+                return Err(read_only(rel));
+            }
+            ensure_outside_git_work_trees(folders, &hop.target)?;
+            let folder_dir = Path::new(&folder_root)
+                .components()
+                .skip(hop.link.components().count())
+                .collect();
+            LocalOnlyEntry {
+                graph_root,
+                base: hop.target,
+                rest: hop.rest,
+                folder_root,
+                folder_dir,
+            }
+        }
+        None => {
+            let resolved = resolve_checked(root, rel)?;
+            let rest: PathBuf = parts.iter().collect();
+            ensure_no_symlinks_below(&resolved.canonical_root, &rest)?;
+            if !folders.editable_contains(&resolved.on_disk) {
+                return Err(read_only(rel));
+            }
+            LocalOnlyEntry {
+                graph_root: resolved.canonical_root.clone(),
+                base: resolved.canonical_root,
+                rest,
+                folder_dir: PathBuf::from(&folder_root),
+                folder_root,
+            }
+        }
+    };
+    // Nothing on the way is a symlink (checked above), so this sees the
+    // folder itself.
+    if !std::fs::symlink_metadata(entry.base.join(&entry.folder_dir))
+        .is_ok_and(|meta| meta.is_dir())
+    {
+        return Err(AppError::traversal(format!(
+            "the local-only folder {} does not exist",
+            entry.folder_root
+        )));
+    }
+    Ok(EditTarget::LocalOnly(entry))
+}
+
+fn read_only(rel: &str) -> AppError {
+    AppError::traversal(format!("local-only folders are read-only: {rel}"))
+}
+
+/// The filesystem's spelling of a path through a hop, graph-relative: the
+/// directories above the link (all real, [`LocalOnlyFolders::link_target`]
+/// checked) and the existing part below it (no symlinks, checked) canonicalize
+/// to their on-disk names; the link keeps its requested name, and anything
+/// not yet created stays as requested.
+fn on_disk_through(graph_root: &Path, root: &Path, hop: &Hop) -> AppResult<String> {
+    let outside = || AppError::traversal("path resolves outside its folder");
+    let above = match hop.link.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => root
+            .join(parent)
+            .canonicalize()?
+            .strip_prefix(graph_root)
+            .map_err(|_| outside())?
+            .to_path_buf(),
+        _ => PathBuf::new(),
+    };
+    let link_name = hop.link.file_name().ok_or_else(outside)?;
+    let joined = hop.target.join(&hop.rest);
+    let existing = existing_ancestor(&joined);
+    let anchor = existing.canonicalize()?;
+    let below = anchor.strip_prefix(&hop.target).map_err(|_| outside())?;
+    let remainder = joined.strip_prefix(&existing).unwrap_or(Path::new(""));
+    Ok(slash_path(
+        &above.join(link_name).join(below).join(remainder),
+    ))
+}
+
+/// Refuse an edit through a link when any directory from the raw-store root
+/// down to the link's `target` (both included) holds a `.git` entry: a note
+/// inside a nested work tree could leave the Mac through that repository's
+/// remote. A directory or a `gitdir:` file counts alike, and nothing is
+/// followed.
+fn ensure_outside_git_work_trees(folders: &LocalOnlyFolders, target: &Path) -> AppResult<()> {
+    let refused = || AppError::traversal("local-only link outside its raw store");
+    let raw_root = folders.raw_root().ok_or_else(refused)?.canonicalize()?;
+    let below = target.strip_prefix(&raw_root).map_err(|_| refused())?;
+    let mut current = raw_root.clone();
+    let mut directories = vec![current.clone()];
+    for component in below.components() {
+        current.push(component);
+        directories.push(current.clone());
+    }
+    for directory in directories {
+        match std::fs::symlink_metadata(directory.join(".git")) {
+            Ok(_) => {
+                return Err(AppError::traversal(format!(
+                    "local-only notes inside a Git work tree are never edited: {}",
+                    directory.display()
+                )))
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
 }
 
 /// Refuse when any existing component of `rest` below `base` is a symlink:
@@ -461,6 +709,315 @@ mod tests {
         std::fs::create_dir_all(linked.graph.join("people")).unwrap();
         symlink(outside.path(), linked.graph.join("people/secure")).unwrap();
         assert!(resolve_read(&linked.graph, "people/secure/x.md", Some(&linked.folders)).is_err());
+    }
+
+    /// `linked()`'s configuration with `names` editable.
+    #[cfg(unix)]
+    fn editable(linked: &Linked, names: &[&str]) -> LocalOnlyFolders {
+        linked.folders.clone().with_editable(names).0
+    }
+
+    #[cfg(unix)]
+    fn edit(linked: &Linked, rel: &str, folders: &LocalOnlyFolders) -> AppResult<EditTarget> {
+        resolve_note_edit(&linked.graph, rel, Some(folders), TargetKind::Note)
+    }
+
+    #[cfg(unix)]
+    fn local_only_entry(target: AppResult<EditTarget>) -> LocalOnlyEntry {
+        match target {
+            Ok(EditTarget::LocalOnly(entry)) => entry,
+            other => panic!("expected a local-only edit target, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_edit_takes_one_hop_into_an_editable_link() {
+        let linked = linked();
+        let folders = editable(&linked, &["secure"]);
+        let entry = local_only_entry(edit(&linked, "finance/secure/sub/bank.md", &folders));
+        assert_eq!(
+            entry,
+            LocalOnlyEntry {
+                graph_root: linked.graph.clone(),
+                base: linked.raw.join("finance/secure"),
+                rest: PathBuf::from("sub/bank.md"),
+                folder_root: "finance/secure".into(),
+                folder_dir: PathBuf::new(),
+            }
+        );
+        // A note that does not exist yet.
+        let created = local_only_entry(edit(&linked, "finance/secure/new.md", &folders));
+        assert_eq!(created.rest, PathBuf::from("new.md"));
+        // Match the lowercase configuration against an existing uppercase
+        // link without relying on a case-insensitive filesystem.
+        std::fs::rename(
+            linked.graph.join("finance/secure"),
+            linked.graph.join("finance/SECURE"),
+        )
+        .unwrap();
+        let cased = local_only_entry(edit(&linked, "./finance/SECURE/sub/x.md", &folders));
+        assert_eq!(cased.base, linked.raw.join("finance/secure"));
+        assert_eq!(cased.rest, PathBuf::from("sub/x.md"));
+        assert_eq!(cased.folder_root, "finance/SECURE");
+
+        // An ordinary path resolves exactly like a strict write; no
+        // configuration at all is the plain guard.
+        assert_eq!(
+            edit(&linked, "notes/a.md", &folders).unwrap(),
+            EditTarget::Graph(resolve_write(&linked.graph, "notes/a.md", Some(&folders)).unwrap())
+        );
+        assert_eq!(
+            resolve_note_edit(&linked.graph, "notes/a.md", None, TargetKind::Note).unwrap(),
+            EditTarget::Graph(linked.graph.join("notes/a.md"))
+        );
+        // Control: the strict resolver still refuses every editable path.
+        for rel in [
+            "finance/secure/sub/bank.md",
+            "finance/secure/new.md",
+            "finance/SECURE/sub/x.md",
+        ] {
+            assert!(
+                resolve_write(&linked.graph, rel, Some(&folders)).is_err(),
+                "{rel}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_real_editable_folder_is_edited_from_the_graph_root() {
+        let linked = linked();
+        std::fs::create_dir_all(linked.graph.join("people/secure/deep")).unwrap();
+        let folders = editable(&linked, &["secure"]);
+        let entry = local_only_entry(edit(&linked, "people/secure/deep/visa.md", &folders));
+        assert_eq!(
+            entry,
+            LocalOnlyEntry {
+                graph_root: linked.graph.clone(),
+                base: linked.graph.clone(),
+                rest: PathBuf::from("people/secure/deep/visa.md"),
+                folder_root: "people/secure".into(),
+                folder_dir: PathBuf::from("people/secure"),
+            }
+        );
+        assert!(
+            resolve_write(&linked.graph, "people/secure/deep/visa.md", Some(&folders)).is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_refuse_read_only_folders_their_entries_and_unknown_configurations() {
+        let linked = linked();
+        std::fs::create_dir_all(linked.graph.join("archive/2019/secure")).unwrap();
+        let folders = LocalOnlyFolders::new(["secure", "archive"], Some(&linked.raw))
+            .unwrap()
+            .with_editable(["secure"])
+            .0;
+        let refused = |rel: &str, folders: &LocalOnlyFolders| {
+            assert!(edit(&linked, rel, folders).is_err(), "{rel}");
+        };
+        refused("archive/x.md", &folders);
+        // Nested in a read-only folder: every name on the path must be editable.
+        refused("archive/2019/secure/x.md", &folders);
+        // The folder entry itself, whatever the spelling.
+        refused("finance/secure", &folders);
+        refused("finance/Secure/", &folders);
+        // Read-only (the default) and unknown (editability stripped).
+        refused("finance/secure/sub/bank.md", &linked.folders);
+        refused(
+            "finance/secure/sub/bank.md",
+            &folders.clone().without_editable(),
+        );
+
+        // Control: with both names editable the nested folder opens.
+        let both = folders.clone().with_editable(["secure", "archive"]).0;
+        let entry = local_only_entry(edit(&linked, "archive/2019/secure/x.md", &both));
+        assert_eq!(entry.folder_root, "archive/2019/secure");
+        assert_eq!(entry.folder_dir, PathBuf::from("archive/2019/secure"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_refuse_other_names_hidden_components_and_attachments_need_no_md() {
+        let linked = linked();
+        let folders = editable(&linked, &["secure"]);
+        for rel in [
+            "finance/secure/sub/bank.txt",
+            "finance/secure/scan.png",
+            "finance/secure/README",
+            "finance/secure/.x.md",
+            "finance/secure/.hidden/x.md",
+            ".hidden/secure/x.md",
+        ] {
+            assert!(edit(&linked, rel, &folders).is_err(), "{rel}");
+        }
+        // Upper-case `.MD` is still Markdown.
+        assert!(edit(&linked, "finance/secure/Note.MD", &folders).is_ok());
+        // Attachment intake names a note's folder, not a note: any visible
+        // name is fine, hidden ones never are.
+        let attachment = |rel: &str| {
+            resolve_note_edit(&linked.graph, rel, Some(&folders), TargetKind::Attachment)
+        };
+        assert!(attachment("finance/secure/scan.png").is_ok());
+        assert!(attachment("finance/secure/.scan.png").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_refuse_dangling_retargeted_and_nested_links() {
+        use std::os::unix::fs::symlink;
+        let linked = linked();
+        let folders = editable(&linked, &["secure"]);
+
+        // A dangling configured link.
+        std::fs::create_dir_all(linked.graph.join("people")).unwrap();
+        symlink(
+            linked.raw.join("people/missing"),
+            linked.graph.join("people/secure"),
+        )
+        .unwrap();
+        assert!(edit(&linked, "people/secure/x.md", &folders).is_err());
+
+        // A symlink below the hop.
+        let elsewhere = tempdir().unwrap();
+        symlink(elsewhere.path(), linked.raw.join("finance/secure/alias")).unwrap();
+        assert!(edit(&linked, "finance/secure/alias/x.md", &folders).is_err());
+        assert!(edit(&linked, "finance/secure/alias", &folders).is_err());
+
+        // A link retargeted outside the raw store loses its grant on the
+        // next call.
+        let rel = "finance/secure/sub/bank.md";
+        assert!(edit(&linked, rel, &folders).is_ok());
+        let outside = tempdir().unwrap();
+        std::fs::create_dir_all(outside.path().join("sub")).unwrap();
+        std::fs::remove_file(linked.graph.join("finance/secure")).unwrap();
+        symlink(outside.path(), linked.graph.join("finance/secure")).unwrap();
+        assert!(edit(&linked, rel, &folders).is_err());
+        assert!(!outside.path().join("sub/bank.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_never_reach_an_editable_real_folder_through_an_alias_or_folded_spelling() {
+        use std::os::unix::fs::symlink;
+        let linked = linked();
+        let folders = editable(&linked, &["secure"]);
+        std::fs::create_dir_all(linked.graph.join("people/secure")).unwrap();
+        std::fs::write(linked.graph.join("people/secure/visa.md"), "# Visa").unwrap();
+        // An in-graph alias, plain and carrying the configured name.
+        symlink(
+            linked.graph.join("people/secure"),
+            linked.graph.join("notes/alias"),
+        )
+        .unwrap();
+        symlink(
+            linked.graph.join("people/secure"),
+            linked.graph.join("notes/secure"),
+        )
+        .unwrap();
+        for rel in [
+            "notes/alias/visa.md",
+            "notes/alias/new.md",
+            "notes/secure/visa.md",
+        ] {
+            assert!(edit(&linked, rel, &folders).is_err(), "{rel}");
+        }
+        // Folded spellings of the real folder and of the link.
+        for rel in ["people/\u{17f}ecure/visa.md", "finance/\u{17f}ecure/new.md"] {
+            if linked.graph.join(rel).parent().unwrap().exists() {
+                assert!(edit(&linked, rel, &folders).is_err(), "{rel}");
+            }
+        }
+    }
+
+    /// A folded spelling (KELVIN SIGN for `k`) of a read-only folder above
+    /// or below the hop is read-only, whatever the requested string says.
+    #[cfg(unix)]
+    #[test]
+    fn a_folded_read_only_name_around_the_hop_stays_read_only() {
+        use std::os::unix::fs::symlink;
+        let linked = linked();
+        let folders = LocalOnlyFolders::new(["secure", "kids"], Some(&linked.raw))
+            .unwrap()
+            .with_editable(["secure"])
+            .0;
+        std::fs::create_dir_all(linked.graph.join("kids/finance")).unwrap();
+        symlink(
+            linked.raw.join("finance/secure"),
+            linked.graph.join("kids/finance/secure"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(linked.raw.join("finance/secure/kids")).unwrap();
+        let above = "\u{212a}ids/finance/secure/new.md";
+        let below = "finance/secure/\u{212a}ids/new.md";
+        // The requested strings carry no read-only name...
+        assert!(folders.editable_contains(above) && folders.editable_contains(below));
+        for rel in [above, below] {
+            if linked.graph.join(rel).parent().unwrap().exists() {
+                assert!(edit(&linked, rel, &folders).is_err(), "{rel}");
+            }
+        }
+        // ...and the plain spellings are read-only by name.
+        assert!(edit(&linked, "kids/finance/secure/new.md", &folders).is_err());
+        assert!(edit(&linked, "finance/secure/kids/new.md", &folders).is_err());
+        // Control: the editable folder itself.
+        assert!(edit(&linked, "finance/secure/new.md", &folders).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_edit_never_creates_a_local_only_folder() {
+        let linked = linked();
+        let folders = LocalOnlyFolders::new(["secure", "archive"], Some(&linked.raw))
+            .unwrap()
+            .with_editable(["secure", "archive"])
+            .0;
+        // No `family/secure` in the graph, no `archive` in the linked folder.
+        for rel in ["family/secure/x.md", "finance/secure/archive/x.md"] {
+            assert!(edit(&linked, rel, &folders).is_err(), "{rel}");
+        }
+        // A link gone missing: a save must not start a real folder in its place.
+        std::fs::remove_file(linked.graph.join("finance/secure")).unwrap();
+        assert!(edit(&linked, "finance/secure/sub/bank.md", &folders).is_err());
+        assert!(!linked.graph.join("finance/secure").exists());
+
+        // Control: inside existing folders, new directories are fine.
+        std::fs::create_dir_all(linked.graph.join("family/secure")).unwrap();
+        std::fs::create_dir_all(linked.raw.join("finance/secure/archive")).unwrap();
+        std::os::unix::fs::symlink(
+            linked.raw.join("finance/secure"),
+            linked.graph.join("finance/secure"),
+        )
+        .unwrap();
+        for rel in [
+            "family/secure/x.md",
+            "family/secure/new/x.md",
+            "finance/secure/archive/x.md",
+        ] {
+            assert!(edit(&linked, rel, &folders).is_ok(), "{rel}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_refuse_a_git_work_tree_between_the_raw_store_and_the_link_target() {
+        let linked = linked();
+        let folders = editable(&linked, &["secure"]);
+        let rel = "finance/secure/sub/bank.md";
+        assert!(edit(&linked, rel, &folders).is_ok());
+        for planted in ["", "finance", "finance/secure"] {
+            let dir = linked.raw.join(planted).join(".git");
+            std::fs::create_dir(&dir).unwrap();
+            assert!(edit(&linked, rel, &folders).is_err(), "{planted}/.git");
+            std::fs::remove_dir(&dir).unwrap();
+            // A `gitdir:` file marks a work tree as well.
+            std::fs::write(&dir, "gitdir: /elsewhere").unwrap();
+            assert!(edit(&linked, rel, &folders).is_err(), "{planted}/.git file");
+            std::fs::remove_file(&dir).unwrap();
+        }
+        assert!(edit(&linked, rel, &folders).is_ok());
     }
 
     #[test]

@@ -981,10 +981,11 @@ fn resolve_edit_vs_delete(
 }
 
 /// Write a blob into the working tree. With local-only folders configured
-/// the target goes through the write guard: `fs::write` follows symlinks,
-/// and a held path can never conflict, so a refusal here is a bug surfacing
-/// loudly rather than a write through a link.
-fn write_blob(
+/// the target goes through the strict write guard, editable folders
+/// included: `fs::write` follows symlinks, a pull never writes into a
+/// local-only folder, and a held path can never conflict, so a refusal here
+/// is a bug surfacing loudly rather than a write through a link.
+pub(super) fn write_blob(
     repo: &Repository,
     root: &Path,
     rel: &str,

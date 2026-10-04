@@ -32,9 +32,8 @@ const X_PHOTO_URL =
   "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='100'%20height='100'/%3E"
 const X_VIDEO_URL = 'data:video/mp4;base64,'
 
-vi.mock('@/editor/use-x-post-resolver.ts', () => ({
-  X_MEDIA_URL_PROTOCOLS: ['data:'],
-  useXPostResolver: () => (): XPost => ({
+const resolveXPost = vi.hoisted(() =>
+  vi.fn((): XPost => ({
     id: '20',
     createdAt: '2006-03-21T20:50:14.000Z',
     lang: 'en',
@@ -49,8 +48,15 @@ vi.mock('@/editor/use-x-post-resolver.ts', () => ({
         sources: [{ type: 'video/mp4', url: X_VIDEO_URL }],
       },
     ],
-  }),
+  })),
+)
+vi.mock('@/editor/use-x-post-resolver.ts', () => ({
+  X_MEDIA_URL_PROTOCOLS: ['data:'],
+  useXPostResolver: () => resolveXPost,
 }))
+
+const resolveYouTubeVideo = vi.hoisted(() => vi.fn(() => undefined))
+vi.mock('@/editor/youtube-video-resolver.ts', () => ({ resolveYouTubeVideo }))
 
 const pmRoot = page.locate('.ProseMirror')
 
@@ -80,6 +86,7 @@ function renderEditor(
 ): ReturnType<typeof render> {
   return render(
     <NoteEditor
+      privateNote={false}
       initialContent={IMAGE_NOTE}
       resolveImageUrl={(src) => (src === 'assets/cat.png' ? 'asset://cat.png' : undefined)}
       resolveAssetOpenPath={(src) => (src === 'assets/cat.png' ? 'assets/cat.png' : null)}
@@ -99,19 +106,19 @@ afterEach(() => {
 
 describe('NoteEditor markdown syntax mode', () => {
   it('hides markdown syntax by default', async () => {
-    await render(<NoteEditor initialContent="Hello" />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" />)
     await expect.element(pmRoot).toHaveAttribute('data-mark-mode', 'hide')
   })
 
   it('applies an explicit markdown syntax mode', async () => {
-    await render(<NoteEditor initialContent="Hello" markMode="show" />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" markMode="show" />)
     await expect.element(pmRoot).toHaveAttribute('data-mark-mode', 'show')
   })
 })
 
 describe('NoteEditor wiki-link hover card', () => {
   it('does not mount the optional card without a host renderer', async () => {
-    await render(<NoteEditor initialContent="see [[Note]] here" />)
+    await render(<NoteEditor privateNote={false} initialContent="see [[Note]] here" />)
     await pmRoot.getByTestId('wikilink').hover()
     await expect.element(pmRoot.getByTestId('wikilink')).toBeVisible()
     await expectLocatorToHaveCount(page.getByTestId('wikilink-hover-card'), 0)
@@ -120,6 +127,7 @@ describe('NoteEditor wiki-link hover card', () => {
   it('shows the host-rendered card body when a wiki link is hovered', async () => {
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="see [[Note]] here"
         renderWikilinkHoverCard={() => <div data-testid="reflect-hover-body">Preview</div>}
       />,
@@ -134,6 +142,7 @@ describe('NoteEditor wiki-link chips', () => {
     const onWikiLinkClick = vi.fn()
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="see [[Tim MacCaw // Dad|Dad]] and [[Tim MacCaw // Dad]]"
         onWikiLinkClick={onWikiLinkClick}
       />,
@@ -158,6 +167,7 @@ describe('NoteEditor link preview', () => {
     }))
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="[https://example.com](https://example.com)"
         resolveLinkPreview={resolveLinkPreview}
       />,
@@ -174,7 +184,7 @@ describe('NoteEditor link preview', () => {
 describe('NoteEditor time format', () => {
   it('inserts a 12-hour time through /now by default', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    await render(<NoteEditor initialContent="" handleRef={handleRef} />)
+    await render(<NoteEditor privateNote={false} initialContent="" handleRef={handleRef} />)
 
     await pmRoot.click()
     await userEvent.keyboard('/now')
@@ -188,7 +198,9 @@ describe('NoteEditor time format', () => {
 
   it("maps the 24h setting to meowdown's 24-hour clock", async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    await render(<NoteEditor initialContent="" timeFormat="24h" handleRef={handleRef} />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="" timeFormat="24h" handleRef={handleRef} />,
+    )
 
     await pmRoot.click()
     await userEvent.keyboard('/now')
@@ -203,7 +215,7 @@ describe('NoteEditor time format', () => {
 
 describe('NoteEditor smooth caret animation', () => {
   it('enables the caret glide by default', async () => {
-    await render(<NoteEditor initialContent="Hello" />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" />)
     await pmRoot.click()
     const caret = page.getByTestId('virtual-caret')
     await expect.element(caret).toBeVisible()
@@ -213,7 +225,9 @@ describe('NoteEditor smooth caret animation', () => {
   })
 
   it('disables the caret glide when smooth caret animation is off', async () => {
-    await render(<NoteEditor initialContent="Hello" smoothCaretAnimation={false} />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="Hello" smoothCaretAnimation={false} />,
+    )
     await pmRoot.click()
     const caret = page.getByTestId('virtual-caret')
     await expect.element(caret).toBeVisible()
@@ -223,7 +237,7 @@ describe('NoteEditor smooth caret animation', () => {
 
 describe('NoteEditor touch-surface input hygiene', () => {
   it('passes the spellcheck setting through on desktop', async () => {
-    await render(<NoteEditor initialContent="Hello" spellCheck={true} />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" spellCheck={true} />)
     await expect.element(pmRoot).toBeVisible()
     const editable = pmRoot.element()
     expect(editable).toBeInstanceOf(HTMLElement)
@@ -232,7 +246,7 @@ describe('NoteEditor touch-surface input hygiene', () => {
 
   it('pins spellcheck off on the touch surface (iOS smart-punctuation gate)', async () => {
     setPlatformSurface({ touchEditor: true })
-    await render(<NoteEditor initialContent="Hello" spellCheck={true} />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" spellCheck={true} />)
     await expect.element(pmRoot).toBeVisible()
     const editable = pmRoot.element()
     expect(editable).toBeInstanceOf(HTMLElement)
@@ -249,7 +263,7 @@ describe('NoteEditor touch-surface input hygiene', () => {
     // block handle only opens on pointer events, so the hover below must be a
     // real movement into the fresh editor.
     await unhover()
-    await render(<NoteEditor initialContent="Hello" blockHandle={true} />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" blockHandle={true} />)
     await hover(pmRoot.getByText('Hello'))
     await expect.element(page.getByTestId('block-handle')).toBeVisible()
   })
@@ -257,7 +271,7 @@ describe('NoteEditor touch-surface input hygiene', () => {
   it('pins the block handle off on the touch surface', async () => {
     setPlatformSurface({ touchEditor: true })
     await unhover()
-    await render(<NoteEditor initialContent="Hello" blockHandle={true} />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" blockHandle={true} />)
     await hover(pmRoot.getByText('Hello'))
     await expect.element(pmRoot.getByText('Hello')).toBeVisible()
     await expectLocatorToHaveCount(page.getByTestId('block-handle'), 0)
@@ -265,13 +279,13 @@ describe('NoteEditor touch-surface input hygiene', () => {
 
   it('sets explicit input traits on the contenteditable on the touch surface', async () => {
     setPlatformSurface({ touchEditor: true })
-    await render(<NoteEditor initialContent="Hello" />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" />)
     await expect.element(pmRoot).toHaveAttribute('autocapitalize', 'sentences')
     await expect.element(pmRoot).toHaveAttribute('autocorrect', 'on')
   })
 
   it('leaves the contenteditable untouched on desktop', async () => {
-    await render(<NoteEditor initialContent="Hello" />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" />)
     await expect.element(pmRoot).toBeVisible()
     await expect.element(pmRoot).not.toHaveAttribute('autocapitalize')
     await expect.element(pmRoot).not.toHaveAttribute('autocorrect')
@@ -281,7 +295,9 @@ describe('NoteEditor touch-surface input hygiene', () => {
 describe('NoteEditor tag click', () => {
   it('forwards a clicked tag name, without the leading #', async () => {
     const onTagClick = vi.fn()
-    await render(<NoteEditor initialContent="see #book here" onTagClick={onTagClick} />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="see #book here" onTagClick={onTagClick} />,
+    )
 
     await pmRoot.getByText('#book').click()
     await vi.waitFor(() => {
@@ -380,7 +396,9 @@ describe('NoteEditor image lightbox', () => {
   })
 
   it('opens an X post photo without the local image opener', async () => {
-    await render(<NoteEditor initialContent="![](https://x.com/jack/status/20)" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="![](https://x.com/jack/status/20)" />,
+    )
 
     await pmRoot.locate('[data-media] img').click()
     const dialog = page.getByRole('dialog', { name: 'Image preview' })
@@ -389,7 +407,9 @@ describe('NoteEditor image lightbox', () => {
   })
 
   it('plays an X post video in the lightbox instead of the card', async () => {
-    await render(<NoteEditor initialContent="![](https://x.com/jack/status/20)" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="![](https://x.com/jack/status/20)" />,
+    )
 
     await pmRoot.getByRole('button', { name: 'Play video' }).click()
     const dialog = page.getByRole('dialog', { name: 'Video preview' })
@@ -403,7 +423,7 @@ describe('NoteEditor image lightbox', () => {
   })
 
   it('plays a YouTube video in the lightbox instead of the card', async () => {
-    await render(<NoteEditor initialContent={YOUTUBE_NOTE} />)
+    await render(<NoteEditor privateNote={false} initialContent={YOUTUBE_NOTE} />)
 
     await pmRoot.getByRole('button', { name: 'Play: Big Buck Bunny' }).click()
     const dialog = page.getByRole('dialog', { name: 'Video preview' })
@@ -426,6 +446,7 @@ describe('NoteEditor image lightbox', () => {
 
     await screen.rerender(
       <NoteEditor
+        privateNote={false}
         initialContent={IMAGE_NOTE}
         resolveImageUrl={(src) => (src === 'assets/cat.png' ? 'asset://cat.png' : undefined)}
         resolveAssetOpenPath={(src) => (src === 'assets/cat.png' ? 'assets/cat.png' : null)}
@@ -443,6 +464,7 @@ describe('NoteEditor image lightbox', () => {
   it('hides the Open button when no opener is provided', async () => {
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent={IMAGE_NOTE}
         resolveImageUrl={(src) => (src === 'assets/cat.png' ? 'asset://cat.png' : undefined)}
         resolveAssetOpenPath={(src) => (src === 'assets/cat.png' ? 'assets/cat.png' : null)}
@@ -457,6 +479,7 @@ describe('NoteEditor image lightbox', () => {
   it('skips rendering an image whose source cannot be resolved', async () => {
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent={'![Cat](assets/cat.png)\n\n![X](https://blocked.example/x.png)'}
         resolveImageUrl={(src) => (src === 'assets/cat.png' ? 'asset://cat.png' : undefined)}
       />,
@@ -474,6 +497,7 @@ describe('NoteEditor attachment resolution', () => {
     const openAsset = vi.fn(async () => {})
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="Budget ![[garden-budget.png]] here"
         resolveWikiEmbed={({ target }) => embedImage(`/attachments/${target}`)}
         resolveImageUrl={(src) => `asset://${src}`}
@@ -495,6 +519,7 @@ describe('NoteEditor attachment resolution', () => {
     const handleRef = createRef<NoteEditorHandle>()
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="![[../outside.png]]"
         resolveWikiEmbed={() => undefined}
         resolveImageUrl={(src) => `asset://${src}`}
@@ -509,7 +534,9 @@ describe('NoteEditor attachment resolution', () => {
 
 describe('NoteEditor link opening', () => {
   it('opens external links through the OS opener', async () => {
-    await render(<NoteEditor initialContent="see [Docs](https://example.com) here" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="see [Docs](https://example.com) here" />,
+    )
 
     await pmRoot.getByRole('link').click()
     await vi.waitFor(() => {
@@ -519,7 +546,10 @@ describe('NoteEditor link opening', () => {
 
   it('opens a custom app scheme link via the URL opener', async () => {
     await render(
-      <NoteEditor initialContent="[note](x-devonthink-item://40C88434-68B6-4DCB) here" />,
+      <NoteEditor
+        privateNote={false}
+        initialContent="[note](x-devonthink-item://40C88434-68B6-4DCB) here"
+      />,
     )
 
     await pmRoot.getByRole('link').click()
@@ -529,7 +559,9 @@ describe('NoteEditor link opening', () => {
   })
 
   it('drops an unsafe scheme link without opening anything', async () => {
-    await render(<NoteEditor initialContent="[secret](file:///etc/passwd) here" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="[secret](file:///etc/passwd) here" />,
+    )
 
     await pmRoot.getByRole('link').click()
     await expect.element(pmRoot.getByRole('link')).toBeVisible()
@@ -541,6 +573,7 @@ describe('NoteEditor link opening', () => {
     const openAsset = vi.fn(async () => {})
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="[cat](assets/cat.png) here"
         resolveAssetOpenPath={(src) => (src === 'assets/cat.png' ? 'assets/cat.png' : null)}
         openAsset={openAsset}
@@ -555,7 +588,9 @@ describe('NoteEditor link opening', () => {
   })
 
   it('routes a reflect:// link through the in-app deep-link intake, not the URL opener', async () => {
-    await render(<NoteEditor initialContent="[note](reflect://note/abc123) here" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="[note](reflect://note/abc123) here" />,
+    )
 
     await pmRoot.getByRole('link').click()
     await vi.waitFor(() => {
@@ -566,7 +601,9 @@ describe('NoteEditor link opening', () => {
 
   it('⌘-click sends a reflect:// link to a new window instead of dispatching', async () => {
     openDeepLinkInNewWindow.mockResolvedValue(true)
-    await render(<NoteEditor initialContent="[note](reflect://note/abc123) here" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="[note](reflect://note/abc123) here" />,
+    )
 
     await pmRoot.getByRole('link').click({ modifiers: ['ControlOrMeta'] })
     await vi.waitFor(() => {
@@ -577,7 +614,9 @@ describe('NoteEditor link opening', () => {
 
   it('a declined ⌘-click open degrades to the normal deep-link dispatch', async () => {
     openDeepLinkInNewWindow.mockResolvedValue(false)
-    await render(<NoteEditor initialContent="[append](reflect://append?text=hi) here" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="[append](reflect://append?text=hi) here" />,
+    )
 
     await pmRoot.getByRole('link').click({ modifiers: ['ControlOrMeta'] })
     await vi.waitFor(() => {
@@ -592,6 +631,7 @@ describe('NoteEditor file pills', () => {
   it('renders a claimed link as a pill with its resolved size', async () => {
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="[report.pdf](assets/report.pdf)"
         resolveFileLink={claimAssets}
         resolveFileInfo={() => Promise.resolve({ size: 1_400_000 })}
@@ -604,7 +644,9 @@ describe('NoteEditor file pills', () => {
   })
 
   it('leaves links as links when the host claims no file links', async () => {
-    await render(<NoteEditor initialContent="[report.pdf](assets/report.pdf)" />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="[report.pdf](assets/report.pdf)" />,
+    )
 
     await expect.element(pmRoot.getByRole('link')).toBeInTheDocument()
     await expectLocatorToHaveCount(pmRoot.getByTestId('file-pill'), 0)
@@ -614,6 +656,7 @@ describe('NoteEditor file pills', () => {
     const openAsset = vi.fn(async () => {})
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent="[cat.png](assets/cat.png)"
         resolveFileLink={claimAssets}
         resolveAssetOpenPath={(src) => (src === 'assets/cat.png' ? 'assets/cat.png' : null)}
@@ -635,6 +678,7 @@ describe('NoteEditor file paste', () => {
     const saveFile = vi.fn(async () => 'assets/q3.zip')
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent=""
         handleRef={handleRef}
         saveFile={saveFile}
@@ -654,7 +698,14 @@ describe('NoteEditor file paste', () => {
   it('embeds a pasted PDF as an inline preview', async () => {
     const handleRef = createRef<NoteEditorHandle>()
     const saveFile = vi.fn(async () => 'assets/q3.pdf')
-    await render(<NoteEditor initialContent="" handleRef={handleRef} saveFile={saveFile} />)
+    await render(
+      <NoteEditor
+        privateNote={false}
+        initialContent=""
+        handleRef={handleRef}
+        saveFile={saveFile}
+      />,
+    )
     await expect.element(pmRoot).toBeInTheDocument()
 
     pasteFiles(pmRoot.element(), [
@@ -669,7 +720,14 @@ describe('NoteEditor file paste', () => {
   it('titles a blank note from a pasted PDF and puts the PDF below the title', async () => {
     const handleRef = createRef<NoteEditorHandle>()
     const saveFile = vi.fn(async () => 'assets/socc20-serverless.pdf')
-    await render(<NoteEditor initialContent={'#\n'} handleRef={handleRef} saveFile={saveFile} />)
+    await render(
+      <NoteEditor
+        privateNote={false}
+        initialContent={'#\n'}
+        handleRef={handleRef}
+        saveFile={saveFile}
+      />,
+    )
     await expect.element(pmRoot).toBeInTheDocument()
 
     pasteFiles(pmRoot.element(), [
@@ -686,7 +744,14 @@ describe('NoteEditor file paste', () => {
   it('leaves a blank note untitled for a pasted image', async () => {
     const handleRef = createRef<NoteEditorHandle>()
     const saveFile = vi.fn(async () => 'assets/pasted-1.png')
-    await render(<NoteEditor initialContent={'#\n'} handleRef={handleRef} saveFile={saveFile} />)
+    await render(
+      <NoteEditor
+        privateNote={false}
+        initialContent={'#\n'}
+        handleRef={handleRef}
+        saveFile={saveFile}
+      />,
+    )
     await expect.element(pmRoot).toBeInTheDocument()
 
     pasteFiles(pmRoot.element(), [
@@ -702,7 +767,14 @@ describe('NoteEditor file paste', () => {
   it('declines the paste when saveFile returns null', async () => {
     const handleRef = createRef<NoteEditorHandle>()
     const saveFile = vi.fn(async () => null)
-    await render(<NoteEditor initialContent="" handleRef={handleRef} saveFile={saveFile} />)
+    await render(
+      <NoteEditor
+        privateNote={false}
+        initialContent=""
+        handleRef={handleRef}
+        saveFile={saveFile}
+      />,
+    )
     await expect.element(pmRoot).toBeInTheDocument()
 
     pasteFiles(pmRoot.element(), [new File([], 'q3.pdf', { type: 'application/pdf' })])
@@ -720,6 +792,7 @@ describe('NoteEditor PDF embeds', () => {
   ): ReturnType<typeof render> {
     return render(
       <NoteEditor
+        privateNote={false}
         initialContent="![](assets/paper.pdf)"
         resolveEmbed={(src) => {
           if (src !== 'assets/paper.pdf') {
@@ -758,5 +831,122 @@ describe('NoteEditor PDF embeds', () => {
       expect(openAsset).toHaveBeenCalledWith('assets/paper.pdf')
     })
     await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
+  })
+})
+
+describe('NoteEditor private note policy', () => {
+  const X_URL = 'https://x.com/jack/status/20'
+  const YOUTUBE_URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
+  // A saved card whose poster would load from the network if it rendered.
+  const SAVED_YOUTUBE = `![](${YOUTUBE_URL})<!-- ${JSON.stringify({
+    snapshot: {
+      kind: 'youtube-video',
+      data: {
+        url: YOUTUBE_URL,
+        title: 'Big Buck Bunny',
+        author_name: 'Blender',
+        author_url: 'https://www.youtube.com/@Blender',
+        thumbnail_url: 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
+        thumbnail_width: 480,
+        thumbnail_height: 360,
+        width: 200,
+        height: 113,
+      },
+    },
+  })} -->`
+  const REMOTE_NOTE = [
+    `![](${X_URL})`,
+    SAVED_YOUTUBE,
+    '![Remote](https://example.com/remote.png)',
+    '![Cat](assets/cat.png)',
+  ].join('\n\n')
+
+  // The host resolver passes remote sources through, as the note pane's does
+  // for an ordinary note; the private policy must filter them itself.
+  function resolveImageUrl(src: string): string | undefined {
+    if (src === 'assets/cat.png') return X_PHOTO_URL
+    return /^https?:/i.test(src) ? src : undefined
+  }
+
+  function pasteText(target: Element, text: string): void {
+    const clipboardData = new DataTransfer()
+    clipboardData.setData('text/plain', text)
+    target.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+    )
+  }
+
+  function remoteElements(): Element | null {
+    return document.querySelector(
+      'img[src^="https:"], img[src^="http:"], iframe, meowdown-embed-x, meowdown-embed-youtube',
+    )
+  }
+
+  it('shows embeds as source URLs and loads only graph attachments', async () => {
+    const hostResolver = vi.fn(resolveImageUrl)
+    await render(
+      <NoteEditor privateNote initialContent={REMOTE_NOTE} resolveImageUrl={hostResolver} />,
+    )
+
+    const links = pmRoot.getByTestId('embed-link')
+    await expect.element(links.first()).toHaveTextContent(X_URL)
+    await expect.element(links.last()).toHaveTextContent(YOUTUBE_URL)
+    await expect.element(pmRoot.getByAltText('Cat')).toBeVisible()
+    expect(remoteElements()).toBeNull()
+    // The host resolver is only ever asked for the graph attachment.
+    expect(new Set(hostResolver.mock.calls.flat())).toEqual(new Set(['assets/cat.png']))
+    expect(resolveXPost).not.toHaveBeenCalled()
+    expect(resolveYouTubeVideo).not.toHaveBeenCalled()
+  })
+
+  it('never resolves a remote source for the lightbox', async () => {
+    const hostResolver = vi.fn(resolveImageUrl)
+    await render(
+      <NoteEditor privateNote initialContent={`![](${X_URL})`} resolveImageUrl={hostResolver} />,
+    )
+    // A click on the source URL activates it like any image preview; the
+    // lightbox may only load what the private policy resolves.
+    await pmRoot.getByTestId('embed-link').click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(hostResolver).not.toHaveBeenCalled()
+    await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
+  })
+
+  it('pastes an embed link as a plain link', async () => {
+    const handleRef = createRef<NoteEditorHandle>()
+    await render(<NoteEditor privateNote initialContent="" handleRef={handleRef} />)
+    await pmRoot.click()
+    pasteText(pmRoot.element(), YOUTUBE_URL)
+    await vi.waitFor(() => expect(handleRef.current?.getMarkdown().trim()).toBe(YOUTUBE_URL))
+    expect(pmRoot.getByTestId('embed-link').query()).toBeNull()
+    expect(resolveYouTubeVideo).not.toHaveBeenCalled()
+  })
+
+  it('auto-embeds a pasted link in an ordinary note (control)', async () => {
+    const handleRef = createRef<NoteEditorHandle>()
+    await render(<NoteEditor privateNote={false} initialContent="" handleRef={handleRef} />)
+    await pmRoot.click()
+    pasteText(pmRoot.element(), YOUTUBE_URL)
+    await vi.waitFor(() =>
+      expect(handleRef.current?.getMarkdown().trim()).toBe(`![](${YOUTUBE_URL})`),
+    )
+  })
+
+  it('switches the policy live, without remounting the editor', async () => {
+    const view = await render(<NoteEditor privateNote={false} initialContent={`![](${X_URL})`} />)
+    const card = pmRoot.getByTestId('x-post-embed')
+    await expect.element(card.getByText('just setting up my twttr')).toBeVisible()
+    const editable = pmRoot.element()
+
+    await view.rerender(<NoteEditor privateNote initialContent={`![](${X_URL})`} />)
+    await expect.element(pmRoot.getByTestId('embed-link')).toHaveTextContent(X_URL)
+    expect(remoteElements()).toBeNull()
+    expect(pmRoot.element()).toBe(editable)
+
+    resolveXPost.mockClear()
+    await view.rerender(<NoteEditor privateNote={false} initialContent={`![](${X_URL})`} />)
+    await expect.element(card.getByText('just setting up my twttr')).toBeVisible()
+    expect(resolveXPost).toHaveBeenCalled()
+    expect(pmRoot.element()).toBe(editable)
   })
 })

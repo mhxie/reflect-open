@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  localImagesOnly,
-  resolveNoXPost,
-  resolveNoYouTubeVideo,
-  withoutEmbedSnapshots,
-} from './local-only-render.ts'
+import { localImagesOnly, resolveNoXPost, resolveNoYouTubeVideo } from './local-only-render.ts'
 
 describe('localImagesOnly', () => {
   it('refuses every remote source and delegates graph attachments', async () => {
@@ -30,32 +25,9 @@ describe('localImagesOnly', () => {
   })
 })
 
-describe('embed resolvers for local-only content', () => {
-  it('find nothing, so the link renders as a plain link', async () => {
+describe('embed resolvers for private content', () => {
+  it('find nothing', async () => {
     expect(await resolveNoXPost('https://x.com/jack/status/1')).toBeUndefined()
     expect(await resolveNoYouTubeVideo('https://youtu.be/abc')).toBeUndefined()
-  })
-})
-
-describe('withoutEmbedSnapshots', () => {
-  it('drops the snapshot, keeps a saved size, and leaves other comments alone', () => {
-    // Written the way Meowdown writes it: a `--` inside the JSON escaped.
-    const snapshot = JSON.stringify({
-      snapshot: { kind: 'youtube-video', data: { title: 'a -- b' } },
-      width: 320,
-    }).replaceAll('--', String.raw`-\u002d`)
-    expect(withoutEmbedSnapshots(`![](https://youtu.be/abc)<!-- ${snapshot} -->`)).toBe(
-      '![](https://youtu.be/abc)<!-- {"width":320} -->',
-    )
-    expect(
-      withoutEmbedSnapshots('![](https://youtu.be/abc)<!-- {"snapshot":{"kind":"x-post"}} -->'),
-    ).toBe('![](https://youtu.be/abc)')
-    for (const untouched of [
-      '![](assets/a.png)<!-- {"width":200} -->',
-      '<!-- reflect-capture-page-text:start -->',
-      '<!-- {not json} -->',
-    ]) {
-      expect(withoutEmbedSnapshots(untouched)).toBe(untouched)
-    }
   })
 })

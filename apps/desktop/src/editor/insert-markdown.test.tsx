@@ -11,6 +11,7 @@ describe('NoteEditorHandle.insertMarkdown', () => {
     let handle: NoteEditorHandle | null = null
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent=""
         handleRef={(grabbed) => {
           handle = grabbed
@@ -28,6 +29,7 @@ describe('NoteEditorHandle.insertMarkdown', () => {
     let handle: NoteEditorHandle | null = null
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent={'#\n'}
         handleRef={(grabbed) => {
           handle = grabbed
@@ -45,6 +47,7 @@ describe('NoteEditorHandle.insertMarkdown', () => {
     let handle: NoteEditorHandle | null = null
     await render(
       <NoteEditor
+        privateNote={false}
         initialContent={'#\n'}
         handleRef={(grabbed) => {
           handle = grabbed

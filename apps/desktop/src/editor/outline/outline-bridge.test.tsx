@@ -44,6 +44,7 @@ async function setup(markdown: string = NOTE): Promise<Setup> {
       style={{ height: `${VIEWPORT}px`, overflow: 'auto', overflowAnchor: 'none' }}
     >
       <NoteEditor
+        privateNote={false}
         initialContent={markdown}
         handleRef={(handle) => {
           grabbed.current = handle

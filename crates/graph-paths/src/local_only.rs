@@ -1,6 +1,8 @@
 //! Local-only folders: named folders (usually symlinks into a "raw store"
 //! outside the graph) whose notes the desktop reads on this machine but never
-//! syncs, sends, publishes, or writes.
+//! syncs, sends, or publishes. They are read-only unless the configuration
+//! also lists their name as editable; then the desktop edits notes in place,
+//! and those writes never leave the folder or follow a link inside it.
 //!
 //! - **Deny side** ([`LocalOnlyFolders::contains`], [`LocalOnlyFolders::covers`]):
 //!   lexical rules over the configured names, in force even while a link
@@ -9,9 +11,13 @@
 //!   to, because APFS folds Unicode case (`ſecure` opens `secure`).
 //! - **Allow side** ([`LocalOnlyFolders::link_target`]): one symlink hop into a
 //!   validated target; nothing inside it is followed further.
+//! - **Edit side** ([`LocalOnlyFolders::editable_contains`]): a path inside
+//!   local-only folders is editable only when every configured name on it is
+//!   editable. Editability is opt-in and starts empty
+//!   ([`LocalOnlyFolders::with_editable`]); losing it is always safe.
 //!
-//! The path predicate is shared with `isLocalOnlyPath` in `packages/core`
-//! through `fixtures/local-only-paths.json`.
+//! The path predicates are shared with `packages/core` through
+//! `fixtures/local-only-paths.json` and `fixtures/local-only-editable.json`.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -23,6 +29,9 @@ pub struct LocalOnlyFolders {
     /// The configured raw-store root (absolute). Canonicalized at every
     /// check, so a store mounted after the graph opened still resolves.
     raw_root: Option<PathBuf>,
+    /// The configured names whose folders may be edited in place, spelled
+    /// as in `names`; empty unless [`Self::with_editable`] grants some.
+    editable: Vec<String>,
 }
 
 /// A local-only link a walk followed one hop.
@@ -67,7 +76,7 @@ impl LocalOnlyFolders {
     ///
     /// Names with a [`folder_name_problem`] are dropped and duplicates folded;
     /// `None` when no valid name remains. A relative `raw_root` is dropped,
-    /// leaving only the deny side active.
+    /// leaving only the deny side active. Nothing is editable.
     pub fn new<I, S>(names: I, raw_root: Option<&Path>) -> Option<Self>
     where
         I: IntoIterator<Item = S>,
@@ -90,6 +99,7 @@ impl LocalOnlyFolders {
             raw_root: raw_root
                 .filter(|path| path.is_absolute())
                 .map(Path::to_path_buf),
+            editable: Vec::new(),
         })
     }
 
@@ -97,7 +107,7 @@ impl LocalOnlyFolders {
     /// every non-empty name is kept, even one today's [`folder_name_problem`]
     /// rules would refuse (a name recorded before a rule existed). Dropping
     /// it would turn its folder public; keeping it fails closed until the
-    /// user releases it. Duplicates still fold.
+    /// user releases it. Duplicates still fold. Nothing is editable.
     pub fn recorded<I, S>(names: I, raw_root: Option<&Path>) -> Option<Self>
     where
         I: IntoIterator<Item = S>,
@@ -118,12 +128,63 @@ impl LocalOnlyFolders {
             raw_root: raw_root
                 .filter(|path| path.is_absolute())
                 .map(Path::to_path_buf),
+            editable: Vec::new(),
         })
+    }
+
+    /// This configuration with exactly `names` editable: each must be a
+    /// configured name ([`Self::is_folder_name`], ASCII case-insensitive)
+    /// and is kept in its configured spelling, duplicates folded. Returns
+    /// the names that are not configured, which grant nothing.
+    pub fn with_editable<I, S>(mut self, names: I) -> (Self, Vec<String>)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut editable: Vec<String> = Vec::new();
+        let mut rejected = Vec::new();
+        for name in names {
+            let name = name.as_ref();
+            match self
+                .names
+                .iter()
+                .find(|configured| configured.eq_ignore_ascii_case(name))
+            {
+                Some(configured) => {
+                    if !editable.contains(configured) {
+                        editable.push(configured.clone());
+                    }
+                }
+                None => rejected.push(name.to_string()),
+            }
+        }
+        self.editable = editable;
+        (self, rejected)
+    }
+
+    /// This configuration with nothing editable: what every doubt about the
+    /// configuration falls back to.
+    pub fn without_editable(mut self) -> Self {
+        self.editable.clear();
+        self
     }
 
     /// The configured folder names, as written.
     pub fn names(&self) -> &[String] {
         &self.names
+    }
+
+    /// The names whose folders may be edited in place, in their configured
+    /// spelling; empty when every local-only folder is read-only.
+    pub fn editable_names(&self) -> &[String] {
+        &self.editable
+    }
+
+    /// Whether `name` is an editable folder name (ASCII case-insensitive).
+    pub fn is_editable_name(&self, name: &str) -> bool {
+        self.editable
+            .iter()
+            .any(|editable| editable.eq_ignore_ascii_case(name))
     }
 
     /// The configured raw-store root, as written (not canonicalized).
@@ -156,6 +217,45 @@ impl LocalOnlyFolders {
         components(path)
             .iter()
             .any(|component| self.is_folder_name(component))
+    }
+
+    /// Edit side: whether a graph-relative path lies inside local-only
+    /// folders ([`Self::contains`]) that are all editable — every directory
+    /// component carrying a configured name is an editable one, so a folder
+    /// nested in a read-only folder stays read-only.
+    pub fn editable_contains(&self, path: &str) -> bool {
+        let components = components(path);
+        let Some((_, directories)) = components.split_last() else {
+            return false;
+        };
+        let mut configured = directories
+            .iter()
+            .filter(|directory| self.is_folder_name(directory))
+            .peekable();
+        configured.peek().is_some() && configured.all(|directory| self.is_editable_name(directory))
+    }
+
+    /// Whether a graph-relative path names a local-only folder itself (its
+    /// last component is a configured name): the link or directory, which
+    /// is never an edit target.
+    pub fn is_folder_entry(&self, path: &str) -> bool {
+        components(path)
+            .last()
+            .is_some_and(|last| self.is_folder_name(last))
+    }
+
+    /// The local-only folder a path lies in ([`Self::contains`]): the path
+    /// through its innermost directory component carrying a configured name,
+    /// spelled as requested, with empty and `.` segments dropped
+    /// (`finance//secure/sub/x.md` → `finance/secure`). `None` outside every
+    /// local-only folder. Its attachments go to `<folder>/assets/`.
+    pub fn folder_root(&self, path: &str) -> Option<String> {
+        let components = components(path);
+        let (_, directories) = components.split_last()?;
+        let innermost = directories
+            .iter()
+            .rposition(|directory| self.is_folder_name(directory))?;
+        Some(directories[..=innermost].join("/"))
     }
 
     /// Why the raw-store root cannot serve `graph_root`, or `None` when it
@@ -266,6 +366,78 @@ mod tests {
                 case.path
             );
         }
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EditableFixture {
+        folders: Vec<String>,
+        editable: Vec<String>,
+        cases: Vec<EditableCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EditableCase {
+        path: String,
+        local_only: bool,
+        editable: bool,
+        folder_entry: bool,
+        folder_root: Option<String>,
+    }
+
+    #[test]
+    fn shared_editable_fixture_matches_rust_policy() {
+        let raw = include_str!("../../../fixtures/local-only-editable.json");
+        let fixture: EditableFixture = serde_json::from_str(raw).expect("valid fixture corpus");
+        let (folders, rejected) = LocalOnlyFolders::new(&fixture.folders, None)
+            .expect("folders")
+            .with_editable(&fixture.editable);
+        assert!(rejected.is_empty(), "{rejected:?}");
+        for case in fixture.cases {
+            let path = case.path.as_str();
+            assert_eq!(folders.contains(path), case.local_only, "contains {path}");
+            assert_eq!(
+                folders.editable_contains(path),
+                case.editable,
+                "editable {path}"
+            );
+            assert_eq!(
+                folders.is_folder_entry(path),
+                case.folder_entry,
+                "folder entry {path}"
+            );
+            assert_eq!(
+                folders.folder_root(path),
+                case.folder_root,
+                "folder root {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_editable_until_granted_and_only_configured_names_can_be() {
+        let fresh = LocalOnlyFolders::new(["secure", "archive"], None).expect("folders");
+        let recorded = LocalOnlyFolders::recorded(["secure", "archive"], None).expect("folders");
+        for folders in [&fresh, &recorded] {
+            assert!(folders.editable_names().is_empty());
+            assert!(!folders.editable_contains("finance/secure/x.md"));
+        }
+
+        let (granted, rejected) = fresh.with_editable(["SECURE", "secure", "raw", "secured"]);
+        assert_eq!(granted.editable_names(), ["secure"]);
+        assert_eq!(rejected, ["raw", "secured"]);
+        assert!(granted.is_editable_name("Secure"));
+        assert!(!granted.is_editable_name("archive"));
+        assert!(granted.editable_contains("finance/secure/x.md"));
+        // The grant changes nothing on the deny side.
+        assert!(granted.contains("archive/x.md"));
+        assert!(granted.covers("finance/secure"));
+
+        let revoked = granted.without_editable();
+        assert!(revoked.editable_names().is_empty());
+        assert!(!revoked.editable_contains("finance/secure/x.md"));
+        assert!(revoked.contains("finance/secure/x.md"));
     }
 
     #[test]

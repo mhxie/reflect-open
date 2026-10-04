@@ -156,6 +156,9 @@ beforeEach(() => {
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
   mockInvoke.mockReset()
   mockInvoke.mockImplementation(async (command, args) => {
+    if (command === 'note_delete') {
+      return { trashed: 'system' }
+    }
     if (command !== 'db_query') {
       return null
     }
@@ -852,7 +855,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
         if (args['path'] === 'notes/tokyo.md') {
           throw new Error('locked')
         }
-        return null
+        return { trashed: 'system' }
       }
       if (command !== 'db_query') {
         return null

@@ -1,18 +1,21 @@
 import type { ReactElement } from 'react'
-import { isLocalOnlyPath, type OpenTask } from '@reflect/core'
+import type { OpenTask } from '@reflect/core'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
+import { usePrivateNote } from '@/hooks/use-private-note.ts'
 
 /**
  * Render a task's Markdown (its first paragraph, marker excluded) through
  * Reflect's read-only markdown preview. The focused row swaps this for the
  * inline editor; unfocused rows should look like rendered markdown, not raw
- * source text.
+ * source text. A task in a private note renders with no remote media, under
+ * the same verdict as its inline editor.
  */
 export function TaskText({ task }: { task: OpenTask }): ReactElement {
+  const privateNote = usePrivateNote(task.notePath, { sessionEpoch: null, privateHeader: false })
   return (
     <MarkdownPreview
       content={task.markdown}
-      remoteEmbeds={!isLocalOnlyPath(task.notePath)}
+      remoteEmbeds={!privateNote}
       className="reflect-task-preview pointer-events-none text-sm"
     />
   )

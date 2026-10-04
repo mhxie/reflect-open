@@ -130,7 +130,13 @@ it('shares pending reads for different URLs of the same post', async () => {
 })
 
 it('shares a resolver within a graph and isolates another graph', () => {
-  const graph = { root: '/graph', name: 'Graph', generation: 7, localOnlyFolders: [] }
+  const graph = {
+    root: '/graph',
+    name: 'Graph',
+    generation: 7,
+    localOnlyFolders: [],
+    localOnlyEditableFolders: [],
+  }
   expect(getXPostResolver(graph)).toBe(getXPostResolver(graph))
   expect(getXPostResolver({ ...graph, generation: 8 })).not.toBe(getXPostResolver(graph))
 })

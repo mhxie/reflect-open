@@ -251,8 +251,11 @@ describe('getBacklinksWithContext', () => {
     path: string
     title: string
     recencyMs: number
-    content: string
+    /** `undefined` makes the source's read fail. */
+    content: string | undefined
     positions: number[]
+    /** The index row's `is_private` (default 0). */
+    isPrivate?: number
   }
 
   function mockBacklinkPage({
@@ -266,7 +269,11 @@ describe('getBacklinksWithContext', () => {
   }): void {
     mockInvoke.mockImplementation(async (command, args) => {
       if (command === 'note_read') {
-        return sources.find((source) => source.path === args['path'])?.content ?? ''
+        const source = sources.find((candidate) => candidate.path === args['path'])
+        if (source !== undefined && source.content === undefined) {
+          throw new Error('unreadable')
+        }
+        return source?.content ?? ''
       }
       if (command !== 'db_query') {
         throw new Error(`unexpected command: ${command}`)
@@ -282,6 +289,7 @@ describe('getBacklinksWithContext', () => {
         return sources.map((source) => ({
           source_path: source.path,
           source_title: source.title,
+          source_is_private: source.isPrivate ?? 0,
           recency_ms: source.recencyMs,
         }))
       }
@@ -482,6 +490,59 @@ describe('getBacklinksWithContext', () => {
     ])
     expect(page.contexts).toHaveLength(2)
     expect(page.indexedLinkCount).toBe(3)
+  })
+
+  it('marks a source private by its index row, by the read it was cut from, or when unreadable', async () => {
+    const link = 'see [[target]]\n'
+    const position = link.indexOf('[[target]]')
+    mockBacklinkPage({
+      indexedLinkCount: 4,
+      sources: [
+        {
+          path: 'notes/public.md',
+          title: 'Public',
+          recencyMs: 4,
+          content: link,
+          positions: [position],
+        },
+        {
+          path: 'notes/indexed-locked.md',
+          title: 'Indexed locked',
+          recencyMs: 3,
+          content: link,
+          positions: [position],
+          isPrivate: 1,
+        },
+        {
+          // Locked on disk before the index caught up: the row still says public.
+          path: 'notes/just-locked.md',
+          title: 'Just locked',
+          recencyMs: 2,
+          content: `---\nprivate: true\n---\n${link}`,
+          positions: [`---\nprivate: true\n---\n`.length + position],
+        },
+        {
+          path: 'notes/gone.md',
+          title: 'Gone',
+          recencyMs: 1,
+          content: undefined,
+          positions: [position],
+        },
+      ],
+    })
+
+    const page = await getBacklinksWithContext('notes/target.md', { cursor: null, limit: 10 })
+
+    expect(
+      page.contexts.map((context) => [context.sourcePath, context.sourcePrivate, context.snippet]),
+    ).toEqual([
+      ['notes/public.md', false, 'see [[target]]'],
+      ['notes/indexed-locked.md', true, 'see [[target]]'],
+      ['notes/just-locked.md', true, 'see [[target]]'],
+      ['notes/gone.md', true, ''],
+    ])
+    const sourceQuery = dbQueries().find(({ sql }) => sql.includes('select distinct'))
+    expect(sourceQuery?.sql).toContain('"notes"."is_private"')
   })
 })
 

@@ -21,7 +21,13 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   isLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
 }))
 
-const GRAPH: GraphInfo = { root: '/vault', name: 'Vault', generation: 3, localOnlyFolders: [] }
+const GRAPH: GraphInfo = {
+  root: '/vault',
+  name: 'Vault',
+  generation: 3,
+  localOnlyFolders: [],
+  localOnlyEditableFolders: [],
+}
 
 interface FakeVault {
   listings: () => number

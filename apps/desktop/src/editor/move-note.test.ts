@@ -46,6 +46,8 @@ function fakeSession(path: string, follows = false) {
     prepareDelete: async () => false,
     cancelDelete: () => {},
     loadTheirs: () => {},
+    restoreRecovery: () => {},
+    discardRecovery: () => {},
     commitFrontmatter: async () => true,
     content: () => '',
     liveContent: () => '',
@@ -72,7 +74,7 @@ afterEach(() => {
 describe('moveNoteCarryingSession', () => {
   it('flushes, retargets, re-keys, moves, and announces', async () => {
     const { session, flush } = fakeSession('notes/a.md')
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
       moves.push([from, to])
@@ -94,7 +96,7 @@ describe('moveNoteCarryingSession', () => {
   it('a failed move with a carried session retargets and re-keys back', async () => {
     core.moveNoteIndexed.mockRejectedValue(new Error('disk full'))
     const { session } = fakeSession('notes/a.md')
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     try {
       await expect(moveNoteCarryingSession('notes/a.md', 'notes/b.md', 7)).rejects.toThrow(
         'disk full',
@@ -111,7 +113,7 @@ describe('moveNoteCarryingSession', () => {
     core.moveNoteIndexed.mockRejectedValue(new Error('refused'))
     // Another pane legitimately holds a note at the destination path.
     const foreign = fakeSession('notes/b.md')
-    const unregister = registerOpenDocument({ session: foreign.session })
+    const unregister = registerOpenDocument({ generation: () => 1, session: foreign.session })
     try {
       await expect(moveNoteCarryingSession('notes/a.md', 'notes/b.md', 7)).rejects.toThrow(
         'refused',
@@ -130,7 +132,7 @@ describe('moveNoteCarryingSession', () => {
 describe('followHealedMove', () => {
   it('carries a live session to the healed path and announces', () => {
     const { session } = fakeSession('notes/a.md')
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
       moves.push([from, to])
@@ -169,9 +171,23 @@ describe('followDisplacedNote', () => {
   const TO = 'daily/2026-10-04 (this device).md'
   const GENERATION = 7
 
+  it('ignores a same-path owner from another graph generation', async () => {
+    const { session, followDisplacement } = fakeSession(FROM, true)
+    const unregister = registerOpenDocument({ session, generation: () => GENERATION + 1 })
+    try {
+      await followDisplacedNote(FROM, TO, true, GENERATION, () => true)
+      expect(core.readNote).not.toHaveBeenCalled()
+      expect(followDisplacement).not.toHaveBeenCalled()
+      expect(openSession(FROM)).toBe(session)
+      expect(openSession(TO)).toBeNull()
+    } finally {
+      unregister()
+    }
+  })
+
   it('carries a session that follows its moved bytes, and announces the move', async () => {
     const { session, followDisplacement } = fakeSession(FROM, true)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ session, generation: () => GENERATION })
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
       moves.push([from, to])
@@ -193,7 +209,7 @@ describe('followDisplacedNote', () => {
 
   it('leaves a session that stays with the incoming note where it is, unannounced', async () => {
     const { session, followDisplacement } = fakeSession(FROM, false)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ session, generation: () => GENERATION })
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
       moves.push([from, to])
@@ -213,7 +229,7 @@ describe('followDisplacedNote', () => {
   it('hands the session null when the incoming note cannot be read', async () => {
     core.readNote.mockRejectedValue({ kind: 'notFound', message: 'missing' })
     const { session, followDisplacement } = fakeSession(FROM, true)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ session, generation: () => GENERATION })
     try {
       await followDisplacedNote(FROM, TO, false, GENERATION, () => true)
       expect(followDisplacement).toHaveBeenCalledWith(TO, null, false)
@@ -261,7 +277,7 @@ describe('followDisplacedNote', () => {
       applyContent: () => {},
       saveDebounceMs: 60_000,
     })
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ session, generation: () => GENERATION })
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
       moves.push([from, to])
@@ -299,7 +315,7 @@ describe('followDisplacedNote', () => {
     )
     let generation = GENERATION
     const { session, followDisplacement } = fakeSession(FROM, true)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ session, generation: () => GENERATION })
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
       moves.push([from, to])

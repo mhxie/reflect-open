@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
 import { deleteNote, writeNote } from '../graph/commands.ts'
+import type { NoteDeleteOutcome } from '../graph/schemas.ts'
 import { subscribeFileChanges, type FileChange } from './file-changes.ts'
 import { setLocalWriteEcho } from './local-write-echo.ts'
 
@@ -9,10 +10,9 @@ afterEach(() => {
   setBridge(null)
 })
 
-/** Bridge fake: every invoke succeeds with `null` (the void contract). */
-function fakeBridge() {
+function fakeBridge(trashed: NoteDeleteOutcome['trashed'] = 'system') {
   setBridge({
-    invoke: async () => null,
+    invoke: async (command) => (command === 'note_delete' ? { trashed } : null),
     listen: async () => () => {},
   })
 }
@@ -34,19 +34,22 @@ describe('local write echo (Plan 19, decision 5)', () => {
     unlisten()
   })
 
-  it('emits a remove after a delete', async () => {
-    fakeBridge()
-    setLocalWriteEcho(true)
-    const seen: FileChange[][] = []
-    const unlisten = await subscribeFileChanges((changes) => {
-      seen.push(changes)
-    })
+  it.each(['system', 'graph'] as const)(
+    'emits a remove after a delete into %s trash',
+    async (trashed) => {
+      fakeBridge(trashed)
+      setLocalWriteEcho(true)
+      const seen: FileChange[][] = []
+      const unlisten = await subscribeFileChanges((changes) => {
+        seen.push(changes)
+      })
 
-    await deleteNote('notes/gone.md', 1)
+      await expect(deleteNote('notes/gone.md', 1)).resolves.toEqual({ trashed })
 
-    expect(seen).toEqual([[{ path: 'notes/gone.md', kind: 'remove' }]])
-    unlisten()
-  })
+      expect(seen).toEqual([[{ path: 'notes/gone.md', kind: 'remove' }]])
+      unlisten()
+    },
+  )
 
   it('stamps the echo with the on-disk mtime the write returned', async () => {
     // The reconcile's read-free skip compares the stored row's mtime against

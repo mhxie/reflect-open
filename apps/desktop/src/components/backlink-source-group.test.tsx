@@ -8,6 +8,7 @@ import { BacklinkSourceGroup } from './backlink-source-group.tsx'
 const SOURCE: BacklinkSource = {
   path: 'notes/source.md',
   title: 'Source Note',
+  isPrivate: false,
   snippets: [],
 }
 

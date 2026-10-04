@@ -34,6 +34,7 @@ async function setupEditor(
   const grabbed: { current: NoteEditorHandle | null } = { current: null }
   const editor = (
     <NoteEditor
+      privateNote={false}
       initialContent={initialContent}
       onWikilinkSearch={async () => []}
       {...(saveFile !== undefined ? { saveFile } : {})}

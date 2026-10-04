@@ -1,7 +1,7 @@
 import {
+  localImagesOnly,
   resolveNoXPost,
   resolveNoYouTubeVideo,
-  withoutEmbedSnapshots,
 } from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
@@ -21,6 +21,11 @@ interface BacklinkSnippetProps {
   text: string
   /** Graph-relative path of the source note the snippet was read from. */
   notePath: string
+  /**
+   * Whether the source note is private (locked, unreadable, or local-only;
+   * query-provided): the snippet then stays off the network.
+   */
+  sourcePrivate: boolean
   /** The snippet's checkbox tasks anchored to the source note (query-provided). */
   tasks: SnippetTask[]
   /**
@@ -46,14 +51,15 @@ interface BacklinkSnippetProps {
  * `![[embeds]]` resolve from the source note's folder, as in its editor. The
  * `reflect-editor` class shares the editor's chip styling; the
  * `reflect-backlink-snippet` wrapper keeps it in the panel's compact line box.
- * A snippet from a local-only note renders without network embeds or their
- * saved snapshots (its images resolve local-only through
- * `createNoteAttachments`), and its checkboxes stay inert: the source note is
- * read-only.
+ * A snippet from a private note (locked, unreadable, or local-only) never
+ * reaches the network: its embeds show as source URLs, never their cards or
+ * saved snapshots, and only its graph attachments load. A local-only source's
+ * checkboxes also stay inert: that note is read-only.
  */
 export function BacklinkSnippet({
   text,
   notePath,
+  sourcePrivate,
   tasks,
   onWikilinkClick,
 }: BacklinkSnippetProps): ReactElement {
@@ -62,29 +68,30 @@ export function BacklinkSnippet({
   const graphXPostResolver = useXPostResolver()
   const onTaskClick = useSnippetTaskToggle(notePath, tasks)
   const openExternalLink = useOpenExternalLink()
-  const localOnly = isLocalOnlyPath(notePath)
+  const privateSource = sourcePrivate || isLocalOnlyPath(notePath)
+  const imageResolver = useMemo(
+    () => (privateSource ? localImagesOnly(resolveImageUrl) : resolveImageUrl),
+    [privateSource, resolveImageUrl],
+  )
   const handleWikilinkClick = useCallback<WikilinkClickHandler>(
     (payload) => onWikilinkClick(payload, notePath),
     [onWikilinkClick, notePath],
   )
-  const markdown = useMemo(
-    () => (localOnly ? withoutEmbedSnapshots(text) : text),
-    [localOnly, text],
-  )
   return (
     <div className="reflect-backlink-snippet select-text text-xs text-text">
       <MarkdownView
-        resolveXPost={localOnly ? resolveNoXPost : graphXPostResolver}
-        resolveYouTubeVideo={localOnly ? resolveNoYouTubeVideo : resolveYouTubeVideo}
+        resolveXPost={privateSource ? resolveNoXPost : graphXPostResolver}
+        resolveYouTubeVideo={privateSource ? resolveNoYouTubeVideo : resolveYouTubeVideo}
         mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
+        remoteMedia={!privateSource}
         className="reflect-editor"
-        markdown={markdown}
+        markdown={text}
         expandCollapsed
         resolveWikilink={resolveWikilink}
         onWikilinkClick={handleWikilinkClick}
         onLinkClick={openExternalLink}
         {...(onTaskClick ? { onTaskClick } : {})}
-        resolveImageUrl={resolveImageUrl}
+        resolveImageUrl={imageResolver}
         resolveWikiEmbed={resolveWikiEmbed}
       />
     </div>

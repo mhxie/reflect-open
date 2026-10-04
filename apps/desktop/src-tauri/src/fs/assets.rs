@@ -14,6 +14,13 @@
 //!   OS path, so Rust copies file-to-file and the bytes never enter webview
 //!   memory at all.
 //!
+//! Both take the path of the note the attachment is for, and Rust picks the
+//! destination from it ([`attachment_destination`]): an ordinary note's
+//! attachments go to the synced `assets/`, and a note in an editable
+//! local-only folder keeps its attachments in that folder's own `assets/`,
+//! landed through directory descriptors with the same `-2`, `-3`, … policy.
+//! A note in a read-only local-only folder takes none.
+//!
 //! Both are generation-pinned like every mutating command: a graph switch
 //! mid-upload strands the temp file in the *old* graph's `.reflect/tmp/` and
 //! the commit is rejected loudly.
@@ -28,9 +35,12 @@ use std::sync::Mutex;
 use tauri::ipc::{InvokeBody, Request};
 use tauri::State;
 
+use reflect_graph_paths::LocalOnlyFolders;
+
 use crate::error::{AppError, AppResult};
 
-use super::resolve::resolve_write;
+use super::local_only_edit;
+use super::resolve::{resolve_note_edit, resolve_write, EditTarget, LocalOnlyEntry, TargetKind};
 use super::{graph_for, root_for_generation, GraphState};
 
 /// Header carrying the upload id on `asset_upload_append` calls — raw-body
@@ -48,9 +58,9 @@ struct Upload {
 #[derive(Default)]
 pub struct AssetUploads(Mutex<HashMap<String, Upload>>);
 
-fn lock_uploads<'locked>(
-    uploads: &'locked State<'_, AssetUploads>,
-) -> AppResult<std::sync::MutexGuard<'locked, HashMap<String, Upload>>> {
+fn lock_uploads(
+    uploads: &AssetUploads,
+) -> AppResult<std::sync::MutexGuard<'_, HashMap<String, Upload>>> {
     uploads.0.lock().map_err(|err| {
         tracing::error!(?err, "asset upload state lock poisoned by an earlier panic");
         AppError::io("asset upload state lock poisoned")
@@ -85,6 +95,25 @@ fn split_name(name: &str) -> (&str, &str) {
     }
 }
 
+/// The names an intake of `desired` tries, in order: `desired`, then
+/// `stem-2.ext`, `stem-3.ext`, … up to [`MAX_NAME_PROBES`] names.
+fn candidate_names(desired: &str) -> impl Iterator<Item = String> + '_ {
+    let (stem, ext) = split_name(desired);
+    (1..=MAX_NAME_PROBES).map(move |attempt| {
+        if attempt == 1 {
+            desired.to_string()
+        } else {
+            format!("{stem}-{attempt}{ext}")
+        }
+    })
+}
+
+fn no_free_name(desired: &str) -> AppError {
+    AppError::io(format!(
+        "no free asset name after {MAX_NAME_PROBES} probes for {desired}"
+    ))
+}
+
 /// Persist `temp` under `assets_dir` as `desired`, probing `-2`, `-3`, …
 /// suffixes until a name is free. `persist_noclobber` is the collision check
 /// *and* the claim (`O_EXCL` semantics), so two concurrent intakes of the
@@ -95,13 +124,7 @@ fn persist_unique(
     desired: &str,
 ) -> AppResult<String> {
     temp.as_file().sync_all()?;
-    let (stem, ext) = split_name(desired);
-    for attempt in 1..=MAX_NAME_PROBES {
-        let candidate = if attempt == 1 {
-            desired.to_string()
-        } else {
-            format!("{stem}-{attempt}{ext}")
-        };
+    for candidate in candidate_names(desired) {
         match temp.persist_noclobber(assets_dir.join(&candidate)) {
             Ok(_) => return Ok(candidate),
             Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -110,9 +133,27 @@ fn persist_unique(
             Err(err) => return Err(AppError::io(err.to_string())),
         }
     }
-    Err(AppError::io(format!(
-        "no free asset name after {MAX_NAME_PROBES} probes for {desired}"
-    )))
+    Err(no_free_name(desired))
+}
+
+/// [`persist_unique`] for a note in an editable local-only folder: lands the
+/// staged `temp` in the folder's own `assets/` through directory descriptors
+/// (no link followed, no entry replaced, the same suffix policy) and returns
+/// its graph-relative path. `temp` drops afterwards and removes whatever is
+/// left in staging (the original, when the bytes landed as a copy on
+/// another volume).
+fn persist_unique_beneath(
+    temp: tempfile::NamedTempFile,
+    note: &LocalOnlyEntry,
+    desired: &str,
+) -> AppResult<String> {
+    temp.as_file().sync_all()?;
+    let staged = temp
+        .path()
+        .file_name()
+        .ok_or_else(|| AppError::io("a staged upload has no file name"))?;
+    local_only_edit::land_attachment(note, staged, candidate_names(desired))?
+        .ok_or_else(|| no_free_name(desired))
 }
 
 /// The staging directory for in-flight uploads (and the V1 import's asset
@@ -125,22 +166,77 @@ pub(super) fn staging_dir(root: &Path) -> AppResult<std::path::PathBuf> {
     Ok(dir)
 }
 
-/// Resolved `assets/` directory for a commit/import destination, traversal-
-/// and generation-guarded.
-fn assets_dir_for(
+/// Where an intake lands.
+enum Destination {
+    /// The graph's synced `assets/` directory.
+    Graph(std::path::PathBuf),
+    /// The note's editable local-only folder, whose own `assets/` takes it.
+    LocalOnly(LocalOnlyEntry),
+}
+
+/// Where an attachment named `name` for the note at `note_path` lands,
+/// generation-guarded. The note decides: an ordinary note's attachments go
+/// to the graph's `assets/`; a note in an editable local-only folder keeps
+/// them in that folder's `assets/` (never the synced one); a note in a
+/// read-only local-only folder, or one the filesystem resolves into a
+/// local-only folder by another spelling, takes none. Path-shaped names are
+/// refused, and so are hidden names inside a local-only folder.
+fn attachment_destination(
     state: &State<GraphState>,
     generation: u64,
+    note_path: &str,
     name: &str,
-) -> AppResult<std::path::PathBuf> {
+) -> AppResult<Destination> {
     ensure_asset_name(name)?;
     let (root, local_only) = graph_for(state, Some(generation))?;
+    match resolve_note_edit(
+        &root,
+        note_path,
+        local_only.as_deref(),
+        TargetKind::Attachment,
+    )? {
+        EditTarget::Graph(_) => Ok(Destination::Graph(graph_assets_dir(
+            &root,
+            local_only.as_deref(),
+            name,
+        )?)),
+        EditTarget::LocalOnly(note) => {
+            if name.starts_with('.') {
+                return Err(AppError::traversal(format!(
+                    "hidden names are never written into a local-only folder: {name}"
+                )));
+            }
+            Ok(Destination::LocalOnly(note))
+        }
+    }
+}
+
+/// The graph's `assets/` directory for `name`, traversal-guarded.
+fn graph_assets_dir(
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+    name: &str,
+) -> AppResult<std::path::PathBuf> {
     // Resolve the target through the shared guard even though `name` is
     // already vetted — defense in depth: it canonicalizes symlink games, and
     // an `assets/` aliased into a local-only folder refuses the write.
-    resolve_write(&root, &format!("assets/{name}"), local_only.as_deref())?;
+    resolve_write(root, &format!("assets/{name}"), local_only)?;
     let dir = root.join("assets");
     fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Land the staged `temp` at `destination` as `desired` (or its first free
+/// `-2`, `-3`, … variant) and return the graph-relative path.
+fn land(
+    temp: tempfile::NamedTempFile,
+    destination: Destination,
+    desired: &str,
+) -> AppResult<String> {
+    match destination {
+        Destination::Graph(dir) => Ok(format!("assets/{}", persist_unique(temp, &dir, desired)?)),
+        Destination::LocalOnly(note) => persist_unique_beneath(temp, &note, desired),
+    }
 }
 
 /// Start a streamed asset upload: creates a temp file in the graph's staging
@@ -176,7 +272,13 @@ pub fn asset_upload_append(request: Request<'_>, uploads: State<AssetUploads>) -
             "asset_upload_append expects a raw binary body, got JSON",
         ));
     };
-    let mut uploads = lock_uploads(&uploads)?;
+    append_chunk(&uploads, id, bytes)
+}
+
+/// Append `bytes` to the in-flight upload `id` ([`asset_upload_append`]'s
+/// body, which command-tier tests call directly).
+pub(crate) fn append_chunk(uploads: &AssetUploads, id: &str, bytes: &[u8]) -> AppResult<()> {
+    let mut uploads = lock_uploads(uploads)?;
     let upload = uploads
         .get_mut(id)
         .ok_or_else(|| AppError::not_found(format!("unknown upload: {id}")))?;
@@ -184,13 +286,17 @@ pub fn asset_upload_append(request: Request<'_>, uploads: State<AssetUploads>) -
     Ok(())
 }
 
-/// Finish a streamed upload: fsync, then move the staged file into `assets/`
-/// under `desired_name` (or the first free `-2`-suffixed variant). Returns the
-/// final graph-relative `assets/…` path.
+/// Finish a streamed upload for the note at `note_path`: fsync, then move
+/// the staged file to the note's attachment folder
+/// ([`attachment_destination`]) under `desired_name` (or the first free
+/// `-2`-suffixed variant). Returns the final graph-relative path:
+/// `assets/…`, or `<folder>/assets/…` for a note in an editable local-only
+/// folder.
 #[tauri::command]
 pub fn asset_upload_commit(
     id: String,
     desired_name: String,
+    note_path: String,
     generation: u64,
     state: State<GraphState>,
     uploads: State<AssetUploads>,
@@ -206,10 +312,10 @@ pub fn asset_upload_commit(
     // Pin the root before persisting: after the file lands, a failed root
     // lookup would otherwise skip invalidation and strand a stale catalog.
     let root = root_for_generation(&state, generation)?;
-    let assets_dir = assets_dir_for(&state, generation, &desired_name)?;
-    let final_name = persist_unique(upload.file, &assets_dir, &desired_name)?;
+    let destination = attachment_destination(&state, generation, &note_path, &desired_name)?;
+    let path = land(upload.file, destination, &desired_name)?;
     super::invalidate_file_catalog(&state, &root);
-    Ok(format!("assets/{final_name}"))
+    Ok(path)
 }
 
 /// Persist a staged upload at an exact target path, creating parent
@@ -273,13 +379,16 @@ pub fn asset_upload_abort(id: String, uploads: State<AssetUploads>) -> AppResult
     Ok(())
 }
 
-/// Copy a file the OS gave us a real path for (file picker) into `assets/`
+/// Copy a file the OS gave us a real path for (file picker) to the
+/// attachment folder of the note at `note_path` ([`attachment_destination`])
 /// under `desired_name`, with the same collision policy as uploads. The bytes
-/// never cross the IPC. Returns the final graph-relative `assets/…` path.
+/// never cross the IPC. Returns the final graph-relative path, as
+/// [`asset_upload_commit`] does.
 #[tauri::command]
 pub fn asset_import(
     source_path: String,
     desired_name: String,
+    note_path: String,
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<String> {
@@ -290,12 +399,14 @@ pub fn asset_import(
         )));
     }
     let root = root_for_generation(&state, generation)?;
+    // Decided before any byte is copied: a note that takes no attachments
+    // gets nothing staged.
+    let destination = attachment_destination(&state, generation, &note_path, &desired_name)?;
     let mut temp = tempfile::NamedTempFile::new_in(staging_dir(&root)?)?;
     std::io::copy(&mut fs::File::open(source)?, temp.as_file_mut())?;
-    let assets_dir = assets_dir_for(&state, generation, &desired_name)?;
-    let final_name = persist_unique(temp, &assets_dir, &desired_name)?;
+    let path = land(temp, destination, &desired_name)?;
     super::invalidate_file_catalog(&state, &root);
-    Ok(format!("assets/{final_name}"))
+    Ok(path)
 }
 
 /// Copy `source` into the graph at `target`, staging the bytes under

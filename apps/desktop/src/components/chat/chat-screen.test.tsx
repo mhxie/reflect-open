@@ -101,6 +101,7 @@ const GRAPH: GraphInfo = {
   name: 'test-graph',
   generation: 1,
   localOnlyFolders: [],
+  localOnlyEditableFolders: [],
 }
 
 const GRAPH_CONTEXT = cloudSafeGraphContext({

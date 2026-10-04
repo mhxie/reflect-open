@@ -8,8 +8,10 @@ import type {
 } from '@meowdown/core'
 import {
   assetFileName,
+  assetLinkDestination,
   createAsset,
   errorMessage,
+  isLocalOnlyPath,
   isSafeVisibleGraphPath,
   resolveAttachmentLink,
 } from '@reflect/core'
@@ -72,9 +74,12 @@ export interface AssetPersistence {
    */
   openAsset: (path: string) => Promise<void>
   /**
-   * Persist a pasted/dropped file into `assets/`, returning its graph-relative
-   * path — or null when declined, failed (the failure lands on
-   * {@link AssetPersistence.saveError}, never a throw), or no graph is open.
+   * Persist a pasted/dropped file into the note's attachment folder,
+   * returning the Markdown destination that links it — or null when
+   * declined, failed (the failure lands on {@link AssetPersistence.saveError},
+   * never a throw), or no graph is open. Rust picks the folder from the note:
+   * `assets/` (linked as `assets/…`), or an editable local-only note's
+   * `<folder>/assets/` (linked vault-root-absolute, `/<folder>/assets/…`).
    * Images get `pasted-…` names (screenshots have no meaningful name);
    * everything else keeps its original filename, sanitized, since the name
    * is the visible link text.
@@ -94,14 +99,17 @@ export interface AssetPersistence {
  * embeds, and attachment links from the note's own folder
  * ({@link useNoteAttachments}; local files become `reflect-asset://` URLs
  * served off the UI thread by the Rust shell), open attachments in the OS
- * viewer, and persist pasted/dropped files by streaming them into the graph's
- * `assets/` folder — Rust resolves `-2`-style name collisions at write time.
- * A save over {@link LARGE_FILE_BYTES} gets a non-blocking status-line warning
- * after it lands. `generation` pins every save — and every image URL — to the
- * issuing graph session, so a save or image load racing a graph switch is
- * rejected loudly instead of landing in (or reading from) the wrong graph;
- * `path` also scopes the error banner to the note being edited (a pane is
- * reused across note switches).
+ * viewer, and persist pasted/dropped files by streaming them into the note's
+ * attachment folder — the graph's `assets/`, or an editable local-only
+ * note's own `<folder>/assets/`, never the synced one; Rust picks it from the
+ * note and resolves `-2`-style name collisions at write time. A save over
+ * {@link LARGE_FILE_BYTES} into the backed-up `assets/` gets a non-blocking
+ * status-line warning after it lands. `generation` pins every save — and
+ * every image URL — to the issuing graph session, so a save or image load
+ * racing a graph switch is rejected loudly instead of landing in (or reading
+ * from) the wrong graph. `path` names the note each save is for, read when
+ * the save starts (a pane is reused across note switches), and scopes the
+ * error banner to that note.
  */
 export function useAssetPersistence(
   generation: number | null,
@@ -188,9 +196,12 @@ export function useAssetPersistence(
       // seeds the orphaned session's cache, not the next graph's.
       const sizeCache = savedSizes.current
       try {
-        const saved = await createAsset(desiredName, file, generation)
+        // The note this save is for decides where the file lands, so it is
+        // the path this callback holds now, never one cached at mount.
+        const saved = await createAsset(desiredName, file, path, generation)
         sizeCache.set(saved, file.size)
-        if (file.size > LARGE_FILE_BYTES) {
+        // A local-only folder's attachment never enters the Git backup.
+        if (file.size > LARGE_FILE_BYTES && !isLocalOnlyPath(saved)) {
           startOperation('Large file added').warn(
             `“${file.name}” is ${formatBytes(file.size)}. Git keeps every version forever; GitHub rejects files over 100 MB.`,
           )
@@ -198,7 +209,7 @@ export function useAssetPersistence(
         if (!isStale()) {
           setSaveError(null)
         }
-        return saved
+        return assetLinkDestination(saved)
       } catch (cause) {
         // Owned here (not thrown to meowdown's error callback) so a save
         // finishing late can be dropped instead of blaming the next note.
@@ -214,7 +225,7 @@ export function useAssetPersistence(
         return null
       }
     },
-    [generation],
+    [generation, path],
   )
 
   const resolveFileInfo = useCallback(
@@ -223,7 +234,11 @@ export function useAssetPersistence(
         return undefined
       }
       const saved = savedSizes.current
-      const savedSize = isManagedAssetPath(href) ? saved.get(href) : undefined
+      // This session's saves are keyed by graph-relative path; the link's
+      // vault reading names it (`assets/…` as written, `/<folder>/assets/…`
+      // without its slash).
+      const linked = resolveAttachmentLink(path, href, null)
+      const savedSize = linked === null ? undefined : saved.get(linked)
       if (savedSize !== undefined) {
         return { size: savedSize }
       }

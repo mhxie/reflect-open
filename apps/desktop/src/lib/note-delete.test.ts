@@ -11,7 +11,7 @@ const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Pro
 beforeEach(() => {
   setBridge({ invoke: mockInvoke, listen: async () => () => {} })
   mockInvoke.mockReset()
-  mockInvoke.mockResolvedValue(null)
+  mockInvoke.mockResolvedValue({ trashed: 'system' })
   vi.mocked(openSession).mockReset()
 })
 
@@ -27,7 +27,8 @@ describe('deleteOpenNote', () => {
       discard,
     } as unknown as NoteSession)
 
-    await deleteOpenNote('notes/new.md', 7)
+    // No file went anywhere, so no trash took it.
+    await expect(deleteOpenNote('notes/new.md', 7)).resolves.toBeNull()
 
     expect(mockInvoke).not.toHaveBeenCalled()
     expect(discard).toHaveBeenCalledTimes(1)
@@ -51,9 +52,18 @@ describe('deleteOpenNote', () => {
   it('trashes a note with no open session without error', async () => {
     vi.mocked(openSession).mockReturnValue(null)
 
-    await deleteOpenNote('notes/keep.md', 7)
+    await expect(deleteOpenNote('notes/keep.md', 7)).resolves.toEqual({ trashed: 'system' })
 
     expect(mockInvoke).toHaveBeenCalledWith('note_delete', { path: 'notes/keep.md', generation: 7 })
+  })
+
+  it('reports a local-only note the system Trash refused, kept in the graph’s trash', async () => {
+    vi.mocked(openSession).mockReturnValue(null)
+    mockInvoke.mockResolvedValue({ trashed: 'graph' })
+
+    await expect(deleteOpenNote('finance/secure/bank.md', 7)).resolves.toEqual({
+      trashed: 'graph',
+    })
   })
 
   it('resumes persistence when trashing a prepared session fails', async () => {

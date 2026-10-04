@@ -140,7 +140,12 @@ export {
   isCalendarDate,
   type GraphPathKind,
 } from '../graph/paths.ts'
-export { isLocalOnlyPath } from '../graph/local-only.ts'
+export {
+  isEditableLocalOnlyPath,
+  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
+  localOnlyFolderRoot,
+} from '../graph/local-only.ts'
 export {
   createAttachmentCatalog,
   isImageAttachmentPath,
@@ -172,6 +177,8 @@ export {
   recentGraphSchema,
   fileMetaSchema,
   noteCreateOutcomeSchema,
+  noteDeleteOutcomeSchema,
+  noteRecoverySchema,
   graphImportProgressSchema,
   graphImportSummarySchema,
   windowBootstrapSchema,
@@ -180,6 +187,8 @@ export {
   type RecentGraph,
   type FileMeta,
   type NoteCreateOutcome,
+  type NoteDeleteOutcome,
+  type NoteRecovery,
   type GraphImportProgress,
   type GraphImportSummary,
   type WindowBootstrap,
@@ -216,6 +225,9 @@ export {
   listDir,
   noteExists,
   deleteNote,
+  writeNoteRecovery,
+  readNoteRecovery,
+  clearNoteRecovery,
   deleteAudioMemo,
   importAudioMemo,
   listFiles,
@@ -249,7 +261,7 @@ export {
 } from '../graph/patch-note.ts'
 export { fetchYouTubeVideo } from '../youtube-video.ts'
 export { createAsset, importAsset } from '../graph/assets.ts'
-export { assetFileName } from '../graph/asset-names.ts'
+export { assetFileName, assetLinkDestination } from '../graph/asset-names.ts'
 export {
   newNoteId,
   newNoteSource,

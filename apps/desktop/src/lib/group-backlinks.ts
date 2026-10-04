@@ -16,6 +16,12 @@ export interface BacklinkSource {
   path: string
   /** Title of the source note. */
   title: string
+  /**
+   * The source note is private (locked, unreadable, or local-only), so its
+   * snippets must not reach the network. Any of its rows saying so, or
+   * leaving it unsaid, makes it private.
+   */
+  isPrivate: boolean
   /** The line around each link, keyed `path:posFrom` for stable rendering. */
   snippets: BacklinkSnippetData[]
 }
@@ -29,10 +35,19 @@ export interface BacklinkSource {
 export function groupBacklinksBySource(backlinks: readonly BacklinkContext[]): BacklinkSource[] {
   const groups = new Map<string, BacklinkSource>()
   for (const backlink of backlinks) {
+    // Fails closed: only an explicit `false` lets a source's media load.
+    const sourcePrivate = backlink.sourcePrivate !== false
     let group = groups.get(backlink.sourcePath)
     if (group === undefined) {
-      group = { path: backlink.sourcePath, title: backlink.sourceTitle, snippets: [] }
+      group = {
+        path: backlink.sourcePath,
+        title: backlink.sourceTitle,
+        isPrivate: sourcePrivate,
+        snippets: [],
+      }
       groups.set(backlink.sourcePath, group)
+    } else if (sourcePrivate) {
+      group.isPrivate = true
     }
     if (backlink.snippet !== '') {
       group.snippets.push({

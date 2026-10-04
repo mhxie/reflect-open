@@ -168,7 +168,13 @@ vi.mock('@/components/ui/toast.tsx', () => ({ toast }))
 
 const { AudioMemoProvider, useAudioMemo } = await import('./audio-memo-provider.tsx')
 
-const GRAPH: GraphInfo = { root: '/notes', name: 'Notes', generation: 3, localOnlyFolders: [] }
+const GRAPH: GraphInfo = {
+  root: '/notes',
+  name: 'Notes',
+  generation: 3,
+  localOnlyFolders: [],
+  localOnlyEditableFolders: [],
+}
 
 function wrapper({ children }: { children: ReactNode }): ReactElement {
   return <AudioMemoProvider graph={GRAPH}>{children}</AudioMemoProvider>

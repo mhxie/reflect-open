@@ -4,7 +4,9 @@ import {
   errorMessage,
   frontmatterPrivacy,
   isAppError,
+  notePrivate,
   upsertFrontmatter,
+  type NoteRecovery,
 } from '@reflect/core'
 import { splitDoc } from './note-session-doc.ts'
 import { frontmatterPatchToYaml, type FrontmatterPatch } from './note-session-frontmatter.ts'
@@ -14,6 +16,7 @@ import type {
   NoteSessionSnapshot,
   NoteSessionStatus,
 } from './note-session-types.ts'
+import { isSaveBlockingError } from './save-blocking-error.ts'
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 800
 
@@ -34,6 +37,9 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
   let missing = false
   let conflict: string | null = null
   let error: string | null = null
+  let privateHeader = true
+  let recovery: NoteRecovery | null = null
+  let saveBlocked = false
 
   // Pipeline state (never surfaces).
   /** The **body** as of the last editor change (the editor never sees frontmatter). */
@@ -66,6 +72,16 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
   // Set by `discard` — tells `dispose` to skip its flush (the file is being
   // deleted, so rewriting it would recreate it).
   let discarded = false
+  /** This session has queued a draft; saves resolve only their captured versions. */
+  let recoveryHeld = false
+  /** The text this session last put into the recovery copy. */
+  let heldContents: string | null = null
+  let heldRecovery: NoteRecovery | null = null
+  let restoredRecovery: NoteRecovery | null = null
+  let recoveryVersion = 0
+  let heldVersion = 0
+  /** Serializes recovery-copy IO, so a drop never overtakes an earlier keep. */
+  let recoveryChain: Promise<void> = Promise.resolve()
 
   let lastEmitted: NoteSessionSnapshot | null = null
 
@@ -81,6 +97,9 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       missing,
       conflict,
       error,
+      privateHeader,
+      recovery,
+      saveBlocked,
     }
     if (
       lastEmitted !== null &&
@@ -90,12 +109,102 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       lastEmitted.dirty === next.dirty &&
       lastEmitted.missing === next.missing &&
       lastEmitted.conflict === next.conflict &&
-      lastEmitted.error === next.error
+      lastEmitted.error === next.error &&
+      lastEmitted.privateHeader === next.privateHeader &&
+      lastEmitted.recovery === next.recovery &&
+      lastEmitted.saveBlocked === next.saveBlocked
     ) {
       return
     }
     lastEmitted = next
     onSnapshot(next)
+  }
+
+  /**
+   * Re-classify the live header after it changed. The whole document is
+   * classified, not the header alone: a frontmatter block behind a leading
+   * byte-order mark splits as body, yet the shared classifier counts it.
+   */
+  function classifyHeader(): void {
+    privateHeader = notePrivate(header + buffer)
+  }
+
+  /** Queue recovery-copy IO behind any earlier; a failure is logged, never thrown. */
+  function enqueueRecovery(step: () => Promise<void>): void {
+    recoveryChain = recoveryChain.then(step).catch((cause: unknown) => {
+      console.error('failed to keep or drop unsaved note text:', cause)
+    })
+  }
+
+  /**
+   * Keep this session's unsaved document where a later open finds it.
+   * Runs after `dispose` too: a teardown flush that fails is exactly when the
+   * text must survive the pane.
+   */
+  function preserveBuffer(): void {
+    const keep = io.recovery?.preserve
+    if (keep === undefined || discarded) {
+      return
+    }
+    const forPath = path
+    const contents = header + buffer
+    if (recoveryHeld && heldContents === contents) {
+      return // already kept (a teardown flushes, then disposes)
+    }
+    recoveryHeld = true
+    heldContents = contents
+    const version = ++recoveryVersion
+    const sourceRevision = missing ? null : disk
+    if (recovery !== null) {
+      recovery = null
+      emit()
+    }
+    enqueueRecovery(async () => {
+      try {
+        heldRecovery = await keep(forPath, contents, sourceRevision)
+        heldVersion = version
+      } catch (cause) {
+        if (recoveryVersion === version) {
+          recoveryHeld = heldRecovery !== null
+          heldContents = heldRecovery?.contents ?? null
+        }
+        throw cause
+      }
+    })
+  }
+
+  async function refreshRecovery(forPath: string): Promise<void> {
+    const next = await io.recovery?.read(forPath)
+    if (!disposed && path === forPath && restoredRecovery === null) {
+      recovery = next ?? null
+      emit()
+    }
+  }
+
+  /** A write clears only copies that existed when it began. */
+  function clearHeldRecovery(throughVersion: number, restored: NoteRecovery | null): void {
+    const clear = io.recovery?.clear
+    if (clear === undefined || (!recoveryHeld && restored === null)) {
+      return
+    }
+    const forPath = path
+    enqueueRecovery(async () => {
+      if (heldRecovery !== null && heldVersion <= throughVersion) {
+        await clear(forPath, heldRecovery)
+        heldRecovery = null
+      }
+      if (restored !== null) {
+        await clear(forPath, restored)
+        if (restoredRecovery?.token === restored.token) {
+          restoredRecovery = null
+        }
+      }
+      if (recoveryVersion <= throughVersion) {
+        recoveryHeld = false
+        heldContents = null
+      }
+      await refreshRecovery(forPath)
+    })
   }
 
   function save(): void {
@@ -120,6 +229,8 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
           return
         }
         const content = header + buffer
+        const throughVersion = recoveryVersion
+        const restored = restoredRecovery
         inFlightWrite = content
         try {
           await write(path, content, missing ? null : disk)
@@ -127,7 +238,9 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
           dirty = header + buffer !== content
           missing = false // the landed write created the file if it was missing
           error = null // a previous save failure is resolved by this success
+          saveBlocked = false
           emit()
+          clearHeldRecovery(throughVersion, restored)
           onContent?.(content, 'saved')
         } finally {
           inFlightWrite = null
@@ -136,6 +249,10 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       .catch(async (cause) => {
         console.error('failed to save note:', cause)
         error = errorMessage(cause)
+        saveBlocked = io.recovery !== undefined && isSaveBlockingError(cause)
+        // Kept before the reconcile reads disk: the text must outlive this
+        // session even when the read fails or the pane is already gone.
+        preserveBuffer()
         await reconcileFromDisk()
         emit()
       })
@@ -165,9 +282,16 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     reconcilePendingEditorInput?.()
     cancelScheduledSave()
     save()
+    if (dirty && conflict !== null) {
+      // A parked conflict pauses saves, so a teardown or quit flush writes
+      // nothing: keep the unsaved text instead.
+      preserveBuffer()
+    }
     // save() extended the chain synchronously (or left it settled when there
     // was nothing to do) — the chain as of now is exactly this flush's write.
-    return saveChain
+    // Any recovery copy it keeps is queued before that write settles, so
+    // waiting on the recovery chain after it covers the copy too.
+    return saveChain.then(() => recoveryChain)
   }
 
   function editorChanged(markdown: string): void {
@@ -213,9 +337,13 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     const doc = splitDoc(content)
     header = doc.header
     buffer = doc.body
+    classifyHeader()
     disk = content
     dirty = false
     missing = false // external content means the file exists on disk now
+    // Nothing unsaved is left to protect, so the editor takes input again; a
+    // later save that still can't land blocks it anew.
+    saveBlocked = false
     // Re-gate: the content may have introduced (or removed) syntax the editor
     // can't round-trip. When protection flips the pane remounts via
     // initialContent; otherwise reload the live editor in place.
@@ -264,10 +392,12 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     if (dirty) {
       // Never clobber unsaved edits — park the external content and pause the
       // save pipeline (cancel any pending debounce) until the user chooses; a
-      // save landing now would overwrite "theirs" first.
+      // save landing now would overwrite "theirs" first. The unsaved text is
+      // kept meanwhile, so closing the pane can't lose it.
       cancelScheduledSave()
       conflict = content
       emit()
+      preserveBuffer()
       return
     }
     adoptCleanContent(content)
@@ -285,6 +415,24 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     }
   }
 
+  /**
+   * An earlier session's kept unsaved text, read alongside the note so the
+   * offer is in place before the editor can take (and fail to save) an edit.
+   * Failing to read it never fails the load.
+   */
+  async function readRecovery(): Promise<NoteRecovery | null> {
+    const read = io.recovery?.read
+    if (read === undefined) {
+      return null
+    }
+    try {
+      return await read(path)
+    } catch (cause) {
+      console.error('failed to read kept unsaved note text:', cause)
+      return null
+    }
+  }
+
   function load(): void {
     loading = true
     missedChange = false
@@ -294,7 +442,9 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     emit()
     loadPromise = (async () => {
       try {
+        const kept = readRecovery()
         const { content, fileMissing } = await readInitial()
+        const keptCopy = await kept
         if (disposed) {
           return
         }
@@ -305,6 +455,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
         const doc = splitDoc(adopted)
         header = doc.header
         buffer = doc.body
+        classifyHeader()
         disk = adopted
         dirty = false
         missing = fileMissing
@@ -313,6 +464,12 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
         // but still classifies `normalizing` (meowdown 0.65.3).
         isProtected = detectConflictMarkers(adopted) || classify(doc.body) === 'lossy'
         initialContent = isProtected ? adopted : doc.body
+        if (keptCopy !== null && keptCopy.contents === content) {
+          // The text did reach disk after all: nothing to offer.
+          clearHeldRecovery(recoveryVersion, keptCopy)
+        } else {
+          recovery = keptCopy
+        }
         status = 'ready'
         emit()
         // The real disk content, not the seed: the rename tracker must
@@ -410,11 +567,58 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     adoptCleanContent(content)
   }
 
+  function restoreRecovery(): void {
+    if (
+      recovery === null ||
+      disposed ||
+      isProtected ||
+      status !== 'ready' ||
+      conflict !== null ||
+      io.write === null
+    ) {
+      return
+    }
+    const doc = splitDoc(recovery.contents)
+    // The kept copy stays until this text lands, then goes like this
+    // session's own.
+    restoredRecovery = recovery
+    recovery = null
+    header = doc.header
+    buffer = doc.body
+    classifyHeader()
+    applyToEditor(doc.body)
+    dirty = header + buffer !== disk
+    emit()
+    if (dirty) {
+      save()
+    } else {
+      clearHeldRecovery(recoveryVersion, restoredRecovery)
+    }
+  }
+
+  function discardRecovery(): void {
+    if (recovery === null) {
+      return
+    }
+    const discardedCopy = recovery
+    recovery = null
+    emit()
+    const clear = io.recovery?.clear
+    if (clear !== undefined) {
+      const forPath = path
+      enqueueRecovery(async () => {
+        await clear(forPath, discardedCopy)
+        await refreshRecovery(forPath)
+      })
+    }
+  }
+
   function updateFrontmatter(patch: FrontmatterPatch): boolean {
     if (disposed || isProtected || status !== 'ready') {
       return false
     }
     header = splitDoc(upsertFrontmatter(header + buffer, frontmatterPatchToYaml(patch))).header
+    classifyHeader()
     dirty = header + buffer !== disk
     emit()
     if (dirty) {
@@ -459,6 +663,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       // Preserve body edits and any newer metadata change made during the write.
       if (header === attemptedHeader) {
         header = previousHeader
+        classifyHeader()
       }
       dirty = header + buffer !== disk
       emit()
@@ -489,6 +694,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     const doc = splitDoc(transform(header + buffer))
     header = doc.header
     buffer = doc.body
+    classifyHeader()
     applyToEditor(doc.body) // the open editor shows the edited line
     dirty = header + buffer !== disk
     // A no-op edit (transform changed nothing) writes nothing, so a *prior*
@@ -505,8 +711,10 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
         buffer = previousBuffer
         applyToEditor(previousBuffer)
       }
+      classifyHeader()
       dirty = header + buffer !== disk
       error = null
+      saveBlocked = false
       emit()
       throw new Error(message)
     }
@@ -569,6 +777,8 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     flush,
     keepMine,
     loadTheirs,
+    restoreRecovery,
+    discardRecovery,
     content: () => header + buffer,
     liveContent: () => (status === 'ready' ? header + buffer : null),
     isDirty: () => dirty,

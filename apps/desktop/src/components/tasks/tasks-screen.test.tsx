@@ -21,8 +21,13 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   hasBridge: () => true,
   getOpenTasks,
   getCompletedTasks,
-  // The graph's local-only folders are `secure`.
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
+  // The graph's local-only folders: `secure` is editable, `archive` read-only.
+  isLocalOnlyPath: (path: string) =>
+    path
+      .split('/')
+      .slice(0, -1)
+      .some((name) => name === 'secure' || name === 'archive'),
+  isLocalOnlyReadOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('archive'),
 }))
 vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
@@ -569,10 +574,10 @@ describe('TasksScreen', () => {
     await view.unmount()
   })
 
-  it('keeps a task from a local-only note read-only: no inline editor, inert checkbox', async () => {
+  it('keeps a task from a read-only local-only note read-only: no inline editor, inert checkbox', async () => {
     getOpenTasks.mockResolvedValue([
       task({
-        notePath: 'finance/secure/bank.md',
+        notePath: 'archive/bank.md',
         astPath: [2],
         text: 'pay rent',
         noteTitle: 'Bank',
@@ -594,6 +599,32 @@ describe('TasksScreen', () => {
     // Control: the ordinary task beside it still opens the inline editor.
     await userEvent.click(view.getByRole('button', { name: 'second' }))
     expect(view.getByTestId('task-editor').element().textContent).toContain('second')
+    await view.unmount()
+  })
+
+  it('edits and toggles a task from an editable local-only note in place', async () => {
+    getOpenTasks.mockResolvedValue([
+      task({
+        notePath: 'finance/secure/bank.md',
+        astPath: [2],
+        text: 'pay rent',
+        noteTitle: 'Bank',
+      }),
+    ])
+    toggleTask.mockResolvedValue(WRITTEN)
+    const view = await renderScreen()
+
+    await userEvent.click(await view.findByRole('button', { name: 'pay rent' }))
+    // The inline editor mounts (it follows the note's privacy, see TaskEditor).
+    expect(view.getByTestId('task-editor').element().textContent).toContain('pay rent')
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(view.getByRole('button', { name: 'Complete: pay rent' }))
+    await waitFor(() => expect(toggleTask).toHaveBeenCalledTimes(1))
+    expect(toggleTask).toHaveBeenCalledWith(
+      expect.objectContaining({ notePath: 'finance/secure/bank.md' }),
+      1,
+    )
     await view.unmount()
   })
 

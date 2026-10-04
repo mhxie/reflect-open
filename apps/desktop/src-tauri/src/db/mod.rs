@@ -393,10 +393,10 @@ pub fn note_move_indexed<R: tauri::Runtime>(
 ) -> AppResult<()> {
     let _background_task = background_task::scoped(&background_tasks, "Reflect note move");
     let (root, local_only) = crate::fs::graph_for(&graph, Some(generation))?;
-    // A move into or out of a local-only folder is refused before any row
-    // moves (the disk half would refuse it anyway).
-    crate::fs::resolve_write_in_graph(&root, &request.from, local_only.as_deref())?;
-    crate::fs::resolve_write_in_graph(&root, &request.to, local_only.as_deref())?;
+    // A move into or out of a local-only folder, or within a read-only one,
+    // is refused before any row moves (the disk half would refuse it
+    // anyway); a move within editable local-only folders goes ahead.
+    crate::fs::resolve_note_move(&root, &request.from, &request.to, local_only.as_deref())?;
     {
         let writing = crate::fs::note_write_guard();
         let mut state = lock_state(&index)?;

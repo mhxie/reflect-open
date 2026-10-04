@@ -46,7 +46,7 @@ vi.mock('@reflect/core', async (importOriginal) => {
 
 interface RecordedOperation {
   label: string
-  outcome: 'running' | 'done' | 'failed'
+  outcome: 'running' | 'done' | 'warning' | 'failed'
   message: string | null
 }
 const operationLog = vi.hoisted(() => ({ records: [] as RecordedOperation[] }))
@@ -58,6 +58,10 @@ vi.mock('@/lib/operations.ts', () => ({
       progress: () => {},
       done: () => {
         record.outcome = 'done'
+      },
+      warn: (message: string) => {
+        record.outcome = 'warning'
+        record.message = message
       },
       fail: (message: string) => {
         record.outcome = 'failed'
@@ -123,6 +127,8 @@ function fakeSession(content: string): NoteSession & {
     prepareDelete: async () => false,
     cancelDelete: () => {},
     loadTheirs: () => {},
+    restoreRecovery: () => {},
+    discardRecovery: () => {},
     commitFrontmatter: async () => true,
     content: () => content,
     liveContent: () => content,
@@ -141,6 +147,7 @@ beforeEach(() => {
     failed: [],
     collision: false,
     destinationBlocked: false,
+    keptInBackup: [],
   })
   io.getBacklinks.mockReset()
   io.getBacklinks.mockResolvedValue([])
@@ -201,7 +208,7 @@ describe('rename coordinator', () => {
 
   it('routes the alias through a live session instead of the disk', async () => {
     const session = fakeSession('# New Title\n')
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 7, session })
     try {
       const coordinator = makeCoordinator()
       await renameOnce(coordinator, 'Old Title', 'New Title')
@@ -218,7 +225,7 @@ describe('rename coordinator', () => {
   it('falls back to the disk write when the session cannot take the patch', async () => {
     const session = fakeSession('# New Title\n')
     session.updateFrontmatter.mockReturnValue(false) // loading/protected/disposed
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 7, session })
     io.readNote.mockResolvedValue('# New Title\n')
     try {
       const coordinator = makeCoordinator()
@@ -238,6 +245,7 @@ describe('rename coordinator', () => {
       failed: [],
       collision: true,
       destinationBlocked: false,
+      keptInBackup: [],
     })
     const coordinator = makeCoordinator()
     await renameOnce(coordinator, 'Old Title', 'New Title')
@@ -257,6 +265,7 @@ describe('rename coordinator', () => {
       failed: [],
       collision: false,
       destinationBlocked: true,
+      keptInBackup: [],
     })
     io.readNote.mockResolvedValue('# New Title\n')
     const coordinator = makeCoordinator()
@@ -305,6 +314,64 @@ describe('rename coordinator', () => {
     expect(message).toContain('may no longer resolve')
   })
 
+  it('reports the backed-up notes a local-only note’s rename left on the old title', async () => {
+    io.rewriteLinksForTitleChange.mockResolvedValue({
+      rewritten: ['finance/secure/other.md'],
+      failed: [],
+      collision: false,
+      destinationBlocked: false,
+      keptInBackup: ['notes/a.md', 'notes/b.md'],
+    })
+    io.readNote.mockResolvedValue(managed('# New Title\n'))
+    const coordinator = createRenameCoordinator({
+      path: 'finance/secure/ledger.md',
+      generation: () => 7,
+      canFire: () => true,
+    })
+    await renameOnce(coordinator, 'Old Title', 'New Title')
+
+    expect(operationLog.records).toEqual([
+      {
+        label: 'Renaming "Old Title" → "New Title"',
+        outcome: 'warning',
+        message: '2 backed-up notes keep the old title (their links still resolve)',
+      },
+    ])
+    // The old-title alias that keeps them resolving lands in the note itself,
+    // checked against what it read; the file never follows the title.
+    expect(io.writeNote).toHaveBeenCalledWith(
+      'finance/secure/ledger.md',
+      upsertFrontmatter(managed('# New Title\n'), { aliases: ['Old Title'] }),
+      7,
+      managed('# New Title\n'),
+    )
+    expect(io.slugPathForTitle).not.toHaveBeenCalled()
+    expect(io.moveNoteIndexed).not.toHaveBeenCalled()
+  })
+
+  it('says the kept notes’ links no longer resolve when the alias failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    io.rewriteLinksForTitleChange.mockResolvedValue({
+      rewritten: [],
+      failed: [],
+      collision: false,
+      destinationBlocked: false,
+      keptInBackup: ['notes/a.md'],
+    })
+    io.readNote.mockRejectedValue(new Error('read denied'))
+    const coordinator = createRenameCoordinator({
+      path: 'finance/secure/ledger.md',
+      generation: () => 7,
+      canFire: () => true,
+    })
+    await renameOnce(coordinator, 'Old Title', 'New Title')
+
+    expect(operationLog.records[0]!.outcome).toBe('failed')
+    expect(operationLog.records[0]!.message).toContain(
+      '1 backed-up note keeps the old title, and its links no longer resolve',
+    )
+  })
+
   it('drops the rename loudly when no graph generation is available', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const coordinator = makeCoordinator({ generation: () => null })
@@ -342,7 +409,7 @@ describe('rename coordinator', () => {
 
   it('moves the file onto the new slug: flush, retarget, registry re-key, then the move', async () => {
     const session = fakeSession('# New Title\n')
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 7, session })
     io.slugPathForTitle.mockResolvedValue('notes/new-title.md')
     const moves: Array<[string, string]> = []
     const unsubscribe = onNoteMoved((from, to) => {
@@ -386,7 +453,7 @@ describe('rename coordinator', () => {
   it('a failed move retargets the session back and reports filename drift', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const session = fakeSession('# New Title\n')
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 7, session })
     io.readNote.mockResolvedValue('# New Title\n')
     io.slugPathForTitle.mockResolvedValue('notes/new-title.md')
     io.moveNoteIndexed.mockRejectedValue(new Error('disk full'))
@@ -412,6 +479,7 @@ describe('rename coordinator', () => {
       failed: [],
       collision: true,
       destinationBlocked: false,
+      keptInBackup: [],
     })
     io.slugPathForTitle.mockResolvedValue('notes/new-title.md')
     const coordinator = makeCoordinator()

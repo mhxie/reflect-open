@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -30,7 +31,6 @@ import { AiPreviewActions } from '@/editor/ai-menu/ai-preview-actions.tsx'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useAiPrompts } from '@/hooks/use-ai-prompts.ts'
 import { useAiProviders } from '@/hooks/use-ai-providers.ts'
-import { useNoteRow } from '@/hooks/use-note-row.ts'
 import { providerFetch } from '@/lib/provider-fetch.ts'
 import { useRouter } from '@/routing/router.tsx'
 
@@ -46,6 +46,11 @@ interface EditorAiMenuOptions {
   /** Graph-relative path of the note being edited (the privacy subject). */
   path: string
   /**
+   * The note's privacy verdict (`usePrivateNote`), the same one the editor's
+   * network policy follows. A private note gets no cloud AI entry.
+   */
+  privateNote: boolean
+  /**
    * The editor-session identity (`useNoteDocument().sessionEpoch`) — bumps
    * when a new session is created, not when a rename retargets one, so a
    * title-driven rename never tears down a run under its live preview.
@@ -57,9 +62,9 @@ interface EditorAiMenuOptions {
 
 export interface EditorAiMenuValue {
   /**
-   * meowdown's menu source, or undefined for a `private: true` note — with no
+   * meowdown's menu source, or undefined for a private note — with no
    * handler meowdown renders neither the menu nor the selection affordance,
-   * so a private note's selection has no AI entry point at all.
+   * so a private note's selection has no cloud AI entry point at all.
    */
   onSelectionMenuSearch: SelectionMenuSearchHandler | undefined
   /** The retry control rendered in the preview footer. */
@@ -79,41 +84,30 @@ interface ActiveRun {
 
 export function useEditorAiMenu({
   path,
+  privateNote,
   sessionEpoch,
   editorRef,
 }: EditorAiMenuOptions): EditorAiMenuValue {
-  const noteRow = useNoteRow(path)
-  // The last privacy flag this session resolved, adjusted during render (the
-  // note-pane seed pattern). A title-driven rename retargets the same note
-  // under a new path (Plan 17), and the new path's row query starts empty —
-  // the previous flag stays authoritative for that beat, so a Retry mid-
-  // rename doesn't misreport a public note as private.
-  const [resolvedPrivacy, setResolvedPrivacy] = useState<{
-    epoch: number
-    isPrivate: boolean
-  } | null>(null)
-  if (
-    noteRow !== null &&
-    (resolvedPrivacy?.epoch !== sessionEpoch || resolvedPrivacy.isPrivate !== noteRow.isPrivate)
-  ) {
-    setResolvedPrivacy({ epoch: sessionEpoch, isPrivate: noteRow.isPrivate })
-  }
-  // Fail closed: with no row resolved in this session yet, the note counts as
-  // private, so the menu (and the CloudSafe mint below) never treats a
-  // not-yet-loaded note as sendable. The row is overlay-backed, so an in-app
-  // "Mark as private" flips this immediately; only an external edit waits on
-  // the watcher's re-index.
-  const isPrivate =
-    noteRow?.isPrivate ??
-    (resolvedPrivacy?.epoch === sessionEpoch ? resolvedPrivacy.isPrivate : true)
   const { providers, defaultProvider } = useAiProviders()
   const { prompts } = useAiPrompts()
   const { navigate } = useRouter()
 
   const runRef = useRef<ActiveRun | null>(null)
+  const privateNoteRef = useRef(privateNote)
+  // A keychain continuation can run before effects observe a Lock toggle.
+  // eslint-disable-next-line react-hooks/refs
+  privateNoteRef.current = privateNote
   // The staged placement of the current run — state (not just the ref) so the
   // preview's alternate-placement button can label itself.
   const [runMode, setRunMode] = useState<AiPromptMode | null>(null)
+
+  useLayoutEffect(() => {
+    if (!privateNote || runRef.current === null) return
+    runRef.current.controller.abort()
+    runRef.current = null
+    setRunMode(null)
+    editorRef.current?.discardPendingReplacement()
+  }, [privateNote, editorRef])
 
   // A run belongs to one editor session: switching notes (or unmounting)
   // mid-stream aborts the provider call and drops the run, so a stale stream
@@ -166,7 +160,10 @@ export function useEditorAiMenu({
       // device as a CloudSafe value minted against the note's privacy flag.
       let selection: CloudSafe<string>
       try {
-        selection = cloudSafeSelection({ path, isPrivate }, context.selectedText)
+        selection = cloudSafeSelection(
+          { path, isPrivate: privateNoteRef.current },
+          context.selectedText,
+        )
       } catch (cause) {
         if (isPrivateNoteError(cause)) {
           fail('This note is marked private, so its content is never sent to an AI provider.')
@@ -176,7 +173,7 @@ export function useEditorAiMenu({
       }
 
       const apiKey = await aiApiKeyForConfig(config).catch(() => null)
-      if (runRef.current !== run) return
+      if (runRef.current !== run || privateNoteRef.current) return
       if (apiKey === null) {
         fail('No API key found for this provider — re-add it in Settings → AI providers.')
         return
@@ -202,7 +199,7 @@ export function useEditorAiMenu({
         // and the user decides with Accept/Discard.
       }
     },
-    [providers, defaultProvider, path, isPrivate, editorRef],
+    [providers, defaultProvider, path, editorRef],
   )
 
   const runPrompt = useCallback(
@@ -222,7 +219,7 @@ export function useEditorAiMenu({
   )
 
   const onSelectionMenuSearch = useMemo<SelectionMenuSearchHandler | undefined>(() => {
-    if (isPrivate) return
+    if (privateNote) return
     return (query: string): SelectionMenuItem[] => {
       if (providers.length === 0) {
         return [
@@ -252,7 +249,7 @@ export function useEditorAiMenu({
       }
       return items
     }
-  }, [isPrivate, providers.length, prompts, navigate, runPrompt])
+  }, [privateNote, providers.length, prompts, navigate, runPrompt])
 
   const retry = useCallback(
     (option: ChatModelOption | null): void => {
@@ -302,10 +299,10 @@ export function useEditorAiMenu({
     const editor = editorRef.current
     // Only consume the key when the menu can actually open — a private note
     // or an empty selection lets ⌘⇧J fall through.
-    if (isPrivate || !editor || editor.getSelectedText() === '') return false
+    if (privateNote || !editor || editor.getSelectedText() === '') return false
     editor.openSelectionMenu()
     return true
-  }, [isPrivate, editorRef])
+  }, [privateNote, editorRef])
 
   return { onSelectionMenuSearch, pendingReplacementActions, onPendingReplacementResolve, openMenu }
 }

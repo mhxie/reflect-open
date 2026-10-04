@@ -49,13 +49,23 @@ describe('MarkdownPreview saved embed snapshots', () => {
   })
   const CONTENT = `![](https://www.youtube.com/watch?v=dQw4w9WgXcQ)<!-- ${SNAPSHOT} -->`
 
-  it('renders no card from a saved snapshot when remote embeds are off', async () => {
-    const view = await render(<MarkdownPreview content={CONTENT} remoteEmbeds={false} />)
-    // The embed falls back without data, and the snapshot's thumbnail never loads.
-    await vi.waitFor(() => {
-      expect(view.container.querySelector('[data-meowdown-embed="youtube"]')).not.toBeNull()
-    })
+  it('shows embeds as their source URLs when remote embeds are off', async () => {
+    const view = await render(
+      <MarkdownPreview
+        content={`${CONTENT}\n\n![](https://x.com/jack/status/20)\n\n![](https://example.com/a.png)`}
+        remoteEmbeds={false}
+      />,
+    )
+    // Meowdown's remoteMedia is off: no card renders, from the snapshot or a
+    // resolver, so the thumbnail never loads; nor does the remote image.
+    const links = view.getByTestId('embed-link')
+    await expect
+      .element(links.first())
+      .toHaveTextContent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+    await expect.element(links.last()).toHaveTextContent('https://x.com/jack/status/20')
+    expect(view.container.querySelector('[data-meowdown-embed]')).toBeNull()
     expect(showsImage(view.container, THUMBNAIL)).toBe(false)
+    expect(view.container.querySelector('img[src^="https:"]')).toBeNull()
     await view.unmount()
   })
 

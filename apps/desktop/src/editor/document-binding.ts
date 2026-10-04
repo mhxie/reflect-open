@@ -42,6 +42,8 @@ import type { RenameCoordinator } from './rename-coordinator.ts'
  */
 
 export interface BindFactories {
+  /** The owning workspace's file generation, read live across same-graph reopen. */
+  generation: () => number | null
   /** Build the session; receives the coordinator its `onContent` feeds. */
   session: (coordinator: RenameCoordinator | null) => NoteSession
   coordinator: () => RenameCoordinator | null
@@ -64,6 +66,15 @@ export interface DocumentBinding {
   coordinator(): RenameCoordinator | null
   /** Counts session *creations* (not adoptions) — the editor's remount key. */
   epoch(): number
+  /**
+   * Whether the live session holds the note a render for `path` shows: the
+   * last bind was for `path` (a rename may have retargeted the session since,
+   * while the route catches up), or a rename retargeted the session to `path`
+   * and the next bind adopts it. False with no session, and for a pane that
+   * navigated to another note but has not rebound yet: its session is still
+   * the previous note's.
+   */
+  holds(path: string): boolean
 }
 
 export function createDocumentBinding(): DocumentBinding {
@@ -121,6 +132,7 @@ export function createDocumentBinding(): DocumentBinding {
       // quit-time flush, settle-time rename work, and reopened-note lookups.
       unregister = registerOpenDocument({
         session: bound,
+        generation: create.generation,
         ...(owner ? { settle: () => owner.settle(), settled: () => owner.settled() } : {}),
       })
       return { session: bound, coordinator: owner, created: adopted === null }
@@ -156,5 +168,6 @@ export function createDocumentBinding(): DocumentBinding {
     session: () => session,
     coordinator: () => coordinator,
     epoch: () => epoch,
+    holds: (path: string) => session !== null && (lastPath === path || session.path === path),
   }
 }

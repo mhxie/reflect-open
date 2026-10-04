@@ -8,12 +8,13 @@ import {
 } from 'react'
 import { Priority } from '@meowdown/core'
 import { useKeymap } from '@meowdown/react'
-import type { OpenTask } from '@reflect/core'
+import { isLocalOnlyPath, type OpenTask } from '@reflect/core'
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
+import { usePrivateNote } from '@/hooks/use-private-note.ts'
 import {
   useTaskEditorFinalizer,
   type TaskEditorApi,
@@ -164,9 +165,13 @@ export function TaskEditor({
   const { graph } = useGraph()
   const { settings } = useSettings()
   const generation = graph?.generation ?? null
-  const navigate = useWikiLinkNavigation(generation)
+  // The task's note decides the policy: a link from a local-only note only
+  // navigates, never creating a note, and a private note stays off the network.
+  const localOnly = isLocalOnlyPath(task.notePath)
+  const privateNote = usePrivateNote(task.notePath, { sessionEpoch: null, privateHeader: false })
+  const navigate = useWikiLinkNavigation(localOnly ? null : generation)
   const onTagClick = useTagNavigation()
-  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete()
+  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(task.notePath)
 
   // Frozen at mount: the editor is seeded once (uncontrolled), so the commit
   // baseline must stay the seed even if `task.markdown` is re-derived mid-edit.
@@ -215,6 +220,7 @@ export function TaskEditor({
     <div data-task-editor className="min-w-0 flex-1">
       <NoteEditor
         initialContent={initial}
+        privateNote={privateNote}
         onChange={onChange}
         markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
         spellCheck={settings.editorSpellCheck}

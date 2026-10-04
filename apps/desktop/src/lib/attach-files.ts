@@ -2,10 +2,12 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { buildFileMarkdown } from '@meowdown/core'
 import {
   assetFileName,
+  assetLinkDestination,
   errorMessage,
   importAsset,
-  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
   isPdfAttachmentPath,
+  localOnlyFolderRoot,
 } from '@reflect/core'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
@@ -21,27 +23,37 @@ function embedsAsPreview(file: { name: string }): boolean {
   return isPdfAttachmentPath(file.name)
 }
 
+/** Where the note's attachments land, as the failure copy names it. */
+function attachmentFolderOf(notePath: string): string {
+  const folder = localOnlyFolderRoot(notePath)
+  return folder === null ? 'assets/' : `${folder}/assets/`
+}
+
 /**
  * The Attach file… command: native file picker → each pick copied
- * file-to-file into the graph's `assets/` (the bytes never enter the
+ * file-to-file into the note's attachment folder (the bytes never enter the
  * webview) → one `[original name](assets/…)` link per file (a PDF embeds as
  * `![](assets/…)`, its inline preview) inserted at the
  * caret of the current note's editor — the same markdown a drag-and-drop
- * produces, so the two entry points can't drift.
+ * produces, so the two entry points can't drift. Rust picks the folder from
+ * the note: the graph's `assets/`, or an editable local-only note's own
+ * `<folder>/assets/`, linked as `/<folder>/assets/…`.
  *
  * No-ops without an open graph, a routed note, or a mounted editor, and for a
- * note inside a local-only folder (read-only; its files must not be copied
- * into the synced `assets/`); a cancelled picker inserts nothing. When one copy fails mid-batch, the links
- * for the files that already landed are still inserted — they exist in
- * `assets/` either way, and an unlinked copy would be an invisible orphan.
+ * note inside a read-only local-only folder (it takes no attachments, and its
+ * files must never be copied into the synced `assets/`); a cancelled picker
+ * inserts nothing. When one copy fails mid-batch, the links for the files
+ * that already landed are still inserted — they exist in the folder either
+ * way, and an unlinked copy would be an invisible orphan.
  */
 export async function attachFilesToNote(context: CommandContext): Promise<void> {
   const generation = context.generation()
   const notePath = context.notePath()
-  if (generation === null || notePath === null || isLocalOnlyPath(notePath)) {
+  if (generation === null || notePath === null || isLocalOnlyReadOnlyPath(notePath)) {
     return
   }
-  if (noteEditorHandleFor(notePath) === null) {
+  const originalHandle = noteEditorHandleFor(notePath, generation)
+  if (originalHandle === null) {
     return
   }
   const picked = await open({ multiple: true, title: 'Attach files' })
@@ -57,8 +69,8 @@ export async function attachFilesToNote(context: CommandContext): Promise<void> 
     // after it.
     const name = basenameOf(source)
     try {
-      const assetPath = await importAsset(source, assetFileName(name), generation)
-      links.push(buildFileMarkdown({ name }, assetPath, embedsAsPreview))
+      const assetPath = await importAsset(source, assetFileName(name), notePath, generation)
+      links.push(buildFileMarkdown({ name }, assetLinkDestination(assetPath), embedsAsPreview))
       attachedNames.push(name)
     } catch (cause) {
       failures.push({ name, cause })
@@ -69,12 +81,12 @@ export async function attachFilesToNote(context: CommandContext): Promise<void> 
     // Re-resolved after the awaits: the picker (and the copies) can outlive
     // the editor that was mounted when the command fired — a navigation in
     // between would otherwise send the insertion into a dead handle and the
-    // copied files would sit in assets/ with no links and no explanation.
-    const handle = noteEditorHandleFor(notePath)
-    if (handle === null) {
+    // copied files would sit in the folder with no links and no explanation.
+    const handle = noteEditorHandleFor(notePath, generation)
+    if (handle === null || handle !== originalHandle) {
       problems.push(
-        `the note closed before its links could be inserted — ` +
-          `${attachedNames.join(', ')} were still copied into assets/`,
+        `the note changed before its links could be inserted — ` +
+          `${attachedNames.join(', ')} were still copied into ${attachmentFolderOf(notePath)}`,
       )
     } else {
       handle.insertMarkdown(links.join('\n'))

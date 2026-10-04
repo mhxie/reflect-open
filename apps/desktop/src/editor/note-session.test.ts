@@ -1,6 +1,12 @@
-import { applyTaskEdits, projectTasks, TaskStaleError, type TaskLocator } from '@reflect/core'
+import {
+  applyTaskEdits,
+  projectTasks,
+  TaskStaleError,
+  type NoteRecovery,
+  type TaskLocator,
+} from '@reflect/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createNoteSession, type NoteSessionSnapshot } from './note-session.ts'
+import { createNoteSession, type NoteRecoveryIo, type NoteSessionSnapshot } from './note-session.ts'
 import type { RoundTripFidelity } from './roundtrip.ts'
 
 /** The first task's locator as the index records it. */
@@ -31,6 +37,8 @@ interface Harness {
   setDisk: (contents: string | null) => void
   /** While set, writes reject with this message (the save-failure seam). */
   failWrites: (message: string | null) => void
+  /** While set, writes reject with exactly this value (an `AppError`, say). */
+  failWritesWith: (cause: unknown) => void
   session: ReturnType<typeof createNoteSession>
 }
 
@@ -43,6 +51,7 @@ function harness(options?: {
   createIfMissing?: boolean
   missingSeed?: string
   reconcilePendingEditorInput?: () => void
+  recovery?: NoteRecoveryIo
 }): Harness {
   const snapshots: NoteSessionSnapshot[] = []
   const expectedContents: (string | null | undefined)[] = []
@@ -51,6 +60,7 @@ function harness(options?: {
   const contents: Array<{ content: string; origin: string }> = []
   let disk = options?.disk === undefined ? '# Hello\n' : options.disk
   let writeFailure: string | null = null
+  let writeFailureCause: unknown = null
   const session = createNoteSession({
     path: 'notes/a.md',
     io: {
@@ -69,11 +79,15 @@ function harness(options?: {
               if (writeFailure !== null) {
                 throw new Error(writeFailure)
               }
+              if (writeFailureCause !== null) {
+                throw writeFailureCause
+              }
               if (expected !== undefined && expected !== disk)
                 throw { kind: 'io', message: 'Note changed on disk; reload before retrying' }
               writes.push({ path, contents })
               disk = contents
             },
+      ...(options?.recovery === undefined ? {} : { recovery: options.recovery }),
     },
     classify: options?.classify ?? (() => 'exact'),
     onSnapshot: (snapshot) => {
@@ -104,9 +118,83 @@ function harness(options?: {
     failWrites: (message) => {
       writeFailure = message
     },
+    failWritesWith: (cause) => {
+      writeFailureCause = cause
+    },
     session,
   }
 }
+
+interface RecoveryFake {
+  /** The latest unresolved session copy. */
+  slot: NoteRecovery | null
+  /** Every recovery call, in order. */
+  calls: string[]
+  io: NoteRecoveryIo
+  forOwner: (ownerId: string) => NoteRecoveryIo
+  copies: Map<string, NoteRecovery>
+}
+
+const RECOVERY_OWNER_A = 'a'.repeat(32)
+const RECOVERY_OWNER_B = 'b'.repeat(32)
+
+function recoveryCopy(contents: string): NoteRecovery {
+  return {
+    ownerId: RECOVERY_OWNER_B,
+    token: 'c'.repeat(32),
+    sourceRevision: '# Hello\n',
+    savedAtMs: 5,
+    contents,
+  }
+}
+
+/** An in-memory recovery store; `gate` holds each keep until it resolves. */
+function recoveryFake(slot: NoteRecovery | null = null, gate?: () => Promise<void>): RecoveryFake {
+  const copies = new Map<string, NoteRecovery>()
+  if (slot !== null) copies.set(slot.ownerId, slot)
+  let version = 0
+  function forOwner(ownerId: string): NoteRecoveryIo {
+    return {
+      preserve: async (_path, contents, sourceRevision) => {
+        await gate?.()
+        fake.calls.push(`preserve ${contents}`)
+        const copy = {
+          ownerId,
+          token: (++version).toString(16).padStart(32, '0'),
+          sourceRevision,
+          savedAtMs: 1_700_000_000_000,
+          contents,
+        }
+        copies.delete(ownerId)
+        copies.set(ownerId, copy)
+        return copy
+      },
+      read: async () => {
+        fake.calls.push('read')
+        return fake.slot
+      },
+      clear: async (_path, copy) => {
+        fake.calls.push('clear')
+        if (copies.get(copy.ownerId)?.token === copy.token) copies.delete(copy.ownerId)
+      },
+    }
+  }
+  const fake: RecoveryFake = {
+    get slot() {
+      return [...copies.values()].at(-1) ?? null
+    },
+    calls: [],
+    io: forOwner(RECOVERY_OWNER_A),
+    forOwner,
+    copies,
+  }
+  return fake
+}
+
+const FOLDER_GONE = {
+  kind: 'traversal',
+  message: 'the local-only folder finance/secure does not exist',
+} as const
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -1225,5 +1313,409 @@ describe('followDisplacement', () => {
     expect(h.applied.at(-1)).toBe(INCOMING)
     expect(h.session.content()).toBe(INCOMING)
     expect(h.writes).toEqual([])
+  })
+})
+
+describe('live header privacy', () => {
+  it('starts private and classifies the loaded header', async () => {
+    const publicNote = harness({ disk: '---\nid: x\n---\n# Hello\n' })
+    publicNote.session.load()
+    expect(publicNote.snapshots.at(-1)?.privateHeader).toBe(true) // still loading
+    await settled()
+    expect(publicNote.snapshots.at(-1)?.privateHeader).toBe(false)
+
+    const locked = harness({ disk: '---\nprivate: true\n---\n# Hello\n' })
+    locked.session.load()
+    await settled()
+    expect(locked.snapshots.at(-1)?.privateHeader).toBe(true)
+
+    // A value the classifier can't read counts as locked.
+    const unreadable = harness({ disk: '---\nprivate: maybe\n---\n# Hello\n' })
+    unreadable.session.load()
+    await settled()
+    expect(unreadable.snapshots.at(-1)?.privateHeader).toBe(true)
+  })
+
+  it('counts a frontmatter block behind a byte-order mark', async () => {
+    const h = harness({ disk: '\u{FEFF}---\nprivate: true\n---\n# Hello\n' })
+    h.session.load()
+    await settled()
+    expect(h.snapshots.at(-1)?.privateHeader).toBe(true)
+  })
+
+  it('stays private when the note fails to load', async () => {
+    const h = harness({ disk: null })
+    h.session.load()
+    await settled()
+    expect(h.snapshots.at(-1)?.status).toBe('error')
+    expect(h.snapshots.at(-1)?.privateHeader).toBe(true)
+  })
+
+  it('follows a Lock patch before it is saved, and its removal', async () => {
+    const h = harness({ disk: '# Hello\n' })
+    h.session.load()
+    await settled()
+
+    h.session.updateFrontmatter({ private: true })
+    expect(h.snapshots.at(-1)?.privateHeader).toBe(true)
+    expect(h.writes).toEqual([])
+    await settled()
+
+    h.session.updateFrontmatter({ private: false })
+    expect(h.snapshots.at(-1)?.privateHeader).toBe(false)
+  })
+
+  it('follows an adopted external change', async () => {
+    const h = harness({ disk: '# Hello\n' })
+    h.session.load()
+    await settled()
+    h.setDisk('---\nprivate: true\n---\n# Hello\n')
+    h.session.externalChanged()
+    await settled()
+    expect(h.snapshots.at(-1)?.privateHeader).toBe(true)
+  })
+
+  it('restores the verdict when a Lock commit fails', async () => {
+    const h = harness({ disk: '# Hello\n' })
+    h.session.load()
+    await settled()
+    h.failWrites('disk full')
+
+    await expect(h.session.commitFrontmatter({ private: true })).rejects.toThrow('disk full')
+    expect(h.session.content()).toBe('# Hello\n')
+    expect(h.snapshots.at(-1)?.privateHeader).toBe(false)
+  })
+})
+
+describe('unsaved-text recovery (editable local-only notes)', () => {
+  it('retries the same text at teardown after its first recovery write fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = recoveryFake()
+    const preserve = vi
+      .fn(recovery.io.preserve)
+      .mockRejectedValueOnce(new Error('temporary disk error'))
+    recovery.io.preserve = preserve
+    const window = harness({ recovery: recovery.io })
+    window.session.load()
+    await settled()
+    window.failWritesWith(FOLDER_GONE)
+    window.session.editorChanged('# Unsaved\n')
+    await window.session.flush()
+    expect(preserve).toHaveBeenCalledTimes(1)
+    expect(recovery.slot).toBeNull()
+
+    const flushed = window.session.flush()
+    window.session.dispose()
+    await flushed
+    expect(preserve).toHaveBeenCalledTimes(2)
+    expect(recovery.slot?.contents).toBe('# Unsaved\n')
+  })
+
+  it('a recovery retry and successful save leave an earlier session’s copy intact', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const kept = recoveryCopy('# Earlier window\n')
+    const recovery = recoveryFake(kept)
+    const preserve = vi
+      .fn(recovery.io.preserve)
+      .mockRejectedValueOnce(new Error('temporary disk error'))
+    recovery.io.preserve = preserve
+    const window = harness({ recovery: recovery.io })
+    window.session.load()
+    await settled()
+    window.failWritesWith(FOLDER_GONE)
+    window.session.editorChanged('# Unsaved\n')
+    await window.session.flush()
+    expect(recovery.slot).toEqual(kept)
+    await window.session.flush()
+    expect(preserve).toHaveBeenCalledTimes(2)
+    expect(recovery.copies.size).toBe(2)
+
+    window.failWritesWith(null)
+    await window.session.flush()
+    expect(recovery.slot).toEqual(kept)
+    expect(window.snapshots.at(-1)?.recovery).toEqual(kept)
+  })
+
+  it('a failed replacement keeps its old receipt and cannot clear a newer token', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = recoveryFake()
+    const clear = vi.fn(recovery.io.clear)
+    recovery.io.clear = clear
+    const window = harness({ recovery: recovery.io })
+    window.session.load()
+    await settled()
+    window.failWritesWith(FOLDER_GONE)
+    window.session.editorChanged('# First\n')
+    await window.session.flush()
+    const first = recovery.slot
+    const newer = await recovery
+      .forOwner(RECOVERY_OWNER_A)
+      .preserve('notes/a.md', '# Newer copy\n', '# Hello\n')
+    recovery.io.preserve = vi
+      .fn(recovery.io.preserve)
+      .mockRejectedValueOnce(new Error('temporary disk error'))
+    window.session.editorChanged('# Replacement\n')
+    await window.session.flush()
+    expect(recovery.slot).toEqual(newer)
+
+    window.failWritesWith(null)
+    await window.session.flush()
+    expect(clear).toHaveBeenCalledWith('notes/a.md', first)
+    expect(recovery.slot).toEqual(newer)
+    expect(window.snapshots.at(-1)?.recovery).toEqual(newer)
+  })
+
+  it('keeps the text when a save fails, and blocks input when retrying alone won’t help', async () => {
+    const recovery = recoveryFake()
+    const { session, snapshots, failWritesWith, writes } = harness({ recovery: recovery.io })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    session.load()
+    await settled()
+
+    failWritesWith(FOLDER_GONE)
+    session.editorChanged('# Hello\n\nunsaved\n')
+    await settled()
+
+    expect(writes).toEqual([])
+    expect(recovery.slot?.contents).toBe('# Hello\n\nunsaved\n')
+    expect(recovery.slot?.sourceRevision).toBe('# Hello\n')
+    expect(snapshots.at(-1)).toMatchObject({
+      saveBlocked: true,
+      dirty: true,
+      error: FOLDER_GONE.message,
+    })
+  })
+
+  it('a landed save drops the copy this session kept and takes input again', async () => {
+    const recovery = recoveryFake()
+    const { session, snapshots, failWritesWith, writes } = harness({ recovery: recovery.io })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    session.load()
+    await settled()
+    failWritesWith(FOLDER_GONE)
+    session.editorChanged('# Hello\n\nunsaved\n')
+    await settled()
+
+    failWritesWith(null)
+    await session.flush()
+
+    expect(writes).toEqual([{ path: 'notes/a.md', contents: '# Hello\n\nunsaved\n' }])
+    expect(recovery.calls.slice(-2)).toEqual(['clear', 'read'])
+    expect(recovery.slot).toBeNull()
+    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: false, error: null, dirty: false })
+  })
+
+  it('a changed-on-disk refusal parks the conflict and keeps the text, without blocking', async () => {
+    const recovery = recoveryFake()
+    const { session, snapshots, setDisk } = harness({ recovery: recovery.io })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    session.load()
+    await settled()
+
+    session.editorChanged('# Mine\n')
+    setDisk('# Theirs\n') // lands before the save, which the check refuses
+    await settled()
+
+    expect(snapshots.at(-1)).toMatchObject({ conflict: '# Theirs\n', saveBlocked: false })
+    expect(recovery.slot?.contents).toBe('# Mine\n')
+  })
+
+  it('loading theirs over a blocked save takes input again', async () => {
+    const recovery = recoveryFake()
+    const { session, snapshots, setDisk, failWritesWith } = harness({ recovery: recovery.io })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    session.load()
+    await settled()
+    failWritesWith(FOLDER_GONE)
+    session.editorChanged('# Mine\n')
+    setDisk('# Theirs\n')
+    await settled()
+    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: true, conflict: '# Theirs\n' })
+
+    session.loadTheirs()
+
+    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: false, dirty: false, conflict: null })
+  })
+
+  it('a teardown over a parked conflict keeps the latest text, and its flush waits for it', async () => {
+    let releaseKeep: () => void = () => {}
+    const recovery = recoveryFake(
+      null,
+      () => new Promise<void>((resolve) => (releaseKeep = resolve)),
+    )
+    const { session, setDisk, writes } = harness({ recovery: recovery.io })
+    session.load()
+    await settled()
+    session.editorChanged('# Mine\n')
+    setDisk('# Theirs\n')
+    session.externalChanged()
+    await vi.advanceTimersByTimeAsync(0)
+    releaseKeep() // the keep at park time
+
+    session.editorChanged('# Mine, edited further\n')
+    let flushed = false
+    void session.flush().then(() => {
+      flushed = true
+    })
+    session.dispose()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(flushed).toBe(false) // quit must not exit before the copy lands
+
+    releaseKeep()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(flushed).toBe(true)
+    expect(writes).toEqual([]) // the parked conflict paused every save
+    expect(recovery.slot?.contents).toBe('# Mine, edited further\n')
+  })
+
+  it('offers an earlier session’s copy, and Restore saves it over what disk holds', async () => {
+    const kept = recoveryCopy('# Hello\n\nkept\n')
+    const recovery = recoveryFake(kept)
+    const { session, snapshots, applied, writes, expectedContents } = harness({
+      recovery: recovery.io,
+    })
+    session.load()
+    await settled()
+    expect(snapshots.at(-1)).toMatchObject({ status: 'ready', recovery: kept })
+
+    session.restoreRecovery()
+    await settled()
+
+    expect(applied).toEqual(['# Hello\n\nkept\n'])
+    expect(writes).toEqual([{ path: 'notes/a.md', contents: '# Hello\n\nkept\n' }])
+    expect(expectedContents).toEqual(['# Hello\n'])
+    expect(recovery.calls).toEqual(['read', 'clear', 'read'])
+    expect(snapshots.at(-1)).toMatchObject({ recovery: null, dirty: false })
+  })
+
+  it('never drops an earlier session’s copy on a save: only Restore or Discard resolve it', async () => {
+    const kept = recoveryCopy('# Hello\n\nkept\n')
+    const recovery = recoveryFake(kept)
+    const { session, snapshots, writes } = harness({ recovery: recovery.io })
+    session.load()
+    await settled()
+
+    session.editorChanged('# Hello\n\ntyped instead\n')
+    await session.flush()
+    expect(writes).toHaveLength(1)
+    expect(recovery.calls).toEqual(['read'])
+    expect(snapshots.at(-1)?.recovery).toEqual(kept)
+
+    session.discardRecovery()
+    await session.flush()
+    expect(recovery.calls).toEqual(['read', 'clear', 'read'])
+    expect(snapshots.at(-1)?.recovery).toBeNull()
+  })
+
+  it('drops a copy that matches what disk holds instead of offering it', async () => {
+    const recovery = recoveryFake(recoveryCopy('# Hello\n'))
+    const { session, snapshots } = harness({ recovery: recovery.io })
+    session.load()
+    await settled()
+
+    expect(snapshots.at(-1)).toMatchObject({ status: 'ready', recovery: null })
+    expect(recovery.calls).toEqual(['read', 'clear', 'read'])
+  })
+
+  it('keeps two failed sessions after both close and restores their drafts one at a time', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = recoveryFake()
+    const first = harness({ recovery: recovery.io })
+    const second = harness({ recovery: recovery.forOwner(RECOVERY_OWNER_B) })
+    first.session.load()
+    second.session.load()
+    await settled()
+    for (const [window, contents] of [
+      [first, '# A\n'],
+      [second, '# B\n'],
+    ] as const) {
+      window.failWritesWith(FOLDER_GONE)
+      window.session.editorChanged(contents)
+      await window.session.flush()
+      window.session.dispose()
+    }
+    expect(recovery.copies.size).toBe(2)
+
+    const reopened = harness({ recovery: recovery.forOwner('d'.repeat(32)) })
+    reopened.session.load()
+    await settled()
+    expect(reopened.snapshots.at(-1)?.recovery?.contents).toBe('# B\n')
+    reopened.session.restoreRecovery()
+    await reopened.session.flush()
+    expect(reopened.snapshots.at(-1)?.recovery?.contents).toBe('# A\n')
+    reopened.session.restoreRecovery()
+    await reopened.session.flush()
+    expect(reopened.writes.map((write) => write.contents)).toEqual(['# B\n', '# A\n'])
+    expect(recovery.copies.size).toBe(0)
+    expect(reopened.snapshots.at(-1)?.recovery).toBeNull()
+  })
+
+  it('a successful save clears only its own draft and offers another window’s copy', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = recoveryFake()
+    const first = harness({ recovery: recovery.io })
+    const second = harness({ recovery: recovery.forOwner(RECOVERY_OWNER_B) })
+    first.session.load()
+    second.session.load()
+    await settled()
+    for (const [window, contents] of [
+      [first, '# A\n'],
+      [second, '# B\n'],
+    ] as const) {
+      window.failWritesWith(FOLDER_GONE)
+      window.session.editorChanged(contents)
+      await window.session.flush()
+    }
+    first.failWritesWith(null)
+    await first.session.flush()
+    expect(recovery.copies.size).toBe(1)
+    expect(recovery.slot?.contents).toBe('# B\n')
+    expect(first.snapshots.at(-1)?.recovery?.contents).toBe('# B\n')
+  })
+
+  it.each(['restore', 'discard'] as const)(
+    'a stale %s action preserves a newer copy from that owner',
+    async (action) => {
+      const kept = recoveryCopy('# Old\n')
+      const recovery = recoveryFake(kept)
+      const window = harness({ recovery: recovery.io })
+      window.session.load()
+      await settled()
+      const newer = await recovery
+        .forOwner(kept.ownerId)
+        .preserve('notes/a.md', '# New\n', '# Hello\n')
+      if (action === 'restore') window.session.restoreRecovery()
+      else window.session.discardRecovery()
+      await window.session.flush()
+      expect(recovery.slot).toEqual(newer)
+      expect(window.snapshots.at(-1)?.recovery).toEqual(newer)
+    },
+  )
+
+  it('opens the note when the kept copy can’t be read', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = recoveryFake()
+    recovery.io.read = async () => {
+      throw { kind: 'traversal', message: 'symlink in .reflect/recovery' }
+    }
+    const { session, snapshots } = harness({ recovery: recovery.io })
+    session.load()
+    await settled()
+
+    expect(snapshots.at(-1)).toMatchObject({ status: 'ready', recovery: null })
+    expect(consoleError).toHaveBeenCalled()
+  })
+
+  it('keeps nothing and never blocks input without a recovery store', async () => {
+    const { session, snapshots, failWritesWith } = harness()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    session.load()
+    await settled()
+
+    failWritesWith(FOLDER_GONE)
+    session.editorChanged('# Hello\n\nunsaved\n')
+    await settled()
+
+    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: false, error: FOLDER_GONE.message })
   })
 })

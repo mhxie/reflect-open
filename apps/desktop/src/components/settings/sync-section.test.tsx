@@ -81,6 +81,7 @@ beforeEach(() => {
     name: 'Notes',
     generation: 1,
     localOnlyFolders: [],
+    localOnlyEditableFolders: [],
   }
   core.status = {
     available: true,
@@ -117,6 +118,7 @@ describe('SyncSection', () => {
       name: 'Notes',
       generation: 1,
       localOnlyFolders: [],
+      localOnlyEditableFolders: [],
     }
 
     await renderSection()
@@ -137,6 +139,7 @@ describe('SyncSection', () => {
       name: 'Notes',
       generation: 1,
       localOnlyFolders: [],
+      localOnlyEditableFolders: [],
     }
     core.pendingNotes = 2
     core.conflictedNotes = [{ path: 'notes/a.md', title: 'A' }]

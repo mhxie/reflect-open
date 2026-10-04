@@ -1,8 +1,9 @@
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SnippetTask } from '@reflect/core'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setBridge, type SnippetTask } from '@reflect/core'
+import { queryClient } from '@/lib/query-client.ts'
 import { BacklinkSnippet } from './backlink-snippet.tsx'
 
 const toggleTask = vi.hoisted(() => vi.fn())
@@ -58,6 +59,7 @@ function renderSnippet(tasks: SnippetTask[] = anchors()) {
       <BacklinkSnippet
         text={SNIPPET}
         notePath="notes/meeting.md"
+        sourcePrivate={false}
         tasks={tasks}
         onWikilinkClick={() => {}}
       />
@@ -130,6 +132,7 @@ describe('BacklinkSnippet task checkboxes', () => {
         <BacklinkSnippet
           text={'+ parent line\n  - mention of [[Roadmap]]'}
           notePath="notes/meeting.md"
+          sourcePrivate={false}
           tasks={[]}
           onWikilinkClick={() => {}}
         />
@@ -149,6 +152,7 @@ describe('BacklinkSnippet task checkboxes', () => {
         <BacklinkSnippet
           text={'- [[Roadmap]] plan\n  - [x] square box'}
           notePath="notes/meeting.md"
+          sourcePrivate={false}
           tasks={squareOnly}
           onWikilinkClick={() => {}}
         />
@@ -171,6 +175,7 @@ describe('BacklinkSnippet wiki-link chips', () => {
         <BacklinkSnippet
           text={'- see [[Tim MacCaw // Dad|Dad]] and [[Tim MacCaw // Dad]]'}
           notePath="notes/meeting.md"
+          sourcePrivate={false}
           tasks={[]}
           onWikilinkClick={onWikilinkClick}
         />
@@ -212,30 +217,127 @@ describe('BacklinkSnippet saved embed snapshots', () => {
   })
   const TEXT = `- see ![](https://www.youtube.com/watch?v=dQw4w9WgXcQ)<!-- ${SNAPSHOT} -->`
 
-  function renderFrom(notePath: string) {
+  function renderFrom(notePath: string, sourcePrivate: boolean) {
     return render(
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
-        <BacklinkSnippet text={TEXT} notePath={notePath} tasks={[]} onWikilinkClick={() => {}} />
+        <BacklinkSnippet
+          text={TEXT}
+          notePath={notePath}
+          sourcePrivate={sourcePrivate}
+          tasks={[]}
+          onWikilinkClick={() => {}}
+        />
       </QueryClientProvider>,
     )
   }
 
   it('never renders a snapshot card from a local-only source', async () => {
-    const view = await renderFrom('finance/secure/bank.md')
-    await vi.waitFor(() => {
-      expect(view.container.querySelector('[data-meowdown-embed="youtube"]')).not.toBeNull()
-    })
+    // The path alone keeps it off the network, whatever the query said.
+    const view = await renderFrom('finance/secure/bank.md', false)
+    // The embed shows its source URL: no card, so the thumbnail never loads.
+    await expect
+      .element(view.getByTestId('embed-link'))
+      .toHaveTextContent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+    expect(view.container.querySelector('[data-meowdown-embed]')).toBeNull()
+    expect(showsImage(view.container, THUMBNAIL)).toBe(false)
+    await view.unmount()
+  })
+
+  it('never renders a snapshot card from a locked source', async () => {
+    const view = await renderFrom('notes/locked.md', true)
+    await expect
+      .element(view.getByTestId('embed-link'))
+      .toHaveTextContent('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+    expect(view.container.querySelector('[data-meowdown-embed]')).toBeNull()
     expect(showsImage(view.container, THUMBNAIL)).toBe(false)
     await view.unmount()
   })
 
   it('renders it from an ordinary source (control)', async () => {
-    const view = await renderFrom('notes/meeting.md')
+    const view = await renderFrom('notes/meeting.md', false)
     await vi.waitFor(() => {
       expect(showsImage(view.container, THUMBNAIL)).toBe(true)
     })
+    await view.unmount()
+  })
+})
+
+describe('BacklinkSnippet network policy', () => {
+  const X_URL = 'https://x.com/jack/status/777'
+  const IMAGE = 'https://example.com/locked.png'
+  const TEXT = `- [[Roadmap]] see ![](${X_URL}) ![](${IMAGE})`
+  /** What reaches the network, or writes the X archive, on a note's behalf. */
+  const REMOTE_COMMANDS = [
+    'x_archive_resolve',
+    'x_syndication_fetch',
+    'x_archive_write',
+    'capture_oembed_fetch',
+  ]
+  let commands: string[]
+
+  beforeEach(() => {
+    commands = []
+    setBridge({
+      invoke: async (command) => {
+        commands.push(command)
+        return command === 'db_query' ? [] : null
+      },
+      listen: async () => () => {},
+    })
+  })
+
+  afterEach(() => {
+    setBridge(null)
+    queryClient.clear()
+  })
+
+  const remoteImages = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll('img')]
+      .map((image) => image.getAttribute('src') ?? '')
+      .filter((source) => /^https?:/i.test(source))
+
+  function snippet(sourcePrivate: boolean) {
+    return (
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <BacklinkSnippet
+          text={TEXT}
+          notePath="notes/locked.md"
+          sourcePrivate={sourcePrivate}
+          tasks={[]}
+          onWikilinkClick={() => {}}
+        />
+      </QueryClientProvider>
+    )
+  }
+
+  it('never looks up embeds or loads remote images for a locked tracked source', async () => {
+    const view = await render(snippet(true))
+    await expect.element(view.getByTestId('embed-link')).toHaveTextContent(X_URL)
+    expect(remoteImages(view.container)).toEqual([])
+    for (const command of REMOTE_COMMANDS) {
+      expect(commands).not.toContain(command)
+    }
+    await view.unmount()
+  })
+
+  it('looks them up for a public source (control)', async () => {
+    const view = await render(snippet(false))
+    await vi.waitFor(() => expect(commands).toContain('x_archive_resolve'))
+    await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
+    await view.unmount()
+  })
+
+  it('drops remote media at once when the source turns private', async () => {
+    const view = await render(snippet(false))
+    await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
+
+    await view.rerender(snippet(true))
+    await expect.element(view.getByTestId('embed-link')).toHaveTextContent(X_URL)
+    expect(remoteImages(view.container)).toEqual([])
     await view.unmount()
   })
 })

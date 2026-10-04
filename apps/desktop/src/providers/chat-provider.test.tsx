@@ -102,7 +102,13 @@ function conversation(overrides: Partial<ChatConversation> = {}): ChatConversati
 
 let session: ReturnType<typeof useChatSession> | null = null
 
-const GRAPH: GraphInfo = { root: '/g', name: 'test-graph', generation: 1, localOnlyFolders: [] }
+const GRAPH: GraphInfo = {
+  root: '/g',
+  name: 'test-graph',
+  generation: 1,
+  localOnlyFolders: [],
+  localOnlyEditableFolders: [],
+}
 
 function renderProvider() {
   session = null

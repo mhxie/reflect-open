@@ -17,10 +17,19 @@ const commitNoteFrontmatter = vi.hoisted(() =>
   vi.fn<(path: string, patch: FrontmatterPatch, generation: number) => Promise<void>>(),
 )
 vi.mock('@/lib/note-frontmatter.ts', () => ({ readNoteSource, commitNoteFrontmatter }))
-const deleteOpenNote = vi.hoisted(() => vi.fn(async () => {}))
+const deleteOpenNote = vi.hoisted(() =>
+  vi.fn<(path: string, generation: number) => Promise<{ trashed: 'system' | 'graph' } | null>>(),
+)
 const operationFail = vi.hoisted(() => vi.fn())
+const operationWarn = vi.hoisted(() => vi.fn())
+const operationDone = vi.hoisted(() => vi.fn())
 const startOperation = vi.hoisted(() =>
-  vi.fn(() => ({ progress: vi.fn(), done: vi.fn(), fail: operationFail })),
+  vi.fn(() => ({
+    progress: vi.fn(),
+    done: operationDone,
+    fail: operationFail,
+    warn: operationWarn,
+  })),
 )
 const isApplePlatform = vi.hoisted(() => vi.fn(() => false))
 vi.mock('@reflect/core', async (importOriginal) => ({
@@ -28,13 +37,19 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   hasBridge: () => true,
   getPinnedNotes,
   getNote,
-  isLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
+  // `secure` is an editable local-only folder, `archive` a read-only one.
+  isLocalOnlyPath: (path: string) =>
+    path.startsWith('finance/secure/') || path.startsWith('archive/'),
+  isLocalOnlyReadOnlyPath: (path: string) => path.startsWith('archive/'),
 }))
 vi.mock('@/lib/keybindings.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/keybindings.ts')>()),
   isApplePlatform,
 }))
-vi.mock('@/lib/note-delete.ts', () => ({ deleteOpenNote }))
+vi.mock('@/lib/note-delete.ts', () => ({
+  deleteOpenNote,
+  KEPT_IN_GRAPH_TRASH: 'Moved to .reflect/trash in this graph',
+}))
 vi.mock('@/lib/operations.ts', () => ({ startOperation }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 } }),
@@ -65,9 +80,11 @@ beforeEach(() => {
   commitNoteFrontmatter.mockReset().mockImplementation(async (_path, patch) => {
     noteSource.value = upsertFrontmatter(noteSource.value, frontmatterPatchToYaml(patch))
   })
-  deleteOpenNote.mockReset().mockResolvedValue(undefined)
+  deleteOpenNote.mockReset().mockResolvedValue({ trashed: 'system' })
   startOperation.mockClear()
   operationFail.mockClear()
+  operationWarn.mockClear()
+  operationDone.mockClear()
   isApplePlatform.mockReturnValue(false)
 })
 
@@ -177,14 +194,43 @@ describe('NoteActionsSection pin toggle', () => {
 })
 
 describe('NoteActionsSection for a local-only note', () => {
-  it('offers no actions: each would write or publish a read-only note', async () => {
-    getNote.mockResolvedValue(noteRow('finance/secure/bank.md', true))
-    const view = await renderSection('finance/secure/bank.md', true)
+  it('offers no actions in a read-only folder: each would write or publish the note', async () => {
+    getNote.mockResolvedValue(noteRow('archive/2019/bank.md', true))
+    const view = await renderSection('archive/2019/bank.md', true)
     await expect.element(view.getByRole('button', { name: /Unlock note/ })).not.toBeInTheDocument()
     await expect
       .element(view.getByRole('button', { name: /Pin this note/ }))
       .not.toBeInTheDocument()
     expect(view.container.textContent).toBe('')
+  })
+
+  it('offers only Pin and Trash in an editable folder', async () => {
+    getNote.mockResolvedValue(noteRow('finance/secure/bank.md', true))
+    const view = await renderSection('finance/secure/bank.md', true)
+
+    await expect.element(view.getByRole('button', { name: /Pin this note/ })).toBeVisible()
+    await expect.element(view.getByRole('button', { name: 'Trash note' })).toBeVisible()
+    // Its privacy is its folder's, never a toggle, and nothing publishes it.
+    expect(view.getByRole('button', { name: /Lock note|Unlock note/ }).query()).toBeNull()
+    expect(view.getByRole('button', { name: /private link|Unpublish/ }).query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('says so when the system Trash refused a note and the graph’s trash kept it', async () => {
+    deleteOpenNote.mockResolvedValue({ trashed: 'graph' })
+    const view = await renderSection('finance/secure/bank.md', true)
+    await userEvent.click(view.getByRole('button', { name: 'Trash note' }))
+    await expect
+      .element(page.getByRole('dialog'))
+      .toMatchTextContent('by way of this graph’s .reflect/trash folder')
+    await userEvent.click(page.getByRole('dialog').getByRole('button', { name: 'Trash note' }))
+
+    await vi.waitFor(() =>
+      expect(operationWarn).toHaveBeenCalledWith('Moved to .reflect/trash in this graph'),
+    )
+    expect(deleteOpenNote).toHaveBeenCalledWith('finance/secure/bank.md', 7)
+    expect(operationDone).not.toHaveBeenCalled()
+    await view.unmount()
   })
 })
 
@@ -297,6 +343,8 @@ describe('NoteActionsSection trash action', () => {
     await userEvent.click(confirmButton)
     await vi.waitFor(() => expect(deleteOpenNote).toHaveBeenCalledWith('notes/a.md', 7))
     expect(startOperation).toHaveBeenCalledWith('Trashing note')
+    await vi.waitFor(() => expect(operationDone).toHaveBeenCalled())
+    expect(operationWarn).not.toHaveBeenCalled()
     await view.unmount()
   })
 

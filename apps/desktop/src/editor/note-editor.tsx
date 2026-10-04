@@ -1,3 +1,8 @@
+import {
+  localImagesOnly,
+  resolveNoXPost,
+  resolveNoYouTubeVideo,
+} from '@/editor/local-only-render.ts'
 import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
@@ -28,7 +33,9 @@ import type {
   WikiEmbedResolver,
   WikilinkHoverHit,
   XPostMediaClickHandler,
+  XPostResolver,
   YouTubeVideoClickHandler,
+  YouTubeVideoResolver,
 } from '@meowdown/core'
 import {
   MeowdownEditor,
@@ -126,6 +133,22 @@ export interface NoteEditorHandle {
 interface NoteEditorProps {
   /** Initial markdown, read only on first render (uncontrolled). */
   initialContent: string
+  /**
+   * Whether the note's content must stay off the network (`usePrivateNote`):
+   * no X post or YouTube lookups (so no X archive write), only graph
+   * attachments as images (the lightbox included), no link previews, no
+   * auto-embedded pastes, and embeds shown as their source URLs. Required, so
+   * a new host can't forget it. Live: a Lock toggle switches the policy in
+   * place, re-rendering images and embeds without remounting the editor.
+   */
+  privateNote: boolean
+  /**
+   * Stop taking input, without remounting: the document, selection, and undo
+   * history stay, and editing resumes when this turns off. The note pane sets
+   * it while a local-only note's saves are blocked, so no more text piles up
+   * unsaved. Default off.
+   */
+  readOnly?: boolean
   /** Called with the current markdown whenever the user edits the document. */
   onChange?: (markdown: string) => void
   /** How markdown syntax characters are shown. */
@@ -206,7 +229,7 @@ interface NoteEditorProps {
    * authored href; the handler owns source-relative resolution.
    */
   onNoteLinkClick?: (options: { href: string; openInNewWindow: boolean }) => void
-  /** Resolve privacy-gated metadata for an HTTP(S) link popup. */
+  /** Resolve privacy-gated metadata for an HTTP(S) link popup; unused while `privateNote`. */
   readonly resolveLinkPreview?: LinkPreviewResolver
   /**
    * Resolve the passive body of Meowdown's editor-scoped wiki-link hover
@@ -265,6 +288,8 @@ interface NoteEditorProps {
 
 export function NoteEditor({
   initialContent,
+  privateNote,
+  readOnly = false,
   onChange,
   markMode = 'hide',
   spellCheck = true,
@@ -299,7 +324,7 @@ export function NoteEditor({
   onSearchChange,
   handleRef,
 }: NoteEditorProps): ReactElement {
-  const resolveXPost = useXPostResolver()
+  const graphXPostResolver = useXPostResolver()
   const innerRef = useRef<EditorHandle>(null)
   const followDeepLink = useFollowDeepLink()
 
@@ -307,6 +332,11 @@ export function NoteEditor({
   // rebuilds meowdown's extensions (the uncontrolled-editor contract).
   // TODO: This violates "Rule of hooks". Refactor this later.
   const onChangeRef = useRef(onChange)
+  // The privacy policy is read at call time too: a resolver that runs after a
+  // Lock toggle, even one held by a card that has not re-rendered yet, sees
+  // the new policy.
+  const privateNoteRef = useRef(privateNote)
+  const graphXPostResolverRef = useRef(graphXPostResolver)
   const onWikiLinkClickRef = useRef(onWikiLinkClick)
   const onNoteLinkClickRef = useRef(onNoteLinkClick)
   const onTagClickRef = useRef(onTagClick)
@@ -320,6 +350,8 @@ export function NoteEditor({
   const onExitBoundaryRef = useRef(onExitBoundary)
   useLayoutEffect(() => {
     onChangeRef.current = onChange
+    privateNoteRef.current = privateNote
+    graphXPostResolverRef.current = graphXPostResolver
     onWikiLinkClickRef.current = onWikiLinkClick
     onNoteLinkClickRef.current = onNoteLinkClick
     onTagClickRef.current = onTagClick
@@ -384,8 +416,18 @@ export function NoteEditor({
     (payload: { tag: string }) => onTagClickRef.current?.(payload.tag),
     [],
   )
-  const handleResolveImageUrl: ImageUrlResolver = useCallback(
-    (src) => resolveImageUrlRef.current?.(src),
+  // A private note shows graph attachments only; this also covers hosts that
+  // pass no resolver.
+  const handleResolveImageUrl: ImageUrlResolver = useCallback((src) => {
+    const resolver = resolveImageUrlRef.current
+    return privateNoteRef.current ? localImagesOnly(resolver)(src) : resolver?.(src)
+  }, [])
+  const handleResolveXPost: XPostResolver = useCallback(
+    (url) => (privateNoteRef.current ? resolveNoXPost : graphXPostResolverRef.current)(url),
+    [],
+  )
+  const handleResolveYouTubeVideo: YouTubeVideoResolver = useCallback(
+    (url) => (privateNoteRef.current ? resolveNoYouTubeVideo : resolveYouTubeVideo)(url),
     [],
   )
   const handleResolveEmbed: EmbedResolver = useCallback((src) => resolveEmbedRef.current?.(src), [])
@@ -460,7 +502,8 @@ export function NoteEditor({
         }
         return
       }
-      void Promise.resolve(resolveImageUrlRef.current?.(src)).then((displayUrl) => {
+      // The lightbox loads what the preview may load, through the same policy.
+      void Promise.resolve(handleResolveImageUrl(src)).then((displayUrl) => {
         if (displayUrl === undefined) {
           return
         }
@@ -478,7 +521,7 @@ export function NoteEditor({
         openLightbox({ type: 'image', src: displayUrl, alt }, element)
       })
     },
-    [openLightbox],
+    [openLightbox, handleResolveImageUrl],
   )
 
   const handleXPostMediaClick: XPostMediaClickHandler = useCallback(
@@ -515,9 +558,12 @@ export function NoteEditor({
   return (
     <>
       <MeowdownEditor
-        resolveXPost={resolveXPost}
-        resolveYouTubeVideo={resolveYouTubeVideo}
+        resolveXPost={handleResolveXPost}
+        resolveYouTubeVideo={handleResolveYouTubeVideo}
         mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
+        remoteMedia={!privateNote}
+        embedPaste={!privateNote}
+        readOnly={readOnly}
         handleRef={innerRef}
         mode={markMode}
         initialMarkdown={initialContent}
@@ -545,7 +591,7 @@ export function NoteEditor({
         onWikilinkClick={handleWikilinkClick}
         onTagClick={handleTagClick}
         onLinkClick={handleLinkClick}
-        {...(resolveLinkPreview !== undefined ? { resolveLinkPreview } : {})}
+        {...(resolveLinkPreview !== undefined && !privateNote ? { resolveLinkPreview } : {})}
         onImageClick={handleImageClick}
         onXPostMediaClick={handleXPostMediaClick}
         onYouTubeVideoClick={handleYouTubeVideoClick}

@@ -19,6 +19,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   isLocalOnlyPath: () => localOnly,
+  isLocalOnlyReadOnlyPath: () => localOnly && !editableLocal,
   getBacklinksWithContext: async () => ({ contexts: [], nextCursor: null, indexedLinkCount: 0 }),
   relatedNotes: async () => [],
 }))
@@ -58,9 +59,11 @@ const ENTRY = [
 
 let files: Record<string, string>
 let localOnly: boolean
+let editableLocal: boolean
 
 beforeEach(() => {
   localOnly = false
+  editableLocal = false
   files = { 'wiki/Anchoring.md': ENTRY }
   setBridge({
     invoke: async (command, args) => {
@@ -166,6 +169,17 @@ it('scrolls to a heading in the same note from a [[#Heading]] link', async () =>
   await page.getByTestId('wikilink').first().click()
 
   await vi.waitFor(() => expect(caretHeading()?.textContent).toBe('Evidence'))
+  await view.unmount()
+})
+
+it('reveals a claim after an editable local-only editor mounts', async () => {
+  localOnly = true
+  editableLocal = true
+  const view = await renderFollowing('^c2')
+
+  await expect.element(page.getByText('The wheel-of-fortune study.')).toBeInTheDocument()
+  await vi.waitFor(() => expect(caretHeading()?.textContent).toContain('[C2] The canonical'))
+  expect(document.querySelector('[contenteditable="true"]')).not.toBeNull()
   await view.unmount()
 })
 

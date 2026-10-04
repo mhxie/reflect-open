@@ -13,6 +13,7 @@ import {
   gitSetup,
   gitStatus,
   isCaptureSpoolPath,
+  isEditableLocalOnlyPath,
   isNotePath,
   loadGithubAuth,
   parseGithubRemote,
@@ -376,10 +377,21 @@ export function createBackupController(options: BackupControllerOptions): Backup
         },
         onLocalOnlyChangesSkipped: (paths) => {
           // Local-only folders are never written by sync: say so, or the
-          // other device's edits would seem to vanish.
-          startOperation('Syncing').warn(
-            `Not applied here (local-only folders stay as they are): ${paths.join(', ')}`,
-          )
+          // other device's edits would seem to vanish. In an editable folder
+          // this Mac's copy goes on changing apart from the backup's, so
+          // that warning stays until it is dismissed.
+          const editable = paths.filter((path) => isEditableLocalOnlyPath(path))
+          const frozen = paths.filter((path) => !isEditableLocalOnlyPath(path))
+          if (frozen.length > 0) {
+            startOperation('Syncing').warn(
+              `Not applied here (local-only folders stay as they are): ${frozen.join(', ')}`,
+            )
+          }
+          if (editable.length > 0) {
+            startOperation('Syncing', { persistent: true }).warn(
+              `Not applied here: another device changed these in an editable local-only folder, and this Mac keeps editing its own copy: ${editable.join(', ')}`,
+            )
+          }
         },
         onDisplaced,
         onRemoteChanges,

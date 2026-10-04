@@ -1,3 +1,4 @@
+import type { NoteRecovery } from '@reflect/core'
 import type { FrontmatterPatch } from './note-session-frontmatter.ts'
 import type { RoundTripFidelity } from './roundtrip.ts'
 
@@ -29,6 +30,28 @@ export interface NoteSessionSnapshot {
   /** External content waiting on the user's choice (set only when dirty). */
   conflict: string | null
   error: string | null
+  /**
+   * True when the live frontmatter, the header the next save writes, keeps
+   * the note on the device: `private: true`, or a block the shared fail-closed
+   * classifier can't read. It follows in-app frontmatter patches and adopted
+   * external changes before the index catches up, and starts `true` until the
+   * note has loaded.
+   */
+  privateHeader: boolean
+  /**
+   * Unsaved text an earlier session kept when this note couldn't be saved
+   * (only sessions with a {@link NoteRecoveryIo}), offered until the user
+   * restores or discards it; `null` when there is none.
+   */
+  recovery: NoteRecovery | null
+  /**
+   * True while saves fail in a way retrying alone won't fix (only sessions
+   * with a {@link NoteRecoveryIo}): the local-only folder is unavailable, a
+   * link changed, the file's bytes aren't on this Mac, or the OS refused the
+   * write. The editor stops taking input, without remounting, until a save
+   * lands; the unsaved text is kept meanwhile.
+   */
+  saveBlocked: boolean
 }
 
 /** The snapshot before a session has loaded anything. */
@@ -40,6 +63,24 @@ export const INITIAL_NOTE_SNAPSHOT: NoteSessionSnapshot = {
   missing: false,
   conflict: null,
   error: null,
+  privateHeader: true,
+  recovery: null,
+  saveBlocked: false,
+}
+
+/**
+ * Where a session keeps its unsaved text when a save can't land, with the
+ * graph generation pre-bound by the host: one copy per note and session in the graph's
+ * `.reflect/recovery/`. Wired only for notes in an editable local-only
+ * folder, which have no Git history to fall back on.
+ */
+export interface NoteRecoveryIo {
+  /** Keep this session's text and return the ownership receipt for this version. */
+  preserve: (path: string, contents: string, sourceRevision: string | null) => Promise<NoteRecovery>
+  /** The newest unresolved session copy, or `null`. */
+  read: (path: string) => Promise<NoteRecovery | null>
+  /** Drop this exact version; missing and newer copies stay untouched. */
+  clear: (path: string, copy: NoteRecovery) => Promise<void>
 }
 
 /** File access injected by the host (the hook binds `@reflect/core` commands). */
@@ -52,6 +93,15 @@ export interface NoteSessionIo {
    * dirtiness but never writes.
    */
   write: ((path: string, contents: string, expectedContents: string | null) => Promise<void>) | null
+  /**
+   * Unsaved-text recovery; absent everywhere but editable local-only notes.
+   * With it, the session keeps the buffer whenever it can't be saved (a
+   * failed save, a conflict parked over unsaved edits, a teardown or quit
+   * with either), drops the copy it kept once a save lands, offers an
+   * earlier session's copy on load, and blocks input while saves are
+   * blocked ({@link NoteSessionSnapshot.saveBlocked}).
+   */
+  recovery?: NoteRecoveryIo
 }
 
 /** Why {@link NoteSessionOptions.onContent} fired. */
@@ -149,6 +199,15 @@ export interface NoteSession {
   keepMine: () => void
   /** Resolve a conflict by loading the external content (discards the buffer). */
   loadTheirs: () => void
+  /**
+   * Put the offered {@link NoteSessionSnapshot.recovery} into the buffer as an
+   * edit and save it now, checked against what disk holds like any save. A
+   * no-op without an offer, before the note has loaded, while protected, or
+   * while a conflict is parked (resolve that first).
+   */
+  restoreRecovery: () => void
+  /** Drop the offered {@link NoteSessionSnapshot.recovery} and its kept copy. */
+  discardRecovery: () => void
   /** The full current document (frontmatter + buffer), as a save would write it. */
   content: () => string
   /**

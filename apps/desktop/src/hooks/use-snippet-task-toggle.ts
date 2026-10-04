@@ -1,6 +1,11 @@
 import { useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { errorMessage, isLocalOnlyPath, type SnippetTask, type TaskLocator } from '@reflect/core'
+import {
+  errorMessage,
+  isLocalOnlyReadOnlyPath,
+  type SnippetTask,
+  type TaskLocator,
+} from '@reflect/core'
 import type { TaskClickHandler, TaskClickPayload } from '@meowdown/react'
 import { toggleTask } from '@/lib/note-task.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -76,8 +81,8 @@ export function useSnippetTaskToggle(
     [notePath, tasks, generation, isPending, mutate],
   )
 
-  // A local-only source note is read-only: its checkboxes stay inert.
-  return tasks.some((task) => task.locator !== null) && !isLocalOnlyPath(notePath)
+  // A read-only local-only source note keeps its checkboxes inert.
+  return tasks.some((task) => task.locator !== null) && !isLocalOnlyReadOnlyPath(notePath)
     ? handler
     : undefined
 }

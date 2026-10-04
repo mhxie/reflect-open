@@ -84,6 +84,7 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
     name: 'Dev Graph',
     generation: 1,
     localOnlyFolders: [],
+    localOnlyEditableFolders: [],
   }
   let settingsDocument: Record<string, unknown> = { mobileOnboarded: true }
   const assets = new Map<string, string>()
@@ -226,7 +227,8 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         return files.exists(pathArgsSchema.parse(args).path)
       case 'note_delete': {
         files.remove(pathArgsSchema.parse(args).path)
-        return null
+        // The browser preview stands in for the desktop's system Trash.
+        return { trashed: 'system' }
       }
       case 'list_files':
         return files.list()

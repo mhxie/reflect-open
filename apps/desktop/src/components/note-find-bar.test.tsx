@@ -87,7 +87,7 @@ let registered: NoteEditorHandle | null = null
 
 function registerHandle(): NoteEditorHandle {
   const handle = editorHandle()
-  registerNoteEditorHandle(NOTE_PATH, handle)
+  registerNoteEditorHandle(NOTE_PATH, handle, 1)
   registered = handle
   return handle
 }

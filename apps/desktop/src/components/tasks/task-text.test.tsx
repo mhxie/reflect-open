@@ -1,10 +1,13 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from 'vitest-browser-react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NoteRow } from '@reflect/core'
 import { makeOpenTask as task } from '@/lib/tasks/open-task-fixture.ts'
 import { TaskText } from './task-text.tsx'
 
 /** The props each rendered preview received. */
 const previews = vi.hoisted((): Array<{ content: string; remoteEmbeds?: boolean }> => [])
+const getNote = vi.hoisted(() => vi.fn<(path: string) => Promise<NoteRow | undefined>>())
 vi.mock('@/editor/markdown-preview.tsx', () => ({
   MarkdownPreview: (props: { content: string; remoteEmbeds?: boolean }) => {
     previews.push(props)
@@ -13,24 +16,67 @@ vi.mock('@/editor/markdown-preview.tsx', () => ({
 }))
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
+  hasBridge: () => true,
+  getNote,
   // The graph's local-only folders are `secure`.
   isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
 }))
+vi.mock('@/providers/graph-provider.tsx', () => ({
+  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
+}))
 
-async function renderedFor(notePath: string): Promise<{ remoteEmbeds?: boolean }> {
+function row(path: string, isPrivate: boolean): NoteRow {
+  return {
+    path,
+    title: 'Plan',
+    dailyDate: null,
+    isPrivate,
+    hasConflict: false,
+    gistUrl: null,
+    gistStale: false,
+  }
+}
+
+beforeEach(() => {
   previews.length = 0
-  const view = await render(<TaskText task={task({ notePath, text: 'watch the talk' })} />)
+  getNote.mockReset().mockImplementation(async (path) => row(path, path === 'notes/locked.md'))
+})
+
+async function renderFor(notePath: string): Promise<void> {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = await render(
+    <QueryClientProvider client={client}>
+      <TaskText task={task({ notePath, text: 'watch the talk' })} />
+    </QueryClientProvider>,
+  )
   await expect.element(view.getByTestId('markdown-preview')).toBeVisible()
-  await view.unmount()
-  return previews.at(-1)!
+  await vi.waitFor(() => expect(getNote).toHaveBeenCalledWith(notePath))
 }
 
 describe('TaskText', () => {
-  it('renders a task from a local-only note without remote embeds', async () => {
-    expect((await renderedFor('finance/secure/bank.md')).remoteEmbeds).toBe(false)
+  it('renders an ordinary task with remote embeds once its note is known public', async () => {
+    await renderFor('notes/plan.md')
+    // Fail closed until the row lands.
+    expect(previews[0]?.remoteEmbeds).toBe(false)
+    await vi.waitFor(() => expect(previews.at(-1)?.remoteEmbeds).toBe(true))
   })
 
-  it('renders an ordinary task with them (control)', async () => {
-    expect((await renderedFor('notes/plan.md')).remoteEmbeds).toBe(true)
+  it('renders a task from a locked note without them', async () => {
+    await renderFor('notes/locked.md')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(previews.every((props) => props.remoteEmbeds === false)).toBe(true)
+  })
+
+  it('renders a task from a local-only note without them', async () => {
+    await renderFor('finance/secure/bank.md')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(previews.every((props) => props.remoteEmbeds === false)).toBe(true)
+  })
+
+  it('renders a task without them while its note has no row', async () => {
+    getNote.mockResolvedValue(undefined)
+    await renderFor('notes/unindexed.md')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(previews.every((props) => props.remoteEmbeds === false)).toBe(true)
   })
 })

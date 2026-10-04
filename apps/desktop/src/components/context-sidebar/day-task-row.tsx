@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { Circle, CircleCheck } from 'lucide-react'
-import { displayNoteTitle, isLocalOnlyPath, type OpenTask } from '@reflect/core'
+import { displayNoteTitle, isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
 import { isModEvent } from '@meowdown/core'
 import type { NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { formatShortDate } from '@/lib/dates.ts'
@@ -19,7 +19,8 @@ interface DayTaskRowProps {
 
 /**
  * A daily-sidebar task row. The checkbox goes through the Tasks view's guarded
- * write-back and, as there, stays inert for a task in a local-only note.
+ * write-back and, as there, stays inert for a task in a read-only local-only
+ * note.
  */
 export function DayTaskRow({ task, day, onNavigate }: DayTaskRowProps): ReactElement {
   const { settings } = useSettings()
@@ -37,7 +38,7 @@ export function DayTaskRow({ task, day, onNavigate }: DayTaskRowProps): ReactEle
       <button
         type="button"
         aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
-        disabled={isPending || isLocalOnlyPath(task.notePath)}
+        disabled={isPending || isLocalOnlyReadOnlyPath(task.notePath)}
         onClick={toggle}
         className="flex h-5 shrink-0 items-center text-text-muted transition-colors hover:text-text focus-visible:text-text focus-visible:outline-none disabled:cursor-default"
       >

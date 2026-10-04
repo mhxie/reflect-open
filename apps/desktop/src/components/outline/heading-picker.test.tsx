@@ -124,7 +124,7 @@ describe('HeadingPicker', () => {
       findPrevious: vi.fn(),
       revealHeading: () => false,
     }
-    registerNoteEditorHandle(PATH, handle)
+    registerNoteEditorHandle(PATH, handle, 1)
     try {
       await renderOpenPicker()
       await userEvent.keyboard('{Escape}')

@@ -1,6 +1,7 @@
 import type { Database } from '@reflect/db'
 import { sql, type Selectable } from 'kysely'
 import { readNote } from '../graph/commands.ts'
+import { notePrivate } from '../privacy/checkers.ts'
 import {
   blockContextLinesAt,
   prepareBlockContext,
@@ -33,6 +34,14 @@ export function getBacklinks(path: string): Promise<Backlink[]> {
 export interface BacklinkContext {
   sourcePath: string
   sourceTitle: string
+  /**
+   * Whether the source note is private, so the snippet must not reach the
+   * network: its index row says so (locked, unreadable frontmatter, or in a
+   * local-only folder), or the frontmatter of the very read the snippet came
+   * from does (a lock the index hasn't caught up with). Also true when that
+   * read failed.
+   */
+  sourcePrivate: boolean
   /**
    * The Markdown block context around the link (old Reflect's rules — see
    * {@link blockContextAt}): the whole paragraph, the containing list item with
@@ -103,9 +112,10 @@ function throughSource(cursor: BacklinkSourceCursor) {
 }
 
 /**
- * Backlinks of `path` with source titles and block-context snippets. One read
- * per distinct source; a source that vanished between query and read keeps its
- * row with an empty snippet (the index lags deletes only briefly). Mentions of
+ * Backlinks of `path` with source titles, source privacy and block-context
+ * snippets. One read per distinct source; a source that vanished between query
+ * and read keeps its row with an empty snippet (the index lags deletes only
+ * briefly). Mentions of
  * one source that produce an identical context collapse into one row — two
  * links to `path` in the same paragraph read as a single reference, exactly as
  * old Reflect deduplicated on `[target, contextHtml]`. Pages are bounded by
@@ -125,7 +135,12 @@ export async function getBacklinksWithContext(
     .selectFrom('backlinks')
     .innerJoin('notes', 'notes.path', 'backlinks.sourcePath')
     .where('targetPath', '=', path)
-    .select(['backlinks.sourcePath', 'notes.title as sourceTitle', sourceRecency.as('recencyMs')])
+    .select([
+      'backlinks.sourcePath',
+      'notes.title as sourceTitle',
+      'notes.isPrivate as sourceIsPrivate',
+      sourceRecency.as('recencyMs'),
+    ])
     .$narrowType<{ sourcePath: string }>()
     .distinct()
   if (options.cursor !== null) {
@@ -211,14 +226,21 @@ export async function getBacklinksWithContext(
   // contributes many rows, and context extraction walks the parsed body.
   const sources = new Map<string, BlockContextSource | null>()
   const locators = new Map<string, SourceTaskLocate>()
+  // The privacy of the exact content each snippet is cut from.
+  const privateReads = new Set<string>()
   await Promise.all(
     pageSources.map(async ({ sourcePath }) => {
       try {
-        const source = prepareBlockContext(await readNote(sourcePath))
+        const content = await readNote(sourcePath)
+        if (notePrivate(content)) {
+          privateReads.add(sourcePath)
+        }
+        const source = prepareBlockContext(content)
         sources.set(sourcePath, source)
         locators.set(sourcePath, createSourceTaskLocator(source))
       } catch {
         sources.set(sourcePath, null)
+        privateReads.add(sourcePath)
       }
     }),
   )
@@ -227,6 +249,8 @@ export async function getBacklinksWithContext(
   const results: BacklinkContext[] = []
   for (const pageSource of pageSources) {
     const source = sources.get(pageSource.sourcePath)
+    const sourcePrivate =
+      pageSource.sourceIsPrivate !== 0 || privateReads.has(pageSource.sourcePath)
     const seenSnippets = new Set<string>()
     for (const posFrom of positionsBySource.get(pageSource.sourcePath) ?? []) {
       const context =
@@ -243,6 +267,7 @@ export async function getBacklinksWithContext(
       results.push({
         sourcePath: pageSource.sourcePath,
         sourceTitle: pageSource.sourceTitle,
+        sourcePrivate,
         snippet,
         posFrom,
         tasks: extractSnippetTasks(

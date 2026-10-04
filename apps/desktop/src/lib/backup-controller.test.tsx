@@ -21,6 +21,12 @@ vi.mock('@/lib/platform.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/platform.ts')>()),
   isNativeShell: () => true,
 }))
+// `finance/secure` is an editable local-only folder (the predicate itself is
+// covered against the shared fixture in core).
+vi.mock('@reflect/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@reflect/core')>()),
+  isEditableLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
+}))
 const httpFetch = vi.mocked(tauriFetch)
 
 afterEach(() => {
@@ -30,7 +36,13 @@ afterEach(() => {
   resetOperations()
 })
 
-const GRAPH: GraphInfo = { root: '/g', name: 'G', generation: 3, localOnlyFolders: [] }
+const GRAPH: GraphInfo = {
+  root: '/g',
+  name: 'G',
+  generation: 3,
+  localOnlyFolders: [],
+  localOnlyEditableFolders: [],
+}
 
 beforeEach(() => {
   setDisplacedNotesGeneration(GRAPH.generation)
@@ -723,6 +735,32 @@ describe('createBackupController', () => {
     } finally {
       controller.dispose()
     }
+  })
+
+  it('keeps warning about skipped changes inside an editable local-only folder until dismissed', async () => {
+    resetOperations()
+    fakeBridge({
+      mergeOutcome: {
+        kind: 'fastForward',
+        conflictedPaths: [],
+        changedFiles: [],
+        frozenPaths: ['archive/2019.md', 'finance/secure/remote.md'],
+      },
+    })
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: null })
+    await controller.start()
+
+    await vi.waitFor(() => expect(getOperations()).toHaveLength(2))
+    const [frozen, editable] = getOperations()
+    expect(frozen).toMatchObject({ label: 'Syncing', status: 'warning', persistent: false })
+    expect(frozen?.message).toContain('archive/2019.md')
+    expect(frozen?.message).not.toContain('finance/secure/remote.md')
+    // This Mac's copy goes on changing apart from the backup's: the warning stays.
+    expect(editable).toMatchObject({ label: 'Syncing', status: 'warning', persistent: true })
+    expect(editable?.message).toContain('finance/secure/remote.md')
+    expect(editable?.message).not.toContain('archive/2019.md')
+    controller.dispose()
+    resetOperations()
   })
 
   it('fans a pull’s writes whole to the local file-changes channel — consumers filter by path', async () => {

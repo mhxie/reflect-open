@@ -1,4 +1,4 @@
-import { isLocalOnlyPath } from '../graph/local-only.ts'
+import { isLocalOnlyPath, isLocalOnlyReadOnlyPath } from '../graph/local-only.ts'
 import { patchNoteWith } from '../graph/patch-note.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
@@ -72,6 +72,13 @@ export interface TitleRenameRewriteResult {
    * note only through it.
    */
   destinationBlocked: boolean
+  /**
+   * Backed-up sources left untouched because the renamed note is local-only:
+   * rewriting them would carry its new title into the Git backup. Their
+   * links keep resolving through the old-title alias. Empty for every other
+   * note.
+   */
+  keptInBackup: string[]
 }
 
 /**
@@ -82,6 +89,12 @@ export interface TitleRenameRewriteResult {
  * not fatal. The old-title alias keeps its links resolving. Each write is
  * checked against the text it rewrote: a source edited meanwhile is re-read
  * and rewritten again (`patchNoteWith`), never overwritten.
+ *
+ * Local-only notes bound the rewrite both ways. A source in a read-only
+ * local-only folder is never written. When the renamed note itself is
+ * local-only, only sources in (editable) local-only folders are rewritten:
+ * a backed-up source keeps the old title, so the new one never enters the
+ * Git backup, and comes back in `keptInBackup`.
  */
 export async function rewriteLinksForTitleChange(
   options: TitleRenameRewriteOptions,
@@ -175,12 +188,20 @@ export async function rewriteLinksForTitleChange(
     }
   }
 
-  // A note inside a local-only folder is read-only: its links are never
-  // rewritten (the old-title alias keeps them resolving) and it is not a
-  // failure to report.
-  const sources = [...new Set([...titleSources, ...backlinkSources])]
-    .filter((source) => source !== path && !isLocalOnlyPath(source))
+  // A note inside a read-only local-only folder is never written: its links
+  // stay as they are (the old-title alias keeps them resolving), and that is
+  // not a failure to report.
+  const candidates = [...new Set([...titleSources, ...backlinkSources])]
+    .filter((source) => source !== path && !isLocalOnlyReadOnlyPath(source))
     .sort()
+  // A local-only note's new title stays out of backed-up notes.
+  const renamedLocalOnly = isLocalOnlyPath(path)
+  const keptInBackup = renamedLocalOnly
+    ? candidates.filter((source) => !isLocalOnlyPath(source))
+    : []
+  const sources = renamedLocalOnly
+    ? candidates.filter((source) => isLocalOnlyPath(source))
+    : candidates
   const repoint =
     collision || destinationBlocked ? null : { fromKey: foldKey(fromTarget), to: toTarget }
   const display =
@@ -204,7 +225,7 @@ export async function rewriteLinksForTitleChange(
     done += 1
     onProgress?.(done, sources.length)
   }
-  return { rewritten, failed, collision, destinationBlocked }
+  return { rewritten, failed, collision, destinationBlocked, keptInBackup }
 }
 
 /**
@@ -282,10 +303,11 @@ export async function rewritePathLinksForMove(
     throw new Error(`move destination has no wiki spelling: ${toPath}`)
   }
   const fromPathKey = foldGraphPath(fromPath)
-  // Local-only notes are read-only; their path links dangle like any
-  // unwritable source's, without being read or reported.
+  // Notes in read-only local-only folders are never written; their path
+  // links dangle like any unwritable source's, without being read or
+  // reported. An editable folder's notes are retargeted like any other.
   const sources = (await io.pathLinkSources(fromPathKey))
-    .filter((source) => source !== fromPath && !isLocalOnlyPath(source))
+    .filter((source) => source !== fromPath && !isLocalOnlyReadOnlyPath(source))
     .sort()
   const rewritten: string[] = []
   const failed: string[] = []

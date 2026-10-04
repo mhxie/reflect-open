@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import { errorMessage, isDaily } from '@reflect/core'
+import { errorMessage, isDaily, isLocalOnlyPath } from '@reflect/core'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from '@/components/ui/dialog.tsx'
-import { deleteOpenNote } from '@/lib/note-delete.ts'
+import { deleteOpenNote, KEPT_IN_GRAPH_TRASH } from '@/lib/note-delete.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
@@ -21,9 +21,12 @@ interface NoteTrashActionProps {
 }
 
 /**
- * Moves a regular note to the system Trash after confirmation. Daily notes
- * return `null` here as a second UI-layer guard; the shared delete helper
- * enforces the same rule before touching disk.
+ * Moves a regular note to the system Trash after confirmation. A note from an
+ * editable local-only folder gets there by way of the graph's
+ * `.reflect/trash/`, and stays there when the system Trash refuses it, which
+ * the status line then says. Daily notes return `null` here as a second
+ * UI-layer guard; the shared delete helper enforces the same rule before
+ * touching disk.
  */
 export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | null {
   const { graph } = useGraph()
@@ -45,8 +48,12 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
     setIsTrashing(true)
     setError(null)
     try {
-      await deleteOpenNote(path, generation)
-      operation.done()
+      const outcome = await deleteOpenNote(path, generation)
+      if (outcome?.trashed === 'graph') {
+        operation.warn(KEPT_IN_GRAPH_TRASH)
+      } else {
+        operation.done()
+      }
       setConfirmingTrash(false)
       navigate({ kind: 'today' })
     } catch (cause) {
@@ -80,7 +87,9 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
         <DialogContent>
           <DialogTitle>Trash this note?</DialogTitle>
           <DialogDescription>
-            It moves to your system Trash, where you can restore it.
+            {isLocalOnlyPath(path)
+              ? 'It moves to your system Trash by way of this graph’s .reflect/trash folder. Put Back returns it to that folder, not here.'
+              : 'It moves to your system Trash, where you can restore it.'}
           </DialogDescription>
           {error !== null ? <p className="text-sm text-destructive">{error}</p> : null}
           <DialogFooter>

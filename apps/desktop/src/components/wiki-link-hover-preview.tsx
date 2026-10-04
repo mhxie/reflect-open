@@ -9,6 +9,11 @@ interface WikiLinkHoverPreviewProps {
   path: string
   /** The note body with frontmatter already stripped. */
   markdown: string
+  /**
+   * Whether the target note is private (locked, unreadable, or local-only):
+   * its body then renders with no remote media at all.
+   */
+  privateNote: boolean
   dateFormat: DateFormat
   resolveImageUrl: ImageUrlResolver
   /** Classify the note's `![[embeds]]`, resolved from its own folder. */
@@ -59,6 +64,7 @@ function useOverflowing(): {
 export function WikiLinkHoverPreview({
   path,
   markdown,
+  privateNote,
   dateFormat,
   resolveImageUrl,
   resolveWikiEmbed,
@@ -88,6 +94,9 @@ export function WikiLinkHoverPreview({
             resolveImageUrl={resolveImageUrl}
             {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
             interactive={false}
+            // A passive card already renders no embed and only local raster
+            // images; a private target is kept off the network regardless.
+            remoteEmbeds={!privateNote}
             className="text-xs leading-relaxed"
           />
         )}
