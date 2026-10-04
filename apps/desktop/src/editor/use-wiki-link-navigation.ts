@@ -6,6 +6,7 @@ import {
   resolveOrCreateNoteWithTitle,
   resolveWikiTarget,
 } from '@reflect/core'
+import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { reportAmbiguousNoteTitle } from '@/editor/ambiguous-note-feedback.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -31,7 +32,8 @@ function reportUnavailableNoteTitle(title: string): void {
  * decided at the editor boundary from meowdown's `mod` flag) opens the
  * resolved target in a secondary note window instead, falling back to
  * in-window navigation whenever the surface can't (browser dev, mobile), so
- * the request never makes a link do nothing.
+ * the request never makes a link do nothing. A `peek` request (⌥-click) floats
+ * the note over the editor where the workspace offers Peek.
  *
  * Resolution is async, and the host pane can unmount or the user can act
  * again while it's in flight — a late navigate would yank the user somewhere
@@ -45,15 +47,25 @@ function reportUnavailableNoteTitle(title: string): void {
  */
 export function useWikiLinkNavigation(
   generation: number | null,
-): (options: { target: string; openInNewWindow: boolean }) => void {
+): (options: { target: string; openInNewWindow: boolean; peek?: boolean }) => void {
   const navigateNoteLink = useNoteLinkNavigation()
+  const peekNoteLink = usePeekNavigation()
   const beginLinkIntent = useLinkIntentGuard()
 
   return useCallback(
-    ({ target, openInNewWindow }: { target: string; openInNewWindow: boolean }) => {
+    ({
+      target,
+      openInNewWindow,
+      peek = false,
+    }: {
+      target: string
+      openInNewWindow: boolean
+      peek?: boolean
+    }) => {
       const isStale = beginLinkIntent()
+      const follow = peek ? peekNoteLink : navigateNoteLink
       const open = (route: NoteRoute): void => {
-        navigateNoteLink({ target: route, openInNewWindow })
+        follow({ target: route, openInNewWindow })
       }
       void (async () => {
         try {
@@ -121,6 +133,6 @@ export function useWikiLinkNavigation(
         }
       })()
     },
-    [beginLinkIntent, generation, navigateNoteLink],
+    [beginLinkIntent, generation, navigateNoteLink, peekNoteLink],
   )
 }
