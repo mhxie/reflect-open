@@ -19,9 +19,20 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({ settings: { dateFormat: 'iso', timeFormat: '24h' } }),
 }))
+// Every asset URL serves one real 1×1 PNG, so previews load rather than
+// falling back to the placeholder; the asset path rides in the fragment.
+const imageUrl = vi.hoisted(() => {
+  const bytes = Uint8Array.from(
+    atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    ),
+    (character) => character.charCodeAt(0),
+  )
+  return URL.createObjectURL(new Blob([bytes], { type: 'image/png' }))
+})
 vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${path}`,
+  convertFileSrc: (path: string, protocol: string) => `${imageUrl}#${protocol}/${path}`,
 }))
 
 function entry(path: string, title: string): NoteListEntry {
@@ -69,12 +80,12 @@ describe('AttachmentGallery', () => {
     expect(listAttachmentPreviews).toHaveBeenCalledWith('pdf')
   })
 
-  it('shows an image attachment as itself and marks the selected card', async () => {
+  it('shows an image attachment as its cached thumbnail and marks the selected card', async () => {
     const view = await renderGallery('image')
 
     await vi.waitFor(() => {
       const sources = [...view.container.querySelectorAll('img')].map((img) => img.src)
-      expect(sources[1]).toMatch(/7\/assets\/map\.png$/)
+      expect(sources[1]).toMatch(/7\/assets\/map\.png\?reflect-preview=thumb&width=\d+$/)
     })
     const cards = view.container.querySelectorAll('li')
     expect(cards[1]!.className).toContain('border-accent')

@@ -24,6 +24,10 @@
 //! `?reflect-preview=pdf-page&page=N&width=W` passes the same checks and
 //! answers with a page PNG rendered by `pdf_render`; the PDF's own bytes
 //! never reach the webview.
+//!
+//! `?reflect-preview=thumb&width=W` passes the same checks and answers with
+//! a downscaled JPEG or PNG that `image_thumbnail` decodes and re-encodes;
+//! the image's own bytes never reach the webview either.
 
 use std::borrow::Cow;
 use std::io::Read;
@@ -35,6 +39,7 @@ use tauri::http::{header, Request, Response, StatusCode};
 use tauri::utils::mime_type::MimeType;
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
+use super::image_thumbnail::{self, ThumbnailError, ThumbnailLookup, ThumbnailRequest};
 use super::pdf_render::{self, PageLookup, PageRequest, PdfError};
 use super::resolve::ReadTarget;
 use super::GraphState;
@@ -68,6 +73,17 @@ pub(crate) fn handle<R: Runtime>(
                 _ if !method_allowed => status_response(StatusCode::METHOD_NOT_ALLOWED),
                 Err(status) => status_response(status),
                 Ok(page) => pdf_page_response(app, request_path, page).await,
+            };
+            responder.respond(response);
+        });
+        return;
+    }
+    if let Some(thumbnail) = ThumbnailRequest::from_query(request.uri().query()) {
+        tauri::async_runtime::spawn(async move {
+            let response = match thumbnail {
+                _ if !method_allowed => status_response(StatusCode::METHOD_NOT_ALLOWED),
+                Err(status) => status_response(status),
+                Ok(thumbnail) => thumbnail_response(app, request_path, thumbnail).await,
             };
             responder.respond(response);
         });
@@ -232,6 +248,59 @@ async fn serve_pdf_page<R: Runtime>(
 /// status alone cannot tell a corrupt PDF from an unreadable page).
 fn page_status(err: PdfError) -> StatusCode {
     tracing::debug!(error = ?err, "PDF page failed");
+    err.status()
+}
+
+async fn thumbnail_response<R: Runtime>(
+    app: AppHandle<R>,
+    request_path: String,
+    request: ThumbnailRequest,
+) -> Response<Cow<'static, [u8]>> {
+    match serve_thumbnail(app, request_path.clone(), request).await {
+        // Set from the encoded bytes: sniffing would go by the source path.
+        Ok(thumbnail) => Response::builder()
+            .header(header::CONTENT_TYPE, thumbnail.mime)
+            .header(header::CONTENT_LENGTH, thumbnail.bytes.len())
+            .body(Cow::Owned(thumbnail.bytes))
+            .unwrap_or_else(|_| status_response(StatusCode::INTERNAL_SERVER_ERROR)),
+        Err(status) => {
+            tracing::debug!(path = request_path, %status, "asset protocol refused a thumbnail");
+            status_response(status)
+        }
+    }
+}
+
+/// One image thumbnail. The cheap half (resolve, stat, cache lookup) runs
+/// straight away on the blocking pool; a render waits for one of
+/// `image_thumbnail`'s render slots, so a screen of new images cannot
+/// saturate the CPU while cached thumbnails keep loading.
+async fn serve_thumbnail<R: Runtime>(
+    app: AppHandle<R>,
+    request_path: String,
+    request: ThumbnailRequest,
+) -> Result<image_thumbnail::Thumbnail, StatusCode> {
+    let lookup = tauri::async_runtime::spawn_blocking(move || {
+        let located = locate(&app, &request_path)?;
+        image_thumbnail::lookup_thumbnail(
+            &located.root,
+            located.local_only.as_deref(),
+            &located.rel,
+            &located.target,
+            request,
+        )
+        .map_err(thumbnail_status)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    match lookup {
+        ThumbnailLookup::Cached(thumbnail) => Ok(thumbnail),
+        ThumbnailLookup::Render(render) => render.run().await.map_err(thumbnail_status),
+    }
+}
+
+/// The status for a failed thumbnail, keeping the reason in the debug log.
+fn thumbnail_status(err: ThumbnailError) -> StatusCode {
+    tracing::debug!(error = %err, "thumbnail failed");
     err.status()
 }
 
@@ -450,6 +519,81 @@ mod tests {
             ("4/notes/paper.md", request(1, 480), StatusCode::FORBIDDEN),
         ] {
             assert_eq!(serve_page(path, page).unwrap_err(), status, "{path}");
+        }
+    }
+
+    /// Command tier: an image thumbnail comes back re-encoded under its own
+    /// content type, a repeat is served from the cache, and the generation
+    /// pin, path guard, and decoder refusals map to statuses.
+    #[test]
+    fn serves_cached_image_thumbnails_under_the_asset_rules() {
+        use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        let mut png = Vec::new();
+        DynamicImage::ImageRgb8(RgbImage::from_pixel(1200, 600, Rgb([9, 9, 9])))
+            .write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        std::fs::write(root.join("assets/photo.png"), png).unwrap();
+        std::fs::write(root.join("assets/drawing.png"), b"<svg/>").unwrap();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(GraphState::default());
+        {
+            let state = app.state::<GraphState>();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 4;
+            inner.root = Some(root.clone());
+        }
+        let thumb = |width: u32| {
+            ThumbnailRequest::from_query(Some(&format!("reflect-preview=thumb&width={width}")))
+                .unwrap()
+                .unwrap()
+        };
+        let serve_thumb = |path: &str, width| {
+            tauri::async_runtime::block_on(serve_thumbnail(
+                app.handle().clone(),
+                path.to_owned(),
+                thumb(width),
+            ))
+        };
+
+        let response = tauri::async_runtime::block_on(thumbnail_response(
+            app.handle().clone(),
+            "4/assets/photo.png".into(),
+            thumb(600),
+        ));
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/jpeg");
+        let decoded = image::load_from_memory(response.body()).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (640, 320));
+
+        let cache = root.join(".reflect/cache/thumbnails");
+        let cached: Vec<_> = std::fs::read_dir(&cache)
+            .unwrap()
+            .flatten()
+            .flat_map(|key| std::fs::read_dir(key.path()).unwrap().flatten())
+            .map(|entry| entry.path())
+            .collect();
+        assert_eq!(cached.len(), 1);
+        assert!(cached[0].ends_with("640.thumb"));
+        // A repeat in the same bucket is the cached entry.
+        let marker = b"\xff\xd8\xffmarker".to_vec();
+        std::fs::write(&cached[0], &marker).unwrap();
+        assert_eq!(
+            serve_thumb("4/assets/photo.png", 500).unwrap().bytes,
+            marker
+        );
+
+        for (path, status) in [
+            ("4/assets/drawing.png", StatusCode::UNSUPPORTED_MEDIA_TYPE),
+            ("4/assets/missing.png", StatusCode::NOT_FOUND),
+            ("3/assets/photo.png", StatusCode::FORBIDDEN),
+            ("4/notes/photo.md", StatusCode::FORBIDDEN),
+        ] {
+            assert_eq!(serve_thumb(path, 320).unwrap_err(), status, "{path}");
         }
     }
 

@@ -93,6 +93,12 @@ const APP_COMMANDS: AppCommand[] = [
     run: (context) => context.navigate(allNotesRoute(null)),
   },
   {
+    id: 'nav.attachments',
+    title: 'Attachments',
+    keywords: ['all attachments', 'media', 'images', 'photos', 'gallery', 'pdf', 'video', 'audio'],
+    run: (context) => context.navigate({ kind: 'attachments', type: null, tag: null }),
+  },
+  {
     id: 'allNotes.sortByTitle',
     title: 'Sort notes by title',
     keywords: ['all notes', 'order', 'alphabetical', 'name', 'subject'],

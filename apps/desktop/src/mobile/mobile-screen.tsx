@@ -76,9 +76,11 @@ export function MobileScreen({
         />
       )
     case 'search':
+    case 'attachments':
       // Mobile has no dedicated search surface: a search entry (shared
       // history shapes with desktop) renders as the All tab; the shell seeds
-      // the live query from the entry.
+      // the live query from the entry. The desktop Attachments library has no
+      // mobile screen either, so it lands on the All tab too.
       return (
         <MobileAllNotes
           query={allQuery}

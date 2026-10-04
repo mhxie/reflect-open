@@ -106,6 +106,7 @@ describe('appMenuLayout', () => {
       'palette.open',
       'nav.today',
       'nav.allNotes',
+      'nav.attachments',
       'history.back',
       'history.forward',
       'shortcuts.show',

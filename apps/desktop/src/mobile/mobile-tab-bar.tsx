@@ -13,6 +13,7 @@ export function tabRootFor(route: Route): MobileTab | null {
     case 'daily':
       return 'daily'
     case 'allNotes':
+    case 'attachments':
     case 'search':
       return 'all'
     case 'tasks':

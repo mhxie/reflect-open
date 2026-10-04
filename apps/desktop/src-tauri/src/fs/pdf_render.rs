@@ -4,18 +4,18 @@
 //! cache under `.reflect/cache/pdf-pages/<key>/<page>-<width>.png`, the key
 //! hashing path, size, and mtime; [`sweep_page_cache`] bounds the cache.
 
-use std::fs::{self, File, Metadata};
+use std::fs::{File, Metadata};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use tauri::http::StatusCode;
 use tauri::State;
 use tokio::sync::Semaphore;
 
+use super::preview_cache;
 use super::resolve::{resolve_read, resolve_write, ReadTarget};
 use super::GraphState;
 use crate::error::{AppError, AppResult};
@@ -422,14 +422,9 @@ impl PageRender {
     }
 }
 
-/// The cache key for one version of one PDF: a SHA-256 prefix over the
-/// cache format, graph-relative path, size, and mtime.
+/// The cache key for one version of one PDF (see [`preview_cache::cache_key`]).
 fn cache_key(rel: &str, size: u64, modified_ms: u64) -> String {
-    let digest = Sha256::digest(format!("{CACHE_FORMAT}\0{rel}\0{size}\0{modified_ms}"));
-    digest[..16]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    preview_cache::cache_key(CACHE_FORMAT, rel, size, modified_ms)
 }
 
 /// The graph-relative cache path for one rendered page.
@@ -442,21 +437,9 @@ fn cache_rel_path(rel: &str, size: u64, modified_ms: u64, request: PageRequest) 
     )
 }
 
-/// A cached PNG, or `None` when there is none (or it is not a PNG). A hit
-/// refreshes the entry's mtime: the sweep evicts least-recently-used first,
-/// and access times are not dependable on macOS.
+/// A cached page PNG, or `None` when there is none (or it is not a PNG).
 fn read_cached(path: &Path) -> Option<Vec<u8>> {
-    const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
-    let mut file = File::open(path).ok()?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
-    if !bytes.starts_with(PNG_SIGNATURE) {
-        return None;
-    }
-    if let Err(err) = file.set_modified(SystemTime::now()) {
-        tracing::debug!(%err, "failed to refresh a cached PDF page");
-    }
-    Some(bytes)
+    preview_cache::read_cached(path, preview_cache::is_png)
 }
 
 /// Bound the page cache when a graph opens: past [`CACHE_CAP_BYTES`], delete
@@ -467,60 +450,7 @@ pub(super) fn sweep_page_cache(root: &Path) {
 }
 
 fn sweep_cache_dir(root: &Path, cap: u64) {
-    // `.reflect/` itself is vetted at open; below it nothing symlinked is
-    // followed, so a planted link cannot point the sweep's deletes elsewhere.
-    let is_real_dir =
-        |path: &Path| fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir());
-    let cache = root.join(CACHE_DIR);
-    if !is_real_dir(&cache) || !cache.parent().is_some_and(is_real_dir) {
-        return;
-    }
-    let Ok(documents) = fs::read_dir(&cache) else {
-        return;
-    };
-    let mut pages = Vec::new();
-    let mut total = 0u64;
-    let mut document_dirs = Vec::new();
-    for document in documents.flatten() {
-        let document = document.path();
-        if !is_real_dir(&document) {
-            continue;
-        }
-        if let Ok(entries) = fs::read_dir(&document) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let Ok(metadata) = fs::symlink_metadata(&path) else {
-                    continue;
-                };
-                if !metadata.is_file() || path.extension().is_none_or(|ext| ext != "png") {
-                    continue;
-                }
-                total += metadata.len();
-                let used = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                pages.push((used, metadata.len(), path));
-            }
-        }
-        document_dirs.push(document);
-    }
-    if total <= cap {
-        return;
-    }
-    let before = total;
-    pages.sort_by_key(|(used, _, _)| *used);
-    for (_, len, path) in pages {
-        if total <= cap {
-            break;
-        }
-        match fs::remove_file(&path) {
-            Ok(()) => total -= len,
-            Err(err) => tracing::debug!(%err, path = %path.display(), "failed to evict a PDF page"),
-        }
-    }
-    for document in document_dirs {
-        // Only empties go: `remove_dir` refuses a directory with entries.
-        let _ = fs::remove_dir(document);
-    }
-    tracing::debug!(before, after = total, cap, "swept the PDF page cache");
+    preview_cache::sweep_cache_dir(root, CACHE_DIR, "png", cap);
 }
 
 /// Hand-assembled PDFs and helpers for the rendering, command, and protocol
@@ -612,6 +542,9 @@ pub(crate) mod fixtures {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::time::SystemTime;
+
     use super::*;
 
     #[test]

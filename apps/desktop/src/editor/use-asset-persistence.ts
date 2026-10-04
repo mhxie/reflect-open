@@ -11,13 +11,12 @@ import {
   createAsset,
   errorMessage,
   isSafeVisibleGraphPath,
-  openAsset as openAssetCommand,
   resolveAttachmentLink,
-  revealAsset as revealAssetCommand,
 } from '@reflect/core'
 import { createPdfEmbedResolver } from '@/editor/pdf-embed-resolver.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { formatBytes } from '@/lib/format-bytes.ts'
+import { openAttachment } from '@/lib/open-attachment.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { loadAttachmentCatalog } from '@/lib/attachment-catalog.ts'
 
@@ -157,21 +156,7 @@ export function useAssetPersistence(
       if (generation === null) {
         return
       }
-      try {
-        await openAssetCommand(assetPath, generation)
-      } catch (openCause) {
-        // A refused file type still deserves a visible outcome: fall back to
-        // the file manager. When even the reveal fails (missing or evicted
-        // file), report the original open error — that is the user's intent.
-        try {
-          await revealAssetCommand(assetPath, generation)
-          startOperation('Opening attachment').warn(
-            'This file type can’t be opened directly, so it was revealed in Finder instead.',
-          )
-        } catch {
-          startOperation('Opening attachment').fail(errorMessage(openCause))
-        }
-      }
+      await openAttachment(assetPath, generation)
     },
     [generation],
   )
