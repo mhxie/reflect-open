@@ -93,13 +93,24 @@ const GRAPH_SWITCH_COMMANDS: AppCommand[] = Array.from({ length: 9 }, (_, index)
     id: `graph.switch${position}`,
     title: `Switch to graph ${position}`,
     keywords: ['graph', 'workspace', 'switch', 'recent'],
-    keybinding: `Mod-${position}`,
     run: (context) => context.switchGraph(index),
+  }
+})
+
+const PINNED_NOTE_COMMANDS: AppCommand[] = Array.from({ length: 10 }, (_, index) => {
+  const position = index + 1
+  return {
+    id: `pinned.open${position}`,
+    title: `Open pinned note ${position}`,
+    keywords: ['pinned', 'note', 'open', 'sidebar'],
+    keybinding: `Mod-${position % 10}`,
+    run: (context) => context.openPinnedNote(index),
   }
 })
 
 const APP_COMMANDS: AppCommand[] = [
   ...GRAPH_SWITCH_COMMANDS,
+  ...PINNED_NOTE_COMMANDS,
   {
     id: 'nav.today',
     title: 'Go to today',

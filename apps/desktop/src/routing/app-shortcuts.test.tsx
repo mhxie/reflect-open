@@ -39,6 +39,14 @@ vi.mock('@/lib/note-frontmatter.ts', () => ({
 const newChat = vi.hoisted(() => vi.fn())
 const openRecent = vi.hoisted(() => vi.fn())
 const openRouteInNewWindow = vi.hoisted(() => vi.fn(async () => true))
+const bridgeState = vi.hoisted(() => ({ ready: false }))
+const getPinnedNotes = vi.hoisted(() => vi.fn<() => Promise<PinnedNote[]>>(async () => []))
+
+vi.mock('@reflect/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@reflect/core')>()),
+  hasBridge: () => bridgeState.ready,
+  getPinnedNotes,
+}))
 
 const openNoteFindForPath = vi.hoisted(() => vi.fn(() => true))
 const findNextInNote = vi.hoisted(() => vi.fn())
@@ -91,6 +99,8 @@ vi.mock('@/providers/chat-provider.tsx', () => ({
 registerAppCommands() // production does this in main.tsx
 
 beforeEach(() => {
+  bridgeState.ready = false
+  getPinnedNotes.mockReset().mockResolvedValue([])
   graphState.graph = {
     root: '/g',
     name: 'g',
@@ -148,6 +158,21 @@ function press(key: string, options: KeyboardEventInit = {}) {
   window.dispatchEvent(
     new KeyboardEvent('keydown', { key, ...MOD_KEY, cancelable: true, ...options }),
   )
+}
+
+function pinnedNotes(count = 10): PinnedNote[] {
+  return Array.from({ length: count }, (_, index) => ({
+    path: `notes/pin-${index + 1}.md`,
+    title: `Pin ${index + 1}`,
+    dailyDate: null,
+    pinnedOrder: index + 1,
+  }))
+}
+
+function pinnedClient(count = 10): QueryClient {
+  const client = new QueryClient()
+  client.setQueryData(queryKeys.index.pinnedNotes('/g'), pinnedNotes(count))
+  return client
 }
 
 function pressFrom(target: EventTarget, key: string, options: KeyboardEventInit = {}) {
@@ -260,6 +285,7 @@ describe('app shortcuts', () => {
       'Alt-Mod-l',
       'Mod-1',
       'Mod-9',
+      'Mod-0',
     ]) {
       expect(bindings.get(key)).toBe('app')
     }
@@ -512,21 +538,22 @@ describe('app shortcuts', () => {
     expect(newChat).not.toHaveBeenCalled()
   })
 
-  it('⌘number switches to the matching recent graph', async () => {
-    const { act } = await shortcutsHook()
+  it('⌘1–⌘9 and ⌘0 open the first ten pinned notes', async () => {
+    const { result, act } = await shortcutsHook(pinnedClient())
+    const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
 
-    await act(() => press('1'))
-    expect(openRecent).not.toHaveBeenCalled() // first row is already open
-
-    await act(() => press('2'))
-    expect(openRecent).toHaveBeenCalledWith('/work')
-
-    await act(() => press('9'))
-    expect(openRecent).toHaveBeenCalledTimes(1)
+    for (const [index, digit] of digits.entries()) {
+      await act(() => press(digit))
+      expect(result.current.router.route).toEqual({
+        kind: 'note',
+        path: `notes/pin-${index + 1}.md`,
+      })
+    }
+    expect(openRecent).not.toHaveBeenCalled()
   })
 
-  it('⌘number switches graphs from a focused editor that leaves the chord alone', async () => {
-    const { act } = await shortcutsHook()
+  it('⌘number opens a pin from a focused editor that leaves the chord alone', async () => {
+    const { result, act } = await shortcutsHook(pinnedClient())
     // Stands in for meowdown, whose heading toggles are ⌘⌥1–⌘⌥6: plain ⌘N is
     // not an editor binding, so the keydown bubbles to the app untouched.
     const toggleHeading = vi.fn()
@@ -541,47 +568,129 @@ describe('app shortcuts', () => {
 
     try {
       await act(() => pressFrom(editor, '2', { code: 'Digit2' }))
-      expect(openRecent).toHaveBeenCalledWith('/work')
+      expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
       expect(toggleHeading).not.toHaveBeenCalled()
 
       await act(() => pressFrom(editor, '™', { code: 'Digit2', altKey: true }))
-      expect(openRecent).toHaveBeenCalledTimes(1) // ⌘⌥2 stays the editor's
+      expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
       expect(toggleHeading).toHaveBeenCalledTimes(1)
     } finally {
       editor.remove()
     }
   })
 
-  it('matches graph number shortcuts by physical digit key on symbol-producing layouts', async () => {
-    const { act } = await shortcutsHook()
+  it('matches pinned-number shortcuts by physical digit key on symbol-producing layouts', async () => {
+    const { result, act } = await shortcutsHook(pinnedClient())
 
     await act(() => press('@', { code: 'Digit2' }))
 
-    expect(openRecent).toHaveBeenCalledWith('/work')
+    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
   })
 
   it('strips Shift from physical digit fallback on layouts where digits require Shift', async () => {
-    const { act } = await shortcutsHook()
+    const { result, act } = await shortcutsHook(pinnedClient())
 
     await act(() => press('2', { code: 'Digit2', shiftKey: true }))
 
-    expect(openRecent).toHaveBeenCalledWith('/work')
+    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
   })
 
-  it('does not turn produced symbols with Shift into graph number shortcuts', async () => {
-    const { act } = await shortcutsHook()
+  it('does not turn produced symbols with Shift into pinned-number shortcuts', async () => {
+    const { result, act } = await shortcutsHook(pinnedClient())
 
     await act(() => press('@', { code: 'Digit2', shiftKey: true }))
 
-    expect(openRecent).not.toHaveBeenCalled()
+    expect(result.current.router.route).toEqual({ kind: 'today' })
   })
 
-  it('switches graphs only on the Mod key, not the other command key', async () => {
-    const { act } = await shortcutsHook()
+  it('opens pins only on the Mod key, not the other command key', async () => {
+    const { result, act } = await shortcutsHook(pinnedClient())
 
     await act(() => press('2', NON_MOD_KEY))
 
-    expect(openRecent).not.toHaveBeenCalled()
+    expect(result.current.router.route).toEqual({ kind: 'today' })
+  })
+
+  it('loads pinned shortcuts with no sidebar mounted and while the sidebar is collapsed', async () => {
+    bridgeState.ready = true
+    getPinnedNotes.mockResolvedValue(pinnedNotes())
+    const { result, act } = await shortcutsHook()
+    await act(() => result.current.sidebar.toggleSidebar())
+    await vi.waitFor(() => expect(getPinnedNotes).toHaveBeenCalledTimes(1))
+
+    await act(() => press('0'))
+
+    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-10.md' })
+    expect(getPinnedNotes).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the optimistic pinned order immediately', async () => {
+    const client = pinnedClient(2)
+    const { result, act } = await shortcutsHook(client)
+    await act(() =>
+      client.setQueryData(queryKeys.index.pinnedNotes('/g'), pinnedNotes(2).reverse()),
+    )
+
+    await act(() => press('1'))
+
+    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
+  })
+
+  it('missing and removed pinned slots leave the current route in place', async () => {
+    const client = pinnedClient(1)
+    const { result, act } = await shortcutsHook(client)
+    await act(() => press('0'))
+    expect(result.current.router.route).toEqual({ kind: 'today' })
+
+    await act(() => client.setQueryData(queryKeys.index.pinnedNotes('/g'), []))
+    await act(() => press('1'))
+    expect(result.current.router.route).toEqual({ kind: 'today' })
+  })
+
+  it('opens a pinned daily note at its date', async () => {
+    const client = new QueryClient()
+    client.setQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes('/g'), [
+      { path: 'daily/2025-05-02.md', title: '2025-05-02', dailyDate: '2025-05-02' },
+    ])
+    const { result, act } = await shortcutsHook(client)
+
+    await act(() => press('1'))
+
+    expect(result.current.router.route).toEqual({ kind: 'daily', date: '2025-05-02' })
+  })
+
+  it('a saved command context reads pins from the current graph', async () => {
+    const client = pinnedClient(1)
+    client.setQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes('/other'), [
+      { path: 'notes/other.md', title: 'Other', dailyDate: null },
+    ])
+    const { result, act } = await shortcutsHook(client)
+    const context = result.current.context
+    graphState.graph = {
+      root: '/other',
+      name: 'Other',
+      generation: 2,
+      localOnlyFolders: [],
+      localOnlyEditableFolders: [],
+    }
+    await act(() => result.current.router.navigate({ kind: 'settings' }))
+
+    await act(() => context.openPinnedNote(0))
+
+    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/other.md' })
+    graphState.graph = null
+    await act(() => result.current.router.navigate({ kind: 'settings' }))
+    await act(() => context.openPinnedNote(0))
+    expect(result.current.router.route).toEqual({ kind: 'settings' })
+  })
+
+  it('pinned shortcuts do not navigate behind the palette', async () => {
+    const { result, act } = await shortcutsHook(pinnedClient())
+    await act(() => result.current.palette.openPalette())
+
+    await act(() => press('1'))
+
+    expect(result.current.router.route).toEqual({ kind: 'today' })
   })
 
   it('matches uppercase keys (caps lock) and ignores auto-repeat', async () => {

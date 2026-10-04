@@ -89,6 +89,7 @@ function fakeContext(overrides?: Partial<CommandContext>) {
     findNextInNote: vi.fn(),
     findPreviousInNote: vi.fn(),
     switchGraph: vi.fn(),
+    openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
     generation: () => 7,
     graphRoot: () => '/g',
@@ -139,9 +140,14 @@ describe('keybindingFor', () => {
     expect(keybindingFor('note.openInNewWindow')).toBe('Mod-Shift-o')
   })
 
-  it('graph switch commands use command-number bindings', () => {
-    expect(keybindingFor('graph.switch1')).toBe('Mod-1')
-    expect(keybindingFor('graph.switch9')).toBe('Mod-9')
+  it('pinned notes own all ten command-number bindings', () => {
+    const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+    for (const [index, digit] of digits.entries()) {
+      expect(keybindingFor(`pinned.open${index + 1}`)).toBe(`Mod-${digit}`)
+    }
+    expect(keybindingFor('pinned.open11')).toBeNull()
+    expect(keybindingFor('graph.switch1')).toBeNull()
+    expect(keybindingFor('graph.switch9')).toBeNull()
   })
 })
 
@@ -271,6 +277,16 @@ describe('app commands', () => {
 
     expect(switchGraph).toHaveBeenNthCalledWith(1, 0)
     expect(switchGraph).toHaveBeenNthCalledWith(2, 8)
+  })
+
+  it('pinned-note commands select their zero-based sidebar position', async () => {
+    const openPinnedNote = vi.fn()
+    const { context } = fakeContext({ openPinnedNote })
+
+    for (let position = 1; position <= 10; position++) {
+      await command(`pinned.open${position}`).run(context)
+      expect(openPinnedNote).toHaveBeenNthCalledWith(position, position - 1)
+    }
   })
 
   it('note.new clears daily scroll and navigates to a fresh lazy ULID note path', async () => {

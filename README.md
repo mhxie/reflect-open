@@ -24,6 +24,8 @@ In addition to upstream Reflect's features, this fork adds:
   "On this day" entries from earlier years, and due/overdue tasks in the sidebar.
 - **Editor aids:** a heading outline and quick jumps, plus live character and
   selection counts and the note's last edit time.
+- **Pinned note shortcuts:** `⌘1`–`⌘9` and `⌘0` open the first ten pinned notes
+  in sidebar order, with floating hints on hover and keyboard focus.
 - **Peek and PDFs on Mac:** open notes and PDFs over the current editor, and read
   PDFs inline as scrollable page previews.
 - **Attachment browsing:** an attachment library with image/PDF previews,

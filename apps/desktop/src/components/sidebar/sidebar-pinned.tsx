@@ -13,6 +13,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { displayNoteTitle } from '@reflect/core'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { useReorderPinnedNotes } from '@/hooks/use-reorder-pinned-notes.ts'
+import { keybindingFor } from '@/lib/commands/app-commands.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath, routesEqual } from '@/routing/route.ts'
@@ -75,8 +76,12 @@ export function SidebarPinned(): ReactElement | null {
           strategy={verticalListSortingStrategy}
         >
           <ul className="mt-2 flex flex-col space-y-1">
-            {pinned.map((note) => (
-              <SidebarSortablePinnedRow key={note.path} note={note} />
+            {pinned.map((note, index) => (
+              <SidebarSortablePinnedRow
+                key={note.path}
+                note={note}
+                binding={keybindingFor(`pinned.open${index + 1}`) ?? undefined}
+              />
             ))}
           </ul>
         </SortableContext>
