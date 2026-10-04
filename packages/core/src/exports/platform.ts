@@ -150,7 +150,11 @@ export {
   type AttachmentCatalog,
   type WikiEmbedTarget,
 } from '../graph/attachment-resolution.ts'
-export { NOTE_ATTACHMENT_TYPES, type NoteAttachmentType } from '../graph/attachment-types.ts'
+export {
+  attachmentTypeOf,
+  NOTE_ATTACHMENT_TYPES,
+  type NoteAttachmentType,
+} from '../graph/attachment-types.ts'
 export {
   wikiNoteReference,
   markdownNoteReference,
@@ -182,6 +186,10 @@ export {
   type PdfPageSize,
 } from '../graph/schemas.ts'
 export { PDF_PAGE_WIDTH_BUCKETS, pdfPageWidthBucket } from '../graph/pdf-pages.ts'
+export {
+  IMAGE_THUMBNAIL_WIDTH_BUCKETS,
+  imageThumbnailWidthBucket,
+} from '../graph/image-thumbnails.ts'
 export {
   openGraph,
   openNoteWindow,

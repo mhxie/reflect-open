@@ -84,6 +84,9 @@ export const queryKeys = {
     attachmentPreviews(root: GraphRoot, type: string) {
       return [...this.graph(root), 'attachment-previews', type] as const
     },
+    attachmentReferences(root: GraphRoot) {
+      return [...this.graph(root), 'attachment-references'] as const
+    },
     noteMtime(root: GraphRoot, path: string) {
       return [...this.graph(root), 'note-mtime', path] as const
     },
@@ -150,6 +153,10 @@ export const queryKeys = {
     all: ['attachments'] as const,
     catalog(generation: number) {
       return [...this.all, generation] as const
+    },
+    /** The raw attachment listing (with mtimes) behind the Attachments library. */
+    files(generation: number) {
+      return [...this.all, 'files', generation] as const
     },
   },
   pdf: {
@@ -349,6 +356,8 @@ export const queryClient = new QueryClient({
 // Settings load freshness lives with its shared query options.
 queryClient.setQueryDefaults(queryKeys.index.all, { staleTime: Infinity })
 queryClient.setQueryDefaults(queryKeys.chat.all, { staleTime: Infinity })
+// The watcher invalidates the attachment listings (`invalidateAttachmentCatalog`).
+queryClient.setQueryDefaults(queryKeys.attachments.all, { staleTime: Infinity })
 
 /** Refetch all index-backed queries; called after index rows change. */
 export function invalidateIndexQueries(): void {

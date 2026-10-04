@@ -244,6 +244,25 @@ describe('Sidebar', () => {
       .toHaveAttribute('aria-current', 'page')
   })
 
+  it('Attachments opens the library and lights alone while it is open', async () => {
+    const { view, navigate } = await renderSidebar(undefined, {
+      kind: 'attachments',
+      type: null,
+      tag: null,
+    })
+    const attachments = view.getByRole('button', { name: /attachments/i })
+
+    await expect.element(attachments).toHaveAttribute('aria-current', 'page')
+    await expect
+      .element(view.getByRole('button', { name: /all notes/i }))
+      .not.toHaveAttribute('aria-current')
+
+    await attachments.click()
+    await vi.waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({ kind: 'attachments', type: null, tag: null }),
+    )
+  })
+
   it('only "New note" — not "All notes" — lights for the untitled placeholder', async () => {
     // A brand-new note is still an untitled placeholder, so the two rows must
     // never light at once.

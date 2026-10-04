@@ -22,6 +22,11 @@ export type Route =
   | { kind: 'daily'; date: string }
   | { kind: 'note'; path: string }
   | { kind: 'allNotes'; filter: AllNotesFilter | null }
+  /**
+   * Every media attachment in the graph, optionally narrowed to one type
+   * and/or to files linked from notes carrying a tag.
+   */
+  | { kind: 'attachments'; type: NoteAttachmentType | null; tag: string | null }
   | { kind: 'search'; query: string }
   | { kind: 'tasks' }
   | { kind: 'chat' }
@@ -51,6 +56,10 @@ export function routesEqual(a: Route, b: Route): boolean {
       return a.path === (b as Extract<Route, { kind: 'note' }>).path
     case 'allNotes':
       return allNotesFiltersEqual(a.filter, (b as Extract<Route, { kind: 'allNotes' }>).filter)
+    case 'attachments': {
+      const other = b as Extract<Route, { kind: 'attachments' }>
+      return a.type === other.type && a.tag === other.tag
+    }
     case 'search':
       return a.query === (b as Extract<Route, { kind: 'search' }>).query
   }

@@ -1,3 +1,5 @@
+import { AUDIO_MEMOS_DIR } from './paths.ts'
+
 /**
  * The attachment types the All Notes list can be narrowed to: which file
  * extensions each one covers (a subset of the supported attachment formats in
@@ -26,3 +28,30 @@ export const YOUTUBE_VIDEO_URL_FRAGMENTS: readonly string[] = [
   'youtube-nocookie.com/embed/',
   'youtu.be/',
 ]
+
+/** Is this graph-relative path inside an `audio-memos/` tree (at the root or nested)? */
+function isAudioMemoPath(path: string): boolean {
+  return path.startsWith(`${AUDIO_MEMOS_DIR}/`) || path.includes(`/${AUDIO_MEMOS_DIR}/`)
+}
+
+/**
+ * The attachment type of a graph-relative file, by extension (ASCII
+ * case-insensitive), or null for a file of no media type. A recording inside
+ * an `audio-memos/` tree is audio whatever its container — the recorder may
+ * save `.webm` — matching the All Notes audio and video filters.
+ */
+export function attachmentTypeOf(path: string): NoteAttachmentType | null {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) {
+    return null
+  }
+  const extension = name.slice(dot + 1).toLowerCase()
+  const type = NOTE_ATTACHMENT_TYPES.find((candidate) =>
+    ATTACHMENT_TYPE_EXTENSIONS[candidate].includes(extension),
+  )
+  if (type === undefined) {
+    return null
+  }
+  return type === 'video' && isAudioMemoPath(path) ? 'audio' : type
+}

@@ -55,6 +55,17 @@ describe('routesEqual', () => {
     expect(routesEqual({ kind: 'allNotes', filter: null }, { kind: 'today' })).toBe(false)
   })
 
+  it('compares attachments routes by their type and tag', () => {
+    const attachments = (type: 'pdf' | null, tag: string | null) =>
+      ({ kind: 'attachments', type, tag }) as const
+    expect(routesEqual(attachments(null, null), attachments(null, null))).toBe(true)
+    expect(routesEqual(attachments('pdf', 'trip'), attachments('pdf', 'trip'))).toBe(true)
+    expect(routesEqual(attachments('pdf', null), attachments(null, null))).toBe(false)
+    expect(routesEqual(attachments(null, 'trip'), attachments(null, null))).toBe(false)
+    expect(routesEqual(attachments(null, 'trip'), attachments(null, 'work'))).toBe(false)
+    expect(routesEqual(attachments(null, null), { kind: 'allNotes', filter: null })).toBe(false)
+  })
+
   it('treats singleton screens as equal to themselves', () => {
     expect(routesEqual({ kind: 'chat' }, { kind: 'chat' })).toBe(true)
     expect(routesEqual({ kind: 'chat' }, { kind: 'settings' })).toBe(false)

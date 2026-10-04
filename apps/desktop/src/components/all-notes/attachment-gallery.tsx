@@ -4,11 +4,10 @@ import { FileText } from 'lucide-react'
 import {
   displayNoteTitle,
   listAttachmentPreviews,
-  pdfPageWidthBucket,
   type NoteListEntry,
   type PreviewableAttachmentType,
 } from '@reflect/core'
-import { attachmentUrl, pdfPageUrl } from '@/editor/use-note-attachments.ts'
+import { AttachmentPreviewImage } from '@/components/attachment-preview-image.tsx'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
@@ -26,7 +25,7 @@ interface AttachmentGalleryProps {
   onOpen: (path: string, event?: ModClickEvent) => void
 }
 
-/** Card thumbnails are at most this wide (CSS px), so PDFs render at a small bucket. */
+/** Card thumbnails are at most this wide (CSS px), so previews render at a small bucket. */
 const CARD_WIDTH = 220
 
 /**
@@ -50,17 +49,6 @@ export function AttachmentGallery({
     enabled: bridgeReady && graph !== null,
   })
   const generation = graph?.generation ?? null
-  const thumbnail = (assetPath: string): string | null =>
-    generation === null
-      ? null
-      : type === 'pdf'
-        ? pdfPageUrl(
-            generation,
-            assetPath,
-            1,
-            pdfPageWidthBucket(CARD_WIDTH * window.devicePixelRatio),
-          )
-        : attachmentUrl(generation, assetPath)
 
   return (
     <ul
@@ -69,7 +57,9 @@ export function AttachmentGallery({
     >
       {notes.map((note) => {
         const assetPath = previews?.get(note.path)
-        const src = assetPath === undefined ? null : thumbnail(assetPath)
+        const placeholder = (
+          <FileText aria-hidden strokeWidth={1.5} className="size-6 text-text-muted" />
+        )
         const title = displayNoteTitle(note.title) || 'Untitled'
         const selected = selection.isSelected(note.path)
         return (
@@ -90,17 +80,15 @@ export function AttachmentGallery({
             )}
           >
             <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-surface-sunken">
-              {src === null ? (
-                <FileText aria-hidden strokeWidth={1.5} className="size-6 text-text-muted" />
+              {assetPath === undefined || generation === null ? (
+                placeholder
               ) : (
-                <img
-                  src={src}
-                  alt=""
-                  loading="lazy"
-                  className={cn(
-                    'size-full transition-transform duration-200 group-hover/card:scale-[1.02]',
-                    type === 'pdf' ? 'object-cover object-top' : 'object-cover',
-                  )}
+                <AttachmentPreviewImage
+                  generation={generation}
+                  path={assetPath}
+                  kind={type}
+                  width={CARD_WIDTH}
+                  fallback={placeholder}
                 />
               )}
             </div>
