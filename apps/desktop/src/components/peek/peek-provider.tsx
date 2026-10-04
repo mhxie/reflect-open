@@ -35,16 +35,32 @@ const PeekContext = createContext<PeekContextValue | null>(null)
  * opened from a note, floats over the editor instead of replacing it, so the
  * user keeps their place.
  */
-export function PeekProvider({ children }: { children: ReactNode }): ReactElement {
+export function PeekProvider({
+  enabled = true,
+  children,
+}: {
+  /** False where no panel renders (note windows), so links navigate instead. */
+  enabled?: boolean
+  children: ReactNode
+}): ReactElement {
   const [target, setTarget] = useState<PeekTarget | null>(null)
   const closePeek = useCallback(() => setTarget(null), [])
   const value = useMemo(() => ({ target, openPeek: setTarget, closePeek }), [target, closePeek])
-  return <PeekContext value={value}>{children}</PeekContext>
+  return <PeekContext value={enabled ? value : null}>{children}</PeekContext>
 }
 
 /** The peek state, or null outside a {@link PeekProvider} (note windows). */
 export function usePeek(): PeekContextValue | null {
   return use(PeekContext)
+}
+
+/**
+ * The note open in Peek, or null. While one is, it is the note being worked
+ * on: note-scoped commands, Find, and the status bar follow it.
+ */
+export function usePeekedNotePath(): string | null {
+  const target = usePeek()?.target
+  return target?.kind === 'note' ? target.path : null
 }
 
 /**

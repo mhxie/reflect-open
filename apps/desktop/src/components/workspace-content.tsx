@@ -11,7 +11,6 @@ import { LocalModelUpdates } from '@/components/local-model-updates.tsx'
 import { NoteFindBar } from '@/components/note-find-bar.tsx'
 import { NoteStatusBar } from '@/components/note-status-bar.tsx'
 import { PeekPanel } from '@/components/peek/peek-panel.tsx'
-import { PeekProvider } from '@/components/peek/peek-provider.tsx'
 import { HeadingPicker } from '@/components/outline/heading-picker.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { ShortcutsDialog } from '@/components/shortcuts-dialog.tsx'
@@ -58,34 +57,32 @@ export function WorkspaceContent({ graph }: WorkspaceContentProps): ReactElement
   const contextTarget = useDailyContextTarget()
 
   return (
-    <PeekProvider>
-      <AppShell
-        sidebar={collapsed ? undefined : <Sidebar graph={graph} context={commandContext} />}
-        sidebarEdge={<SidebarResizeHandle panel="workspace" />}
-        context={collapsed ? undefined : contextSidebarFor(contextTarget)}
-        contextEdge={<SidebarResizeHandle panel="context" />}
-      >
-        <div className="relative flex h-full flex-col">
-          <div className="min-h-0 flex-1">
-            <RouteContent />
-          </div>
-          <NoteStatusBar />
-          <PeekPanel />
-
-          <NoteFindBar />
-          <CommandPalette context={commandContext} />
-          <ShortcutsDialog />
-          <TemplatePicker context={commandContext} />
-          <HeadingPicker context={commandContext} />
-          <TemplateCreateDialog context={commandContext} />
-          <EmbeddingsSync />
-          <SearchIpcResponder />
-          <LocalModelUpdates />
-          {import.meta.env.DEV && import.meta.env.VITE_SEARCH_EVAL === '1' ? (
-            <SearchEvalRunner />
-          ) : null}
+    <AppShell
+      sidebar={collapsed ? undefined : <Sidebar graph={graph} context={commandContext} />}
+      sidebarEdge={<SidebarResizeHandle panel="workspace" />}
+      context={collapsed ? undefined : contextSidebarFor(contextTarget)}
+      contextEdge={<SidebarResizeHandle panel="context" />}
+    >
+      <div className="relative flex h-full flex-col">
+        <div className="min-h-0 flex-1">
+          <RouteContent />
         </div>
-      </AppShell>
-    </PeekProvider>
+        <NoteStatusBar />
+        <PeekPanel />
+
+        <NoteFindBar />
+        <CommandPalette context={commandContext} />
+        <ShortcutsDialog />
+        <TemplatePicker context={commandContext} />
+        <HeadingPicker context={commandContext} />
+        <TemplateCreateDialog context={commandContext} />
+        <EmbeddingsSync />
+        <SearchIpcResponder />
+        <LocalModelUpdates />
+        {import.meta.env.DEV && import.meta.env.VITE_SEARCH_EVAL === '1' ? (
+          <SearchEvalRunner />
+        ) : null}
+      </div>
+    </AppShell>
   )
 }
