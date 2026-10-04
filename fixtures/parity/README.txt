@@ -31,7 +31,9 @@ jobs. When adding a fixture, add the file (or scalar input), regenerate, and
 commit both.
 
 `.gitattributes` disables line-ending conversion: the fixture bytes are the
-contract (`crlf.md` deliberately carries `\r\n`).
+contract (`crlf.md` deliberately carries `\r\n`). Both sides normalize line
+endings on read, except unreadable frontmatter: its original bytes must remain
+visible to the privacy classifiers.
 
 Frontmatter on the Rust side comes from the shared `reflect-frontmatter` crate
 (`crates/frontmatter`), which the CLI and the desktop shell both use.

@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use reflect_cli::hash::hash_content;
 use reflect_cli::keys::fold_key;
-use reflect_cli::note_file::{parse_note_meta, walk_notes};
+use reflect_cli::note_file::{parse_note_meta, read_note_text, walk_notes};
 use reflect_cli::search::{build_fts_any_match, build_fts_match, is_sentence_like};
 use reflect_index_schema::cjk::cjk_column_text;
 
@@ -60,7 +60,7 @@ fn note_derivations_match_the_ts_pipeline() {
     let corpus = corpus_dir();
     let expected = load_expected();
     for (rel_path, want) in expected["notes"].as_object().unwrap() {
-        let content = fs::read_to_string(corpus.join(rel_path)).unwrap();
+        let content = read_note_text(&corpus.join(rel_path)).unwrap();
         let meta = parse_note_meta(rel_path, &content);
 
         assert_eq!(meta.id.as_deref(), want["id"].as_str(), "{rel_path}: id");

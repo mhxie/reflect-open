@@ -13,8 +13,10 @@ use std::os::raw::c_int;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use reflect_frontmatter::backup_privacy;
 use reflect_graph_paths::{
-    evicted_logical_path, eviction_placeholder, is_dataless, LocalOnlyFolders,
+    evicted_logical_path, eviction_placeholder, is_dataless, normalize_line_endings,
+    LocalOnlyFolders,
 };
 
 use crate::error::{AppError, AppResult};
@@ -152,12 +154,20 @@ fn create_runtime_file(path: &Path, contents: &str) -> AppResult<()> {
 /// used as-is: `O_NOFOLLOW_ANY` then polices every component of
 /// `base.join(rest)`, so neither a symlink below the base nor one swapped into
 /// it after validation is followed. Off Apple targets it falls back to a
-/// plain read (the resolve guards still apply).
+/// plain read (the resolve guards still apply). Line endings are normalized
+/// unless doing so would change the frontmatter privacy verdict.
 pub(super) fn read_note_no_follow(base: &Path, rest: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut contents = String::new();
     open_no_follow(base, rest)?.read_to_string(&mut contents)?;
-    Ok(contents)
+    if !contents.contains('\r') {
+        return Ok(contents);
+    }
+    let normalized = normalize_line_endings(contents.clone());
+    if backup_privacy(contents.as_bytes()) != backup_privacy(normalized.as_bytes()) {
+        return Ok(contents);
+    }
+    Ok(normalized)
 }
 
 /// Open `base.join(rest)` for reading with every component policed by
@@ -562,6 +572,36 @@ fn file_meta_from(entry: reflect_graph_paths::FileEntry) -> FileMeta {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn note_reads_preserve_privacy_when_normalizing_line_endings() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let path = Path::new("note.md");
+        for (source, expected) in [
+            ("a\r\nb\rc", "a\nb\nc"),
+            (
+                "---\r\nprivate: true\r\n---\r\nsecret",
+                "---\nprivate: true\n---\nsecret",
+            ),
+            (
+                "---\ntitle: x\rprivate: false\n---\nsecret",
+                "---\ntitle: x\rprivate: false\n---\nsecret",
+            ),
+            (
+                "---\ntitle: x\r---\rprivate: true\n---\nsecret",
+                "---\ntitle: x\r---\rprivate: true\n---\nsecret",
+            ),
+        ] {
+            fs::write(root.join(path), source).unwrap();
+            let actual = read_note_no_follow(&root, path).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(
+                backup_privacy(source.as_bytes()),
+                backup_privacy(actual.as_bytes())
+            );
+        }
+    }
 
     #[cfg(target_os = "macos")]
     #[test]

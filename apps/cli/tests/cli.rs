@@ -44,7 +44,8 @@ impl Fixture {
     fn build_index(&self) {
         let conn = reflect_index_schema::open_index_at(self.root()).unwrap();
         for note in reflect_cli::note_file::walk_notes(self.root()) {
-            let content = fs::read_to_string(self.root().join(&note.rel_path)).unwrap();
+            let content =
+                reflect_cli::note_file::read_note_text(&self.root().join(&note.rel_path)).unwrap();
             let meta = parse_note_meta(&note.rel_path, &content);
             let daily_date = reflect_cli::paths::date_from_daily_path(&note.rel_path);
             let kind = if daily_date.is_some() {
@@ -1234,6 +1235,36 @@ fn resolving_to_a_local_only_note_is_refused_as_private() {
         assert_eq!(output.status.code(), Some(3), "{command}");
         assert!(stderr(&output).contains("private"), "{command}");
         assert!(!stdout(&output).contains("1234"), "{command}");
+    }
+}
+
+#[test]
+fn normalizing_line_endings_never_releases_private_notes() {
+    for source in [
+        "---\ntitle: x\rprivate: false\n---\nsecret",
+        "---\ntitle: x\r---\rprivate: true\n---\nsecret",
+        "---\r\nprivate: true\r\n---\r\nsecret",
+    ] {
+        let fixture = Fixture {
+            dir: tempfile::tempdir().unwrap(),
+        };
+        let path = fixture.write_note("notes/secret.md", source);
+        let read = reflect_cli::note_file::read_note_text(&path).unwrap();
+        assert_eq!(
+            reflect_frontmatter::backup_privacy(source.as_bytes()),
+            reflect_frontmatter::backup_privacy(read.as_bytes()),
+        );
+        fixture.build_index();
+        for command in ["show", "path", "open"] {
+            let output = reflect(&fixture, &[command, "notes/secret.md", "--json"]);
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{command}: {}",
+                stderr(&output)
+            );
+            assert!(!stdout(&output).contains("secret"));
+        }
     }
 }
 

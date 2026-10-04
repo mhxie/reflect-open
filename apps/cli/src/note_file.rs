@@ -10,7 +10,7 @@ use pulldown_cmark::{Event, HeadingLevel, Parser, Tag};
 use reflect_frontmatter::{
     backup_privacy, parse_frontmatter, split_frontmatter, BackupPrivacy, Frontmatter,
 };
-use reflect_graph_paths::{eviction_placeholder, LocalOnlyFolders};
+use reflect_graph_paths::{eviction_placeholder, normalize_line_endings, LocalOnlyFolders};
 
 use crate::error::CliError;
 use crate::keys::fold_key;
@@ -380,6 +380,20 @@ fn in_local_only_folder(root: &Path, rel_path: &str, folders: &LocalOnlyFolders)
     folders.contains(&on_disk.join("/"))
 }
 
+/// Read a note with normalized line endings unless normalization changes its
+/// frontmatter privacy verdict.
+pub fn read_note_text(path: &Path) -> std::io::Result<String> {
+    let content = fs::read_to_string(path)?;
+    if !content.contains('\r') {
+        return Ok(content);
+    }
+    let normalized = normalize_line_endings(content.clone());
+    if backup_privacy(content.as_bytes()) != backup_privacy(normalized.as_bytes()) {
+        return Ok(content);
+    }
+    Ok(normalized)
+}
+
 /// Read a note and enforce the privacy contract: a `private: true` note, or
 /// one whose frontmatter can't be read, is refused (exit 3), based on the
 /// file's own frontmatter — never an index row — and so is a note inside a
@@ -392,7 +406,7 @@ pub fn read_note(
 ) -> Result<Note, CliError> {
     refuse_local_only(root, rel_path, local_only)?;
     let absolute = checked_note_path(root, rel_path)?;
-    let content = fs::read_to_string(&absolute)
+    let content = read_note_text(&absolute)
         .map_err(|err| CliError::Runtime(format!("could not read {rel_path}: {err}")))?;
     let meta = parse_note_meta(rel_path, &content);
     refuse_withheld(rel_path, meta.privacy)?;

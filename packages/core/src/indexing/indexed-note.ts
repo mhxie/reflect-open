@@ -120,8 +120,10 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * lone CR or another non-printable character doesn't load (so it is withheld
  * when it mentions `private`), every block reads as YAML 1.2, and a block of
  * only comments is empty.
+ * 27 - file reads normalize line endings without changing the privacy verdict,
+ * so existing file hashes and Markdown-derived rows must be rebuilt.
  */
-export const PROJECTION_VERSION = 26
+export const PROJECTION_VERSION = 27
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the

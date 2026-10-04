@@ -1,7 +1,6 @@
 import { isMap, parseDocument, type Document } from 'yaml'
 import { loadFrontmatterBlock } from './frontmatter-load.ts'
 import { classifyFrontmatterBlock, type FrontmatterPrivacy } from './frontmatter-privacy.ts'
-import { documentLineEnding } from './line-endings.ts'
 import { frontmatterSchema, type Frontmatter } from './model.ts'
 
 /**
@@ -148,7 +147,7 @@ export function upsertFrontmatter(source: string, patch: Record<string, unknown>
     return body
   }
   const block = `---\n${ensureTrailingNewline(String(doc))}---\n\n`
-  return block.replaceAll(/\r?\n/g, documentLineEnding(source)) + body
+  return block + body
 }
 
 /**

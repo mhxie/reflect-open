@@ -651,15 +651,6 @@ describe('drainCaptureInbox (text captures)', () => {
     expect(files.get(DAILY)).toBe('Wrote some prose.\n\n- call the bank\n')
   })
 
-  it('joins a CRLF daily with CRLF line endings', async () => {
-    files.set(DAILY, '- morning standup\r\n')
-    addTextSpool(textEnvelope())
-
-    await drain()
-
-    expect(files.get(DAILY)).toBe('- morning standup\r\n- call the bank\r\n')
-  })
-
   it('keeps a daily edit that lands mid-drain, appending after it', async () => {
     files.set(DAILY, '- morning standup\n')
     addTextSpool(textEnvelope())

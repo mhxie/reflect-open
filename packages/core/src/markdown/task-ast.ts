@@ -1,4 +1,5 @@
 import {
+  isMarkdownAstEqual,
   parseMarkdownAst,
   resolveMarkdownAstPath,
   serializeMarkdownAst,
@@ -13,7 +14,6 @@ import {
 } from '@meowdown/markdown'
 import { DefaultMap } from '@ocavue/utils'
 import { splitFrontmatter } from './frontmatter.ts'
-import { documentLineEnding } from './line-endings.ts'
 import { normalizeWikiTarget } from './resolve.ts'
 import { scanInlineWikiLinks } from './scan.ts'
 import { isSameTaskPath } from './task-path.ts'
@@ -234,8 +234,7 @@ export function applyTaskEdits(source: string, edits: readonly TaskEdit[]): Task
     return snapshot
   })
 
-  const serializedBody = document.children.length === 0 ? '' : serializeMarkdownAst(document)
-  const nextBody = restoreLineEnding(serializedBody, source)
+  const nextBody = document.children.length === 0 ? '' : serializeMarkdownAst(document)
   assertTasksSurvive(nextBody, after)
   return {
     source: source.slice(0, bodyOffset) + nextBody,
@@ -254,17 +253,11 @@ function assertSerializable(document: MarkdownDocument): void {
     return
   }
   const reparsed = parseMarkdownAst(serializeMarkdownAst(document))
-  if (structureOf(reparsed) !== structureOf(document)) {
+  if (!isMarkdownAstEqual(reparsed, document)) {
     throw new NoteNotSerializableError(
       'This note cannot be rewritten faithfully. Edit the task in the note itself.',
     )
   }
-}
-
-/** A document's blocks without their source offsets, which shift whenever
- * serializing normalizes layout or line endings. */
-function structureOf(document: MarkdownDocument): string {
-  return JSON.stringify(document, (key, value: unknown) => (key === 'position' ? undefined : value))
 }
 
 function hasSameContent(entry: TaskLocator, locator: TaskLocator): boolean {
@@ -437,10 +430,6 @@ function createTaskItem(markdown: string): MarkdownListItem {
     collapsed: false,
     children: [{ type: 'paragraph', value: markdown }],
   }
-}
-
-function restoreLineEnding(body: string, source: string): string {
-  return documentLineEnding(source) === '\r\n' ? body.replaceAll('\n', '\r\n') : body
 }
 
 /** The written bytes must read back with the same tasks at the same paths. */

@@ -65,8 +65,8 @@ importers:
         specifier: file:../../vendor/meowdown/meowdown-core-0.78.2-6aebbd534640.tgz
         version: file:vendor/meowdown/meowdown-core-0.78.2-6aebbd534640.tgz(@lezer/common@1.5.2)(@shikijs/types@4.4.3)(@types/hast@3.0.5)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.1)(prosemirror-view@1.42.4)(supports-color@7.2.0)(typescript@6.0.3)
       '@meowdown/markdown':
-        specifier: ^0.75.0
-        version: 0.75.0(typescript@6.0.3)
+        specifier: ^0.76.0
+        version: 0.76.0(typescript@6.0.3)
       '@meowdown/react':
         specifier: file:../../vendor/meowdown/meowdown-react-0.76.2-6aebbd534640.tgz
         version: file:vendor/meowdown/meowdown-react-0.76.2-6aebbd534640.tgz(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@shikijs/types@4.4.3)(@types/hast@3.0.5)(@types/react@19.3.0)(date-fns@4.4.0)(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.1)(prosemirror-view@1.42.4)(react-dom@19.3.0)(react@19.3.0)(supports-color@7.2.0)(typescript@6.0.3)
@@ -300,8 +300,8 @@ importers:
   packages/core:
     dependencies:
       '@meowdown/markdown':
-        specifier: ^0.75.0
-        version: 0.75.0(typescript@6.0.3)
+        specifier: ^0.76.0
+        version: 0.76.0(typescript@6.0.3)
       '@ocavue/utils':
         specifier: ^1.8.0
         version: 1.8.0
@@ -1180,6 +1180,9 @@ packages:
 
   '@meowdown/markdown@0.75.0':
     resolution: {integrity: sha512-wjwEFw74BrDXgorv8U47Sd1MW070uB02qCrHdGin2WXLCEprm3TQlOEfRUIVTlcZjL7XDzKBriWz4f40InaurA==}
+
+  '@meowdown/markdown@0.76.0':
+    resolution: {integrity: sha512-+K4LztyVa2j+oyelNDDRMfVdiHFZqOV5Vu25s1jcpJJhkfor38rG617J0VQEnUFyKXqEIjfyC4ogBzjm1bYkBw==}
 
   '@meowdown/react@file:vendor/meowdown/meowdown-react-0.76.2-6aebbd534640.tgz':
     resolution: {integrity: sha512-wYgOBZiXRuO/8sZzz5a9j5MpEL6o16BfLqH15LF5a1fMF+VUcf0c0GSnVAYhgFlOto0VRPJXFByAZEmZMEctvg==, tarball: file:vendor/meowdown/meowdown-react-0.76.2-6aebbd534640.tgz}
@@ -7005,6 +7008,14 @@ snapshots:
       - typescript
 
   '@meowdown/markdown@0.75.0(typescript@6.0.3)':
+    dependencies:
+      '@lezer/common': 1.5.2
+      '@lezer/markdown': 1.7.2
+      '@post-embed/schema': 0.5.2(typescript@6.0.3)
+    transitivePeerDependencies:
+      - typescript
+
+  '@meowdown/markdown@0.76.0(typescript@6.0.3)':
     dependencies:
       '@lezer/common': 1.5.2
       '@lezer/markdown': 1.7.2

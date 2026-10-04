@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version whose private bit fails closed', () => {
-    expect(PROJECTION_VERSION).toBe(26)
+  it('carries the projection version for privacy-preserving normalized reads', () => {
+    expect(PROJECTION_VERSION).toBe(27)
   })
 
   it('marks a note private when its frontmatter cannot be read', () => {
