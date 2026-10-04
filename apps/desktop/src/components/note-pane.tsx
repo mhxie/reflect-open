@@ -32,6 +32,7 @@ import { OutlineBridge } from '@/editor/outline/outline-bridge.tsx'
 import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useNoteDocument } from '@/editor/use-note-document.ts'
+import { useNoteStatusPublisher } from '@/editor/status/use-note-status-publisher.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useTemplateSlashItems } from '@/editor/use-template-slash-items.ts'
 import { useMarkdownLinkNavigation } from '@/editor/use-markdown-link-navigation.ts'
@@ -285,6 +286,15 @@ export function NotePaneComponent({
       ? document.initialContent
       : null
   const xPostsReady = useXPostPreload(editorContent)
+  const publishStatus = useNoteStatusPublisher(path, editorContent)
+  const { onEditorChange } = document
+  const handleEditorChange = useCallback(
+    (markdown: string) => {
+      onEditorChange(markdown)
+      publishStatus(markdown)
+    },
+    [onEditorChange, publishStatus],
+  )
 
   if (document.status === 'loading' || (editorContent !== null && !xPostsReady)) {
     return <NoteLoading className={cn(gutterClassName, editorClassName, className)} />
@@ -371,7 +381,7 @@ export function NotePaneComponent({
         // for that would throw away the cursor mid-thought.
         key={document.sessionEpoch}
         initialContent={editorSeed}
-        onChange={document.onEditorChange}
+        onChange={handleEditorChange}
         markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
         spellCheck={settings.editorSpellCheck}
         searchQuery={searchQuery}

@@ -27,6 +27,7 @@ vi.mock('@/components/context-sidebar/note-context-sidebar.tsx', () => ({
 }))
 vi.mock('@/components/embeddings-sync.tsx', () => ({ EmbeddingsSync: () => null }))
 vi.mock('@/components/note-find-bar.tsx', () => ({ NoteFindBar: () => null }))
+vi.mock('@/components/note-status-corner.tsx', () => ({ NoteStatusCorner: () => null }))
 vi.mock('@/components/route-content.tsx', () => ({ RouteContent: () => <div>Route content</div> }))
 vi.mock('@/components/search-ipc-responder.tsx', () => ({ SearchIpcResponder: () => null }))
 vi.mock('@/components/shortcuts-dialog.tsx', () => ({ ShortcutsDialog: () => null }))

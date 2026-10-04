@@ -27,6 +27,7 @@ export {
 } from './frontmatter.ts'
 export { parseBody } from './grammar.ts'
 export { parseNote, isTagName, hasAuthoredTitle } from './extract.ts'
+export { countDisplayChars } from './char-count.ts'
 export {
   scanInlineWikiLinks,
   scanInlineImages,

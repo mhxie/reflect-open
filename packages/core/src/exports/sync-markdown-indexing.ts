@@ -55,6 +55,7 @@ export {
   pinnedOrder,
   PARSED_NOTE_VERSION,
   parseNote,
+  countDisplayChars,
   appendBlock,
   wikiLinkSafe,
   retitleWikiLinks,
