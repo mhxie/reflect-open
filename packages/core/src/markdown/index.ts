@@ -21,10 +21,12 @@ export {
 export {
   splitFrontmatter,
   parseFrontmatter,
+  frontmatterPrivacy,
   upsertFrontmatter,
   type FrontmatterSplit,
   type ParsedFrontmatter,
 } from './frontmatter.ts'
+export type { FrontmatterPrivacy, UnreadableFrontmatterReason } from './frontmatter-privacy.ts'
 export { parseBody } from './grammar.ts'
 export { parseNote, isTagName, hasAuthoredTitle } from './extract.ts'
 export { countDisplayChars } from './char-count.ts'

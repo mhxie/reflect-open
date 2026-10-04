@@ -232,6 +232,55 @@ fn commit_does_not_leak_private_authored_titles() {
     );
     commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add private note");
+
+    // The shared classifier unwraps a tagged value...
+    write(root, "notes/tagged.md", "# Tagged Plan\n");
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    assert_eq!(head_message(root), "Add Tagged Plan");
+    write(
+        root,
+        "notes/tagged.md",
+        "---\nprivate: !x true\n---\n# Tagged Plan\n",
+    );
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    assert_eq!(head_message(root), "Update private note");
+
+    // ...and treats frontmatter it can't read, but that mentions private, as
+    // locked.
+    write(root, "notes/unreadable.md", "# Unreadable Plan\n");
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    write(
+        root,
+        "notes/unreadable.md",
+        "---\nprivate: no\ntitle: [Unreadable Plan\n---\n# Unreadable Plan\n",
+    );
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    assert_eq!(head_message(root), "Update private note");
+
+    // A locked note renamed names neither side.
+    fs::rename(
+        root.join("notes/private-project.md"),
+        root.join("notes/renamed-project.md"),
+    )
+    .unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    assert_eq!(head_message(root), "Rename private note");
+}
+
+#[test]
+fn commit_never_labels_a_non_utf8_private_note_by_its_path() {
+    let fixture = fixture();
+    let root = &fixture.graph_a;
+
+    // Privacy is decided on the raw blob, so the path-derived label ("Secret
+    // Plan") can't stand in for a title the UTF-8 reader couldn't read.
+    fs::write(
+        root.join("notes/secret-plan.md"),
+        b"---\nprivate: true\n---\n\xff\xfe Secret\n",
+    )
+    .unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    assert_eq!(head_message(root), "Add private note");
 }
 
 #[test]

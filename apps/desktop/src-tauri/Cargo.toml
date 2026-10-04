@@ -45,6 +45,8 @@ serde_json = { workspace = true }
 rusqlite = { workspace = true, features = ["hooks"] }
 reflect-index-schema = { path = "../../../crates/index-schema" }
 reflect-graph-paths = { workspace = true }
+# The shared fail-closed frontmatter classifier (commit-subject redaction).
+reflect-frontmatter = { workspace = true }
 tempfile = { workspace = true }
 sha2 = { workspace = true }
 dirs = "7.0.0"

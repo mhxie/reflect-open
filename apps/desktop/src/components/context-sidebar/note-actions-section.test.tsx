@@ -40,13 +40,15 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 } }),
 }))
 
-async function renderSection(path: string, showTrash = false) {
+async function renderSection(path: string, showTrash = false, width?: number) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = await render(
     <TooltipProvider>
       <QueryClientProvider client={client}>
         <RouterProvider initialRoute={{ kind: 'note', path }}>
-          <NoteActionsSection path={path} showTrash={showTrash} />
+          <div style={width === undefined ? undefined : { width }}>
+            <NoteActionsSection path={path} showTrash={showTrash} />
+          </div>
         </RouterProvider>
       </QueryClientProvider>
     </TooltipProvider>,
@@ -230,6 +232,35 @@ describe('NoteActionsSection private toggle', () => {
     await expect.element(view.getByText('Unlock note')).toBeInTheDocument()
     write.resolve()
     await action
+    await view.unmount()
+  })
+
+  it.each([
+    ['an unrecognized private value', '---\nprivate: maybe\n---\n# A\n'],
+    [
+      'a locking line in YAML that does not load',
+      '---\nprivate: true\ntitle: [unclosed\n---\n# A\n',
+    ],
+  ])('shows %s as locked and disables the toggle', async (_case, source) => {
+    getNote.mockResolvedValue(noteRow('notes/a.md', true))
+    noteSource.value = source
+    const view = await renderSection('notes/a.md')
+    await expect
+      .element(view.getByRole('button', { name: /Frontmatter can't be read — treated as locked/ }))
+      .toBeDisabled()
+    expect(view.getByRole('button', { name: /Unlock note/ }).query()).toBeNull()
+    expect(commitNoteFrontmatter).not.toHaveBeenCalled()
+    await view.unmount()
+  })
+
+  it('wraps the unreadable label instead of cutting it off in the narrowest sidebar', async () => {
+    getNote.mockResolvedValue(noteRow('notes/a.md', true))
+    noteSource.value = '---\nprivate: maybe\n---\n# A\n'
+    const view = await renderSection('notes/a.md', false, 240)
+    const label = view.getByText("Frontmatter can't be read — treated as locked")
+    await expect.element(label).toBeVisible()
+    const element = label.element()
+    expect(element.scrollWidth).toBeLessThanOrEqual(element.clientWidth)
     await view.unmount()
   })
 

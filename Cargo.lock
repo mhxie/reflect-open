@@ -5649,15 +5649,24 @@ dependencies = [
  "clap",
  "jiff",
  "pulldown-cmark",
+ "reflect-frontmatter",
  "reflect-graph-paths",
  "reflect-index-schema",
  "rusqlite",
- "saphyr",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "unicode-normalization",
+]
+
+[[package]]
+name = "reflect-frontmatter"
+version = "0.1.0"
+dependencies = [
+ "saphyr",
+ "saphyr-parser",
+ "serde_json",
 ]
 
 [[package]]
@@ -5717,6 +5726,7 @@ dependencies = [
  "percent-encoding",
  "qwen3-asr",
  "realfft",
+ "reflect-frontmatter",
  "reflect-graph-paths",
  "reflect-index-schema",
  "reqwest 0.12.28",

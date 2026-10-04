@@ -62,7 +62,7 @@ impl Fixture {
                     meta.title,
                     fold_key(&meta.title),
                     daily_date,
-                    i64::from(meta.private),
+                    i64::from(!meta.privacy.is_public()),
                     hash_content(&content),
                     note.mtime_ms as i64,
                     meta.id,
@@ -876,6 +876,53 @@ fn show_blocks_a_private_note_even_when_the_index_says_public() {
     assert_eq!(path_output.status.code(), Some(3));
 }
 
+/// Unreadable frontmatter fails closed: `show` and `path` refuse the note
+/// (exit 3) and say why, while the same YAML with a plain value reads.
+#[test]
+fn show_and_path_refuse_a_note_whose_frontmatter_cannot_be_read() {
+    let fixture = graph();
+    fixture.write_note(
+        "notes/a.md",
+        "---\nprivate: no\ntitle: [unclosed\n---\n# Alpha\nbody\n",
+    );
+    fixture.write_note("notes/b.md", "---\nprivate: no\n---\n# Beta\nbody\n");
+
+    let output = reflect(&fixture, &["show", "notes/a.md"]);
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(stdout(&output), "");
+    assert!(stderr(&output).contains("can't be read"));
+
+    let path_output = reflect(&fixture, &["path", "notes/a.md"]);
+    assert_eq!(path_output.status.code(), Some(3));
+    assert_eq!(stdout(&path_output), "");
+
+    assert_eq!(
+        reflect(&fixture, &["show", "notes/b.md"]).status.code(),
+        Some(0)
+    );
+}
+
+/// A locked note whose bytes aren't UTF-8 is classified all the same: `path`
+/// and `open --print` refuse it instead of printing where it lives.
+#[test]
+fn path_and_open_refuse_a_locked_note_that_is_not_utf8() {
+    let fixture = graph();
+    fs::write(
+        fixture.root().join("notes/latin1.md"),
+        b"---\nprivate: true\n---\n# Caf\xe9 secret\n",
+    )
+    .unwrap();
+
+    for args in [
+        &["path", "notes/latin1.md"][..],
+        &["open", "notes/latin1.md", "--print"],
+    ] {
+        let output = reflect(&fixture, args);
+        assert_eq!(output.status.code(), Some(3), "{args:?}");
+        assert_eq!(stdout(&output), "", "{args:?}");
+    }
+}
+
 #[test]
 fn show_json_includes_the_daily_date() {
     let fixture = graph();
@@ -1197,6 +1244,36 @@ fn resolving_to_a_local_only_note_is_refused_as_private() {
         assert_eq!(output.status.code(), Some(3), "{command}");
         assert!(stderr(&output).contains("private"), "{command}");
         assert!(!stdout(&output).contains("1234"), "{command}");
+    }
+}
+
+#[test]
+fn normalizing_line_endings_never_releases_private_notes() {
+    for source in [
+        "---\ntitle: x\rprivate: false\n---\nsecret",
+        "---\ntitle: x\r---\rprivate: true\n---\nsecret",
+        "---\r\nprivate: true\r\n---\r\nsecret",
+    ] {
+        let fixture = Fixture {
+            dir: tempfile::tempdir().unwrap(),
+        };
+        let path = fixture.write_note("notes/secret.md", source);
+        let read = reflect_cli::note_file::read_note_text(&path).unwrap();
+        assert_eq!(
+            reflect_frontmatter::backup_privacy(source.as_bytes()),
+            reflect_frontmatter::backup_privacy(read.as_bytes()),
+        );
+        fixture.build_index();
+        for command in ["show", "path", "open"] {
+            let output = reflect(&fixture, &[command, "notes/secret.md", "--json"]);
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{command}: {}",
+                stderr(&output)
+            );
+            assert!(!stdout(&output).contains("secret"));
+        }
     }
 }
 

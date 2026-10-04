@@ -31,5 +31,59 @@ jobs. When adding a fixture, add the file (or scalar input), regenerate, and
 commit both.
 
 `.gitattributes` disables line-ending conversion: the fixture bytes are the
-contract (`crlf.md` deliberately carries `\r\n`). Both sides read a note with
-`\n` line endings, so `crlf.md` pins that conversion.
+contract (`crlf.md` deliberately carries `\r\n`). Both sides normalize line
+endings on read, except unreadable frontmatter: its original bytes must remain
+visible to the privacy classifiers.
+
+Frontmatter on the Rust side comes from the shared `reflect-frontmatter` crate
+(`crates/frontmatter`), which the CLI and the desktop shell both use.
+`expected.json`'s `private` is the TS index bit: true when the shared privacy
+classifier says private *or* unreadable. `crates/frontmatter/tests/corpus.rs`
+checks that every note it marks private is withheld by the Rust classifier,
+and every note the Rust classifier withholds is marked private.
+
+## Frontmatter privacy corpus
+
+`../frontmatter-privacy.json` is the classifier's own corpus: one spec
+(public · private · unreadable, plus why a block is unreadable), asserted case
+by case by `crates/frontmatter/tests/corpus.rs` and
+`packages/core/src/markdown/frontmatter-privacy.test.ts`. Add a case for any
+new tricky YAML; it needs no regeneration step.
+
+Both sides apply the same load rules: size, characters, one document read as
+YAML 1.2, duplicate keys, aliases, root shape. A block holding a character the
+parsers read differently (NUL, a byte-order mark, a CR outside a CRLF, any
+other character outside YAML's printable set) loads on neither side. Whether a
+block parses at all is still decided by two parsers, though, and each accepts
+some syntax the other rejects:
+
+- saphyr rejects, yaml accepts (Rust is stricter): a tab after `:` or `?`, a
+  `:` indented past its `?`, a repeated or malformed `%` directive, a lone
+  surrogate escape.
+- yaml rejects, saphyr accepts (TS is stricter): a tab that indents a line, an
+  anchor run into `[` or `{`, a block scalar indicator inside a flow
+  collection, continuation lines of a flow collection or quoted key that
+  aren't indented, an explicit `!!merge` tag on a scalar.
+
+A side that can't load a block withholds it when it mentions `private` or
+holds a backslash, so on such inputs the sides can disagree on whether the
+note is withheld. The corpus pins representative cases with `divergence`
+naming the stricter side; both corpus tests fail on any disagreement a case
+doesn't pin. When this rule landed, a seeded differential fuzz of both
+classifiers (30,000 blocks, with and without control characters; not a
+committed test) found divergences only in these syntax classes.
+
+The TS-stricter direction matters once Git withholding runs on the Rust
+classifier: the app would show such a note as treated as locked while Git and
+the CLI treat it as public. The upstream app reads it as public too (yaml
+rejects the block, so its `private` reads false), so no lock a user set can
+leak; the gates disagree only on YAML that is already broken for the app.
+
+What the corpus and the fuzz show in both directions: no note the upstream
+app reads as `private: true` is public on either side. A block both parsers
+load reads the same on both (the character rule removes the inputs where
+saphyr and yaml saw different text), and a block one side refuses is withheld
+there when it mentions `private`; spelling the key any other way takes a YAML
+escape, and so a backslash. This assumes the app's runtime: in a browser, yaml
+turns a `!!binary` key into a list of byte values, never into the text
+`private` (Node's yaml would decode it).

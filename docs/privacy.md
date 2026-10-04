@@ -11,7 +11,11 @@ The one hard rule sits above all of it: **a note with `private: true` frontmatte
 has its content sent to any external service.** This is enforced in code at every AI
 call site (the `CloudSafe` type brand in `packages/core/src/ai/` — content for a
 provider cannot even be constructed from a private note, and the flag is re-read from
-disk at call time), and it is covered by tests.
+disk at call time), and it is covered by tests. The rule fails closed: frontmatter Reflect
+can't read with certainty — YAML that doesn't parse but mentions `private`, a `private`
+value that is neither true nor false, a block hidden behind a byte-order mark — counts
+as private too, and the Lock control says "Frontmatter can't be read — treated as
+locked" until the YAML is fixed.
 
 ## AI chat (off until you add a key)
 

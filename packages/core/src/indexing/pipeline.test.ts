@@ -320,22 +320,25 @@ describe('syncIndex', () => {
     expect(commands).not.toContain('index_meta_set')
   })
 
-  it('rebuilds and stamps when the index predates the current projection', async () => {
-    metaRows = [] // never stamped (or written by an older app)
-    await syncIndex({ generation: 3 })
-    // A projection bump re-derives rows only: embeddings survive, and just
-    // those whose note is gone are pruned once every row is back.
-    const clear = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_clear')
-    expect(clear![1]).toEqual({ generation: 3, keepEmbeddings: true })
-    const prune = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_prune_embeddings')
-    expect(prune![1]).toEqual({ generation: 3, keep: [] })
-    const stamp = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_meta_set')
-    expect(stamp![1]).toMatchObject({
-      key: PROJECTION_VERSION_KEY,
-      value: String(PROJECTION_VERSION),
-      generation: 3,
-    })
-  })
+  it.each([null, String(PROJECTION_VERSION - 1)])(
+    'rebuilds and stamps when the stored projection is %s',
+    async (storedVersion) => {
+      metaRows = storedVersion === null ? [] : [{ value: storedVersion }]
+      await syncIndex({ generation: 3 })
+      // A projection bump re-derives rows only: embeddings survive, and just
+      // those whose note is gone are pruned once every row is back.
+      const clear = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_clear')
+      expect(clear![1]).toEqual({ generation: 3, keepEmbeddings: true })
+      const prune = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_prune_embeddings')
+      expect(prune![1]).toEqual({ generation: 3, keep: [] })
+      const stamp = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_meta_set')
+      expect(stamp![1]).toMatchObject({
+        key: PROJECTION_VERSION_KEY,
+        value: String(PROJECTION_VERSION),
+        generation: 3,
+      })
+    },
+  )
 })
 
 describe('applyIndexChanges (watcher dispatch)', () => {

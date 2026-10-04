@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseFrontmatter, splitFrontmatter, upsertFrontmatter } from './frontmatter.ts'
+import {
+  frontmatterPrivacy,
+  parseFrontmatter,
+  splitFrontmatter,
+  upsertFrontmatter,
+} from './frontmatter.ts'
 import { isPinned, pinnedOrder } from './model.ts'
 
 describe('splitFrontmatter', () => {
@@ -59,13 +64,81 @@ describe('parseFrontmatter', () => {
     expect(warning).toMatch(/not a mapping/i)
   })
 
-  it('coerces the private flag explicitly (true/yes; false/no/unknown/absent → false)', () => {
+  it('reads a block of only comments, or a bare null, as empty frontmatter', () => {
+    for (const raw of ['# private: true', '--- # private: true', '~ # private: true']) {
+      const { data, warning, privacy } = parseFrontmatter(raw)
+      expect(warning, raw).toBeUndefined()
+      expect(privacy, raw).toEqual({ kind: 'public' })
+      expect(data, raw).toEqual({ aliases: [], private: false, pinned: false, ignoredContacts: [] })
+    }
+  })
+
+  it('reads nothing from a block holding a character the Rust reader would read differently', () => {
+    for (const raw of [
+      'title: x\0',
+      '\u{FEFF}title: x',
+      'title: x\rpinned: true',
+      'title: x\u{7}',
+    ]) {
+      const { data, warning } = parseFrontmatter(raw)
+      expect(warning, JSON.stringify(raw)).toMatch(/control character/)
+      expect(data.title, JSON.stringify(raw)).toBeUndefined()
+    }
+    expect(parseFrontmatter('title: x\r\npinned: true').data.pinned).toBe(true)
+  })
+
+  it('reads every block as YAML 1.2, whatever its %YAML directive says', () => {
+    // YAML 1.1 would make `yes` a boolean, which no string field accepts.
+    expect(parseFrontmatter('%YAML 1.1\n--- #c\ntitle: yes').data.title).toBe('yes')
+    expect(parseFrontmatter('%YAML 1.1\n--- #c\nyes: 1\ntrue: 2').warning).toBeUndefined()
+  })
+
+  it('reads the private flag fail-closed: an unrecognized value counts as private', () => {
     expect(parseFrontmatter('private: true').data.private).toBe(true)
     expect(parseFrontmatter('private: yes').data.private).toBe(true)
     expect(parseFrontmatter('private: false').data.private).toBe(false)
     expect(parseFrontmatter('private: no').data.private).toBe(false)
-    expect(parseFrontmatter('private: banana').data.private).toBe(false)
     expect(parseFrontmatter('id: x').data.private).toBe(false)
+    const banana = parseFrontmatter('private: banana')
+    expect(banana.privacy).toEqual({ kind: 'unreadable', reason: 'unrecognizedValue' })
+    expect(banana.data.private).toBe(true)
+    expect(banana.warning).toBeUndefined()
+  })
+
+  it('keeps private: true next to a malformed field, with a warning', () => {
+    const { data, warning, privacy } = parseFrontmatter('private: true\ntitle: [unclosed')
+    expect(privacy).toEqual({ kind: 'private' })
+    expect(data.private).toBe(true)
+    expect(warning).toMatch(/invalid YAML/i)
+  })
+
+  it('treats malformed YAML that mentions private as unreadable, and otherwise as public', () => {
+    // Even `private: no`: the block can't be read, so its value can't be trusted.
+    const unreadable = parseFrontmatter('private: no\ntitle: [unclosed')
+    expect(unreadable.privacy).toEqual({ kind: 'unreadable', reason: 'parseFailed' })
+    expect(unreadable.data.private).toBe(true)
+    // A backslash could spell the key with an escape.
+    expect(parseFrontmatter('title: "\\u0070"\ntags: [unclosed').data.private).toBe(true)
+    expect(parseFrontmatter('title: [unclosed').data.private).toBe(false)
+    expect(parseFrontmatter('just a bare string').data.private).toBe(false)
+  })
+
+  it('leaves a valid block that never mentions private untouched', () => {
+    const { data, warning, privacy } = parseFrontmatter('title: Plain\naliases: [a]')
+    expect(privacy).toEqual({ kind: 'public' })
+    expect(warning).toBeUndefined()
+    expect(data.private).toBe(false)
+    expect(data.aliases).toEqual(['a'])
+  })
+
+  it('reads nothing from a block a second document or a repeated key makes unreadable', () => {
+    expect(parseFrontmatter('title: First\n--- second').data).toEqual({
+      aliases: [],
+      private: false,
+      pinned: false,
+      ignoredContacts: [],
+    })
+    expect(parseFrontmatter('title: A\ntitle: B').warning).toMatch(/invalid YAML/i)
   })
 
   it('coerces the pinned value: booleans, truthy words, numbers as explicit order', () => {
@@ -114,6 +187,17 @@ describe('upsertFrontmatter', () => {
   it('is a byte-identical no-op for an empty patch (never re-serializes)', () => {
     const source = '---\nid: x # keep this comment\ncustom: keep\n---\n# Body'
     expect(upsertFrontmatter(source, {})).toBe(source)
+  })
+
+  it('refuses to write over a block hidden behind a byte-order mark', () => {
+    // A new block in front would leave the old one, `private` and all, as body.
+    expect(() =>
+      upsertFrontmatter('\u{FEFF}---\nprivate: true\n---\nbody', { pinned: true }),
+    ).toThrow(/byte-order mark/)
+    // A mark with no block behind it keeps the usual behavior.
+    expect(upsertFrontmatter('\u{FEFF}# Body', { id: 'x' })).toBe(
+      '---\nid: x\n---\n\n\u{FEFF}# Body',
+    )
   })
 
   it('refuses to update invalid frontmatter rather than dropping bytes', () => {
@@ -221,5 +305,22 @@ describe('frontmatter gist block', () => {
   it('degrades a mangled block to "never published" without failing the note', () => {
     expect(parseFrontmatter('gist: not-an-object').data.gist).toBeUndefined()
     expect(parseFrontmatter('gist:\n  id: g1').data.gist).toBeUndefined()
+  })
+})
+
+describe('frontmatterPrivacy', () => {
+  it('classifies the block behind a byte-order mark, never as plainly private', () => {
+    expect(frontmatterPrivacy('\u{FEFF}---\nprivate: true\n---\nbody')).toEqual({
+      kind: 'unreadable',
+      reason: 'bomBeforeFence',
+    })
+    expect(frontmatterPrivacy('\u{FEFF}---\ntitle: x\n---\nbody')).toEqual({ kind: 'public' })
+    expect(frontmatterPrivacy('---\nprivate: true\n---\nbody')).toEqual({ kind: 'private' })
+  })
+
+  it('treats an unterminated fence as no frontmatter, like the split', () => {
+    expect(frontmatterPrivacy('---\ntitle: Never closed\nmy private thoughts')).toEqual({
+      kind: 'public',
+    })
   })
 })
