@@ -17,6 +17,7 @@
 
 mod commit;
 mod commit_message;
+mod history_roots;
 mod max_file_size;
 mod merge;
 mod remote;
@@ -38,6 +39,12 @@ use self::commit::CommitOutcome;
 use self::merge::MergeOutcome;
 use self::remote::{PushOutcome, RemoteDelta};
 
+/// The open graph's accepted history roots, loaded at graph open
+/// (`fs::activate`).
+pub(crate) use self::history_roots::load_for_root as load_accepted_history_roots;
+/// The settings key holding every graph's accepted history roots (Rust owns
+/// it: `settings_save` keeps the copy on disk).
+pub(crate) use self::history_roots::SETTINGS_KEY as ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY;
 /// The open graph's backup size limit, loaded at graph open (`fs::activate`).
 pub(crate) use self::max_file_size::load_for_root as load_max_file_size;
 /// The settings key holding every graph's backup size limit (Rust owns it:
@@ -201,15 +208,19 @@ pub async fn git_fetch(
 }
 
 /// Merge the fetched remote branch; conflicts are committed into the notes as
-/// labeled markers (see [`merge`]). The repo is never left mid-merge, and
-/// the graph's local-only folders are never written.
+/// labeled markers (see [`merge`]). The repo is never left mid-merge, the
+/// graph's local-only folders are never written, and a pull that would join
+/// a history the graph has not accepted pauses instead (see
+/// [`history_roots`]).
 #[tauri::command]
 pub async fn git_merge_remote(
     generation: u64,
     state: State<'_, GraphState>,
 ) -> AppResult<MergeOutcome> {
     let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
-    let outcome = run_blocking(move || merge::merge_remote(&root, local_only.as_deref())).await;
+    let accepted = crate::fs::accepted_history_roots(&state, generation)?;
+    let outcome =
+        run_blocking(move || merge::merge_remote(&root, local_only.as_deref(), &accepted)).await;
     // Invalidate on both arms: a failed merge can still have moved the tree
     // partway through checkout, and a stale catalog would pin the old view.
     let root = crate::fs::root_for_generation(&state, generation)?;
@@ -218,7 +229,8 @@ pub async fn git_merge_remote(
 }
 
 /// Push the current branch to `origin`; rejections come back as data so the
-/// sync engine can branch on them.
+/// sync engine can branch on them, including the refusal to upload a history
+/// the graph has not accepted (see [`history_roots`]).
 #[tauri::command]
 pub async fn git_push(
     token: Option<String>,
@@ -226,5 +238,6 @@ pub async fn git_push(
     state: State<'_, GraphState>,
 ) -> AppResult<PushOutcome> {
     let root = crate::fs::root_for_generation(&state, generation)?;
-    run_blocking(move || remote::push(&root, token)).await
+    let accepted = crate::fs::accepted_history_roots(&state, generation)?;
+    run_blocking(move || remote::push(&root, token, &accepted)).await
 }

@@ -73,25 +73,27 @@ pub fn settings_load() -> AppResult<SettingsDoc> {
 }
 
 /// The persisted settings document, for the few keys Rust itself must read
-/// (the local-only folders and backup size limit a graph open loads into
-/// `GraphState`).
+/// (the local-only folders, backup size limit, and accepted history roots a
+/// graph open loads into `GraphState`).
 pub(crate) fn load_document() -> AppResult<SettingsDoc> {
     load_from(&store_path()?)
 }
 
 /// Keys Rust owns: the app never edits them, so a save keeps the copy on disk
 /// rather than writing back whatever the app loaded at startup.
-const RUST_OWNED_KEYS: [&str; 2] = [
+const RUST_OWNED_KEYS: [&str; 3] = [
     crate::fs::LOCAL_ONLY_SETTINGS_KEY,
     crate::git::MAX_FILE_SIZE_SETTINGS_KEY,
+    crate::git::ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY,
 ];
 
 /// Command: atomically replace the persisted settings document, except for
 /// the Rust-owned keys, which keep their on-disk value. An edit to the
-/// local-only configuration or the backup size limit made while the app runs
-/// (the documented way to configure them) must survive the app's next save;
-/// and since an unreadable store cannot be merged, it refuses the save
-/// instead of replacing that configuration with the app's copy.
+/// local-only configuration, the backup size limit, or the accepted history
+/// roots made while the app runs (the documented way to configure them) must
+/// survive the app's next save; and since an unreadable store cannot be
+/// merged, it refuses the save instead of replacing that configuration with
+/// the app's copy.
 #[tauri::command]
 pub fn settings_save(settings: SettingsDoc) -> AppResult<()> {
     save_keeping_rust_keys(&store_path()?, settings)
@@ -224,6 +226,20 @@ mod tests {
         let path = dir.path().join("settings.json");
         let key = crate::git::MAX_FILE_SIZE_SETTINGS_KEY;
         let edited = json!({ "/Users/me/Notes": 32 });
+        save_to(&path, &doc(&[(key, edited.clone())])).unwrap();
+
+        save_keeping_rust_keys(&path, doc(&[("theme", json!("light")), (key, json!({}))])).unwrap();
+        let saved = load_from(&path).unwrap();
+        assert_eq!(saved.get(key), Some(&edited));
+        assert_eq!(saved.get("theme"), Some(&json!("light")));
+    }
+
+    #[test]
+    fn a_save_keeps_the_accepted_history_roots_on_disk() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let key = crate::git::ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY;
+        let edited = json!({ "/Users/me/Notes": ["d39c5fa0d39c5fa0d39c5fa0d39c5fa0d39c5fa0"] });
         save_to(&path, &doc(&[(key, edited.clone())])).unwrap();
 
         save_keeping_rust_keys(&path, doc(&[("theme", json!("light")), (key, json!({}))])).unwrap();

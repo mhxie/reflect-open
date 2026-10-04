@@ -254,9 +254,9 @@ describe('GraphProvider open sequencing', () => {
     dismissOperation(localOnlyOperations()[0]!.id)
   })
 
-  it('shows a graph’s backup size limit problems when it opens', async () => {
+  it('shows a graph’s backup settings problems when it opens', async () => {
     const backupOperations = () =>
-      getOperations().filter((operation) => operation.label === 'Backup size limit')
+      getOperations().filter((operation) => operation.label === 'Backup settings')
     for (const operation of backupOperations()) {
       dismissOperation(operation.id)
     }

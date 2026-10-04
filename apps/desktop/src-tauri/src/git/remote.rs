@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
+use super::history_roots::push_refusal;
 use super::repo::{current_branch, open_existing};
 
 /// Where the local branch stands relative to its last-fetched remote
@@ -27,7 +28,9 @@ pub struct RemoteDelta {
 
 /// Result of a push attempt. `pushed: false` with `non_fast_forward: true` is
 /// the normal two-device case (pull, merge, retry); a `rejection_message`
-/// carries anything else the remote said (e.g. GitHub push protection).
+/// carries anything else the remote said (e.g. GitHub push protection), or
+/// why Reflect did not send the push at all (a history root the graph has
+/// not accepted).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PushOutcome {
@@ -182,10 +185,32 @@ pub(super) fn clone(url: &str, target: &Path, token: Option<String>) -> AppResul
 /// Push the current branch to `origin`. Rejections come back as data, not
 /// errors — the sync engine branches on them (non-fast-forward → pull/merge/
 /// retry; anything else → surface the remote's message).
-pub(super) fn push(root: &Path, token: Option<String>) -> AppResult<PushOutcome> {
+///
+/// A push that would upload a history root the last-fetched remote branch
+/// lacks and `accepted_roots` does not list is refused the same way, before
+/// any network (see [`super::history_roots`]). The first push, with no
+/// remote branch yet, goes out as before.
+pub(super) fn push(
+    root: &Path,
+    token: Option<String>,
+    accepted_roots: &[git2::Oid],
+) -> AppResult<PushOutcome> {
     let repo = open_existing(root)?;
     let branch = current_branch(&repo)?;
     let mut remote = origin(&repo)?;
+    let local = repo.refname_to_id(&format!("refs/heads/{branch}")).ok();
+    let known = repo
+        .refname_to_id(&format!("refs/remotes/origin/{branch}"))
+        .ok();
+    if let (Some(local), Some(known)) = (local, known) {
+        if let Some(message) = push_refusal(&repo, root, local, known, accepted_roots)? {
+            return Ok(PushOutcome {
+                pushed: false,
+                non_fast_forward: false,
+                rejection_message: Some(message),
+            });
+        }
+    }
 
     let rejection: RefCell<Option<String>> = RefCell::new(None);
     let sideband: RefCell<String> = RefCell::new(String::new());

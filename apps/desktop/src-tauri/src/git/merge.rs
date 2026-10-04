@@ -19,20 +19,33 @@
 //! >>>>>>> other device
 //! ```
 //!
+//! **Separate histories pause.** Before anything is analyzed or written, a
+//! pull whose incoming commits include a history root the graph has not
+//! accepted pauses sync (see `history_roots`): libgit2 would merge two
+//! unrelated histories, or fast-forward into another device's merge of one,
+//! like any other change.
+//!
 //! **Local-only folders are frozen.** With folders configured, no merge or
 //! fast-forward ever creates, writes, or deletes a path that is, or that the
 //! filesystem resolves into, a local-only folder (or out of the graph). Each
 //! such folder moves as one unit, so a type change (a link becoming a folder
 //! upstream) is one entry's change: a fast-forward checks out only the other
 //! changed paths, and a diverged merge runs against the remote with each
-//! unit held at this device's version. The repository still follows the
-//! other device: HEAD and the index take its version of each unit, so
-//! history keeps it and the next commit stays clean, while this device's
-//! files are never touched. Paths tracked before the folder became
-//! local-only therefore stay frozen on disk and are never checked out again;
-//! each skipped change is reported in [`MergeOutcome::frozen_paths`]. A
-//! remote change that would replace a working-tree folder holding a
-//! local-only folder (with a file) is refused before anything is written.
+//! unit held at this device's version. Where this device's history already
+//! tracks a unit, the repository still follows the other device: HEAD and
+//! the index take its version of the unit, so history keeps it and the next
+//! commit stays clean, while this device's files are never touched. Paths
+//! tracked before the folder became local-only therefore stay frozen on
+//! disk and are never checked out again; each skipped change is reported in
+//! [`MergeOutcome::frozen_paths`]. A pull that would start tracking a unit
+//! this device's history does not track pauses instead: commits never add,
+//! update, or delete a local-only entry, so the unit would stay in every
+//! later backup. A remote change that would replace a working-tree folder
+//! holding a local-only folder (with a file) is refused too. Both refusals
+//! come before anything is written.
+//!
+//! An unborn HEAD has no history of its own: it adopts the remote's whole,
+//! with neither check, as before.
 
 use std::fs;
 use std::path::Path;
@@ -44,6 +57,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
+use super::history_roots::ensure_pull_accepted;
 use super::repo::{current_branch, ensure_clean_state, open_existing, signature};
 
 /// Conflict-marker labels. "this device" is the local side, "other device"
@@ -124,10 +138,12 @@ fn is_frozen(root: &Path, folders: &LocalOnlyFolders, path: &str) -> bool {
 /// Merge the fetched `origin/<branch>` into the local branch. Pre-condition
 /// (the sync engine guarantees it): local changes are already committed,
 /// except inside local-only folders, which are never committed and which
-/// this merge never writes (see the module docs).
+/// this merge never writes (see the module docs). `accepted_roots` are the
+/// graph's accepted history roots.
 pub(super) fn merge_remote(
     root: &Path,
     local_only: Option<&LocalOnlyFolders>,
+    accepted_roots: &[git2::Oid],
 ) -> AppResult<MergeOutcome> {
     let repo = open_existing(root)?;
     ensure_clean_state(&repo)?;
@@ -144,6 +160,9 @@ pub(super) fn merge_remote(
             frozen_paths: Vec::new(),
         });
     };
+    if let Ok(local_oid) = repo.refname_to_id(&format!("refs/heads/{branch}")) {
+        ensure_pull_accepted(&repo, root, local_oid, remote_oid, accepted_roots)?;
+    }
     let annotated = repo.find_annotated_commit(remote_oid)?;
     let (analysis, _) = repo.merge_analysis(&[&annotated])?;
 
@@ -185,6 +204,9 @@ pub(super) fn merge_remote(
                 // then records the pulled files as a local change, which the
                 // following merge reconciles with the identical remote one.
                 let plan = plan_pull(root, folders, std::mem::take(&mut changed_files));
+                if let Some(old_tree) = &old_tree {
+                    ensure_units_already_tracked(old_tree, &plan.units)?;
+                }
                 ensure_no_folder_replaced(root, folders, &plan.allowed)?;
                 checkout_paths(&repo, &new_tree, &plan.allowed)?;
                 let mut follow: Vec<String> = plan
@@ -219,6 +241,17 @@ pub(super) fn merge_remote(
         Some(folders) => held_units(&repo, root, folders, remote_oid)?,
         None => Vec::new(),
     };
+    // History takes the remote's version of each held unit it changed since
+    // the merge base; a held unit it did not change keeps this device's.
+    let followed = if held.is_empty() {
+        Vec::new()
+    } else {
+        let local = repo.head()?.peel_to_commit()?;
+        let remote = repo.find_commit(remote_oid)?;
+        let followed = remote_changed_units(&repo, local.id(), &remote, &held)?;
+        ensure_units_already_tracked(&local.tree()?, &followed)?;
+        followed
+    };
     let annotated = if held.is_empty() {
         annotated
     } else {
@@ -238,7 +271,7 @@ pub(super) fn merge_remote(
     // behind would trip `ensure_clean_state` on every later cycle and wedge
     // sync until a manual repair — exactly what this design forbids. Clear it
     // on every path; the next cycle re-derives anything a failed attempt lost.
-    let result = complete_merge(&repo, root, remote_oid, &held, local_only);
+    let result = complete_merge(&repo, root, remote_oid, &held, &followed, local_only);
     if result.is_err() {
         let _ = repo.cleanup_state();
     }
@@ -314,6 +347,35 @@ fn under_any(units: &[String], path: &str) -> bool {
                 .strip_prefix(unit.as_str())
                 .is_some_and(|rest| rest.starts_with('/'))
     })
+}
+
+/// Refuse, before anything is written, a pull that would start tracking a
+/// frozen unit this device's history (`head_tree`) does not track: commits
+/// never add, update, or delete a local-only entry, so once in the index the
+/// unit would stay in every later backup. Units HEAD already tracks keep
+/// following the other device.
+fn ensure_units_already_tracked(head_tree: &git2::Tree, units: &[String]) -> AppResult<()> {
+    let untracked: Vec<String> = units
+        .iter()
+        .filter(|unit| head_tree.get_path(Path::new(unit.as_str())).is_err())
+        .map(|unit| format!("\"{unit}\""))
+        .collect();
+    if untracked.is_empty() {
+        return Ok(());
+    }
+    let (folders, them) = if untracked.len() == 1 {
+        ("the local-only folder", "that folder")
+    } else {
+        ("the local-only folders", "those folders")
+    };
+    Err(AppError::io(format!(
+        "Sync paused: the backup has files inside {folders} {}, which this graph's history does \
+         not track. Pulling them would keep them in every later backup from this device, so \
+         Reflect stops instead. Remove them from the backup in a separate clone (git rm -r \
+         --cached on {them}, then commit and push), or restore the backup repository from a \
+         good copy, then sync again.",
+        untracked.join(", ")
+    )))
 }
 
 /// Refuse, before anything is written, a write that would replace a
@@ -546,6 +608,7 @@ fn complete_merge(
     root: &Path,
     remote_oid: git2::Oid,
     held: &[String],
+    followed: &[String],
     local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<(Vec<String>, Vec<ChangedFile>, Vec<String>)> {
     let mut index = repo.index()?;
@@ -554,15 +617,15 @@ fn complete_merge(
     let remote_commit = repo.find_commit(remote_oid)?;
     let remote_tree = remote_commit.tree()?;
     // Held units merged as this device's version; where the other device
-    // changed one, history takes its version instead. The files stay frozen.
-    let followed = remote_changed_units(repo, local_commit.id(), &remote_commit, held)?;
-    follow_tree_in_index(repo, &mut index, &remote_tree, &followed)?;
+    // changed one (`followed`), history takes its version instead. The files
+    // stay frozen.
+    follow_tree_in_index(repo, &mut index, &remote_tree, followed)?;
     index.write()?;
     let frozen_paths: Vec<String> =
         changed_between(repo, Some(&local_commit.tree()?), &remote_tree)?
             .into_iter()
             .map(|change| change.path)
-            .filter(|path| under_any(&followed, path))
+            .filter(|path| under_any(followed, path))
             .collect();
 
     let tree = repo.find_tree(index.write_tree()?)?;

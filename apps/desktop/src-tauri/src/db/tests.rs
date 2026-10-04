@@ -2668,6 +2668,30 @@ impl Drop for OpenFixture {
     }
 }
 
+/// End to end through the open: the graph's accepted history roots reach
+/// `GraphState` for sync, and an id Reflect cannot use comes back as a
+/// backup warning instead.
+#[test]
+fn a_graph_open_loads_its_accepted_history_roots_and_reports_a_malformed_one() {
+    use tauri::Manager;
+    let fixture = OpenFixture::new();
+    let key = crate::git::ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY;
+    let graph = fixture.root.to_string_lossy().into_owned();
+    let accepted = "d39c5fa0d39c5fa0d39c5fa0d39c5fa0d39c5fa0";
+    let doc = serde_json::json!({ key: { graph: [accepted, "d39c5fa"] } });
+    std::fs::write(&fixture.settings, doc.to_string()).unwrap();
+
+    let info = fixture.open();
+    assert_eq!(info.backup_warnings.len(), 1, "{:?}", info.backup_warnings);
+    assert!(
+        info.backup_warnings[0].contains("\"d39c5fa\""),
+        "{:?}",
+        info.backup_warnings
+    );
+    let roots = crate::fs::accepted_history_roots(&fixture.app.state(), info.generation).unwrap();
+    assert_eq!(roots, vec![git2::Oid::from_str(accepted).unwrap()]);
+}
+
 /// End to end through the commands, the load the open uses included: a
 /// graph whose entry disappears (a moved vault) keeps its recorded folders
 /// local-only, warns, and refuses to commit; a `released` list in its own
