@@ -67,6 +67,12 @@ export function AppearanceSection(): ReactElement {
         checked={settings.activityHeatmapEnabled}
         onCheckedChange={(checked) => updateSettings({ activityHeatmapEnabled: checked })}
       />
+      <SettingsSwitchField
+        legend="Status bar"
+        description="Show the note's character count along the bottom of the editor."
+        checked={settings.statusBarEnabled}
+        onCheckedChange={(checked) => updateSettings({ statusBarEnabled: checked })}
+      />
     </SettingsSection>
   )
 }

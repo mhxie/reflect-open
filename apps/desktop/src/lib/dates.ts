@@ -106,6 +106,21 @@ export interface DateTimePrefs {
 }
 
 /**
+ * The status bar's last-edit label: `just now` and `N min ago` within the
+ * hour, then {@link formatRecencyLabel}'s form (the All Notes Updated column).
+ */
+export function formatEditedLabel(epochMs: number, prefs: DateTimePrefs, now: Date): string {
+  const minutes = Math.floor((now.getTime() - epochMs) / 60_000)
+  if (minutes < 1) {
+    return 'Edited just now'
+  }
+  if (minutes < 60) {
+    return `Edited ${minutes} min ago`
+  }
+  return `Edited ${formatRecencyLabel(epochMs, prefs, now)}`
+}
+
+/**
  * Compact recency label for list rows (the original app's Updated column):
  * the time for today (per `timeFormat`), the weekday within the current week
  * (`Mon`), the short date otherwise (`6/3/2026`, `3/6/2026`, or

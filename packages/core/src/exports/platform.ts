@@ -280,6 +280,7 @@ export {
   allNotesFilterAttachmentsSchema,
   allNotesSortSchema,
   activityHeatmapEnabledSchema,
+  statusBarEnabledSchema,
   calendarEnabledSchema,
   calendarIdsSchema,
   graphColorSchema,

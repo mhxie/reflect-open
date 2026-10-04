@@ -15,6 +15,7 @@ import {
 } from '../graph/paths.ts'
 import { hasSearchableChar } from '../lib/searchable-char.ts'
 import {
+  countDisplayChars,
   detectConflictMarkers,
   encodeTaskPath,
   extractEmailFields,
@@ -422,7 +423,7 @@ export function buildIndexedNote(
     assetText: meta.assetText ?? '',
     preview: previewSnippet(parsed.displayText, parsed.title),
     hasContent: parsed.displayText !== '' || hasSearchableChar(body),
-    bodyChars: Array.from(parsed.displayText).length,
+    bodyChars: countDisplayChars(parsed),
     links: [...wikiLinks, ...mdLinks],
     tags: parsed.tags.map((tag) => ({ tag, tagKey: foldTag(tag) })),
     aliases,

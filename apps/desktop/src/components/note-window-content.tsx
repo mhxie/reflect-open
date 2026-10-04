@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { dailyPath, displayNoteTitle } from '@reflect/core'
 import { NoteFindBar } from '@/components/note-find-bar.tsx'
+import { NoteStatusBar } from '@/components/note-status-bar.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { SingleNoteView } from '@/components/single-note-view.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
@@ -55,6 +56,7 @@ export function NoteWindowContent(): ReactElement {
       ) : (
         <RouteContent />
       )}
+      <NoteStatusBar />
       <NoteFindBar />
     </div>
   )

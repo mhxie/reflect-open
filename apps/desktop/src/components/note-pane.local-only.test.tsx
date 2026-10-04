@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
+import { cleanup, render, renderHook } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { setBridge } from '@reflect/core'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
+import { useNoteStatus } from '@/editor/status/note-status-store.ts'
 import { queryClient } from '@/lib/query-client.ts'
 import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
@@ -125,4 +126,13 @@ it('keeps editing every other note', async () => {
   expect(document.querySelector('[contenteditable="true"]')).not.toBeNull()
   expect(document.querySelector('[data-testid="local-only-notice"]')).toBeNull()
   await view.unmount()
+})
+
+it('counts a local-only note for the status corner', async () => {
+  files['finance/secure/bank.md'] = '# Bank\n\nAccount notes.\n'
+  await renderNote('finance/secure/bank.md')
+  await expect.element(page.getByText('Account notes.')).toBeVisible()
+
+  const status = await renderHook(() => useNoteStatus('finance/secure/bank.md'))
+  expect(status.result.current?.characters).toBeGreaterThan(0)
 })
