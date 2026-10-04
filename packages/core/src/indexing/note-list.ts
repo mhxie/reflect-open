@@ -31,6 +31,8 @@ export interface NoteListEntry {
   mtime: number
   /** Pinned notes lead the list (V1 order) and show a pin marker. */
   isPinned: boolean
+  /** A numbered pin's shelf position (`pinned: <n>`); null for bare or no pins. */
+  pinnedOrder: number | null
 }
 
 export interface NoteListOptions {
@@ -152,7 +154,8 @@ function noteListTagsQuery(tag: string | null, attachment: NoteAttachmentType | 
  * Notes for the All Notes screen: unfiltered lists include non-daily notes only;
  * a tag or attachment filter includes both regular and daily notes that match.
  * Pinned notes appear first (explicit pin order, then unordered pins), then most
- * recently edited — V1's list order.
+ * recently edited — V1's list order. `sortNoteListRows` reorders the result
+ * for another sort without a new query.
  */
 export async function listNotes(options: NoteListOptions = {}): Promise<NoteListEntry[]> {
   const tag = options.tag ?? null
@@ -186,6 +189,7 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     snippet: row.preview,
     tags: tagsByPath.get(row.path) ?? [],
     isPinned: row.isPinned !== 0,
+    pinnedOrder: row.pinnedOrder,
   }))
 }
 

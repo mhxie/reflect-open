@@ -1,3 +1,4 @@
+import type { NoteListSort } from '@reflect/core'
 import type { Route } from '@/routing/route.ts'
 import type { NavigateOptions } from '@/routing/router.tsx'
 
@@ -66,6 +67,8 @@ export interface CommandContext {
    * downloading — the model, so flipping the flag is the whole command.
    */
   enableSemanticSearch: () => void
+  /** Persist a new All Notes order (`allNotesSort`), computed from the current one. */
+  sortAllNotes: (update: (current: NoteListSort) => NoteListSort) => void
 }
 
 export interface AppCommand {

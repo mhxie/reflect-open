@@ -36,6 +36,7 @@ function contextFor(notePath: string | null, generation: number | null): Command
     openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
+    sortAllNotes: vi.fn(),
     clearScrollState: vi.fn(),
   }
 }

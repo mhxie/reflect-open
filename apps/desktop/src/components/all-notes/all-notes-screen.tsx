@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { foldTag, isDaily, listNotes, listNoteTags } from '@reflect/core'
+import {
+  chooseNoteListSort,
+  foldTag,
+  isDaily,
+  listNotes,
+  listNoteTags,
+  sortNoteListRows,
+  type NoteListSortKey,
+} from '@reflect/core'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
@@ -11,6 +19,7 @@ import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useScrollToIndexBridge } from '@/lib/use-scroll-to-index-bridge.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath, type AllNotesFilter } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
@@ -27,8 +36,10 @@ interface AllNotesScreenProps {
 
 /**
  * The All Notes screen (a routed view, like settings): every non-daily note,
- * newest first, filterable by a tag or an attachment type. The active filter
- * lives on the route so back/forward and "open a note, come back" keep it.
+ * newest first or in the order chosen from the column headers (the
+ * `allNotesSort` setting, so it holds across filters and restarts), filterable
+ * by a tag or an attachment type. The active filter lives on the route so
+ * back/forward and "open a note, come back" keep it.
  * Daily notes are deliberately absent from the unfiltered view, but appear when
  * they match the active filter.
  *
@@ -43,6 +54,8 @@ interface AllNotesScreenProps {
  */
 export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const { graph } = useGraph()
+  const { settings, updateSettingsWith } = useSettings()
+  const sort = settings.allNotesSort
   const { navigate } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
   // The scroll container lives in state, not a ref, so scroll restoration
@@ -81,11 +94,25 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
     enabled,
   })
 
-  const ready = notes !== undefined
+  // The index read is newest first; another order re-sorts the cached rows, so
+  // switching order is instant and shares the filter's query.
+  const sortedNotes = useMemo(
+    () => (notes === undefined ? undefined : sortNoteListRows(notes, sort)),
+    [notes, sort],
+  )
+  const handleSort = useCallback(
+    (key: NoteListSortKey) =>
+      updateSettingsWith((current) => ({
+        allNotesSort: chooseNoteListSort(current.allNotesSort, key),
+      })),
+    [updateSettingsWith],
+  )
+
+  const ready = sortedNotes !== undefined
   const { onScroll } = useScrollRestoration(scrollElement, ready)
 
   // The flat, render-order paths the selection and its shortcuts act on.
-  const orderedPaths = useMemo(() => (notes ?? []).map((note) => note.path), [notes])
+  const orderedPaths = useMemo(() => (sortedNotes ?? []).map((note) => note.path), [sortedNotes])
   const selection = useListSelection(orderedPaths)
   const openNote = useCallback(
     (path: string, event?: ModClickEvent) =>
@@ -176,8 +203,10 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
         className="min-h-0 flex-1 overflow-auto"
       >
         <AllNotesTable
-          notes={notes}
+          notes={sortedNotes}
           filter={filter}
+          sort={sort}
+          onSort={handleSort}
           selection={selection}
           onOpen={openNote}
           registerScrollToIndex={registerScrollToIndex}

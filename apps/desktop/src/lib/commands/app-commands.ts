@@ -1,4 +1,10 @@
-import { randomNotePath, toggleDevtools, untitledNotePath } from '@reflect/core'
+import {
+  randomNotePath,
+  reverseNoteListSort,
+  toggleDevtools,
+  untitledNotePath,
+  type NoteListSort,
+} from '@reflect/core'
 import { attachFilesToNote } from '@/lib/attach-files.ts'
 import { runCopyNotePath } from '@/lib/note-copy-path.ts'
 import { runCopyDeepLink } from '@/lib/note-deep-link.ts'
@@ -40,6 +46,20 @@ function openNewNote(context: CommandContext): void {
   context.navigate(newNoteRoute())
 }
 
+/**
+ * Set the All Notes order and show the list. The sort-by commands set an
+ * absolute order (repeatable), unlike a header click, which toggles.
+ */
+function sortAllNotes(
+  context: CommandContext,
+  update: (current: NoteListSort) => NoteListSort,
+): void {
+  context.sortAllNotes(update)
+  if (context.route().kind !== 'allNotes') {
+    context.navigate(allNotesRoute(null))
+  }
+}
+
 const GRAPH_SWITCH_COMMANDS: AppCommand[] = Array.from({ length: 9 }, (_, index) => {
   const position = index + 1
   return {
@@ -71,6 +91,24 @@ const APP_COMMANDS: AppCommand[] = [
     keywords: ['notes', 'list', 'browse', 'library'],
     keybinding: 'Mod-Shift-a',
     run: (context) => context.navigate(allNotesRoute(null)),
+  },
+  {
+    id: 'allNotes.sortByTitle',
+    title: 'Sort notes by title',
+    keywords: ['all notes', 'order', 'alphabetical', 'name', 'subject'],
+    run: (context) => sortAllNotes(context, () => ({ key: 'title', direction: 'asc' })),
+  },
+  {
+    id: 'allNotes.sortByUpdated',
+    title: 'Sort notes by last updated',
+    keywords: ['all notes', 'order', 'recent', 'modified', 'newest'],
+    run: (context) => sortAllNotes(context, () => ({ key: 'updated', direction: 'desc' })),
+  },
+  {
+    id: 'allNotes.reverseOrder',
+    title: 'Reverse note order',
+    keywords: ['all notes', 'sort', 'ascending', 'descending', 'oldest'],
+    run: (context) => sortAllNotes(context, reverseNoteListSort),
   },
   {
     id: 'nav.tasks',

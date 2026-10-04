@@ -44,6 +44,7 @@ async function renderDialog(): Promise<CommandContext> {
     openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
+    sortAllNotes: vi.fn(),
   }
   await render(
     <NoteTemplatesProvider>

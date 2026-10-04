@@ -51,6 +51,7 @@ describe('listNotes', () => {
         snippet: 'Always on top.',
         tags: [],
         isPinned: true,
+        pinnedOrder: 1,
       },
       {
         path: 'notes/health.md',
@@ -59,6 +60,7 @@ describe('listNotes', () => {
         snippet: 'Shop your health goals.',
         tags: ['health', 'link'],
         isPinned: false,
+        pinnedOrder: null,
       },
     ])
 

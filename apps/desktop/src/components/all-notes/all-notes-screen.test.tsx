@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
 import type { ReactElement } from 'react'
-import { setBridge } from '@reflect/core'
+import { setBridge, type NoteListSort } from '@reflect/core'
 import { resetOperations, useOperations } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
@@ -34,19 +34,56 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
     indexing: false,
   }),
 }))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      editorMarkdownSyntax: 'hide',
-      theme: 'system',
-      timeFormat: '12h',
-      dateFormat: settingsState.dateFormat,
-      allNotesFilterTags: ['book', 'person'],
-      allNotesFilterAttachments: settingsState.allNotesFilterAttachments,
+/** The persisted sort, as a tiny store so a header click re-renders the screen. */
+const sortStore = vi.hoisted(() => {
+  const DEFAULT: NoteListSort = { key: 'updated', direction: 'desc' }
+  let sort = DEFAULT
+  const listeners = new Set<() => void>()
+  return {
+    get: (): NoteListSort => sort,
+    set: (next: NoteListSort): void => {
+      sort = next
+      for (const listener of listeners) {
+        listener()
+      }
     },
-    updateSettings: () => {},
-  }),
-}))
+    reset: (): void => {
+      sort = DEFAULT
+    },
+    subscribe: (listener: () => void): (() => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+})
+vi.mock('@/providers/settings-provider.tsx', async () => {
+  const { useSyncExternalStore } = await import('react')
+  return {
+    useSettings: () => {
+      const allNotesSort = useSyncExternalStore(sortStore.subscribe, sortStore.get)
+      return {
+        settings: {
+          editorMarkdownSyntax: 'hide',
+          theme: 'system',
+          timeFormat: '12h',
+          dateFormat: settingsState.dateFormat,
+          allNotesFilterTags: ['book', 'person'],
+          allNotesFilterAttachments: settingsState.allNotesFilterAttachments,
+          allNotesSort,
+        },
+        updateSettings: () => {},
+        updateSettingsWith: (
+          updater: (current: { allNotesSort: NoteListSort }) => { allNotesSort?: NoteListSort },
+        ) => {
+          const patch = updater({ allNotesSort: sortStore.get() })
+          if (patch.allNotesSort !== undefined) {
+            sortStore.set(patch.allNotesSort)
+          }
+        },
+      }
+    },
+  }
+})
 vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
   openRouteInNewWindow,
@@ -115,6 +152,7 @@ beforeEach(() => {
   resetOperations()
   settingsState.dateFormat = 'mdy'
   settingsState.allNotesFilterAttachments = ['pdf', 'video']
+  sortStore.reset()
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
   mockInvoke.mockReset()
   mockInvoke.mockImplementation(async (command, args) => {
@@ -558,6 +596,65 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     await view.getByText('Shop your health goals.').dblClick()
     expect(probedRoute(view)).toEqual({ kind: 'note', path: 'notes/health.md' })
+    await view.unmount()
+  })
+
+  it('sorts by subject from the header, flipping direction on a second click', async () => {
+    const view = await renderScreen()
+    await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
+    const order = (): number =>
+      Math.sign(
+        (view.container.textContent ?? '').indexOf('Tokyo Gâteau') -
+          (view.container.textContent ?? '').indexOf('Health Stacked'),
+      )
+    expect(order()).toBe(1) // newest first: Health (Jan 15) above Tokyo (Jan 10)
+
+    await view.getByRole('button', { name: 'Sort by subject' }).click()
+    expect(sortStore.get()).toEqual({ key: 'title', direction: 'asc' })
+    await expect
+      .element(view.getByRole('button', { name: 'Subject, sorted A to Z' }))
+      .toBeInTheDocument()
+    expect(order()).toBe(1)
+
+    await view.getByRole('button', { name: 'Subject, sorted A to Z' }).click()
+    await expect
+      .element(view.getByRole('button', { name: 'Subject, sorted Z to A' }))
+      .toBeInTheDocument()
+    expect(order()).toBe(-1)
+
+    await view.getByRole('button', { name: 'Sort by updated' }).click()
+    expect(sortStore.get()).toEqual({ key: 'updated', direction: 'desc' })
+    await view.getByRole('button', { name: 'Updated, sorted newest first' }).click()
+    await expect
+      .element(view.getByRole('button', { name: 'Updated, sorted oldest first' }))
+      .toBeInTheDocument()
+    expect(order()).toBe(-1)
+    await view.unmount()
+  })
+
+  it('moves the keyboard selection through the sorted order', async () => {
+    sortStore.set({ key: 'updated', direction: 'asc' })
+    const view = await renderScreen()
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
+
+    await userEvent.keyboard('{ArrowDown}') // the first row in the oldest-first order
+    await userEvent.keyboard('{Enter}')
+
+    expect(probedRoute(view)).toEqual({ kind: 'note', path: 'notes/tokyo.md' })
+    await view.unmount()
+  })
+
+  it('lets Return on a focused header sort without opening the selection', async () => {
+    const view = await renderScreen()
+    await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
+    await userEvent.keyboard('{ArrowDown}')
+    await expect.element(view.getByRole('button', { name: /Trash \(1\)/ })).toBeInTheDocument()
+
+    view.getByRole('button', { name: 'Sort by subject' }).element().focus()
+    await userEvent.keyboard('{Enter}')
+
+    expect(sortStore.get()).toEqual({ key: 'title', direction: 'asc' })
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
 

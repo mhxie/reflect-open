@@ -32,6 +32,7 @@ describe('settingsSchema', () => {
       weekStartDay: 'monday',
       allNotesFilterTags: ['book', 'link', 'person'],
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
+      allNotesSort: { key: 'updated', direction: 'desc' },
       calendarEnabled: false,
       calendarIds: [],
       graphColors: {},
@@ -176,6 +177,16 @@ describe('settingsSchema', () => {
     expect(
       settingsSchema.parse({ allNotesFilterAttachments: 'pdf' }).allNotesFilterAttachments,
     ).toEqual(['pdf', 'image', 'audio', 'video'])
+    expect(
+      settingsSchema.parse({ allNotesSort: { key: 'title', direction: 'asc' } }).allNotesSort,
+    ).toEqual({ key: 'title', direction: 'asc' })
+    expect(
+      settingsSchema.parse({ allNotesSort: { key: 'created', direction: 'asc' } }).allNotesSort,
+    ).toEqual({ key: 'updated', direction: 'desc' })
+    expect(settingsSchema.parse({ allNotesSort: 'title' }).allNotesSort).toEqual({
+      key: 'updated',
+      direction: 'desc',
+    })
     expect(settingsSchema.parse({ calendarEnabled: true }).calendarEnabled).toBe(true)
     expect(settingsSchema.parse({ calendarEnabled: false }).calendarEnabled).toBe(false)
     expect(settingsSchema.parse({ calendarIds: ['cal-1', 'cal-2'] }).calendarIds).toEqual([
@@ -316,6 +327,7 @@ describe('settingsSchema', () => {
       weekStartDay: 'monday',
       allNotesFilterTags: ['book', 'link', 'person'],
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
+      allNotesSort: { key: 'updated', direction: 'desc' },
       calendarEnabled: false,
       calendarIds: [],
       graphColors: {},

@@ -31,7 +31,15 @@ function setup() {
   const note: PinnedNote = { path: input.path, title: 'a', dailyDate: null, pinnedOrder: 1024 }
   queryClient.setQueryData<PinnedNote[]>(shelfKey, [])
   queryClient.setQueryData<NoteListEntry[]>(desktopKey, [
-    { path: input.path, title: 'A', snippet: '', tags: [], mtime: 0, isPinned: false },
+    {
+      path: input.path,
+      title: 'A',
+      snippet: '',
+      tags: [],
+      mtime: 0,
+      isPinned: false,
+      pinnedOrder: null,
+    },
   ])
   queryClient.setQueryData<FilteredSearchHit[]>(mobileKey, [
     {
