@@ -129,8 +129,9 @@ assume GitHub when `repo === null`:
 - Public-repo confirmation: API-based, GitHub-only. Generic remotes skip it — wiring
   your own remote is the opt-in. Documented loudly (notes marked `private: true` are
   in the backup; host visibility is the user's responsibility).
-- `MAX_FILE_BYTES` (95 MB) guard stays for all remotes (every sensible host has a
-  limit; ours just mirrors GitHub's). Message drops the "for GitHub" phrasing.
+- The 95 MiB size guard stays for all remotes (every sensible host has a
+  limit; ours just mirrors GitHub's). Message drops the "for GitHub" phrasing. A
+  graph can lower it with `backupMaxFileMiB` in the settings file (`docs/privacy.md`).
 
 ### 6. Restore on a new machine — V1 (docs only)
 

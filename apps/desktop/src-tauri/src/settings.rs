@@ -73,21 +73,25 @@ pub fn settings_load() -> AppResult<SettingsDoc> {
 }
 
 /// The persisted settings document, for the few keys Rust itself must read
-/// (the local-only folders a graph open loads into `GraphState`).
+/// (the local-only folders and backup size limit a graph open loads into
+/// `GraphState`).
 pub(crate) fn load_document() -> AppResult<SettingsDoc> {
     load_from(&store_path()?)
 }
 
 /// Keys Rust owns: the app never edits them, so a save keeps the copy on disk
 /// rather than writing back whatever the app loaded at startup.
-const RUST_OWNED_KEYS: [&str; 1] = [crate::fs::LOCAL_ONLY_SETTINGS_KEY];
+const RUST_OWNED_KEYS: [&str; 2] = [
+    crate::fs::LOCAL_ONLY_SETTINGS_KEY,
+    crate::git::MAX_FILE_SIZE_SETTINGS_KEY,
+];
 
 /// Command: atomically replace the persisted settings document, except for
 /// the Rust-owned keys, which keep their on-disk value. An edit to the
-/// local-only configuration made while the app runs (the documented way to
-/// configure it) must survive the app's next save; and since an unreadable
-/// store cannot be merged, it refuses the save instead of replacing that
-/// configuration with the app's copy.
+/// local-only configuration or the backup size limit made while the app runs
+/// (the documented way to configure them) must survive the app's next save;
+/// and since an unreadable store cannot be merged, it refuses the save
+/// instead of replacing that configuration with the app's copy.
 #[tauri::command]
 pub fn settings_save(settings: SettingsDoc) -> AppResult<()> {
     save_keeping_rust_keys(&store_path()?, settings)
@@ -101,7 +105,8 @@ fn save_keeping_rust_keys(path: &Path, mut settings: SettingsDoc) -> AppResult<(
         };
         AppError::io(format!(
             "Settings not saved: Reflect could not read its settings file ({reason}). Fix or \
-             remove {}; saving over it would replace its local-only folder configuration.",
+             remove {}; saving over it would replace its local-only folder and backup \
+             configuration.",
             path.display()
         ))
     })?;
@@ -211,6 +216,20 @@ mod tests {
         save_to(&path, &doc(&[("theme", json!("dark"))])).unwrap();
         save_keeping_rust_keys(&path, app_copy).unwrap();
         assert_eq!(load_from(&path).unwrap().get(key), None);
+    }
+
+    #[test]
+    fn a_save_keeps_the_backup_size_limit_on_disk() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let key = crate::git::MAX_FILE_SIZE_SETTINGS_KEY;
+        let edited = json!({ "/Users/me/Notes": 32 });
+        save_to(&path, &doc(&[(key, edited.clone())])).unwrap();
+
+        save_keeping_rust_keys(&path, doc(&[("theme", json!("light")), (key, json!({}))])).unwrap();
+        let saved = load_from(&path).unwrap();
+        assert_eq!(saved.get(key), Some(&edited));
+        assert_eq!(saved.get("theme"), Some(&json!("light")));
     }
 
     #[test]

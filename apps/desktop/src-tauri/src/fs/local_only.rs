@@ -392,7 +392,11 @@ fn string_list(entry: &Map<String, Value>, key: &str, warnings: &mut Vec<String>
 
 /// The entry key for `root`: the exact root string or, failing that, one
 /// naming the same folder (recents may hold a non-canonical spelling).
-fn matching_key<'doc>(entries: &'doc Map<String, Value>, root: &Path) -> Option<&'doc String> {
+/// Shared with the other settings keyed by graph root.
+pub(crate) fn matching_key<'doc>(
+    entries: &'doc Map<String, Value>,
+    root: &Path,
+) -> Option<&'doc String> {
     if let Some((key, _)) = root.to_str().and_then(|root| entries.get_key_value(root)) {
         return Some(key);
     }

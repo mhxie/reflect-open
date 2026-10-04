@@ -29,6 +29,7 @@ import { followHealedMove } from '@/editor/move-note.ts'
 import { reloadOpenDocuments } from '@/editor/open-documents.ts'
 import { resetNoteRowOverlays } from '@/hooks/note-row-overlay.ts'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import { reportBackupWarnings } from '@/lib/backup-warnings.ts'
 import { setIndexProgress } from '@/lib/index-progress.ts'
 import { reportLocalOnlyWarnings } from '@/lib/local-only-warnings.ts'
 import {
@@ -297,6 +298,7 @@ export function GraphProvider({
           setStatus('ready')
           opened = true
           reportLocalOnlyWarnings(info)
+          reportBackupWarnings(info)
           // Onboarding, considered exactly once per graph (the `welcomeSeeded`
           // meta marker): an empty graph gets the pinned "How to use Reflect"
           // note. Needs the index for the marker, so a graph whose index failed

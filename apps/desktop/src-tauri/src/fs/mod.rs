@@ -35,6 +35,9 @@ use self::io::{
 };
 use self::resolve::{resolve, resolve_read, resolve_shareable, resolve_write};
 
+/// The entry for a graph root in a settings key keyed by graph root, matched
+/// the way the local-only configuration matches it.
+pub(crate) use self::local_only::matching_key as settings_key_for_root;
 /// What an index recorded about its local-only folders (read by `db`).
 pub(crate) use self::local_only::Recorded;
 /// The settings key holding every graph's local-only configuration (Rust
@@ -109,6 +112,11 @@ pub struct GraphInner {
     /// The configuration is unknown, so the index open only adds to the
     /// recorded folders (`local_only::LoadedConfig::record`).
     local_only_grow_record: bool,
+    /// The open graph's Git backup size limit in bytes (`git::max_file_size`),
+    /// loaded with the root; `None` until a graph opens.
+    backup_max_file_bytes: Option<u64>,
+    /// The backup size limit's configuration problems found at open.
+    backup_warnings: Vec<String>,
     /// Cached vault catalog for the current root, dropped on every write path
     /// and watcher/iCloud change so listings never pin deleted files.
     catalog: Option<io::FileCatalog>,
@@ -163,6 +171,9 @@ pub struct GraphInfo {
     /// Problems with that configuration the user must see (dropped names,
     /// an unusable rawRoot, an unreadable settings file); empty when none.
     pub local_only_warnings: Vec<String>,
+    /// Problems with the graph's backup size limit the user must see (a value
+    /// out of range, a key naming a missing folder); empty when none.
+    pub backup_warnings: Vec<String>,
 }
 
 /// Metadata for a file inside the graph.
@@ -205,6 +216,7 @@ fn graph_info(
     generation: u64,
     local_only: Option<&LocalOnlyFolders>,
     warnings: &[String],
+    backup_warnings: &[String],
 ) -> GraphInfo {
     let name = root
         .file_name()
@@ -218,6 +230,7 @@ fn graph_info(
             .map(|folders| folders.names().to_vec())
             .unwrap_or_default(),
         local_only_warnings: warnings.to_vec(),
+        backup_warnings: backup_warnings.to_vec(),
     }
 }
 
@@ -230,6 +243,10 @@ fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
     for warning in &loaded.warnings {
         tracing::warn!(root = %root.display(), "local-only folders: {warning}");
     }
+    let backup_limit = crate::git::load_max_file_size(root);
+    for warning in &backup_limit.warnings {
+        tracing::warn!(root = %root.display(), "backup size limit: {warning}");
+    }
     let generation = {
         let mut inner = lock_graph(state)?;
         inner.generation += 1;
@@ -238,6 +255,8 @@ fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
         inner.local_only_warnings = loaded.warnings.clone();
         inner.local_only_unknown = loaded.unknown;
         inner.local_only_grow_record = !loaded.record;
+        inner.backup_max_file_bytes = Some(backup_limit.max_file_bytes);
+        inner.backup_warnings = backup_limit.warnings.clone();
         inner.catalog = None;
         inner.catalog_revision = inner.catalog_revision.wrapping_add(1);
         inner.generation
@@ -247,6 +266,7 @@ fn activate(state: &State<GraphState>, root: &Path) -> AppResult<GraphInfo> {
         generation,
         loaded.folders.as_deref(),
         &loaded.warnings,
+        &backup_limit.warnings,
     );
     // Recents is a convenience cache: a failure to persist it must not fail the
     // open (which would leave Rust treating the graph as open while the command
@@ -285,6 +305,7 @@ pub(crate) fn current_graph_info(state: &State<GraphState>) -> AppResult<GraphIn
         inner.generation,
         inner.local_only.as_deref(),
         &inner.local_only_warnings,
+        &inner.backup_warnings,
     ))
 }
 
@@ -317,6 +338,19 @@ pub(crate) fn graph_for(
     }
     let root = inner.root.clone().ok_or_else(AppError::no_graph)?;
     Ok((root, inner.local_only.clone()))
+}
+
+/// The open graph's Git backup size limit, verified against the generation
+/// the commit was issued for (like [`root_for_generation`]); `None` when the
+/// open did not load one.
+pub(crate) fn backup_max_file_bytes(state: &GraphState, generation: u64) -> AppResult<Option<u64>> {
+    let inner = lock_graph(state)?;
+    if generation != inner.generation {
+        return Err(AppError::io(
+            "the graph changed since this command was issued; dropping it",
+        ));
+    }
+    Ok(inner.backup_max_file_bytes)
 }
 
 /// Why sync refuses while the local-only configuration is unknown.
@@ -1083,6 +1117,8 @@ pub fn graph_delete(generation: u64, state: State<GraphState>) -> AppResult<()> 
             inner.local_only_warnings = Vec::new();
             inner.local_only_unknown = false;
             inner.local_only_grow_record = false;
+            inner.backup_max_file_bytes = None;
+            inner.backup_warnings = Vec::new();
             inner.generation += 1;
             inner.catalog = None;
             inner.catalog_revision = inner.catalog_revision.wrapping_add(1);
@@ -1376,6 +1412,8 @@ mod file_catalog_tests {
             local_only_warnings: Vec::new(),
             local_only_unknown: false,
             local_only_grow_record: false,
+            backup_max_file_bytes: None,
+            backup_warnings: Vec::new(),
             catalog: None,
             catalog_revision: 0,
         }))

@@ -9,9 +9,10 @@ use git2::{Repository, RepositoryInitOptions};
 use tempfile::{tempdir, TempDir};
 
 use super::commit::commit_all;
+use super::max_file_size::DEFAULT_MAX_FILE_BYTES as MAX_FILE_BYTES;
 use super::merge::{merge_remote, MergeKind};
 use super::remote::{fetch, push};
-use super::{setup, status, MAX_FILE_BYTES};
+use super::{setup, status};
 
 /// Scaffold a minimal graph layout (what `fs::bootstrap` produces).
 fn scaffold_graph(root: &Path) {
