@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { errorMessage, type NoteListEntry } from '@reflect/core'
-import { deleteOpenNote } from '@/lib/note-delete.ts'
+import { deleteOpenNote, KEPT_IN_GRAPH_TRASH } from '@/lib/note-delete.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -60,12 +60,17 @@ export function useNoteTrash(): NoteTrash {
       setIsTrashing(true)
       let failures = 0
       let lastError: unknown = null
+      // Notes the system Trash refused, kept in the graph's own trash.
+      let keptInGraph = 0
       try {
         operation.progress(0, paths.length)
         let attempted = 0
         for (const path of paths) {
           try {
-            await deleteOpenNote(path, generation)
+            const outcome = await deleteOpenNote(path, generation)
+            if (outcome?.trashed === 'graph') {
+              keptInGraph += 1
+            }
             // Drop the row the moment it's actually gone — the desktop list
             // otherwise waits on the watcher's reindex. Crucially, a note that
             // *fails* is left in the list, so it keeps its place in the
@@ -91,7 +96,15 @@ export function useNoteTrash(): NoteTrash {
           // on its own.
           return false
         }
-        operation.done()
+        if (keptInGraph > 0) {
+          operation.warn(
+            keptInGraph === 1
+              ? KEPT_IN_GRAPH_TRASH
+              : `${KEPT_IN_GRAPH_TRASH}: ${keptInGraph} notes`,
+          )
+        } else {
+          operation.done()
+        }
         return true
       } finally {
         setIsTrashing(false)

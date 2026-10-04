@@ -3,7 +3,7 @@ import { renderHook } from 'vitest-browser-react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '@reflect/core'
-import { resetOperations } from '@/lib/operations.ts'
+import { getOperations, resetOperations } from '@/lib/operations.ts'
 import { useNoteTrash } from './use-note-trash.ts'
 
 interface GraphValue {
@@ -24,7 +24,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   setBridge({ invoke: mockInvoke, listen: async () => () => {} })
   mockInvoke.mockReset()
-  mockInvoke.mockResolvedValue(null)
+  mockInvoke.mockResolvedValue({ trashed: 'system' })
 })
 
 afterEach(() => {
@@ -72,7 +72,7 @@ describe('useNoteTrash', () => {
       if (command === 'note_delete' && args['path'] === 'notes/b.md') {
         throw new Error('locked')
       }
-      return null
+      return { trashed: 'system' }
     })
     const { result } = await renderHook(() => useNoteTrash(), { wrapper })
 
@@ -91,5 +91,26 @@ describe('useNoteTrash', () => {
       path: 'notes/c.md',
       generation: 1,
     })
+  })
+
+  it('says when the system Trash refused a note and the graph’s trash kept it', async () => {
+    mockInvoke.mockImplementation(async (_command, args) => ({
+      trashed: args['path'] === 'secure/bank.md' ? 'graph' : 'system',
+    }))
+    const { result } = await renderHook(() => useNoteTrash(), { wrapper })
+
+    let trashed = false
+    await act(async () => {
+      trashed = await result.current.trash(['notes/a.md', 'secure/bank.md'])
+    })
+
+    expect(trashed).toBe(true)
+    expect(getOperations()).toEqual([
+      expect.objectContaining({
+        label: 'Trashing notes',
+        status: 'warning',
+        message: 'Moved to .reflect/trash in this graph',
+      }),
+    ])
   })
 })

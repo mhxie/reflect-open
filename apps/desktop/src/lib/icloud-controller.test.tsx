@@ -34,6 +34,7 @@ const GRAPH = {
   name: 'Notes',
   generation: 7,
   localOnlyFolders: [],
+  localOnlyEditableFolders: [],
 }
 
 let invoked: Array<[string, Record<string, unknown>]>

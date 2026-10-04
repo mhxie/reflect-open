@@ -17,17 +17,22 @@ const CHUNK_BYTES = 4 * 1024 * 1024
 const UPLOAD_ID_HEADER = 'x-upload-id'
 
 /**
- * Stream a pasted/dropped file's bytes into the graph's `assets/` folder as
- * `desiredName` — or the first free `-2`-suffixed variant; Rust decides the
- * final name race-free and returns it as a graph-relative `assets/…` path.
- * Bytes travel as raw binary IPC bodies in {@link CHUNK_BYTES} chunks staged
- * under `.reflect/tmp/`, so neither webview memory nor the file watcher ever
- * sees the whole file in flight. `generation` pins the write to the graph it
- * was issued for; a failure aborts the upload (best-effort) and rethrows.
+ * Stream a pasted/dropped file's bytes into the attachment folder of the note
+ * at `notePath` as `desiredName` — or the first free `-2`-suffixed variant;
+ * Rust decides the destination from the note and the final name race-free,
+ * and returns the graph-relative path: `assets/…` for an ordinary note,
+ * `<folder>/assets/…` for a note in an editable local-only folder (whose
+ * attachments never enter the synced `assets/`). A note in a read-only
+ * local-only folder takes none. Bytes travel as raw binary IPC bodies in
+ * {@link CHUNK_BYTES} chunks staged under `.reflect/tmp/`, so neither webview
+ * memory nor the file watcher ever sees the whole file in flight.
+ * `generation` pins the write to the graph it was issued for; a failure
+ * aborts the upload (best-effort) and rethrows.
  */
 export async function createAsset(
   desiredName: string,
   contents: Blob,
+  notePath: string,
   generation: number,
 ): Promise<string> {
   const id = await call('asset_upload_begin', { generation }, z.string())
@@ -40,7 +45,11 @@ export async function createAsset(
         voidSchema,
       )
     }
-    const path = await call('asset_upload_commit', { id, desiredName, generation }, z.string())
+    const path = await call(
+      'asset_upload_commit',
+      { id, desiredName, notePath, generation },
+      z.string(),
+    )
     echoLocalWrite({ path, kind: 'upsert', modifiedMs: Date.now() })
     return path
   } catch (error) {
@@ -84,17 +93,23 @@ export async function writeAssetStreamed(
 }
 
 /**
- * Copy a file the OS handed us a real path for (file picker) into the graph's
- * `assets/` folder as `desiredName`, with the same collision policy and
- * return value as {@link createAsset}. The copy happens file-to-file in Rust;
- * the bytes never enter webview memory.
+ * Copy a file the OS handed us a real path for (file picker) into the
+ * attachment folder of the note at `notePath` as `desiredName`, with the same
+ * destination rule, collision policy, and return value as
+ * {@link createAsset}. The copy happens file-to-file in Rust; the bytes never
+ * enter webview memory.
  */
 export async function importAsset(
   sourcePath: string,
   desiredName: string,
+  notePath: string,
   generation: number,
 ): Promise<string> {
-  const path = await call('asset_import', { sourcePath, desiredName, generation }, z.string())
+  const path = await call(
+    'asset_import',
+    { sourcePath, desiredName, notePath, generation },
+    z.string(),
+  )
   echoLocalWrite({ path, kind: 'upsert', modifiedMs: Date.now() })
   return path
 }

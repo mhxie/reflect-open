@@ -1,5 +1,11 @@
 import { buildFileMarkdown } from '@meowdown/core'
-import { assetFileName, createAsset, errorMessage, untitledNotePath } from '@reflect/core'
+import {
+  assetFileName,
+  assetLinkDestination,
+  createAsset,
+  errorMessage,
+  untitledNotePath,
+} from '@reflect/core'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { shouldEmbedFile } from '@/editor/embed-file.ts'
@@ -51,11 +57,15 @@ export async function createNoteFromFiles(
   navigate: (route: Route) => void,
 ): Promise<void> {
   const operation = startOperation('Creating note from files')
+  // Named before the uploads: the note an attachment is for decides where
+  // it lands (a fresh note's go to the graph's `assets/`).
+  const path = untitledNotePath()
   const saved: { file: File; assetPath: string }[] = []
   const failed: string[] = []
   for (const file of files) {
     try {
-      saved.push({ file, assetPath: await createAsset(assetFileName(file.name), file, generation) })
+      const assetPath = await createAsset(assetFileName(file.name), file, path, generation)
+      saved.push({ file, assetPath: assetLinkDestination(assetPath) })
     } catch (cause) {
       failed.push(`${file.name}: ${errorMessage(cause)}`)
     }
@@ -64,7 +74,6 @@ export async function createNoteFromFiles(
     operation.fail(failed.join('; '))
     return
   }
-  const path = untitledNotePath()
   navigate({ kind: 'note', path })
   const handle = await waitForEditor(path)
   if (handle === null) {

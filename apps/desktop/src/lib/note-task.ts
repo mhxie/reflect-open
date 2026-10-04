@@ -1,6 +1,6 @@
 import {
   applyTaskEdits,
-  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
   patchNote,
   ReflectError,
   type TaskEdit,
@@ -37,22 +37,27 @@ export class NoteBusyError extends Error {
 }
 
 /**
- * One pending-write chain per note path. Task writes read-modify-write a note,
+ * One pending-write chain per graph generation and note path. Task writes read-modify-write a note,
  * so two firing at once on the same note (two checkbox clicks, a bulk delete
  * racing a checkbox) could each read the pre-write source and clobber. Routing
- * every write through the path's chain serializes them — the next only reads
+ * every write through the graph's path chain serializes them — the next only reads
  * after the previous has written. (The open-note path is already serialized by
  * the session's save chain; this closes the disk path and any open↔closed gap.)
  */
 const writeChains = new Map<string, Promise<unknown>>()
 
-function serializeByPath<T>(path: string, op: () => Promise<T>): Promise<T> {
+function serializeByPath<T>(path: string, generation: number, op: () => Promise<T>): Promise<T> {
   // Every task write funnels through here, so this is where a note inside a
-  // local-only folder (read-only) refuses them all.
-  if (isLocalOnlyPath(path)) {
-    return Promise.reject(new Error('This note is in a local-only folder and can’t be edited.'))
+  // read-only local-only folder refuses them all. An editable folder's notes
+  // take them: Rust keeps those writes inside the folder, checked against the
+  // text they were computed from.
+  if (isLocalOnlyReadOnlyPath(path)) {
+    return Promise.reject(
+      new Error('This note is in a read-only local-only folder and can’t be edited.'),
+    )
   }
-  const previous = writeChains.get(path) ?? Promise.resolve()
+  const key = JSON.stringify([generation, path])
+  const previous = writeChains.get(key) ?? Promise.resolve()
   // Run `op` whether the previous write resolved or rejected — one failure must
   // not wedge the chain for the note.
   const result = previous.then(op, op)
@@ -60,11 +65,11 @@ function serializeByPath<T>(path: string, op: () => Promise<T>): Promise<T> {
     () => {},
     () => {},
   )
-  writeChains.set(path, settled)
+  writeChains.set(key, settled)
   void settled.then(() => {
     // Drop the entry once the chain goes idle, so the map can't grow unbounded.
-    if (writeChains.get(path) === settled) {
-      writeChains.delete(path)
+    if (writeChains.get(key) === settled) {
+      writeChains.delete(key)
     }
   })
   return result
@@ -99,8 +104,8 @@ export function writeTaskEdits(
 ): Promise<TaskEditResult> {
   // Serialize per note: a concurrent change to the same note must not read the
   // pre-write source and clobber this one.
-  return serializeByPath(notePath, async (): Promise<TaskEditResult> => {
-    const owner = openSession(notePath)
+  return serializeByPath(notePath, generation, async (): Promise<TaskEditResult> => {
+    const owner = openSession(notePath, generation)
     if (owner !== null) {
       let result: TaskEditResult | undefined
       const applied = await owner.commitSourceEdit((source) => {

@@ -17,7 +17,9 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   getOpenTasks,
-  isLocalOnlyPath: (path: string) => path.startsWith('secure/'),
+  // `secure` is an editable local-only folder, `archive` a read-only one.
+  isLocalOnlyPath: (path: string) => path.startsWith('secure/') || path.startsWith('archive/'),
+  isLocalOnlyReadOnlyPath: (path: string) => path.startsWith('archive/'),
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
@@ -126,13 +128,23 @@ describe('DayTasksSection', () => {
       .toHaveTextContent(JSON.stringify({ kind: 'daily', date: '2026-10-01' }))
   })
 
-  it('keeps the checkbox inert for a local-only task', async () => {
+  it('keeps the checkbox inert for a task in a read-only local-only note', async () => {
+    getOpenTasks.mockResolvedValue([
+      makeOpenTask({ notePath: 'archive/vault.md', markdown: 'rotate keys', dueDate: TODAY }),
+    ])
+    await renderSection(TODAY)
+
+    await expect.element(page.getByRole('button', { name: 'Complete: rotate keys' })).toBeDisabled()
+  })
+
+  it('toggles a task in an editable local-only note', async () => {
     getOpenTasks.mockResolvedValue([
       makeOpenTask({ notePath: 'secure/vault.md', markdown: 'rotate keys', dueDate: TODAY }),
     ])
     await renderSection(TODAY)
 
-    await expect.element(page.getByRole('button', { name: 'Complete: rotate keys' })).toBeDisabled()
+    await userEvent.click(page.getByRole('button', { name: 'Complete: rotate keys' }))
+    await vi.waitFor(() => expect(toggleTask).toHaveBeenCalledTimes(1))
   })
 
   it('caps the list and links to the Tasks view', async () => {

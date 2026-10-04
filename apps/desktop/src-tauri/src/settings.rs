@@ -80,7 +80,9 @@ pub(crate) fn load_document() -> AppResult<SettingsDoc> {
 }
 
 /// Keys Rust owns: the app never edits them, so a save keeps the copy on disk
-/// rather than writing back whatever the app loaded at startup.
+/// rather than writing back whatever the app loaded at startup. Each is kept
+/// whole, so every field of a graph's local-only entry (`folders`,
+/// `editable`, `released`, `rawRoot`) survives a save exactly as written.
 const RUST_OWNED_KEYS: [&str; 3] = [
     crate::fs::LOCAL_ONLY_SETTINGS_KEY,
     crate::git::MAX_FILE_SIZE_SETTINGS_KEY,
@@ -201,8 +203,11 @@ mod tests {
         let key = crate::fs::LOCAL_ONLY_SETTINGS_KEY;
         // The app loaded the document before the user configured a folder...
         let app_copy = doc(&[("theme", json!("dark")), (key, json!({ "/old": {} }))]);
-        // ...then the user edited the file while the app ran.
-        let edited = json!({ "/Users/me/Notes": { "folders": ["secure"] } });
+        // ...then the user edited the file while the app ran, making a folder
+        // editable.
+        let edited = json!({
+            "/Users/me/Notes": { "folders": ["secure", "archive"], "editable": ["secure"] }
+        });
         save_to(
             &path,
             &doc(&[("theme", json!("dark")), (key, edited.clone())]),

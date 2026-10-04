@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readNote, writeNote, type FileChange } from '@reflect/core'
+import {
+  clearNoteRecovery,
+  isLocalOnlyPath,
+  readNote,
+  readNoteRecovery,
+  writeNote,
+  writeNoteRecovery,
+  type FileChange,
+} from '@reflect/core'
 import { useFileChanges } from '@/lib/use-file-changes.ts'
 import { createDocumentBinding, type DocumentBinding } from './document-binding.ts'
 import type { NoteEditorHandle } from './note-editor.tsx'
@@ -7,6 +15,7 @@ import { createRenameCoordinator } from './rename-coordinator.ts'
 import {
   createNoteSession,
   INITIAL_NOTE_SNAPSHOT,
+  type NoteRecoveryIo,
   type NoteSessionSnapshot,
 } from './note-session.ts'
 import { checkRoundTrip } from './roundtrip.ts'
@@ -30,6 +39,12 @@ export interface NoteDocument extends NoteSessionSnapshot {
   keepMine: () => void
   /** Resolve a conflict by loading the external content (discards the buffer). */
   loadTheirs: () => void
+  /** Put the offered `recovery` text back into the note and save it. */
+  restoreRecovery: () => void
+  /** Drop the offered `recovery` text. */
+  discardRecovery: () => void
+  /** Try the pending save again now (the blocked-save "Try again"). */
+  retrySave: () => void
   /**
    * Stable identity of the underlying session: increments when a session is
    * *created*, not when a rename retargets one (Plan 17). Key the editor on
@@ -62,9 +77,34 @@ export interface NoteDocumentOptions {
   /**
    * Never write: the session tracks the note (external changes reload it)
    * but has no write path, so every save and commit declines. For notes in a
-   * local-only folder, which the app reads but must never edit.
+   * read-only local-only folder, which the app reads but must never edit.
+   * It is part of the session's identity: changing it recreates the session,
+   * so a save that is merely blocked never flips it (the editor's own
+   * `readOnly` covers that, see `NoteSessionSnapshot.saveBlocked`).
    */
   readOnly?: boolean
+}
+
+/**
+ * Unsaved-text recovery for a note in an editable local-only folder, pinned
+ * to the generation current at each call like the session's writes.
+ */
+function recoveryIo(generation: () => number | null): NoteRecoveryIo {
+  const ownerId = crypto.randomUUID().replaceAll('-', '')
+  const pinned = async <T>(run: (current: number) => Promise<T>): Promise<T> => {
+    const current = generation()
+    if (current === null) {
+      throw new Error('no graph generation available for unsaved-text recovery')
+    }
+    return await run(current)
+  }
+  return {
+    preserve: (path, contents, sourceRevision) =>
+      pinned((current) => writeNoteRecovery(path, contents, ownerId, sourceRevision, current)),
+    read: (path) => pinned((current) => readNoteRecovery(path, current)),
+    clear: (path, copy) =>
+      pinned((current) => clearNoteRecovery(path, copy.ownerId, copy.token, current)),
+  }
 }
 
 /**
@@ -105,12 +145,16 @@ export function useNoteDocument(
   // eslint-disable-next-line react-hooks/refs
   generationRef.current = generation
   const canWrite = generation !== null && !readOnly
+  // Only an editable local-only note keeps unsaved text outside itself: it
+  // has no Git history to fall back on, and everything else is backed up.
+  const keepsRecovery = canWrite && path !== null && isLocalOnlyPath(path)
 
   useEffect(() => {
     if (!path) {
       return
     }
     const { session, created } = binding.bind(path, {
+      generation: () => generationRef.current,
       // The auto-rename lifecycle (Plan 07b/17) is owned by the coordinator —
       // the tracker, the rewrite chain, alias placement, and the file move.
       coordinator: () =>
@@ -135,6 +179,7 @@ export function useNoteDocument(
                   return writeNote(forPath, contents, current, expectedContents)
                 }
               : null,
+            ...(keepsRecovery ? { recovery: recoveryIo(() => generationRef.current) } : {}),
           },
           classify: checkRoundTrip,
           onSnapshot: (next) => {
@@ -158,7 +203,7 @@ export function useNoteDocument(
       session.load()
     }
     return () => binding.unbind(path)
-  }, [binding, path, canWrite, createIfMissing, trackRenames, missingSeed])
+  }, [binding, path, canWrite, keepsRecovery, createIfMissing, trackRenames, missingSeed])
 
   // External-change reconciliation via the watcher (Plan 04b events). The
   // comparison reads the session's CURRENT path, not the route prop: a rename
@@ -230,12 +275,34 @@ export function useNoteDocument(
     binding.session()?.loadTheirs()
   }, [binding])
 
+  const restoreRecovery = useCallback(() => {
+    binding.session()?.restoreRecovery()
+  }, [binding])
+
+  const discardRecovery = useCallback(() => {
+    binding.session()?.discardRecovery()
+  }, [binding])
+
+  const retrySave = useCallback(() => {
+    void binding.session()?.flush()
+  }, [binding])
+
+  // A pane that navigates to another note renders once before the effect
+  // rebinds it, while the snapshot still describes the previous note. That
+  // note must never render, preload or choose the privacy policy under the
+  // new path, so the render waits as `loading`. A session that a rename
+  // retargeted is the same note, before and after the route follows.
+  const shown = path !== null && binding.holds(path) ? snapshot : INITIAL_NOTE_SNAPSHOT
+
   return {
-    ...snapshot,
+    ...shown,
     onEditorChange,
     bindEditor,
     keepMine,
     loadTheirs,
+    restoreRecovery,
+    discardRecovery,
+    retrySave,
     sessionEpoch: binding.epoch(),
   }
 }

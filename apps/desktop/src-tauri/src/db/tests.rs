@@ -2353,6 +2353,7 @@ fn local_only_app(
     app.manage(crate::fs::GraphState::default());
     app.manage(super::IndexState::default());
     app.manage(crate::background_task::BackgroundTaskState::default());
+    app.manage(crate::fs::assets::AssetUploads::default());
     {
         let state: tauri::State<crate::fs::GraphState> = app.state();
         let mut inner = state.0.lock().unwrap();
@@ -2494,6 +2495,310 @@ fn a_refused_move_into_a_local_only_folder_leaves_the_row_as_it_was() {
     assert_eq!(
         super::write::row_private(conn, "notes/plan.md").unwrap(),
         Some(false)
+    );
+}
+
+/// A graph whose `finance/secure` links into a raw store with `secure`
+/// editable, beside an ordinary note, open in a mock app.
+#[cfg(unix)]
+struct EditableGraph {
+    _dir: tempfile::TempDir,
+    root: std::path::PathBuf,
+    raw: std::path::PathBuf,
+    app: tauri::App<tauri::test::MockRuntime>,
+}
+
+#[cfg(unix)]
+fn editable_graph() -> EditableGraph {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let (root, raw) = (base.join("graph"), base.join("raw"));
+    for folder in ["notes", "assets", "finance", ".reflect"] {
+        std::fs::create_dir_all(root.join(folder)).unwrap();
+    }
+    std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
+    std::fs::write(root.join("notes/plan.md"), "# Plan\n").unwrap();
+    std::fs::write(raw.join("finance/secure/bank.md"), "# Bank\n").unwrap();
+    std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+    let (folders, _) = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw))
+        .unwrap()
+        .with_editable(["secure"]);
+    let app = local_only_app(&root, Some(folders));
+    EditableGraph {
+        _dir: dir,
+        root,
+        raw,
+        app,
+    }
+}
+
+#[cfg(unix)]
+fn move_request(from: &str, to: &str) -> super::NoteMoveRequest {
+    super::NoteMoveRequest {
+        from: from.into(),
+        to: to.into(),
+        to_address: moved_address(to),
+        from_address: moved_address(from),
+    }
+}
+
+/// A move into or out of an editable local-only folder is refused before
+/// any row moves; a move within it carries the rows, which stay private.
+#[cfg(unix)]
+#[test]
+fn a_move_across_an_editable_folder_boundary_is_refused_before_any_row_moves() {
+    use tauri::Manager;
+    let graph = editable_graph();
+    let app = &graph.app;
+    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    for (path, title) in [
+        ("notes/plan.md", "Plan"),
+        ("finance/secure/bank.md", "Bank"),
+    ] {
+        super::index_apply(
+            note(path, title, vec![]),
+            generation,
+            app.handle().clone(),
+            app.state(),
+            app.state(),
+        )
+        .unwrap();
+    }
+    let move_note = |from: &str, to: &str| {
+        super::note_move_indexed(
+            move_request(from, to),
+            1,
+            app.handle().clone(),
+            app.state(),
+            app.state(),
+            app.state(),
+        )
+    };
+
+    for (from, to) in [
+        ("notes/plan.md", "finance/secure/plan.md"),
+        ("finance/secure/bank.md", "notes/bank.md"),
+    ] {
+        let message = format!("{:?}", move_note(from, to).unwrap_err());
+        assert!(
+            message.contains("crosses a local-only boundary"),
+            "{message}"
+        );
+        assert_eq!(row_private_flag(app, to), None, "{to}");
+    }
+    assert_eq!(row_private_flag(app, "notes/plan.md"), Some(false));
+    assert_eq!(row_private_flag(app, "finance/secure/bank.md"), Some(true));
+    assert!(graph.root.join("notes/plan.md").exists());
+    assert!(graph.raw.join("finance/secure/bank.md").exists());
+    assert!(!graph.raw.join("finance/secure/plan.md").exists());
+    assert!(!graph.root.join("notes/bank.md").exists());
+
+    // Control: within the folder, rows and file move together.
+    move_note("finance/secure/bank.md", "finance/secure/2026/bank.md").unwrap();
+    assert_eq!(row_private_flag(app, "finance/secure/bank.md"), None);
+    assert_eq!(
+        row_private_flag(app, "finance/secure/2026/bank.md"),
+        Some(true)
+    );
+    assert_eq!(
+        std::fs::read_to_string(graph.raw.join("finance/secure/2026/bank.md")).unwrap(),
+        "# Bank\n"
+    );
+}
+
+/// Every file below `dir`, with its bytes, skipping `skip` directory names
+/// (a link is recorded by its target and never followed).
+#[cfg(all(unix, desktop))]
+fn tree(dir: &std::path::Path, skip: &[&str]) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let mut found = Vec::new();
+    let entries = walkdir::WalkDir::new(dir)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| {
+            !skip
+                .iter()
+                .any(|name| entry.depth() == 1 && entry.file_name() == *name)
+        });
+    for entry in entries {
+        let entry = entry.unwrap();
+        let bytes = if entry.path_is_symlink() {
+            std::fs::read_link(entry.path())
+                .unwrap()
+                .into_os_string()
+                .into_encoded_bytes()
+        } else if entry.file_type().is_file() {
+            std::fs::read(entry.path()).unwrap()
+        } else {
+            Vec::new()
+        };
+        found.push((entry.path().to_path_buf(), bytes));
+    }
+    found
+}
+
+/// End to end through the commands, the way the app edits a note in an
+/// editable linked folder: a refused unchecked save, a checked save, the
+/// alias frontmatter a rename writes, a move within the folder, a pasted
+/// attachment, a kept and cleared recovery copy, a delete through the
+/// system Trash, and the next backup commit. The note's text and its
+/// attachment exist only in the raw store, the graph's own tree and
+/// `assets/` never change, its rows stay private, and the backup holds
+/// nothing of it, nor of `.reflect/`.
+#[cfg(all(unix, desktop))]
+#[test]
+fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
+    use tauri::Manager;
+    let graph = editable_graph();
+    let (root, raw, app) = (&graph.root, &graph.raw, &graph.app);
+    git2::Repository::init(root).unwrap();
+    let _trash = crate::fs::os_trash_seam::install(|path| Ok(std::fs::remove_file(path)?));
+    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    let tracked = || tree(root, &[".git", ".reflect"]);
+    let tracked_before = tracked();
+    let secret = "account 4421-7731";
+    let (path, moved) = ("finance/secure/bank.md", "finance/secure/2026/bank.md");
+    let write = |path: &str, contents: &str, check: Option<bool>, expected: Option<&str>| {
+        tauri::async_runtime::block_on(crate::fs::note_write(
+            path.into(),
+            contents.into(),
+            1,
+            check,
+            expected.map(str::to_string),
+            app.state(),
+        ))
+    };
+
+    let body = format!("# Bank\n\n{secret}\n");
+    assert!(write(path, &body, None, None).is_err());
+    assert_eq!(std::fs::read_to_string(raw.join(path)).unwrap(), "# Bank\n");
+    write(path, &body, Some(true), Some("# Bank\n")).unwrap();
+    let aliased = format!("---\naliases:\n  - Old Bank\n---\n{body}");
+    write(path, &aliased, Some(true), Some(&body)).unwrap();
+    super::index_apply(
+        note(path, "Bank", vec![]),
+        generation,
+        app.handle().clone(),
+        app.state(),
+        app.state(),
+    )
+    .unwrap();
+
+    super::note_move_indexed(
+        move_request(path, moved),
+        1,
+        app.handle().clone(),
+        app.state(),
+        app.state(),
+        app.state(),
+    )
+    .unwrap();
+    assert_eq!(row_private_flag(app, path), None);
+    assert_eq!(row_private_flag(app, moved), Some(true));
+
+    let upload = crate::fs::assets::asset_upload_begin(1, app.state(), app.state()).unwrap();
+    crate::fs::assets::append_chunk(
+        &app.state::<crate::fs::assets::AssetUploads>(),
+        &upload,
+        secret.as_bytes(),
+    )
+    .unwrap();
+    let asset = crate::fs::assets::asset_upload_commit(
+        upload,
+        "statement.png".into(),
+        moved.into(),
+        1,
+        app.state(),
+        app.state(),
+    )
+    .unwrap();
+    assert_eq!(asset, "finance/secure/assets/statement.png");
+
+    let owner = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let copy = tauri::async_runtime::block_on(crate::fs::recovery::note_recovery_write(
+        moved.into(),
+        body.clone(),
+        owner.into(),
+        Some(aliased.clone()),
+        1,
+        app.state(),
+    ))
+    .unwrap();
+    let recovery = root.join(".reflect/recovery");
+    assert_eq!(std::fs::read_dir(&recovery).unwrap().count(), 1);
+    tauri::async_runtime::block_on(crate::fs::recovery::note_recovery_clear(
+        moved.into(),
+        owner.into(),
+        copy.token,
+        1,
+        app.state(),
+    ))
+    .unwrap();
+    assert!(
+        tauri::async_runtime::block_on(crate::fs::recovery::note_recovery_read(
+            moved.into(),
+            1,
+            app.state()
+        ))
+        .unwrap()
+        .is_none()
+    );
+
+    // Until the delete, the text and the attachment live in the raw store
+    // alone: nothing under the graph root holds either.
+    assert_eq!(
+        std::fs::read_to_string(raw.join("finance/secure/2026/bank.md")).unwrap(),
+        aliased
+    );
+    assert_eq!(
+        std::fs::read(raw.join("finance/secure/assets/statement.png")).unwrap(),
+        secret.as_bytes()
+    );
+    let leaked: Vec<_> = tree(root, &[".git"])
+        .into_iter()
+        .filter(|(_, bytes)| {
+            bytes
+                .windows(secret.len())
+                .any(|window| window == secret.as_bytes())
+        })
+        .collect();
+    assert!(leaked.is_empty(), "{leaked:?}");
+
+    let deleted = crate::fs::note_delete(moved.into(), 1, app.state()).unwrap();
+    assert_eq!(deleted.trashed, crate::fs::Trashed::System);
+    assert!(!raw.join("finance/secure/2026/bank.md").exists());
+
+    let committed = tauri::async_runtime::block_on(crate::git::git_commit_all(
+        "Update notes".into(),
+        1,
+        app.state(),
+    ))
+    .unwrap();
+    assert!(committed.committed);
+    let repo = git2::Repository::open(root).unwrap();
+    let head = repo.head().unwrap().peel_to_tree().unwrap();
+    let mut committed_paths = Vec::new();
+    head.walk(git2::TreeWalkMode::PreOrder, |prefix, entry| {
+        committed_paths.push(format!("{prefix}{}", entry.name().unwrap_or("")));
+        git2::TreeWalkResult::Ok
+    })
+    .unwrap();
+    assert!(
+        committed_paths.contains(&"notes/plan.md".to_string()),
+        "{committed_paths:?}"
+    );
+    assert!(
+        !committed_paths
+            .iter()
+            .any(|path| path.contains("secure") || path.contains(".reflect")),
+        "{committed_paths:?}"
+    );
+
+    assert_eq!(tracked(), tracked_before);
+    assert_eq!(
+        std::fs::read_dir(root.join(".reflect/tmp"))
+            .map(|entries| entries.count())
+            .unwrap_or(0),
+        0
     );
 }
 
@@ -2887,6 +3192,63 @@ fn a_name_in_both_lists_pauses_until_one_list_drops_it() {
     );
     assert!(!paused && info.local_only_folders.is_empty());
     assert!(warns(&info, "no longer local-only"));
+}
+
+/// End to end through the open: the entry's `editable` list reaches
+/// `GraphInfo` (and so the app) only while editing is safe. A paused
+/// configuration and a rawRoot that contains the Library folder both open
+/// with every folder read-only and a warning saying why; the folders stay
+/// local-only either way.
+#[cfg(all(desktop, unix))]
+#[test]
+fn a_graph_open_grants_editable_folders_only_while_editing_is_safe() {
+    let fixture = OpenFixture::new();
+    let raw = fixture.root.with_file_name("raw");
+    std::fs::create_dir_all(&raw).unwrap();
+    let (info, paused) = session(
+        &fixture,
+        serde_json::json!({ "folders": ["secure"], "editable": ["secure"], "rawRoot": raw }),
+    );
+    assert!(!paused);
+    assert_eq!(info.local_only_editable_folders, ["secure"]);
+    assert!(
+        !warns(&info, "Not editable"),
+        "{:?}",
+        info.local_only_warnings
+    );
+
+    let (info, paused) = session(
+        &fixture,
+        serde_json::json!({
+            "folders": ["secure", "kids"],
+            "released": ["kids"],
+            "editable": ["secure"],
+            "rawRoot": raw
+        }),
+    );
+    assert!(paused);
+    assert!(info.local_only_editable_folders.is_empty());
+    assert!(
+        warns(&info, "until the configuration is known again"),
+        "{:?}",
+        info.local_only_warnings
+    );
+    assert!(info.local_only_folders.contains(&"secure".to_string()));
+
+    if let Some(home) = dirs::home_dir() {
+        let (info, paused) = session(
+            &fixture,
+            serde_json::json!({
+                "folders": ["secure"],
+                "released": ["kids"],
+                "editable": ["secure"],
+                "rawRoot": home
+            }),
+        );
+        assert!(!paused);
+        assert!(info.local_only_editable_folders.is_empty());
+        assert!(warns(&info, "too broad"), "{:?}", info.local_only_warnings);
+    }
 }
 
 /// A record that is not text is damaged content, not a failed read: it

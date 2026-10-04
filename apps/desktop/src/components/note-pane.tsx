@@ -4,6 +4,7 @@ import {
   detectConflictMarkers,
   isDaily,
   isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
   isTemplatePath,
   isUntitledNotePath,
   splitFrontmatter,
@@ -16,6 +17,7 @@ import { ConflictNoteView } from '@/components/conflict-note-view.tsx'
 import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
 import { NoteLoading } from '@/components/note-loading.tsx'
 import { NoteOpenError } from '@/components/note-open-error.tsx'
+import { NoteRecoveryBanner } from '@/components/note-recovery-banner.tsx'
 import { NoteSaveAlerts } from '@/components/note-save-alerts.tsx'
 import { usePeek } from '@/components/peek/peek-provider.tsx'
 import { ProtectedNoteView } from '@/components/protected-note-view.tsx'
@@ -47,6 +49,8 @@ import { useLinkPreview } from '@/editor/use-link-preview.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
+import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
+import { formatRecencyLabel } from '@/lib/dates.ts'
 import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
 import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -137,10 +141,15 @@ function revealFragment(editor: NoteEditorHandle, fragment: string): void {
  * non-destructive conflict prompt when an external change races unsaved edits).
  * Notes the editor can't faithfully round-trip open **protected** (read-only)
  * so a converter gap can never silently rewrite a file. A note inside a
- * local-only folder opens as a rendered, never-writing view instead of the
- * editor: no save path, no attachment intake, link clicks that only navigate
- * (never create), and nothing that reaches the network. Plan 06 mounts one
- * of these per day in the daily stream.
+ * read-only local-only folder opens as a rendered, never-writing view instead
+ * of the editor: no save path, no attachment intake, link clicks that only
+ * navigate (never create), and nothing that reaches the network. A note in an
+ * editable local-only folder gets the editor, under the same leak guards: it
+ * stays off the network and out of every cloud AI (the editor follows the
+ * note's privacy), link clicks and `[[` rows never create a note, its
+ * attachments stay in its folder, and unsaved text a save couldn't land is
+ * kept and offered back. Plan 06 mounts one of these per day in the daily
+ * stream.
  *
  * The pane is composition only: document semantics live in
  * `useNoteDocument`/`note-session.ts`, link-click behavior in
@@ -168,7 +177,10 @@ export function NotePaneComponent({
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const dailyNote = isDaily(path)
+  // Every leak guard follows `localOnly`; only the edit gates relax for an
+  // editable folder (`readOnlyLocal` is false there).
   const localOnly = isLocalOnlyPath(path)
+  const readOnlyLocal = isLocalOnlyReadOnlyPath(path)
   const lazyCreate = lazy && !localOnly && (dailyNote || isUntitledNotePath(path))
   // Templates rename via file operations only (settings, or outside the app):
   // the rename pipeline's slug targets live under `notes/`, so tracking a
@@ -190,8 +202,8 @@ export function NotePaneComponent({
     // Every editable regular note maintains title-addressed links and
     // title-mirroring backlink displays. The coordinator separately limits
     // title-derived file moves to Reflect-managed notes.
-    trackRenames: !dailyNote && !template && !localOnly,
-    readOnly: localOnly,
+    trackRenames: !dailyNote && !template && !readOnlyLocal,
+    readOnly: readOnlyLocal,
     // A missing ordinary note opens as a name-me template (old Reflect's
     // new-note flow): the seed — `id:` frontmatter plus an empty H1 the
     // caret lands in, ghosted "Untitled" by the title placeholder — only
@@ -229,7 +241,7 @@ export function NotePaneComponent({
   const followWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
   const onNoteLinkClick = useMarkdownLinkNavigation(generation, path)
   const onTagClick = useTagNavigation()
-  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete()
+  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
   const linkPreviewSession = useMemo(
     () =>
       generation === null || graphKey === null || localOnly
@@ -266,15 +278,16 @@ export function NotePaneComponent({
   // The mounted editor as state, so a reveal request can wait for it.
   const [revealEditor, setRevealEditor] = useState<NoteEditorHandle | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
+  const previewOnly = readOnlyLocal || (localOnly && document.protected)
   const revealInPane = useCallback(
     (fragment: string): void => {
       if (revealEditor !== null) {
         revealFragment(revealEditor, fragment)
-      } else if (localOnly && document.status === 'ready' && paneRef.current !== null) {
+      } else if (previewOnly && document.status === 'ready' && paneRef.current !== null) {
         revealPreviewHeading(paneRef.current, document.initialContent, fragment)
       }
     },
-    [revealEditor, localOnly, document.status, document.initialContent],
+    [revealEditor, previewOnly, document.status, document.initialContent],
   )
   const handleRef = useCallback(
     (handle: NoteEditorHandle | null) => {
@@ -287,7 +300,7 @@ export function NotePaneComponent({
           registeredHandle.current = null
         }
       } else {
-        registerNoteEditorHandle(path, handle)
+        registerNoteEditorHandle(path, handle, generation)
         registeredHandle.current = { path, handle }
       }
       if (dailyDate !== undefined) {
@@ -304,14 +317,23 @@ export function NotePaneComponent({
         onAutoFocused?.()
       }
     },
-    [bindEditor, path, dailyDate, registerHandle, autoFocus, autoFocusSelection, onAutoFocused],
+    [
+      bindEditor,
+      path,
+      generation,
+      dailyDate,
+      registerHandle,
+      autoFocus,
+      autoFocusSelection,
+      onAutoFocused,
+    ],
   )
 
   const revealedKey = useRef<number | null>(null)
   useEffect(() => {
     if (
       reveal === undefined ||
-      (revealEditor === null && !(localOnly && document.status === 'ready')) ||
+      (revealEditor === null && !(previewOnly && document.status === 'ready')) ||
       revealedKey.current === reveal.key
     ) {
       return
@@ -324,7 +346,7 @@ export function NotePaneComponent({
       onRevealed?.(reveal.key)
     })
     return () => cancelAnimationFrame(frame)
-  }, [reveal, revealEditor, localOnly, document.status, revealInPane, onRevealed])
+  }, [reveal, revealEditor, previewOnly, document.status, revealInPane, onRevealed])
 
   // A link to a heading in this same note, `[[#Heading]]`, scrolls here —
   // as a link intent of its own, so a slower link still resolving can't
@@ -343,8 +365,15 @@ export function NotePaneComponent({
     [beginLinkIntent, followWikiLink, revealInPane],
   )
 
+  // One verdict for the editor's network policy and the AI menu; it follows
+  // Lock toggles live, without remounting the editor.
+  const { privateNote, pending: privacyPending } = usePrivateNoteState(path, {
+    sessionEpoch: document.sessionEpoch,
+    privateHeader: document.privateHeader,
+  })
   const aiMenu = useEditorAiMenu({
     path,
+    privateNote,
     sessionEpoch: document.sessionEpoch,
     editorRef: aiEditorRef,
   })
@@ -359,10 +388,23 @@ export function NotePaneComponent({
   }, [dailyDate, onExitBoundary])
 
   const editorContent =
-    document.status === 'ready' && !document.protected && !localOnly
+    document.status === 'ready' && !document.protected && !readOnlyLocal
       ? document.initialContent
       : null
-  const xPostsReady = useXPostPreload(editorContent)
+  // The X preload only shapes the editor's first frame, so it runs before a
+  // session's first mount only, and never for a private note (it would fetch
+  // the posts and write their archive). Once a session's editor has shown,
+  // the pane never returns to loading: a Lock toggle must not remount it.
+  const [shownEpoch, setShownEpoch] = useState<number | null>(null)
+  const editorShown = shownEpoch === document.sessionEpoch
+  const xPostsReady = useXPostPreload(
+    editorContent === null || editorShown ? null : editorContent,
+    privacyPending ? 'pending' : privateNote ? 'private' : 'public',
+  )
+  const awaitingFirstFrame = editorContent !== null && !editorShown && !xPostsReady
+  if (editorContent !== null && !editorShown && !awaitingFirstFrame) {
+    setShownEpoch(document.sessionEpoch)
+  }
   // Read-only views (protected, local-only) are counted too, from the file they show.
   const getSelectedText = useCallback(() => aiEditorRef.current?.getSelectedText() ?? '', [])
   const publishStatus = useNoteStatusPublisher(
@@ -379,7 +421,7 @@ export function NotePaneComponent({
     [onEditorChange, publishStatus],
   )
 
-  if (document.status === 'loading' || (editorContent !== null && !xPostsReady)) {
+  if (document.status === 'loading' || awaitingFirstFrame) {
     return <NoteLoading className={cn(gutterClassName, editorClassName, className)} />
   }
 
@@ -393,9 +435,10 @@ export function NotePaneComponent({
     )
   }
 
-  if (localOnly) {
+  if (previewOnly) {
     // A protected note's initial content is the whole file; otherwise it is
-    // the body the editor would show.
+    // the body the editor would show. A protected note stays on the read-only
+    // sheet even in an editable folder.
     const body = document.protected
       ? splitFrontmatter(document.initialContent).body
       : document.initialContent
@@ -454,6 +497,18 @@ export function NotePaneComponent({
   return (
     <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
       <div className={gutterClassName}>
+        {localOnly ? <LocalOnlyNotice editable className="mb-3" /> : null}
+
+        {/* A parked conflict comes first: restoring under it would race the
+            choice between the two versions. */}
+        {document.recovery !== null && document.conflict === null ? (
+          <NoteRecoveryBanner
+            keptAt={formatRecencyLabel(document.recovery.savedAtMs, settings)}
+            onRestore={document.restoreRecovery}
+            onDiscard={document.discardRecovery}
+          />
+        ) : null}
+
         <NoteSaveAlerts document={document} assetSaveError={saveError} />
 
         <SyncConflictNotice path={path} className="mb-4" />
@@ -471,6 +526,10 @@ export function NotePaneComponent({
         // for that would throw away the cursor mid-thought.
         key={document.sessionEpoch}
         initialContent={editorSeed}
+        privateNote={privateNote}
+        // While a local-only note's saves are blocked the editor stops taking
+        // input, in place: the session (and its buffer) never changes.
+        readOnly={document.saveBlocked}
         onChange={handleEditorChange}
         markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
         spellCheck={settings.editorSpellCheck}

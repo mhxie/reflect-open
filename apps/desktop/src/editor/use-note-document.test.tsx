@@ -573,6 +573,47 @@ describe('useNoteDocument', () => {
     }
   })
 
+  it('never reports the previous note under the path it navigated to', async () => {
+    installGraphFake({
+      files: { 'notes/a.md': '# Alpha\n\nalpha body\n', 'notes/b.md': '# Beta\n' },
+    })
+    const renders: Array<{
+      path: string
+      status: string
+      content: string
+      privateHeader: boolean
+    }> = []
+    const hook = await renderHook(
+      ({ path }: { path: string } = { path: 'notes/a.md' }) => {
+        const noteDocument = useNoteDocument(path, 1)
+        renders.push({
+          path,
+          status: noteDocument.status,
+          content: noteDocument.initialContent,
+          privateHeader: noteDocument.privateHeader,
+        })
+        return noteDocument
+      },
+      { initialProps: { path: 'notes/a.md' } },
+    )
+    await vi.waitFor(() => expect(hook.result.current.initialContent).toContain('alpha body'))
+
+    await hook.rerender({ path: 'notes/b.md' })
+    await vi.waitFor(() => expect(hook.result.current.initialContent).toBe('# Beta\n'))
+
+    // The render before the effect rebinds the pane still holds note A's
+    // session: it must read as loading (and private), never as A's content.
+    const underB = renders.filter((render) => render.path === 'notes/b.md')
+    expect(underB[0]).toEqual({
+      path: 'notes/b.md',
+      status: 'loading',
+      content: '',
+      privateHeader: true,
+    })
+    expect(underB.filter((render) => render.content.includes('alpha body'))).toEqual([])
+    await hook.unmount()
+  })
+
   it('alias placement preserves aliases gained while the rewrite ran', async () => {
     vi.useFakeTimers()
     try {

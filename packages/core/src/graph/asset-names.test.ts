@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { assetFileName } from './asset-names.ts'
+import { attachmentReferenceCandidates } from '../markdown/extract.ts'
+import { assetFileName, assetLinkDestination } from './asset-names.ts'
 
 describe('assetFileName', () => {
   it('slugs the stem and keeps a lowercased extension', () => {
@@ -35,5 +36,30 @@ describe('assetFileName', () => {
 
   it('is idempotent on already-sanitized names', () => {
     expect(assetFileName('q3-report.pdf')).toBe('q3-report.pdf')
+  })
+})
+
+describe('assetLinkDestination', () => {
+  it('keeps the bare spelling for the synced assets folder', () => {
+    expect(assetLinkDestination('assets/scan.png')).toBe('assets/scan.png')
+  })
+
+  it('spells a local-only folder’s attachment vault-root-absolute', () => {
+    expect(assetLinkDestination('finance/secure/assets/scan.png')).toBe(
+      '/finance/secure/assets/scan.png',
+    )
+    expect(assetLinkDestination('My Finance/secure/assets/scan-2.png')).toBe(
+      '/My%20Finance/secure/assets/scan-2.png',
+    )
+  })
+
+  it('names exactly the saved file from any note', () => {
+    for (const path of ['finance/secure/assets/scan.png', 'My Finance/secure/assets/日本.png']) {
+      const destination = assetLinkDestination(path)
+      expect(attachmentReferenceCandidates('finance/secure/sub/bank.md', destination)).toEqual([
+        path,
+      ])
+      expect(attachmentReferenceCandidates('notes/plan.md', destination)).toEqual([path])
+    }
   })
 })

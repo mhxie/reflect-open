@@ -6,7 +6,7 @@ import {
   type ReactElement,
 } from 'react'
 import { Circle, CircleCheck } from 'lucide-react'
-import { displayNoteTitle, isLocalOnlyPath, type OpenTask } from '@reflect/core'
+import { displayNoteTitle, isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
 import { getIsComposing } from '@meowdown/core'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { getTaskKey } from '@/lib/tasks/task-identity.ts'
@@ -69,10 +69,11 @@ interface TaskRowProps {
  * (completed) row shows struck through. A checkbox click on any selected row in
  * a multi-selection completes or reopens the selected rows together.
  *
- * A task in a local-only note is read-only: the row still selects, but it
- * never mounts the inline editor (whose wiki links could create a public note
- * titled with local-only text, and whose embeds fetch from the network) and
- * its checkbox stays inert.
+ * A task in a read-only local-only note is read-only: the row still selects,
+ * but it never mounts the inline editor and its checkbox stays inert. In an
+ * editable local-only folder both work; the inline editor then keeps the
+ * note's text off the network and never creates a note from it
+ * (`TaskEditor` follows the note's privacy).
  */
 export function TaskRow({
   task,
@@ -99,7 +100,7 @@ export function TaskRow({
   const { settings } = useSettings()
   const { toggle, isPending } = useTaskCheckboxToggle(task)
   const checkboxToggleControllerRef = useRef<(() => void) | null>(null)
-  const readOnly = isLocalOnlyPath(task.notePath)
+  const readOnly = isLocalOnlyReadOnlyPath(task.notePath)
   const editable = editing && !readOnly
   const checkboxPending = isPending || taskActionPending
   const done = task.checked

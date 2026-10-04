@@ -1,6 +1,7 @@
 //! The open graph's local-only folders configuration: which folders (by name)
-//! stay on this machine, and which raw-store directory their symlinks may
-//! point into (`reflect_graph_paths::LocalOnlyFolders` holds the rules).
+//! stay on this machine, which raw-store directory their symlinks may point
+//! into, and which of them may be edited in place
+//! (`reflect_graph_paths::LocalOnlyFolders` holds the rules).
 //!
 //! The configuration lives in the user settings document — outside every
 //! graph, so a vault can never grant itself reads outside its own root —
@@ -8,7 +9,11 @@
 //!
 //! ```json
 //! "localOnlyFolders": {
-//!   "/Users/me/Notes": { "folders": ["secure"], "rawRoot": "/Users/me/Raw" }
+//!   "/Users/me/Notes": {
+//!     "folders": ["secure", "archive"],
+//!     "editable": ["secure"],
+//!     "rawRoot": "/Users/me/Library/CloudStorage/Raw"
+//!   }
 //! }
 //! ```
 //!
@@ -18,6 +23,14 @@
 //! is repaired silently: a dropped name, an unusable `rawRoot`, a key naming
 //! a missing folder or no graph Reflect has opened, and an unreadable
 //! settings file all come back as warnings the app shows at open.
+//!
+//! Local-only folders are read-only unless `"editable"` names them (each must
+//! also be in `"folders"`). Editability counts only from this graph's own
+//! entry and only while the configuration is known; [`finalize`] strips it,
+//! with a warning, on any doubt: an unknown configuration, a platform without
+//! the no-follow write path (mobile), or a `rawRoot` so broad (`~/Library` or
+//! above) that an editable link could reach almost anything. Losing
+//! editability is always safe, and older builds ignore the key.
 //!
 //! The configuration fails closed when it goes missing. [`load_for_root`]
 //! compares it with the names the graph's index recorded at its last open:
@@ -56,6 +69,10 @@ pub(crate) struct LoadedConfig {
     pub(crate) record: bool,
     /// The names this graph's own entry releases.
     released: Vec<String>,
+    /// The folder names this graph's own entry made editable. Kept apart
+    /// from `folders`, which [`with_recorded`] may rebuild without them, so
+    /// [`finalize`] can still say which folders it keeps read-only.
+    editable: Vec<String>,
     /// The settings carry an entry for this graph.
     has_entry: bool,
 }
@@ -68,10 +85,16 @@ impl Default for LoadedConfig {
             unknown: false,
             record: true,
             released: Vec::new(),
+            editable: Vec::new(),
             has_entry: false,
         }
     }
 }
+
+/// Whether this build can edit local-only folders: only desktop builds carry
+/// the directory-fd write path (`fs::beneath`, unix-only); the phone runs
+/// the read-only contract.
+const PLATFORM_ALLOWS_EDITING: bool = cfg!(all(desktop, unix));
 
 /// What a graph's index recorded about its local-only folders at its last
 /// open (`db::recorded_local_only_folders`).
@@ -88,17 +111,82 @@ pub(crate) enum Recorded {
 }
 
 /// Load the configuration for the graph at `root`, already compared with
-/// what the graph's index recorded: no caller can skip the comparison.
+/// what the graph's index recorded and stripped of any editability it cannot
+/// keep: no caller can skip either step.
 pub(crate) fn load_for_root(root: &Path) -> LoadedConfig {
     let opened = || -> Vec<PathBuf> {
         crate::recents::list()
             .map(|recents| recents.into_iter().map(|graph| graph.root.into()).collect())
             .unwrap_or_default()
     };
-    with_recorded(
-        loaded_from(crate::settings::load_document(), root, opened),
-        crate::db::recorded_local_only_folders(root),
+    finalize(
+        with_recorded(
+            loaded_from(crate::settings::load_document(), root, opened),
+            crate::db::recorded_local_only_folders(root),
+        ),
+        PLATFORM_ALLOWS_EDITING,
     )
+}
+
+/// The last step of every load: keep the editable folders only while
+/// editing them is safe, otherwise strip them with a warning. Editing stays
+/// off while the configuration is unknown (a folder whose entry went missing
+/// must not stay writable on a guess), on a platform without the no-follow
+/// write path, and when `rawRoot` is `~/Library` or one of its ancestors
+/// (`$HOME`, `/`): an editable link could then reach almost any folder.
+pub(crate) fn finalize(loaded: LoadedConfig, platform_allows_editing: bool) -> LoadedConfig {
+    let library = dirs::home_dir().map(|home| home.join("Library"));
+    finalize_with(loaded, platform_allows_editing, library.as_deref())
+}
+
+/// [`finalize`] with the user's `~/Library` passed in (`None` when the home
+/// folder is unknown, which fails closed).
+fn finalize_with(
+    mut loaded: LoadedConfig,
+    platform_allows_editing: bool,
+    library: Option<&Path>,
+) -> LoadedConfig {
+    if loaded.editable.is_empty() {
+        return loaded;
+    }
+    let raw_root = loaded
+        .folders
+        .as_ref()
+        .and_then(|folders| folders.raw_root().map(Path::to_path_buf));
+    let refusal = if loaded.unknown {
+        "Local-only folders listed as editable stay read-only until the configuration is known \
+         again."
+    } else if !platform_allows_editing {
+        "Editing local-only folders is desktop-only, so they stay read-only here."
+    } else if raw_root_too_broad(raw_root.as_deref(), library) {
+        "rawRoot is too broad to allow edits (it contains your Library folder), so local-only \
+         folders stay read-only."
+    } else {
+        return loaded;
+    };
+    loaded.warnings.push(format!(
+        "{refusal} Not editable: {}.",
+        quoted(&loaded.editable)
+    ));
+    loaded.folders = loaded
+        .folders
+        .map(|folders| Arc::new(Arc::unwrap_or_clone(folders).without_editable()));
+    loaded.editable.clear();
+    loaded
+}
+
+/// Whether `raw_root` is `library` or one of its ancestors, compared
+/// canonically where the paths exist. No `rawRoot` links nowhere; an unknown
+/// `library` cannot be ruled out, so it counts as too broad.
+fn raw_root_too_broad(raw_root: Option<&Path>, library: Option<&Path>) -> bool {
+    let Some(raw_root) = raw_root else {
+        return false;
+    };
+    let Some(library) = library else {
+        return true;
+    };
+    let canonical = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    canonical(library).starts_with(canonical(raw_root))
 }
 
 fn loaded_from(
@@ -317,6 +405,7 @@ fn from_settings(doc: &SettingsDoc, root: &Path, opened: &[PathBuf]) -> LoadedCo
             )),
         }
     }
+    let editable = string_list(entry, "editable", &mut warnings);
     let released = string_list(entry, "released", &mut warnings);
     let raw_root = entry.get("rawRoot").and_then(Value::as_str).map(Path::new);
     let folders = LocalOnlyFolders::new(names, raw_root);
@@ -329,12 +418,13 @@ fn from_settings(doc: &SettingsDoc, root: &Path, opened: &[PathBuf]) -> LoadedCo
         Some(folders) => {
             if let Some(problem) = folders.raw_root_problem(root) {
                 warnings.push(format!(
-                    "Local-only folders stay private and read-only, but linked ones can't be \
-                     read: {problem}."
+                    "Local-only folders stay private, but linked ones can't be read or edited: \
+                     {problem}."
                 ));
             }
         }
     }
+    let folders = grant_editable(folders, editable, &released, &mut warnings);
     // A name in both lists is ambiguous: it stays local-only (listed), and
     // the configuration is unknown until one list drops it, so a leftover
     // release never sits quietly beside the folder it names.
@@ -362,6 +452,10 @@ fn from_settings(doc: &SettingsDoc, root: &Path, opened: &[PathBuf]) -> LoadedCo
         ));
     }
     LoadedConfig {
+        editable: folders
+            .as_ref()
+            .map(|folders| folders.editable_names().to_vec())
+            .unwrap_or_default(),
         folders: folders.map(Arc::new),
         warnings,
         unknown: !both.is_empty(),
@@ -369,6 +463,45 @@ fn from_settings(doc: &SettingsDoc, root: &Path, opened: &[PathBuf]) -> LoadedCo
         released,
         has_entry: true,
     }
+}
+
+/// Make the entry's `"editable"` names editable. Each must be one of the
+/// configured folders and not one the entry releases; any other name is
+/// reported and grants nothing.
+fn grant_editable(
+    folders: Option<LocalOnlyFolders>,
+    requested: Vec<String>,
+    released: &[String],
+    warnings: &mut Vec<String>,
+) -> Option<LocalOnlyFolders> {
+    let mut grantable = Vec::new();
+    for name in requested {
+        if released
+            .iter()
+            .any(|released| released.eq_ignore_ascii_case(&name))
+        {
+            warnings.push(format!(
+                "\"{name}\" is listed both as released and as editable in this graph's entry, so \
+                 it is not editable."
+            ));
+        } else {
+            grantable.push(name);
+        }
+    }
+    let Some(folders) = folders else {
+        warnings.extend(grantable.iter().map(|name| not_a_folder_to_edit(name)));
+        return None;
+    };
+    let (granted, rejected) = folders.with_editable(&grantable);
+    warnings.extend(rejected.iter().map(|name| not_a_folder_to_edit(name)));
+    Some(granted)
+}
+
+fn not_a_folder_to_edit(name: &str) -> String {
+    format!(
+        "\"{name}\" is listed as editable but is not one of this graph's local-only folders, so \
+         it grants nothing."
+    )
 }
 
 /// The strings of `entry[key]` (an array), reporting anything else in it.
@@ -757,6 +890,195 @@ mod tests {
             },
         );
         assert!(config.unknown && !config.record);
+    }
+
+    fn editable_names(config: &LoadedConfig) -> Vec<String> {
+        config
+            .folders
+            .as_ref()
+            .map(|folders| folders.editable_names().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Editability was stripped, and the warning gives `reason` and names
+    /// the folder it keeps read-only.
+    fn stripped(config: &LoadedConfig, reason: &str) -> bool {
+        editable_names(config).is_empty()
+            && config.editable.is_empty()
+            && config.warnings.iter().any(|warning| {
+                warning.contains(reason) && warning.contains("Not editable: \"secure\"")
+            })
+    }
+
+    fn warned(config: &LoadedConfig, text: &str) -> bool {
+        config.warnings.iter().any(|warning| warning.contains(text))
+    }
+
+    #[test]
+    fn editable_names_load_and_each_stray_one_is_reported() {
+        let config = entry(json!({
+            "folders": ["secure", "archive"],
+            "editable": ["SECURE", "raw", 7]
+        }));
+        let folders = config.folders.as_ref().expect("policy");
+        assert_eq!(folders.editable_names(), ["secure"]);
+        assert_eq!(config.editable, ["secure"]);
+        assert!(folders.editable_contains("finance/secure/x.md"));
+        assert!(!folders.editable_contains("archive/x.md"));
+        assert!(
+            warned(
+                &config,
+                "\"raw\" is listed as editable but is not one of this graph's local-only folders"
+            ),
+            "{:?}",
+            config.warnings
+        );
+        assert!(
+            warned(&config, "7 in \"editable\" is ignored"),
+            "{:?}",
+            config.warnings
+        );
+        // Control: without the list nothing is editable, and nothing about
+        // editing is reported.
+        let plain = entry(json!({ "folders": ["secure"] }));
+        assert!(editable_names(&plain).is_empty() && plain.editable.is_empty());
+        assert!(!warned(&plain, "editable"), "{:?}", plain.warnings);
+        // With no valid folder, every editable name is a stray.
+        let none = entry(json!({ "folders": ["daily"], "editable": ["daily"] }));
+        assert!(none.folders.is_none());
+        assert!(warned(&none, "\"daily\" is listed as editable but"));
+    }
+
+    #[test]
+    fn a_name_both_released_and_editable_is_reported_and_stays_read_only() {
+        let config = entry(json!({
+            "folders": ["kids"],
+            "released": ["secure"],
+            "editable": ["Secure", "kids"]
+        }));
+        assert_eq!(editable_names(&config), ["kids"]);
+        assert!(
+            warned(
+                &config,
+                "\"Secure\" is listed both as released and as editable"
+            ),
+            "{:?}",
+            config.warnings
+        );
+        assert!(!warned(&config, "\"Secure\" is listed as editable but"));
+    }
+
+    #[test]
+    fn finalize_keeps_editable_folders_only_on_a_platform_that_can_edit() {
+        let library = Path::new("/Users/me/Library");
+        let editable = || entry(json!({ "folders": ["secure"], "editable": ["secure"] }));
+        let kept = finalize_with(editable(), true, Some(library));
+        assert_eq!(editable_names(&kept), ["secure"]);
+        assert_eq!(kept.editable, ["secure"]);
+        assert!(!warned(&kept, "Not editable"), "{:?}", kept.warnings);
+
+        let mobile = finalize_with(editable(), false, Some(library));
+        assert!(stripped(&mobile, "desktop-only"), "{:?}", mobile.warnings);
+        // Only editability goes: the folders stay local-only.
+        assert!(mobile
+            .folders
+            .as_ref()
+            .is_some_and(|folders| folders.contains("finance/secure/x.md")));
+
+        // Nothing editable, nothing to report.
+        let plain = finalize_with(entry(json!({ "folders": ["secure"] })), false, None);
+        assert!(!warned(&plain, "Not editable"), "{:?}", plain.warnings);
+    }
+
+    #[test]
+    fn finalize_strips_editability_for_every_unknown_source() {
+        let library = Path::new("/Users/me/Library");
+        let editable = || entry(json!({ "folders": ["secure"], "editable": ["secure"] }));
+
+        // An unreadable settings file grants nothing: the folders come from
+        // the index's record alone.
+        let unreadable = with_recorded(
+            loaded_from(
+                Err(crate::error::AppError::io("expected value at line 1")),
+                Path::new("/vaults/notes"),
+                Vec::new,
+            ),
+            recorded(&["secure"]),
+        );
+        let unreadable = finalize_with(unreadable, true, Some(library));
+        assert!(unreadable.unknown);
+        assert_eq!(names(&unreadable), ["secure"]);
+        assert!(editable_names(&unreadable).is_empty());
+
+        let both = with_recorded(
+            entry(json!({
+                "folders": ["secure", "kids"],
+                "released": ["kids"],
+                "editable": ["secure"]
+            })),
+            recorded(&["secure", "kids"]),
+        );
+        let missing = with_recorded(editable(), recorded(&["secure", "kids"]));
+        let corrupt = with_recorded(
+            editable(),
+            Recorded::Unreadable {
+                reason: "the record does not parse".into(),
+                corrupt: true,
+            },
+        );
+        for (source, config) in [("both", both), ("missing", missing), ("corrupt", corrupt)] {
+            let config = finalize_with(config, true, Some(library));
+            assert!(config.unknown, "{source}");
+            assert!(
+                stripped(&config, "until the configuration is known again"),
+                "{source}: {:?}",
+                config.warnings
+            );
+            assert!(
+                config
+                    .folders
+                    .as_ref()
+                    .is_some_and(|folders| folders.contains("finance/secure/x.md")),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn finalize_strips_editability_when_raw_root_contains_the_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap().join("home");
+        let library = home.join("Library");
+        std::fs::create_dir_all(library.join("CloudStorage/Raw")).unwrap();
+        let editable = |raw_root: &Path| {
+            entry(json!({
+                "folders": ["secure"],
+                "editable": ["secure"],
+                "rawRoot": raw_root
+            }))
+        };
+        for raw_root in [home.clone(), library.clone(), PathBuf::from("/")] {
+            let config = finalize_with(editable(&raw_root), true, Some(&library));
+            assert!(
+                stripped(&config, "too broad"),
+                "{raw_root:?}: {:?}",
+                config.warnings
+            );
+        }
+        // Control: a store below the Library folder, or beside the home
+        // folder, keeps the folders editable.
+        for raw_root in [library.join("CloudStorage/Raw"), dir.path().join("raw")] {
+            let config = finalize_with(editable(&raw_root), true, Some(&library));
+            assert_eq!(editable_names(&config), ["secure"], "{raw_root:?}");
+        }
+        // An unknown home folder cannot rule anything out.
+        let config = finalize_with(editable(Path::new("/Volumes/Raw")), true, None);
+        assert!(stripped(&config, "too broad"), "{:?}", config.warnings);
+        // The real home folder counts as too broad the same way.
+        if let Some(home) = dirs::home_dir() {
+            let config = finalize(editable(&home), true);
+            assert!(stripped(&config, "too broad"), "{:?}", config.warnings);
+        }
     }
 
     #[test]

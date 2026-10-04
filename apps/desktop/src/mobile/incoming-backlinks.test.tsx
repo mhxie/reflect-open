@@ -76,6 +76,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[2026-07-02]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -83,6 +84,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'revisit on [[2026-07-02]]',
         posFrom: 80,
         tasks: [],
@@ -90,6 +92,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/planning.md',
         sourceTitle: 'Planning',
+        sourcePrivate: false,
         snippet: 'ship by [[2026-07-02]]',
         posFrom: 3,
         tasks: [],
@@ -110,6 +113,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'daily/2026-06-01.md',
         sourceTitle: 'June 1st, 2026',
+        sourcePrivate: false,
         snippet: 'planned [[Roadmap]] here',
         posFrom: 4,
         tasks: [],
@@ -130,6 +134,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[2026-07-02]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -150,6 +155,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[2026-07-02]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -179,6 +185,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed follow-ups',
         posFrom: 12,
         tasks: [],
@@ -209,6 +216,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed follow-ups',
         posFrom: 12,
         tasks: [],
@@ -216,6 +224,7 @@ describe('IncomingBacklinks', () => {
       {
         sourcePath: 'notes/planning.md',
         sourceTitle: 'Planning',
+        sourcePrivate: false,
         snippet: 'ship the roadmap',
         posFrom: 3,
         tasks: [],
@@ -237,6 +246,27 @@ describe('IncomingBacklinks', () => {
 
     await userEvent.click(header)
     await expect.element(view.getByText(/ship the/)).toBeVisible()
+    await view.unmount()
+  })
+
+  it('renders a locked source’s snippet with nothing remote', async () => {
+    const xUrl = 'https://x.com/jack/status/777'
+    getBacklinksWithContext.mockResolvedValue([
+      {
+        sourcePath: 'notes/locked.md',
+        sourceTitle: 'Locked',
+        sourcePrivate: true,
+        snippet: `see [[Roadmap]] ![](${xUrl}) ![](https://example.com/chart.png)`,
+        posFrom: 4,
+        tasks: [],
+      },
+    ])
+    const view = await renderSection('notes/roadmap.md')
+    await expect.element(view.getByTestId('embed-link')).toHaveTextContent(xUrl)
+    const remote = [...view.container.querySelectorAll('img')].filter((image) =>
+      /^https?:/i.test(image.getAttribute('src') ?? ''),
+    )
+    expect(remote).toEqual([])
     await view.unmount()
   })
 })

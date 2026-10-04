@@ -25,7 +25,7 @@ describe('createAsset', () => {
     setBridge({ invoke, invokeBinary, listen: async () => () => {} })
 
     // 5 MiB: crosses the 4 MiB chunk size, so exactly two appends.
-    const path = await createAsset('report.pdf', bytesOf(5 * 1024 * 1024, 7), 3)
+    const path = await createAsset('report.pdf', bytesOf(5 * 1024 * 1024, 7), 'notes/q3.md', 3)
 
     expect(path).toBe('assets/report.pdf')
     expect(invoke).toHaveBeenCalledWith('asset_upload_begin', { generation: 3 })
@@ -37,7 +37,30 @@ describe('createAsset', () => {
     expect(invoke).toHaveBeenCalledWith('asset_upload_commit', {
       id: 'upload-1',
       desiredName: 'report.pdf',
+      notePath: 'notes/q3.md',
       generation: 3,
+    })
+  })
+
+  it('names the note, so Rust can keep a local-only note’s attachment in its folder', async () => {
+    const invoke = vi.fn(async (command: string) =>
+      command === 'asset_upload_begin'
+        ? 'upload-3'
+        : command === 'asset_upload_commit'
+          ? 'finance/secure/assets/scan.png'
+          : null,
+    )
+    const invokeBinary = vi.fn(async () => null)
+    setBridge({ invoke, invokeBinary, listen: async () => () => {} })
+
+    const path = await createAsset('scan.png', bytesOf(8, 1), 'finance/secure/bank.md', 4)
+
+    expect(path).toBe('finance/secure/assets/scan.png')
+    expect(invoke).toHaveBeenCalledWith('asset_upload_commit', {
+      id: 'upload-3',
+      desiredName: 'scan.png',
+      notePath: 'finance/secure/bank.md',
+      generation: 4,
     })
   })
 
@@ -50,7 +73,7 @@ describe('createAsset', () => {
     })
     setBridge({ invoke, invokeBinary, listen: async () => () => {} })
 
-    await expect(createAsset('big.zip', bytesOf(16, 1), 2)).rejects.toMatchObject({
+    await expect(createAsset('big.zip', bytesOf(16, 1), 'notes/a.md', 2)).rejects.toMatchObject({
       kind: 'io',
       message: 'disk full',
     })
@@ -64,7 +87,9 @@ describe('createAsset', () => {
     )
     setBridge({ invoke, listen: async () => () => {} })
 
-    await expect(createAsset('a.pdf', bytesOf(8, 0), 1)).rejects.toMatchObject({ kind: 'io' })
+    await expect(createAsset('a.pdf', bytesOf(8, 0), 'notes/a.md', 1)).rejects.toMatchObject({
+      kind: 'io',
+    })
     expect(invoke).toHaveBeenCalledWith('asset_upload_abort', { id: 'upload-2' })
   })
 })
@@ -74,12 +99,18 @@ describe('importAsset', () => {
     const invoke = vi.fn(async () => 'assets/q3-report-2.pdf')
     setBridge({ invoke, listen: async () => () => {} })
 
-    const path = await importAsset('/Users/me/Downloads/Q3 report.pdf', 'q3-report.pdf', 5)
+    const path = await importAsset(
+      '/Users/me/Downloads/Q3 report.pdf',
+      'q3-report.pdf',
+      'notes/q3.md',
+      5,
+    )
 
     expect(path).toBe('assets/q3-report-2.pdf')
     expect(invoke).toHaveBeenCalledWith('asset_import', {
       sourcePath: '/Users/me/Downloads/Q3 report.pdf',
       desiredName: 'q3-report.pdf',
+      notePath: 'notes/q3.md',
       generation: 5,
     })
   })

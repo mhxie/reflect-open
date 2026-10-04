@@ -52,7 +52,7 @@ describe('noteMarkdownForFiles', () => {
 describe('createNoteFromFiles', () => {
   it('copies the files, opens a new note, and fills its editor', async () => {
     createAsset.mockResolvedValue('assets/quarterly-report.pdf')
-    const navigate = vi.fn(() => registerNoteEditorHandle('notes/new.md', handle))
+    const navigate = vi.fn(() => registerNoteEditorHandle('notes/new.md', handle, 4))
 
     await createNoteFromFiles(
       [new File(['x'], 'Quarterly Report.pdf', { type: 'application/pdf' })],
@@ -60,7 +60,13 @@ describe('createNoteFromFiles', () => {
       navigate,
     )
 
-    expect(createAsset).toHaveBeenCalledWith('quarterly-report.pdf', expect.anything(), 4)
+    // The attachment is for the note about to open, named before the upload.
+    expect(createAsset).toHaveBeenCalledWith(
+      'quarterly-report.pdf',
+      expect.anything(),
+      'notes/new.md',
+      4,
+    )
     expect(navigate).toHaveBeenCalledWith({ kind: 'note', path: 'notes/new.md' })
     expect(handle.insertMarkdown).toHaveBeenCalledWith(
       '# Quarterly Report\n\n![](assets/quarterly-report.pdf)',

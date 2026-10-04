@@ -6,22 +6,33 @@ import {
   recordDisplacedNotes,
 } from '../indexing/note-displaced.ts'
 import { setBridge } from '../ipc/bridge.ts'
-import { isLocalOnlyPath } from './local-only.ts'
+import { isEditableLocalOnlyPath, isLocalOnlyPath } from './local-only.ts'
 import {
   cancelReflectV1Import,
+  clearNoteRecovery,
   createGraph,
   createNoteIfAbsent,
+  deleteNote,
   importReflectV1Zip,
   markReflectV1ImportOwnWrites,
   openAsset,
   openGraph,
+  readNoteRecovery,
   subscribeImportProgress,
   windowBootstrap,
+  writeNoteRecovery,
   IMPORT_PROGRESS_EVENT,
 } from './commands.ts'
+import { graphInfoSchema } from './schemas.ts'
+
+interface GraphInfoFixture {
+  generation: number
+  localOnlyFolders: string[]
+  localOnlyEditableFolders?: string[]
+}
 
 /** A bridge answering the graph-open commands with `info` per command. */
-function graphBridge(infos: Record<string, { generation: number; localOnlyFolders: string[] }>) {
+function graphBridge(infos: Record<string, GraphInfoFixture>) {
   setBridge({
     invoke: async (command) => {
       const info = infos[command]
@@ -72,6 +83,53 @@ describe('local-only folders follow the open graph', () => {
     await openGraph('/g')
     expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(false)
   })
+
+  it('records the editable names with the folders', async () => {
+    graphBridge({
+      graph_open: {
+        generation: 30,
+        localOnlyFolders: ['secure', 'archive'],
+        localOnlyEditableFolders: ['secure'],
+      },
+    })
+    await openGraph('/g')
+    expect(isEditableLocalOnlyPath('finance/secure/bank.md')).toBe(true)
+    expect(isEditableLocalOnlyPath('archive/2019/q1.md')).toBe(false)
+
+    // A build that predates the key sends none: every folder is read-only.
+    graphBridge({ graph_open: { generation: 31, localOnlyFolders: ['secure'] } })
+    await openGraph('/g')
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(true)
+    expect(isEditableLocalOnlyPath('finance/secure/bank.md')).toBe(false)
+  })
+
+  it('never lets a late response for an older session replace the editable names', async () => {
+    graphBridge({
+      graph_open: { generation: 40, localOnlyFolders: ['secure'], localOnlyEditableFolders: [] },
+    })
+    await openGraph('/g')
+    graphBridge({
+      window_bootstrap: {
+        generation: 39,
+        localOnlyFolders: ['secure'],
+        localOnlyEditableFolders: ['secure'],
+      },
+    })
+    await windowBootstrap()
+    expect(isEditableLocalOnlyPath('finance/secure/bank.md')).toBe(false)
+  })
+})
+
+describe('graphInfoSchema', () => {
+  it('reads a missing editable list as none', () => {
+    const info = graphInfoSchema.parse({
+      root: '/g',
+      name: 'g',
+      generation: 1,
+      localOnlyFolders: ['secure'],
+    })
+    expect(info.localOnlyEditableFolders).toEqual([])
+  })
 })
 
 afterEach(() => {
@@ -83,43 +141,122 @@ describe('displacement records follow the file graph session', () => {
   const pair = { from: 'notes/a.md', to: 'notes/a (this device).md' }
 
   it('changes scope on open, create, and secondary-window bootstrap', async () => {
-    graphBridge({ graph_open: { generation: 30, localOnlyFolders: [] } })
+    graphBridge({ graph_open: { generation: 50, localOnlyFolders: [] } })
     await openGraph('/g')
-    recordDisplacedNotes([pair], 30)
+    recordDisplacedNotes([pair], 50)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
 
-    graphBridge({ graph_create: { generation: 31, localOnlyFolders: [] } })
+    graphBridge({ graph_create: { generation: 51, localOnlyFolders: [] } })
     await createGraph('/g')
-    recordDisplacedNotes([pair], 30)
+    recordDisplacedNotes([pair], 50)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(false)
-    recordDisplacedNotes([pair], 31)
+    recordDisplacedNotes([pair], 51)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
 
-    graphBridge({ window_bootstrap: { generation: 32, localOnlyFolders: [] } })
+    graphBridge({ window_bootstrap: { generation: 52, localOnlyFolders: [] } })
     await windowBootstrap()
-    recordDisplacedNotes([pair], 31)
+    recordDisplacedNotes([pair], 51)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(false)
-    recordDisplacedNotes([pair], 32)
+    recordDisplacedNotes([pair], 52)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
   })
 
   it('cannot reactivate an older session when its open response arrives late', async () => {
-    graphBridge({ graph_open: { generation: 34, localOnlyFolders: [] } })
+    graphBridge({ graph_open: { generation: 54, localOnlyFolders: [] } })
     await openGraph('/g')
-    recordDisplacedNotes([pair], 34)
-    graphBridge({ graph_open: { generation: 33, localOnlyFolders: [] } })
+    recordDisplacedNotes([pair], 54)
+    graphBridge({ graph_open: { generation: 53, localOnlyFolders: [] } })
     await openGraph('/g')
 
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
     clearDisplacedNotes()
-    recordDisplacedNotes([pair], 33)
+    recordDisplacedNotes([pair], 53)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(false)
-    recordDisplacedNotes([pair], 34)
+    recordDisplacedNotes([pair], 54)
     expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
   })
 })
 
 describe('graph commands', () => {
+  it('reports which trash took a deleted note', async () => {
+    const invoke = vi.fn(async () => ({ trashed: 'graph' }))
+    setBridge({ invoke, listen: async () => () => {} })
+
+    await expect(deleteNote('finance/secure/bank.md', 7)).resolves.toEqual({ trashed: 'graph' })
+    expect(invoke).toHaveBeenCalledWith('note_delete', {
+      path: 'finance/secure/bank.md',
+      generation: 7,
+    })
+  })
+
+  it('keeps and drops only an owned version of local-only unsaved text by generation', async () => {
+    const kept = {
+      ownerId: 'a'.repeat(32),
+      token: 'b'.repeat(32),
+      sourceRevision: '# Bank\n',
+      savedAtMs: 1_700_000_000_000,
+      contents: '# Bank\n\nunsaved\n',
+    }
+    const invoke = vi.fn(async (command: string) =>
+      command === 'note_recovery_clear' ? null : kept,
+    )
+    setBridge({ invoke, listen: async () => () => {} })
+
+    await expect(
+      writeNoteRecovery(
+        'finance/secure/bank.md',
+        kept.contents,
+        kept.ownerId,
+        kept.sourceRevision,
+        3,
+      ),
+    ).resolves.toEqual(kept)
+    await expect(readNoteRecovery('finance/secure/bank.md', 3)).resolves.toEqual(kept)
+    await clearNoteRecovery('finance/secure/bank.md', kept.ownerId, kept.token, 3)
+
+    expect(invoke.mock.calls).toEqual([
+      [
+        'note_recovery_write',
+        {
+          path: 'finance/secure/bank.md',
+          contents: kept.contents,
+          ownerId: kept.ownerId,
+          sourceRevision: kept.sourceRevision,
+          generation: 3,
+        },
+      ],
+      ['note_recovery_read', { path: 'finance/secure/bank.md', generation: 3 }],
+      [
+        'note_recovery_clear',
+        {
+          path: 'finance/secure/bank.md',
+          ownerId: kept.ownerId,
+          token: kept.token,
+          generation: 3,
+        },
+      ],
+    ])
+  })
+
+  it('reads no kept text as null', async () => {
+    setBridge({ invoke: async () => null, listen: async () => () => {} })
+    await expect(readNoteRecovery('finance/secure/bank.md', 3)).resolves.toBeNull()
+  })
+
+  it('rejects recovery receipts without a valid ownership token', async () => {
+    setBridge({
+      invoke: async () => ({
+        ownerId: 'a'.repeat(32),
+        token: '../other',
+        sourceRevision: null,
+        savedAtMs: 5,
+        contents: 'unsaved',
+      }),
+      listen: async () => () => {},
+    })
+    await expect(readNoteRecovery('finance/secure/bank.md', 3)).rejects.toThrow()
+  })
+
   it('creates a note through the generation-pinned no-clobber boundary', async () => {
     const invoke = vi.fn(async () => ({ kind: 'created', modifiedMs: 1_234 }))
     setBridge({ invoke, listen: async () => () => {} })

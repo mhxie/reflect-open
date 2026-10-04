@@ -15,9 +15,17 @@ export const graphInfoSchema = z.object({
   /**
    * The local-only folder names configured for this graph (empty when none):
    * notes inside a folder with one of these names stay on this device —
-   * private, read-only, and never backed up. See `./local-only.ts`.
+   * private, never backed up, and read-only unless the name is also in
+   * `localOnlyEditableFolders`. See `./local-only.ts`.
    */
   localOnlyFolders: z.array(z.string()),
+  /**
+   * The local-only folder names whose notes the user may edit in place, each
+   * also in `localOnlyFolders` (empty when every folder is read-only). Rust
+   * grants them only while the configuration is known, on desktop, and for a
+   * `rawRoot` below `~/Library`; a build that predates the key sends none.
+   */
+  localOnlyEditableFolders: z.array(z.string()).default([]),
   /**
    * Problems with that configuration the user must see (a dropped name, an
    * unusable rawRoot, an unreadable settings file); absent or empty when none.
@@ -64,6 +72,32 @@ export const noteCreateOutcomeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('collision') }),
 ])
 export type NoteCreateOutcome = z.infer<typeof noteCreateOutcomeSchema>
+
+/**
+ * Where a deleted note went (mirrors the Rust `NoteDeleteOutcome`): the
+ * system Trash, or the graph's own `.reflect/trash/` — where mobile keeps
+ * every deleted note, and where a note from an editable local-only folder
+ * stays when the system Trash refuses it.
+ */
+export const noteDeleteOutcomeSchema = z.object({
+  trashed: z.enum(['system', 'graph']),
+})
+export type NoteDeleteOutcome = z.infer<typeof noteDeleteOutcomeSchema>
+
+/**
+ * A local-only note's kept unsaved text (mirrors the Rust `NoteRecovery`):
+ * the document a save could not land, verbatim, and when it was kept.
+ */
+export const noteRecoverySchema = z.object({
+  ownerId: z.string().regex(/^[a-f0-9]{32}$/),
+  token: z.string().regex(/^[a-f0-9]{32}$/),
+  sourceRevision: z.string().nullable(),
+  /** When the text was kept, epoch milliseconds. */
+  savedAtMs: z.number(),
+  /** The unsaved document (frontmatter and body), verbatim. */
+  contents: z.string(),
+})
+export type NoteRecovery = z.infer<typeof noteRecoverySchema>
 
 /**
  * What a secondary note window needs to boot (mirrors the Rust

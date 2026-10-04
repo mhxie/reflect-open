@@ -39,3 +39,20 @@ export function composeRenameFailure(from: string, failures: RenamePhaseFailures
   }
   return parts.length > 0 ? parts.join('; ') : null
 }
+
+/**
+ * The status line for backed-up notes a local-only note's rename left on the
+ * old title (rewriting them would carry the new title into the Git backup),
+ * or `null` when there are none. Their links still resolve while the
+ * old-title alias holds; `aliasHeld` is false when placing it failed.
+ */
+export function keptInBackupNote(count: number, aliasHeld: boolean): string | null {
+  if (count === 0) {
+    return null
+  }
+  const notes = count === 1 ? '1 backed-up note keeps' : `${count} backed-up notes keep`
+  const links = count === 1 ? 'its links' : 'their links'
+  return aliasHeld
+    ? `${notes} the old title (${links} still resolve)`
+    : `${notes} the old title, and ${links} no longer resolve`
+}

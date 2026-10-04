@@ -2,6 +2,7 @@ import { render } from 'vitest-browser-react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { queryKeys } from '@/lib/query-client.ts'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { BacklinksPanel } from './backlinks-panel.tsx'
@@ -45,8 +46,10 @@ function RouteProbe(): ReactNode {
   )
 }
 
-function renderPanel(path: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderPanel(
+  path: string,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <QueryClientProvider client={client}>
       <RouterProvider>
@@ -87,6 +90,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -102,6 +106,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -128,6 +133,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'finance/secure/bank.md',
         sourceTitle: 'Bank',
+        sourcePrivate: true,
         snippet: 'pay [[Private Plan]] per [[Roadmap]]',
         posFrom: 0,
         tasks: [],
@@ -158,6 +164,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -165,6 +172,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'revisit [[Roadmap]] next week',
         posFrom: 80,
         tasks: [],
@@ -172,6 +180,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/planning.md',
         sourceTitle: 'Planning',
+        sourcePrivate: false,
         snippet: 'ship the [[Roadmap]]',
         posFrom: 3,
         tasks: [],
@@ -201,6 +210,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -225,6 +235,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -254,6 +265,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/shared.md',
         sourceTitle: 'Shared Source',
+        sourcePrivate: false,
         snippet: 'links [[A]] and [[B]]',
         posFrom: 5,
         tasks: [],
@@ -283,6 +295,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -313,6 +326,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -320,6 +334,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/planning.md',
         sourceTitle: 'Planning',
+        sourcePrivate: false,
         snippet: 'ship the [[Roadmap]]',
         posFrom: 3,
         tasks: [],
@@ -346,6 +361,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/meeting.md',
         sourceTitle: 'Meeting Notes',
+        sourcePrivate: false,
         snippet: 'discussed [[Roadmap]] follow-ups',
         posFrom: 12,
         tasks: [],
@@ -353,6 +369,7 @@ describe('BacklinksPanel', () => {
       {
         sourcePath: 'notes/planning.md',
         sourceTitle: 'Planning',
+        sourcePrivate: false,
         snippet: 'ship the [[Roadmap]]',
         posFrom: 3,
         tasks: [],
@@ -365,5 +382,49 @@ describe('BacklinksPanel', () => {
     expect(view.getByText(/discussed/).query()).toBeNull()
     await expect.element(view.getByText(/ship the/)).toBeInTheDocument()
     await view.unmount()
+  })
+
+  describe('a private source', () => {
+    const X_URL = 'https://x.com/jack/status/777'
+    const IMAGE = 'https://example.com/chart.png'
+    const remoteImages = (container: HTMLElement): string[] =>
+      [...container.querySelectorAll('img')]
+        .map((image) => image.getAttribute('src') ?? '')
+        .filter((source) => /^https?:/i.test(source))
+
+    function row(sourcePrivate: boolean, snippet: string) {
+      return {
+        sourcePath: 'notes/source.md',
+        sourceTitle: 'Source',
+        sourcePrivate,
+        snippet,
+        posFrom: 4,
+        tasks: [],
+      }
+    }
+
+    it('renders a locked source’s snippet with nothing remote', async () => {
+      getBacklinksWithContext.mockResolvedValue([
+        row(true, `see [[Roadmap]] ![](${X_URL}) ![](${IMAGE})`),
+      ])
+      const view = await renderPanel('notes/roadmap.md')
+      await expect.element(view.getByTestId('embed-link')).toHaveTextContent(X_URL)
+      expect(remoteImages(view.container)).toEqual([])
+      await view.unmount()
+    })
+
+    it('takes a source’s media off the network once the index reports it locked', async () => {
+      getBacklinksWithContext.mockResolvedValue([row(false, `see [[Roadmap]] ![](${IMAGE})`)])
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const view = await renderPanel('notes/roadmap.md', client)
+      await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
+
+      // A Lock writes the note; its re-index invalidates every index query.
+      getBacklinksWithContext.mockResolvedValue([row(true, `see [[Roadmap]] ![](${IMAGE})`)])
+      await client.invalidateQueries({ queryKey: queryKeys.index.all })
+      await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([]))
+      await expect.element(view.getByText(/see/)).toBeInTheDocument()
+      await view.unmount()
+    })
   })
 })

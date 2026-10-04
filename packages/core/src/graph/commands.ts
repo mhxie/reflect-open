@@ -10,6 +10,8 @@ import {
   graphImportSummarySchema,
   graphInfoSchema,
   noteCreateOutcomeSchema,
+  noteDeleteOutcomeSchema,
+  noteRecoverySchema,
   pdfInfoSchema,
   recentGraphSchema,
   windowBootstrapSchema,
@@ -18,6 +20,8 @@ import {
   type GraphImportSummary,
   type GraphInfo,
   type NoteCreateOutcome,
+  type NoteDeleteOutcome,
+  type NoteRecovery,
   type PdfInfo,
   type RecentGraph,
   type WindowBootstrap,
@@ -30,18 +34,19 @@ const voidSchema = z.null()
 let adoptedGraphGeneration = -Infinity
 
 /**
- * Record a graph session's local-only folders as this window's (see
- * `./local-only.ts`). Generations only grow, so a response for an older
- * session that lands late never replaces a newer graph's names. The
- * predicate is the UI's and a first gate; every path off this machine is
- * also refused by Rust against the graph that serves the bytes.
+ * Record a graph session's local-only folders, and which of them are
+ * editable, as this window's (see `./local-only.ts`). Generations only grow,
+ * so a response for an older session that lands late never replaces a newer
+ * graph's names. The predicates are the UI's and a first gate; every path
+ * off this machine, and every write into a local-only folder, is also
+ * decided by Rust against the graph that serves the bytes.
  */
 function adoptGraphSession(info: GraphInfo): void {
   if (info.generation < adoptedGraphGeneration) {
     return
   }
   adoptedGraphGeneration = info.generation
-  setLocalOnlyFolders(info.localOnlyFolders)
+  setLocalOnlyFolders(info.localOnlyFolders, info.localOnlyEditableFolders)
   setDisplacedNotesGeneration(info.generation)
 }
 
@@ -382,10 +387,55 @@ export async function noteExists(path: string): Promise<boolean> {
   return await call('note_exists', { path }, z.boolean())
 }
 
-/** Send a note to the OS trash (recoverable; pinned to `generation`). */
-export async function deleteNote(path: string, generation: number): Promise<void> {
-  await call('note_delete', { path, generation }, voidSchema)
+/**
+ * Send a note to the trash (recoverable; pinned to `generation`) and report
+ * which one took it: the system Trash on desktop, the graph's own
+ * `.reflect/trash/` on mobile. A note in an editable local-only folder moves
+ * into `.reflect/trash/` first and from there to the system Trash, and stays
+ * in `.reflect/trash/` when the system Trash refuses it (`graph`).
+ */
+export async function deleteNote(path: string, generation: number): Promise<NoteDeleteOutcome> {
+  const outcome = await call('note_delete', { path, generation }, noteDeleteOutcomeSchema)
   echoLocalWrite({ path, kind: 'remove' })
+  return outcome
+}
+
+/**
+ * Keep `contents` as this session's unsaved text of the local-only note at `path`
+ * in `.reflect/recovery/`, replacing only its own earlier version, for when
+ * a save inside a local-only folder cannot land. Rust refuses any other path:
+ * a backed-up note's unsaved text has no business outside the note.
+ */
+export async function writeNoteRecovery(
+  path: string,
+  contents: string,
+  ownerId: string,
+  sourceRevision: string | null,
+  generation: number,
+): Promise<NoteRecovery> {
+  return await call(
+    'note_recovery_write',
+    { path, contents, ownerId, sourceRevision, generation },
+    noteRecoverySchema,
+  )
+}
+
+/** The newest unresolved session copy of the local-only note at `path`, or `null`. */
+export async function readNoteRecovery(
+  path: string,
+  generation: number,
+): Promise<NoteRecovery | null> {
+  return await call('note_recovery_read', { path, generation }, noteRecoverySchema.nullable())
+}
+
+/** Drop the specified session version; missing and newer copies stay untouched. */
+export async function clearNoteRecovery(
+  path: string,
+  ownerId: string,
+  token: string,
+  generation: number,
+): Promise<void> {
+  await call('note_recovery_clear', { path, ownerId, token, generation }, voidSchema)
 }
 
 /**

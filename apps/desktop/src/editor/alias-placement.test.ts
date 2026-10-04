@@ -46,6 +46,21 @@ function fakeSession(options?: { content?: string; takesPatch?: boolean }) {
 }
 
 describe('placeOldTitleAlias', () => {
+  it('refuses to put an old private title into another graph’s same-path live session', async () => {
+    const otherSession = fakeSession({ content: '# Public note\n' })
+    docs.openSession.mockImplementation((_path: string, generation: number) =>
+      generation === 8 ? otherSession : null,
+    )
+    io.readNote.mockRejectedValue(new Error('stale graph'))
+    await expect(
+      placeOldTitleAlias(PATH, { ...RENAME, from: 'Private account title' }, 7),
+    ).rejects.toThrow('stale graph')
+    expect(docs.openSession).toHaveBeenCalledWith(PATH, 7)
+    expect(otherSession.updateFrontmatter).not.toHaveBeenCalled()
+    expect(otherSession.flush).not.toHaveBeenCalled()
+    expect(io.writeNote).not.toHaveBeenCalled()
+  })
+
   it('with no live session, patches the alias straight onto disk at the generation', async () => {
     io.readNote.mockResolvedValue('# Old Title\n\nbody\n')
 

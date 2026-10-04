@@ -34,6 +34,8 @@ function fakeSession(path: string) {
     prepareDelete: async () => false,
     cancelDelete: () => {},
     loadTheirs: () => {},
+    restoreRecovery: () => {},
+    discardRecovery: () => {},
     commitFrontmatter: async () => true,
     content: () => '',
     liveContent: () => '',
@@ -59,7 +61,7 @@ function fakeCoordinator() {
 }
 
 function factories(session: NoteSession, coordinator: RenameCoordinator | null): BindFactories {
-  return { session: () => session, coordinator: () => coordinator }
+  return { generation: () => 1, session: () => session, coordinator: () => coordinator }
 }
 
 const microtasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -129,6 +131,33 @@ describe('createDocumentBinding', () => {
     expect(moved.dispose).toHaveBeenCalled()
     expect(moved.flush).toHaveBeenCalled()
     expect(settle).toHaveBeenCalled() // a pending rename still settles
+  })
+
+  it('holds the note a render shows: its bound path, or a rename target being followed', () => {
+    const binding = createDocumentBinding()
+    expect(binding.holds('notes/a.md')).toBe(false) // nothing bound yet
+
+    const moved = fakeSession('notes/a.md')
+    binding.bind('notes/a.md', factories(moved.session, null))
+    expect(binding.holds('notes/a.md')).toBe(true)
+    // A pane that navigated renders once before its effect rebinds: the live
+    // session is still the previous note's.
+    expect(binding.holds('notes/b.md')).toBe(false)
+
+    // A rename retargets the session before the route follows: both the old
+    // route path and the new one show this same note.
+    moved.session.retarget('notes/renamed.md')
+    expect(binding.holds('notes/a.md')).toBe(true)
+    expect(binding.holds('notes/renamed.md')).toBe(true)
+    expect(binding.holds('notes/b.md')).toBe(false)
+
+    binding.unbind('notes/a.md')
+    binding.bind('notes/renamed.md', factories(fakeSession('notes/renamed.md').session, null))
+    expect(binding.holds('notes/renamed.md')).toBe(true)
+    expect(binding.holds('notes/a.md')).toBe(false)
+
+    binding.unbind('notes/renamed.md')
+    expect(binding.holds('notes/renamed.md')).toBe(false) // torn down
   })
 
   it('a normal unbind settles the coordinator after the final flush', async () => {

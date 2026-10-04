@@ -15,6 +15,7 @@ import {
   errorMessage,
   hasBridge,
   isContactsReadable,
+  isLocalOnlyPath,
   resolveOrCreateNoteWithTitle,
   resolvePersonContact,
   suggestTags,
@@ -30,7 +31,10 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 
 /** The `[[` and `#` autocomplete search handlers a {@link NoteEditor} wires up. */
 export interface EditorAutocomplete {
-  /** Search notes for the `[[` menu: ranked suggestions plus a trailing "Create" row. */
+  /**
+   * Search notes for the `[[` menu: ranked suggestions plus a trailing
+   * "Create" row (none for a local-only source).
+   */
   onWikilinkSearch: WikilinkSearchHandler
   /** Search tags for the `#` menu, most-used first. */
   onTagSearch: TagSearchHandler
@@ -47,8 +51,16 @@ export interface EditorAutocomplete {
  * A consumer wires whichever menus it wants — the note pane and the task editor
  * both take `onWikilinkSearch` and `onTagSearch` — so returning both here never
  * forces a menu onto an editor that doesn't pass it through.
+ *
+ * Nothing picked in a local-only note creates a note: a created note would be
+ * a tracked file named after local-only text. For such a `sourcePath` the menu
+ * offers no "Create" row, and a contact row only inserts its link text.
+ *
+ * @param sourcePath graph-relative path of the note being edited, or `null`
+ *   for an editor that edits no note
  */
-export function useEditorAutocomplete(): EditorAutocomplete {
+export function useEditorAutocomplete(sourcePath: string | null): EditorAutocomplete {
+  const createsNotes = sourcePath === null || !isLocalOnlyPath(sourcePath)
   const { graph } = useGraph()
   const { settings } = useSettings()
   const authorization = useContactsAuthorization()
@@ -119,7 +131,7 @@ export function useEditorAutocomplete(): EditorAutocomplete {
         resolution.kind === 'blocked' ? [resolution.contact.fullName] : [],
       )
       const entries = buildAutocompleteEntries(query, wikiLinks.suggestions, {
-        offerCreate: true,
+        offerCreate: createsNotes,
         contacts,
         blockedContactNames,
         requireSerializableWikiText: true,
@@ -150,10 +162,16 @@ export function useEditorAutocomplete(): EditorAutocomplete {
         }
         if (entry.kind === 'contact') {
           const { contact } = entry
-          return {
+          const row = {
             target: entry.target,
             label: contact.fullName,
             detail: contact.emails[0] ?? contact.phones[0] ?? 'Contact',
+          }
+          if (!createsNotes) {
+            return row
+          }
+          return {
+            ...row,
             onSelect: () => {
               if (generation !== null) {
                 void ensurePersonNote({
@@ -213,6 +231,7 @@ export function useEditorAutocomplete(): EditorAutocomplete {
       resolveOrCreateFromAutocomplete,
       contactsInMenu,
       generation,
+      createsNotes,
     ],
   )
 

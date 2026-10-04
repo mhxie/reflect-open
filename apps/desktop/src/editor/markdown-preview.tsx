@@ -2,7 +2,6 @@ import {
   localImagesOnly,
   resolveNoXPost,
   resolveNoYouTubeVideo,
-  withoutEmbedSnapshots,
 } from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
@@ -52,9 +51,9 @@ interface MarkdownPreviewProps {
   /**
    * Whether the content may reach the network to render (default true): X
    * post and YouTube embed lookups, saved embed snapshots (a YouTube card
-   * loads its thumbnail), and remote images. Off for content from a
-   * local-only note — embeds render as plain links and only graph
-   * attachments load.
+   * loads its thumbnail), and remote images. Off for content from a private
+   * note — embeds show their source URLs (Meowdown's `remoteMedia`) and only
+   * graph attachments load.
    */
   remoteEmbeds?: boolean
   /** Extra classes for the rendered root. */
@@ -80,10 +79,6 @@ export function MarkdownPreview({
     () => (remoteEmbeds ? resolveImageUrl : localImagesOnly(resolveImageUrl)),
     [remoteEmbeds, resolveImageUrl],
   )
-  const markdown = useMemo(
-    () => (remoteEmbeds ? content : withoutEmbedSnapshots(content)),
-    [remoteEmbeds, content],
-  )
   const navigateRef = useRef(onWikiLinkClick)
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
@@ -106,7 +101,8 @@ export function MarkdownPreview({
       resolveXPost={resolveXPost}
       resolveYouTubeVideo={remoteEmbeds ? resolveYouTubeVideo : resolveNoYouTubeVideo}
       mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
-      markdown={markdown}
+      remoteMedia={remoteEmbeds}
+      markdown={content}
       markMode="hide"
       interactive={interactive}
       resolveWikilink={resolveWikilink}

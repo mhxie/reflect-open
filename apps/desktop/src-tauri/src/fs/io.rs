@@ -161,14 +161,19 @@ pub(super) fn read_note_no_follow(base: &Path, rest: &Path) -> std::io::Result<S
     use std::io::Read;
     let mut contents = String::new();
     open_no_follow(base, rest)?.read_to_string(&mut contents)?;
+    Ok(normalize_note_text(contents))
+}
+
+/// Normalize line endings only when doing so preserves the file's privacy verdict.
+pub(super) fn normalize_note_text(contents: String) -> String {
     if !contents.contains('\r') {
-        return Ok(contents);
+        return contents;
     }
     let normalized = normalize_line_endings(contents.clone());
     if backup_privacy(contents.as_bytes()) != backup_privacy(normalized.as_bytes()) {
-        return Ok(contents);
+        return contents;
     }
-    Ok(normalized)
+    normalized
 }
 
 /// Open `base.join(rest)` for reading with every component policed by

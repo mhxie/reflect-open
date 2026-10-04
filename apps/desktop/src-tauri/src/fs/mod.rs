@@ -8,20 +8,17 @@
 
 pub mod asset_protocol;
 pub mod assets;
-// Git sync's displacement walks and moves through it today; later waves
-// route local-only edits through it too (note_write, note_create,
-// note_delete, move_note_file), and Git's commit reads and the on-device
-// note read build on it.
 #[cfg(unix)]
-#[cfg_attr(not(test), allow(dead_code))]
 mod beneath;
 mod image_thumbnail;
 mod import;
 mod import_assets;
 mod io;
 mod local_only;
+mod local_only_edit;
 pub mod pdf_render;
 mod preview_cache;
+pub mod recovery;
 mod resolve;
 pub mod x_archive;
 mod x_archive_store;
@@ -43,7 +40,10 @@ use reflect_graph_paths::LocalOnlyFolders;
 use self::io::{
     atomic_create, atomic_write, bootstrap, collect_files, initialize_runtime, AtomicCreateOutcome,
 };
-use self::resolve::{resolve, resolve_read, resolve_shareable, resolve_write};
+use self::resolve::{
+    resolve, resolve_note_edit, resolve_read, resolve_shareable, resolve_write, EditTarget,
+    TargetKind,
+};
 
 /// The entry for a graph root in a settings key keyed by graph root, matched
 /// the way the local-only configuration matches it.
@@ -196,8 +196,14 @@ pub struct GraphInfo {
     /// Open-session generation; mutating file commands must echo it back.
     pub generation: u64,
     /// The local-only folder names configured for this graph (empty when
-    /// none): notes inside them are private and read-only everywhere.
+    /// none): notes inside them are private everywhere, and read-only unless
+    /// every one of these names on their path is also editable.
     pub local_only_folders: Vec<String>,
+    /// The local-only folder names this graph edits in place (a subset of
+    /// `local_only_folders`; empty when every local-only folder is
+    /// read-only, which is all a phone, an unknown configuration, or a too
+    /// broad rawRoot ever gets).
+    pub local_only_editable_folders: Vec<String>,
     /// Problems with that configuration the user must see (dropped names,
     /// an unusable rawRoot, an unreadable settings file); empty when none.
     pub local_only_warnings: Vec<String>,
@@ -240,6 +246,28 @@ pub enum NoteCreateOutcome {
     Collision,
 }
 
+/// Where [`note_delete`] put the note.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteDeleteOutcome {
+    pub trashed: Trashed,
+}
+
+/// Which trash holds a deleted note.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Trashed {
+    /// The system Trash (desktop): Finder's Put Back restores it.
+    System,
+    /// The graph's own `.reflect/trash/`: mobile has no system Trash, and a
+    /// local-only note stays there when the system Trash refuses it.
+    Graph,
+}
+
+/// Why a write refuses when the file no longer holds what its writer read.
+/// The app's idempotent patches re-read and retry once on exactly this text.
+const CHANGED_ON_DISK: &str = "Note changed on disk; reload before retrying";
+
 // ---- state accessors --------------------------------------------------------
 
 fn graph_info(
@@ -259,6 +287,9 @@ fn graph_info(
         generation,
         local_only_folders: local_only
             .map(|folders| folders.names().to_vec())
+            .unwrap_or_default(),
+        local_only_editable_folders: local_only
+            .map(|folders| folders.editable_names().to_vec())
             .unwrap_or_default(),
         local_only_warnings: warnings.to_vec(),
         backup_warnings: backup_warnings.to_vec(),
@@ -776,13 +807,17 @@ pub(crate) struct NoteWriteGuard {
 /// check could put back text over bytes a sync pull or another device just
 /// wrote.
 ///
+/// A note in an editable local-only folder ([`resolve_note_edit`]) is
+/// written through directory descriptors that never follow a link, and its
+/// revision is checked again, by file identity, right before the rename.
+///
 /// Returns the written file's on-disk mtime (epoch ms, `None` when the
 /// platform can't provide one) so the caller's index echo can stamp the row
 /// with the value a later `list_files` will report — a `Date.now()` stamp
 /// never matches and costs a re-read on every reconcile.
 ///
 /// `expected_contents` is compared with the note as [`note_read`] returns it,
-/// with `\n` line endings. `contents` is written as given.
+/// with privacy-preserving line-ending normalization. `contents` is written as given.
 ///
 /// Runs on the blocking pool: the write waits on the note write guard,
 /// which a Git pull holds through its checkout.
@@ -801,10 +836,16 @@ pub async fn note_write(
         ));
     }
     let (root, local_only) = graph_for(&state, Some(generation))?;
-    let target = resolve_write(&root, &path, local_only.as_deref())?;
+    let target = resolve_note_edit(&root, &path, local_only.as_deref(), TargetKind::Note)?;
     let written = root.clone();
-    let modified_ms = crate::blocking::run_blocking(move || {
-        write_note_revision(&written, &target, &contents, expected_contents.as_deref())
+    let modified_ms = crate::blocking::run_blocking(move || match target {
+        EditTarget::Graph(target) => {
+            write_note_revision(&written, &target, &contents, expected_contents.as_deref())
+        }
+        EditTarget::LocalOnly(entry) => {
+            let _guard = note_write_guard();
+            local_only_edit::write_note(&entry, &contents, expected_contents.as_deref())
+        }
     })
     .await?;
     invalidate_file_catalog(&state, &root);
@@ -829,14 +870,16 @@ fn write_note_revision(
         Err(error) => return Err(error.into()),
     };
     if current.as_deref() != expected {
-        return Err(AppError::io("Note changed on disk; reload before retrying"));
+        return Err(AppError::io(CHANGED_ON_DISK));
     }
     atomic_write(root, target, contents)
 }
 
 /// Atomically create a note only when `path` is still free. Unlike
 /// [`note_write`], this is a no-clobber claim: a concurrent sync checkout or
-/// creator wins as `Collision`, with its file left byte-for-byte intact.
+/// creator wins as `Collision`, with its file left byte-for-byte intact. A
+/// note in an editable local-only folder is claimed the same way, through
+/// directory descriptors that never follow a link.
 /// Runs on the blocking pool, like [`note_write`].
 #[tauri::command]
 pub async fn note_create(
@@ -849,17 +892,21 @@ pub async fn note_create(
     let created = root.clone();
     let outcome = crate::blocking::run_blocking(move || {
         let _guard = note_write_guard();
-        let target = resolve_write(&created, &path, local_only.as_deref())?;
-        atomic_create(&created, &target, &contents)
+        match resolve_note_edit(&created, &path, local_only.as_deref(), TargetKind::Note)? {
+            EditTarget::Graph(target) => match atomic_create(&created, &target, &contents)? {
+                AtomicCreateOutcome::Created(modified_ms) => {
+                    Ok(NoteCreateOutcome::Created { modified_ms })
+                }
+                AtomicCreateOutcome::Collision => Ok(NoteCreateOutcome::Collision),
+            },
+            EditTarget::LocalOnly(entry) => local_only_edit::create_note(&entry, &contents),
+        }
     })
     .await?;
-    match outcome {
-        AtomicCreateOutcome::Created(modified_ms) => {
-            invalidate_file_catalog(&state, &root);
-            Ok(NoteCreateOutcome::Created { modified_ms })
-        }
-        AtomicCreateOutcome::Collision => Ok(NoteCreateOutcome::Collision),
+    if matches!(outcome, NoteCreateOutcome::Created { .. }) {
+        invalidate_file_catalog(&state, &root);
     }
+    Ok(outcome)
 }
 
 /// Atomically write a binary asset (pasted/dropped image) by graph-relative
@@ -1158,51 +1205,154 @@ pub(crate) fn move_note_file(
     to: &str,
     local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<()> {
-    let from_abs = resolve_write(root, from, local_only)?;
-    let to_abs = resolve_write(root, to, local_only)?;
-    // Occupied includes an evicted iCloud note (placeholder only on disk):
-    // renaming onto it would collide with the re-download (Plan 21).
-    if io::file_occupied(&to_abs) {
-        return Err(AppError::io(format!(
-            "cannot move note: {to} already exists on disk"
-        )));
+    match resolve_note_move(root, from, to, local_only)? {
+        NoteMove::Graph { from_abs, to_abs } => {
+            // Occupied includes an evicted iCloud note (placeholder only on
+            // disk): renaming onto it would collide with the re-download
+            // (Plan 21).
+            if io::file_occupied(&to_abs) {
+                return Err(AppError::io(format!(
+                    "cannot move note: {to} already exists on disk"
+                )));
+            }
+            if let Some(parent) = to_abs.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(from_abs, to_abs)?;
+        }
+        NoteMove::LocalOnly {
+            from_entry,
+            to_entry,
+        } => local_only_edit::move_note(&from_entry, &to_entry, to)?,
     }
-    if let Some(parent) = to_abs.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::rename(from_abs, to_abs)?;
     // Carry the note's sync ancestor across the rename (Plan 21) — a missed
     // move only degrades one future merge, never blocks the rename.
     crate::conflict::shadow::ShadowStore::new(root).record_move(from, to);
     Ok(())
 }
 
+/// Both ends of a user's note move, on the same side of every local-only
+/// boundary ([`resolve_note_move`]).
+pub(crate) enum NoteMove {
+    /// Between ordinary paths, absolute.
+    Graph { from_abs: PathBuf, to_abs: PathBuf },
+    /// Within editable local-only folders.
+    LocalOnly {
+        from_entry: resolve::LocalOnlyEntry,
+        to_entry: resolve::LocalOnlyEntry,
+    },
+}
+
+/// Resolve both ends of a user's note move ([`resolve_note_edit`]), refusing
+/// one that crosses a local-only boundary: a note moves within ordinary
+/// paths or within editable local-only folders, never into or out of them
+/// (that changes where it is backed up and who may read it). The rename
+/// pipeline calls this before any index row moves, and the rename itself
+/// resolves again.
+pub(crate) fn resolve_note_move(
+    root: &Path,
+    from: &str,
+    to: &str,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<NoteMove> {
+    let from_target = resolve_note_edit(root, from, local_only, TargetKind::Note)?;
+    let to_target = resolve_note_edit(root, to, local_only, TargetKind::Note)?;
+    match (from_target, to_target) {
+        (EditTarget::Graph(from_abs), EditTarget::Graph(to_abs)) => {
+            Ok(NoteMove::Graph { from_abs, to_abs })
+        }
+        (EditTarget::LocalOnly(from_entry), EditTarget::LocalOnly(to_entry)) => {
+            Ok(NoteMove::LocalOnly {
+                from_entry,
+                to_entry,
+            })
+        }
+        _ => Err(AppError::traversal(format!(
+            "moving {from} to {to} crosses a local-only boundary"
+        ))),
+    }
+}
+
 /// Send a note to the OS trash (recoverable), not a hard delete (pinned to
 /// `generation`). Mobile has no OS trash: the file moves into the graph-local
 /// `.reflect/trash/` instead (Plan 19), the same recoverability promise, and
 /// `.reflect/` is already excluded from sync and indexing.
+///
+/// A note in an editable local-only folder first moves into a fresh
+/// `.reflect/trash/<random>/` directory through directory descriptors, so
+/// the path-based OS-trash call can only ever reach the file staged there;
+/// when the OS trash refuses it, the note stays there and the outcome says
+/// so ([`Trashed::Graph`]).
 #[tauri::command]
-pub fn note_delete(path: String, generation: u64, state: State<GraphState>) -> AppResult<()> {
+pub fn note_delete(
+    path: String,
+    generation: u64,
+    state: State<GraphState>,
+) -> AppResult<NoteDeleteOutcome> {
     let (root, local_only) = graph_for(&state, Some(generation))?;
-    let abs = resolve_write(&root, &path, local_only.as_deref())?;
-    // An iCloud-evicted note exists only as its `.name.md.icloud` stub —
-    // trashing the logical path would fail and the note would be
-    // undeletable. Removing the stub deletes the iCloud item (Plan 21).
-    let target = if abs.exists() {
-        abs
-    } else {
-        eviction_placeholder(&abs)
-            .filter(|stub| stub.exists())
-            .unwrap_or(abs)
+    let trashed = match resolve_note_edit(&root, &path, local_only.as_deref(), TargetKind::Note)? {
+        EditTarget::Graph(abs) => {
+            // An iCloud-evicted note exists only as its `.name.md.icloud`
+            // stub — trashing the logical path would fail and the note would
+            // be undeletable. Removing the stub deletes the iCloud item
+            // (Plan 21).
+            let target = if abs.exists() {
+                abs
+            } else {
+                eviction_placeholder(&abs)
+                    .filter(|stub| stub.exists())
+                    .unwrap_or(abs)
+            };
+            trash_graph_file(&root, &target)?
+        }
+        EditTarget::LocalOnly(entry) => {
+            let staged = {
+                let _guard = NOTE_WRITE_LOCK
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                local_only_edit::trash_note(&entry)?
+            };
+            hand_to_os_trash(&staged)
+        }
     };
-    #[cfg(desktop)]
-    os_trash_delete(&target)?;
-    #[cfg(mobile)]
-    move_to_graph_trash(&root, &target)?;
     // A deleted note's sync ancestor is meaningless — drop it (Plan 21).
     crate::conflict::shadow::ShadowStore::new(&root).forget(&path);
     invalidate_file_catalog(&state, &root);
-    Ok(())
+    Ok(NoteDeleteOutcome { trashed })
+}
+
+/// Trash an ordinary graph file: into the system Trash on desktop, into the
+/// graph's own `.reflect/trash/` on mobile.
+fn trash_graph_file(root: &Path, target: &Path) -> AppResult<Trashed> {
+    #[cfg(desktop)]
+    {
+        let _ = root;
+        os_trash_delete(target)?;
+        Ok(Trashed::System)
+    }
+    #[cfg(mobile)]
+    {
+        move_to_graph_trash(root, target)?;
+        Ok(Trashed::Graph)
+    }
+}
+
+/// Hand a note staged in `.reflect/trash/<random>/` to the OS trash, best
+/// effort: when the OS trash refuses (or there is none), the note stays
+/// staged in the graph's own trash.
+fn hand_to_os_trash(staged: &Path) -> Trashed {
+    #[cfg(desktop)]
+    match os_trash_delete(staged) {
+        Ok(()) => return Trashed::System,
+        Err(err) => tracing::warn!(
+            ?err,
+            path = %staged.display(),
+            "the system Trash refused a local-only note; it stays in the graph's .reflect/trash"
+        ),
+    }
+    #[cfg(mobile)]
+    let _ = staged;
+    Trashed::Graph
 }
 
 /// Move the open graph's **entire directory** to the OS trash (recoverable)
@@ -1268,17 +1418,74 @@ pub fn graph_delete(generation: u64, state: State<GraphState>) -> AppResult<()> 
 /// no sound, and still lands the file in the system Trash for recovery.
 #[cfg(desktop)]
 fn os_trash_delete(abs: &Path) -> AppResult<()> {
-    #[cfg(target_os = "macos")]
-    let ctx = {
-        use trash::macos::{DeleteMethod, TrashContextExtMacos};
-        let mut ctx = trash::TrashContext::default();
-        ctx.set_delete_method(DeleteMethod::NsFileManager);
-        ctx
-    };
-    #[cfg(not(target_os = "macos"))]
-    let ctx = trash::TrashContext::default();
+    // Tests never reach the real Trash: they get a stand-in.
+    #[cfg(test)]
+    {
+        os_trash_seam::trash(abs)
+    }
+    #[cfg(not(test))]
+    {
+        #[cfg(target_os = "macos")]
+        let ctx = {
+            use trash::macos::{DeleteMethod, TrashContextExtMacos};
+            let mut ctx = trash::TrashContext::default();
+            ctx.set_delete_method(DeleteMethod::NsFileManager);
+            ctx
+        };
+        #[cfg(not(target_os = "macos"))]
+        let ctx = trash::TrashContext::default();
 
-    ctx.delete(abs).map_err(|err| AppError::io(err.to_string()))
+        ctx.delete(abs).map_err(|err| AppError::io(err.to_string()))
+    }
+}
+
+/// Test-only stand-in for the system Trash, per thread: every call is
+/// recorded, and with no stand-in installed the Trash refuses, which leaves
+/// the file where it is. Tests must never move files into the real Trash.
+#[cfg(all(test, desktop))]
+pub(crate) mod os_trash_seam {
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
+
+    use crate::error::{AppError, AppResult};
+
+    type Hook = Box<dyn FnMut(&Path) -> AppResult<()>>;
+
+    thread_local! {
+        static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static CALLS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn trash(path: &Path) -> AppResult<()> {
+        CALLS.with_borrow_mut(|calls| calls.push(path.to_path_buf()));
+        HOOK.with_borrow_mut(|hook| match hook {
+            Some(hook) => hook(path),
+            None => Err(AppError::io("no system Trash in tests")),
+        })
+    }
+
+    /// What the system Trash does on this thread until the guard drops.
+    pub(crate) fn install(hook: impl FnMut(&Path) -> AppResult<()> + 'static) -> Installed {
+        HOOK.set(Some(Box::new(hook)));
+        CALLS.set(Vec::new());
+        Installed
+    }
+
+    /// The paths handed to the system Trash on this thread since the last
+    /// install (or the thread's start).
+    pub(crate) fn calls() -> Vec<PathBuf> {
+        CALLS.with_borrow(Clone::clone)
+    }
+
+    /// Restores the refusing Trash when dropped.
+    pub(crate) struct Installed;
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            HOOK.set(None);
+            CALLS.set(Vec::new());
+        }
+    }
 }
 
 /// Move a deleted file under `<graph>/.reflect/trash/`, stamping the name
@@ -1644,6 +1851,37 @@ mod file_catalog_tests {
 }
 
 #[cfg(test)]
+mod graph_info_tests {
+    use super::graph_info;
+    use reflect_graph_paths::LocalOnlyFolders;
+    use serde_json::json;
+    use std::path::Path;
+
+    #[test]
+    fn graph_info_carries_the_editable_folders_to_the_typescript_boundary() {
+        let (folders, _) = LocalOnlyFolders::new(["secure", "archive"], None)
+            .unwrap()
+            .with_editable(["secure"]);
+        let info = graph_info(Path::new("/vaults/notes"), 3, Some(&folders), &[], &[]);
+        let value = serde_json::to_value(&info).unwrap();
+        assert_eq!(value["localOnlyFolders"], json!(["secure", "archive"]));
+        assert_eq!(value["localOnlyEditableFolders"], json!(["secure"]));
+
+        let read_only = LocalOnlyFolders::new(["secure"], None).unwrap();
+        let info = graph_info(Path::new("/vaults/notes"), 3, Some(&read_only), &[], &[]);
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["localOnlyEditableFolders"],
+            json!([])
+        );
+        let info = graph_info(Path::new("/vaults/notes"), 3, None, &[], &[]);
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["localOnlyEditableFolders"],
+            json!([])
+        );
+    }
+}
+
+#[cfg(test)]
 mod note_create_tests {
     use super::NoteCreateOutcome;
     use serde_json::json;
@@ -1963,6 +2201,7 @@ mod local_only_command_tests {
         app: tauri::App<tauri::test::MockRuntime>,
         _dir: tempfile::TempDir,
         root: PathBuf,
+        raw: PathBuf,
     }
 
     const FOLDED: &str = "people/\u{17f}ecure/visa.md";
@@ -1974,6 +2213,7 @@ mod local_only_command_tests {
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
         app.manage(GraphState::default());
+        app.manage(assets::AssetUploads::default());
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().canonicalize().unwrap();
         let (root, raw) = (base.join("graph"), base.join("raw"));
@@ -2005,11 +2245,579 @@ mod local_only_command_tests {
             app,
             _dir: dir,
             root,
+            raw,
         }
+    }
+
+    /// [`session`] with `secure` editable.
+    fn editable_session() -> Session {
+        let session = session(true);
+        let (folders, _) = LocalOnlyFolders::new(["secure"], Some(&session.raw))
+            .unwrap()
+            .with_editable(["secure"]);
+        session
+            .app
+            .state::<GraphState>()
+            .0
+            .lock()
+            .unwrap()
+            .set_local_only(Some(folders));
+        session
     }
 
     fn folds(session: &Session) -> bool {
         session.root.join(FOLDED).exists()
+    }
+
+    fn write_note(
+        session: &Session,
+        path: &str,
+        contents: &str,
+        check_contents: Option<bool>,
+        expected: Option<&str>,
+    ) -> AppResult<Option<u64>> {
+        tauri::async_runtime::block_on(note_write(
+            path.into(),
+            contents.into(),
+            1,
+            check_contents,
+            expected.map(str::to_string),
+            session.app.state(),
+        ))
+    }
+
+    fn create_note(session: &Session, path: &str, contents: &str) -> AppResult<NoteCreateOutcome> {
+        tauri::async_runtime::block_on(note_create(
+            path.into(),
+            contents.into(),
+            1,
+            session.app.state(),
+        ))
+    }
+
+    fn read(path: &Path) -> String {
+        fs::read_to_string(path).unwrap()
+    }
+
+    /// Every file below `dir` with its bytes; links by their target.
+    fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut found = Vec::new();
+        for entry in walkdir::WalkDir::new(dir).sort_by_file_name() {
+            let entry = entry.unwrap();
+            let bytes = if entry.path_is_symlink() {
+                fs::read_link(entry.path())
+                    .unwrap()
+                    .into_os_string()
+                    .into_encoded_bytes()
+            } else if entry.file_type().is_file() {
+                fs::read(entry.path()).unwrap()
+            } else {
+                Vec::new()
+            };
+            found.push((entry.path().to_path_buf(), bytes));
+        }
+        found
+    }
+
+    /// The names staged in the graph's `.reflect/trash/`, as
+    /// `<slot>/<name>` (empty slots included as `<slot>/`).
+    #[cfg(desktop)]
+    fn trashed(session: &Session) -> Vec<String> {
+        let trash = session.root.join(".reflect/trash");
+        let Ok(slots) = fs::read_dir(&trash) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        for slot in slots {
+            let slot = slot.unwrap().file_name().to_string_lossy().into_owned();
+            let names: Vec<String> = fs::read_dir(trash.join(&slot))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            if names.is_empty() {
+                found.push(format!("{slot}/"));
+            }
+            found.extend(names.into_iter().map(|name| format!("{slot}/{name}")));
+        }
+        found
+    }
+
+    #[test]
+    fn a_checked_write_to_an_editable_note_lands_in_the_raw_store() {
+        let session = editable_session();
+        let bank = session.raw.join("finance/secure/bank.md");
+        let graph_before = snapshot(&session.root.join("notes"));
+
+        let modified = write_note(
+            &session,
+            "finance/secure/bank.md",
+            "# Bank\n\nedited",
+            Some(true),
+            Some("# Bank"),
+        )
+        .unwrap();
+        assert_eq!(read(&bank), "# Bank\n\nedited");
+        assert_eq!(modified, modified_ms(&fs::metadata(&bank).unwrap()));
+        // A new note (and its folder) claims a free name.
+        write_note(
+            &session,
+            "finance/secure/2026/plan.md",
+            "# Plan",
+            Some(true),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            read(&session.raw.join("finance/secure/2026/plan.md")),
+            "# Plan"
+        );
+        // A real editable folder is written in place, in the graph.
+        write_note(
+            &session,
+            "people/secure/visa.md",
+            "# Visa\n\nrenewed",
+            Some(true),
+            Some("# Visa"),
+        )
+        .unwrap();
+        assert_eq!(
+            read(&session.root.join("people/secure/visa.md")),
+            "# Visa\n\nrenewed"
+        );
+        // Nothing else in the graph changed, and nothing was left staged.
+        assert_eq!(snapshot(&session.root.join("notes")), graph_before);
+        assert_eq!(
+            fs::read_dir(session.root.join(".reflect/tmp"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn editable_checked_writes_compare_the_revision_returned_by_note_read() {
+        let session = editable_session();
+        let path = "finance/secure/bank.md";
+        let bank = session.raw.join(path);
+        for (source, expected) in [
+            ("# Bank\r\n\r\nBalance", "# Bank\n\nBalance"),
+            (
+                "---\r\nprivate: true\r\n---\r\nsecret",
+                "---\nprivate: true\n---\nsecret",
+            ),
+            (
+                "---\ntitle: x\rprivate: false\n---\nsecret",
+                "---\ntitle: x\rprivate: false\n---\nsecret",
+            ),
+            (
+                "---\ntitle: x\r---\rprivate: true\n---\nsecret",
+                "---\ntitle: x\r---\rprivate: true\n---\nsecret",
+            ),
+        ] {
+            fs::write(&bank, source).unwrap();
+            let revision = tauri::async_runtime::block_on(note_read(
+                path.into(),
+                Some(1),
+                session.app.state(),
+            ))
+            .unwrap();
+            assert_eq!(revision, expected);
+            write_note(&session, path, "# Edited", Some(true), Some(&revision)).unwrap();
+            assert_eq!(read(&bank), "# Edited");
+        }
+    }
+
+    #[test]
+    fn a_normalized_local_only_revision_cannot_replace_new_disk_text() {
+        let session = editable_session();
+        let path = "finance/secure/bank.md";
+        let bank = session.raw.join(path);
+        fs::write(&bank, "# Bank\r\nBalance").unwrap();
+        let revision =
+            tauri::async_runtime::block_on(note_read(path.into(), Some(1), session.app.state()))
+                .unwrap();
+        fs::write(&bank, "# Bank\r\nNew balance").unwrap();
+        let error = write_note(&session, path, "# Edited", Some(true), Some(&revision))
+            .expect_err("a stale revision must be refused");
+        assert!(format!("{error:?}").contains(CHANGED_ON_DISK));
+        assert_eq!(read(&bank), "# Bank\r\nNew balance");
+
+        let ambiguous = "---\ntitle: x\rprivate: false\n---\nsecret";
+        fs::write(&bank, ambiguous).unwrap();
+        let normalized = reflect_graph_paths::normalize_line_endings(ambiguous.into());
+        let error = write_note(&session, path, "# Edited", Some(true), Some(&normalized))
+            .expect_err("a privacy-changing normalization is not the read revision");
+        assert!(format!("{error:?}").contains(CHANGED_ON_DISK));
+        assert_eq!(read(&bank), ambiguous);
+    }
+
+    #[test]
+    fn an_editable_note_is_written_only_over_the_revision_it_names() {
+        let session = editable_session();
+        let bank = session.raw.join("finance/secure/bank.md");
+        let refused = |check: Option<bool>, expected: Option<&str>| {
+            write_note(
+                &session,
+                "finance/secure/bank.md",
+                "# Ours",
+                check,
+                expected,
+            )
+            .expect_err("refused")
+        };
+        // Unchecked, whatever it names.
+        for check in [None, Some(false)] {
+            assert!(matches!(
+                refused(check, Some("# Bank")),
+                AppError::Parse { .. }
+            ));
+        }
+        // A missing revision over an existing file, and a stale one.
+        for expected in [None, Some("# Stale")] {
+            let message = format!("{:?}", refused(Some(true), expected));
+            assert!(message.contains(CHANGED_ON_DISK), "{message}");
+        }
+        assert_eq!(read(&bank), "# Bank");
+        // A revision for a note that is gone.
+        let message = format!(
+            "{:?}",
+            write_note(
+                &session,
+                "finance/secure/gone.md",
+                "# Ours",
+                Some(true),
+                Some("# Gone")
+            )
+            .unwrap_err()
+        );
+        assert!(message.contains(CHANGED_ON_DISK), "{message}");
+        assert!(!session.raw.join("finance/secure/gone.md").exists());
+        // An iCloud placeholder holds its note's name.
+        fs::write(
+            session.raw.join("finance/secure/.evicted.md.icloud"),
+            "stub",
+        )
+        .unwrap();
+        assert!(write_note(
+            &session,
+            "finance/secure/evicted.md",
+            "# Ours",
+            Some(true),
+            None
+        )
+        .is_err());
+        assert!(!session.raw.join("finance/secure/evicted.md").exists());
+    }
+
+    #[test]
+    fn a_create_in_an_editable_folder_never_replaces_a_note() {
+        let session = editable_session();
+        let create = |path: &str| create_note(&session, path, "# New").unwrap();
+
+        assert!(matches!(
+            create("finance/secure/bank.md"),
+            NoteCreateOutcome::Collision
+        ));
+        assert_eq!(read(&session.raw.join("finance/secure/bank.md")), "# Bank");
+        assert!(matches!(
+            create("finance/secure/new.md"),
+            NoteCreateOutcome::Created { .. }
+        ));
+        assert_eq!(read(&session.raw.join("finance/secure/new.md")), "# New");
+        assert!(create_note(&session, "finance/secure/new.txt", "x").is_err());
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn a_delete_in_an_editable_folder_stages_the_note_before_the_system_trash() {
+        let session = editable_session();
+        let state = || session.app.state::<GraphState>();
+        fs::write(session.raw.join("finance/secure/old.md"), "# Old").unwrap();
+
+        // The system Trash refuses: the note stays in the graph's trash.
+        let refusing = os_trash_seam::install(|_| Err(AppError::io("Trash refused")));
+        let outcome = note_delete("finance/secure/bank.md".into(), 1, state()).unwrap();
+        assert_eq!(outcome.trashed, Trashed::Graph);
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap(),
+            serde_json::json!({ "trashed": "graph" })
+        );
+        assert!(!session.raw.join("finance/secure/bank.md").exists());
+        let staged = trashed(&session);
+        assert_eq!(staged.len(), 1, "{staged:?}");
+        let (slot, name) = staged[0].split_once('/').unwrap();
+        assert_eq!((slot.len(), name), (32, "bank.md"));
+        assert_eq!(
+            read(&session.root.join(".reflect/trash").join(&staged[0])),
+            "# Bank"
+        );
+        assert_eq!(
+            os_trash_seam::calls(),
+            [session.root.join(".reflect/trash").join(&staged[0])]
+        );
+        drop(refusing);
+
+        // The system Trash takes it: the staged copy leaves the graph.
+        let _accepting = os_trash_seam::install(|path| Ok(fs::remove_file(path)?));
+        let outcome = note_delete("finance/secure/old.md".into(), 1, state()).unwrap();
+        assert_eq!(outcome.trashed, Trashed::System);
+        assert!(!session.raw.join("finance/secure/old.md").exists());
+        let called = os_trash_seam::calls();
+        assert_eq!(called.len(), 1);
+        assert!(called[0].starts_with(session.root.join(".reflect/trash")));
+        assert!(called[0].ends_with("old.md"));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn a_symlinked_or_dataless_note_is_never_deleted_or_moved() {
+        let session = editable_session();
+        let state = || session.app.state::<GraphState>();
+        let _trash = os_trash_seam::install(|_| Ok(()));
+        symlink(
+            session.root.join("people/plan.md"),
+            session.raw.join("finance/secure/link.md"),
+        )
+        .unwrap();
+        assert!(note_delete("finance/secure/link.md".into(), 1, state()).is_err());
+        assert!(fs::symlink_metadata(session.raw.join("finance/secure/link.md")).is_ok());
+
+        let dataless = beneath::PretendDataless::engage();
+        assert!(note_delete("finance/secure/bank.md".into(), 1, state()).is_err());
+        assert!(move_note_file(
+            &note_write_guard(),
+            &session.root,
+            "finance/secure/bank.md",
+            "finance/secure/moved.md",
+            Some(&editable_folders(&session)),
+        )
+        .is_err());
+        drop(dataless);
+        assert_eq!(read(&session.raw.join("finance/secure/bank.md")), "# Bank");
+        assert!(os_trash_seam::calls().is_empty());
+        assert_eq!(trashed(&session), Vec::<String>::new());
+    }
+
+    fn editable_folders(session: &Session) -> LocalOnlyFolders {
+        LocalOnlyFolders::new(["secure"], Some(&session.raw))
+            .unwrap()
+            .with_editable(["secure"])
+            .0
+    }
+
+    #[test]
+    fn a_move_stays_inside_editable_folders() {
+        let session = editable_session();
+        let folders = editable_folders(&session);
+        move_note_file(
+            &note_write_guard(),
+            &session.root,
+            "finance/secure/bank.md",
+            "finance/secure/2026/bank.md",
+            Some(&folders),
+        )
+        .unwrap();
+        assert_eq!(
+            read(&session.raw.join("finance/secure/2026/bank.md")),
+            "# Bank"
+        );
+        assert!(!session.raw.join("finance/secure/bank.md").exists());
+        // Between two editable folders, a link and a real directory.
+        move_note_file(
+            &note_write_guard(),
+            &session.root,
+            "finance/secure/2026/bank.md",
+            "people/secure/bank.md",
+            Some(&folders),
+        )
+        .unwrap();
+        assert_eq!(read(&session.root.join("people/secure/bank.md")), "# Bank");
+        // An occupied destination refuses, both files intact.
+        let occupied = move_note_file(
+            &note_write_guard(),
+            &session.root,
+            "people/secure/bank.md",
+            "people/secure/visa.md",
+            Some(&folders),
+        );
+        assert!(occupied.is_err());
+        assert_eq!(read(&session.root.join("people/secure/visa.md")), "# Visa");
+
+        // Crossing the boundary either way refuses before anything moves.
+        for (from, to) in [
+            ("people/plan.md", "finance/secure/plan.md"),
+            ("people/secure/bank.md", "people/bank.md"),
+        ] {
+            let message = format!(
+                "{:?}",
+                move_note_file(&note_write_guard(), &session.root, from, to, Some(&folders))
+                    .unwrap_err()
+            );
+            assert!(
+                message.contains("crosses a local-only boundary"),
+                "{message}"
+            );
+        }
+        assert!(session.root.join("people/plan.md").exists());
+        assert!(session.root.join("people/secure/bank.md").exists());
+        assert!(!session.raw.join("finance/secure/plan.md").exists());
+        assert!(!session.root.join("people/bank.md").exists());
+    }
+
+    /// The default contract: without `editable`, a local-only folder takes
+    /// no write, create, delete, move, or attachment.
+    #[cfg(desktop)]
+    #[test]
+    fn a_read_only_folder_still_refuses_every_edit() {
+        let session = session(true);
+        let state = || session.app.state::<GraphState>();
+        let _trash = os_trash_seam::install(|_| Ok(()));
+        let raw_before = snapshot(&session.raw);
+        let graph_before = snapshot(&session.root);
+        let folders = LocalOnlyFolders::new(["secure"], Some(&session.raw)).unwrap();
+
+        for (path, expected) in [
+            ("finance/secure/bank.md", Some("# Bank")),
+            ("finance/secure/new.md", None),
+            ("people/secure/visa.md", Some("# Visa")),
+        ] {
+            assert!(
+                write_note(&session, path, "# Ours", Some(true), expected).is_err(),
+                "{path}"
+            );
+        }
+        assert!(create_note(&session, "finance/secure/new.md", "x").is_err());
+        assert!(note_delete("finance/secure/bank.md".into(), 1, state()).is_err());
+        assert!(note_delete("people/secure/visa.md".into(), 1, state()).is_err());
+        assert!(move_note_file(
+            &note_write_guard(),
+            &session.root,
+            "finance/secure/bank.md",
+            "finance/secure/moved.md",
+            Some(&folders),
+        )
+        .is_err());
+        let source = session.root.join("people/photo.png");
+        assert!(assets::asset_import(
+            source.to_string_lossy().into_owned(),
+            "pic.png".into(),
+            "finance/secure/bank.md".into(),
+            1,
+            state(),
+        )
+        .is_err());
+
+        assert_eq!(snapshot(&session.raw), raw_before);
+        assert_eq!(snapshot(&session.root), graph_before);
+        assert!(os_trash_seam::calls().is_empty());
+    }
+
+    fn upload(session: &Session, bytes: &[u8], name: &str, note: &str) -> AppResult<String> {
+        let id = assets::asset_upload_begin(1, session.app.state(), session.app.state()).unwrap();
+        assets::append_chunk(&session.app.state::<assets::AssetUploads>(), &id, bytes).unwrap();
+        assets::asset_upload_commit(
+            id,
+            name.into(),
+            note.into(),
+            1,
+            session.app.state(),
+            session.app.state(),
+        )
+    }
+
+    fn import(session: &Session, source: &Path, name: &str, note: &str) -> AppResult<String> {
+        assets::asset_import(
+            source.to_string_lossy().into_owned(),
+            name.into(),
+            note.into(),
+            1,
+            session.app.state(),
+        )
+    }
+
+    fn staging_is_empty(session: &Session) -> bool {
+        fs::read_dir(session.root.join(".reflect/tmp"))
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true)
+    }
+
+    #[test]
+    fn an_editable_notes_attachments_stay_in_its_folder() {
+        let session = editable_session();
+        let assets_before = snapshot(&session.root.join("assets"));
+        let source = session.root.join("people/photo.png");
+
+        assert_eq!(
+            upload(&session, b"scan", "scan.png", "finance/secure/bank.md").unwrap(),
+            "finance/secure/assets/scan.png"
+        );
+        assert_eq!(
+            import(&session, &source, "scan.png", "finance/secure/sub/deep.md").unwrap(),
+            "finance/secure/assets/scan-2.png"
+        );
+        assert_eq!(
+            fs::read(session.raw.join("finance/secure/assets/scan.png")).unwrap(),
+            b"scan"
+        );
+        assert_eq!(
+            fs::read(session.raw.join("finance/secure/assets/scan-2.png")).unwrap(),
+            b"png"
+        );
+        // A real editable folder keeps them in its own `assets/` too.
+        assert_eq!(
+            upload(&session, b"id", "id.png", "people/secure/visa.md").unwrap(),
+            "people/secure/assets/id.png"
+        );
+        assert!(session.root.join("people/secure/assets/id.png").is_file());
+
+        assert_eq!(snapshot(&session.root.join("assets")), assets_before);
+        assert!(staging_is_empty(&session));
+
+        // Control: an ordinary note's attachments go to `assets/` as before.
+        assert_eq!(
+            upload(&session, b"chart", "chart.png", "people/plan.md").unwrap(),
+            "assets/chart.png"
+        );
+        assert_eq!(
+            fs::read(session.root.join("assets/chart.png")).unwrap(),
+            b"chart"
+        );
+    }
+
+    #[test]
+    fn attachments_refuse_hidden_names_and_a_planted_assets_link() {
+        let editable = editable_session();
+        let source = editable.root.join("people/photo.png");
+
+        // A hidden name, and a path-shaped one.
+        for name in [".scan.png", "sub/scan.png"] {
+            assert!(upload(&editable, b"x", name, "finance/secure/bank.md").is_err());
+            assert!(import(&editable, &source, name, "finance/secure/bank.md").is_err());
+        }
+        // `<folder>/assets` planted as a link into `notes/`.
+        let notes_before = snapshot(&editable.root.join("notes"));
+        symlink(
+            editable.root.join("notes"),
+            editable.raw.join("finance/secure/assets"),
+        )
+        .unwrap();
+        assert!(upload(&editable, b"x", "scan.png", "finance/secure/bank.md").is_err());
+        assert!(import(&editable, &source, "scan.png", "finance/secure/bank.md").is_err());
+        assert_eq!(snapshot(&editable.root.join("notes")), notes_before);
+        assert!(staging_is_empty(&editable));
+    }
+
+    #[test]
+    fn a_note_in_a_read_only_folder_takes_no_attachment() {
+        let read_only = session(true);
+        let source = read_only.root.join("people/photo.png");
+        let raw_before = snapshot(&read_only.raw);
+        let assets_before = snapshot(&read_only.root.join("assets"));
+        assert!(upload(&read_only, b"x", "scan.png", "finance/secure/bank.md").is_err());
+        assert!(import(&read_only, &source, "scan.png", "people/secure/visa.md").is_err());
+        assert_eq!(snapshot(&read_only.raw), raw_before);
+        assert_eq!(snapshot(&read_only.root.join("assets")), assets_before);
+        assert!(staging_is_empty(&read_only));
     }
 
     fn shareable(session: &Session, path: &str) -> ShareableNoteRead {
@@ -2241,6 +3049,7 @@ mod local_only_command_tests {
             let imported = assets::asset_import(
                 source.to_string_lossy().into_owned(),
                 "pic.png".into(),
+                "people/plan.md".into(),
                 1,
                 state(),
             );

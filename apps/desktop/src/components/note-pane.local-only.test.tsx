@@ -22,6 +22,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   // The graph's local-only folders are `secure` (the predicate itself is
   // covered against the shared fixture in core).
   isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
+  isLocalOnlyReadOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({

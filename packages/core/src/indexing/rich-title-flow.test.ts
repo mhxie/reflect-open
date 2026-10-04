@@ -118,6 +118,7 @@ describe('rich title flow', () => {
         failed: [],
         collision: false,
         destinationBlocked: true,
+        keptInBackup: [],
       })
       expect(writes).toEqual([])
     } finally {

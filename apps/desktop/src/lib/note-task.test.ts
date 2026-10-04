@@ -31,7 +31,10 @@ vi.mock('@reflect/core', async (importOriginal) => {
     ...core,
     readNote,
     writeNote,
-    isLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
+    // `finance/secure` is an editable local-only folder, `archive` a read-only one.
+    isLocalOnlyPath: (path: string) =>
+      path.startsWith('finance/secure/') || path.startsWith('archive/'),
+    isLocalOnlyReadOnlyPath: (path: string) => path.startsWith('archive/'),
     patchNote: patchNoteOver(core, { readNote, writeNote }),
   }
 })
@@ -82,22 +85,92 @@ beforeEach(() => {
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe('local-only notes', () => {
-  it('refuses every task write without reading or writing the note', async () => {
+  it('refuses every task write in a read-only folder without reading or writing the note', async () => {
     const local = {
-      notePath: 'finance/secure/bank.md',
+      notePath: 'archive/bank.md',
       astPath: [0],
       markdown: 'do it',
       checked: false,
     }
-    await expect(toggleTask(local, 7)).rejects.toThrow(/local-only/)
-    await expect(insertTask(local.notePath, 7)).rejects.toThrow(/local-only/)
+    await expect(toggleTask(local, 7)).rejects.toThrow(/read-only local-only/)
+    await expect(insertTask(local.notePath, 7)).rejects.toThrow(/read-only local-only/)
     expect(openSession).not.toHaveBeenCalled()
     expect(readNote).not.toHaveBeenCalled()
     expect(writeNote).not.toHaveBeenCalled()
   })
+
+  it('writes a task edit in an editable folder, checked against what it read', async () => {
+    openSession.mockReturnValue(null)
+    readNote.mockResolvedValue('+ [ ] do it\n')
+    writeNote.mockResolvedValue(undefined)
+
+    await toggleTask(ref('+ [ ] do it\n', 0, 'finance/secure/bank.md'), 7)
+
+    expect(writeNote).toHaveBeenCalledWith(
+      'finance/secure/bank.md',
+      '+ [x] do it\n',
+      7,
+      '+ [ ] do it\n',
+    )
+  })
 })
 
 describe('write serialization', () => {
+  it('does not send queued private task text into a new graph’s same-path session', async () => {
+    const path = 'finance/secure/bank.md'
+    const privateTask = ref('+ [ ] do it\n', 0, path)
+    const otherSession = sessionOver('+ [ ] do it\n')
+    let switched = false
+    let releaseWrite: () => void = () => {}
+    openSession.mockImplementation((_path: string, generation: number) =>
+      switched && generation === 8 ? otherSession : null,
+    )
+    readNote.mockImplementation(async (_path: string, generation: number) => {
+      if (switched && generation === 7) throw new Error('stale graph')
+      return '+ [ ] do it\n'
+    })
+    writeNote.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWrite = resolve
+        }),
+    )
+    const first = toggleTask(privateTask, 7)
+    await vi.waitFor(() => expect(writeNote).toHaveBeenCalledTimes(1))
+    const queued = editTask(privateTask, 'private account details', 7)
+    const rejected = expect(queued).rejects.toThrow('stale graph')
+    switched = true
+    releaseWrite()
+    await first
+    await rejected
+    expect(otherSession.commitSourceEdit).not.toHaveBeenCalled()
+    expect(writeNote).toHaveBeenCalledTimes(1)
+    expect(openSession).toHaveBeenLastCalledWith(path, 7)
+  })
+
+  it('runs a new graph’s task without waiting for the old graph’s same-path write', async () => {
+    let releaseWrite: () => void = () => {}
+    openSession.mockReturnValue(null)
+    readNote.mockResolvedValue('+ [ ] do it\n')
+    writeNote
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseWrite = resolve
+          }),
+      )
+      .mockResolvedValue(undefined)
+    const first = toggleTask(task, 7)
+    await vi.waitFor(() => expect(writeNote).toHaveBeenCalledTimes(1))
+    try {
+      await expect(toggleTask(task, 8)).resolves.toMatchObject({ source: '+ [x] do it\n' })
+      expect(writeNote).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseWrite()
+      await first
+    }
+  })
+
   it('serializes concurrent writes to the same note — no read/write interleave', async () => {
     openSession.mockReturnValue(null)
     readNote.mockResolvedValue('+ [ ] do it\n')

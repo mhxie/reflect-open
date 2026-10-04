@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { isLocalOnlyPath } from '@reflect/core'
+import { isLocalOnlyPath, isLocalOnlyReadOnlyPath } from '@reflect/core'
 import { Lock } from 'lucide-react'
 import { PinIcon } from '@/components/icons/pin-icon.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
@@ -45,8 +45,10 @@ const UNREADABLE_LABELS = {
  * Pin reads the shared shelf cache, updated immediately by every pin entrypoint.
  * Privacy reads the note row cache shared by the palette and mobile actions;
  * a note whose frontmatter can't be read shows as locked with the toggle
- * disabled. A note inside a local-only folder gets no section: every action
- * would write or publish it, and its privacy is not a toggle.
+ * disabled. A note inside a read-only local-only folder gets no section:
+ * every action would write or publish it. One in an editable local-only
+ * folder keeps Pin (its frontmatter stays in the folder) and Trash; Lock is
+ * gone because its privacy is not a toggle, and Gist because it publishes.
  */
 export function NoteActionsSection({
   path,
@@ -75,9 +77,10 @@ export function NoteActionsSection({
     }
   }
 
-  if (isLocalOnlyPath(path)) {
+  if (isLocalOnlyReadOnlyPath(path)) {
     return null
   }
+  const localOnly = isLocalOnlyPath(path)
 
   return (
     <SidebarSection storageKey="note-actions" title="Note actions">
@@ -88,20 +91,22 @@ export function NoteActionsSection({
         labels={{ active: 'Un-pin this note', inactive: 'Pin this note' }}
         keybinding={PIN_KEYBINDING}
       />
-      <NoteActionButton
-        isActive={isPrivate}
-        disabled={unreadable}
-        onClick={togglePrivate}
-        icon={<Lock size={14} aria-hidden />}
-        labels={unreadable ? UNREADABLE_LABELS : LOCK_LABELS}
-        keybinding={PRIVATE_KEYBINDING}
-        tooltip={
-          unreadable
-            ? UNREADABLE_FRONTMATTER_HINT
-            : 'Locks this note out of AI. Backup and sync still include it.'
-        }
-      />
-      <NoteGistAction path={path} keybinding={GIST_KEYBINDING} />
+      {localOnly ? null : (
+        <NoteActionButton
+          isActive={isPrivate}
+          disabled={unreadable}
+          onClick={togglePrivate}
+          icon={<Lock size={14} aria-hidden />}
+          labels={unreadable ? UNREADABLE_LABELS : LOCK_LABELS}
+          keybinding={PRIVATE_KEYBINDING}
+          tooltip={
+            unreadable
+              ? UNREADABLE_FRONTMATTER_HINT
+              : 'Locks this note out of AI. Backup and sync still include it.'
+          }
+        />
+      )}
+      {localOnly ? null : <NoteGistAction path={path} keybinding={GIST_KEYBINDING} />}
       {showTrash ? <NoteTrashAction path={path} /> : null}
     </SidebarSection>
   )

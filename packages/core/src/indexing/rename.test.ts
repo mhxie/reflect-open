@@ -62,6 +62,7 @@ describe('rewriteLinksForTitleChange', () => {
       failed: [],
       collision: false,
       destinationBlocked: false,
+      keptInBackup: [],
     })
     expect(writes['notes/a.md']).toBe('See [[New Title]] for context.\n')
     expect(writes['notes/b.md']).toBe('Alias form: [[New Title|the doc]].\n')
@@ -90,6 +91,63 @@ describe('rewriteLinksForTitleChange', () => {
       expect(result.failed).toEqual([])
       expect(reads).toEqual(['notes/a.md'])
       expect(writes['finance/secure/bank.md']).toBeUndefined()
+    } finally {
+      setLocalOnlyFolders([])
+    }
+  })
+
+  it('renames a local-only note into local-only sources only, keeping backed-up ones on the old title', async () => {
+    const { io, writes } = fakeIo({
+      'notes/a.md': 'See [[Old Title]].\n',
+      'finance/secure/b.md': 'Also [[Old Title]].\n',
+      'archive/c.md': 'Old: [[Old Title]].\n',
+    })
+    const reads: string[] = []
+    const read = io.read
+    io.read = async (path) => {
+      reads.push(path)
+      return await read(path)
+    }
+    setLocalOnlyFolders(['secure', 'archive'], ['secure'])
+    try {
+      const result = await rewriteLinksForTitleChange({
+        path: 'finance/secure/target.md',
+        from: 'Old Title',
+        to: 'New Title',
+        io,
+      })
+      expect(result).toEqual({
+        rewritten: ['finance/secure/b.md'],
+        failed: [],
+        collision: false,
+        destinationBlocked: false,
+        keptInBackup: ['notes/a.md'],
+      })
+      // The new title never reaches a backed-up note, nor a read-only folder.
+      expect(reads).toEqual(['finance/secure/b.md'])
+      expect(writes).toEqual({ 'finance/secure/b.md': 'Also [[New Title]].\n' })
+    } finally {
+      setLocalOnlyFolders([])
+    }
+  })
+
+  it('renames a backed-up note into editable local-only sources but never read-only ones', async () => {
+    const { io, writes } = fakeIo({
+      'notes/a.md': 'See [[Old Title]].\n',
+      'finance/secure/b.md': 'Also [[Old Title]].\n',
+      'archive/c.md': 'Old: [[Old Title]].\n',
+    })
+    setLocalOnlyFolders(['secure', 'archive'], ['secure'])
+    try {
+      const result = await rewriteLinksForTitleChange({
+        path: 'notes/target.md',
+        from: 'Old Title',
+        to: 'New Title',
+        io,
+      })
+      expect(result.rewritten).toEqual(['finance/secure/b.md', 'notes/a.md'])
+      expect(result.keptInBackup).toEqual([])
+      expect(writes['archive/c.md']).toBeUndefined()
     } finally {
       setLocalOnlyFolders([])
     }
@@ -674,6 +732,7 @@ describe('rewriteLinksForTitleChange — rich titles', () => {
       failed: [],
       collision: false,
       destinationBlocked: false,
+      keptInBackup: [],
     })
     expect(writes['notes/source.md']).toBe('See [[Meeting with Grace]] tomorrow.')
   })
@@ -744,6 +803,7 @@ describe('rewriteLinksForTitleChange — destination guard', () => {
       failed: [],
       collision: false,
       destinationBlocked: true,
+      keptInBackup: [],
     })
     expect(writes).toEqual({})
   })
@@ -761,6 +821,7 @@ describe('rewriteLinksForTitleChange — destination guard', () => {
       failed: [],
       collision: false,
       destinationBlocked: true,
+      keptInBackup: [],
     })
     expect(writes).toEqual({})
   })
@@ -801,6 +862,7 @@ describe('rewriteLinksForTitleChange — destination guard', () => {
       failed: [],
       collision: true,
       destinationBlocked: false,
+      keptInBackup: [],
     })
     expect(writes).toEqual({})
   })
@@ -840,6 +902,29 @@ describe('rewritePathLinksForMove', () => {
       const result = await rewritePathLinksForMove('notes/plan-2.md', 'notes/roadmap.md', io)
       expect(result).toEqual({ rewritten: ['Journal.md'], failed: [] })
       expect(writes['finance/secure/ledger.md']).toBeUndefined()
+    } finally {
+      setLocalOnlyFolders([])
+    }
+  })
+
+  it('retargets path links in an editable local-only folder, never a read-only one', async () => {
+    const { io, writes } = pathIo(
+      {
+        'Journal.md': 'See [[notes/plan-2]].',
+        'finance/secure/ledger.md': 'Plan: [[notes/plan-2]].',
+        'archive/old.md': 'Plan: [[notes/plan-2]].',
+      },
+      ['Journal.md', 'archive/old.md', 'finance/secure/ledger.md'],
+    )
+    setLocalOnlyFolders(['secure', 'archive'], ['secure'])
+    try {
+      const result = await rewritePathLinksForMove('notes/plan-2.md', 'notes/roadmap.md', io)
+      expect(result).toEqual({
+        rewritten: ['Journal.md', 'finance/secure/ledger.md'],
+        failed: [],
+      })
+      expect(writes['finance/secure/ledger.md']).toBe('Plan: [[notes/roadmap]].')
+      expect(writes['archive/old.md']).toBeUndefined()
     } finally {
       setLocalOnlyFolders([])
     }

@@ -15,6 +15,12 @@ describe('Reflect-managed notes', () => {
     expect(isReflectManagedNote('Projects/managed.md', source)).toBe(false)
   })
 
+  it('never manages a local-only note, whose file must not follow its title', () => {
+    const source = `---\nid: ${VALID_ID}\n---\n# Ledger\n`
+    expect(isReflectManagedNote(`archive/${VALID_ID}.md`, source)).toBe(false)
+    expect(isReflectManagedNote('finance/secure/ledger.md', source)).toBe(false)
+  })
+
   it('keeps direct adopted notes without a valid Reflect id unmanaged', () => {
     expect(isReflectManagedNote('notes/adopted.md', '# Adopted\n')).toBe(false)
     expect(isReflectManagedNote('notes/adopted.md', '---\nid: legacy-id\n---\n# Adopted\n')).toBe(

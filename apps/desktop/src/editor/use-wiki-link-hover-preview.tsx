@@ -1,6 +1,12 @@
 import { useCallback, type ReactNode } from 'react'
 import type { ImageUrlResolver, WikilinkHoverHit } from '@meowdown/core'
-import { resolveExistingWikiTarget, splitFrontmatter, type DateFormat } from '@reflect/core'
+import {
+  isLocalOnlyPath,
+  notePrivate,
+  resolveExistingWikiTarget,
+  splitFrontmatter,
+  type DateFormat,
+} from '@reflect/core'
 import { WikiLinkHoverPreview } from '@/components/wiki-link-hover-preview.tsx'
 import { createNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { readExistingNoteSource } from '@/lib/read-existing-note-source.ts'
@@ -69,6 +75,7 @@ export function useWikiLinkHoverPreview({
           <WikiLinkHoverPreview
             path={resolution.path}
             markdown={splitFrontmatter(source).body}
+            privateNote={isLocalOnlyPath(resolution.path) || notePrivate(source)}
             dateFormat={dateFormat}
             resolveImageUrl={passiveImageResolver(generation, resolution.path)}
             resolveWikiEmbed={createNoteAttachments(generation, resolution.path).resolveWikiEmbed}

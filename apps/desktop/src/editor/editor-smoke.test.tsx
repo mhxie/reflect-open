@@ -25,7 +25,14 @@ describe('NoteEditor smoke', () => {
 
     const handleRef = createRef<NoteEditorHandle>()
     const onChange = vi.fn()
-    await render(<NoteEditor initialContent="Hello" onChange={onChange} handleRef={handleRef} />)
+    await render(
+      <NoteEditor
+        privateNote={false}
+        initialContent="Hello"
+        onChange={onChange}
+        handleRef={handleRef}
+      />,
+    )
     await expect.element(page.getByText('Hello')).toBeInTheDocument()
     await expect.element(pmRoot).toBeInTheDocument()
 

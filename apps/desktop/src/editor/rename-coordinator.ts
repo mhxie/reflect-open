@@ -14,7 +14,11 @@ import {
 import { placeOldTitleAlias } from './alias-placement.ts'
 import { moveNoteCarryingSession } from './move-note.ts'
 import type { NoteContentOrigin } from './note-session.ts'
-import { composeRenameFailure, type RenamePhaseFailures } from './rename-failure.ts'
+import {
+  composeRenameFailure,
+  keptInBackupNote,
+  type RenamePhaseFailures,
+} from './rename-failure.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { createTitleRenameTracker } from './title-rename.ts'
 import type { TitleRename } from './title-rename.ts'
@@ -163,6 +167,8 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
       // The phases fail independently and the report says what held — the
       // permutations live in `composeRenameFailure`.
       const failures: RenamePhaseFailures = { rewrite: null, alias: null, move: null }
+      // Backed-up notes a local-only note's rename left on the old title.
+      let keptInBackup = 0
       try {
         let collision = false
         try {
@@ -180,6 +186,7 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
             onProgress: operation.progress,
           })
           collision = result.collision
+          keptInBackup = result.keptInBackup.length
         } catch (cause) {
           // A failed rewrite must NOT skip the alias below: the tracker's
           // baseline has already advanced (re-arming would re-fire with a
@@ -218,8 +225,11 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
         }
       } finally {
         const failure = composeRenameFailure(from, failures)
+        const kept = keptInBackupNote(keptInBackup, failures.alias === null)
         if (failure !== null) {
-          operation.fail(failure)
+          operation.fail(kept === null ? failure : `${failure}; ${kept}`)
+        } else if (kept !== null) {
+          operation.warn(kept)
         } else {
           operation.done()
         }

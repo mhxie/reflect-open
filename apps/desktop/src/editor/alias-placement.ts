@@ -53,7 +53,7 @@ export async function placeOldTitleAlias(
   generation: number,
 ): Promise<string[]> {
   const aliasesOf = (source: string): string[] => parseNote({ path, source }).frontmatter.aliases
-  const owner = openSession(path)
+  const owner = openSession(path, generation)
   let placed = false
   let added: string[] = []
   if (owner !== null) {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { ArrowRight, CalendarDays, Check, CircleCheck, List, Trash2, Undo2, X } from 'lucide-react'
 import { Priority } from '@meowdown/core'
 import { useKeymap } from '@meowdown/react'
-import { getTaskDueDate, type OpenTask } from '@reflect/core'
+import { getTaskDueDate, isLocalOnlyPath, type OpenTask } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer.tsx'
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
@@ -10,6 +10,7 @@ import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
+import { usePrivateNote } from '@/hooks/use-private-note.ts'
 import { addDaysIso, formatDayLabel } from '@/lib/dates.ts'
 import type { TaskActions } from '@/lib/tasks/use-task-actions.ts'
 import { cn } from '@/lib/utils.ts'
@@ -65,9 +66,13 @@ export function MobileTaskEditSheet({
   const { graph } = useGraph()
   const { settings } = useSettings()
   const generation = graph?.generation ?? null
-  const navigateWikiLink = useWikiLinkNavigation(generation)
+  // The task's note decides the policy: a link from a local-only note only
+  // navigates, never creating a note, and a private note stays off the network.
+  const localOnly = isLocalOnlyPath(task.notePath)
+  const privateNote = usePrivateNote(task.notePath, { sessionEpoch: null, privateHeader: false })
+  const navigateWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
   const navigateTag = useTagNavigation()
-  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete()
+  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(task.notePath)
   const [showCalendar, setShowCalendar] = useState(false)
   // The editor is uncontrolled; a reopen reseeds the draft (the row may have
   // been rewritten by an action), so remount it via this seed to re-read it.
@@ -221,6 +226,7 @@ export function MobileTaskEditSheet({
             <NoteEditor
               key={editorSeed}
               initialContent={draft}
+              privateNote={privateNote}
               onChange={handleChange}
               markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
               spellCheck={settings.editorSpellCheck}

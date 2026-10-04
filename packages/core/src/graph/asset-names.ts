@@ -38,3 +38,23 @@ export function assetFileName(originalName: string): string {
   const slug = slugForTitle(stem.replaceAll('.', '-'))
   return extension === '' ? slug : `${slug}.${extension}`
 }
+
+/**
+ * The Markdown destination that links a saved attachment, from the
+ * graph-relative path the asset intake returned. An `assets/…` file keeps
+ * the bare spelling Reflect has always written. Anything else (an editable
+ * local-only note's `<folder>/assets/…`) is spelled vault-root-absolute, each
+ * segment percent-encoded: a leading `/` resolves to exactly that one file
+ * from any note, and a folder above it may carry spaces.
+ *
+ * ```ts
+ * assetLinkDestination('assets/scan.png')                 // 'assets/scan.png'
+ * assetLinkDestination('My Finance/secure/assets/a.png')  // '/My%20Finance/secure/assets/a.png'
+ * ```
+ */
+export function assetLinkDestination(path: string): string {
+  if (path.startsWith('assets/')) {
+    return path
+  }
+  return `/${path.split('/').map(encodeURIComponent).join('/')}`
+}

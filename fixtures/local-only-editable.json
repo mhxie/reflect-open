@@ -1,0 +1,119 @@
+{
+  "folders": ["secure", "archive"],
+  "editable": ["secure"],
+  "cases": [
+    {
+      "path": "finance/secure/x.md",
+      "localOnly": true,
+      "editable": true,
+      "folderEntry": false,
+      "folderRoot": "finance/secure"
+    },
+    {
+      "path": "finance/secure/sub/deep/x.md",
+      "localOnly": true,
+      "editable": true,
+      "folderEntry": false,
+      "folderRoot": "finance/secure"
+    },
+    {
+      "path": "secure/top.md",
+      "localOnly": true,
+      "editable": true,
+      "folderEntry": false,
+      "folderRoot": "secure"
+    },
+    {
+      "path": "finance/SECURE/x.md",
+      "localOnly": true,
+      "editable": true,
+      "folderEntry": false,
+      "folderRoot": "finance/SECURE"
+    },
+    {
+      "path": "./finance//secure/x.md",
+      "localOnly": true,
+      "editable": true,
+      "folderEntry": false,
+      "folderRoot": "finance/secure"
+    },
+    {
+      "path": "finance/secure/assets/scan.png",
+      "localOnly": true,
+      "editable": true,
+      "folderEntry": false,
+      "folderRoot": "finance/secure"
+    },
+    {
+      "path": "archive/x.md",
+      "localOnly": true,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": "archive"
+    },
+    {
+      "path": "archive/2019/secure/x.md",
+      "localOnly": true,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": "archive/2019/secure"
+    },
+    {
+      "path": "finance/secure/archive/x.md",
+      "localOnly": true,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": "finance/secure/archive"
+    },
+    {
+      "path": "finance/secure",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": true,
+      "folderRoot": null
+    },
+    {
+      "path": "finance/Secure/",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": true,
+      "folderRoot": null
+    },
+    {
+      "path": "archive",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": true,
+      "folderRoot": null
+    },
+    {
+      "path": "finance/ſecure/x.md",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": null
+    },
+    {
+      "path": "finance/secured/x.md",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": null
+    },
+    {
+      "path": "notes/secure.md",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": null
+    },
+    {
+      "path": "notes/a.md",
+      "localOnly": false,
+      "editable": false,
+      "folderEntry": false,
+      "folderRoot": null
+    },
+    { "path": "", "localOnly": false, "editable": false, "folderEntry": false, "folderRoot": null }
+  ]
+}

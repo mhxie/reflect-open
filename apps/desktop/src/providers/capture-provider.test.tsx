@@ -32,7 +32,13 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
 
 import { CaptureProvider } from './capture-provider.tsx'
 
-const GRAPH: GraphInfo = { root: '/g', name: 'g', generation: 7, localOnlyFolders: [] }
+const GRAPH: GraphInfo = {
+  root: '/g',
+  name: 'g',
+  generation: 7,
+  localOnlyFolders: [],
+  localOnlyEditableFolders: [],
+}
 
 function mount(children: ReactNode = null) {
   return render(<CaptureProvider graph={GRAPH}>{children}</CaptureProvider>)

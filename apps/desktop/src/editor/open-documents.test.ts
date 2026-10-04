@@ -26,6 +26,8 @@ function fakeSession(path: string, log: string[]): NoteSession {
     prepareDelete: async () => false,
     cancelDelete: () => {},
     loadTheirs: () => {},
+    restoreRecovery: () => {},
+    discardRecovery: () => {},
     commitFrontmatter: async () => true,
     content: () => '',
     liveContent: () => '',
@@ -38,9 +40,25 @@ function fakeSession(path: string, log: string[]): NoteSession {
 }
 
 describe('open documents', () => {
+  it('restricts delayed work to its owning graph and follows same-graph generation changes', () => {
+    const path = 'secure/plan.md'
+    const session = fakeSession(path, [])
+    let generation = 7
+    const unregister = registerOpenDocument({ session, generation: () => generation })
+    try {
+      expect(openSession(path, 7)).toBe(session)
+      expect(openSession(path, 8)).toBeNull()
+      generation = 8
+      expect(openSession(path, 7)).toBeNull()
+      expect(openSession(path, 8)).toBe(session)
+    } finally {
+      unregister()
+    }
+  })
+
   it('looks up the live session by path and forgets it on unregister', () => {
     const session = fakeSession('notes/a.md', [])
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     expect(openSession('notes/a.md')).toBe(session)
     unregister()
     expect(openSession('notes/a.md')).toBeNull()
@@ -49,8 +67,8 @@ describe('open documents', () => {
   it('a reopened path replaces the entry; the old unregister cannot evict it', () => {
     const first = fakeSession('notes/a.md', [])
     const second = fakeSession('notes/a.md', [])
-    const unregisterFirst = registerOpenDocument({ session: first })
-    const unregisterSecond = registerOpenDocument({ session: second })
+    const unregisterFirst = registerOpenDocument({ generation: () => 1, session: first })
+    const unregisterSecond = registerOpenDocument({ generation: () => 1, session: second })
     unregisterFirst() // stale unregister after the reopen — must be a no-op
     expect(openSession('notes/a.md')).toBe(second)
     unregisterSecond()
@@ -59,6 +77,7 @@ describe('open documents', () => {
   it('flushOpenDocuments flushes, then settles, then awaits the settle work', async () => {
     const log: string[] = []
     const unregister = registerOpenDocument({
+      generation: () => 1,
       session: fakeSession('notes/a.md', log),
       settle: () => {
         log.push('settle')
@@ -78,8 +97,14 @@ describe('open documents', () => {
 
   it('reloadOpenDocuments asks every open session to reconcile against disk', () => {
     const log: string[] = []
-    const unregisterA = registerOpenDocument({ session: fakeSession('notes/a.md', log) })
-    const unregisterB = registerOpenDocument({ session: fakeSession('notes/b.md', log) })
+    const unregisterA = registerOpenDocument({
+      generation: () => 1,
+      session: fakeSession('notes/a.md', log),
+    })
+    const unregisterB = registerOpenDocument({
+      generation: () => 1,
+      session: fakeSession('notes/b.md', log),
+    })
     try {
       reloadOpenDocuments()
       expect(log).toEqual(['externalChanged:notes/a.md', 'externalChanged:notes/b.md'])
@@ -95,8 +120,11 @@ describe('open documents', () => {
     failing.flush = async () => {
       throw new Error('disk full')
     }
-    const unregisterBad = registerOpenDocument({ session: failing })
-    const unregisterGood = registerOpenDocument({ session: fakeSession('notes/good.md', log) })
+    const unregisterBad = registerOpenDocument({ generation: () => 1, session: failing })
+    const unregisterGood = registerOpenDocument({
+      generation: () => 1,
+      session: fakeSession('notes/good.md', log),
+    })
     try {
       await expect(flushOpenDocuments()).resolves.toBeUndefined()
       expect(log).toContain('flush:notes/good.md')
@@ -111,7 +139,7 @@ describe('retargetOpenDocument (Plan 17)', () => {
   it('re-keys the entry; the original unregister still finds it by identity', async () => {
     const { retargetOpenDocument } = await import('./open-documents.ts')
     const session = fakeSession('notes/a.md', [])
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
 
     retargetOpenDocument('notes/a.md', 'notes/renamed.md', session)
     expect(openSession('notes/a.md')).toBeNull()
@@ -132,7 +160,7 @@ describe('retargetOpenDocument (Plan 17)', () => {
     // `to` belongs to another pane, it must stay exactly where it is.
     const { retargetOpenDocument } = await import('./open-documents.ts')
     const foreign = fakeSession('notes/taken.md', [])
-    const unregister = registerOpenDocument({ session: foreign })
+    const unregister = registerOpenDocument({ generation: () => 1, session: foreign })
     try {
       retargetOpenDocument('notes/taken.md', 'notes/old.md', fakeSession('notes/taken.md', []))
       expect(openSession('notes/taken.md')).toBe(foreign)
@@ -175,7 +203,7 @@ describe('reloadOpenDocuments with live sessions', () => {
     const applied: string[] = []
     const snapshots: NoteSessionSnapshot[] = []
     const session = liveSession(() => disk, applied, snapshots)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     try {
       session.load()
       await vi.waitFor(() => expect(snapshots.at(-1)?.status).toBe('ready'))
@@ -195,7 +223,7 @@ describe('reloadOpenDocuments with live sessions', () => {
     let disk = '# Old\n'
     const snapshots: NoteSessionSnapshot[] = []
     const session = liveSession(() => disk, [], snapshots)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     try {
       session.load()
       await vi.waitFor(() => expect(snapshots.at(-1)?.status).toBe('ready'))
@@ -216,7 +244,7 @@ describe('reloadOpenDocuments with live sessions', () => {
     const applied: string[] = []
     const snapshots: NoteSessionSnapshot[] = []
     const session = liveSession(() => '# Old\n', applied, snapshots)
-    const unregister = registerOpenDocument({ session })
+    const unregister = registerOpenDocument({ generation: () => 1, session })
     try {
       session.load()
       await vi.waitFor(() => expect(snapshots.at(-1)?.status).toBe('ready'))

@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   resolveExistingWikiTarget: mocks.resolveExistingWikiTarget,
+  // The graph's local-only folders are `secure`.
+  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
 }))
 
 vi.mock('@/lib/read-existing-note-source.ts', () => ({
@@ -29,6 +31,7 @@ vi.mock('@/lib/read-existing-note-source.ts', () => ({
 interface MarkdownPreviewProps {
   content: string
   interactive: boolean
+  remoteEmbeds: boolean
   resolveImageUrl: ImageUrlResolver
   resolveWikiEmbed: WikiEmbedResolver
 }
@@ -122,6 +125,21 @@ describe('useWikiLinkHoverPreview', () => {
     })
     expect(mocks.resolveExistingWikiTarget).toHaveBeenCalledWith('Alpha', 7)
     expect(mocks.readExistingNoteSource).toHaveBeenCalledWith('notes/alpha.md', 7)
+  })
+
+  it.each([
+    ['a locked target', 'notes/alpha.md', '---\nprivate: true\n---\nBody', false],
+    ['an unreadable lock', 'notes/alpha.md', '---\nprivate: maybe\n---\nBody', false],
+    ['a local-only target', 'finance/secure/alpha.md', 'Body', false],
+    ['an ordinary target', 'notes/alpha.md', '---\nid: x\n---\nBody', true],
+  ])('renders %s with remote embeds %s', async (_label, path, source, remoteEmbeds) => {
+    mocks.resolveExistingWikiTarget.mockResolvedValue({ kind: 'resolved', path })
+    mocks.readExistingNoteSource.mockResolvedValue(source)
+    const renderBody = await setupRenderer()
+
+    await render(<>{await renderBody(hoverHit('Alpha'))}</>)
+
+    expect(mocks.markdownPreview.mock.calls.at(-1)?.[0]).toMatchObject({ remoteEmbeds })
   })
 
   it('serves only local sniffable raster images to the preview', async () => {

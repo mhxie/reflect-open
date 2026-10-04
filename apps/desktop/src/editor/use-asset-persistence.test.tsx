@@ -8,6 +8,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (filePath: string, protocol = 'asset') =>
     `${protocol}://localhost/${encodeURIComponent(filePath)}`,
 }))
+// The graph's local-only folder is `secure` (the predicate itself is covered
+// against the shared fixture in core).
+vi.mock('@reflect/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@reflect/core')>()),
+  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
+}))
 import { resetOperations, useOperations, type Operation } from '@/lib/operations.ts'
 import { queryClient } from '@/lib/query-client.ts'
 import {
@@ -137,6 +143,76 @@ describe('useAssetPersistence saveFile', () => {
     })
     expect(saved).toBeNull()
     expect(invoke).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A bridge whose upload commit lands where Rust would put it: an editable
+ * local-only note's attachment in its folder's own `assets/`.
+ */
+function installRoutingBridge(): ReturnType<typeof vi.fn> {
+  const invoke = vi.fn(async (command: string, args: Record<string, unknown>) => {
+    if (command === 'asset_upload_begin') {
+      return 'upload-1'
+    }
+    if (command === 'asset_upload_commit') {
+      const notePath = args['notePath'] as string
+      const folder = notePath.startsWith('My Finance/secure/') ? 'My Finance/secure/' : ''
+      return `${folder}assets/${args['desiredName'] as string}`
+    }
+    return null
+  })
+  setBridge({ invoke, invokeBinary: async () => null, listen: async () => () => {} })
+  return invoke
+}
+
+/** The note each upload commit named. */
+function committedNotePaths(invoke: ReturnType<typeof vi.fn>): unknown[] {
+  return invoke.mock.calls
+    .filter(([command]) => command === 'asset_upload_commit')
+    .map(([, args]) => (args as Record<string, unknown>)['notePath'])
+}
+
+describe('useAssetPersistence saveFile for local-only notes', () => {
+  it('names the note, links its folder’s copy vault-root-absolute, and warns about no Git limit', async () => {
+    const invoke = installRoutingBridge()
+    const { act } = await renderPersistence({ generation: 3, path: 'My Finance/secure/bank.md' })
+
+    let saved: string | null = null
+    await act(async () => {
+      saved = await persistence!.saveFile(
+        fileOf('Huge Scan.mov', 'video/quicktime', LARGE_FILE_BYTES + 1),
+      )
+    })
+
+    expect(committedNotePaths(invoke)).toEqual(['My Finance/secure/bank.md'])
+    expect(saved).toBe('/My%20Finance/secure/assets/huge-scan.mov')
+    // It never enters the Git backup, so the backup's size limits don't apply.
+    expect(operations.filter((operation) => operation.status === 'warning')).toEqual([])
+    // The pill sizes it from the save itself, by the link it inserted.
+    await expect(persistence!.resolveFileInfo(saved!)).resolves.toEqual({
+      size: LARGE_FILE_BYTES + 1,
+    })
+  })
+
+  it('sends the note the pane shows when the save starts, after the pane switched notes', async () => {
+    const invoke = installRoutingBridge()
+    const view = await renderPersistence({ generation: 3, path: 'notes/plan.md' })
+
+    let saved: string | null = null
+    await view.act(async () => {
+      saved = await persistence!.saveFile(fileOf('a.png', 'image/png'))
+    })
+    expect(saved).toMatch(/^assets\/pasted-\d+\.png$/)
+
+    // The same pane now shows an editable local-only note.
+    await view.rerender({ generation: 3, path: 'My Finance/secure/bank.md' })
+    await view.act(async () => {
+      saved = await persistence!.saveFile(fileOf('b.png', 'image/png'))
+    })
+
+    expect(committedNotePaths(invoke)).toEqual(['notes/plan.md', 'My Finance/secure/bank.md'])
+    expect(saved).toMatch(/^\/My%20Finance\/secure\/assets\/pasted-\d+\.png$/)
   })
 })
 

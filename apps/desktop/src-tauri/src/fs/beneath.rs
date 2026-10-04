@@ -14,10 +14,12 @@
 //! graph root (or in a hidden temp beside the target when that directory is
 //! on another volume), flush them with `F_FULLFSYNC`, and land with one
 //! rename: a replace only while the name still holds the file that was read
-//! ([`Identity`]), a create only while the name is free. A delete first
-//! moves the file into a fresh random directory under `.reflect/trash/`, so
-//! the path-based OS-trash call that follows names a place nothing else can
-//! occupy. `.reflect/recovery/` keeps one unsaved buffer per note.
+//! ([`Identity`]), a create only while the name is free. An upload already
+//! staged in `.reflect/tmp/` lands the same way, under the first free name.
+//! A delete first moves the file into a fresh random directory under
+//! `.reflect/trash/`, so the path-based OS-trash call that follows names a
+//! place nothing else can occupy. `.reflect/recovery/` keeps one unsaved
+//! buffer per note and editor session.
 //!
 //! Git sync's pull walks the graph the same way before it moves an entry
 //! out of a path it writes (`git::displace`): it inspects entries without
@@ -358,6 +360,45 @@ fn dataless(file: &File) -> BeneathResult<bool> {
     Ok(is_dataless(&file.metadata()?))
 }
 
+/// Check that `name` in `dir` is a regular file whose bytes are on this Mac,
+/// without reading it: the check before a move or delete. A symlink or
+/// anything but a regular file is [`BeneathError::Traversal`], a dataless
+/// file [`BeneathError::Offline`] (moving one out of its file provider's
+/// folder would strand its bytes in the cloud), and a missing one `NotFound`.
+pub(crate) fn regular_file_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> BeneathResult<()> {
+    let name = plain_name(name.as_ref())?;
+    let _no_materialize = NoMaterialize::engage();
+    let (file, stat) = open_file(dir, name)?;
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+        return Err(BeneathError::Traversal(format!(
+            "not a regular file: {}",
+            dir.path.join(name).display()
+        )));
+    }
+    if dataless(&file)? {
+        return Err(BeneathError::Offline);
+    }
+    Ok(())
+}
+
+/// Whether anything holds `name` in `dir`, or its iCloud eviction
+/// placeholder does ([`evicted_beneath`]): a create must treat either as
+/// taken. Nothing is followed.
+pub(crate) fn occupied_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> BeneathResult<bool> {
+    let name = plain_name(name.as_ref())?;
+    Ok(identity_at(dir, name)?.is_some() || evicted_beneath(dir, name)?)
+}
+
+/// Whether `name` in `dir` exists only as an iCloud eviction placeholder
+/// (`.<name>.icloud`): the note comes back at `name` when it re-downloads.
+pub(crate) fn evicted_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> BeneathResult<bool> {
+    let name = plain_name(name.as_ref())?;
+    let mut placeholder = std::ffi::OsString::from(".");
+    placeholder.push(name);
+    placeholder.push(".icloud");
+    Ok(identity_at(dir, &placeholder)?.is_some())
+}
+
 /// How [`persist_beneath`] may treat the name it writes.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Persist {
@@ -530,6 +571,16 @@ impl<'a> Staged<'a> {
         bytes: &[u8],
         carried: Option<&Carried>,
     ) -> BeneathResult<Self> {
+        Self::fill(graph_root, target, carried, |file| file.write_all(bytes))
+    }
+
+    /// A flushed temp holding whatever `fill` writes into it.
+    fn fill(
+        graph_root: &BeneathDir,
+        target: &'a BeneathDir,
+        carried: Option<&Carried>,
+        fill: impl FnOnce(&mut File) -> std::io::Result<()>,
+    ) -> BeneathResult<Self> {
         let staging = staging_dir(graph_root, target)?;
         let name = format!(".reflect-tmp-{}", random_hex()?);
         let fd = rustix::fs::openat(
@@ -548,7 +599,7 @@ impl<'a> Staged<'a> {
         if let Some(carried) = carried {
             carried.apply(&staged.file)?;
         }
-        staged.file.write_all(bytes)?;
+        fill(&mut staged.file)?;
         staged.file.sync_all()?;
         Ok(staged)
     }
@@ -757,6 +808,78 @@ pub(crate) fn remove_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> Benea
     Ok(())
 }
 
+/// Land `staged`, a flushed regular file in `.reflect/tmp/` (an upload or
+/// import, staged by path), in `dir` under the first of `names` no entry
+/// holds, and return the name it took; `None` when every one is taken. Each
+/// try is one rename that never replaces an entry (`RENAME_EXCL` /
+/// `RENAME_NOREPLACE`) or follows a symlink, so a name is decided once, by
+/// the filesystem. When `.reflect/tmp/` is on another volume the bytes are
+/// first copied into a flushed hidden temp beside the target, which lands
+/// the same way or is unlinked; the staged original then stays for its owner
+/// to remove.
+pub(crate) fn land_staged_beneath(
+    graph_root: &BeneathDir,
+    staged: impl AsRef<OsStr>,
+    dir: &BeneathDir,
+    names: impl IntoIterator<Item = String>,
+) -> BeneathResult<Option<String>> {
+    let staged = plain_name(staged.as_ref())?;
+    if let Some(staging) = staging_dir(graph_root, dir)? {
+        let stat = rustix::fs::statat(&staging.file, staged, AtFlags::SYMLINK_NOFOLLOW)?;
+        if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+            return Err(BeneathError::Traversal(format!(
+                "not a regular file: {}",
+                staging.path.join(staged).display()
+            )));
+        }
+        return land_under_a_free_name(&staging.file, staged, dir, names);
+    }
+    let staging = walk(graph_root, &[REFLECT_DIR, STAGING_DIR], None)?;
+    let (mut source, stat) = open_file(&staging, staged)?;
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+        return Err(BeneathError::Traversal(format!(
+            "not a regular file: {}",
+            staging.path.join(staged).display()
+        )));
+    }
+    let copy = Staged::fill(graph_root, dir, None, |file| {
+        std::io::copy(&mut source, file).map(|_| ())
+    })?;
+    let landed = land_under_a_free_name(copy.dir(), OsStr::new(&copy.name), dir, names)?;
+    if landed.is_some() {
+        copy.landed();
+    }
+    Ok(landed)
+}
+
+/// Rename `from_name` in `from_dir` into `dir` under the first of `names`
+/// nothing holds there.
+fn land_under_a_free_name(
+    from_dir: &File,
+    from_name: &OsStr,
+    dir: &BeneathDir,
+    names: impl IntoIterator<Item = String>,
+) -> BeneathResult<Option<String>> {
+    for name in names {
+        let candidate = plain_name(OsStr::new(&name))?;
+        match rustix::fs::renameat_with(
+            from_dir,
+            from_name,
+            &dir.file,
+            candidate,
+            RenameFlags::NOREPLACE,
+        ) {
+            Ok(()) => {
+                sync_dir(dir);
+                return Ok(Some(name));
+            }
+            Err(Errno::EXIST) => {}
+            Err(errno) => return Err(rename_error(errno)),
+        }
+    }
+    Ok(None)
+}
+
 /// Move `name` out of `dir` into a fresh `.reflect/trash/<128-bit random>/`
 /// directory (`0o700`, walked from `graph_root`) and return its path there
 /// for the OS trash: that call only takes a path, and this one names a
@@ -804,85 +927,150 @@ fn move_into_slot(
     Ok(slot_dir.path.join(name))
 }
 
-/// One note's unsaved text, kept when a save could not land.
+/// One editor session's unsaved note text, kept when a save could not land.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecoveryCopy {
     /// The graph-relative path the text was written for.
     pub(crate) path: String,
+    pub(crate) owner_id: String,
+    pub(crate) token: String,
+    pub(crate) source_revision: Option<String>,
+    sequence: u64,
     /// When the copy was written, in epoch milliseconds.
     pub(crate) saved_at_ms: u64,
     /// The unsaved buffer, verbatim.
     pub(crate) contents: String,
 }
 
-/// Keep `contents` as `path`'s recovery copy (mode `0o600`, in `0o700`
-/// `.reflect/recovery/`), replacing any earlier copy atomically. Staged and
-/// walked like every write here.
+/// Replace only this session's recovery copy. Callers hold `NOTE_WRITE_LOCK`.
 pub(crate) fn write_recovery(
     graph_root: &BeneathDir,
     path: &str,
+    owner_id: &str,
+    source_revision: Option<&str>,
     contents: &str,
-) -> BeneathResult<()> {
+) -> BeneathResult<RecoveryCopy> {
+    let name = recovery_name(owner_id)?;
+    let slot = recovery_slot(path);
     let dir = walk(
         graph_root,
-        &[REFLECT_DIR, RECOVERY_DIR],
+        &[REFLECT_DIR, RECOVERY_DIR, &slot],
         Some(PRIVATE_DIR_MODE),
     )?;
+    let sequence = recovery_copies(&dir, path)?
+        .into_iter()
+        .map(|copy| copy.sequence)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| std::io::Error::other("recovery sequence exhausted"))?;
     let copy = RecoveryCopy {
         path: path.to_owned(),
+        owner_id: owner_id.to_owned(),
+        token: random_hex()?,
+        source_revision: source_revision.map(str::to_owned),
+        sequence,
         saved_at_ms: now_ms(),
         contents: contents.to_owned(),
     };
     let json = serde_json::to_vec(&copy).map_err(std::io::Error::other)?;
     let staged = Staged::write(graph_root, &dir, &json, None)?;
-    rustix::fs::renameat(
-        staged.dir(),
-        staged.name.as_str(),
-        &dir.file,
-        recovery_slot(path).as_str(),
-    )?;
+    rustix::fs::renameat(staged.dir(), staged.name.as_str(), &dir.file, name.as_str())?;
     staged.landed();
     sync_dir(&dir);
-    Ok(())
+    Ok(copy)
 }
 
-/// `path`'s recovery copy, or `None` when it has none.
+/// The newest unresolved session copy, ordered independently of wall-clock time.
 pub(crate) fn read_recovery(
     graph_root: &BeneathDir,
     path: &str,
 ) -> BeneathResult<Option<RecoveryCopy>> {
-    let Some(dir) = missing_as_none(walk(graph_root, &[REFLECT_DIR, RECOVERY_DIR], None))? else {
+    let slot = recovery_slot(path);
+    let Some(dir) = missing_as_none(walk(graph_root, &[REFLECT_DIR, RECOVERY_DIR, &slot], None))?
+    else {
         return Ok(None);
     };
-    let Some(read) = missing_as_none(read_beneath(&dir, recovery_slot(path)))? else {
-        return Ok(None);
-    };
-    serde_json::from_slice(&read.bytes)
-        .map(Some)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err).into())
+    Ok(recovery_copies(&dir, path)?
+        .into_iter()
+        .max_by(|first, second| {
+            first
+                .sequence
+                .cmp(&second.sequence)
+                .then_with(|| first.token.cmp(&second.token))
+        }))
 }
 
-/// Drop `path`'s recovery copy; having none is fine.
-pub(crate) fn clear_recovery(graph_root: &BeneathDir, path: &str) -> BeneathResult<()> {
-    let Some(dir) = missing_as_none(walk(graph_root, &[REFLECT_DIR, RECOVERY_DIR], None))? else {
+/// Delete only the named version. Callers hold `NOTE_WRITE_LOCK` across the comparison and unlink.
+pub(crate) fn clear_recovery(
+    graph_root: &BeneathDir,
+    path: &str,
+    owner_id: &str,
+    token: &str,
+) -> BeneathResult<()> {
+    let name = recovery_name(owner_id)?;
+    recovery_name(token)?;
+    let slot = recovery_slot(path);
+    let Some(dir) = missing_as_none(walk(graph_root, &[REFLECT_DIR, RECOVERY_DIR, &slot], None))?
+    else {
         return Ok(());
     };
-    match rustix::fs::unlinkat(&dir.file, recovery_slot(path).as_str(), AtFlags::empty()) {
-        Ok(()) | Err(Errno::NOENT) => Ok(()),
-        Err(errno) => Err(errno.into()),
+    let Some(read) = missing_as_none(read_beneath(&dir, &name))? else {
+        return Ok(());
+    };
+    let copy: RecoveryCopy = serde_json::from_slice(&read.bytes)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    if copy.path != path || copy.owner_id != owner_id || copy.token != token {
+        return Ok(());
     }
+    rustix::fs::unlinkat(&dir.file, name.as_str(), AtFlags::empty())?;
+    sync_dir(&dir);
+    Ok(())
 }
 
-/// A note's recovery slot: the SHA-256 of its path folded to lowercase, so
-/// the spellings APFS opens as one file (`Notes/A.md`, `notes/a.md`) share a
-/// slot. Unicode normalization is not folded; callers pass the indexed
-/// spelling.
+fn recovery_copies(dir: &BeneathDir, path: &str) -> BeneathResult<Vec<RecoveryCopy>> {
+    let mut copies = Vec::new();
+    for entry in rustix::fs::Dir::read_from(&dir.file)? {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().to_str() else {
+            continue;
+        };
+        let Some(owner_id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if recovery_name(owner_id).is_err() {
+            continue;
+        }
+        let read = read_beneath(dir, name)?;
+        let copy: RecoveryCopy = serde_json::from_slice(&read.bytes)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+        if copy.owner_id != owner_id || copy.path != path {
+            return Err(BeneathError::Traversal(
+                "recovery copy does not match its slot".into(),
+            ));
+        }
+        recovery_name(&copy.token)?;
+        copies.push(copy);
+    }
+    Ok(copies)
+}
+
+fn recovery_name(identity: &str) -> BeneathResult<String> {
+    if identity.len() != 32
+        || !identity
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(BeneathError::Traversal("invalid recovery identity".into()));
+    }
+    Ok(format!("{identity}.json"))
+}
+
+/// A recovery directory keyed by the exact graph-relative wire path.
+/// Callers use the indexed spelling; distinct legal paths never share copies.
 fn recovery_slot(path: &str) -> String {
-    format!(
-        "{}.json",
-        hex(&Sha256::digest(path.to_lowercase().as_bytes()))
-    )
+    hex(&Sha256::digest(path.as_bytes()))
 }
 
 /// `Ok(None)` for something missing, so absence is an answer, not an error.
@@ -940,6 +1128,27 @@ mod seam {
         BEFORE_COMMIT.set(None);
         STAGING_ELSEWHERE.set(false);
         DATALESS.set(false);
+    }
+}
+
+/// Test-only, for the commands built on this module: every file this thread
+/// opens here reads as dataless until the guard drops (userland cannot set
+/// `SF_DATALESS`, so no fixture can be made).
+#[cfg(test)]
+pub(crate) struct PretendDataless;
+
+#[cfg(test)]
+impl PretendDataless {
+    pub(crate) fn engage() -> Self {
+        seam::DATALESS.set(true);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for PretendDataless {
+    fn drop(&mut self) {
+        seam::DATALESS.set(false);
     }
 }
 
@@ -1704,22 +1913,26 @@ mod tests {
     }
 
     #[test]
-    fn recovery_copies_round_trip_in_one_private_slot_per_note() {
+    fn recovery_copies_round_trip_in_one_private_slot_per_session() {
         let fixture = Fixture::new();
         let root = fixture.root();
         assert_eq!(read_recovery(&root, "secure/note.md").unwrap(), None);
         let before = now_ms();
 
-        write_recovery(&root, "secure/note.md", "first").unwrap();
-        write_recovery(&root, "secure/note.md", "unsaved").unwrap();
-        let copy = read_recovery(&root, "Secure/Note.md").unwrap().unwrap();
+        let owner = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let first = write_recovery(&root, "secure/note.md", owner, Some("disk"), "first").unwrap();
+        write_recovery(&root, "secure/note.md", owner, Some("disk"), "unsaved").unwrap();
+        let copy = read_recovery(&root, "secure/note.md").unwrap().unwrap();
         assert_eq!(copy.contents, "unsaved");
         assert_eq!(copy.path, "secure/note.md");
+        assert_eq!(copy.source_revision.as_deref(), Some("disk"));
+        assert_ne!(copy.token, first.token);
         assert!(copy.saved_at_ms >= before);
 
         let recovery = fixture.graph.join(".reflect/recovery");
-        let slot = "ae29e28a182b23223d7c44ad0b9c6b6d82e5449af72de5f9ad5906a4cc33de09.json";
+        let slot = "ae29e28a182b23223d7c44ad0b9c6b6d82e5449af72de5f9ad5906a4cc33de09";
         assert_eq!(entries(&recovery), vec![slot]);
+        assert_eq!(entries(&recovery.join(slot)), vec![format!("{owner}.json")]);
         assert_eq!(
             fs::metadata(&recovery).unwrap().permissions().mode() & 0o777,
             0o700
@@ -1730,13 +1943,132 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(recovery.join(slot).join(format!("{owner}.json")))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
             0o600
         );
         assert_eq!(fixture.staging(), Vec::<String>::new());
 
-        clear_recovery(&root, "SECURE/note.md").unwrap();
+        clear_recovery(&root, "secure/note.md", owner, &first.token).unwrap();
+        assert_eq!(
+            read_recovery(&root, "secure/note.md").unwrap(),
+            Some(copy.clone())
+        );
+        clear_recovery(&root, "secure/note.md", owner, &copy.token).unwrap();
         assert_eq!(read_recovery(&root, "secure/note.md").unwrap(), None);
-        clear_recovery(&root, "secure/note.md").unwrap();
+        clear_recovery(&root, "secure/note.md", owner, &copy.token).unwrap();
+    }
+
+    #[test]
+    fn case_distinct_notes_keep_separate_recovery_copies_for_each_owner() {
+        let owner = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        for lower_owner in [owner, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"] {
+            let fixture = Fixture::new();
+            let root = fixture.root();
+            let upper_path = "secure/Bank.md";
+            let lower_path = "secure/bank.md";
+            assert!(reflect_graph_paths::is_note(upper_path));
+            assert!(reflect_graph_paths::is_note(lower_path));
+            let upper = write_recovery(&root, upper_path, owner, None, "Bank draft").unwrap();
+            assert_eq!(read_recovery(&root, lower_path).unwrap(), None);
+            let lower = write_recovery(&root, lower_path, lower_owner, None, "bank draft").unwrap();
+            assert_eq!(entries(&fixture.graph.join(".reflect/recovery")).len(), 2);
+            assert_eq!(
+                read_recovery(&root, upper_path).unwrap(),
+                Some(upper.clone())
+            );
+            assert_eq!(
+                read_recovery(&root, lower_path).unwrap(),
+                Some(lower.clone())
+            );
+
+            clear_recovery(&root, lower_path, owner, &upper.token).unwrap();
+            assert_eq!(
+                read_recovery(&root, lower_path).unwrap(),
+                Some(lower.clone())
+            );
+            clear_recovery(&root, upper_path, owner, &upper.token).unwrap();
+            assert_eq!(read_recovery(&root, upper_path).unwrap(), None);
+            assert_eq!(
+                read_recovery(&root, lower_path).unwrap(),
+                Some(lower.clone())
+            );
+            clear_recovery(&root, lower_path, lower_owner, &lower.token).unwrap();
+            assert_eq!(read_recovery(&root, lower_path).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn same_millisecond_copies_are_offered_in_write_order_without_losing_either() {
+        let fixture = Fixture::new();
+        let root = fixture.root();
+        let path = "secure/note.md";
+        let owner_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let owner_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut first = write_recovery(&root, path, owner_a, None, "A").unwrap();
+        let mut second = write_recovery(&root, path, owner_b, None, "B").unwrap();
+        first.saved_at_ms = 5;
+        second.saved_at_ms = 5;
+        let dir = fixture
+            .graph
+            .join(".reflect/recovery")
+            .join(recovery_slot(path));
+        for copy in [&first, &second] {
+            fs::write(
+                dir.join(format!("{}.json", copy.owner_id)),
+                serde_json::to_vec(copy).unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(read_recovery(&root, path).unwrap(), Some(second.clone()));
+        clear_recovery(&root, path, owner_b, &second.token).unwrap();
+        assert_eq!(read_recovery(&root, path).unwrap(), Some(first.clone()));
+        clear_recovery(&root, path, owner_a, &first.token).unwrap();
+        assert_eq!(read_recovery(&root, path).unwrap(), None);
+    }
+
+    #[test]
+    fn recovery_note_directories_and_session_files_never_follow_symlinks() {
+        for replace_directory in [true, false] {
+            let fixture = Fixture::new();
+            let root = fixture.root();
+            let path = "secure/note.md";
+            let owner = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            let copy = write_recovery(&root, path, owner, None, "unsaved").unwrap();
+            let notes = fixture.graph.join("notes");
+            let dir = fixture
+                .graph
+                .join(".reflect/recovery")
+                .join(recovery_slot(path));
+            let file = dir.join(format!("{owner}.json"));
+            fs::remove_file(&file).unwrap();
+            if replace_directory {
+                fs::remove_dir(&dir).unwrap();
+                symlink(&notes, &dir).unwrap();
+            } else {
+                symlink(notes.join("kept.md"), &file).unwrap();
+            }
+            let before = snapshot(&notes);
+            assert!(matches!(
+                write_recovery(&root, path, owner, None, "replacement"),
+                Err(BeneathError::Traversal(_))
+            ));
+            assert!(matches!(
+                read_recovery(&root, path),
+                Err(BeneathError::Traversal(_))
+            ));
+            assert!(matches!(
+                clear_recovery(&root, path, owner, &copy.token),
+                Err(BeneathError::Traversal(_))
+            ));
+            assert_eq!(snapshot(&notes), before);
+        }
     }
 
     #[test]
@@ -1746,9 +2078,10 @@ mod tests {
         let notes = fixture.graph.join("notes");
         symlink(&notes, fixture.graph.join(".reflect/recovery")).unwrap();
         let before = snapshot(&notes);
+        let identity = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
         assert!(matches!(
-            write_recovery(&root, "secure/note.md", "unsaved"),
+            write_recovery(&root, "secure/note.md", identity, None, "unsaved"),
             Err(BeneathError::Traversal(_))
         ));
         assert!(matches!(
@@ -1756,7 +2089,7 @@ mod tests {
             Err(BeneathError::Traversal(_))
         ));
         assert!(matches!(
-            clear_recovery(&root, "secure/note.md"),
+            clear_recovery(&root, "secure/note.md", identity, identity),
             Err(BeneathError::Traversal(_))
         ));
         assert_eq!(snapshot(&notes), before);
@@ -1825,6 +2158,165 @@ mod tests {
                 .collect();
             assert_eq!(spelled, vec![std::ffi::OsString::from("Plan.md")]);
         }
+    }
+
+    #[test]
+    fn only_a_regular_local_file_passes_the_move_check() {
+        let _seams = Seams;
+        let fixture = Fixture::new();
+        let dir = fixture.raw_dir("");
+        fs::write(fixture.raw.join("note.md"), "# Note\n").unwrap();
+        symlink(
+            fixture.graph.join("notes/kept.md"),
+            fixture.raw.join("link.md"),
+        )
+        .unwrap();
+        make_fifo(&fixture.raw.join("pipe.md"));
+        fs::create_dir(fixture.raw.join("folder.md")).unwrap();
+
+        assert!(regular_file_beneath(&dir, "note.md").is_ok());
+        for name in ["link.md", "pipe.md", "folder.md"] {
+            assert!(
+                matches!(
+                    regular_file_beneath(&dir, name),
+                    Err(BeneathError::Traversal(_))
+                ),
+                "{name}"
+            );
+        }
+        assert!(matches!(
+            regular_file_beneath(&dir, "missing.md"),
+            Err(BeneathError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound
+        ));
+        let _dataless = PretendDataless::engage();
+        assert!(matches!(
+            regular_file_beneath(&dir, "note.md"),
+            Err(BeneathError::Offline)
+        ));
+    }
+
+    #[test]
+    fn a_name_or_its_icloud_placeholder_is_occupied() {
+        let fixture = Fixture::new();
+        let dir = fixture.raw_dir("");
+        fs::write(fixture.raw.join("note.md"), "# Note\n").unwrap();
+        fs::write(fixture.raw.join(".evicted.md.icloud"), "stub").unwrap();
+        symlink("/nonexistent", fixture.raw.join("dangling.md")).unwrap();
+
+        for name in ["note.md", "evicted.md", "dangling.md"] {
+            assert!(occupied_beneath(&dir, name).unwrap(), "{name}");
+        }
+        assert!(!occupied_beneath(&dir, "free.md").unwrap());
+    }
+
+    /// Stage `bytes` in `.reflect/tmp/` the way an upload does (by path),
+    /// returning the staged name.
+    fn stage_upload(fixture: &Fixture, bytes: &[u8]) -> String {
+        let staging = fixture.graph.join(".reflect/tmp");
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("upload-1"), bytes).unwrap();
+        "upload-1".into()
+    }
+
+    fn scan_names() -> Vec<String> {
+        ["scan.png", "scan-2.png", "scan-3.png"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn a_staged_upload_lands_under_the_first_free_name() {
+        let fixture = Fixture::new();
+        let (root, assets) = (fixture.root(), fixture.raw_dir("assets"));
+        fs::write(fixture.raw.join("assets/scan.png"), "first").unwrap();
+        let staged = stage_upload(&fixture, b"second");
+
+        assert_eq!(
+            land_staged_beneath(&root, &staged, &assets, scan_names()).unwrap(),
+            Some("scan-2.png".into())
+        );
+        assert_eq!(
+            fs::read(fixture.raw.join("assets/scan.png")).unwrap(),
+            b"first"
+        );
+        assert_eq!(
+            fs::read(fixture.raw.join("assets/scan-2.png")).unwrap(),
+            b"second"
+        );
+        assert_eq!(fixture.staging(), Vec::<String>::new());
+
+        // Every name taken: nothing moves, and the upload stays staged.
+        fs::write(fixture.raw.join("assets/scan-3.png"), "third").unwrap();
+        let staged = stage_upload(&fixture, b"fourth");
+        assert_eq!(
+            land_staged_beneath(&root, &staged, &assets, scan_names()).unwrap(),
+            None
+        );
+        assert_eq!(fixture.staging(), vec!["upload-1"]);
+        assert_eq!(
+            entries(&fixture.raw.join("assets")),
+            vec!["scan-2.png", "scan-3.png", "scan.png"]
+        );
+    }
+
+    #[test]
+    fn across_volumes_a_staged_upload_lands_as_a_copy() {
+        let _seams = Seams;
+        let fixture = Fixture::new();
+        let (root, assets) = (fixture.root(), fixture.raw_dir("assets"));
+        seam::STAGING_ELSEWHERE.set(true);
+        let staged = stage_upload(&fixture, b"bytes");
+
+        assert_eq!(
+            land_staged_beneath(&root, &staged, &assets, scan_names()).unwrap(),
+            Some("scan.png".into())
+        );
+        assert_eq!(
+            fs::read(fixture.raw.join("assets/scan.png")).unwrap(),
+            b"bytes"
+        );
+        // No hidden temp is left beside the target, and the original stays
+        // for its owner to remove.
+        assert_eq!(entries(&fixture.raw.join("assets")), vec!["scan.png"]);
+        assert_eq!(fixture.staging(), vec!["upload-1"]);
+
+        // Every name taken: the copy is unlinked.
+        fs::write(fixture.raw.join("assets/scan-2.png"), "x").unwrap();
+        fs::write(fixture.raw.join("assets/scan-3.png"), "x").unwrap();
+        assert_eq!(
+            land_staged_beneath(&root, &staged, &assets, scan_names()).unwrap(),
+            None
+        );
+        assert_eq!(
+            entries(&fixture.raw.join("assets")),
+            vec!["scan-2.png", "scan-3.png", "scan.png"]
+        );
+    }
+
+    #[test]
+    fn a_staged_upload_never_lands_through_a_symlink() {
+        let fixture = Fixture::new();
+        let (root, assets) = (fixture.root(), fixture.raw_dir("assets"));
+        let notes = fixture.graph.join("notes");
+        let before = snapshot(&notes);
+        // The staged entry swapped for a link to a note.
+        let staging = fixture.graph.join(".reflect/tmp");
+        fs::create_dir_all(&staging).unwrap();
+        symlink(notes.join("kept.md"), staging.join("upload-1")).unwrap();
+        assert!(matches!(
+            land_staged_beneath(&root, "upload-1", &assets, scan_names()),
+            Err(BeneathError::Traversal(_))
+        ));
+        // `.reflect/tmp/` swapped for a link into `notes/`.
+        fs::remove_dir_all(&staging).unwrap();
+        symlink(&notes, &staging).unwrap();
+        assert!(matches!(
+            land_staged_beneath(&root, "kept.md", &assets, scan_names()),
+            Err(BeneathError::Traversal(_))
+        ));
+        assert_eq!(snapshot(&notes), before);
+        assert_eq!(entries(&fixture.raw.join("assets")), Vec::<String>::new());
     }
 
     #[test]

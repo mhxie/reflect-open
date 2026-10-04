@@ -64,7 +64,13 @@ function diskHolding(contents: string): { contents: string } {
 }
 
 beforeEach(() => {
-  graphState.graph = { root: '/g', name: 'G', generation: 3, localOnlyFolders: [] }
+  graphState.graph = {
+    root: '/g',
+    name: 'G',
+    generation: 3,
+    localOnlyFolders: [],
+    localOnlyEditableFolders: [],
+  }
   graphState.indexGeneration = 7
   vi.mocked(readNote).mockResolvedValue(SOURCE)
   vi.mocked(writeNote).mockImplementation(async () => {})

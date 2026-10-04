@@ -80,7 +80,7 @@ export async function followDisplacedNote(
   if (!isCurrent()) {
     return
   }
-  const owner = openSession(from)
+  const owner = openSession(from, generation)
   if (owner === null) {
     return
   }
@@ -90,7 +90,7 @@ export async function followDisplacedNote(
   } catch {
     incomingAtFrom = null
   }
-  if (!isCurrent() || openSession(from) !== owner || owner.path !== from) {
+  if (!isCurrent() || openSession(from, generation) !== owner || owner.path !== from) {
     return // closed, moved, or followed elsewhere while the read was out
   }
   if (!owner.followDisplacement(to, incomingAtFrom, keptOut)) {

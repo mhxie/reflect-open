@@ -71,7 +71,13 @@ function Probe(): ReactElement {
 }
 
 function renderProvider(
-  graph = { root: '/graphs/notes', name: 'Notes', generation: 42, localOnlyFolders: [] },
+  graph = {
+    root: '/graphs/notes',
+    name: 'Notes',
+    generation: 42,
+    localOnlyFolders: [],
+    localOnlyEditableFolders: [],
+  },
 ) {
   return render(
     <V1ImportProvider graph={graph}>
@@ -208,7 +214,13 @@ describe('V1ImportProvider', () => {
 
     await view.rerender(
       <V1ImportProvider
-        graph={{ root: '/graphs/other', name: 'Other', generation: 43, localOnlyFolders: [] }}
+        graph={{
+          root: '/graphs/other',
+          name: 'Other',
+          generation: 43,
+          localOnlyFolders: [],
+          localOnlyEditableFolders: [],
+        }}
       >
         <Probe />
       </V1ImportProvider>,

@@ -21,6 +21,8 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ensurePersonNote,
   resolveOrCreateNoteWithTitle,
   resolvePersonContact,
+  // The graph's local-only folders are `secure`.
+  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { generation: 7 } }),
@@ -38,6 +40,11 @@ vi.mock('@/hooks/use-contacts-authorization.ts', () => ({
   useContactsAuthorization: () => 'authorized',
 }))
 vi.mock('@/lib/operations.ts', () => ({ startOperation }))
+
+/** A tracked note the editor is editing. */
+const SOURCE = 'notes/source.md'
+/** A note inside a local-only folder. */
+const LOCAL_ONLY_SOURCE = 'finance/secure/bank.md'
 
 beforeEach(() => {
   resolveOrCreateNoteWithTitle.mockReset()
@@ -62,7 +69,7 @@ describe('useEditorAutocomplete', () => {
       claimedTargetKeys: ['roadmap'],
       queryReadsAsDate: false,
     })
-    const { result } = await renderHook(() => useEditorAutocomplete())
+    const { result } = await renderHook(() => useEditorAutocomplete(SOURCE))
 
     await expect(result.current.onWikilinkSearch('Roadmap')).resolves.toEqual([])
   })
@@ -72,7 +79,7 @@ describe('useEditorAutocomplete', () => {
       kind: 'ambiguous',
       paths: ['notes/business-ideas.md', 'notes/business-ideas-2.md'],
     })
-    const { result, act } = await renderHook(() => useEditorAutocomplete())
+    const { result, act } = await renderHook(() => useEditorAutocomplete(SOURCE))
     const items = await result.current.onWikilinkSearch('Business ideas')
 
     await act(() => {
@@ -93,7 +100,7 @@ describe('useEditorAutocomplete', () => {
       kind: 'unavailable',
       paths: ['notes/business-ideas.md'],
     })
-    const { result, act } = await renderHook(() => useEditorAutocomplete())
+    const { result, act } = await renderHook(() => useEditorAutocomplete(SOURCE))
     const items = await result.current.onWikilinkSearch('Business ideas')
 
     await act(() => {
@@ -112,7 +119,7 @@ describe('useEditorAutocomplete', () => {
   it('surfaces a failed background create instead of silently doing nothing', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     resolveOrCreateNoteWithTitle.mockRejectedValue(new Error('graph changed'))
-    const { result, act } = await renderHook(() => useEditorAutocomplete())
+    const { result, act } = await renderHook(() => useEditorAutocomplete(SOURCE))
     const items = await result.current.onWikilinkSearch('Business ideas')
 
     await act(() => {
@@ -129,7 +136,7 @@ describe('useEditorAutocomplete', () => {
       kind: 'created',
       path: 'notes/business-ideas.md',
     })
-    const { result, act } = await renderHook(() => useEditorAutocomplete())
+    const { result, act } = await renderHook(() => useEditorAutocomplete(SOURCE))
     const items = await result.current.onWikilinkSearch('Business ideas')
 
     await act(() => {
@@ -166,7 +173,7 @@ describe('useEditorAutocomplete', () => {
       claimedTargetKeys: [],
       queryReadsAsDate: false,
     })
-    const { result } = await renderHook(() => useEditorAutocomplete())
+    const { result } = await renderHook(() => useEditorAutocomplete(SOURCE))
 
     const items = await result.current.onWikilinkSearch('maccaw')
     expect(items.slice(0, 2)).toMatchObject([
@@ -207,7 +214,7 @@ describe('useEditorAutocomplete', () => {
       claimedTargetKeys: [],
       queryReadsAsDate: false,
     })
-    const { result } = await renderHook(() => useEditorAutocomplete())
+    const { result } = await renderHook(() => useEditorAutocomplete(SOURCE))
 
     const items = await result.current.onWikilinkSearch('event')
     expect(items.slice(0, 3)).toMatchObject([
@@ -243,7 +250,7 @@ describe('useEditorAutocomplete', () => {
       title: 'Augusta Ada King',
       insertText: 'Augusta Ada King',
     })
-    const { result, act } = await renderHook(() => useEditorAutocomplete())
+    const { result, act } = await renderHook(() => useEditorAutocomplete(SOURCE))
 
     const items = await result.current.onWikilinkSearch('Ada')
     expect(items).toMatchObject([
@@ -283,7 +290,7 @@ describe('useEditorAutocomplete', () => {
       contact,
       reason: 'identity-conflict',
     })
-    const { result } = await renderHook(() => useEditorAutocomplete())
+    const { result } = await renderHook(() => useEditorAutocomplete(SOURCE))
 
     await expect(result.current.onWikilinkSearch('Ada Lovelace')).resolves.toEqual([])
   })
@@ -305,7 +312,7 @@ describe('useEditorAutocomplete', () => {
       insertText: 'Ada Lovelace',
     })
     ensurePersonNote.mockRejectedValue(new Error('graph changed'))
-    const { result, act } = await renderHook(() => useEditorAutocomplete())
+    const { result, act } = await renderHook(() => useEditorAutocomplete(SOURCE))
     const items = await result.current.onWikilinkSearch('Ada Lovelace')
 
     await act(() => {
@@ -314,5 +321,36 @@ describe('useEditorAutocomplete', () => {
 
     await vi.waitFor(() => expect(operationFail).toHaveBeenCalledWith('graph changed'))
     consoleError.mockRestore()
+  })
+
+  it('offers no Create row in a local-only note', async () => {
+    const tracked = await renderHook(() => useEditorAutocomplete(SOURCE))
+    await expect(tracked.result.current.onWikilinkSearch('New title')).resolves.toMatchObject([
+      { target: 'New title', label: 'Create “New title”' },
+    ])
+
+    const { result } = await renderHook(() => useEditorAutocomplete(LOCAL_ONLY_SOURCE))
+    await expect(result.current.onWikilinkSearch('New title')).resolves.toEqual([])
+    expect(resolveOrCreateNoteWithTitle).not.toHaveBeenCalled()
+  })
+
+  it('a Contact row in a local-only note inserts its link text and creates nothing', async () => {
+    settingsState.contactsEnabled = true
+    const contact = {
+      fullName: 'Ada Lovelace',
+      givenName: 'Ada',
+      familyName: 'Lovelace',
+      emails: ['ada@example.com'],
+      phones: [],
+    }
+    contactLinkSuggestions.mockResolvedValue([contact])
+    resolvePersonContact.mockResolvedValue({ kind: 'new', contact, insertText: 'Ada Lovelace' })
+    const { result } = await renderHook(() => useEditorAutocomplete(LOCAL_ONLY_SOURCE))
+
+    const items = await result.current.onWikilinkSearch('Ada Lovelace')
+    expect(items).toEqual([
+      { target: 'Ada Lovelace', label: 'Ada Lovelace', detail: 'ada@example.com' },
+    ])
+    expect(ensurePersonNote).not.toHaveBeenCalled()
   })
 })
