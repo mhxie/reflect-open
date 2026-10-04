@@ -14,11 +14,13 @@ pub mod assets;
 #[cfg(unix)]
 #[cfg_attr(not(test), allow(dead_code))]
 mod beneath;
+mod image_thumbnail;
 mod import;
 mod import_assets;
 mod io;
 mod local_only;
 pub mod pdf_render;
+mod preview_cache;
 mod resolve;
 pub mod x_archive;
 mod x_archive_store;

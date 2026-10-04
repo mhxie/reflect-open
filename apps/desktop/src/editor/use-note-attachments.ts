@@ -42,6 +42,14 @@ export function pdfPageUrl(generation: number, path: string, page: number, width
 }
 
 /**
+ * The `reflect-asset://` URL of a raster image's thumbnail at a width bucket:
+ * decoded, oriented, and re-encoded by the shell, cached on disk.
+ */
+export function imageThumbnailUrl(generation: number, path: string, width: number): string {
+  return `${attachmentUrl(generation, path)}?reflect-preview=thumb&width=${width}`
+}
+
+/**
  * An attachment renders as an image, a PDF preview (through the image view's
  * `resolveEmbed`), or a file pill, a note as a link chip to it (note content
  * is never transcluded), and an unsafe path stays literal.

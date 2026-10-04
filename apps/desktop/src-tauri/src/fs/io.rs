@@ -70,6 +70,7 @@ pub(super) fn initialize_runtime(root: &Path) -> AppResult<()> {
     ensure_runtime_directory(root)?;
     sweep_upload_staging(root);
     super::pdf_render::sweep_page_cache(root);
+    super::image_thumbnail::sweep_thumbnail_cache(root);
     mark_dir_local_only(&root.join(REFLECT_DIR));
     ensure_runtime_gitignore(root)?;
     // A backup repo must never ride a file-sync provider: two devices' object

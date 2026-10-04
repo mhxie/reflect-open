@@ -18,6 +18,8 @@ interface CustomFilterMenuProps {
   /** The active tag when it isn't pinned (the menu owns it), else null. */
   activeTag: string | null
   onSelect: (tag: string) => void
+  /** The trigger's label while no tag is active. */
+  label?: string
 }
 
 /**
@@ -31,6 +33,7 @@ export function CustomFilterMenu({
   facets,
   activeTag,
   onSelect,
+  label = 'Custom',
 }: CustomFilterMenuProps): ReactElement {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -74,7 +77,7 @@ export function CustomFilterMenu({
             : 'text-text-secondary hover:bg-surface-hover hover:text-text',
         )}
       >
-        {activeTag !== null ? `#${activeTag}` : 'Custom'}
+        {activeTag !== null ? `#${activeTag}` : label}
         <ChevronDown aria-hidden strokeWidth={1.75} className="size-3.5 shrink-0" />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-56 p-0">

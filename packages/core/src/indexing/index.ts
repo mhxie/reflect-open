@@ -132,6 +132,15 @@ export {
   type NoteListSortKey,
 } from './note-list-sort.ts'
 export {
+  buildAttachmentLibrary,
+  listAttachmentNoteTags,
+  listAttachmentReferences,
+  type AttachmentLibraryEntry,
+  type AttachmentNoteRef,
+  type AttachmentNoteTagRow,
+  type AttachmentReferenceRow,
+} from './attachment-library.ts'
+export {
   listAttachmentPreviews,
   listNotes,
   listNoteTags,

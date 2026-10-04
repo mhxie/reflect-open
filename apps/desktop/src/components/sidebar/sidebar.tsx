@@ -1,6 +1,6 @@
 import { useState, type DragEvent, type ReactElement } from 'react'
 import { isUntitledNotePath, type GraphInfo } from '@reflect/core'
-import { FilePlus, ListChecks, MessageSquare, SquarePen } from 'lucide-react'
+import { FilePlus, Images, ListChecks, MessageSquare, SquarePen } from 'lucide-react'
 import { AudioMemoButton } from '@/components/audio-memo/audio-memo-button.tsx'
 import { RecordingStrip } from '@/components/audio-memo/recording-strip.tsx'
 import { ListIcon } from '@/components/icons/list-icon.tsx'
@@ -134,6 +134,16 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
               (route.kind === 'note' && !isUntitledNotePath(route.path) && !hasActivePinnedNote)
             }
             onClick={() => void runCommand('nav.allNotes', context)}
+          />
+          <SidebarItem
+            icon={
+              <span className={lucideBox}>
+                <Images aria-hidden strokeWidth={1.75} className="size-4" />
+              </span>
+            }
+            label="Attachments"
+            active={route.kind === 'attachments'}
+            onClick={() => void runCommand('nav.attachments', context)}
           />
           <SidebarItem
             icon={

@@ -9,6 +9,10 @@ const AllNotesScreen = lazy(async () => {
   const { AllNotesScreen } = await import('@/components/all-notes/all-notes-screen.tsx')
   return { default: AllNotesScreen }
 })
+const AttachmentsScreen = lazy(async () => {
+  const { AttachmentsScreen } = await import('@/components/attachments/attachments-screen.tsx')
+  return { default: AttachmentsScreen }
+})
 const ChatScreen = lazy(async () => {
   const { ChatScreen } = await import('@/components/chat/chat-screen.tsx')
   return { default: ChatScreen }
@@ -47,6 +51,10 @@ function RouteContentBody(): ReactElement {
       // Owns its scroll container (virtualized table + fixed header), so no
       // ScrollRestored wrapper — same shape as the daily stream.
       return <AllNotesScreen filter={route.filter} />
+    case 'attachments':
+      // Owns its scroll container (a card flow with a fixed header), so no
+      // ScrollRestored wrapper — same shape as All Notes.
+      return <AttachmentsScreen type={route.type} tag={route.tag} />
     case 'tasks':
       // Owns its scroll container (a grouped list with a fixed header), so no
       // ScrollRestored wrapper — same shape as All Notes.
