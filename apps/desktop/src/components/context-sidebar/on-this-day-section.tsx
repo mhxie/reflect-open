@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react'
 import { isModEvent } from '@meowdown/core'
-import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useOnThisDay } from '@/hooks/use-on-this-day.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
+import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { SidebarSection } from './sidebar-section.tsx'
 
 interface OnThisDaySectionProps {
@@ -23,7 +23,7 @@ function yearsAgoLabel(yearsAgo: number): string {
  */
 export function OnThisDaySection({ date }: OnThisDaySectionProps): ReactElement | null {
   const { settings } = useSettings()
-  const navigateNoteLink = useNoteLinkNavigation(date)
+  const navigateNoteLink = usePeekNavigation(date)
   const entries = useOnThisDay(date)
   if (entries.length === 0) {
     return null
