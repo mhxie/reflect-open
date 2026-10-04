@@ -32,7 +32,15 @@ async function renderedFor(path: string): Promise<{ remoteEmbeds?: boolean }> {
   const view = await render(
     <QueryClientProvider client={client}>
       <NotePreview
-        entry={{ path, title: 'T', date: null, snippet: null, phrase: null, alias: null }}
+        entry={{
+          path,
+          title: 'T',
+          date: null,
+          snippet: null,
+          phrase: null,
+          alias: null,
+          related: false,
+        }}
       />
     </QueryClientProvider>,
   )

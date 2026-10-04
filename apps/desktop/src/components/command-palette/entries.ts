@@ -7,7 +7,10 @@ import type { FilteredSearchHit, WikiSuggestion } from '@reflect/core'
  * {@link FilteredSearchHit}, so the semantic-search adapter doesn't have to
  * fabricate list-only fields (preview, mtime) it has no values for.
  */
-export type PaletteHit = Pick<FilteredSearchHit, 'path' | 'title' | 'dailyDate' | 'snippet'>
+export type PaletteHit = Pick<FilteredSearchHit, 'path' | 'title' | 'dailyDate' | 'snippet'> & {
+  /** Found by meaning alone (hybrid search), not by its wording. */
+  readonly related?: boolean
+}
 
 /**
  * Pure assembly of the palette's sections (Plan 08): merges title suggestions
@@ -27,6 +30,8 @@ export interface NoteEntry {
   phrase: string | null
   /** The alias a title suggestion matched through, when not the title itself; null otherwise. */
   alias: string | null
+  /** A search hit found by meaning alone, labeled so its unrelated wording isn't puzzling. */
+  related: boolean
 }
 
 export interface PaletteSections {
@@ -95,6 +100,7 @@ export function buildPaletteSections(options: {
         snippet: hit.snippet,
         phrase: null,
         alias: null,
+        related: hit.related === true,
       })),
       commands: [],
     }
@@ -126,6 +132,7 @@ export function buildPaletteSections(options: {
         snippet: null,
         phrase: suggestion.generated?.phrase ?? null,
         alias: aliasHint(suggestion),
+        related: false,
       })
     }
   }
@@ -141,6 +148,7 @@ export function buildPaletteSections(options: {
         snippet: hit.snippet,
         phrase: null,
         alias: null,
+        related: hit.related === true,
       })
     }
   }

@@ -26,6 +26,8 @@ export interface RetrievalHit {
   snippet: string
   heading: string | null
   isPrivate: boolean
+  /** Hybrid only: which leg found the note — wording, meaning, or both. */
+  matchedBy?: 'lexical' | 'semantic' | 'both'
 }
 
 export interface RetrieveOptions {
@@ -231,6 +233,24 @@ export function fuseRanked(lists: RetrievalHit[][], limit: number): RetrievalHit
     .map(({ hit, score }) => ({ ...hit, score }))
 }
 
+/** Fused hits tagged with the leg(s) that found each one ({@link RetrievalHit.matchedBy}). */
+export function withMatchedBy(
+  fused: readonly RetrievalHit[],
+  lexical: readonly RetrievalHit[],
+  semantic: readonly RetrievalHit[],
+): RetrievalHit[] {
+  const lexicalPaths = new Set(lexical.map((hit) => hit.path))
+  const semanticPaths = new Set(semantic.map((hit) => hit.path))
+  return fused.map((hit) => ({
+    ...hit,
+    matchedBy: !semanticPaths.has(hit.path)
+      ? 'lexical'
+      : lexicalPaths.has(hit.path)
+        ? 'both'
+        : 'semantic',
+  }))
+}
+
 /** Strip private notes' content while keeping the hit + flag. */
 function withPrivacy(hits: RetrievalHit[], excludePrivateContent: boolean): RetrievalHit[] {
   if (!excludePrivateContent) {
@@ -262,7 +282,7 @@ export async function retrieve(query: string, options?: RetrieveOptions): Promis
         return []
       }),
     ])
-    hits = fuseRanked([lexical, semantic], limit)
+    hits = withMatchedBy(fuseRanked([lexical, semantic], limit), lexical, semantic)
   }
   return withPrivacy(hits.slice(0, limit), excludePrivateContent)
 }

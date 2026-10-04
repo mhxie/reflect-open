@@ -91,6 +91,7 @@ export function usePaletteResults(open: boolean, query: string): PaletteResults 
         title: hit.title,
         dailyDate: null,
         snippet: hit.snippet === '' ? null : hit.snippet,
+        related: hit.matchedBy === 'semantic',
       }))
     },
     enabled: searching && trimmed !== '',

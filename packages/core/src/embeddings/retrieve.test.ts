@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
 import {
   bestChunkPerNote,
+  type ChunkHitRow,
   fuseRanked,
   mergeNearestFirst,
-  retrieve,
-  type ChunkHitRow,
   type RetrievalHit,
+  retrieve,
+  withMatchedBy,
 } from './retrieve.ts'
 
 function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
@@ -290,5 +291,29 @@ describe('retrieve', () => {
       texts: ['where did we land on pricing'],
       role: 'query',
     })
+  })
+})
+
+describe('withMatchedBy', () => {
+  const hit = (path: string) => ({
+    path,
+    title: path,
+    score: 0,
+    snippet: '',
+    heading: null,
+    isPrivate: false,
+  })
+
+  it('tags each fused hit with the leg that found it', () => {
+    const lexical = [hit('a.md'), hit('b.md')]
+    const semantic = [hit('b.md'), hit('c.md')]
+
+    const tagged = withMatchedBy([hit('b.md'), hit('a.md'), hit('c.md')], lexical, semantic)
+
+    expect(tagged.map((entry) => [entry.path, entry.matchedBy])).toEqual([
+      ['b.md', 'both'],
+      ['a.md', 'lexical'],
+      ['c.md', 'semantic'],
+    ])
   })
 })

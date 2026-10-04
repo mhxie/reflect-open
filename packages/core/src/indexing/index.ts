@@ -158,6 +158,7 @@ export {
   type DateSuggestionContext,
 } from './date-suggestions.ts'
 export {
+  cleanSnippetText,
   parseHighlights,
   randomNotePath,
   HIGHLIGHT_START,
