@@ -164,6 +164,7 @@ async function renderSidebar(overrides?: Partial<CommandContext>, initialRoute?:
     openPalette,
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
+    openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     ...overrides,

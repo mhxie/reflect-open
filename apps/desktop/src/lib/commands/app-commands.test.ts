@@ -87,6 +87,7 @@ function fakeContext(overrides?: Partial<CommandContext>) {
     openPalette: vi.fn(),
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
+    openHeadingPicker: vi.fn(),
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     ...overrides,
@@ -187,6 +188,20 @@ describe('app commands', () => {
     const { context: noNote } = fakeContext({ route: () => ({ kind: 'settings' }) })
     await command('template.insert').run(noNote)
     expect(noNote.openTemplatePicker).not.toHaveBeenCalled()
+  })
+
+  it('outline.jumpToHeading opens the picker only on a note route', async () => {
+    const { context } = fakeContext({ route: () => ({ kind: 'note', path: 'notes/a.md' }) })
+    await command('outline.jumpToHeading').run(context)
+    expect(context.openHeadingPicker).toHaveBeenCalledTimes(1)
+    expect(keybindingFor('outline.jumpToHeading')).toBeNull()
+
+    // The daily stream edits a note but publishes no outline yet.
+    for (const route of [{ kind: 'today' }, { kind: 'settings' }] as const) {
+      const { context: other } = fakeContext({ route: () => route })
+      await command('outline.jumpToHeading').run(other)
+      expect(other.openHeadingPicker).not.toHaveBeenCalled()
+    }
   })
 
   it('template.new opens the name dialog through the context capability', async () => {

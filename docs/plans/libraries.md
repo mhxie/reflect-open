@@ -14,7 +14,9 @@ and MIT-licensed, so there is no copyleft constraint.
 - **Validation:** `zod`.
 - **Database:** `kysely` (query builder, TS); `rusqlite` (bundled) + `sqlite-vec` (Rust).
 - **Editor:** meowdown (`@meowdown/react`, `@meowdown/core`) on ProseKit (`@prosekit/*`) +
-  `@lezer/markdown`.
+  `@lezer/markdown`. `@prosekit/core` is also a direct dependency of the desktop app,
+  for editor extensions meowdown doesn't wrap (Plan 26's doc-change handler); keep its
+  range in step with `@meowdown/react`'s so pnpm resolves a single copy.
 - **Forms:** `react-hook-form`.
 - **Test:** `vitest`, `vitest-browser-react`, `@vitest/browser-playwright`, Playwright.
 

@@ -5,6 +5,7 @@ import { renderHook } from 'vitest-browser-react'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { registerAppCommands } from '@/lib/commands/app-commands.ts'
 import { dispatchMenuCommand } from '@/lib/native-menu/dispatch.ts'
+import { HeadingPickerProvider } from '@/providers/heading-picker-provider.tsx'
 import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
 import { ShortcutsProvider } from '@/providers/shortcuts-provider.tsx'
 import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
@@ -79,7 +80,9 @@ function shortcutsHook(client = new QueryClient()) {
             <PaletteProvider>
               <ShortcutsProvider>
                 <NoteTemplatesProvider>
-                  <SidebarProvider>{children}</SidebarProvider>
+                  <HeadingPickerProvider>
+                    <SidebarProvider>{children}</SidebarProvider>
+                  </HeadingPickerProvider>
                 </NoteTemplatesProvider>
               </ShortcutsProvider>
             </PaletteProvider>

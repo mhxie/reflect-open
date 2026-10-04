@@ -28,6 +28,7 @@ import {
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
+import { OutlineBridge } from '@/editor/outline/outline-bridge.tsx'
 import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useNoteDocument } from '@/editor/use-note-document.ts'
@@ -91,6 +92,8 @@ interface NotePaneProps {
    * `IncomingBacklinks` section over the same data layer.
    */
   showBacklinks?: boolean
+  /** Publish the note's outline for the sidebar and "Jump to heading…". */
+  outline?: boolean
   /**
    * The daily stream's day key for this pane (omitted by non-daily callers).
    * Required for {@link registerHandle} and {@link onExitBoundary} to identify
@@ -136,6 +139,7 @@ export function NotePaneComponent({
   editorClassName,
   gutterClassName,
   showBacklinks = true,
+  outline = false,
   dailyDate,
   registerHandle,
   onExitBoundary,
@@ -418,6 +422,7 @@ export function NotePaneComponent({
         onExitBoundary={handleExitBoundary}
       >
         <EditorAiKeymap onTrigger={aiMenu.openMenu} />
+        {outline ? <OutlineBridge path={path} /> : null}
       </NoteEditor>
 
       {showBacklinks ? (

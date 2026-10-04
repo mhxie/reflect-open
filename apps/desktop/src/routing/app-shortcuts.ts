@@ -19,6 +19,7 @@ import { useChatSession } from '@/providers/chat-provider.tsx'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useNoteFindActions } from '@/providers/note-find-provider.tsx'
+import { useHeadingPicker } from '@/providers/heading-picker-provider.tsx'
 import { useNoteTemplates } from '@/providers/note-templates-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useShortcuts } from '@/providers/shortcuts-provider.tsx'
@@ -180,6 +181,7 @@ export function useAppShortcuts(): CommandContext {
     pickerOpen: templatePickerOpen,
     createOpen: templateCreateOpen,
   } = useNoteTemplates()
+  const { openHeadingPicker, open: headingPickerOpen } = useHeadingPicker()
   const { toggleSidebar } = useSidebar()
   const { toggle: toggleAudioMemo } = useAudioMemo()
   const { newChat } = useChatSession()
@@ -201,6 +203,9 @@ export function useAppShortcuts(): CommandContext {
   // navigate behind them.
   const templatesOpenRef = useRef(templatePickerOpen || templateCreateOpen)
 
+  // And for the heading picker, another modal dialog.
+  const headingPickerOpenRef = useRef(headingPickerOpen)
+
   // Read at run time, not captured: a command can fire long after the render
   // that created the context (palette open across an index rebuild, etc.).
   const generationRef = useRef<number | null>(graph?.generation ?? null)
@@ -213,6 +218,7 @@ export function useAppShortcuts(): CommandContext {
     paletteOpenRef.current = paletteOpen
     shortcutsOpenRef.current = shortcutsOpen
     templatesOpenRef.current = templatePickerOpen || templateCreateOpen
+    headingPickerOpenRef.current = headingPickerOpen
     generationRef.current = graph?.generation ?? null
     graphRootRef.current = graph?.root ?? null
     recentsRef.current = recents
@@ -281,6 +287,7 @@ export function useAppShortcuts(): CommandContext {
       openShortcuts,
       openTemplatePicker,
       openTemplateCreate,
+      openHeadingPicker,
       enableSemanticSearch: () => {
         updateSettings({ semanticSearchEnabled: true })
         // EmbeddingsSync loads an untouched runtime; a `failed` one only
@@ -300,6 +307,7 @@ export function useAppShortcuts(): CommandContext {
       openShortcuts,
       openTemplatePicker,
       openTemplateCreate,
+      openHeadingPicker,
       toggleSidebar,
       newChat,
       openNoteFindForPath,
@@ -328,6 +336,9 @@ export function useAppShortcuts(): CommandContext {
       }
       if (templatesOpenRef.current) {
         return false // the template picker/create dialogs are modal too
+      }
+      if (headingPickerOpenRef.current) {
+        return false // so is the heading picker
       }
       void runCommand(id, context)
       return true

@@ -36,6 +36,7 @@ vi.mock('@/components/templates/template-create-dialog.tsx', () => ({
   TemplateCreateDialog: () => null,
 }))
 vi.mock('@/components/templates/template-picker.tsx', () => ({ TemplatePicker: () => null }))
+vi.mock('@/components/outline/heading-picker.tsx', () => ({ HeadingPicker: () => null }))
 vi.mock('@/providers/focused-daily-provider.tsx', () => ({
   useDailyContextTarget: () => workspaceState.target,
 }))

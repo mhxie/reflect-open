@@ -271,6 +271,18 @@ const APP_COMMANDS: AppCommand[] = [
     },
   },
   {
+    id: 'outline.jumpToHeading',
+    title: 'Jump to heading…',
+    keywords: ['outline', 'section', 'table of contents', 'toc', 'go to'],
+    // Only the note route's editor publishes an outline.
+    run: (context) => {
+      if (context.route().kind !== 'note' || context.notePath() === null) {
+        return
+      }
+      context.openHeadingPicker()
+    },
+  },
+  {
     id: 'template.new',
     title: 'New template',
     keywords: ['template', 'snippet', 'boilerplate', 'create'],
