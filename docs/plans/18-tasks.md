@@ -109,7 +109,7 @@ export function applyTaskEdits(source: string, edits: readonly TaskEdit[]): Task
 ```
 
 ```sql
--- crates/index-schema/migrations/0023_task_ast_path.sql (projection wipe/rebuild
+-- crates/index-schema/migrations/0024_task_ast_path.sql (projection wipe/rebuild
 -- on first open; chat_* untouched as always)
 CREATE TABLE tasks (
   note_path   TEXT NOT NULL REFERENCES notes(path) ON DELETE CASCADE,

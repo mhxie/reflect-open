@@ -350,6 +350,7 @@ pub fn run() {
             db::index_apply_batch,
             db::index_remove,
             db::index_clear,
+            db::index_prune_embeddings,
             db::index_move,
             db::index_reconcile_scan,
             db::index_touch,

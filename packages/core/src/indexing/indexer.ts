@@ -7,6 +7,7 @@ import {
   applyIndexedNotes,
   clearIndex,
   moveIndexedRows,
+  pruneEmbeddings,
   reconcileScan,
   removeFromIndex,
   setIndexMeta,
@@ -318,13 +319,20 @@ export function createMtimeTouchBatch(generation: number): MtimeTouchBatch {
  * metadata, so the next foreground sync either rebuilds again for an old stamp
  * or reconciles the missing rows for a current stamp. Both converge without
  * continuing to hold SQLite locks in the background.
+ *
+ * `keepEmbeddings` is for a rebuild that only re-derives rows (a projection
+ * bump): vectors are costly to recompute and stay valid by content hash, so
+ * they survive, and only those whose note is gone are pruned afterwards. A
+ * repair rebuild leaves it off and starts the embeddings over too.
  */
-export async function rebuildIndex(options: IndexPassOptions): Promise<void> {
+export async function rebuildIndex(
+  options: IndexPassOptions & { keepEmbeddings?: boolean },
+): Promise<void> {
   const { generation, onSkippedNote, onFileProgress, onStalePlaceholders } = options
   if (options.signal?.aborted) {
     return // don't wipe the current index for an already-cancelled pass
   }
-  await clearIndex(generation)
+  await clearIndex(generation, { keepEmbeddings: options.keepEmbeddings ?? false })
   if (options.signal?.aborted) {
     return
   }
@@ -376,6 +384,10 @@ export async function rebuildIndex(options: IndexPassOptions): Promise<void> {
   if (evicted.length > 0) {
     onStalePlaceholders?.(evicted)
   }
+  if (options.keepEmbeddings === true) {
+    // Evicted notes got no row this pass, yet their vectors are still good.
+    await pruneEmbeddings(generation, evicted)
+  }
   // The rows now match the current projection — stamp it so `syncIndex` can
   // reconcile cheaply from here on. A superseded pass stamps into a stale
   // generation, which Rust drops: the next open then rebuilds again, which is
@@ -403,7 +415,7 @@ export async function syncIndex(options: IndexPassOptions): Promise<void> {
   console.warn(
     `index: stored projection version ${stamped === null ? 'none' : `"${stamped}"`} ≠ ${PROJECTION_VERSION} — full rebuild`,
   )
-  return await rebuildIndex(options)
+  return await rebuildIndex({ ...options, keepEmbeddings: true })
 }
 
 /**

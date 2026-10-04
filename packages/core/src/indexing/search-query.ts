@@ -8,11 +8,13 @@
  * string (doubling any embedded quote, FTS5's own escape), then adds an FTS5
  * prefix operator outside the escaped literal. Each term independently matches
  * a word prefix in either the title or body while remaining robust to whatever
- * the user types.
+ * the user types. A term in a script written without spaces also matches as a
+ * substring, through the `cjk` column's character pairs (`cjk.ts`).
  */
 
 import { sql, type RawBuilder } from 'kysely'
 import { foldKey } from '../markdown/index.ts'
+import { isUnsegmented, letterSegments, runBigrams, unsegmentedRuns } from './cjk.ts'
 
 /** Split a free-text query into the terms shared by FTS and title recall. */
 export function splitSearchTerms(query: string): string[] {
@@ -73,46 +75,117 @@ export function buildFtsMatch(query: string): string | null {
   return terms
     .map((term) => {
       const literal = quoteFtsLiteral(term)
-      return `(title : ${literal}* OR body : ${literal}*)`
+      return `(title : ${literal}* OR body : ${literal}* OR ${cjkTermMatch(term, literal)})`
     })
     .join(' AND ')
 }
 
 /**
- * Scripts written without spaces between words (Han, kana, Hangul, Thai, …).
- * FTS5's `unicode61` tokenizer only segments at non-alphanumeric characters,
- * so a title run in these scripts indexes as ONE token and a shorter query
- * can never match it lexically — such terms need anywhere-in-the-title
- * substring recall. Space-delimited scripts must NOT get it: `car` may find
- * `Car log` but never `Oscar party`. The Rust CLI mirrors this table
- * (`apps/cli/src/keys.rs`); the two must move together.
+ * A term's match in the `cjk` column. A word written against a run indexes
+ * only there; a term holding runs (`用Python写脚本`) matches each run as a
+ * substring and each letter stretch in any column, since a note may spell it
+ * glued or spaced.
  */
-const UNSEGMENTED_SCRIPT_RANGES: ReadonlyArray<readonly [number, number]> = [
-  [0x0e00, 0x0eff], // Thai, Lao
-  [0x1000, 0x109f], // Myanmar
-  [0x1100, 0x11ff], // Hangul Jamo
-  [0x1780, 0x17ff], // Khmer
-  [0x3005, 0x3007], // Japanese iteration marks (々〆〇)
-  [0x3040, 0x30ff], // Hiragana, Katakana
-  [0x3130, 0x318f], // Hangul Compatibility Jamo
-  [0x31f0, 0x31ff], // Katakana Phonetic Extensions
-  [0x3400, 0x4dbf], // CJK Extension A
-  [0x4e00, 0x9fff], // CJK Unified Ideographs
-  [0xac00, 0xd7af], // Hangul Syllables
-  [0xf900, 0xfaff], // CJK Compatibility Ideographs
-  [0xff66, 0xff9f], // Halfwidth Katakana
-  [0x20000, 0x2fa1f], // CJK Extensions B–F, Compatibility Supplement
-]
+function cjkTermMatch(term: string, literal: string): string {
+  const runs = unsegmentedRuns(term)
+  if (runs.length === 0) {
+    return `cjk : ${literal}*`
+  }
+  const parts = [
+    ...runs.map(cjkRunMatch),
+    ...letterSegments(term).map((segment) => {
+      const quoted = quoteFtsLiteral(segment)
+      return `(cjk : ${quoted}* OR title : ${quoted}* OR body : ${quoted}*)`
+    }),
+  ]
+  return parts.length === 1 ? parts[0]! : `(${parts.join(' AND ')})`
+}
 
-/** True when `value` contains a character from an unsegmented script. */
+/**
+ * A run of an unsegmented script as a substring of the `cjk` column: the phrase
+ * of its character pairs, or — for one character — any token it starts (a
+ * pair, or a run's final character).
+ */
+function cjkRunMatch(run: string): string {
+  return [...run].length === 1
+    ? `cjk : ${quoteFtsLiteral(run)}*`
+    : `cjk : ${quoteFtsLiteral(runBigrams(run).join(' '))}`
+}
+
+/** True when `value` contains a character from a script written without spaces. */
 export function containsUnsegmentedScript(value: string): boolean {
   for (const char of value) {
-    const codePoint = char.codePointAt(0) ?? 0
-    if (UNSEGMENTED_SCRIPT_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end)) {
+    if (isUnsegmented(char)) {
       return true
     }
   }
   return false
+}
+
+/**
+ * Words too common to tell notes apart. bm25 already discounts them, but
+ * dropping them keeps a sentence-long query's expression short.
+ */
+const ANY_TERM_STOPWORDS = new Set(
+  (
+    'a about after all also an and any are as at be been but by can could did do does for from ' +
+    'had has have he her his how i if in into is it its just like may me more most my no not of ' +
+    'on one only or other our out over she so some such than that the their them then there ' +
+    'these they this those to too up us very was we were what when where which while who why ' +
+    'will with would you your'
+  ).split(' '),
+)
+
+/** Bounds on an any-term expression, so one pasted page can't cost a full scan per word. */
+const ANY_TERM_MAX_WORDS = 64
+const ANY_TERM_MAX_PAIRS = 128
+
+/** Words from which a query reads as a sentence rather than a few keywords. */
+const SENTENCE_MIN_WORDS = 4
+
+/**
+ * Whether `query` reads as a sentence: four words or more, a run of CJK
+ * characters counting one word per two characters. Few notes hold every word
+ * of a sentence, so `retrieve` tops such a query up with any-term matches; a
+ * few keywords stay strict, where a partial match is mostly noise.
+ */
+export function isSentenceLike(query: string): boolean {
+  const latin = [...query].map((char) => (isUnsegmented(char) ? ' ' : char)).join('')
+  const words = latin.split(/[^\p{L}\p{N}\p{Co}]+/u).filter((word) => word !== '').length
+  const cjkWords = unsegmentedRuns(query).reduce(
+    (count, run) => count + Math.ceil([...run].length / 2),
+    0,
+  )
+  return words + cjkWords >= SENTENCE_MIN_WORDS
+}
+
+/**
+ * An any-term FTS5 expression for long, natural-language queries (`retrieve`),
+ * or `null` when nothing in the query is searchable. {@link buildFtsMatch}
+ * requires every term, so a sentence matches nothing; here each word and each
+ * CJK character pair counts on its own and bm25 ranks notes by how many of the
+ * rarer ones they hold. Words of four letters or more match as prefixes, a
+ * cheap stand-in for stemming (`meeting` finds `meetings`).
+ */
+export function buildFtsAnyMatch(query: string): string | null {
+  const words = new Set<string>()
+  const latin = [...query].map((char) => (isUnsegmented(char) ? ' ' : char)).join('')
+  for (const word of latin.toLowerCase().split(/[^\p{L}\p{N}\p{Co}]+/u)) {
+    if ([...word].length >= 2 && !ANY_TERM_STOPWORDS.has(word) && words.size < ANY_TERM_MAX_WORDS) {
+      words.add(word)
+    }
+  }
+  const pairs = new Set<string>()
+  for (const pair of unsegmentedRuns(query).flatMap(runBigrams)) {
+    if (pairs.size < ANY_TERM_MAX_PAIRS) {
+      pairs.add(pair)
+    }
+  }
+  const alternatives = [
+    ...[...words].map((word) => `${quoteFtsLiteral(word)}${[...word].length >= 4 ? '*' : ''}`),
+    ...[...pairs].map((pair) => `cjk : ${quoteFtsLiteral(pair)}`),
+  ]
+  return alternatives.length === 0 ? null : alternatives.join(' OR ')
 }
 
 export interface TitleRecallTerm {

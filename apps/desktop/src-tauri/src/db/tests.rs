@@ -12,8 +12,9 @@ use super::migrations::{migrate, migrate_to, open_in_memory, open_index_at, vali
 use super::query::run_query;
 use super::scan::scan_reconcile;
 use super::write::{
-    apply_note, claim_tier, clear_index, move_note, touch_note, IndexedAlias, IndexedClaim,
-    IndexedEmail, IndexedLink, IndexedNote, IndexedTag, IndexedTask, MovedNoteAddress,
+    apply_note, claim_tier, clear_index, move_note, prune_orphan_embeddings, touch_note,
+    IndexedAlias, IndexedClaim, IndexedEmail, IndexedLink, IndexedNote, IndexedTag, IndexedTask,
+    MovedNoteAddress,
 };
 
 fn migrated() -> Connection {
@@ -854,7 +855,7 @@ fn clear_cascades_to_child_tables() {
     let mut seeded = note("notes/a.md", "A", vec![wiki("X")]);
     seeded.tasks = vec![task(0, "buy milk", false)];
     apply_note(&conn, &seeded).unwrap();
-    clear_index(&conn).unwrap();
+    clear_index(&conn, false).unwrap();
     // Deleting notes cascades to children; search_fts is cleared explicitly.
     for table in [
         "notes",
@@ -1455,9 +1456,61 @@ fn clear_index_wipes_embeddings_too() {
     let conn = migrated();
     index_note(&conn, "notes/a.md");
     apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
-    clear_index(&conn).unwrap();
+    clear_index(&conn, false).unwrap();
     assert_eq!(chunk_rows(&conn), vec![]);
     assert_eq!(vector_count(&conn), 0);
+}
+
+#[test]
+fn a_rebuild_keeps_embeddings_and_prunes_only_departed_notes() {
+    let conn = migrated();
+    index_note(&conn, "notes/kept.md");
+    index_note(&conn, "notes/gone.md");
+    apply_chunks(&conn, "notes/kept.md", &[chunk("k1", Some(vec384(0.1)))]).unwrap();
+    apply_chunks(&conn, "notes/gone.md", &[chunk("g1", Some(vec384(0.2)))]).unwrap();
+
+    index_note(&conn, "notes/evicted.md");
+    apply_chunks(&conn, "notes/evicted.md", &[chunk("e1", Some(vec384(0.3)))]).unwrap();
+
+    clear_index(&conn, true).unwrap();
+    assert_eq!(vector_count(&conn), 3);
+    // The rebuild re-applies only the note still on disk; the evicted one it
+    // couldn't read keeps its vectors.
+    index_note(&conn, "notes/kept.md");
+    let keep = ["notes/evicted.md".to_string()];
+    assert_eq!(prune_orphan_embeddings(&conn, &keep).unwrap(), 1);
+
+    let paths: Vec<String> = chunk_rows(&conn)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(paths, ["notes/kept.md", "notes/evicted.md"]);
+    assert_eq!(vector_count(&conn), 2);
+}
+
+#[test]
+fn a_cjk_word_inside_a_clause_matches_through_its_character_pairs() {
+    let conn = migrated();
+    let mut trip = note("notes/trip.md", "旅行计划", vec![]);
+    trip.text = "我们下周去東京旅行，然后去大阪。".to_string();
+    apply_note(&conn, &trip).unwrap();
+    index_note(&conn, "notes/plain.md");
+
+    let matches = |expression: &str| -> Vec<String> {
+        conn.prepare("SELECT path FROM search_fts WHERE search_fts MATCH ?1")
+            .unwrap()
+            .query_map([expression], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    // `unicode61` alone can't see a word inside the clause token.
+    assert!(matches(r#"body : "東京"*"#).is_empty());
+    assert_eq!(matches(r#"cjk : "東京""#), ["notes/trip.md"]);
+    assert_eq!(matches(r#"cjk : "東京 京旅 旅行""#), ["notes/trip.md"]);
+    assert_eq!(matches(r#"cjk : "计划""#), ["notes/trip.md"]);
+    // Pairs that straddle a clause break never form.
+    assert!(matches(r#"cjk : "行然""#).is_empty());
 }
 
 #[test]
@@ -1950,7 +2003,7 @@ fn clear_index_preserves_chat_history() {
     let conn = migrated();
     apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
     save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
-    clear_index(&conn).unwrap();
+    clear_index(&conn, false).unwrap();
 
     let notes = run_query(&conn, "SELECT count(*) AS n FROM notes", &[]).unwrap();
     assert_eq!(notes[0]["n"], Value::from(0));

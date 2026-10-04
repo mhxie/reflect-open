@@ -14,7 +14,8 @@ use serde_json::Value;
 use reflect_cli::hash::hash_content;
 use reflect_cli::keys::fold_key;
 use reflect_cli::note_file::{parse_note_meta, read_note_text, walk_notes};
-use reflect_cli::search::build_fts_match;
+use reflect_cli::search::{build_fts_any_match, build_fts_match, is_sentence_like};
+use reflect_index_schema::cjk::cjk_column_text;
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/parity")
@@ -109,14 +110,53 @@ fn fold_key_matches_the_ts_pipeline() {
     }
 }
 
+/// The index writer (desktop) fills `search_fts.cjk` with the shared crate's
+/// `cjk_column_text`; the app's dev index uses `cjkColumnText`.
+#[test]
+fn cjk_column_matches_the_ts_pipeline() {
+    let expected = load_expected();
+    let rows = expected["cjkColumn"].as_object().unwrap();
+    assert!(!rows.is_empty());
+    for (input, want) in rows {
+        assert_eq!(
+            cjk_column_text(input),
+            want.as_str().unwrap(),
+            "cjkColumn({input:?})"
+        );
+    }
+}
+
 #[test]
 fn fts_match_building_matches_the_ts_pipeline() {
     let expected = load_expected();
     for (input, want) in expected["ftsMatch"].as_object().unwrap() {
-        let got = build_fts_match(input);
+        let got = build_fts_match(input, true);
         match want.as_str() {
             Some(expression) => assert_eq!(got.as_deref(), Some(expression), "ftsMatch({input:?})"),
             None => assert_eq!(got, None, "ftsMatch({input:?})"),
         }
+    }
+}
+
+/// Sentences top up with any-term matches in both the app (`retrieve`) and
+/// the CLI: same sentence test, same expression, byte for byte.
+#[test]
+fn any_term_expressions_match_the_ts_pipeline() {
+    let expected = load_expected();
+    let rows = expected["ftsAnyMatch"].as_object().unwrap();
+    assert!(!rows.is_empty());
+    for (input, want) in rows {
+        assert_eq!(
+            build_fts_any_match(input, true).as_deref(),
+            want.as_str(),
+            "ftsAnyMatch({input:?})"
+        );
+    }
+    for (input, want) in expected["sentenceLike"].as_object().unwrap() {
+        assert_eq!(
+            is_sentence_like(input),
+            want.as_bool().unwrap(),
+            "sentenceLike({input:?})"
+        );
     }
 }

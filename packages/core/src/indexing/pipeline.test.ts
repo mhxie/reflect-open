@@ -48,6 +48,8 @@ beforeEach(() => {
       case 'index_remove':
       case 'index_meta_set':
         return null
+      case 'index_prune_embeddings':
+        return 0
       case 'db_query':
         if (sql.includes('index_meta')) return metaRows
         if (sql.includes('from "assets"')) return [{ note_path: 'notes/a.md' }]
@@ -182,6 +184,9 @@ describe('rebuildIndex', () => {
     expect(progress.at(-1)).toEqual([1, 1, 1])
     const commands = mockInvoke.mock.calls.map(([cmd]) => cmd)
     expect(commands[0]).toBe('index_clear')
+    // A repair rebuild starts the embeddings over too.
+    expect(mockInvoke.mock.calls[0]![1]).toEqual({ generation: 1, keepEmbeddings: false })
+    expect(commands).not.toContain('index_prune_embeddings')
     expect(commands).toContain('list_files')
     const batch = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_apply_batch')
     expect(batch).toBeDefined()
@@ -318,8 +323,12 @@ describe('syncIndex', () => {
   it('rebuilds and stamps when the index predates the current projection', async () => {
     metaRows = [] // never stamped (or written by an older app)
     await syncIndex({ generation: 3 })
-    const commands = mockInvoke.mock.calls.map(([cmd]) => cmd)
-    expect(commands).toContain('index_clear')
+    // A projection bump re-derives rows only: embeddings survive, and just
+    // those whose note is gone are pruned once every row is back.
+    const clear = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_clear')
+    expect(clear![1]).toEqual({ generation: 3, keepEmbeddings: true })
+    const prune = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_prune_embeddings')
+    expect(prune![1]).toEqual({ generation: 3, keep: [] })
     const stamp = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_meta_set')
     expect(stamp![1]).toMatchObject({
       key: PROJECTION_VERSION_KEY,
@@ -484,7 +493,7 @@ describe('Kysely → db_query bridge', () => {
     expect(sql).toContain('left join "lexical"')
     expect(sql).toContain('when "filtered_notes"."title_key" =')
     expect(sql).toContain(`instr(' ' || "filtered_notes"."title_key"`)
-    expect(sql).toContain('bm25(search_fts, 0, 10.0, 1.0)')
+    expect(sql).toContain('bm25(search_fts, 0, 10.0, 1.0, 1.0)')
     expect(sql).toContain('"filtered_notes"."is_pinned" desc')
     expect(sql).toContain('"filtered_notes"."mtime" desc')
     expect(sql).toContain('"filtered_notes"."path" asc')

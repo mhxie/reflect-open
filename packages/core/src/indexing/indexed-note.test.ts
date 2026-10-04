@@ -10,7 +10,7 @@ import {
 
 describe('buildIndexedNote', () => {
   it('carries the projection version that rebuilds tasks by AST path', () => {
-    expect(PROJECTION_VERSION).toBe(21)
+    expect(PROJECTION_VERSION).toBe(22)
   })
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {

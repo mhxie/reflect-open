@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { setBridge } from '../ipc/bridge.ts'
 import {
   bestChunkPerNote,
   fuseRanked,
   mergeNearestFirst,
+  retrieve,
   type ChunkHitRow,
   type RetrievalHit,
 } from './retrieve.ts'
@@ -123,5 +125,92 @@ describe('fuseRanked (reciprocal rank fusion)', () => {
   it('keeps the private flag through fusion', () => {
     const fused = fuseRanked([[hit('p', { isPrivate: true })]], 5)
     expect(fused[0]!.isPrivate).toBe(true)
+  })
+})
+
+describe('retrieve', () => {
+  afterEach(() => {
+    setBridge(null)
+  })
+
+  /** A bridge whose `db_query` answers by query shape; records every call. */
+  function fakeIndex(answers: {
+    everyTerm: object[]
+    anyTerm: object[]
+  }): Array<[string, unknown]> {
+    const calls: Array<[string, unknown]> = []
+    setBridge({
+      invoke: async (command, args) => {
+        calls.push([command, args])
+        const sql = String(args['sql'] ?? '')
+        if (sql.includes('materialized')) {
+          return answers.everyTerm
+        }
+        if (sql.includes('bm25(search_fts, 0, 10.0, 1.0, 1.0)')) {
+          return answers.anyTerm
+        }
+        if (sql.includes('"is_private"')) {
+          return [{ path: 'notes/exact.md', is_private: 0 }]
+        }
+        return []
+      },
+      listen: async () => () => {},
+    })
+    return calls
+  }
+
+  const EXACT = {
+    path: 'notes/exact.md',
+    title: 'Exact',
+    daily_date: null,
+    preview: '',
+    mtime: 1,
+    is_pinned: 0,
+    fts_highlighted_title: 'Exact',
+    snippet: 'every term',
+  }
+
+  it('fills a sentence-long query with any-term matches after the every-term ones', async () => {
+    const calls = fakeIndex({
+      everyTerm: [EXACT],
+      anyTerm: [
+        { path: 'notes/exact.md', title: 'Exact', snippet: '', isPrivate: 0 },
+        { path: 'notes/related.md', title: 'Related', snippet: 'some terms', isPrivate: 1 },
+      ],
+    })
+    const hits = await retrieve('a sentence about wombat formats and their storage', {
+      mode: 'lexical',
+      limit: 3,
+    })
+    // The every-term hit leads and isn't repeated; the rest rank by bm25.
+    expect(hits.map((hit) => [hit.path, hit.isPrivate])).toEqual([
+      ['notes/exact.md', false],
+      ['notes/related.md', true],
+    ])
+    expect(hits.map((hit) => hit.score)).toEqual([1, 0.5])
+    const anyTerm = calls.find(([, args]) =>
+      String((args as { sql?: string }).sql).includes('bm25(search_fts, 0, 10.0, 1.0, 1.0)'),
+    )
+    expect(anyTerm).toBeDefined()
+  })
+
+  it('skips the any-term leg when every term already filled the limit', async () => {
+    const calls = fakeIndex({ everyTerm: [EXACT], anyTerm: [] })
+    await retrieve('exact', { mode: 'lexical', limit: 1 })
+    expect(
+      calls.some(([, args]) => String((args as { sql?: string }).sql).includes('ORDER BY bm25')),
+    ).toBe(false)
+  })
+
+  it('keeps a few keywords strict: no partial matches fill the list', async () => {
+    const calls = fakeIndex({
+      everyTerm: [EXACT],
+      anyTerm: [{ path: 'notes/related.md', title: 'Related', snippet: 'some', isPrivate: 0 }],
+    })
+    const hits = await retrieve('wombat formats', { mode: 'lexical', limit: 3 })
+    expect(hits.map((hit) => hit.path)).toEqual(['notes/exact.md'])
+    expect(
+      calls.some(([, args]) => String((args as { sql?: string }).sql).includes('ORDER BY bm25')),
+    ).toBe(false)
   })
 })

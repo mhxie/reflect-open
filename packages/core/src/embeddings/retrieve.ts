@@ -2,6 +2,8 @@ import { sql } from 'kysely'
 import { db } from '../indexing/db.ts'
 import { searchWithFilters } from '../indexing/filtered-search.ts'
 import { literalSearchQuery } from '../indexing/filter-query.ts'
+import { HIGHLIGHT_END, HIGHLIGHT_START } from '../indexing/search.ts'
+import { buildFtsAnyMatch, isSentenceLike } from '../indexing/search-query.ts'
 import { embedTexts } from './commands.ts'
 
 /**
@@ -104,6 +106,24 @@ async function lexicalHits(query: string, limit: number): Promise<RetrievalHit[]
   // Literal on purpose: retrieve() receives raw text (often from AI callers,
   // Plan 10) where palette filter tokens like "is:daily" inside a sentence
   // must stay search terms, not become constraints.
+  const everyTerm = await everyTermHits(query, limit)
+  if (everyTerm.length >= limit || !isSentenceLike(query)) {
+    return everyTerm
+  }
+  // A sentence rarely has every term in one note: fill the rest with the
+  // notes that share the most, and rarest, of its words. A few keywords stay
+  // strict, where a partial match is mostly noise.
+  const anyTerm = await anyTermHits(
+    query,
+    limit - everyTerm.length,
+    new Set(everyTerm.map((hit) => hit.path)),
+  )
+  // Scores stay rank order; raw bm25 scores are not comparable across legs.
+  return [...everyTerm, ...anyTerm].map((hit, index) => ({ ...hit, score: 1 / (1 + index) }))
+}
+
+/** The palette's search: every term must match, title matches first. */
+async function everyTermHits(query: string, limit: number): Promise<RetrievalHit[]> {
   const hits = await searchWithFilters(literalSearchQuery(query), { limit })
   if (hits.length === 0) {
     return []
@@ -118,14 +138,47 @@ async function lexicalHits(query: string, limit: number): Promise<RetrievalHit[]
     .select(['path', 'isPrivate'])
     .execute()
   const privateByPath = new Map(flags.map((row) => [row.path, row.isPrivate !== 0]))
-  return hits.map((hit, index) => ({
+  return hits.map((hit) => ({
     path: hit.path,
     title: hit.title,
-    score: 1 / (1 + index), // FTS rank order; raw bm25 scores are not exposed
+    score: 0,
     snippet: hit.snippet ?? '',
     heading: null,
     isPrivate: privateByPath.get(hit.path) ?? false,
   }))
+}
+
+/** Notes matching any word or CJK pair of `query`, best bm25 first, skipping `exclude`. */
+async function anyTermHits(
+  query: string,
+  limit: number,
+  exclude: ReadonlySet<string>,
+): Promise<RetrievalHit[]> {
+  const match = buildFtsAnyMatch(query)
+  if (match === null) {
+    return []
+  }
+  const result = await sql<{ path: string; title: string; snippet: string; isPrivate: number }>`
+    SELECT search_fts.path AS path, n.title AS title,
+           snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10) AS snippet,
+           n.is_private AS isPrivate
+    FROM search_fts
+    JOIN notes n ON n.path = search_fts.path
+    WHERE search_fts MATCH ${match} AND n.kind != 'template'
+    ORDER BY bm25(search_fts, 0, 10.0, 1.0, 1.0)
+    LIMIT ${limit + exclude.size}
+  `.execute(db)
+  return result.rows
+    .filter((row) => !exclude.has(row.path))
+    .slice(0, limit)
+    .map((row) => ({
+      path: row.path,
+      title: row.title,
+      score: 0,
+      snippet: row.snippet,
+      heading: null,
+      isPrivate: row.isPrivate !== 0,
+    }))
 }
 
 /** Reciprocal rank fusion: order-based, scale-free, deterministic. */

@@ -290,7 +290,7 @@ export async function searchWithFilters(
           sql<string>`snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10)`.as(
             'snippet',
           ),
-          sql<number>`bm25(search_fts, 0, 10.0, 1.0)`.as('rank'),
+          sql<number>`bm25(search_fts, 0, 10.0, 1.0, 1.0)`.as('rank'),
         ])
         .where(sql<boolean>`search_fts MATCH ${match}`),
   )

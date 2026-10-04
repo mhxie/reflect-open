@@ -289,9 +289,13 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       case 'index_reconcile_scan':
         return reconcileScan(files, index)
       case 'index_clear': {
+        // The browser index has no real vectors (vec0 is stubbed out), so
+        // there is nothing for `keepEmbeddings` to preserve.
         index.clear()
         return null
       }
+      case 'index_prune_embeddings':
+        return 0
       case 'index_meta_set': {
         const { key, value } = metaArgsSchema.parse(args)
         index.setMeta(key, value)

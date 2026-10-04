@@ -1,5 +1,6 @@
 import sqlite3InitModule, { type Database, type SqlValue } from '@sqlite.org/sqlite-wasm'
 import {
+  cjkColumnText,
   CLAIM_TIER,
   dateFromDailyPath,
   encodeTaskBreadcrumbs,
@@ -206,10 +207,11 @@ export async function createDevIndexDb(): Promise<DevIndexDb> {
         )
       }
       const searchBody = note.assetText === '' ? note.text : `${note.text}\n${note.assetText}`
-      run(db, 'INSERT INTO search_fts(path, title, body) VALUES(?, ?, ?)', [
+      run(db, 'INSERT INTO search_fts(path, title, body, cjk) VALUES(?, ?, ?, ?)', [
         note.path,
         note.title,
         searchBody,
+        `${cjkColumnText(note.title)} ${cjkColumnText(searchBody)}`.trim(),
       ])
     },
 

@@ -165,9 +165,28 @@ export async function touchIndexedNotes(
   await call('index_touch', { entries, generation }, voidSchema)
 }
 
-/** Wipe all derived tables (precedes a full rebuild; for `generation`). */
-export async function clearIndex(generation: number): Promise<void> {
-  await call('index_clear', { generation }, voidSchema)
+/**
+ * Wipe all derived tables (precedes a full rebuild; for `generation`).
+ * `keepEmbeddings` spares the embedding tables when only the projection's
+ * derivation changed: their chunks are keyed by content hash and stay valid.
+ */
+export async function clearIndex(
+  generation: number,
+  options?: { keepEmbeddings?: boolean },
+): Promise<void> {
+  await call(
+    'index_clear',
+    { generation, keepEmbeddings: options?.keepEmbeddings ?? false },
+    voidSchema,
+  )
+}
+
+/**
+ * Drop embeddings whose note no longer has a row, sparing `keep` (notes a
+ * rebuild couldn't read); returns how many chunks went.
+ */
+export async function pruneEmbeddings(generation: number, keep: string[]): Promise<number> {
+  return await call('index_prune_embeddings', { generation, keep }, z.number().int().nonnegative())
 }
 
 /**

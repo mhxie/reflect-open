@@ -14,6 +14,8 @@
 //! the `chat_*` tables (0008), which hold durable chat history. Wipe-style
 //! migrations (0004, 0006) and `index_clear` must never touch them.
 
+pub mod cjk;
+
 /// Directory inside a graph that holds the index (and marks a dir as a graph).
 pub const REFLECT_DIR: &str = ".reflect";
 
@@ -23,7 +25,7 @@ pub const INDEX_FILE: &str = "index.sqlite";
 /// `user_version` after every migration has run. Read-only consumers compare
 /// this against `PRAGMA user_version` to detect an index written by a newer
 /// (or older) app than they were built for.
-pub const LATEST_SCHEMA_VERSION: usize = 23;
+pub const LATEST_SCHEMA_VERSION: usize = 24;
 
 /// The `index_meta` key holding the TS-owned projection version (the rows'
 /// derivation version, distinct from the schema version above).
@@ -44,7 +46,7 @@ mod schema {
     use std::sync::{LazyLock, OnceLock};
 
     use rusqlite::ffi::{sqlite3, sqlite3_api_routines};
-    use rusqlite::Connection;
+    use rusqlite::{Connection, TransactionBehavior};
     use rusqlite_migration::{Migrations, M};
 
     /// Ordered schema migrations, loaded from `migrations/*.sql`.
@@ -74,7 +76,8 @@ mod schema {
             )),
             M::up(include_str!("../migrations/0021_note_has_content.sql")),
             M::up(include_str!("../migrations/0022_drop_note_text.sql")),
-            M::up(include_str!("../migrations/0023_task_ast_path.sql")),
+            M::up(include_str!("../migrations/0023_search_fts_cjk.sql")),
+            M::up(include_str!("../migrations/0024_task_ast_path.sql")),
         ])
     });
 
@@ -153,11 +156,26 @@ mod schema {
         Ok(Connection::open_in_memory()?)
     }
 
-    /// Bring the connection up to the latest schema version (no-op if current).
+    /// Bring the connection to the latest schema and reconcile its CJK projection.
     pub fn migrate(conn: &mut Connection) -> Result<(), SchemaError> {
         MIGRATIONS
             .to_latest(conn)
-            .map_err(|err| SchemaError::Migration(err.to_string()))
+            .map_err(|err| SchemaError::Migration(err.to_string()))?;
+        repair_cjk_projection(conn)
+    }
+
+    fn repair_cjk_projection(conn: &mut Connection) -> Result<(), SchemaError> {
+        // Upstream schema 23 contains task changes, so its FTS table can lack CJK.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !super::cjk::has_column(&tx)? {
+            tx.execute_batch(include_str!("../migrations/0023_search_fts_cjk.sql"))?;
+            tx.execute(
+                "DELETE FROM index_meta WHERE key = ?1",
+                [super::PROJECTION_VERSION_KEY],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Stop at schema `version`, so schema-evolution tests can stage data in an
@@ -165,7 +183,11 @@ mod schema {
     pub fn migrate_to(conn: &mut Connection, version: usize) -> Result<(), SchemaError> {
         MIGRATIONS
             .to_version(conn, version)
-            .map_err(|err| SchemaError::Migration(format!("to version {version}: {err}")))
+            .map_err(|err| SchemaError::Migration(format!("to version {version}: {err}")))?;
+        if version >= super::cjk::COLUMN_SCHEMA_VERSION {
+            repair_cjk_projection(conn)?;
+        }
+        Ok(())
     }
 
     /// Open (creating if needed) and migrate `<root>/.reflect/index.sqlite`.
@@ -216,6 +238,7 @@ mod schema {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use rusqlite::OptionalExtension;
 
         #[test]
         fn migrations_are_valid() {
@@ -230,6 +253,132 @@ mod schema {
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
             assert_eq!(version, crate::LATEST_SCHEMA_VERSION as i64);
+            assert!(crate::cjk::has_column(&conn).unwrap());
+        }
+
+        #[test]
+        fn historical_targets_keep_their_cjk_schema_boundary() {
+            let mut conn = open_in_memory().unwrap();
+            migrate_to(&mut conn, 22).unwrap();
+            assert!(!crate::cjk::has_column(&conn).unwrap());
+            migrate_to(&mut conn, 23).unwrap();
+            assert!(crate::cjk::has_column(&conn).unwrap());
+        }
+
+        #[test]
+        fn cjk_repair_preserves_durable_data_and_is_idempotent() {
+            for (version, upstream) in [
+                (23, true),
+                (23, false),
+                (24, false),
+                (crate::LATEST_SCHEMA_VERSION, false),
+            ] {
+                let mut conn = open_in_memory().unwrap();
+                if upstream {
+                    migrate_to(&mut conn, 22).unwrap();
+                    conn.execute_batch(include_str!("../migrations/0024_task_ast_path.sql"))
+                        .unwrap();
+                    conn.pragma_update(None, "user_version", i64::try_from(version).unwrap())
+                        .unwrap();
+                } else {
+                    migrate_to(&mut conn, version).unwrap();
+                }
+                conn.execute_batch(
+                    "INSERT INTO notes(path, title, title_key, file_hash) VALUES ('notes/a.md', 'A', 'a', 'hash');
+                     INSERT INTO search_fts(path, title, body) VALUES ('notes/a.md', 'A', 'body');
+                     INSERT INTO index_meta(key, value) VALUES ('projection_version', 'current'), ('local_only_folders', '[\"secure\"]');
+                     INSERT INTO chat_conversations VALUES ('c1', 'Chat', 1, 2);
+                     INSERT INTO chat_messages VALUES ('m1', 'c1', 0, 'hello', '[]', '[]', '[]', 1);
+                     INSERT INTO embedding_chunks(id, note_path, pos_from, pos_to, text, content_hash, model_id)
+                       VALUES (1, 'notes/a.md', 0, 4, 'body', 'hash', 'all-MiniLM-L6-v2');",
+                ).unwrap();
+                let vector = format!("[{}]", ["0.25"; 384].join(","));
+                conn.execute(
+                    "INSERT INTO embedding_vectors(rowid, embedding) VALUES (1, ?1)",
+                    [vector],
+                )
+                .unwrap();
+                let before: Vec<u8> = conn
+                    .query_row(
+                        "SELECT embedding FROM embedding_vectors WHERE rowid = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+
+                migrate(&mut conn).unwrap();
+                assert!(crate::cjk::has_column(&conn).unwrap());
+                let stamp: Option<String> = conn
+                    .query_row(
+                        "SELECT value FROM index_meta WHERE key = 'projection_version'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .unwrap();
+                assert_eq!(stamp.as_deref(), (!upstream).then_some("current"));
+                assert_eq!(
+                    conn.query_row(
+                        "SELECT count(*) FROM search_fts WHERE path = 'notes/a.md'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                    i64::from(!upstream)
+                );
+                conn.execute("INSERT INTO tasks(note_path, ast_path, markdown, checked) VALUES ('notes/a.md', '[0]', 'task', 0)", []).unwrap();
+                let after: Vec<u8> = conn
+                    .query_row(
+                        "SELECT embedding FROM embedding_vectors WHERE rowid = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(after, before);
+                for (query, expected) in [
+                    ("SELECT title FROM notes WHERE path = 'notes/a.md'", "A"),
+                    (
+                        "SELECT title FROM chat_conversations WHERE id = 'c1'",
+                        "Chat",
+                    ),
+                    (
+                        "SELECT user_text FROM chat_messages WHERE id = 'm1'",
+                        "hello",
+                    ),
+                    ("SELECT text FROM embedding_chunks WHERE id = 1", "body"),
+                    (
+                        "SELECT value FROM index_meta WHERE key = 'local_only_folders'",
+                        "[\"secure\"]",
+                    ),
+                ] {
+                    assert_eq!(
+                        conn.query_row(query, [], |row| row.get::<_, String>(0))
+                            .unwrap(),
+                        expected
+                    );
+                }
+                conn.execute_batch("INSERT INTO search_fts(path, title, body, cjk) VALUES ('notes/rebuilt.md', 'Rebuilt', '東京旅行', '東京 京旅 旅行 行');
+                    INSERT OR REPLACE INTO index_meta(key, value) VALUES ('projection_version', 'rebuilt');").unwrap();
+                migrate(&mut conn).unwrap();
+                assert_eq!(
+                    conn.query_row(
+                        "SELECT path FROM search_fts WHERE search_fts MATCH 'cjk : \"東京\"'",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                    "notes/rebuilt.md"
+                );
+                assert_eq!(
+                    conn.query_row(
+                        "SELECT value FROM index_meta WHERE key = 'projection_version'",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                    "rebuilt"
+                );
+            }
         }
     }
 }

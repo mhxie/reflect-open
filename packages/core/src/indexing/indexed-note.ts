@@ -98,10 +98,14 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * 20 - `notes.has_content` records whether a note would render blank, and
  * `search_fts.body` now carries the raw Markdown body, so every note must
  * reproject.
- * 21 - tasks are keyed by AST path (`tasks.ast_path`) and store Markdown instead
- * of plain text, so every note's tasks must reproject.
+ * 21 - `search_fts.cjk` (migration 0023) indexes CJK runs as character pairs
+ * and final characters, plus the letters and digits glued to them; the
+ * migration recreates the table empty, so every note must reproject. The
+ * rebuild keeps embeddings: their chunk text didn't change.
+ * 22 - tasks are keyed by AST path (`tasks.ast_path`, migration 0024) and
+ * store Markdown instead of plain text, so every note's tasks must reproject.
  */
-export const PROJECTION_VERSION = 21
+export const PROJECTION_VERSION = 22
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the

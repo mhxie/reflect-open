@@ -5,6 +5,7 @@
 //! transactions and generation gating while these stay directly unit-testable.
 
 use reflect_graph_paths::LocalOnlyFolders;
+use reflect_index_schema::cjk::cjk_column_text;
 use reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
 use rusqlite::{params, Connection};
 use serde::Deserialize;
@@ -251,8 +252,15 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
     } else {
         format!("{}\n{}", note.text, note.asset_text)
     };
-    conn.prepare_cached("INSERT INTO search_fts(path, title, body) VALUES(?1, ?2, ?3)")?
-        .execute(params![note.path, note.title, search_body])?;
+    // CJK runs index once more as character pairs, so a word inside a clause
+    // matches, along with the words glued to them (migration 0023).
+    let cjk = format!(
+        "{} {}",
+        cjk_column_text(&note.title),
+        cjk_column_text(&search_body)
+    );
+    conn.prepare_cached("INSERT INTO search_fts(path, title, body, cjk) VALUES(?1, ?2, ?3, ?4)")?
+        .execute(params![note.path, note.title, search_body, cjk.trim()])?;
     Ok(())
 }
 
@@ -347,12 +355,41 @@ pub(super) fn move_note(
 /// Wipe every derived table (for a full rebuild driven by TS). Deleting `notes`
 /// cascades to every child table; `search_fts` (a virtual table, no FK) is
 /// cleared explicitly. `index_meta` is intentionally preserved across a rebuild.
-pub(super) fn clear_index(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch(
-        "DELETE FROM notes; DELETE FROM search_fts;
-         DELETE FROM embedding_vectors; DELETE FROM embedding_chunks;",
-    )?;
+///
+/// `keep_embeddings` spares the embedding tables, which have no FK to `notes`:
+/// a projection-version rebuild changes how rows are derived, not the chunk
+/// text the vectors were computed from, and re-embedding a graph with a large
+/// model takes far longer than re-indexing it. Chunks keyed by content hash
+/// stay valid; [`prune_orphan_embeddings`] drops those whose note is gone.
+pub(super) fn clear_index(conn: &Connection, keep_embeddings: bool) -> AppResult<()> {
+    conn.execute_batch("DELETE FROM notes; DELETE FROM search_fts;")?;
+    if !keep_embeddings {
+        conn.execute_batch("DELETE FROM embedding_vectors; DELETE FROM embedding_chunks;")?;
+    }
     Ok(())
+}
+
+/// Drop embeddings whose note no longer has a row: what a rebuild that kept
+/// embeddings leaves behind for notes deleted since. `keep` names notes the
+/// rebuild couldn't read (iCloud-evicted) whose vectors are still good.
+/// Returns the chunks removed.
+pub(super) fn prune_orphan_embeddings(conn: &Connection, keep: &[String]) -> AppResult<usize> {
+    const ORPHANS: &str = "note_path NOT IN (SELECT path FROM notes)
+         AND note_path NOT IN (SELECT value FROM json_each(?1))";
+    let keep =
+        serde_json::to_string(keep).map_err(|err| crate::error::AppError::io(err.to_string()))?;
+    conn.execute(
+        &format!(
+            "DELETE FROM embedding_vectors WHERE rowid IN (
+               SELECT id FROM embedding_chunks WHERE {ORPHANS})"
+        ),
+        [&keep],
+    )?;
+    let removed = conn.execute(
+        &format!("DELETE FROM embedding_chunks WHERE {ORPHANS}"),
+        [&keep],
+    )?;
+    Ok(removed)
 }
 
 /// Re-stamp a note row's stored `mtime` (and `updated_at`, which `apply_note`

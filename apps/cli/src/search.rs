@@ -9,6 +9,9 @@
 //! `search-query.ts` is the TS twin). The CLI adds its privacy filter
 //! (`notes.is_private = 0`) and FTS5 `snippet()`.
 
+use std::collections::HashSet;
+
+use reflect_index_schema::cjk::{is_unsegmented, letter_segments, run_bigrams, unsegmented_runs};
 use rusqlite::types::Value;
 use rusqlite::{params_from_iter, Connection};
 use unicode_normalization::char::is_combining_mark;
@@ -90,7 +93,12 @@ fn search_terms(query: &str) -> Vec<&str> {
 /// A punctuation-only query has no tokenizable term to constrain on, so it
 /// gets the quoted join: a valid, matchless expression that still lets title
 /// recall admit rows.
-pub fn build_fts_match(query: &str) -> Option<String> {
+///
+/// `cjk_column` says whether the index has the `cjk` column
+/// ([`reflect_index_schema::cjk::COLUMN_SCHEMA_VERSION`] on); an index the app
+/// hasn't migrated yet is
+/// searched by title and body alone, as before the column existed.
+pub fn build_fts_match(query: &str, cjk_column: bool) -> Option<String> {
     let terms = search_terms(query);
     if terms.is_empty() {
         return None;
@@ -109,11 +117,49 @@ pub fn build_fts_match(query: &str) -> Option<String> {
             .into_iter()
             .map(|term| {
                 let literal = quote_fts_literal(term);
-                format!("(title : {literal}* OR body : {literal}*)")
+                let mut alternatives =
+                    vec![format!("title : {literal}*"), format!("body : {literal}*")];
+                if cjk_column {
+                    alternatives.push(cjk_term_match(term, &literal));
+                }
+                format!("({})", alternatives.join(" OR "))
             })
             .collect::<Vec<_>>()
             .join(" AND "),
     )
+}
+
+/// A term's match in the `cjk` column. A word written against a run indexes
+/// only there; a term holding runs (`用Python写脚本`) matches each run as a
+/// substring and each letter stretch in any column, since a note may spell it
+/// glued or spaced. The twin of `cjkTermMatch` (`search-query.ts`).
+fn cjk_term_match(term: &str, literal: &str) -> String {
+    let runs = unsegmented_runs(term);
+    if runs.is_empty() {
+        return format!("cjk : {literal}*");
+    }
+    let mut parts: Vec<String> = runs.into_iter().map(cjk_run_match).collect();
+    parts.extend(letter_segments(term).into_iter().map(|segment| {
+        let quoted = quote_fts_literal(segment);
+        format!("(cjk : {quoted}* OR title : {quoted}* OR body : {quoted}*)")
+    }));
+    if parts.len() == 1 {
+        parts.remove(0)
+    } else {
+        format!("({})", parts.join(" AND "))
+    }
+}
+
+/// A run of an unsegmented script as a substring of the `cjk` column: the
+/// phrase of its character pairs, or — for one character — any token it
+/// starts (a pair, or a run's final character). The twin of `cjkRunMatch`
+/// (`search-query.ts`).
+fn cjk_run_match(run: &str) -> String {
+    if run.chars().count() == 1 {
+        format!("cjk : {}*", quote_fts_literal(run))
+    } else {
+        format!("cjk : {}", quote_fts_literal(&run_bigrams(run).join(" ")))
+    }
 }
 
 /// One search result row.
@@ -148,8 +194,8 @@ fn title_recall_needles(title_key: &str) -> Vec<String> {
 }
 
 /// The palette search's bm25 column weights (`filtered-search.ts`): path
-/// unranked, title boosted 10× over body. Must stay in lockstep.
-const RANK_EXPR: &str = "bm25(search_fts, 0, 10.0, 1.0)";
+/// unranked, title boosted 10× over body and CJK pairs. Must stay in lockstep.
+const RANK_EXPR: &str = "bm25(search_fts, 0, 10.0, 1.0, 1.0)";
 
 /// Ranked, private-excluded search mirroring the desktop palette ordering
 /// (`filtered-search.ts`): exact, prefix, and all-terms title matches first,
@@ -235,6 +281,147 @@ pub fn search_index(
     Ok(hits)
 }
 
+/// Words too common to tell notes apart: bm25 already discounts them, but
+/// dropping them keeps a sentence's expression short. The twin of
+/// `ANY_TERM_STOPWORDS` (`search-query.ts`).
+const ANY_TERM_STOPWORDS: &[&str] = &[
+    "a", "about", "after", "all", "also", "an", "and", "any", "are", "as", "at", "be", "been",
+    "but", "by", "can", "could", "did", "do", "does", "for", "from", "had", "has", "have", "he",
+    "her", "his", "how", "i", "if", "in", "into", "is", "it", "its", "just", "like", "may", "me",
+    "more", "most", "my", "no", "not", "of", "on", "one", "only", "or", "other", "our", "out",
+    "over", "she", "so", "some", "such", "than", "that", "the", "their", "them", "then", "there",
+    "these", "they", "this", "those", "to", "too", "up", "us", "very", "was", "we", "were", "what",
+    "when", "where", "which", "while", "who", "why", "will", "with", "would", "you", "your",
+];
+
+/// Bounds on an any-term expression, so one pasted page can't cost a full
+/// scan per word.
+const ANY_TERM_MAX_WORDS: usize = 64;
+const ANY_TERM_MAX_PAIRS: usize = 128;
+
+/// Words from which a query reads as a sentence rather than a few keywords.
+const SENTENCE_MIN_WORDS: usize = 4;
+
+/// The query's stretches of `unicode61` token characters outside the
+/// unsegmented scripts, which stand in as spaces.
+fn latin_words(query: &str) -> Vec<String> {
+    let latin: String = query
+        .chars()
+        .map(|character| {
+            if is_unsegmented(character) {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    latin
+        .split(|character: char| !is_fts_token_char(character))
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether `query` reads as a sentence: four words or more, a run of CJK
+/// characters counting one word per two characters. Few notes hold every word
+/// of a sentence, so search tops such a query up with any-term matches. The
+/// twin of `isSentenceLike` (`search-query.ts`).
+pub fn is_sentence_like(query: &str) -> bool {
+    let cjk_words: usize = unsegmented_runs(query)
+        .into_iter()
+        .map(|run| run.chars().count().div_ceil(2))
+        .sum();
+    latin_words(query).len() + cjk_words >= SENTENCE_MIN_WORDS
+}
+
+/// An any-term FTS5 expression for a sentence, or `None` when nothing in it
+/// is searchable: each word and each CJK character pair counts on its own, and
+/// bm25 ranks notes by how many of the rarer ones they hold. Words of four
+/// letters or more match as prefixes. The twin of `buildFtsAnyMatch`
+/// (`search-query.ts`); pairs need the `cjk` column.
+pub fn build_fts_any_match(query: &str, cjk_column: bool) -> Option<String> {
+    let mut words: Vec<String> = Vec::new();
+    for word in latin_words(&query.to_lowercase()) {
+        if word.chars().count() >= 2
+            && !ANY_TERM_STOPWORDS.contains(&word.as_str())
+            && !words.contains(&word)
+            && words.len() < ANY_TERM_MAX_WORDS
+        {
+            words.push(word);
+        }
+    }
+    let mut pairs: Vec<String> = Vec::new();
+    if cjk_column {
+        for pair in unsegmented_runs(query).into_iter().flat_map(run_bigrams) {
+            if !pairs.contains(&pair) && pairs.len() < ANY_TERM_MAX_PAIRS {
+                pairs.push(pair);
+            }
+        }
+    }
+    let alternatives: Vec<String> = words
+        .iter()
+        .map(|word| {
+            let prefix = if word.chars().count() >= 4 { "*" } else { "" };
+            format!("{}{prefix}", quote_fts_literal(word))
+        })
+        .chain(
+            pairs
+                .iter()
+                .map(|pair| format!("cjk : {}", quote_fts_literal(pair))),
+        )
+        .collect();
+    if alternatives.is_empty() {
+        None
+    } else {
+        Some(alternatives.join(" OR "))
+    }
+}
+
+/// The notes matching an any-term expression, best bm25 first, skipping
+/// `exclude` (the every-term hits already listed) and private notes.
+pub fn any_term_index(
+    conn: &Connection,
+    match_expr: &str,
+    limit: usize,
+    exclude: &HashSet<String>,
+) -> Result<Vec<SearchHit>, CliError> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT search_fts.path, notes.title,
+                snippet(search_fts, 2, char(1), char(2), '…', 12), {RANK_EXPR}
+         FROM search_fts
+         JOIN notes ON notes.path = search_fts.path
+         WHERE search_fts MATCH ?1 AND notes.is_private = 0 AND notes.kind != 'template'
+         ORDER BY {RANK_EXPR}
+         LIMIT ?2",
+    ))?;
+    let rows = statement.query_map(
+        params_from_iter([
+            Value::Text(match_expr.to_owned()),
+            Value::Integer((limit + exclude.len()) as i64),
+        ]),
+        |row| {
+            let marked_snippet: String = row.get(2)?;
+            Ok(SearchHit {
+                path: row.get(0)?,
+                title: row.get(1)?,
+                snippet: marked_snippet.replace([HIGHLIGHT_START, HIGHLIGHT_END], ""),
+                score: row.get(3)?,
+            })
+        },
+    )?;
+    let mut hits = Vec::new();
+    for row in rows {
+        let hit = row?;
+        if !exclude.contains(&hit.path) {
+            hits.push(hit);
+            if hits.len() == limit {
+                break;
+            }
+        }
+    }
+    Ok(hits)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{build_fts_match, title_recall_needles};
@@ -253,46 +440,69 @@ mod tests {
     /// same expressions, byte for byte.
     #[test]
     fn match_expressions_match_the_ts_builder() {
-        assert_eq!(build_fts_match(""), None);
-        assert_eq!(build_fts_match("   \t \n "), None);
+        assert_eq!(build_fts_match("", true), None);
+        assert_eq!(build_fts_match("   \t \n ", true), None);
         assert_eq!(
-            build_fts_match("hello"),
-            Some("(title : \"hello\"* OR body : \"hello\"*)".to_string())
+            build_fts_match("hello", true),
+            Some("(title : \"hello\"* OR body : \"hello\"* OR cjk : \"hello\"*)".to_string())
         );
         assert_eq!(
-            build_fts_match("cats AND (dogs*)"),
+            build_fts_match("cats AND (dogs*)", true),
             Some(
-                "(title : \"cats\"* OR body : \"cats\"*) AND (title : \"AND\"* OR body : \"AND\"*) AND (title : \"(dogs*)\"* OR body : \"(dogs*)\"*)"
+                "(title : \"cats\"* OR body : \"cats\"* OR cjk : \"cats\"*) AND (title : \"AND\"* OR body : \"AND\"* OR cjk : \"AND\"*) AND (title : \"(dogs*)\"* OR body : \"(dogs*)\"* OR cjk : \"(dogs*)\"*)"
                     .to_string()
             )
         );
         assert_eq!(
-            build_fts_match("say \"hi\""),
+            build_fts_match("say \"hi\"", true),
             Some(
-                "(title : \"say\"* OR body : \"say\"*) AND (title : \"\"\"hi\"\"\"* OR body : \"\"\"hi\"\"\"*)"
+                "(title : \"say\"* OR body : \"say\"* OR cjk : \"say\"*) AND (title : \"\"\"hi\"\"\"* OR body : \"\"\"hi\"\"\"* OR cjk : \"\"\"hi\"\"\"*)"
                     .to_string()
             )
         );
         assert_eq!(
-            build_fts_match("  alpha   beta "),
+            build_fts_match("  alpha   beta ", true),
             Some(
-                "(title : \"alpha\"* OR body : \"alpha\"*) AND (title : \"beta\"* OR body : \"beta\"*)"
+                "(title : \"alpha\"* OR body : \"alpha\"* OR cjk : \"alpha\"*) AND (title : \"beta\"* OR body : \"beta\"* OR cjk : \"beta\"*)"
                     .to_string()
             )
         );
         assert_eq!(
-            build_fts_match("meeting - notes"),
+            build_fts_match("meeting - notes", true),
             Some(
-                "(title : \"meeting\"* OR body : \"meeting\"*) AND (title : \"notes\"* OR body : \"notes\"*)"
+                "(title : \"meeting\"* OR body : \"meeting\"* OR cjk : \"meeting\"*) AND (title : \"notes\"* OR body : \"notes\"* OR cjk : \"notes\"*)"
                     .to_string()
             )
         );
         assert_eq!(
-            build_fts_match("東京 ・"),
-            Some("(title : \"東京\"* OR body : \"東京\"*)".to_string())
+            build_fts_match("東京 ・", true),
+            Some("(title : \"東京\"* OR body : \"東京\"* OR cjk : \"東京\")".to_string())
         );
-        assert_eq!(build_fts_match("-"), Some("\"-\"".to_string()));
-        assert_eq!(build_fts_match(". -"), Some("\".\" \"-\"".to_string()));
+        assert_eq!(
+            build_fts_match("用Python写脚本", true),
+            Some(
+                "(title : \"用Python写脚本\"* OR body : \"用Python写脚本\"* OR (cjk : \"用\"* AND cjk : \"写脚 脚本\" AND (cjk : \"Python\"* OR title : \"Python\"* OR body : \"Python\"*)))"
+                    .to_string()
+            )
+        );
+        assert_eq!(build_fts_match("-", true), Some("\"-\"".to_string()));
+        assert_eq!(
+            build_fts_match(". -", true),
+            Some("\".\" \"-\"".to_string())
+        );
+    }
+
+    /// An index the app hasn't migrated to the `cjk` column yet must not be
+    /// asked about it: FTS5 rejects an unknown column outright.
+    #[test]
+    fn an_index_without_the_cjk_column_is_searched_by_title_and_body() {
+        assert_eq!(
+            build_fts_match("東京 hello", false),
+            Some(
+                "(title : \"東京\"* OR body : \"東京\"*) AND (title : \"hello\"* OR body : \"hello\"*)"
+                    .to_string()
+            )
+        );
     }
 
     /// The token test follows unicode61's `L* N* Co` categories, not Rust's
@@ -301,16 +511,19 @@ mod tests {
     #[test]
     fn token_classification_matches_the_tokenizer_categories() {
         assert_eq!(
-            build_fts_match("\u{F8FF}"),
-            Some("(title : \"\u{F8FF}\"* OR body : \"\u{F8FF}\"*)".to_string())
+            build_fts_match("\u{F8FF}", true),
+            Some(
+                "(title : \"\u{F8FF}\"* OR body : \"\u{F8FF}\"* OR cjk : \"\u{F8FF}\"*)"
+                    .to_string()
+            )
         );
         assert_eq!(
-            build_fts_match("hello \u{345}"),
-            Some("(title : \"hello\"* OR body : \"hello\"*)".to_string())
+            build_fts_match("hello \u{345}", true),
+            Some("(title : \"hello\"* OR body : \"hello\"* OR cjk : \"hello\"*)".to_string())
         );
         assert_eq!(
-            build_fts_match("hello \u{24B6}"),
-            Some("(title : \"hello\"* OR body : \"hello\"*)".to_string())
+            build_fts_match("hello \u{24B6}", true),
+            Some("(title : \"hello\"* OR body : \"hello\"* OR cjk : \"hello\"*)".to_string())
         );
     }
 

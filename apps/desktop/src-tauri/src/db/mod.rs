@@ -626,10 +626,13 @@ pub fn index_meta_set(
 
 /// Wipe all derived tables (the TS layer then re-applies every note; no-op if
 /// stale). The `chat_*` tables are deliberately untouched — chat history is
-/// durable, not a rebuildable projection.
+/// durable, not a rebuildable projection. `keep_embeddings` spares the
+/// embedding tables for a rebuild that only re-derives rows (see
+/// [`write::clear_index`]).
 #[tauri::command]
 pub fn index_clear<R: tauri::Runtime>(
     generation: u64,
+    keep_embeddings: Option<bool>,
     app: tauri::AppHandle<R>,
     index: State<IndexState>,
     background_tasks: State<BackgroundTaskState>,
@@ -641,10 +644,29 @@ pub fn index_clear<R: tauri::Runtime>(
             return Ok(());
         }
         let conn = state.conn.as_ref().ok_or_else(AppError::no_graph)?;
-        write::clear_index(conn)?;
+        write::clear_index(conn, keep_embeddings.unwrap_or(false))?;
     }
     emit_index_written(&app);
     Ok(())
+}
+
+/// After a rebuild that kept embeddings, drop the ones whose note is gone,
+/// sparing `keep` (notes the rebuild couldn't read). No-op if stale. Returns
+/// how many chunks were removed.
+#[tauri::command]
+pub fn index_prune_embeddings(
+    generation: u64,
+    keep: Vec<String>,
+    index: State<IndexState>,
+    background_tasks: State<BackgroundTaskState>,
+) -> AppResult<usize> {
+    let _background_task = background_task::scoped(&background_tasks, "Reflect embedding cleanup");
+    let state = lock_state(&index)?;
+    if state.generation != generation {
+        return Ok(0);
+    }
+    let conn = state.conn.as_ref().ok_or_else(AppError::no_graph)?;
+    write::prune_orphan_embeddings(conn, &keep)
 }
 
 /// Upsert one chat message and its conversation row in a single transaction
