@@ -97,6 +97,7 @@ export {
   type WikiLinkSuggestionResult,
 } from './queries.ts'
 export { resolveNoteTarget } from './resolve-target.ts'
+export { listOnThisDay, type OnThisDayEntry } from './on-this-day.ts'
 export {
   groupTaskContexts,
   groupTasks,

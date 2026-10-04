@@ -3,6 +3,7 @@ import { dailyPath } from '@reflect/core'
 import { DailyEventsSection } from './daily-events-section.tsx'
 import { DayCalendar } from './day-calendar.tsx'
 import { NoteActionsSection } from './note-actions-section.tsx'
+import { OnThisDaySection } from './on-this-day-section.tsx'
 import { PublishedUrlSection } from './published-url-section.tsx'
 import { SimilarNotesSection } from './similar-notes-section.tsx'
 import { useToday } from '@/lib/use-today.ts'
@@ -18,9 +19,9 @@ interface DailyContextSidebarProps {
  * The daily note's contextual sidebar (modeled on the old app's note context
  * sidebar): the month calendar up top — itself the day-navigation surface,
  * with a jump-to-today button — then note actions, the day's calendar
- * events, and semantic neighbors. Inbound links live under the note itself
- * (the incoming-backlinks section), not here. Rendered in the AppShell's
- * right region on daily routes only.
+ * events, the same day in earlier years, and semantic neighbors. Inbound
+ * links live under the note itself (the incoming-backlinks section), not
+ * here. Rendered in the AppShell's right region on daily routes only.
  */
 export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactElement {
   const today = useToday()
@@ -38,6 +39,7 @@ export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactEl
       <div className="my-4 space-y-4 pb-4">
         <NoteActionsSection path={dailyPath(date)} />
         <DailyEventsSection date={date} />
+        <OnThisDaySection date={date} />
         <PublishedUrlSection path={dailyPath(date)} />
         <SimilarNotesSection path={dailyPath(date)} />
       </div>

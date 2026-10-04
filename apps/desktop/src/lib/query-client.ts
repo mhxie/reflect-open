@@ -80,6 +80,9 @@ export const queryKeys = {
     dailyEmpty(root: GraphRoot, path: string) {
       return [...this.graph(root), 'daily-empty', path] as const
     },
+    onThisDay(root: GraphRoot, date: string) {
+      return [...this.graph(root), 'on-this-day', date] as const
+    },
     mobileAllNotes(root: GraphRoot) {
       return [...this.graph(root), 'mobile-all-notes'] as const
     },
