@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { FrontmatterPrivacy } from './frontmatter-privacy.ts'
 import type { ParsedTask } from './task-ast.ts'
 
 /**
@@ -15,30 +16,9 @@ export interface Span {
 }
 
 /**
- * Coerce the privacy flag. `private` is a hard block (such notes must never reach
- * any external service), so coercion is explicit and predictable rather than
- * truthiness-based: a note is private only when it carries an explicit truthy
- * boolean/number/string. Anything unrecognized (typo, object, absent) is **not**
- * private — it never silently marks an unrelated note private, and the explicit
- * `private: true` path the security model relies on is always honoured. We also
- * accept the YAML 1.1-style words (`yes`/`on`) a 1.2 loader reads as strings.
- */
-function coercePrivate(value: unknown): boolean {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return value === 1
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase()
-    return (
-      normalized === 'true' || normalized === 'yes' || normalized === 'on' || normalized === '1'
-    )
-  }
-  return false
-}
-
-/**
  * Coerce the pin value. `pinned: true` pins; a finite number pins **with an
  * explicit sidebar order** — the encoding the pinned shelf reorder writes.
- * Truthy words follow `private`'s rules; anything unrecognized is unpinned.
+ * The words `true`/`yes`/`on`/`1` pin too; anything unrecognized is unpinned.
  */
 function coercePinned(value: unknown): boolean | number {
   if (typeof value === 'boolean') return value
@@ -95,8 +75,13 @@ export const frontmatterSchema = z.looseObject({
   /** Reserved stable id. Not auto-written in the first wave (identity = path). */
   id: z.string().optional().catch(undefined),
   aliases: z.array(z.string()).catch([]).default([]),
-  /** Hard privacy flag: such notes must never be sent to any external service. */
-  private: z.preprocess(coercePrivate, z.boolean()).default(false),
+  /**
+   * Hard privacy flag: such notes must never be sent to any external service.
+   * `parseFrontmatter` sets it from the shared fail-closed classifier
+   * (`frontmatter-privacy.ts`) — true for a locked note and for one whose
+   * frontmatter can't be read — so the value parsed here is only a default.
+   */
+  private: z.boolean().catch(false),
   /**
    * Pinned to the sidebar's Pinned section: `true`, or a number for an
    * explicit order. Unpinned notes omit the key. Read through
@@ -186,6 +171,12 @@ export interface ParsedNote {
   /** `frontmatter.title` → first H1 → filename (or the date for daily notes). */
   title: string
   frontmatter: Frontmatter
+  /**
+   * The frontmatter's privacy (`frontmatter-privacy.ts`); `frontmatter.private`
+   * is its withheld bit. `unreadable` notes are treated as locked everywhere,
+   * and their lock can't be toggled.
+   */
+  frontmatterPrivacy: FrontmatterPrivacy
   /** Set when YAML frontmatter failed to parse; the note is still usable. */
   frontmatterWarning?: string | undefined
   wikiLinks: WikiLink[]

@@ -52,6 +52,14 @@ describe('notePrivate', () => {
     expect(notePrivate('---\nprivate: false\n---\npublic')).toBe(false)
     expect(notePrivate('no frontmatter')).toBe(false)
   })
+
+  it('fails closed on frontmatter it cannot read', () => {
+    expect(notePrivate('---\nprivate: true\ntitle: [unclosed\n---\nsecret')).toBe(true)
+    expect(notePrivate('---\nprivate: no\ntitle: [unclosed\n---\nsecret')).toBe(true)
+    expect(notePrivate('---\nprivate: maybe\n---\nsecret')).toBe(true)
+    expect(notePrivate('\u{FEFF}---\nprivate: true\n---\nsecret')).toBe(true)
+    expect(notePrivate('---\ntitle: [unclosed\n---\npublic')).toBe(false)
+  })
 })
 
 describe('isPrivateNoteError', () => {
@@ -148,6 +156,19 @@ describe('cloudSafeNoteContent', () => {
         isPrivate: true,
         title: PRIVATE_TITLE,
         content: PRIVATE_BODY,
+        truncated: false,
+      }),
+    ).toThrow(PrivateNoteError)
+  })
+
+  it('refuses a note whose malformed frontmatter declares it private', () => {
+    const source = `---\nprivate: true\ntitle: [unclosed\n---\n${PRIVATE_BODY}`
+    expect(() =>
+      cloudSafeNoteContent({
+        path: PRIVATE_PATH,
+        isPrivate: notePrivate(source),
+        title: PRIVATE_TITLE,
+        content: source,
         truncated: false,
       }),
     ).toThrow(PrivateNoteError)

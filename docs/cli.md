@@ -39,7 +39,11 @@ content, no paths, no search hits — and there is no flag that overrides this.
 `search` filters them out; `show`/`today`/`path` print nothing to stdout,
 explain on stderr, and exit `3`. The check reads the resolved file's own
 frontmatter (never just the index row), so a stale index can't leak a
-just-flagged note.
+just-flagged note. Frontmatter the CLI can't read with certainty (YAML that
+doesn't parse but mentions `private` or holds a backslash, a `private` value
+that is neither true nor false, a block behind a byte-order mark) is treated
+as private too; the stderr message says why, so the YAML can be fixed. The
+desktop app applies the same rules (`crates/frontmatter`).
 
 Notes inside the graph's local-only folders (configured in the desktop app,
 which records the folder names in the index) are treated the same way: never

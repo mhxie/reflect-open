@@ -32,3 +32,35 @@ commit both.
 
 `.gitattributes` disables line-ending conversion: the fixture bytes are the
 contract (`crlf.md` deliberately carries `\r\n`).
+
+Frontmatter on the Rust side comes from the shared `reflect-frontmatter` crate
+(`crates/frontmatter`), which the CLI and the desktop shell both use.
+`expected.json`'s `private` is the TS index bit: true when the shared privacy
+classifier says private *or* unreadable. `crates/frontmatter/tests/corpus.rs`
+checks that every note it marks private is withheld by the Rust classifier,
+and every note the Rust classifier withholds is marked private.
+
+## Frontmatter privacy corpus
+
+`../frontmatter-privacy.json` is the classifier's own corpus: one spec
+(public · private · unreadable, plus why a block is unreadable), asserted case
+by case by `crates/frontmatter/tests/corpus.rs` and
+`packages/core/src/markdown/frontmatter-privacy.test.ts`. A case may give one
+side a different class where the YAML parsers (saphyr, yaml) disagree, but
+never a different answer to "is this note withheld?". Add a case for any new
+tricky YAML; it needs no regeneration step.
+
+Known one-sided divergences — the parsers disagree on whether a block loads,
+so the sides disagree on withholding it and the corpus can't list them; each
+side pins its verdict in its unit tests:
+
+- saphyr rejects YAML that yaml accepts (a tab after `:`, as in
+  `private:\tfalse`): Rust can't load the block and withholds it when it
+  mentions `private` or holds a backslash; TS reads the value.
+- yaml rejects YAML that saphyr accepts (in `%YAML 1.1` mode, `yes:` beside
+  `true:` is a duplicate key): TS withholds the block when it mentions
+  `private`; Rust reads the value.
+
+Neither direction can publish a note the upstream app reads as private: any
+`private: true` it can read either loads on both sides or mentions `private`
+(or a backslash, for an escaped key) in a block Rust withholds.

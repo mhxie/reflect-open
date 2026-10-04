@@ -1,4 +1,4 @@
 ---
 private: [true]
 ---
-not secret
+withheld: an unrecognized value

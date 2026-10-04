@@ -1,6 +1,6 @@
 import { parseXPostId } from '@post-embed/schema'
 import { dateFromDailyPath, isAttachmentPath, isDaily } from '../graph/paths.ts'
-import { parseFrontmatter, splitFrontmatter } from './frontmatter.ts'
+import { frontmatterPrivacy, parseFrontmatter, splitFrontmatter } from './frontmatter.ts'
 import { parseBody } from './grammar.ts'
 import { foldTag } from './keys.ts'
 import { parseInlineLink } from './link-syntax.ts'
@@ -340,7 +340,12 @@ function deriveTitle(frontmatter: Frontmatter, headings: Heading[], path: string
 export function parseNote(input: { path: string; source: string }): ParsedNote {
   const { path, source } = input
   const { raw, body, bodyOffset } = splitFrontmatter(source)
-  const { data: frontmatter, warning } = parseFrontmatter(raw)
+  const parsedFrontmatter = parseFrontmatter(raw)
+  const { warning } = parsedFrontmatter
+  // With no block found, a leading byte-order mark may be hiding one: the
+  // source-level classifier still reads it, so `private` can't hide there.
+  const privacy = raw === null ? frontmatterPrivacy(source) : parsedFrontmatter.privacy
+  const frontmatter = { ...parsedFrontmatter.data, private: privacy.kind !== 'public' }
   const tree = parseBody(body)
 
   const wikiLinks: WikiLink[] = []
@@ -435,6 +440,7 @@ export function parseNote(input: { path: string; source: string }): ParsedNote {
     id: stringField(frontmatter, 'id'),
     title: deriveTitle(frontmatter, headings, path),
     frontmatter,
+    frontmatterPrivacy: privacy,
     frontmatterWarning: warning,
     wikiLinks,
     links,

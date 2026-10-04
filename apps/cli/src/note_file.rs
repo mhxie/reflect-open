@@ -7,10 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag};
+use reflect_frontmatter::{
+    backup_privacy, parse_frontmatter, split_frontmatter, BackupPrivacy, Frontmatter,
+};
 use reflect_graph_paths::{eviction_placeholder, LocalOnlyFolders};
 
 use crate::error::CliError;
-use crate::frontmatter::{parse_frontmatter, split_frontmatter, Frontmatter};
 use crate::keys::fold_key;
 use crate::paths::date_from_daily_path;
 
@@ -21,7 +23,9 @@ pub struct NoteMeta {
     pub id: Option<String>,
     pub title: String,
     pub aliases: Vec<String>,
-    pub private: bool,
+    /// The shared classifier's verdict: only a public note may be printed.
+    /// Its withheld bit (private or unreadable) is the index's `is_private`.
+    pub privacy: BackupPrivacy,
 }
 
 /// A note read off disk: full source plus derived metadata.
@@ -313,7 +317,20 @@ pub fn parse_note_meta(rel_path: &str, source: &str) -> NoteMeta {
         id: frontmatter.id,
         title,
         aliases,
-        private: frontmatter.private,
+        privacy: backup_privacy(source.as_bytes()),
+    }
+}
+
+/// Refuse a note whose frontmatter isn't public (exit 3): locked, or
+/// unreadable and so treated as locked. The message says which, so the YAML
+/// of an unreadable note can be fixed.
+fn refuse_withheld(rel_path: &str, privacy: BackupPrivacy) -> Result<(), CliError> {
+    match privacy {
+        BackupPrivacy::Public => Ok(()),
+        BackupPrivacy::Private => Err(CliError::Private(format!("note is private: {rel_path}"))),
+        BackupPrivacy::Unreadable(reason) => Err(CliError::Private(format!(
+            "note is treated as private because its frontmatter can't be read ({reason}): {rel_path}"
+        ))),
     }
 }
 
@@ -363,10 +380,11 @@ fn in_local_only_folder(root: &Path, rel_path: &str, folders: &LocalOnlyFolders)
     folders.contains(&on_disk.join("/"))
 }
 
-/// Read a note and enforce the privacy contract: a `private: true` note is
-/// refused (exit 3), based on the file's own frontmatter — never an index row
-/// — and so is a note inside a local-only folder (`local_only`, from the
-/// index's record of them), before anything is read.
+/// Read a note and enforce the privacy contract: a `private: true` note, or
+/// one whose frontmatter can't be read, is refused (exit 3), based on the
+/// file's own frontmatter — never an index row — and so is a note inside a
+/// local-only folder (`local_only`, from the index's record of them), before
+/// anything is read.
 pub fn read_note(
     root: &Path,
     rel_path: &str,
@@ -377,9 +395,7 @@ pub fn read_note(
     let content = fs::read_to_string(&absolute)
         .map_err(|err| CliError::Runtime(format!("could not read {rel_path}: {err}")))?;
     let meta = parse_note_meta(rel_path, &content);
-    if meta.private {
-        return Err(CliError::Private(format!("note is private: {rel_path}")));
-    }
+    refuse_withheld(rel_path, meta.privacy)?;
     Ok(Note { content, meta })
 }
 
@@ -401,10 +417,7 @@ pub fn ensure_not_private(
         }
         Err(_) => return Ok(()),
     };
-    if parse_note_meta(rel_path, &content).private {
-        return Err(CliError::Private(format!("note is private: {rel_path}")));
-    }
-    Ok(())
+    refuse_withheld(rel_path, backup_privacy(content.as_bytes()))
 }
 
 /// Resolve one canonical graph-relative note path without following symlinks.
@@ -496,6 +509,36 @@ mod tests {
         ));
         assert!(read_note(&root, "people/plan.md", Some(&folders))
             .is_err_and(|err| !matches!(err, CliError::Private(_))));
+    }
+
+    /// The CLI fails closed: a note whose frontmatter can't be read is
+    /// refused like a locked one, and the message says why.
+    #[test]
+    fn unreadable_frontmatter_is_refused_like_a_private_note() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("notes")).expect("mkdir");
+        for (path, content) in [
+            (
+                "notes/broken.md",
+                "---\nprivate: no\ntitle: [unclosed\n---\n# Broken\n",
+            ),
+            ("notes/maybe.md", "---\nprivate: maybe\n---\n# Maybe\n"),
+            ("notes/plain.md", "---\nprivate: false\n---\n# Plain\n"),
+        ] {
+            fs::write(root.path().join(path), content).expect("write");
+        }
+        for rel_path in ["notes/broken.md", "notes/maybe.md"] {
+            let Err(CliError::Private(message)) = read_note(root.path(), rel_path, None) else {
+                panic!("{rel_path} must be refused as private");
+            };
+            assert!(message.contains("can't be read"), "{message}");
+            assert!(matches!(
+                ensure_not_private(root.path(), rel_path, None),
+                Err(CliError::Private(_))
+            ));
+        }
+        assert!(read_note(root.path(), "notes/plain.md", None).is_ok());
+        assert!(ensure_not_private(root.path(), "notes/plain.md", None).is_ok());
     }
 
     #[test]

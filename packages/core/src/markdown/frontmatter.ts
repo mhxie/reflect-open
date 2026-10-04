@@ -1,4 +1,6 @@
-import { isMap, parse as parseYaml, parseDocument, type Document } from 'yaml'
+import { isMap, parseDocument, type Document } from 'yaml'
+import { loadFrontmatterBlock } from './frontmatter-load.ts'
+import { classifyFrontmatterBlock, type FrontmatterPrivacy } from './frontmatter-privacy.ts'
 import { documentLineEnding } from './line-endings.ts'
 import { frontmatterSchema, type Frontmatter } from './model.ts'
 
@@ -7,7 +9,11 @@ import { frontmatterSchema, type Frontmatter } from './model.ts'
  * may be edited outside Reflect, so parsing is **tolerant**: broken or non-object
  * YAML degrades to "no frontmatter" + a warning, never an unreadable note. The
  * known subset is typed via {@link frontmatterSchema}; unknown keys pass through.
+ * Privacy is the one exception to tolerance: it fails closed (see
+ * `frontmatter-privacy.ts`), so a block that can't be read counts as private.
  */
+
+const BYTE_ORDER_MARK = '\u{FEFF}'
 
 /** Result of carving a leading `---` block off the source. */
 export interface FrontmatterSplit {
@@ -47,38 +53,57 @@ export function splitFrontmatter(source: string): FrontmatterSplit {
 
 /** Parsed frontmatter plus an optional non-fatal warning. */
 export interface ParsedFrontmatter {
+  /** The typed fields; `data.private` is `privacy`'s withheld bit. */
   data: Frontmatter
   warning?: string
+  /** The block's privacy (a leading byte-order mark is {@link frontmatterPrivacy}'s to judge). */
+  privacy: FrontmatterPrivacy
 }
+
+const PUBLIC: FrontmatterPrivacy = { kind: 'public' }
 
 function emptyFrontmatter(): Frontmatter {
   return frontmatterSchema.parse({})
 }
 
-function errorMessage(value: unknown): string {
-  return value instanceof Error ? value.message : String(value)
-}
-
 /**
- * Parse the YAML text from {@link splitFrontmatter}. Never throws: malformed or
- * non-mapping YAML yields defaults + a warning so the note stays readable.
+ * Parse the YAML text from {@link splitFrontmatter}. Never throws: a block that
+ * doesn't load (malformed, not a mapping, several documents, over a budget)
+ * yields defaults + a warning so the note stays readable. `data.private` is
+ * true when the block classifies as private *or* unreadable.
  */
 export function parseFrontmatter(raw: string | null): ParsedFrontmatter {
   if (raw === null || raw.trim() === '') {
-    return { data: emptyFrontmatter() }
+    return { data: emptyFrontmatter(), privacy: PUBLIC }
   }
-  let loaded: unknown
-  try {
-    loaded = parseYaml(raw)
-  } catch (err) {
-    return { data: emptyFrontmatter(), warning: `invalid YAML frontmatter: ${errorMessage(err)}` }
-  }
-  if (loaded === null || typeof loaded !== 'object' || Array.isArray(loaded)) {
-    return { data: emptyFrontmatter(), warning: 'frontmatter is not a mapping; ignored' }
+  const load = loadFrontmatterBlock(raw)
+  const privacy = classifyFrontmatterBlock(raw, load)
+  const isPrivate = privacy.kind !== 'public'
+  if (!load.loaded) {
+    return { data: { ...emptyFrontmatter(), private: isPrivate }, warning: load.warning, privacy }
   }
   // The schema is built to tolerate bad known fields (`.catch`) and preserve
   // unknown keys (`.passthrough`), so this won't throw for an object input.
-  return { data: frontmatterSchema.parse(loaded) }
+  return { data: { ...frontmatterSchema.parse(load.value), private: isPrivate }, privacy }
+}
+
+/**
+ * A note's frontmatter privacy from its full source. Like
+ * {@link parseFrontmatter}, plus the one rule that needs the whole file: a
+ * block hidden behind a leading byte-order mark is classified as usual, but
+ * `private` becomes `unreadable` — the app sees no frontmatter there, so it
+ * could neither show the lock nor toggle it.
+ */
+export function frontmatterPrivacy(source: string): FrontmatterPrivacy {
+  const behindMark = source.startsWith(BYTE_ORDER_MARK)
+  const { raw } = splitFrontmatter(behindMark ? source.slice(BYTE_ORDER_MARK.length) : source)
+  if (raw === null || raw.trim() === '') {
+    return PUBLIC
+  }
+  const privacy = classifyFrontmatterBlock(raw, loadFrontmatterBlock(raw))
+  return behindMark && privacy.kind === 'private'
+    ? { kind: 'unreadable', reason: 'bomBeforeFence' }
+    : privacy
 }
 
 /**
@@ -99,6 +124,11 @@ export function upsertFrontmatter(source: string, patch: Record<string, unknown>
     return source
   }
 
+  // A block behind a leading byte-order mark is invisible to the split: a new
+  // block in front of it would leave the old one, `private` and all, as body.
+  if (source.startsWith(BYTE_ORDER_MARK) && splitFrontmatter(source.slice(1)).raw !== null) {
+    throw new Error('refusing to update frontmatter behind a byte-order mark')
+  }
   const { raw, body } = splitFrontmatter(source)
   const doc = parseDocument(raw ?? '')
   // Reading tolerates malformed YAML (it degrades to a warning), but *writing*

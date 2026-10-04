@@ -45,6 +45,24 @@
       "private": false,
       "fileHash": "908fa211637831cc52411262f3d69d49eccd706efeb36b01f8eba7f98ff8c826"
     },
+    "notes/broken-yaml-private-no.md": {
+      "id": null,
+      "title": "Broken Private No",
+      "titleKey": "broken private no",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "122dcaf82c7d94e0af873c6e0495cb06af48c595185f294145b8299bafa6f24b"
+    },
+    "notes/broken-yaml-private.md": {
+      "id": null,
+      "title": "Broken But Locked",
+      "titleKey": "broken but locked",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "c59870b7888cea7fa19e249dcb2878dfa6db24469d7fd07e75893ebfe6b543f5"
+    },
     "notes/broken-yaml.md": {
       "id": null,
       "title": "Broken Yaml Fallback",
@@ -189,6 +207,69 @@
       "private": false,
       "fileHash": "cd7fc018e2b41b6e98a25f7241afbeb256c2df3b1adbaf31e00bed91e86a011e"
     },
+    "notes/private-alias.md": {
+      "id": null,
+      "title": "Alias Value",
+      "titleKey": "alias value",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "e1eb47372239cddf91c235bde48e990fdcdcb86171ed93f51bfb9bca35e8ba06"
+    },
+    "notes/private-bom.md": {
+      "id": null,
+      "title": "Behind A Mark",
+      "titleKey": "behind a mark",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "3390875aed6c8ad8b89c0c52c82071ca47c433c6b344f070afc4969d0afb5413"
+    },
+    "notes/private-bool-tag-no.md": {
+      "id": null,
+      "title": "Bool Tag No",
+      "titleKey": "bool tag no",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "db9d8f8eed7a7154229b31a2a30c61e972699419001d86ae7c7e2da3a40ef4ae"
+    },
+    "notes/private-custom-tag.md": {
+      "id": null,
+      "title": "Custom Tag",
+      "titleKey": "custom tag",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "22c222d752d0d118f9c5ac99c392d9e54254af88d4d9d1ff040a4bdf4c9acfdd"
+    },
+    "notes/private-duplicate.md": {
+      "id": null,
+      "title": "Duplicate Key",
+      "titleKey": "duplicate key",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "1bba1b9edbbca292fc99301c845c39d7cb0dd985769d95d705527ccce3291fc2"
+    },
+    "notes/private-escaped-key-tab.md": {
+      "id": null,
+      "title": "Escaped Key Tab",
+      "titleKey": "escaped key tab",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "b0da104eb90fe4f5b260bd9f6dab789a3b18110d43c82659282eff3af32e4540"
+    },
+    "notes/private-escaped-key.md": {
+      "id": null,
+      "title": "Escaped Key",
+      "titleKey": "escaped key",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "64cddd54dc24eff1b756c25813a8bbe3b061c5b3a9db0abd0dc066bee7498f34"
+    },
     "notes/private-false.md": {
       "id": null,
       "title": "private-false",
@@ -207,14 +288,41 @@
       "private": true,
       "fileHash": "2264a8b6ab3094b1315a575d26c337b34667fca664354fb544f0ab2f7e52e834"
     },
+    "notes/private-flow-root.md": {
+      "id": null,
+      "title": "Flow Root",
+      "titleKey": "flow root",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "be6b117f061b1bdddd72e7708ace5ef26d7f53320aad837685c201db66796fb1"
+    },
     "notes/private-list.md": {
       "id": null,
       "title": "private-list",
       "titleKey": "private-list",
       "aliases": [],
       "aliasKeys": [],
+      "private": true,
+      "fileHash": "47c5fe26e0961983e352a35f5f45f865cf1ae3d682382d0f91deb2b14448137c"
+    },
+    "notes/private-merge-key.md": {
+      "id": null,
+      "title": "Merge Key",
+      "titleKey": "merge key",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "0b430c6867f448fcc23d0d91a4bd77dafdcea0859ead8b0a3bb91f9ea3b32e9f"
+    },
+    "notes/private-nested.md": {
+      "id": null,
+      "title": "Nested Private",
+      "titleKey": "nested private",
+      "aliases": [],
+      "aliasKeys": [],
       "private": false,
-      "fileHash": "aa3910f50fbd9c4d02361468b1912be3c8ecdef2586a99c8eb5a9dc242ea176e"
+      "fileHash": "298822643bd819142d9aa0e3759f9f3869134fa96df53973e0c25621a7753721"
     },
     "notes/private-numeric-one.md": {
       "id": null,
@@ -234,6 +342,15 @@
       "private": true,
       "fileHash": "0525882d00c147377fdd30d95d39f64ca4f384d160171de46565c1c6e6cdf025"
     },
+    "notes/private-tab.md": {
+      "id": null,
+      "title": "Tab After Colon",
+      "titleKey": "tab after colon",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "5abd932a66c9ab9cca0f8e3f579c9d315f8a1a83dc3b12e353d199864f2a8dbf"
+    },
     "notes/private-true.md": {
       "id": null,
       "title": "private-true",
@@ -249,8 +366,17 @@
       "titleKey": "private-two",
       "aliases": [],
       "aliasKeys": [],
+      "private": true,
+      "fileHash": "333e206a13947b1a511f70ced83f9b19da269152708bb869cf8cfc85d5284796"
+    },
+    "notes/private-unterminated.md": {
+      "id": null,
+      "title": "private-unterminated",
+      "titleKey": "private-unterminated",
+      "aliases": [],
+      "aliasKeys": [],
       "private": false,
-      "fileHash": "57f80adbe986f4f91714ba7baa8c3f1f9e1009fa535c4318b25a8d51a8d3c12f"
+      "fileHash": "01c123c3f676c650016c5ffd5e1b9bf16e8d97235c51bbd1eb79e277bc1c43f5"
     },
     "notes/private-word.md": {
       "id": null,
@@ -258,8 +384,17 @@
       "titleKey": "private-word",
       "aliases": [],
       "aliasKeys": [],
-      "private": false,
-      "fileHash": "6226f525fdcba9cd5678d8cf8253346d93e4e2765ef15f293ac8028bc8c40cb0"
+      "private": true,
+      "fileHash": "eb578e2d899e8282ad5a6f88dc76a00a140ca5ca6f6c003f258e52825e981813"
+    },
+    "notes/private-yaml11.md": {
+      "id": null,
+      "title": "YAML 1.1 Word",
+      "titleKey": "yaml 1.1 word",
+      "aliases": [],
+      "aliasKeys": [],
+      "private": true,
+      "fileHash": "59d5e2f212d750e6ad82e016e5c43f505672ed0cf04b08b365ee3f3441a3f775"
     },
     "notes/private-yes-string.md": {
       "id": null,

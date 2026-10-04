@@ -112,8 +112,12 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * already on disk.
  * 24 - `notes.body_chars` (migration 0025) sizes every note for the activity
  * heatmap.
+ * 25 - `notes.is_private` fails closed: frontmatter the shared classifier can't
+ * read (malformed YAML that mentions `private`, an unrecognized `private`
+ * value, a block behind a byte-order mark) now counts as private, so existing
+ * rows must reproject.
  */
-export const PROJECTION_VERSION = 24
+export const PROJECTION_VERSION = 25
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -405,8 +409,10 @@ export function buildIndexedNote(
     pathKey: foldGraphPath(parsed.path),
     kind: isDaily(parsed.path) ? 'daily' : isTemplatePath(parsed.path) ? 'template' : 'note',
     dailyDate: isDaily(parsed.path) ? dateFromDailyPath(parsed.path) : null,
-    // A note inside a local-only folder is private whatever its frontmatter
-    // says, so every `is_private` filter and gate downstream covers it.
+    // Locked or unreadable frontmatter (`frontmatter.private` is the shared
+    // classifier's withheld bit), or a note inside a local-only folder whatever
+    // its frontmatter says: every `is_private` filter and gate downstream
+    // covers all three.
     isPrivate: parsed.frontmatter.private || isLocalOnlyPath(parsed.path),
     isPinned: isPinned(parsed.frontmatter),
     pinnedOrder: pinnedOrder(parsed.frontmatter),

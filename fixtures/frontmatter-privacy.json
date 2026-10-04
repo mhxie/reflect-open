@@ -1,0 +1,600 @@
+{
+  "about": [
+    "The frontmatter privacy corpus: one spec, two classifiers. Rust (crates/frontmatter, tests/corpus.rs) and TS (packages/core/src/markdown/frontmatter-privacy.test.ts) both assert every case.",
+    "privacy is public | private | unreadable; reason names why an unreadable block can't be read. A `rust` or `ts` object overrides the expectation for that side only, with `why`: the two YAML parsers disagree there, so the class may differ, but whether the note is withheld (private or unreadable) never may.",
+    "Add a case for any new tricky YAML. Known one-sided divergences that can't be listed here are in fixtures/parity/README.txt."
+  ],
+  "cases": [
+    {
+      "name": "no frontmatter",
+      "source": "# Title\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "empty block",
+      "source": "---\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "whitespace-only block",
+      "source": "---\n   \n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "unterminated fence mentioning private",
+      "source": "---\ntitle: Never Closed\nmy private thoughts\n",
+      "privacy": "public"
+    },
+    {
+      "name": "CRLF line endings",
+      "source": "---\r\nprivate: true\r\n---\r\nbody\r\n",
+      "privacy": "private"
+    },
+    {
+      "name": "true",
+      "source": "---\nprivate: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "false",
+      "source": "---\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "TRUE",
+      "source": "---\nprivate: TRUE\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "True",
+      "source": "---\nprivate: True\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "1",
+      "source": "---\nprivate: 1\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "0",
+      "source": "---\nprivate: 0\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "1.0",
+      "source": "---\nprivate: 1.0\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "0.0",
+      "source": "---\nprivate: 0.0\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "hex 0x1",
+      "source": "---\nprivate: 0x1\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "+1",
+      "source": "---\nprivate: +1\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "01",
+      "source": "---\nprivate: 01\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "1e0",
+      "source": "---\nprivate: 1e0\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "yes",
+      "source": "---\nprivate: yes\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "quoted yes",
+      "source": "---\nprivate: \"yes\"\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "on",
+      "source": "---\nprivate: on\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "off",
+      "source": "---\nprivate: off\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "no",
+      "source": "---\nprivate: no\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "empty value",
+      "source": "---\nprivate:\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "tilde",
+      "source": "---\nprivate: ~\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "null",
+      "source": "---\nprivate: null\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "empty quoted string",
+      "source": "---\nprivate: \"\"\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "quoted with ASCII padding",
+      "source": "---\nprivate: ' TRUE '\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "comment after true",
+      "source": "---\nprivate: true # locked\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "comment after false",
+      "source": "---\nprivate: false # was true\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "literal block value",
+      "source": "---\nprivate: |\n  true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "folded block value",
+      "source": "---\nprivate: >-\n  yes\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "escaped quoted value",
+      "source": "---\nprivate: \"\\x74rue\"\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "-1",
+      "source": "---\nprivate: -1\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "2",
+      "source": "---\nprivate: 2\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "maybe",
+      "source": "---\nprivate: maybe\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "sequence value",
+      "source": "---\nprivate: [true]\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "mapping value",
+      "source": "---\nprivate: {value: true}\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "y without a YAML 1.1 directive",
+      "source": "---\nprivate: y\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "quoted 1.0",
+      "source": "---\nprivate: \"1.0\"\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": ".inf",
+      "source": "---\nprivate: .inf\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "multi-line plain value",
+      "source": "---\nprivate: tr\n  ue\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "non-breaking space inside quotes",
+      "source": "---\nprivate: \"\u00a0true\"\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "fullwidth letters",
+      "source": "---\nprivate: \uff54\uff52\uff55\uff45\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "custom tag on true",
+      "source": "---\nprivate: !x true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "named custom tag on true",
+      "source": "---\nprivate: !custom true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "custom tag on 1.0",
+      "source": "---\nprivate: !x 1.0\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "non-specific tag on true",
+      "source": "---\nprivate: ! true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "bool tag on yes",
+      "source": "---\nprivate: !!bool yes\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "bool tag on no",
+      "source": "---\nprivate: !!bool no\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "int tag on 0x1",
+      "source": "---\nprivate: !!int 0x1\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "int tag on 0o1",
+      "source": "---\nprivate: !!int 0o1\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "int tag on quoted 1",
+      "source": "---\nprivate: !!int \"1\"\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "str tag on true",
+      "source": "---\nprivate: !!str true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "str tag on 1.0, which the line scan reads untagged",
+      "source": "---\nprivate: !!str 1.0\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "str tag on a quoted 1.0",
+      "source": "---\nprivate: !!str \"1.0\"\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "float tag on 1",
+      "source": "---\nprivate: !!float 1\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "null tag on Null",
+      "source": "---\nprivate: !!null Null\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "verbatim str tag",
+      "source": "---\nprivate: !<tag:yaml.org,2002:str> true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "anchor and tag on the value",
+      "source": "---\nprivate: &a !!bool true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "custom tag on the root mapping",
+      "source": "---\n!custom {private: true}\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "map tag on the root mapping",
+      "source": "---\n!!map {private: true}\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "YAML 1.1 directive with y",
+      "source": "---\n%YAML 1.1\n--- #c\nprivate: y\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "YAML 1.1 directive with n",
+      "source": "---\n%YAML 1.1\n--- #c\nprivate: n\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    },
+    {
+      "name": "escaped key",
+      "source": "---\n\"\\u0070rivate\": true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "escaped key with a tab after the colon",
+      "source": "---\n\"\\u0070rivate\":\ttrue\n---\nbody\n",
+      "privacy": "private",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "why": "saphyr rejects a tab after ':' while yaml reads `private: true`; the backslash keeps Rust withholding a key spelled with an escape"
+    },
+    {
+      "name": "tab after the colon",
+      "source": "---\nprivate:\ttrue\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "duplicate keys, true first",
+      "source": "---\nprivate: true\nprivate: false\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "duplicate keys, false first",
+      "source": "---\nprivate: false\nprivate: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "alias to true",
+      "source": "---\nbase: &t true\nprivate: *t\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "flow root mapping",
+      "source": "---\n{private: true}\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "nested private key",
+      "source": "---\nmeta: {private: true}\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "tagged key",
+      "source": "---\n!x private: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "anchored key",
+      "source": "---\n&k private: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "alias key",
+      "source": "---\nk: &k private\n*k : true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "explicit key",
+      "source": "---\n? private\n: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "block scalar key",
+      "source": "---\n? |-\n  private\n: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "double-quoted key",
+      "source": "---\n\"private\": true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "single-quoted key",
+      "source": "---\n'private': yes\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "space before the colon",
+      "source": "---\nprivate : true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "no space after the colon",
+      "source": "---\nprivate:true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "key with a trailing space",
+      "source": "---\n\"private \": true\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "capitalized key",
+      "source": "---\nPrivate: true\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "malformed YAML beside private: true",
+      "source": "---\nprivate: true\ntitle: [unclosed\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "malformed YAML beside private: no",
+      "source": "---\nprivate: no\ntitle: [unclosed\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "malformed YAML with a backslash",
+      "source": "---\ntitle: \"C:\\notes\"\ntags: [unclosed\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "malformed YAML without private",
+      "source": "---\n[broken yaml\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "escaped value in malformed YAML",
+      "source": "---\nprivate: \"\\x74rue\"\ntitle: [unclosed\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "tab indentation",
+      "source": "---\nmeta:\n\tprivate: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "unknown alias",
+      "source": "---\nprivate: *nope\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "repeated nested key",
+      "source": "---\nprivate: false\nmeta: {a: 1, a: 2}\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "repeated numeric key",
+      "source": "---\n1: a\n1.0: b\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "second document",
+      "source": "---\nprivate: false\n--- x\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "multipleDocuments"
+    },
+    {
+      "name": "second document after an end marker",
+      "source": "---\nprivate: false\n...\nx: 1\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "multipleDocuments"
+    },
+    {
+      "name": "sequence root without private",
+      "source": "---\n- a\n- b\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "sequence root with a private item",
+      "source": "---\n- private: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "scalar root",
+      "source": "---\nprivate\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "comment-only block",
+      "source": "---\n# private: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "merge key",
+      "source": "---\n<<: {private: true}\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "merge-tagged key",
+      "source": "---\n!!merge <<: {private: true}\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "merge key without private",
+      "source": "---\n<<: {title: x}\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "valid YAML with a backslash",
+      "source": "---\ntitle: \"C:\\\\notes\"\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "alias inside its own anchor",
+      "source": "---\na: &a [*a]\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "aliasBudget"
+    },
+    {
+      "name": "99 aliases of a scalar",
+      "source": "---\na: &x 1\nb: [*x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x]\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "100 aliases of a scalar",
+      "source": "---\na: &x 1\nb: [*x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x, *x]\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "aliasBudget"
+    },
+    {
+      "name": "500 aliases of an empty anchor",
+      "source": "---\na: &e []\nb: [*e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e, *e]\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "aliases over the expansion budget",
+      "source": "---\na: &l [t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t, t]\nb: [*l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l, *l]\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "aliasBudget"
+    },
+    {
+      "name": "alias bomb",
+      "source": "---\nprivate: false\na: &a [\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\"]\nb: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\nc: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]\nd: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\ne: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]\nf: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]\ng: &g [*f,*f,*f,*f,*f,*f,*f,*f,*f]\nh: &h [*g,*g,*g,*g,*g,*g,*g,*g,*g]\ni: &i [*h,*h,*h,*h,*h,*h,*h,*h,*h]\nj: &j [*i,*i,*i,*i,*i,*i,*i,*i,*i]\nk: &k [*j,*j,*j,*j,*j,*j,*j,*j,*j]\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "aliasBudget"
+    },
+    {
+      "name": "byte-order mark before a locking block",
+      "source": "\ufeff---\nprivate: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "bomBeforeFence"
+    },
+    {
+      "name": "byte-order mark before a public block",
+      "source": "\ufeff---\ntitle: x\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "byte-order mark before an unreadable block",
+      "source": "\ufeff---\nprivate: maybe\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "unrecognizedValue"
+    }
+  ]
+}

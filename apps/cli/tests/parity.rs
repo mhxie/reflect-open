@@ -86,7 +86,7 @@ fn note_derivations_match_the_ts_pipeline() {
             "{rel_path}: aliasKeys"
         );
         assert_eq!(
-            meta.private,
+            !meta.privacy.is_public(),
             want["private"].as_bool().unwrap(),
             "{rel_path}: private"
         );

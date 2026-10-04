@@ -9,8 +9,22 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version that adds body sizes', () => {
-    expect(PROJECTION_VERSION).toBe(24)
+  it('carries the projection version whose private bit fails closed', () => {
+    expect(PROJECTION_VERSION).toBe(25)
+  })
+
+  it('marks a note private when its frontmatter cannot be read', () => {
+    const build = (source: string) =>
+      buildIndexedNote(parseNote({ path: 'notes/a.md', source }), {
+        fileHash: 'h',
+        mtime: 1,
+        source,
+      })
+    expect(build('---\nprivate: maybe\n---\n# A\n').isPrivate).toBe(true)
+    expect(build('---\nprivate: no\ntitle: [unclosed\n---\n# A\n').isPrivate).toBe(true)
+    expect(build('\u{FEFF}---\nprivate: true\n---\n# A\n').isPrivate).toBe(true)
+    expect(build('---\ntitle: [unclosed\n---\n# A\n').isPrivate).toBe(false)
+    expect(build('---\nprivate: no\n---\n# A\n').isPrivate).toBe(false)
   })
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {

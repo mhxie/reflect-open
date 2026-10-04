@@ -61,7 +61,7 @@ impl Fixture {
                     meta.title,
                     fold_key(&meta.title),
                     daily_date,
-                    i64::from(meta.private),
+                    i64::from(!meta.privacy.is_public()),
                     hash_content(&content),
                     note.mtime_ms as i64,
                     meta.id,
@@ -864,6 +864,32 @@ fn show_blocks_a_private_note_even_when_the_index_says_public() {
 
     let path_output = reflect(&fixture, &["path", "Alpha"]);
     assert_eq!(path_output.status.code(), Some(3));
+}
+
+/// Unreadable frontmatter fails closed: `show` and `path` refuse the note
+/// (exit 3) and say why, while the same YAML with a plain value reads.
+#[test]
+fn show_and_path_refuse_a_note_whose_frontmatter_cannot_be_read() {
+    let fixture = graph();
+    fixture.write_note(
+        "notes/a.md",
+        "---\nprivate: no\ntitle: [unclosed\n---\n# Alpha\nbody\n",
+    );
+    fixture.write_note("notes/b.md", "---\nprivate: no\n---\n# Beta\nbody\n");
+
+    let output = reflect(&fixture, &["show", "notes/a.md"]);
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(stdout(&output), "");
+    assert!(stderr(&output).contains("can't be read"));
+
+    let path_output = reflect(&fixture, &["path", "notes/a.md"]);
+    assert_eq!(path_output.status.code(), Some(3));
+    assert_eq!(stdout(&path_output), "");
+
+    assert_eq!(
+        reflect(&fixture, &["show", "notes/b.md"]).status.code(),
+        Some(0)
+    );
 }
 
 #[test]

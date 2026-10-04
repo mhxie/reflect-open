@@ -1,6 +1,6 @@
 import type { RetrievalHit } from '../embeddings/retrieve.ts'
 import { isLocalOnlyPath } from '../graph/local-only.ts'
-import { parseFrontmatter, splitFrontmatter } from '../markdown/frontmatter.ts'
+import { frontmatterPrivacy } from '../markdown/frontmatter.ts'
 
 /**
  * Reflect's outbound-service privacy gate (Plan 10). `private: true` is a hard block:
@@ -35,7 +35,10 @@ function mint<T>(value: T): CloudSafe<T> {
 export interface CloudSendable {
   /** Graph-relative path: checked against the local-only folders, and named in the error. */
   path: string
-  /** The note's live `private: true` frontmatter flag. */
+  /**
+   * The note's live privacy flag: `private: true`, or frontmatter that can't
+   * be read and so counts as locked (see {@link notePrivate}).
+   */
   isPrivate: boolean
 }
 
@@ -78,9 +81,13 @@ export function cloudSafeLinkHref(note: CloudSendable, href: string): CloudSafe<
   return mint(href)
 }
 
-/** Read a note's authored `private` flag from its full markdown source. */
+/**
+ * Whether a note's own frontmatter keeps it on the device, from its full
+ * markdown source: locked, or unreadable and so treated as locked (the shared
+ * fail-closed classifier, `frontmatter-privacy.ts`).
+ */
 export function notePrivate(source: string): boolean {
-  return parseFrontmatter(splitFrontmatter(source).raw).data.private
+  return frontmatterPrivacy(source).kind !== 'public'
 }
 
 /** One search hit as an external service may see it. */
