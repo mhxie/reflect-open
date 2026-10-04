@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NoteRow } from '@reflect/core'
+import { parseNote, type NoteRow } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
 import { createNoteSession } from '@/editor/note-session.ts'
 import type { NoteSession } from '@/editor/note-session.ts'
@@ -16,7 +16,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
 }))
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 
-const { toggleNotePrivate } = await import('./note-private.ts')
+const { hasUnreadableLock, toggleNotePrivate } = await import('./note-private.ts')
 
 let client: QueryClient
 const operationFail = vi.hoisted(() => vi.fn())
@@ -112,12 +112,14 @@ describe('toggleNotePrivate', () => {
       '---\nprivate: maybe\n---\n# A\n',
       '---\nprivate: no\ntitle: [unclosed\n---\n# A\n',
       '\u{FEFF}---\nprivate: true\n---\n# A\n',
+      // Locked by its `private:` line, but the YAML around it doesn't load.
+      '---\nprivate: true\ntitle: [unclosed\n---\n# A\n',
     ]) {
       readNote.mockResolvedValue(source)
       await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
     }
     expect(writeNote).not.toHaveBeenCalled()
-    expect(operationFail).toHaveBeenCalledTimes(3)
+    expect(operationFail).toHaveBeenCalledTimes(4)
     expect(operationFail).toHaveBeenLastCalledWith(expect.stringContaining("can't be read"))
     // Never predicted unlocked, not even for a moment.
     expect(client.getQueryData<NoteRow>(queryKey)?.isPrivate).toBe(true)
@@ -225,5 +227,22 @@ describe('privacy feedback', () => {
       session.discard()
       consoleError.mockRestore()
     }
+  })
+})
+
+describe('hasUnreadableLock', () => {
+  const lockOf = (source: string): boolean =>
+    hasUnreadableLock(parseNote({ path: 'notes/a.md', source }))
+
+  it("freezes a locked note whose frontmatter can't be parsed", () => {
+    expect(lockOf('---\nprivate: maybe\n---\n# A\n')).toBe(true)
+    expect(lockOf('---\nprivate: true\ntitle: [unclosed\n---\n# A\n')).toBe(true)
+  })
+
+  it('leaves readable locks and unlocked notes alone, even with malformed YAML', () => {
+    expect(lockOf('---\nprivate: true\n---\n# A\n')).toBe(false)
+    // Not locked, so claiming "treated as locked" would be false.
+    expect(lockOf('---\ntitle: [unclosed\n---\n# A\n')).toBe(false)
+    expect(lockOf('# A\n')).toBe(false)
   })
 })
