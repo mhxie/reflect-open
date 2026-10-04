@@ -1,6 +1,8 @@
+import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
 import type { AiProviderId, HostedAiProviderId } from '../settings/schema.ts'
 import { anthropicDirectBrowserAccessHeaders } from './anthropic-headers.ts'
 import { APP_REVIEW_STUB_KEY } from './app-review-demo.ts'
+import { onDeviceFetch } from './on-device-fetch.ts'
 import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from './openai-compatible.ts'
 import { OPENROUTER_BASE_URL } from './openrouter.ts'
 
@@ -81,7 +83,9 @@ function keyProbe(input: ApiKeyValidationInput): KeyProbe | null {
 /**
  * Probe `input.provider` with `input.apiKey`. `fetchFn` lets hosts substitute a
  * CORS-free transport (the desktop app passes the Tauri HTTP plugin's fetch;
- * `@reflect/core` itself stays platform-agnostic).
+ * `@reflect/core` itself stays platform-agnostic). An OpenAI-compatible
+ * endpoint on a loopback host is probed through {@link onDeviceFetch}
+ * instead, like every other call to it.
  */
 export async function validateApiKey(
   input: ApiKeyValidationInput,
@@ -97,12 +101,17 @@ export async function validateApiKey(
   if (probe === null) {
     return 'invalid'
   }
+  const transport =
+    input.provider === 'openai-compatible' && isLoopbackHttpUrl(probe.url) ? onDeviceFetch : fetchFn
   let response: Response
   try {
-    response = await fetchFn(probe.url, { method: 'GET', headers: probe.headers(input.apiKey) })
+    response = await transport(probe.url, { method: 'GET', headers: probe.headers(input.apiKey) })
   } catch {
     return 'unreachable'
   }
+  // Only the status matters. Release the body now: the on-device transport
+  // holds an unread body (and one of its few slots) until it is cancelled.
+  response.body?.cancel().catch(() => {})
   if (response.ok) {
     return 'valid'
   }

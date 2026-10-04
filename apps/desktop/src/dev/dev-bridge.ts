@@ -356,6 +356,16 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         return null
       }
 
+      // The loopback transport is native: a browser has no way to keep a
+      // request off proxies and redirects, so it never stands in for it.
+      case 'on_device_http_send':
+      case 'on_device_http_read':
+      case 'on_device_http_cancel':
+        throw new ReflectError(
+          'unsupported',
+          'Reaching a model on this Mac needs the desktop app; the browser preview cannot.',
+        )
+
       default:
         console.error(`[dev-bridge] unimplemented command "${command}"`, args)
         throw new ReflectError('unknown', `dev bridge: unimplemented command "${command}"`)

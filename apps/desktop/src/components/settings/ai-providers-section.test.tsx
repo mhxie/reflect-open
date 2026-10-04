@@ -23,15 +23,23 @@ let saved: unknown[]
 let secrets: Map<string, string>
 let failSecretSet: boolean
 let failLoad: boolean
+/** Requests that reached the loopback transport (`on_device_http_send`). */
+let onDeviceSends: Record<string, unknown>[]
 
 function installFakeBridge(): void {
   saved = []
   secrets = new Map()
   failSecretSet = false
   failLoad = false
+  onDeviceSends = []
   setBridge({
     invoke: async (command, args) => {
       switch (command) {
+        case 'on_device_http_send':
+          onDeviceSends.push(args)
+          return { status: 200, statusText: 'OK', headers: [] }
+        case 'on_device_http_read':
+          return new ArrayBuffer(0)
         case 'settings_load':
           if (failLoad) {
             throw { kind: 'io', message: 'corrupt store' }
@@ -202,10 +210,15 @@ describe('AiProvidersSection', () => {
       baseUrl: 'http://localhost:1234/v1',
       keyHint: '',
     })
-    expect(providerFetchMock).toHaveBeenCalledWith(
-      'http://localhost:1234/v1/models',
-      expect.objectContaining({ method: 'GET', headers: {} }),
-    )
+    // An endpoint on this Mac is probed through the loopback transport only.
+    expect(onDeviceSends).toEqual([
+      expect.objectContaining({
+        method: 'GET',
+        url: 'http://localhost:1234/v1/models',
+        headers: [],
+      }),
+    ])
+    expect(providerFetchMock).not.toHaveBeenCalled()
     expect(secrets.size).toBe(0)
     expect(JSON.stringify(saved)).not.toContain('localhost:1234/v1/')
     await expectLocatorToHaveCount(page.getByRole('dialog'), 0)

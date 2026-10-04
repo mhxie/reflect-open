@@ -1,7 +1,9 @@
 import type { LanguageModel } from '@reflect/modules/ai'
+import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import { anthropicDirectBrowserAccessHeaders } from './anthropic-headers.ts'
 import { APP_REVIEW_STUB_KEY, createDemoModel } from './app-review-demo.ts'
+import { onDeviceFetch } from './on-device-fetch.ts'
 import { OPENAI_COMPATIBLE_PROVIDER_ID } from './openai-compatible.ts'
 import { OPENROUTER_BASE_URL, openRouterAttributionHeaders } from './openrouter.ts'
 
@@ -9,7 +11,9 @@ import { OPENROUTER_BASE_URL, openRouterAttributionHeaders } from './openrouter.
  * Build the AI SDK model instance for a configured BYOK entry — the one place
  * provider ids map to SDK factories. Shared by the chat engine
  * (`chat/stream-chat`) and one-shot calls like the link-capture page
- * description (`describe-page`).
+ * description (`describe-page`). An OpenAI-compatible endpoint on a loopback
+ * host always goes through {@link onDeviceFetch}; `fetchFn` carries every
+ * other call.
  */
 export async function languageModel(
   config: AiProviderConfig,
@@ -53,7 +57,9 @@ export async function languageModel(
       return createOpenAICompatible({
         name: OPENAI_COMPATIBLE_PROVIDER_ID,
         baseURL: config.baseUrl,
-        fetch: fetchFn,
+        // A server on this Mac is reached only through the hardened
+        // loopback transport, whatever fetch the caller passed.
+        fetch: isLoopbackHttpUrl(config.baseUrl) ? onDeviceFetch : fetchFn,
         includeUsage: true,
         ...(apiKey.trim() === '' ? {} : { apiKey }),
       }).chatModel(config.model)
