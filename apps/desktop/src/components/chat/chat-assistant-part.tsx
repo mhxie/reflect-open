@@ -28,7 +28,12 @@ export function ChatAssistantPart({ part, onWikiLinkClick }: ChatAssistantPartPr
   }
 }
 
-function ChatNotice({ tone, text }: { tone: 'error' | 'info'; text: string }): ReactElement {
+interface ChatNoticeProps {
+  tone: 'error' | 'info'
+  text: string
+}
+
+function ChatNotice({ tone, text }: ChatNoticeProps): ReactElement {
   return (
     <Marker
       className={cn(

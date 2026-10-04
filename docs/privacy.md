@@ -27,10 +27,12 @@ locked" until the YAML is fixed.
   every chat turn. Private notes are dropped from every tool result, and reading one is
   refused outright — the model sees a refusal, not the content. Each turn resends the
   conversation so far, except earlier exchanges that read a note or attachment that has
-  since become private or local-only (a model you marked as running on this Mac still
+  since become private or local-only, or that can no longer be confirmed public, such as
+  a note since renamed or deleted (a model you marked as running on this Mac still
   receives those); the transcript keeps them and notes once that they are no longer
   sent. That protection cannot identify note content you manually paste into a message
-  or the configured prompt.
+  or the configured prompt, nor a later answer that repeats what a withheld exchange
+  read.
 - **When:** only while you use chat (⌘J). No background calls.
 
 ## Audio memos (off until you add a key)

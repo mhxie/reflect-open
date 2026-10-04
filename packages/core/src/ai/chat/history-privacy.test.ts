@@ -1,6 +1,6 @@
 import type { ModelMessage } from '@reflect/modules/ai'
 import type { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setLocalOnlyFolders } from '../../graph/local-only.ts'
 import {
   applyProjection,
@@ -9,14 +9,25 @@ import {
   project,
 } from '../../indexing/flow-test-harness.ts'
 import { getBridge, setBridge } from '../../ipc/bridge.ts'
-import { modelTarget } from '../../privacy/on-device.ts'
+import { modelTarget, verifyOnDeviceServer } from '../../privacy/on-device.ts'
 import { historyForTarget } from './history-privacy.ts'
 
 /**
  * The resend gate over a real index: notes are projected from Markdown into
  * the production schema, and the gate reads them back through `db_query`,
- * which is counted.
+ * which is counted. The on-device server check keeps its real answer unless
+ * a test overrides it.
  */
+
+vi.mock('../../privacy/on-device', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../privacy/on-device.ts')>()
+  return {
+    ...original,
+    verifyOnDeviceServer: vi.fn(original.verifyOnDeviceServer),
+  }
+})
+
+const verifyOnDeviceServerMock = vi.mocked(verifyOnDeviceServer)
 
 type ToolMessage = Extract<ModelMessage, { role: 'tool' }>
 type ToolResultOutput = Extract<ToolMessage['content'][number], { type: 'tool-result' }>['output']
@@ -71,6 +82,7 @@ afterEach(() => {
   database = null
   queries.length = 0
   setLocalOnlyFolders([])
+  verifyOnDeviceServerMock.mockReset()
 })
 
 function user(text: string): ModelMessage {
@@ -276,6 +288,26 @@ describe('historyForTarget', () => {
     expect(result.withheldTurns).toBe(0)
     expect(result.messages).toBe(history)
     expect(queries).toHaveLength(0)
+    expect(verifyOnDeviceServerMock).toHaveBeenCalledExactlyOnceWith(ON_DEVICE)
+  })
+
+  it('filters the history like a cloud model when the on-device server is refused', async () => {
+    openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
+    verifyOnDeviceServerMock.mockResolvedValueOnce({
+      kind: 'refused',
+      reason: 'This model runs in Ollama’s cloud.',
+    })
+    const history: ModelMessage[] = [
+      ...exchange('x?', 'read_notes', readNotes('notes/x.md'), 'x.'),
+      ...exchange('atlas?', 'read_notes', readNotes('notes/atlas.md'), 'Atlas.'),
+      user('next'),
+    ]
+
+    expect(await historyForTarget(history, ON_DEVICE)).toEqual({
+      messages: history.slice(4),
+      withheldTurns: 1,
+    })
+    expect(queries).toHaveLength(1)
   })
 
   it('checks every named note and asset in one index query', async () => {
@@ -423,6 +455,35 @@ describe('historyForTarget over asset reads', () => {
     ]
 
     expect((await historyForTarget(history, CLOUD)).withheldTurns).toBe(1)
+  })
+
+  it('leaves out an X media read once a note linking the post that owns it is locked', async () => {
+    // A public note embeds the media directly; the locked note links the X
+    // post, which the index records as the post's archive file.
+    openIndex({ 'notes/public.md': PUBLIC, 'notes/x.md': LOCKED }, [
+      ['notes/public.md', 'assets/x/abc.jpg'],
+      ['notes/x.md', 'assets/x/post-1.json'],
+    ])
+    const history: ModelMessage[] = [
+      ...exchange('photo?', 'read_assets', readAssets('assets/x/abc.jpg'), 'A photo.'),
+      user('next'),
+    ]
+
+    expect((await historyForTarget(history, CLOUD)).withheldTurns).toBe(1)
+  })
+
+  it('counts every X media file as private, since the index does not know its owners', async () => {
+    openIndex({ 'notes/public.md': PUBLIC, 'notes/post.md': PUBLIC }, [
+      ['notes/public.md', 'assets/x/abc.jpg'],
+      ['notes/post.md', 'assets/x/post-1.json'],
+    ])
+    const history: ModelMessage[] = [
+      ...exchange('photo?', 'read_assets', readAssets('assets/x/abc.jpg'), 'A photo.'),
+      user('next'),
+    ]
+
+    expect((await historyForTarget(history, CLOUD)).withheldTurns).toBe(1)
+    expect(queries).toHaveLength(0)
   })
 })
 

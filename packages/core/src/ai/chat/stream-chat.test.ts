@@ -1,5 +1,6 @@
 import type { ModelMessage } from '@reflect/modules/ai'
-import { describe, expect, it, vi } from 'vitest'
+import type { DatabaseSync } from 'node:sqlite'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { convertArrayToReadableStream, MockLanguageModelV3 } from '@reflect/modules/ai/test'
 import type {
   LanguageModelV3StreamPart,
@@ -15,10 +16,12 @@ import {
 } from '../../indexing/flow-test-harness.ts'
 import { setBridge } from '../../ipc/bridge.ts'
 import { cloudSafeGraphContext } from '../../privacy/checkers.ts'
+import { verifyOnDeviceServer } from '../../privacy/on-device.ts'
 import type { AiProviderConfig } from '../../settings/schema.ts'
 import { languageModel } from '../language-model.ts'
 import { fitToContextWindow } from './context-window.ts'
 import { MAX_STEPS, streamChat, streamChatTurn, type ChatStreamEvent } from './stream-chat.ts'
+import { buildHistory } from './transcript.ts'
 
 vi.mock('../language-model', () => ({
   languageModel: vi.fn(),
@@ -32,8 +35,17 @@ vi.mock('./context-window', async (importOriginal) => {
   }
 })
 
+vi.mock('../../privacy/on-device', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../privacy/on-device.ts')>()
+  return {
+    ...original,
+    verifyOnDeviceServer: vi.fn(original.verifyOnDeviceServer),
+  }
+})
+
 const languageModelMock = vi.mocked(languageModel)
 const fitToContextWindowMock = vi.mocked(fitToContextWindow)
+const verifyOnDeviceServerMock = vi.mocked(verifyOnDeviceServer)
 
 const USAGE: LanguageModelV3Usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
@@ -276,12 +288,46 @@ describe('streamChat history privacy', () => {
     { role: 'user', content: 'anything else?' },
   ]
 
-  function turn(config: AiProviderConfig) {
+  const CLOUD: AiProviderConfig = {
+    id: 'cfg',
+    provider: 'openai',
+    model: 'gpt-5.5',
+    keyHint: 'test',
+  }
+  const ON_DEVICE_URL = 'http://localhost:11434/v1'
+  const ON_DEVICE: AiProviderConfig = {
+    id: 'ollama',
+    provider: 'openai-compatible',
+    model: 'llama3.2',
+    baseUrl: ON_DEVICE_URL,
+    keyHint: '',
+    onDevice: { baseUrl: ON_DEVICE_URL, model: 'llama3.2' },
+  }
+
+  let database: DatabaseSync | null = null
+
+  /** Index Atlas and the sentinel note, which is locked unless `locked` is false. */
+  function openIndex(locked = true): void {
+    database = openMigratedIndex()
+    applyProjection(database, project('notes/atlas.md', '# Atlas Launch Plan\n', 1))
+    const header = locked ? '---\nprivate: true\n---\n' : ''
+    applyProjection(database, project(PRIVATE_PATH, `${header}# ${PRIVATE_TITLE}\n`, 2))
+    connectIndex(database)
+  }
+
+  afterEach(() => {
+    setBridge(null)
+    database?.close()
+    database = null
+    verifyOnDeviceServerMock.mockReset()
+  })
+
+  function turn(config: AiProviderConfig, messages: ModelMessage[] = HISTORY) {
     return streamChat({
       config,
       apiKey: 'sk-test',
       fetchFn: globalThis.fetch,
-      messages: HISTORY,
+      messages,
       today: '2026-06-11',
       semanticSearchEnabled: false,
       customSystemPrompt: '',
@@ -289,52 +335,151 @@ describe('streamChat history privacy', () => {
     })
   }
 
-  it('sends a cloud model no exchange that read a note private now', async () => {
-    // The note was public when the first exchange read it; it is locked now.
-    const database = openMigratedIndex()
-    applyProjection(database, project('notes/atlas.md', '# Atlas Launch Plan\n', 1))
-    applyProjection(
-      database,
-      project(PRIVATE_PATH, `---\nprivate: true\n---\n# ${PRIVATE_TITLE}\n`, 2),
-    )
-    connectIndex(database)
+  /** The provider the next turn loads, answering with one text reply. */
+  function nextModel(): MockLanguageModelV3 {
     const model = new MockLanguageModelV3({ doStream: sequence([textTurn('Nothing else.')]) })
     languageModelMock.mockResolvedValueOnce(model)
-    try {
-      const events = await collect(
-        turn({ id: 'cfg', provider: 'openai', model: 'gpt-5.5', keyHint: 'test' }),
-      )
+    return model
+  }
 
-      expect(events[0]).toEqual({ type: 'history-withheld' })
-      expect(events.at(-1)?.type).toBe('complete')
-      const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)
-      for (const sentinel of [PRIVATE_PATH, PRIVATE_TITLE, PRIVATE_BODY, PRIVATE_QUESTION]) {
-        expect(outbound).not.toContain(sentinel)
-      }
-      expect(outbound).toContain('notes/atlas.md')
-      expect(outbound).toContain('anything else?')
-    } finally {
-      setBridge(null)
-      database.close()
+  /** Expect the prompt `model` received to name neither the sentinel note nor the turn that read it. */
+  function expectNoSentinels(model: MockLanguageModelV3): void {
+    const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    for (const sentinel of [PRIVATE_PATH, PRIVATE_TITLE, PRIVATE_BODY, PRIVATE_QUESTION]) {
+      expect(outbound).not.toContain(sentinel)
     }
-  })
+  }
 
-  it('sends a model on this Mac the full history', async () => {
-    // No bridge installed: asking the index would fail the turn.
-    const model = new MockLanguageModelV3({ doStream: sequence([textTurn('Nothing else.')]) })
-    languageModelMock.mockResolvedValueOnce(model)
-    const baseUrl = 'http://localhost:11434/v1'
-
+  /**
+   * The history a real turn leaves behind: the SDK runs read_notes on the
+   * sentinel note while it is public and records the exchange, which then
+   * goes through the store's JSON column and `buildHistory` like a restored
+   * chat.
+   */
+  async function recordedHistory(): Promise<ModelMessage[]> {
+    const reader = new MockLanguageModelV3({
+      doStream: sequence([
+        stream([
+          {
+            type: 'tool-call',
+            toolCallId: 'call-read',
+            toolName: 'read_notes',
+            input: JSON.stringify({ paths: [PRIVATE_PATH] }),
+          },
+          { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage: USAGE },
+        ]),
+        textTurn(`It says ${PRIVATE_BODY}`),
+      ]),
+    })
     const events = await collect(
-      turn({
-        id: 'ollama',
-        provider: 'openai-compatible',
-        model: 'llama3.2',
-        baseUrl,
-        keyHint: '',
-        onDevice: { baseUrl, model: 'llama3.2' },
+      streamChatTurn(reader, {
+        messages: [{ role: 'user', content: PRIVATE_QUESTION }],
+        today: '2026-06-11',
+        semanticSearchEnabled: false,
+        customSystemPrompt: '',
+        context: null,
+        toolDeps: { readNoteFn: async () => `# ${PRIVATE_TITLE}\n\n${PRIVATE_BODY}\n` },
       }),
     )
+    const complete = events.at(-1)
+    if (complete?.type !== 'complete') {
+      throw new Error(`the recorded turn ended with ${String(complete?.type)}`)
+    }
+    // chat_messages keeps a turn's messages as JSON text.
+    const stored = JSON.stringify(complete.messages)
+    const responseMessages: ModelMessage[] = JSON.parse(stored)
+    return [
+      ...buildHistory([
+        {
+          id: 'turn-1',
+          userText: PRIVATE_QUESTION,
+          attachments: [],
+          parts: [],
+          responseMessages,
+          status: 'done',
+        },
+      ]),
+      { role: 'user', content: 'anything else?' },
+    ]
+  }
+
+  it('sends a cloud model no exchange that read a note private now', async () => {
+    // The note was public when the first exchange read it; it is locked now.
+    openIndex()
+    const model = nextModel()
+
+    const events = await collect(turn(CLOUD))
+
+    expect(events[0]).toEqual({ type: 'history-withheld' })
+    expect(events.at(-1)?.type).toBe('complete')
+    expectNoSentinels(model)
+    const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(outbound).toContain('notes/atlas.md')
+    expect(outbound).toContain('anything else?')
+  })
+
+  it('sends a model on this Mac the full history once its server checks out', async () => {
+    // No bridge installed: asking the index would fail the turn.
+    const model = nextModel()
+
+    const events = await collect(turn(ON_DEVICE))
+
+    expect(events.map((event) => event.type)).toEqual(['text-delta', 'complete'])
+    expect(verifyOnDeviceServerMock).toHaveBeenCalledOnce()
+    const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(outbound).toContain(PRIVATE_BODY)
+    expect(outbound).toContain(PRIVATE_QUESTION)
+  })
+
+  it('filters the history for a model on this Mac whose server is refused', async () => {
+    openIndex()
+    verifyOnDeviceServerMock.mockResolvedValueOnce({
+      kind: 'refused',
+      reason: 'This model runs in Ollama’s cloud.',
+    })
+    const model = nextModel()
+
+    const events = await collect(turn(ON_DEVICE))
+
+    expect(events[0]).toEqual({ type: 'history-withheld' })
+    expect(events.at(-1)?.type).toBe('complete')
+    expectNoSentinels(model)
+  })
+
+  it('fails a cloud turn before loading the model when the index cannot be read', async () => {
+    setBridge({
+      invoke: async (command) => {
+        throw new Error(`index unavailable (${command})`)
+      },
+      listen: async () => () => {},
+    })
+    const loads = languageModelMock.mock.calls.length
+
+    const events = await collect(turn(CLOUD))
+
+    expect(events).toEqual([
+      { type: 'error', message: expect.stringContaining('index unavailable'), messages: [] },
+    ])
+    expect(languageModelMock.mock.calls.length).toBe(loads)
+  })
+
+  it('withholds an exchange the SDK recorded once its note is locked', async () => {
+    const history = await recordedHistory()
+    openIndex()
+    const model = nextModel()
+
+    const events = await collect(turn(CLOUD, history))
+
+    expect(events[0]).toEqual({ type: 'history-withheld' })
+    expectNoSentinels(model)
+  })
+
+  it('resends an exchange the SDK recorded while its note is public', async () => {
+    const history = await recordedHistory()
+    openIndex(false)
+    const model = nextModel()
+
+    const events = await collect(turn(CLOUD, history))
 
     expect(events.map((event) => event.type)).toEqual(['text-delta', 'complete'])
     const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)

@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { isLocalOnlyPath } from '../../graph/local-only.ts'
 import { assetReferenceMatches } from '../../indexing/asset-refs.ts'
 import { db } from '../../indexing/db.ts'
-import type { ModelTarget } from '../../privacy/on-device.ts'
+import { verifyOnDeviceServer, type ModelTarget } from '../../privacy/on-device.ts'
+import { isXArchiveAssetPath } from '../../x-archive.ts'
 import { splitIntoTurnSegments } from './context-window.ts'
 import { toolResultSources, type ToolResultSources } from './tools.ts'
 
@@ -17,14 +18,16 @@ import { toolResultSources, type ToolResultSources } from './tools.ts'
  * message, the tool calls and results, and the answer, which can paraphrase
  * what it read. Exchanges are the context window's turn segments, so role
  * alternation survives. The stored turns are untouched; only what this turn
- * sends changes. An on-device target receives the full history.
+ * sends changes. An on-device target receives the full history once its
+ * server passes `verifyOnDeviceServer`; a refused one is filtered like a cloud
+ * target.
  *
  * Private now means a note in a local-only folder or whose index row is
  * private or missing (moved, deleted, not indexed), or an asset in a
- * local-only folder, referenced by no indexed note, or referenced by a note
- * that is private now. A tool result whose sources can't be read fails
- * closed. All paths are checked in one index query rather than a disk read
- * per path, so the gate is as fresh as the index.
+ * local-only folder or the X archive folder, referenced by no indexed note,
+ * or referenced by a note that is private now. A tool result whose sources
+ * can't be read fails closed. All paths are checked in one index query rather
+ * than a disk read per path, so the gate is as fresh as the index.
  */
 
 /** The history one turn sends, from {@link historyForTarget}. */
@@ -37,13 +40,16 @@ export interface TargetHistory {
 
 /**
  * The model-facing history `target` may receive, given everything a turn
- * would resend (`buildHistory` plus the new user message).
+ * would resend (`buildHistory` plus the new user message). An on-device
+ * target whose server {@link verifyOnDeviceServer} accepts receives all of
+ * it; any other target, a refused on-device one included, gets the filtered
+ * history.
  */
 export async function historyForTarget(
   messages: ModelMessage[],
   target: ModelTarget,
 ): Promise<TargetHistory> {
-  if (target.kind === 'on-device') {
+  if (target.kind === 'on-device' && (await verifyOnDeviceServer(target)) === 'ok') {
     return { messages, withheldTurns: 0 }
   }
   const segments = splitIntoTurnSegments(messages)
@@ -62,11 +68,13 @@ export async function historyForTarget(
 }
 
 /**
- * Sub-project C's rule for a cloud target: a conversation that holds content
- * the cloud gate withheld (a tool output carrying the `reflectPrivateContext`
- * marker, which only on-device tools mint) is refused outright instead of
- * filtered, because its later answers can paraphrase that content.
- * `streamChat` reports a throw from here as the turn's error, sending nothing.
+ * Sub-project C's rule for a target that gets the filtered history (cloud, or
+ * an on-device target whose server was refused): a conversation that holds
+ * content the cloud gate withheld (a tool output carrying the
+ * `reflectPrivateContext` marker, which only on-device tools mint) is refused
+ * outright instead of filtered, because its later answers can paraphrase that
+ * content. `streamChat` reports a throw from here as the turn's error,
+ * sending nothing.
  */
 function refuseCloudPrivateContext(_segments: readonly ModelMessage[][]): void {
   // TODO(C2): throw the refusal when any segment carries the marker. No tool
@@ -148,7 +156,13 @@ async function privateNowPaths(named: readonly ToolResultSources[]): Promise<Pri
   const notes = [...new Set(named.flatMap((sources) => sources.notes))]
   const assets = [...new Set(named.flatMap((sources) => sources.assets))]
   const privateNotes = new Set(notes.filter((path) => isLocalOnlyPath(path)))
-  const privateAssets = new Set(assets.filter((path) => isLocalOnlyPath(path)))
+  // An archived post can own an X asset, so a note linking the post references
+  // it too. Finding those owners takes a disk read per asset
+  // (`getXArchiveOwners`), which this one-query gate does not make, so every
+  // X asset counts as private.
+  const privateAssets = new Set(
+    assets.filter((path) => isLocalOnlyPath(path) || isXArchiveAssetPath(path)),
+  )
   const notePaths = notes.filter((path) => !privateNotes.has(path))
   const assetPaths = assets.filter((path) => !privateAssets.has(path))
   const rows = await privacyRows(notePaths, assetPaths)
