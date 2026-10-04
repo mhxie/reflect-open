@@ -60,6 +60,16 @@ export function isImageAttachmentPath(path: string): boolean {
 }
 
 /**
+ * Does this path (or file name, or Markdown destination) name a PDF, which an
+ * embed renders as an inline, page-by-page preview? A `?query` or `#fragment`
+ * suffix is ignored.
+ */
+export function isPdfAttachmentPath(path: string): boolean {
+  const bare = path.split(/[?#]/, 1)[0] ?? ''
+  return bare.toLowerCase().endsWith('.pdf')
+}
+
+/**
  * The attachment a Markdown link or image destination in `sourcePath` names,
  * or null when the destination is not a local attachment (a URL, a note, a
  * traversal).
@@ -99,12 +109,13 @@ export function resolveAttachmentLink(
 
 /**
  * What an Obsidian `![[target]]` embed shows: another note (rendered as a
- * link to it, never transcluded), or an attachment as the Markdown destination
- * {@link resolveAttachmentLink} reads it by.
+ * link to it, never transcluded), or an attachment — an image, a PDF preview,
+ * or a file pill — as the Markdown destination {@link resolveAttachmentLink}
+ * reads it by.
  */
 export type WikiEmbedTarget =
   | { readonly kind: 'note' }
-  | { readonly kind: 'image' | 'file'; readonly source: string }
+  | { readonly kind: 'image' | 'pdf' | 'file'; readonly source: string }
 
 /**
  * Classify an Obsidian `![[target]]` embed, or null when it names an
@@ -122,9 +133,16 @@ export function resolveWikiEmbedTarget(target: string): WikiEmbedTarget | null {
   }
   const encoded = path.split('/').map(encodeURIComponent).join('/')
   return {
-    kind: isImageAttachmentPath(path) ? 'image' : 'file',
+    kind: attachmentEmbedKind(path),
     source: path.includes('/') ? `/${encoded}` : encoded,
   }
+}
+
+function attachmentEmbedKind(path: string): 'image' | 'pdf' | 'file' {
+  if (isImageAttachmentPath(path)) {
+    return 'image'
+  }
+  return isPdfAttachmentPath(path) ? 'pdf' : 'file'
 }
 
 /**

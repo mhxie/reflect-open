@@ -405,7 +405,7 @@ function requireAttached(document: MarkdownDocument, target: MarkdownBlock): Att
 }
 
 function requireParagraphMarkdown(markdown: string): string {
-  const trimmed = markdown.trim()
+  const trimmed = markdown.replaceAll(/\r\n?/g, '\n').trim()
   if (/\n[ \t]*\n/.test(trimmed)) {
     throw new TaskStaleError(`task content must be one paragraph: ${JSON.stringify(markdown)}`)
   }

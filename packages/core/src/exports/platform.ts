@@ -125,6 +125,7 @@ export { isLocalOnlyPath } from '../graph/local-only.ts'
 export {
   createAttachmentCatalog,
   isImageAttachmentPath,
+  isPdfAttachmentPath,
   resolveAttachmentLink,
   resolveWikiEmbedTarget,
   type AttachmentCatalog,
@@ -149,6 +150,7 @@ export {
   graphImportProgressSchema,
   graphImportSummarySchema,
   windowBootstrapSchema,
+  pdfInfoSchema,
   type GraphInfo,
   type RecentGraph,
   type FileMeta,
@@ -156,7 +158,10 @@ export {
   type GraphImportProgress,
   type GraphImportSummary,
   type WindowBootstrap,
+  type PdfInfo,
+  type PdfPageSize,
 } from '../graph/schemas.ts'
+export { PDF_PAGE_WIDTH_BUCKETS, pdfPageWidthBucket } from '../graph/pdf-pages.ts'
 export {
   openGraph,
   openNoteWindow,
@@ -178,6 +183,7 @@ export {
   readAsset,
   openAsset,
   revealAsset,
+  pdfInfo,
   listDir,
   noteExists,
   deleteNote,

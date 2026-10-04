@@ -15,6 +15,9 @@ export const appErrorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('parse'), message: z.string() }),
   z.object({ kind: z.literal('auth'), message: z.string() }),
   z.object({ kind: z.literal('network'), message: z.string() }),
+  z.object({ kind: z.literal('unsupported'), message: z.string() }),
+  z.object({ kind: z.literal('locked'), message: z.string() }),
+  z.object({ kind: z.literal('invalid'), message: z.string() }),
   z.object({ kind: z.literal('unknown'), message: z.string() }),
 ])
 

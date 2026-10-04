@@ -65,6 +65,7 @@ pub(super) fn bootstrap(root: &Path) -> AppResult<()> {
 pub(super) fn initialize_runtime(root: &Path) -> AppResult<()> {
     ensure_runtime_directory(root)?;
     sweep_upload_staging(root);
+    super::pdf_render::sweep_page_cache(root);
     mark_dir_local_only(&root.join(REFLECT_DIR));
     ensure_runtime_gitignore(root)?;
     // A backup repo must never ride a file-sync provider: two devices' object
@@ -164,18 +165,11 @@ pub(super) fn read_note_no_follow(base: &Path, rest: &Path) -> std::io::Result<S
     Ok(normalize_line_endings(contents))
 }
 
-/// [`read_note_no_follow`] for bytes: a local-only attachment served to the
-/// webview.
-pub(super) fn read_bytes_no_follow(base: &Path, rest: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-    let mut contents = Vec::new();
-    open_no_follow(base, rest)?.read_to_end(&mut contents)?;
-    Ok(contents)
-}
-
 /// Open `base.join(rest)` for reading with every component policed by
-/// `O_NOFOLLOW_ANY` on Apple platforms (a plain open elsewhere).
-fn open_no_follow(base: &Path, rest: &Path) -> std::io::Result<fs::File> {
+/// `O_NOFOLLOW_ANY` on Apple platforms (a plain open elsewhere). Attachment
+/// reads (the asset protocol, PDF previews) go through
+/// `resolve::ReadTarget::open`, which picks this open for a local-only entry.
+pub(super) fn open_no_follow(base: &Path, rest: &Path) -> std::io::Result<fs::File> {
     let path = base.join(rest);
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
@@ -624,12 +618,15 @@ mod tests {
             read_note_no_follow(&target, Path::new("bank.md")).unwrap(),
             "# Bank"
         );
-        assert_eq!(
-            read_bytes_no_follow(&target, Path::new("bank.md")).unwrap(),
-            b"# Bank"
-        );
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut open_no_follow(&target, Path::new("bank.md")).unwrap(),
+            &mut bytes,
+        )
+        .unwrap();
+        assert_eq!(bytes, b"# Bank");
         assert!(read_note_no_follow(&target, Path::new("alias/leak.md")).is_err());
-        assert!(read_bytes_no_follow(&target, Path::new("alias/leak.md")).is_err());
+        assert!(open_no_follow(&target, Path::new("alias/leak.md")).is_err());
     }
 
     #[cfg(target_os = "macos")]

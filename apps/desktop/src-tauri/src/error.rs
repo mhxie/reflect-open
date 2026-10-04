@@ -28,6 +28,14 @@ pub enum AppError {
     Auth { message: String },
     /// The remote is unreachable (offline, DNS, timeout) — retryable.
     Network { message: String },
+    /// This platform (or build) cannot do what was asked, e.g. rendering a
+    /// PDF preview anywhere but macOS, or a file past a preview size limit.
+    Unsupported { message: String },
+    /// The file is password-protected and cannot be opened without asking.
+    Locked { message: String },
+    /// The file's content is not what its type promises (a `.pdf` that is
+    /// not a PDF, has no pages, or cannot be parsed).
+    Invalid { message: String },
     /// Anything not covered above.
     Unknown { message: String },
 }
@@ -60,6 +68,24 @@ impl AppError {
     pub fn no_graph() -> Self {
         Self::NoGraph {
             message: "No graph is open".into(),
+        }
+    }
+
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::Unsupported {
+            message: message.into(),
+        }
+    }
+
+    pub fn locked(message: impl Into<String>) -> Self {
+        Self::Locked {
+            message: message.into(),
+        }
+    }
+
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid {
+            message: message.into(),
         }
     }
 }
@@ -190,6 +216,27 @@ mod tests {
     fn other_git_failures_classify_as_io() {
         let error = classify(ErrorCode::NotFound, ErrorClass::Odb, "object not found");
         assert!(matches!(error, AppError::Io { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn preview_errors_serialize_with_their_own_kinds() {
+        let cases = [
+            (AppError::unsupported("macOS only"), "unsupported"),
+            (AppError::locked("password-protected"), "locked"),
+            (AppError::invalid("not a PDF"), "invalid"),
+        ];
+        for (error, kind) in cases {
+            let message = match &error {
+                AppError::Unsupported { message }
+                | AppError::Locked { message }
+                | AppError::Invalid { message } => message.clone(),
+                other => panic!("unexpected variant: {other:?}"),
+            };
+            assert_eq!(
+                serde_json::to_value(&error).unwrap(),
+                serde_json::json!({ "kind": kind, "message": message }),
+            );
+        }
     }
 
     #[test]

@@ -9,6 +9,7 @@ import {
   graphImportSummarySchema,
   graphInfoSchema,
   noteCreateOutcomeSchema,
+  pdfInfoSchema,
   recentGraphSchema,
   windowBootstrapSchema,
   type FileMeta,
@@ -16,6 +17,7 @@ import {
   type GraphImportSummary,
   type GraphInfo,
   type NoteCreateOutcome,
+  type PdfInfo,
   type RecentGraph,
   type WindowBootstrap,
 } from './schemas.ts'
@@ -350,6 +352,16 @@ export async function openAsset(path: string, generation: number): Promise<void>
  */
 export async function revealAsset(path: string, generation: number): Promise<void> {
   await call('asset_reveal', { path, generation }, voidSchema)
+}
+
+/**
+ * The page sizes of the PDF at a graph-relative path, for an inline preview
+ * (Plan 25). Pinned to `generation` like {@link openAsset}. Rejects with an
+ * `unsupported` app error off macOS, `locked` for a password-protected PDF,
+ * and `invalid` for a file that is not a readable PDF.
+ */
+export async function pdfInfo(path: string, generation: number): Promise<PdfInfo> {
+  return await call('pdf_info', { path, generation }, pdfInfoSchema)
 }
 
 /**

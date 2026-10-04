@@ -178,6 +178,7 @@ export function NotePaneComponent({
   })
   const {
     resolveImageUrl,
+    resolveEmbed,
     resolveWikiEmbed,
     resolveAssetOpenPath,
     resolveFileLink,
@@ -383,6 +384,7 @@ export function NotePaneComponent({
         // The grip drag-reorders blocks and the "+" inserts a paragraph below.
         blockHandle={true}
         resolveImageUrl={resolveImageUrl}
+        resolveEmbed={resolveEmbed}
         resolveWikiEmbed={resolveWikiEmbed}
         resolveAssetOpenPath={resolveAssetOpenPath}
         openAsset={openAsset}

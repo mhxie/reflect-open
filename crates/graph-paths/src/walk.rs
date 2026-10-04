@@ -1,9 +1,10 @@
 //! The one vault walk, shared by the desktop shell and the CLI.
 //!
 //! Built on the `ignore` crate (ripgrep's walker): per-entry errors instead of
-//! aborting the listing, no symlink following, and `.gitignore`-aware pruning
-//! so an adopted vault that is also a code checkout does not flood the index
-//! with dependency trees. Classification is [`crate::classify`]; hidden-entry
+//! aborting the listing, no symlink following, and pruning by
+//! [`REFLECT_IGNORE_FILE`] and dependency/cache trees, never `.gitignore`
+//! (it decides what Git syncs, not what Reflect shows). Classification is
+//! [`crate::classify`]; hidden-entry
 //! policy lives here because the walker must keep exactly one class of
 //! dot-name visible: iCloud eviction placeholders, which list as the logical
 //! file they stand in for.
@@ -24,7 +25,7 @@ use crate::{
 };
 
 /// Per-directory ignore file for user-configured exclusions, same syntax and
-/// precedence as `.gitignore`.
+/// precedence as `.gitignore` — the one ignore file the walk honors.
 pub const REFLECT_IGNORE_FILE: &str = ".reflectignore";
 
 /// Machine-generated trees that are never notes, pruned at any depth. Kept
@@ -71,11 +72,10 @@ pub struct FileCatalog {
 /// Recursively list every eligible note and supported attachment under `root`.
 ///
 /// Hidden entries are pruned except iCloud eviction placeholders, which list
-/// as their logical file. Symlinks are never followed and never listed. The
-/// vault's own `.gitignore` files (no repository required, no global or
-/// parent-directory rules) and [`REFLECT_IGNORE_FILE`] files prune subtrees;
-/// [`PRUNED_DIR_NAMES`] and `CACHEDIR.TAG`-tagged directories are always
-/// pruned. Every refusal is counted, never fatal: one unreadable directory
+/// as their logical file. Symlinks are never followed and never listed.
+/// [`REFLECT_IGNORE_FILE`] files prune subtrees (no parent-directory rules);
+/// `.gitignore` files do not. [`PRUNED_DIR_NAMES`] and `CACHEDIR.TAG`-tagged
+/// directories are always pruned. Every refusal is counted, never fatal: one unreadable directory
 /// costs that directory, not the listing.
 pub fn walk_catalog(root: &Path) -> FileCatalog {
     let mut catalog = FileCatalog::default();
@@ -201,6 +201,8 @@ impl TreeWalk {
             .hidden(false)
             .ignore(false)
             .parents(false)
+            .git_ignore(false)
+            .git_exclude(false)
             .git_global(false)
             .require_git(false)
             .follow_links(false)
@@ -593,16 +595,29 @@ mod tests {
     }
 
     #[test]
-    fn gitignore_and_reflectignore_prune_without_a_repository() {
+    fn reflectignore_prunes_and_gitignore_does_not() {
         let dir = tempdir().unwrap();
         let root = dir.path();
-        write(root, ".gitignore", "generated/\n");
+        write(root, ".gitignore", "generated/\n*.pdf\n");
+        fs::create_dir_all(root.join(".git/info")).unwrap();
+        write(root, ".git/info/exclude", "excluded/\n");
         write(root, ".reflectignore", "drafts/\n");
         write(root, "generated/api.md", "generated");
+        write(root, "excluded/kept.md", "kept");
         write(root, "drafts/wip.md", "draft");
         write(root, "notes/a.md", "a");
+        write(root, "papers/paper.pdf", "%PDF");
 
-        assert_eq!(note_paths(root), vec!["notes/a.md"]);
+        assert_eq!(
+            note_paths(root),
+            vec!["excluded/kept.md", "generated/api.md", "notes/a.md"]
+        );
+        let attachments: Vec<String> = walk_catalog(root)
+            .attachments
+            .into_iter()
+            .map(|file| file.path)
+            .collect();
+        assert_eq!(attachments, vec!["papers/paper.pdf"]);
     }
 
     #[test]
@@ -705,7 +720,7 @@ mod tests {
         use std::os::unix::fs::symlink;
         let linked = linked_graph();
         let (graph, raw) = (&linked.graph, &linked.raw);
-        write(graph, ".gitignore", "archive/\n");
+        write(graph, ".reflectignore", "archive/\n");
         write(raw, "archive/secure/old.md", "old");
         fs::create_dir_all(graph.join("archive")).unwrap();
         fs::create_dir_all(graph.join(".hidden")).unwrap();
