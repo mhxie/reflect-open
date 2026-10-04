@@ -24,9 +24,10 @@ const resolution = vi.hoisted(() => ({
   error: null as string | null,
   resolve: vi.fn(async () => {}),
 }))
-vi.mock('@/hooks/use-conflict-resolution.ts', () => ({
-  useConflictResolution: () => resolution,
-}))
+const useConflictResolution = vi.hoisted(() =>
+  vi.fn((_path: string, _shownContent?: string) => resolution),
+)
+vi.mock('@/hooks/use-conflict-resolution.ts', () => ({ useConflictResolution }))
 
 const NOTE = {
   path: 'notes/clash.md',
@@ -53,10 +54,10 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function renderNotice(): Promise<void> {
+async function renderNotice(props: { shownContent?: string } = {}): Promise<void> {
   await render(
     <QueryClientProvider client={queryClient}>
-      <SyncConflictNotice path="notes/clash.md" />
+      <SyncConflictNotice path="notes/clash.md" {...props} />
     </QueryClientProvider>,
   )
 }
@@ -84,6 +85,18 @@ describe('SyncConflictNotice', () => {
 
     await page.getByRole('button', { name: /keep both/i }).click()
     expect(resolution.resolve).toHaveBeenCalledWith('both')
+    // No conflict view beside it: resolution reads the file at click.
+    expect(useConflictResolution).toHaveBeenCalledWith('notes/clash.md', undefined)
+  })
+
+  it('resolves exactly the text the conflict view shows', async () => {
+    vi.mocked(getNote).mockResolvedValue(NOTE)
+    const shown = '<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n'
+    await renderNotice({ shownContent: shown })
+    await expect.element(page.getByText(/edited on two devices/i)).toBeInTheDocument()
+
+    expect(useConflictResolution).toHaveBeenCalledWith('notes/clash.md', shown)
+    expect(useConflictResolution).not.toHaveBeenCalledWith('notes/clash.md', undefined)
   })
 
   it('offers the same resolution actions on mobile', async () => {

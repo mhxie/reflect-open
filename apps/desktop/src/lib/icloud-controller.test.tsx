@@ -192,7 +192,7 @@ describe('createIcloudController', () => {
     await icloud.start()
     await settleScan() // baseline out of the way
 
-    await writeNote('notes/own.md', '# mine\n', GRAPH.generation)
+    await writeNote('notes/own.md', '# mine\n', GRAPH.generation, null)
     emitFileChanges([
       { path: 'notes/own.md', kind: 'upsert', modifiedMs: 1 },
       { path: 'notes/external.md', kind: 'upsert', modifiedMs: 2 },

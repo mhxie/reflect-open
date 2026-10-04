@@ -226,6 +226,18 @@ export {
   captureSharedInboxRelay,
   promoteCaptureScreenshot,
 } from '../graph/commands.ts'
+export {
+  PATCH_NOTE_ATTEMPTS,
+  NoteChangedError,
+  isNoteChangedError,
+  patchNote,
+  patchNoteWith,
+  readNoteOrNull,
+  type NotePatch,
+  type NotePatchIo,
+  type PatchNoteOptions,
+  type PatchNoteResult,
+} from '../graph/patch-note.ts'
 export { fetchYouTubeVideo } from '../youtube-video.ts'
 export { createAsset, importAsset } from '../graph/assets.ts'
 export { assetFileName } from '../graph/asset-names.ts'

@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DescriptionRejectedError } from '../ai/describe-page.ts'
 import { ReflectError } from '../errors.ts'
+import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
 import {
   addSpool,
   CAPTURE_URL,
+  CHANGED_ON_DISK,
   DAILY,
   describeMock,
   drain,
@@ -13,6 +15,8 @@ import {
   IDENTITY,
   linkPreviewMock,
   NO_PROVIDERS,
+  raceNextWrite,
+  raceWrites,
   readAssetMock,
   reconcile,
   scrapeMock,
@@ -31,6 +35,7 @@ vi.mock('../graph/commands', () => ({
   captureInboxReject: vi.fn(),
   captureInboxRemove: vi.fn(),
   captureLinkPreview: vi.fn(),
+  createNoteIfAbsent: vi.fn(),
   listFiles: vi.fn(),
   promoteCaptureScreenshot: vi.fn(),
   readAsset: vi.fn(),
@@ -856,6 +861,70 @@ describe('reconcileCaptureEnrichment', () => {
     const daily = files.get(DAILY) ?? ''
     expect(daily).toContain('- jotted down mid-enrichment')
     expect(daily).toContain('|A Cleaned Up Article]]')
+  })
+
+  it('keeps a daily edit that lands during the retitle write and still retitles', async () => {
+    await drainOne()
+    describeMock.mockResolvedValue({
+      title: 'A Cleaned Up Article',
+      description: 'An AI description of the page.',
+    })
+    raceNextWrite(DAILY, (daily) => `${daily ?? ''}\n- typed during the write\n`)
+
+    const outcome = await reconcile()
+
+    expect(outcome.enriched).toBe(1)
+    const daily = files.get(DAILY) ?? ''
+    expect(daily).toContain('- typed during the write')
+    expect(daily).toContain('|A Cleaned Up Article]]')
+  })
+
+  it('a daily that keeps changing stops the retitle; the next pass resumes it', async () => {
+    await drainOne()
+    describeMock.mockResolvedValue({
+      title: 'A Cleaned Up Article',
+      description: 'An AI description of the page.',
+    })
+    let edits = 0
+    raceWrites(
+      DAILY,
+      (daily) => {
+        edits += 1
+        return `${daily ?? ''}\n- edit ${edits}\n`
+      },
+      PATCH_NOTE_ATTEMPTS,
+    )
+
+    const first = await reconcile()
+
+    expect(first.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
+    expect(files.get(DAILY)).toContain('- edit 3')
+    expect(files.get(DAILY)).not.toContain('|A Cleaned Up Article]]')
+    expect(files.get(IDENTITY.notePath)).toContain('captureDailyFromTitle: An article')
+
+    const retry = await reconcile()
+
+    expect(retry).toEqual({ pending: 1, enriched: 1, skipped: 0, stopped: null })
+    const daily = files.get(DAILY) ?? ''
+    expect(daily).toContain('- edit 3')
+    expect(daily).toContain('|A Cleaned Up Article]]')
+    expect(files.get(IDENTITY.notePath)).toContain('captureStatus: done')
+    expect(files.get(IDENTITY.notePath)).not.toContain('captureDailyFromTitle')
+    expect(describeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('judges a capture edit that lands during a checkpoint write, never overwriting it', async () => {
+    await drainOne()
+    raceNextWrite(IDENTITY.notePath, (note) => (note ?? '').replace('# An article', '# Mine'))
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({ pending: 1, enriched: 0, skipped: 1, stopped: null })
+    const note = files.get(IDENTITY.notePath) ?? ''
+    expect(note).toContain('# Mine')
+    expect(note).not.toContain('captureMetadataStatus: done')
+    expect(note).toContain('captureStatus: skipped')
+    expect(describeMock).not.toHaveBeenCalled()
   })
 
   it('resumes the exact metadata checkpoint when its daily write fails', async () => {

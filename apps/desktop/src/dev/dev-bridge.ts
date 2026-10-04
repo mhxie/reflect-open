@@ -15,6 +15,10 @@ export interface DevBridgeBackend {
 const dbQueryArgsSchema = z.object({ sql: z.string(), params: z.array(z.unknown()) })
 const pathArgsSchema = z.object({ path: z.string() })
 const writeArgsSchema = z.object({ path: z.string(), contents: z.string() })
+const checkedWriteArgsSchema = writeArgsSchema.extend({
+  checkContents: z.boolean().optional(),
+  expectedContents: z.string().nullable().optional(),
+})
 const createArgsSchema = writeArgsSchema.extend({ generation: z.number().int().nonnegative() })
 const moveArgsSchema = z.object({ from: z.string(), to: z.string() })
 const moveRequestArgsSchema = z.object({
@@ -197,7 +201,15 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         return { kind: 'content', content: contents }
       }
       case 'note_write': {
-        const { path, contents } = writeArgsSchema.parse(args)
+        // Rust's contract: every write names the contents it replaces.
+        const { path, contents, checkContents, expectedContents } =
+          checkedWriteArgsSchema.parse(args)
+        if (checkContents !== true) {
+          throw new ReflectError('parse', 'a note write must name the contents it replaces')
+        }
+        if (files.read(path) !== (expectedContents ?? null)) {
+          throw new ReflectError('io', 'Note changed on disk; reload before retrying')
+        }
         return files.write(path, contents)
       }
       case 'note_create': {

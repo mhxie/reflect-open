@@ -1,4 +1,5 @@
 import {
+  createNoteIfAbsent,
   getIndexMeta,
   newNoteId,
   notePath,
@@ -6,7 +7,6 @@ import {
   slugForTitle,
   upsertFrontmatter,
   vaultScanStats,
-  writeNote,
 } from '@reflect/core'
 
 /**
@@ -61,17 +61,20 @@ export interface EnsureWelcomeNoteOptions {
  * so deleting the note — or emptying the graph entirely — never re-onboards.
  * The marker is stamped after the write: a failed seed retries on the next
  * open, and a retry that finds the note already on disk converges to marking.
- * Returns whether a seed happened.
+ * The note is only ever created, never written over: a file that reached the
+ * path after the scan (a first sync pull) is kept as it is. Returns whether a
+ * seed happened.
  */
 export async function ensureWelcomeNote(options: EnsureWelcomeNoteOptions): Promise<boolean> {
   if ((await getIndexMeta(WELCOME_SEEDED_META_KEY)) !== null) {
     return false
   }
   const stats = await vaultScanStats(options.fileGeneration)
-  const seeded = stats.notes === 0 && stats.attachments === 0 && stats.skipped === 0
-  if (seeded) {
+  let seeded = false
+  if (stats.notes === 0 && stats.attachments === 0 && stats.skipped === 0) {
     const source = upsertFrontmatter(WELCOME_BODY, { id: newNoteId(), pinned: true })
-    await writeNote(WELCOME_NOTE_PATH, source, options.fileGeneration)
+    const outcome = await createNoteIfAbsent(WELCOME_NOTE_PATH, source, options.fileGeneration)
+    seeded = outcome.kind === 'created'
   }
   await setIndexMeta(WELCOME_SEEDED_META_KEY, 'true', options.indexGeneration)
   return seeded

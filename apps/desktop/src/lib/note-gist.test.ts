@@ -22,16 +22,21 @@ const startOperation = vi.hoisted(() =>
   vi.fn(() => ({ progress: vi.fn(), done: operationDone, fail: operationFail })),
 )
 
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote,
-  readNoteShareable,
-  writeNote,
-  getGithubToken,
-  createGist,
-  updateGist,
-  deleteGist,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    readNote,
+    readNoteShareable,
+    writeNote,
+    getGithubToken,
+    createGist,
+    updateGist,
+    deleteGist,
+    patchNote: patchNoteOver(core, { readNote, writeNote }),
+  }
+})
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 vi.mock('@/lib/operations.ts', () => ({ startOperation }))
 
@@ -87,7 +92,7 @@ describe('publishNoteToGist', () => {
       expect.any(Function),
     )
     const gist = { id: 'g1', url: PUBLISHED.htmlUrl, file: 'A.md', hash: gistBodyHash(BODY) }
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', upsertFrontmatter(BODY, { gist }), 3)
+    expect(writeNote).toHaveBeenCalledWith('notes/a.md', upsertFrontmatter(BODY, { gist }), 3, BODY)
   })
 
   it('republishes to the same gist, addressing the file by its previous name', async () => {
@@ -238,7 +243,7 @@ describe('unpublishNoteGist', () => {
     await expect(unpublishNoteGist('notes/a.md', 3)).resolves.toBeUndefined()
 
     expect(deleteGist).toHaveBeenCalledWith('tok', 'g0', expect.any(Function))
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', BODY, 3)
+    expect(writeNote).toHaveBeenCalledWith('notes/a.md', BODY, 3, REPUBLISH_SOURCE)
   })
 
   it('does not delete the remote gist when clearing local frontmatter fails', async () => {
@@ -263,8 +268,8 @@ describe('unpublishNoteGist', () => {
       message: 'network down',
     })
 
-    expect(writeNote).toHaveBeenNthCalledWith(1, 'notes/a.md', BODY, 3)
-    expect(writeNote).toHaveBeenNthCalledWith(2, 'notes/a.md', REPUBLISH_SOURCE, 3)
+    expect(writeNote).toHaveBeenNthCalledWith(1, 'notes/a.md', BODY, 3, REPUBLISH_SOURCE)
+    expect(writeNote).toHaveBeenNthCalledWith(2, 'notes/a.md', REPUBLISH_SOURCE, 3, BODY)
   })
 
   it('routes the gist removal through the live session when the note is open', async () => {

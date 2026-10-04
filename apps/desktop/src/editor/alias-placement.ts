@@ -2,9 +2,9 @@ import {
   foldKey,
   nextAliases,
   parseNote,
-  readNote,
+  patchNote,
+  ReflectError,
   upsertFrontmatter,
-  writeNote,
 } from '@reflect/core'
 import { openSession } from './open-documents.ts'
 
@@ -20,7 +20,8 @@ import { openSession } from './open-documents.ts'
  * would silently drop the alias. Only when no session can take the patch
  * does the alias go straight to disk; a loading/clean session reconciles it
  * like any external change, and a header-only patch is body-safe even for
- * protected notes.
+ * protected notes. That disk write is checked against the bytes the aliases
+ * were computed from, and recomputed over a concurrent change (`patchNote`).
  */
 
 /** A settled rename, `from` already known to be a real previous title. */
@@ -69,16 +70,19 @@ export async function placeOldTitleAlias(
     }
   }
   if (!placed) {
-    const content = await readNote(path)
-    const current = aliasesOf(content)
-    const aliases = nextAliases(current, rename)
-    if (aliases !== null) {
-      const patched = upsertFrontmatter(content, { aliases })
-      if (patched !== content) {
-        await writeNote(path, patched, generation)
-      }
-      added = addedAliases(current, aliases)
-    }
+    await patchNote(
+      path,
+      (content) => {
+        if (content === null) {
+          throw new ReflectError('notFound', `${path} does not exist`)
+        }
+        const current = aliasesOf(content)
+        const aliases = nextAliases(current, rename)
+        added = aliases === null ? [] : addedAliases(current, aliases)
+        return aliases === null ? null : upsertFrontmatter(content, { aliases })
+      },
+      generation,
+    )
   }
   return added
 }

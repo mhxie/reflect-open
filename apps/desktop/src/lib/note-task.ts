@@ -1,9 +1,8 @@
 import {
   applyTaskEdits,
-  isAppError,
   isLocalOnlyPath,
-  readNote,
-  writeNote,
+  patchNote,
+  ReflectError,
   type TaskEdit,
   type TaskEditResult,
   type TaskLocator,
@@ -76,17 +75,6 @@ interface WriteTaskEditsOptions {
   readonly createIfMissing?: boolean
 }
 
-async function readSource(notePath: string, createIfMissing: boolean): Promise<string> {
-  try {
-    return await readNote(notePath)
-  } catch (cause) {
-    if (createIfMissing && isAppError(cause) && cause.kind === 'notFound') {
-      return ''
-    }
-    throw cause
-  }
-}
-
 /**
  * Apply Tasks-view edits (Plan 18) to one note and persist them, routing the
  * same way every time: when the note is **open**, through its live session,
@@ -95,10 +83,13 @@ async function readSource(notePath: string, createIfMissing: boolean): Promise<s
  * declines (and we refuse rather than clobber via disk) only when it can't
  * persist now (loading, protected/read-only, or a parked conflict), surfaced as
  * {@link NoteBusyError}. When the note is **not** open, disk is the source of
- * truth. Every locator in `edits` describes the note as the index last saw it;
- * one whose task is gone surfaces as `TaskStaleError` from the core edit
- * rather than a silent wrong write. The result reports where every task of
- * the note ended up, so callers can re-address cached rows before the reindex.
+ * truth: the edits apply to the bytes on disk and are written back checked
+ * against them, re-applied to a concurrent change rather than clobbering it
+ * (`patchNote`). Every locator in `edits` describes the note as the index last
+ * saw it; one whose task is gone surfaces as `TaskStaleError` from the core
+ * edit rather than a silent wrong write. The result reports where every task
+ * of the note ended up, so callers can re-address cached rows before the
+ * reindex.
  */
 export function writeTaskEdits(
   notePath: string,
@@ -121,9 +112,21 @@ export function writeTaskEdits(
       }
       return result
     }
-    const source = await readSource(notePath, options.createIfMissing === true)
-    const result = applyTaskEdits(source, edits)
-    await writeNote(notePath, result.source, generation)
+    let result: TaskEditResult | undefined
+    await patchNote(
+      notePath,
+      (source) => {
+        if (source === null && options.createIfMissing !== true) {
+          throw new ReflectError('notFound', `${notePath} does not exist`)
+        }
+        result = applyTaskEdits(source ?? '', edits)
+        return result.source
+      },
+      generation,
+    )
+    if (result === undefined) {
+      throw new Error('The task edit was not applied.')
+    }
     return result
   })
 }

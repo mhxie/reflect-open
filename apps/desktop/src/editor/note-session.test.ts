@@ -501,6 +501,27 @@ describe('frontmatter ownership (Plan 07b)', () => {
     expect(h.session.content()).toBe('---\npinned: true\n---\n\n# Theirs\n')
   })
 
+  it('commitFrontmatter under a parked conflict writes only over the parked disk text', async () => {
+    const h = harness()
+    h.session.load()
+    await vi.runAllTimersAsync()
+    h.session.editorChanged('# Mine\n')
+    h.setDisk('# Theirs\n')
+    h.session.externalChanged()
+    await vi.runAllTimersAsync()
+
+    await h.session.commitFrontmatter({ pinned: true })
+    expect(h.expectedContents.at(-1)).toBe('# Theirs\n')
+
+    // A newer version that landed before its watcher event is refused, not
+    // overwritten with the patched park.
+    h.setDisk('# Newer\n')
+    await expect(h.session.commitFrontmatter({ private: true })).rejects.toMatchObject({
+      kind: 'io',
+    })
+    expect(h.writes.at(-1)?.contents).toBe('---\npinned: true\n---\n\n# Theirs\n')
+  })
+
   it('commitFrontmatter under a conflict keeps the patch through "keep mine" too', async () => {
     const h = harness()
     h.session.load()

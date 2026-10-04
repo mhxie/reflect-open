@@ -113,7 +113,7 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
         await rewritePathLinksForMove(from, target, {
           pathLinkSources: getPathLinkSources,
           read: readNote,
-          write: (forPath, contents) => writeNote(forPath, contents, gen),
+          write: (forPath, contents, expected) => writeNote(forPath, contents, gen, expected),
         })
       } catch (cause) {
         console.error('path link rewrite failed:', cause)
@@ -174,7 +174,7 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
               sources: getLinkSources,
               backlinks: getBacklinks,
               read: readNote,
-              write: (forPath, contents) => writeNote(forPath, contents, gen),
+              write: (forPath, contents, expected) => writeNote(forPath, contents, gen, expected),
               resolve: resolveWikiTarget,
             },
             onProgress: operation.progress,

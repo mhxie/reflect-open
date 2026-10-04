@@ -46,13 +46,12 @@ export const INITIAL_NOTE_SNAPSHOT: NoteSessionSnapshot = {
 export interface NoteSessionIo {
   read: (path: string) => Promise<string>
   /**
-   * Atomic write, with the graph generation pre-bound by the host. `null` when
-   * no generation is available — the session then tracks dirtiness but never
-   * writes.
+   * Atomic checked write, with the graph generation pre-bound by the host: it
+   * lands only while the file still holds `expectedContents` (`null`: absent).
+   * `null` when no generation is available — the session then tracks
+   * dirtiness but never writes.
    */
-  write:
-    | ((path: string, contents: string, expectedContents?: string | null) => Promise<void>)
-    | null
+  write: ((path: string, contents: string, expectedContents: string | null) => Promise<void>) | null
 }
 
 /** Why {@link NoteSessionOptions.onContent} fired. */

@@ -207,3 +207,44 @@ describe('dev bridge note_create parity', () => {
     expect(files.read('notes/existing.md')).toBe('# Existing\n')
   })
 })
+
+describe('dev bridge note_write parity', () => {
+  async function bridgeOver(initial: Record<string, string>) {
+    const files = createDevFileStore(initial)
+    return { files, bridge: createDevBridge({ files, index: await createDevIndexDb() }) }
+  }
+
+  it('refuses a write that names no contents to replace', async () => {
+    const { files, bridge } = await bridgeOver({ 'notes/plan.md': '# Plan\n' })
+
+    for (const check of [{}, { checkContents: false, expectedContents: '# Plan\n' }]) {
+      await expect(
+        bridge.invoke('note_write', { path: 'notes/plan.md', contents: '# New\n', ...check }),
+      ).rejects.toMatchObject({ kind: 'parse' })
+    }
+    expect(files.read('notes/plan.md')).toBe('# Plan\n')
+  })
+
+  it('writes only over the contents the caller names', async () => {
+    const { files, bridge } = await bridgeOver({ 'notes/plan.md': '# Plan\n' })
+    const write = (path: string, expectedContents: string | null) =>
+      bridge.invoke('note_write', {
+        path,
+        contents: '# New\n',
+        checkContents: true,
+        expectedContents,
+      })
+
+    await expect(write('notes/plan.md', '# Stale\n')).rejects.toMatchObject({
+      kind: 'io',
+      message: 'Note changed on disk; reload before retrying',
+    })
+    await expect(write('notes/plan.md', null)).rejects.toMatchObject({ kind: 'io' })
+    expect(files.read('notes/plan.md')).toBe('# Plan\n')
+
+    await write('notes/plan.md', '# Plan\n')
+    await write('notes/fresh.md', null)
+    expect(files.read('notes/plan.md')).toBe('# New\n')
+    expect(files.read('notes/fresh.md')).toBe('# New\n')
+  })
+})

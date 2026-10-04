@@ -7,11 +7,16 @@ const readNote = vi.hoisted(() => vi.fn<(path: string) => Promise<string>>())
 const writeNote = vi.hoisted(() => vi.fn(async () => {}))
 const openSession = vi.hoisted(() => vi.fn<(path: string) => NoteSession | null>(() => null))
 
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote,
-  writeNote,
-}))
+vi.mock('@reflect/core', async (importOriginal) => {
+  const core = await importOriginal<typeof import('@reflect/core')>()
+  const { patchNoteOver } = await import('@/test-utils/patch-note.ts')
+  return {
+    ...core,
+    readNote,
+    writeNote,
+    patchNote: patchNoteOver(core, { readNote, writeNote }),
+  }
+})
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 
 const { reorderPinnedNotes, toggleNotePinned, unpinNote } = await import('./note-pin.ts')
@@ -47,7 +52,12 @@ describe('toggleNotePinned', () => {
   it('pins an unopened note via read-patch-write on disk', async () => {
     readNote.mockResolvedValue('# A\n')
     await expect(toggleNotePinned(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\npinned: true\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\npinned: true\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
   })
 
   it('numbers the pin a gap past the shelf it joins', async () => {
@@ -59,20 +69,30 @@ describe('toggleNotePinned', () => {
 
     await expect(toggleNotePinned(input())).resolves.toBeUndefined()
 
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\npinned: 3072\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\npinned: 3072\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
   })
 
   it('unpins on disk by removing the key (back to no frontmatter)', async () => {
     readNote.mockResolvedValue('---\npinned: true\n---\n# A\n')
     await expect(toggleNotePinned(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '# A\n',
+      3,
+      '---\npinned: true\n---\n# A\n',
+    )
   })
 
   it('treats an explicit order — including 0 — as pinned, and unpinning clears it', async () => {
     // `pinned: 0` is falsy in JS; a truthiness check would re-pin instead.
     readNote.mockResolvedValue('---\npinned: 0\n---\n# A\n')
     await expect(toggleNotePinned(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3, '---\npinned: 0\n---\n# A\n')
   })
 
   it('routes through the live session, which owns landing the patch', async () => {
@@ -96,7 +116,12 @@ describe('toggleNotePinned', () => {
     openSession.mockReturnValue(session)
     readNote.mockResolvedValue('# A\n')
     await expect(toggleNotePinned(input())).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\npinned: true\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\npinned: true\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
   })
 
   it('pins a not-yet-created note by creating its file (the lazy contract)', async () => {
@@ -108,7 +133,12 @@ describe('toggleNotePinned', () => {
     openSession.mockReturnValue(session)
     readNote.mockRejectedValue({ kind: 'notFound', message: 'no such note' })
     await expect(toggleNotePinned(input('daily/2026-06-10.md'))).resolves.toBeUndefined()
-    expect(writeNote).toHaveBeenCalledWith('daily/2026-06-10.md', '---\npinned: true\n---\n\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'daily/2026-06-10.md',
+      '---\npinned: true\n---\n\n',
+      3,
+      null,
+    )
   })
 
   it('reports non-notFound read failures through operations', async () => {
@@ -126,7 +156,12 @@ describe('unpinNote', () => {
 
     await unpinNote(input())
 
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '# A\n',
+      3,
+      '---\npinned: true\n---\n# A\n',
+    )
   })
 
   it('routes direct unpin through the live session', async () => {
@@ -152,8 +187,18 @@ describe('reorderPinnedNotes', () => {
       3,
     )
 
-    expect(writeNote).toHaveBeenCalledWith('notes/c.md', '---\npinned: 1024\n---\n\n# A\n', 3)
-    expect(writeNote).toHaveBeenCalledWith('notes/a.md', '---\npinned: 1536\n---\n\n# A\n', 3)
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/c.md',
+      '---\npinned: 1024\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\npinned: 1536\n---\n\n# A\n',
+      3,
+      '# A\n',
+    )
   })
 
   it('routes open notes through their sessions', async () => {

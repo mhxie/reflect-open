@@ -2,8 +2,9 @@ import { contactDetailsMarkdown } from '../contacts/markdown.ts'
 import { ensurePersonNote } from '../contacts/person.ts'
 import { resolveAttendeeContact } from '../contacts/resolve.ts'
 import { isAppError } from '../errors.ts'
-import { noteExists, readNote, writeNote } from '../graph/commands.ts'
+import { noteExists, readNote } from '../graph/commands.ts'
 import { createNoteWithTitle } from '../graph/create-note.ts'
+import { patchNote } from '../graph/patch-note.ts'
 import { dailyPath, notePath } from '../graph/paths.ts'
 import { resolveWikiTarget } from '../indexing/queries.ts'
 import { appendListItemUnderHeading, wikiLinkSafe } from '../markdown/edit.ts'
@@ -275,11 +276,20 @@ export async function addMeetingToDaily(input: AddMeetingInput): Promise<AddMeet
     backlinkMeeting: input.backlinkMeeting,
     startTime: input.startTime,
   })
-  await writeNote(
+  // Checked against the daily it lands on: an edit made while the attendees
+  // resolved is re-read and kept, and a meeting linked meanwhile still makes
+  // the call a no-op.
+  const appended = await patchNote(
     daily,
-    appendListItemUnderHeading(source, MEETINGS_HEADING, line),
+    (current) =>
+      input.backlinkMeeting && current !== null && meetingAlreadyLinked(current, title)
+        ? null
+        : appendListItemUnderHeading(current ?? '', MEETINGS_HEADING, line),
     input.generation,
   )
+  if (appended.patched === null) {
+    return { appended: false, createdNotes: [] }
+  }
 
   const createdNotes: string[] = []
   if (input.backlinkMeeting && !(await titleHasNote(title))) {

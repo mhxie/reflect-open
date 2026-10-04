@@ -133,6 +133,8 @@ function installFakeBridge(): void {
         case 'index_meta_set':
           metaStore[String(args['key'])] = String(args['value'])
           return null
+        case 'note_create':
+          return { kind: 'created', modifiedMs: null }
         case 'db_query': {
           // The only meta read the provider issues is the welcome marker.
           const sql = String(args['sql'] ?? '')
@@ -404,7 +406,7 @@ describe('GraphProvider welcome seeding', () => {
     })
 
     expect(result.current.status).toBe('ready')
-    expect(invokeLog).toContain('note_write')
+    expect(invokeLog).toContain('note_create')
     expect(metaStore['welcomeSeeded']).toBe('true')
   })
 
@@ -419,6 +421,7 @@ describe('GraphProvider welcome seeding', () => {
     })
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
 
+    expect(invokeLog).not.toContain('note_create')
     expect(invokeLog).not.toContain('note_write')
   })
 
@@ -433,6 +436,7 @@ describe('GraphProvider welcome seeding', () => {
     })
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
 
+    expect(invokeLog).not.toContain('note_create')
     expect(invokeLog).not.toContain('note_write')
     // Onboarding was considered: emptying this graph later won't re-seed.
     expect(metaStore['welcomeSeeded']).toBe('true')

@@ -15,14 +15,15 @@ import { AUDIO_EXTENSION_BY_MIME, baseMimeType } from '../ai/transcribe.ts'
 import { APP_REVIEW_STUB_KEY, stubTranscriptBody } from '../ai/app-review-demo.ts'
 import { bytesToBase64 } from '../lib/base64.ts'
 import {
+  createNoteIfAbsent,
   importAudioMemo,
   listDir,
   listFiles,
   readNote,
   writeAsset,
-  writeNote,
 } from '../graph/commands.ts'
 import { writeAssetStreamed } from '../graph/assets.ts'
+import { isNoteChangedError, patchNote } from '../graph/patch-note.ts'
 import { hasBinaryIpc } from '../ipc/bridge.ts'
 import {
   groupAudioMemoSessions,
@@ -395,10 +396,33 @@ function recordingLinks(session: AudioMemoSession): string {
 /** The category note every audio-memo section backlinks; recordings that
  * aren't meetings join the same section. */
 export const AUDIO_MEMOS_NOTE_TITLE = 'Audio memos'
+
+/**
+ * Claim the memo's transcription note path with the no-clobber create; false
+ * when a file already owns it. Whether a memo is pending is decided at the
+ * start of the pass, so another device can transcribe the same recording
+ * while this one waits on a provider: its note is left byte-for-byte intact,
+ * and its backlink is already in the daily note or arrives with its push.
+ */
+async function createTranscriptionNote(
+  memo: AudioMemoIdentity,
+  note: string,
+  generation: number,
+): Promise<boolean> {
+  const outcome = await createNoteIfAbsent(memo.notePath, note, generation)
+  return outcome.kind === 'created'
+}
+
 /**
  * Append the memo's wikilink once under `## [[Audio memos]]`, creating the
  * heading and daily file as needed. The watcher reindexes the direct write;
  * open dirty editors park a conflict instead of being clobbered.
+ *
+ * The write is checked against the daily note it read (absent included). When
+ * the daily changes in between, it is re-read: a backlink that arrived in the
+ * meantime ends the step, otherwise the entry is appended once more. Losing
+ * that race too skips the backlink — the transcript note already holds the
+ * result, and an unlinked note is the pipeline's recoverable failure mode.
  */
 async function ensureDailyBacklink(
   memo: AudioMemoIdentity,
@@ -406,16 +430,25 @@ async function ensureDailyBacklink(
   memosNoteTitle: string,
   generation: number,
 ): Promise<void> {
-  const source = await dailyNoteSource(memo.date, generation)
-  if (hasBacklink(source, memo)) {
-    return
-  }
   const displayTitle = wikiLinkSafe(title) || memo.title
   const entry = `[[${memo.base}|${displayTitle}]]`
-  const updated = appendListItemUnderBacklinkedHeading(source, memosNoteTitle, entry, [
-    AUDIO_MEMOS_NOTE_TITLE,
-  ])
-  await writeNote(dailyPath(memo.date), updated, generation)
+  try {
+    await patchNote(
+      dailyPath(memo.date),
+      (source) =>
+        source !== null && hasBacklink(source, memo)
+          ? null
+          : appendListItemUnderBacklinkedHeading(source ?? '', memosNoteTitle, entry, [
+              AUDIO_MEMOS_NOTE_TITLE,
+            ]),
+      generation,
+      { attempts: 2 },
+    )
+  } catch (cause) {
+    if (!isNoteChangedError(cause)) {
+      throw cause
+    }
+  }
 }
 
 /**
@@ -582,6 +615,9 @@ export interface ReconcileAudioMemosOutcome {
  * The note is written **first** — it carries the result, so a failure
  * between the two writes leaves an unlinked note (recoverable from All
  * Notes), never a backlink-tombstoned session whose transcript was dropped.
+ * The note is only ever created, never written over: when another device's
+ * transcript claimed the path first, the session gets neither a note nor a
+ * backlink from this pass and counts as neither transcribed nor rejected.
  * A segment the provider refuses is cached as a terminal failure and
  * surfaces as one line in the assembled note — one bad container never
  * sinks the meeting. A session the graph refuses to read (a local-only
@@ -652,7 +688,9 @@ export async function reconcileAudioMemos(
           stubTranscriptBody(),
           recordingLinks(session),
         )
-        await writeNote(memo.notePath, note, input.generation)
+        if (!(await createTranscriptionNote(memo, note, input.generation))) {
+          continue
+        }
         await ensureDailyBacklink(memo, memo.title, memosNoteTitle, input.generation)
         transcribed += 1
         continue
@@ -703,11 +741,10 @@ export async function reconcileAudioMemos(
       if (stale()) {
         return stalled()
       }
-      await writeNote(
-        memo.notePath,
-        transcriptionNote(memo, title, body, recordingLinks(session)),
-        input.generation,
-      )
+      const note = transcriptionNote(memo, title, body, recordingLinks(session))
+      if (!(await createTranscriptionNote(memo, note, input.generation))) {
+        continue
+      }
       await ensureDailyBacklink(memo, title, memosNoteTitle, input.generation)
       if (allRejected) {
         rejected += 1
