@@ -21,7 +21,8 @@ interface UpdateContextValue {
   /**
    * False outside a desktop native shell (browser dev, iOS/Android) — hide
    * update UI entirely. Mobile ships through the app stores, and the updater
-   * plugins are only registered under `#[cfg(desktop)]`.
+   * plugins are only registered under `#[cfg(desktop)]`. Also false in local
+   * builds (`VITE_UPDATES=off`), which the release feed would replace.
    */
   supported: boolean
   checkNow: () => Promise<void>
@@ -50,7 +51,7 @@ interface UpdateProviderProps {
  * any graph is open.
  */
 export function UpdateProvider({ children, autoCheck }: UpdateProviderProps): ReactElement {
-  const supported = isNativeShell()
+  const supported = isNativeShell() && import.meta.env.VITE_UPDATES !== 'off'
   const resolvedAutoCheck = autoCheck ?? (supported && !import.meta.env.DEV)
   const [controller, setController] = useState<UpdateController | null>(null)
 

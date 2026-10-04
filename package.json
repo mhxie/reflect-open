@@ -27,6 +27,8 @@
     "tauri:ios:dev:sim": "pnpm --filter @reflect/desktop tauri:ios:dev:sim",
     "tauri:build:dev": "pnpm --filter @reflect/desktop tauri:build:dev",
     "tauri:build:beta": "pnpm --filter @reflect/desktop tauri:build:beta",
+    "tauri:build:local": "pnpm --filter @reflect/desktop tauri:build:local",
+    "tauri:install:local": "pnpm --filter @reflect/desktop tauri:install:local",
     "postinstall": "simple-git-hooks"
   },
   "devDependencies": {
