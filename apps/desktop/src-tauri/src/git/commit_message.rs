@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use git2::{Commit, Delta, DiffOptions, Repository, Tree};
+use reflect_frontmatter::{backup_privacy, split_frontmatter};
 
 use crate::error::AppResult;
 
@@ -24,8 +25,25 @@ struct TreeChange {
 #[derive(Debug, Eq, PartialEq)]
 struct NoteChange {
     action: ChangeAction,
-    label: String,
-    old_label: Option<String>,
+    label: NoteLabel,
+    old_label: Option<NoteLabel>,
+}
+
+/// How a note is named in a commit subject. A note whose frontmatter isn't
+/// public (locked, or unreadable and so treated as locked) is never named.
+#[derive(Debug, Eq, PartialEq)]
+enum NoteLabel {
+    Named(String),
+    Private,
+}
+
+impl NoteLabel {
+    fn text(&self) -> &str {
+        match self {
+            NoteLabel::Named(label) => label,
+            NoteLabel::Private => "private note",
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -156,12 +174,17 @@ fn describe_note_changes(changes: &[NoteChange]) -> Option<String> {
     match changes {
         [] => None,
         [change] => Some(limit_subject(match change.action {
-            ChangeAction::Add => format!("Add {}", change.label),
-            ChangeAction::Update => format!("Update {}", change.label),
-            ChangeAction::Delete => format!("Delete {}", change.label),
+            ChangeAction::Add => format!("Add {}", change.label.text()),
+            ChangeAction::Update => format!("Update {}", change.label.text()),
+            ChangeAction::Delete => format!("Delete {}", change.label.text()),
             ChangeAction::Rename => match &change.old_label {
-                Some(old_label) => format!("Rename {old_label} to {}", change.label),
-                None => format!("Rename {}", change.label),
+                Some(NoteLabel::Private) if change.label == NoteLabel::Private => {
+                    "Rename private note".to_string()
+                }
+                Some(old_label) => {
+                    format!("Rename {} to {}", old_label.text(), change.label.text())
+                }
+                None => format!("Rename {}", change.label.text()),
             },
         })),
         changes => {
@@ -230,23 +253,23 @@ fn staged_note_label(
     parent: Option<&Commit<'_>>,
     tree: &Tree<'_>,
     change: &TreeChange,
-) -> Option<String> {
+) -> Option<NoteLabel> {
     match change.action {
         ChangeAction::Delete => old_note_label(repo, parent, &change.path),
         _ => current_note_label(repo, tree, &change.path),
     }
 }
 
-fn current_note_label(repo: &Repository, tree: &Tree<'_>, path: &str) -> Option<String> {
+fn current_note_label(repo: &Repository, tree: &Tree<'_>, path: &str) -> Option<NoteLabel> {
     let fallback = note_label(path)?;
     Some(match note_title_from_tree(repo, tree, path) {
-        Some(AuthoredNoteTitle::Public(title)) => title,
-        Some(AuthoredNoteTitle::Private) => "private note".to_string(),
-        None => fallback,
+        Some(AuthoredNoteTitle::Public(title)) => NoteLabel::Named(title),
+        Some(AuthoredNoteTitle::Private) => NoteLabel::Private,
+        None => NoteLabel::Named(fallback),
     })
 }
 
-fn old_note_label(repo: &Repository, parent: Option<&Commit<'_>>, path: &str) -> Option<String> {
+fn old_note_label(repo: &Repository, parent: Option<&Commit<'_>>, path: &str) -> Option<NoteLabel> {
     let fallback = note_label(path)?;
     let parent_tree = parent.and_then(|parent| parent.tree().ok());
     Some(
@@ -254,33 +277,31 @@ fn old_note_label(repo: &Repository, parent: Option<&Commit<'_>>, path: &str) ->
             .as_ref()
             .and_then(|tree| note_title_from_tree(repo, tree, path))
         {
-            Some(AuthoredNoteTitle::Public(title)) => title,
-            Some(AuthoredNoteTitle::Private) => "private note".to_string(),
-            None => fallback,
+            Some(AuthoredNoteTitle::Public(title)) => NoteLabel::Named(title),
+            Some(AuthoredNoteTitle::Private) => NoteLabel::Private,
+            None => NoteLabel::Named(fallback),
         },
     )
 }
 
+/// The note's authored title, or `Private` when the shared classifier
+/// withholds it. Privacy is decided on the raw blob bytes, so a note that
+/// isn't UTF-8 can't fall back to its path label.
 fn note_title_from_tree(
     repo: &Repository,
     tree: &Tree<'_>,
     path: &str,
 ) -> Option<AuthoredNoteTitle> {
-    let source = blob_text(repo, tree, path)?;
-    if note_is_private(&source) {
+    let entry = tree.get_path(Path::new(path)).ok()?;
+    let object = entry.to_object(repo).ok()?;
+    let content = object.as_blob()?.content();
+    if !backup_privacy(content).is_public() {
         return Some(AuthoredNoteTitle::Private);
     }
     if daily_date(path).is_some() {
         return None;
     }
-    authored_note_title(&source)
-}
-
-fn blob_text(repo: &Repository, tree: &Tree<'_>, path: &str) -> Option<String> {
-    let entry = tree.get_path(Path::new(path)).ok()?;
-    let object = entry.to_object(repo).ok()?;
-    let blob = object.as_blob()?;
-    std::str::from_utf8(blob.content()).ok().map(str::to_string)
+    authored_note_title(std::str::from_utf8(content).ok()?)
 }
 
 fn note_label(path: &str) -> Option<String> {
@@ -306,80 +327,8 @@ fn authored_note_title(source: &str) -> Option<AuthoredNoteTitle> {
         .map(AuthoredNoteTitle::Public)
 }
 
-fn note_is_private(source: &str) -> bool {
-    split_frontmatter(source)
-        .raw
-        .is_some_and(frontmatter_private)
-}
-
-struct FrontmatterSplit<'source> {
-    raw: Option<&'source str>,
-    body: &'source str,
-}
-
-fn split_frontmatter(source: &str) -> FrontmatterSplit<'_> {
-    let no_block = FrontmatterSplit {
-        raw: None,
-        body: source,
-    };
-    let Some(open_len) = fence_line_len(source) else {
-        return no_block;
-    };
-    let rest = &source[open_len..];
-    if let Some(close_len) = fence_line_len(rest) {
-        return FrontmatterSplit {
-            raw: Some(""),
-            body: &rest[close_len..],
-        };
-    }
-
-    let mut search_from = 0;
-    while let Some(newline_at) = rest[search_from..].find('\n').map(|at| search_from + at) {
-        let line_start = newline_at + 1;
-        if let Some(close_len) = fence_line_len(&rest[line_start..]) {
-            let raw_end = if newline_at > 0 && rest.as_bytes()[newline_at - 1] == b'\r' {
-                newline_at - 1
-            } else {
-                newline_at
-            };
-            return FrontmatterSplit {
-                raw: Some(&rest[..raw_end]),
-                body: &rest[line_start + close_len..],
-            };
-        }
-        search_from = line_start;
-    }
-    no_block
-}
-
-fn fence_line_len(text: &str) -> Option<usize> {
-    let rest = text.strip_prefix("---")?;
-    let bytes = rest.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() && (bytes[index] == b' ' || bytes[index] == b'\t') {
-        index += 1;
-    }
-    match bytes.get(index) {
-        None => Some(3 + index),
-        Some(b'\n') => Some(3 + index + 1),
-        Some(b'\r') if bytes.get(index + 1) == Some(&b'\n') => Some(3 + index + 2),
-        _ => None,
-    }
-}
-
 fn frontmatter_title(raw: Option<&str>) -> Option<String> {
     frontmatter_scalar(raw?, "title").filter(|title| !title.trim().is_empty())
-}
-
-fn frontmatter_private(raw: &str) -> bool {
-    frontmatter_scalar(raw, "private")
-        .map(|value| {
-            matches!(
-                value.trim().to_lowercase().as_str(),
-                "true" | "yes" | "on" | "1"
-            )
-        })
-        .unwrap_or(false)
 }
 
 fn frontmatter_scalar(raw: &str, key: &str) -> Option<String> {

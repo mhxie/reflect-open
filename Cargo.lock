@@ -5728,6 +5728,7 @@ dependencies = [
  "percent-encoding",
  "qwen3-asr",
  "realfft",
+ "reflect-frontmatter",
  "reflect-graph-paths",
  "reflect-index-schema",
  "reqwest 0.12.28",
