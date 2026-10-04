@@ -3,7 +3,7 @@ import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { DailyActivity, DailyEditCount } from '@reflect/core'
+import type { DailyActivity, DailyEditCount, NoteListEntry, NoteListOptions } from '@reflect/core'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { ActivitySection } from './activity-section.tsx'
@@ -12,12 +12,16 @@ const TODAY = '2026-10-03'
 
 const listDailyActivity = vi.hoisted(() => vi.fn<() => Promise<DailyActivity[]>>())
 const listDailyEditCounts = vi.hoisted(() => vi.fn<() => Promise<DailyEditCount[]>>())
+const listNotes = vi.hoisted(() =>
+  vi.fn<(options: NoteListOptions) => Promise<NoteListEntry[]>>(async () => []),
+)
 const settingsState = vi.hoisted(() => ({ activityHeatmapEnabled: true }))
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   listDailyActivity,
   listDailyEditCounts,
+  listNotes,
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
@@ -122,6 +126,33 @@ describe('ActivitySection', () => {
     await userEvent.hover(page.getByRole('gridcell', { name: /^2026-09-29/ }))
     await expect.element(page.getByText('09-29 · 1 note')).toBeVisible()
     expect(page.getByText(/^10-02 ·/).query()).toBeNull()
+  })
+
+  it('previews the hovered day’s most recently edited notes', async () => {
+    const entry = (path: string, title: string, mtime: number): NoteListEntry => ({
+      path,
+      title,
+      snippet: '',
+      tags: [],
+      mtime,
+      isPinned: false,
+      pinnedOrder: null,
+    })
+    listNotes.mockResolvedValue([
+      entry('notes/old.md', 'Oldest', 1),
+      entry('daily/2026-10-02.md', '', 4),
+      entry('notes/habits.md', 'Atomic Habits', 3),
+      entry('notes/goals.md', 'Quarterly Goals', 2),
+    ])
+    await renderSection()
+
+    await userEvent.hover(page.getByRole('gridcell', { name: /^2026-10-02/ }))
+
+    await expect.element(page.getByText('Atomic Habits')).toBeVisible()
+    await expect.element(page.getByText('Quarterly Goals')).toBeVisible()
+    await expect.element(page.getByText('+1 more')).toBeVisible()
+    expect(page.getByText('Oldest').query()).toBeNull()
+    expect(listNotes).toHaveBeenCalledWith({ updatedOn: '2026-10-02' })
   })
 
   it('shows more weeks in a wider sidebar, with fixed-size square cells', async () => {

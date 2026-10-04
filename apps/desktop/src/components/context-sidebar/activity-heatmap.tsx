@@ -2,11 +2,14 @@ import { memo, useMemo, useRef, useState, type KeyboardEvent, type ReactElement 
 import { format } from 'date-fns'
 import {
   activityLevel,
+  dateFromDailyPath,
+  displayNoteTitle,
   monthLabelColumns,
   type ActivityLevel,
   type ActivityThresholds,
 } from '@reflect/core'
-import { formatCompactDate, formatDayLabel, parseIsoDate } from '@/lib/dates.ts'
+import { useNotesEditedOn } from '@/hooks/use-notes-edited-on.ts'
+import { formatCompactDate, formatDayLabel, formatShortDate, parseIsoDate } from '@/lib/dates.ts'
 import {
   HEATMAP_CELL,
   HEATMAP_GAP,
@@ -180,7 +183,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
       {hover === null ? null : (
         <div
           aria-hidden
-          className="pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-md bg-surface-inverse px-1.5 py-0.5 text-2xs text-text-on-inverse shadow-sm"
+          className="pointer-events-none absolute z-10 max-w-56 -translate-y-full rounded-md bg-surface-inverse px-1.5 py-0.5 text-2xs whitespace-nowrap text-text-on-inverse shadow-sm"
           style={{
             top: hover.top - 4,
             ...(hover.alignRight
@@ -188,10 +191,41 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
               : { left: hover.left }),
           }}
         >
-          {formatCompactDate(hover.date, today, settings.dateFormat)} ·{' '}
-          {daySummary(editCounts.get(hover.date), characters.get(hover.date))}
+          <div>
+            {formatCompactDate(hover.date, today, settings.dateFormat)} ·{' '}
+            {daySummary(editCounts.get(hover.date), characters.get(hover.date))}
+          </div>
+          {editCounts.has(hover.date) ? <EditedTitles date={hover.date} /> : null}
         </div>
       )}
     </div>
   )
 })
+
+/** Titles shown in the day tooltip before "+N more". */
+const TOOLTIP_TITLES = 3
+
+/** The hovered day's most recently edited notes, as a preview of its All Notes list. */
+function EditedTitles({ date }: { date: string }): ReactElement | null {
+  const { settings } = useSettings()
+  const notes = useNotesEditedOn(date)
+  if (notes === undefined || notes.length === 0) {
+    return null
+  }
+  const more = notes.length - TOOLTIP_TITLES
+  return (
+    <ul className="mt-0.5 border-t border-text-on-inverse/20 pt-0.5">
+      {notes.slice(0, TOOLTIP_TITLES).map((note) => {
+        const daily = dateFromDailyPath(note.path)
+        return (
+          <li key={note.path} className="truncate opacity-80">
+            {daily !== null
+              ? formatShortDate(daily, settings.dateFormat)
+              : displayNoteTitle(note.title) || 'Untitled'}
+          </li>
+        )
+      })}
+      {more > 0 ? <li className="opacity-60">+{more} more</li> : null}
+    </ul>
+  )
+}
