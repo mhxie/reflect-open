@@ -78,6 +78,9 @@ export const queryKeys = {
     note(root: GraphRoot, path: string) {
       return [...this.graph(root), 'note', path] as const
     },
+    attachmentPreviews(root: GraphRoot, type: string) {
+      return [...this.graph(root), 'attachment-previews', type] as const
+    },
     noteMtime(root: GraphRoot, path: string) {
       return [...this.graph(root), 'note-mtime', path] as const
     },

@@ -25,6 +25,7 @@ import { routeForPath, type AllNotesFilter } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
 import { AllNotesTable } from './all-notes-table.tsx'
+import { AttachmentGallery } from './attachment-gallery.tsx'
 import { AllNotesTrashDialog } from './all-notes-trash-dialog.tsx'
 import { NewNoteButton } from './new-note-button.tsx'
 import { useAllNotesKeyboard } from './use-all-notes-keyboard.ts'
@@ -218,15 +219,27 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-auto"
       >
-        <AllNotesTable
-          notes={sortedNotes}
-          filter={filter}
-          sort={sort}
-          onSort={handleSort}
-          selection={selection}
-          onOpen={openNote}
-          registerScrollToIndex={registerScrollToIndex}
-        />
+        {filter?.kind === 'attachment' &&
+        (filter.type === 'image' || filter.type === 'pdf') &&
+        sortedNotes !== undefined &&
+        sortedNotes.length > 0 ? (
+          <AttachmentGallery
+            type={filter.type}
+            notes={sortedNotes}
+            selection={selection}
+            onOpen={openNote}
+          />
+        ) : (
+          <AllNotesTable
+            notes={sortedNotes}
+            filter={filter}
+            sort={sort}
+            onSort={handleSort}
+            selection={selection}
+            onOpen={openNote}
+            registerScrollToIndex={registerScrollToIndex}
+          />
+        )}
       </div>
 
       <AllNotesTrashDialog
