@@ -1,4 +1,10 @@
-import { aiProvider, type AiProviderConfig, type ChatModelOption } from '@reflect/core'
+import {
+  aiProvider,
+  isOnDeviceOption,
+  type AiProviderConfig,
+  type AiProvidersState,
+  type ChatModelOption,
+} from '@reflect/core'
 
 /** One configured provider's models, shaped for a picker. */
 export interface ModelOptionGroup {
@@ -8,6 +14,9 @@ export interface ModelOptionGroup {
   /** The group's models, each with its picker value (index into the options). */
   options: Array<{ option: ChatModelOption; value: string }>
 }
+
+/** Appended to the label of a model the user attested runs on this Mac. */
+export const ON_DEVICE_OPTION_SUFFIX = ' · On this Mac'
 
 function providerQualifier(provider: AiProviderConfig): string {
   if (provider.provider === 'openai-compatible') {
@@ -19,16 +28,21 @@ function providerQualifier(provider: AiProviderConfig): string {
 /**
  * The flat option list regrouped per configured provider for rendering
  * (options arrive consecutively per entry). Values are list indexes — model
- * ids alone can collide across providers. Shared by desktop's composer
- * `Select` and the mobile model sheet.
+ * ids alone can collide across providers. A model whose pick resolves
+ * on-device (its endpoint and model are attested) is labeled "· On this
+ * Mac". Shared by desktop's composer `Select` and the mobile model sheet.
  */
 export function groupModelOptions(
   options: ChatModelOption[],
   providers: AiProviderConfig[],
 ): ModelOptionGroup[] {
+  const state: AiProvidersState = { providers, defaultProviderId: null }
   const groups: ModelOptionGroup[] = []
   for (const [index, option] of options.entries()) {
-    const item = { option, value: String(index) }
+    const labeled = isOnDeviceOption(state, option)
+      ? { ...option, label: `${option.label}${ON_DEVICE_OPTION_SUFFIX}` }
+      : option
+    const item = { option: labeled, value: String(index) }
     const last = groups.at(-1)
     if (last?.configId === option.configId) {
       last.options.push(item)

@@ -406,3 +406,163 @@ describe('AiProvidersSection', () => {
     await expect.element(page.getByRole('button', { name: 'Make default' })).toBeInTheDocument()
   })
 })
+
+describe('AiProvidersSection on this Mac', () => {
+  const OLLAMA_URL = 'http://localhost:11434/v1'
+  const ATTESTATION = { baseUrl: OLLAMA_URL, model: 'llama3.2' }
+
+  /** A stored OpenAI-compatible entry on Ollama's default endpoint. */
+  function local(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 'ollama',
+      provider: 'openai-compatible',
+      model: 'llama3.2',
+      baseUrl: OLLAMA_URL,
+      keyHint: '',
+      ...overrides,
+    }
+  }
+
+  function onDeviceSwitch(): Locator {
+    return page.getByRole('switch', { name: 'Runs on this Mac' })
+  }
+
+  function badge(): Locator {
+    return page.getByText('On this Mac · llama3.2')
+  }
+
+  it('offers the switch in the add form only for an endpoint on this Mac', async () => {
+    await renderSection()
+    await expect.element(page.getByText(/No AI providers configured/)).toBeInTheDocument()
+
+    const dialog = await openDialog()
+    await dialog.getByRole('combobox', { name: 'Provider' }).click()
+    await page.getByRole('option', { name: 'OpenAI-compatible' }).click()
+    await dialog.getByLabelText('Endpoint base URL').fill('http://192.168.1.5:1234/v1')
+    await expect.element(dialog.getByRole('switch', { name: 'Runs on this Mac' })).toBeDisabled()
+    await expect
+      .element(dialog.getByText('Only for localhost, 127.x.x.x or [::1]'))
+      .toBeInTheDocument()
+
+    await dialog.getByRole('button', { name: 'Ollama' }).click()
+    await expect.element(dialog.getByLabelText('Endpoint base URL')).toHaveValue(OLLAMA_URL)
+    await expect.element(dialog.getByRole('switch', { name: 'Runs on this Mac' })).toBeEnabled()
+    await dialog.getByLabelText('Default model').fill('llama3.2')
+    await dialog.getByRole('switch', { name: 'Runs on this Mac' }).click()
+    // What the switch means is spelled out, naming the model and endpoint.
+    const meaning = dialog.getByText(/as running on this Mac/)
+    await expect
+      .element(meaning)
+      .toMatchTextContent(`Reflect will treat llama3.2 at ${OLLAMA_URL} as running on this Mac.`)
+    expect(meaning.element().textContent).not.toMatch(/never/i)
+    await dialog.getByRole('checkbox', { name: 'Can read images' }).click()
+    await dialog.getByLabelText('Context length (tokens)').fill('32,768')
+    await dialog.getByRole('button', { name: 'Add provider' }).click()
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1))
+    expect(lastSavedDoc().aiProviders[0]).toMatchObject({
+      baseUrl: OLLAMA_URL,
+      model: 'llama3.2',
+      onDevice: ATTESTATION,
+      supportsImages: true,
+      contextWindow: 32_768,
+    })
+  })
+
+  it('turns on only after a dialog that names the endpoint and model, and off at once', async () => {
+    stored = { aiProviders: [local()], defaultAiProviderId: 'ollama' }
+    await renderSection()
+    await expect.element(onDeviceSwitch()).not.toBeChecked()
+
+    await onDeviceSwitch().click()
+    const confirm = page.getByRole('dialog', { name: 'Treat this model as running on this Mac?' })
+    await expect.element(confirm).toMatchTextContent(/llama3\.2 at http:\/\/localhost:11434\/v1/)
+    await expect.element(confirm).toMatchTextContent(/no proxy and no redirects/)
+    expect(confirm.element().textContent).not.toMatch(/never/i)
+    await confirm.getByRole('button', { name: 'Cancel' }).click()
+    await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
+    await expect.element(onDeviceSwitch()).not.toBeChecked()
+    expect(saved).toEqual([])
+
+    await onDeviceSwitch().click()
+    await page.getByRole('button', { name: 'Turn on' }).click()
+    await vi.waitFor(() =>
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ onDevice: ATTESTATION }),
+    )
+    await expect.element(onDeviceSwitch()).toBeChecked()
+    await expect.element(badge()).toBeInTheDocument()
+
+    await onDeviceSwitch().click()
+    await vi.waitFor(() => expect(lastSavedDoc().aiProviders[0]).toMatchObject({ onDevice: null }))
+    await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
+    await expectLocatorToHaveCount(badge(), 0)
+  })
+
+  it('drops the badge when the row changes its default model', async () => {
+    stored = { aiProviders: [local({ onDevice: ATTESTATION })], defaultAiProviderId: 'ollama' }
+    await renderSection()
+    await expect.element(badge()).toBeInTheDocument()
+
+    await page.getByRole('combobox', { name: 'Default model for OpenAI-compatible' }).click()
+    await page.getByRole('option', { name: /Local model/ }).click()
+
+    await vi.waitFor(() =>
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({
+        model: 'local-model',
+        onDevice: null,
+      }),
+    )
+    await expectLocatorToHaveCount(badge(), 0)
+    await expect.element(onDeviceSwitch()).not.toBeChecked()
+  })
+
+  it('asks to re-confirm an attestation a hand edit no longer matches', async () => {
+    stored = {
+      aiProviders: [local({ onDevice: { baseUrl: OLLAMA_URL, model: 'llama3.1' } })],
+      defaultAiProviderId: 'ollama',
+    }
+    await renderSection()
+
+    await expect
+      .element(page.getByRole('alert'))
+      .toMatchTextContent('Re-confirm: endpoint or model changed')
+    await expect.element(onDeviceSwitch()).not.toBeChecked()
+    await expectLocatorToHaveCount(page.getByText(/On this Mac ·/), 0)
+  })
+
+  it('keeps the switch off for an endpoint off this Mac', async () => {
+    stored = {
+      aiProviders: [local({ baseUrl: 'http://192.168.1.5:11434/v1' })],
+      defaultAiProviderId: 'ollama',
+    }
+    await renderSection()
+
+    await expect.element(onDeviceSwitch()).toBeDisabled()
+    await expect
+      .element(page.getByText('Only for localhost, 127.x.x.x or [::1]'))
+      .toBeInTheDocument()
+  })
+
+  it('stores image support and a context length from the row', async () => {
+    stored = { aiProviders: [local()], defaultAiProviderId: 'ollama' }
+    await renderSection()
+
+    await page.getByRole('checkbox', { name: 'Can read images' }).click()
+    await vi.waitFor(() =>
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ supportsImages: true }),
+    )
+
+    const contextLength = page.getByLabelText('Context length (tokens)')
+    await contextLength.fill('100')
+    await userEvent.keyboard('{Enter}')
+    await expect.element(page.getByRole('alert')).toMatchTextContent(/at least 2,048 tokens/)
+    expect(lastSavedDoc().aiProviders[0]).not.toMatchObject({ contextWindow: 100 })
+
+    await contextLength.fill('16384')
+    await userEvent.keyboard('{Enter}')
+    await vi.waitFor(() =>
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ contextWindow: 16_384 }),
+    )
+    await expectLocatorToHaveCount(page.getByRole('alert'), 0)
+  })
+})
