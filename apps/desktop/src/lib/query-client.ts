@@ -78,6 +78,9 @@ export const queryKeys = {
     note(root: GraphRoot, path: string) {
       return [...this.graph(root), 'note', path] as const
     },
+    noteMtime(root: GraphRoot, path: string) {
+      return [...this.graph(root), 'note-mtime', path] as const
+    },
     pinnedNotes(root: GraphRoot) {
       return [...this.graph(root), 'pinned-notes'] as const
     },

@@ -287,9 +287,12 @@ export function NotePaneComponent({
       : null
   const xPostsReady = useXPostPreload(editorContent)
   // Read-only views (protected, local-only) are counted too, from the file they show.
+  const paneRef = useRef<HTMLDivElement>(null)
+  const getSelectedText = useCallback(() => aiEditorRef.current?.getSelectedText() ?? '', [])
   const publishStatus = useNoteStatusPublisher(
     path,
     document.status === 'ready' ? document.initialContent : null,
+    { pane: paneRef, getSelectedText },
   )
   const { onEditorChange } = document
   const handleEditorChange = useCallback(
@@ -366,7 +369,7 @@ export function NotePaneComponent({
   )
 
   return (
-    <div className={cn('relative', className)} aria-label={`Editing ${path}`}>
+    <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
       <div className={gutterClassName}>
         <NoteSaveAlerts document={document} assetSaveError={saveError} />
 

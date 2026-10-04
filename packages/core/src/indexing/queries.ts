@@ -126,6 +126,16 @@ export async function getNote(path: string): Promise<NoteRow | undefined> {
     : undefined
 }
 
+/** When `path`'s file was last modified (epoch ms), or `undefined` if unindexed. */
+export async function getNoteMtime(path: string): Promise<number | undefined> {
+  const row = await db
+    .selectFrom('notes')
+    .where('path', '=', path)
+    .select('mtime')
+    .executeTakeFirst()
+  return row?.mtime
+}
+
 /** A note flagged `Needs review`: its file carries sync conflict markers. */
 export interface ConflictedNote {
   path: string

@@ -182,6 +182,7 @@ export {
   getLinkSources,
   getPathLinkSources,
   getNote,
+  getNoteMtime,
   getNotesByTag,
   getOpenTasks,
   getCompletedTasks,

@@ -6,6 +6,7 @@ import {
   findWikiTargetMatch,
   getBacklinksWithContext,
   getDuplicateNoteIds,
+  getNoteMtime,
   getNoteIdsByPath,
   getOpenTasks,
   getPinnedNotes,
@@ -738,5 +739,19 @@ describe('getOpenTasks', () => {
     const [, args] = mockInvoke.mock.calls[0]!
     expect(String(args['sql'])).toContain('"notes"."kind" != ?')
     expect(args['params']).toContain('template')
+  })
+})
+
+describe('getNoteMtime', () => {
+  it('reads the indexed modified time, undefined for an unindexed path', async () => {
+    mockInvoke.mockResolvedValueOnce([{ mtime: 1_700_000_000_000 }])
+    await expect(getNoteMtime('notes/a.md')).resolves.toBe(1_700_000_000_000)
+    const [command, args] = mockInvoke.mock.calls[0]!
+    expect(command).toBe('db_query')
+    expect(String(args['sql'])).toContain('"mtime"')
+    expect(args['params']).toEqual(['notes/a.md'])
+
+    mockInvoke.mockResolvedValueOnce([])
+    await expect(getNoteMtime('notes/missing.md')).resolves.toBeUndefined()
   })
 })

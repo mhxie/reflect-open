@@ -3,6 +3,7 @@ import {
   addDaysIso,
   formatCompactDate,
   formatDayLabel,
+  formatEditedLabel,
   formatFullDate,
   formatRecencyLabel,
   formatShortDate,
@@ -74,6 +75,19 @@ describe('dates', () => {
       expect(formatTimeOfDay(new Date(2026, 5, 10, 9, 5), '24h')).toBe('09:05')
       expect(formatTimeOfDay(new Date(2026, 5, 10, 0, 0), '24h')).toBe('00:00')
     })
+  })
+
+  it('formatEditedLabel counts minutes within the hour, then uses the recency label', () => {
+    const now = new Date(2026, 5, 10, 21, 0)
+    const prefs = { timeFormat: '12h', dateFormat: 'mdy' } as const
+    const minutesAgo = (minutes: number) => now.getTime() - minutes * 60_000
+    expect(formatEditedLabel(minutesAgo(0), prefs, now)).toBe('Edited just now')
+    expect(formatEditedLabel(minutesAgo(5), prefs, now)).toBe('Edited 5 min ago')
+    expect(formatEditedLabel(minutesAgo(59), prefs, now)).toBe('Edited 59 min ago')
+    expect(formatEditedLabel(minutesAgo(60), prefs, now)).toBe('Edited 8:00pm')
+    expect(formatEditedLabel(new Date(2026, 5, 3, 13, 0).getTime(), prefs, now)).toBe(
+      'Edited 6/3/2026',
+    )
   })
 
   describe('formatRecencyLabel', () => {

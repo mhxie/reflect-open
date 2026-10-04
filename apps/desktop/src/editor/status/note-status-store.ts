@@ -1,9 +1,13 @@
 import { useSyncExternalStore } from 'react'
 
-/** A mounted note's live status, as the status corner reads it. */
+/** A mounted note's live status, as the status bar reads it. */
 export interface NoteStatus {
   /** Characters the reader sees (`countDisplayChars` over the live buffer). */
   readonly characters: number
+  /** The same count over the editor's selection; 0 when nothing is selected. */
+  readonly selectedCharacters: number
+  /** When this pane last edited the note (epoch ms), ahead of the index. */
+  readonly editedAt: number | null
 }
 
 interface Entry {
