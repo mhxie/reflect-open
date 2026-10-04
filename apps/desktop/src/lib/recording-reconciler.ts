@@ -22,6 +22,8 @@ export interface RecordingReconcilerOptions {
   getSettings: () => Promise<RecordingPassSettings>
   /** How many recordings a pass found waiting; zero once the loop settles. */
   onPending?: (count: number) => void
+  /** Transcript notes a pass wrote, when it wrote any. */
+  onWritten?: (paths: readonly string[]) => void
 }
 
 export interface RecordingReconciler {
@@ -71,6 +73,9 @@ export function createRecordingReconciler(
         isStale,
         ...(options.onPending === undefined ? {} : { onPending: options.onPending }),
       })
+      if (outcome.written.length > 0) {
+        options.onWritten?.(outcome.written)
+      }
       surfaceStop(outcome.stopped)
     },
     onSettled: () => options.onPending?.(0),

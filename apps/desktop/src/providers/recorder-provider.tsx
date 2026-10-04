@@ -53,6 +53,10 @@ export interface RecorderContextValue {
   recordingSince: number | null
   /** Stopped recordings are being transcribed and written. */
   transcribing: boolean
+  /** The transcript note written most recently, until dismissed. */
+  lastTranscript: string | null
+  /** Clear {@link lastTranscript}. */
+  dismissTranscript: () => void
   /** Where recordings are archived when no folder is chosen. */
   defaultRecordingsFolder: string
   /** Start recording, or stop and save the one running. */
@@ -94,6 +98,8 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
   const { settings } = useSettings()
   const [status, setStatus] = useState<RecorderStatus>(IDLE_STATUS)
   const [transcribing, setTranscribing] = useState(false)
+  const [lastTranscript, setLastTranscript] = useState<string | null>(null)
+  const dismissTranscript = useCallback(() => setLastTranscript(null), [])
 
   useEffect(() => {
     if (!hasBridge()) {
@@ -220,6 +226,7 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
       generation: graph.generation,
       graphRoot: graph.root,
       onPending: (count) => setTranscribing(count > 0),
+      onWritten: (paths) => setLastTranscript(paths.at(-1) ?? null),
       getSettings: async (): Promise<RecordingPassSettings> => {
         const current = settingsRef.current
         const lookupContacts =
@@ -240,6 +247,7 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
     return () => {
       reconciler.dispose()
       setTranscribing(false)
+      setLastTranscript(null)
     }
   }, [status.supported, graph.generation, graph.root])
 
@@ -269,15 +277,22 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
       supported: status.supported,
       recordingSince: status.recording?.startedAtMs ?? null,
       transcribing,
+      lastTranscript,
+      dismissTranscript,
       defaultRecordingsFolder: status.defaultRecordingsFolder,
       toggle,
       cancel,
       subscribeLevel,
     }),
-    [status, transcribing, toggle, cancel, subscribeLevel],
+    [status, transcribing, lastTranscript, dismissTranscript, toggle, cancel, subscribeLevel],
   )
 
   return <RecorderContext value={value}>{children}</RecorderContext>
+}
+
+/** The recorder, or null outside a {@link RecorderProvider}. */
+export function useOptionalRecorder(): RecorderContextValue | null {
+  return use(RecorderContext)
 }
 
 export function useRecorder(): RecorderContextValue {

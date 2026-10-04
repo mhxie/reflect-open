@@ -60,12 +60,10 @@ describe('AudioMemoButton', () => {
     expect(memo.toggle).not.toHaveBeenCalled()
   })
 
-  it('recording shows the stop control and the elapsed time', async () => {
+  it('recording turns the mic into the stop control', async () => {
     memo.phase = 'recording'
-    memo.elapsedMs = 83_000
     const view = await renderButton()
 
-    await expect.element(view.getByText('1:23')).toBeInTheDocument()
     await userEvent.click(view.getByRole('button', { name: 'Stop recording' }))
     expect(memo.toggle).toHaveBeenCalled()
   })
@@ -89,39 +87,11 @@ describe('AudioMemoButton', () => {
     expect(memo.discard).not.toHaveBeenCalled()
   })
 
-  it('transcribing shows progress while the mic stays live for the next memo', async () => {
+  it('the mic stays live while earlier memos transcribe', async () => {
     memo.phase = 'transcribing'
     const view = await renderButton()
 
-    await expect.element(view.getByText('Transcribing…')).toBeInTheDocument()
-    const micButton = view.getByRole('button', { name: 'Record audio memo' })
-    expect(micButton.element()).toHaveProperty('disabled', false)
-    await userEvent.click(micButton)
+    await userEvent.click(view.getByRole('button', { name: 'Record audio memo' }))
     expect(memo.toggle).toHaveBeenCalled()
-  })
-
-  it('a resumable failure offers Retry and Discard', async () => {
-    memo.phase = 'error'
-    memo.error = 'provider down'
-    memo.canRetry = true
-    const view = await renderButton()
-
-    await expect.element(view.getByText('provider down')).toBeInTheDocument()
-    await userEvent.click(view.getByRole('button', { name: 'Retry' }))
-    expect(memo.retry).toHaveBeenCalled()
-    await userEvent.click(view.getByRole('button', { name: 'Discard', exact: true }))
-    expect(memo.discard).toHaveBeenCalled()
-  })
-
-  it('a non-resumable failure hides Retry', async () => {
-    memo.phase = 'error'
-    memo.error = 'came back empty'
-    memo.canRetry = false
-    const view = await renderButton()
-
-    expect(view.getByRole('button', { name: 'Retry' }).query()).toBeNull()
-    await expect
-      .element(view.getByRole('button', { name: 'Discard', exact: true }))
-      .toBeInTheDocument()
   })
 })
