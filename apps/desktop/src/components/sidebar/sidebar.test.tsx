@@ -111,6 +111,8 @@ const audioMemo = vi.hoisted(() => ({
 vi.mock('@/providers/audio-memo-provider.tsx', () => ({
   useAudioMemo: () => audioMemo,
 }))
+const createNoteFromFiles = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('@/lib/create-note-from-files.ts', () => ({ createNoteFromFiles }))
 
 const GRAPH: GraphInfo = { root: '/notes', name: 'Notes', generation: 1, localOnlyFolders: [] }
 
@@ -536,5 +538,25 @@ describe('Sidebar', () => {
       graphColors: { '/notes': 'blue' },
     })
     expect(openRecent).not.toHaveBeenCalled()
+  })
+
+  it('turns files dropped on it into a new note', async () => {
+    const { view, navigate } = await renderSidebar()
+    const nav = view.getByRole('navigation', { name: 'Primary' }).element()
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(['x'], 'Report.pdf', { type: 'application/pdf' }))
+
+    nav.dispatchEvent(
+      new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true }),
+    )
+    await expect.element(view.getByText('Drop to create a note')).toBeInTheDocument()
+
+    nav.dispatchEvent(
+      new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }),
+    )
+    await vi.waitFor(() =>
+      expect(createNoteFromFiles).toHaveBeenCalledWith([expect.any(File)], 1, navigate),
+    )
+    expect(view.getByText('Drop to create a note').query()).toBeNull()
   })
 })
