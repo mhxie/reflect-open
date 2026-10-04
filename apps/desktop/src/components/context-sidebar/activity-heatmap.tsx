@@ -6,7 +6,7 @@ import {
   type ActivityLevel,
   type ActivityThresholds,
 } from '@reflect/core'
-import { formatDayLabel, parseIsoDate } from '@/lib/dates.ts'
+import { formatCompactDate, formatDayLabel, parseIsoDate } from '@/lib/dates.ts'
 import {
   HEATMAP_CELL,
   HEATMAP_GAP,
@@ -22,6 +22,8 @@ interface ActivityHeatmapProps {
   weeks: readonly (readonly string[])[]
   /** Characters per journaled day. */
   characters: ReadonlyMap<string, number>
+  /** Notes touched per day, as the edit-day filter lists them. */
+  editCounts: ReadonlyMap<string, number>
   thresholds: ActivityThresholds
   today: string
 }
@@ -41,14 +43,34 @@ const LABEL_STYLE = { lineHeight: `${HEATMAP_CELL}px` }
 
 const numberFormat = new Intl.NumberFormat()
 
+/** The hovered or focused day, and where its tooltip anchors in the wrapper. */
+interface Hover {
+  date: string
+  left: number
+  top: number
+  /** Anchor the tooltip's right edge instead, so it stays inside the sidebar. */
+  alignRight: boolean
+}
+
+/** A day's summary parts: notes touched and characters written, each only when present. */
+function daySummary(notes: number | undefined, characters: number | undefined): string {
+  const parts = [
+    notes === undefined ? null : `${numberFormat.format(notes)} ${notes === 1 ? 'note' : 'notes'}`,
+    characters === undefined ? null : `${numberFormat.format(characters)} chars`,
+  ].filter((part) => part !== null)
+  return parts.length === 0 ? 'No notes' : parts.join(' · ')
+}
+
 /**
  * GitHub-style heatmap of daily-note size; a day opens All Notes filtered to
- * that day's edits. One tab stop: arrows, Home and End move between days.
- * Memoized so a sidebar resize re-renders only when the week count changes.
+ * that day's edits, and hovering or focusing it shows one compact tooltip
+ * (date · notes · chars). One tab stop: arrows, Home and End move between
+ * days. Memoized so a sidebar resize re-renders only when the week count changes.
  */
 export const ActivityHeatmap = memo(function ActivityHeatmap({
   weeks,
   characters,
+  editCounts,
   thresholds,
   today,
 }: ActivityHeatmapProps): ReactElement {
@@ -63,6 +85,19 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
   const focusedIndex = days.indexOf(focused)
   const focusIndex = focusedIndex < 0 ? lastPast : Math.min(lastPast, focusedIndex)
   const cells = useRef(new Map<string, HTMLButtonElement>())
+  const wrapper = useRef<HTMLDivElement>(null)
+  const [hover, setHover] = useState<Hover | null>(null)
+
+  const showTooltip = (date: string, cell: HTMLElement): void => {
+    const half = (wrapper.current?.clientWidth ?? 0) / 2
+    const alignRight = cell.offsetLeft > half
+    setHover({
+      date,
+      left: alignRight ? cell.offsetLeft + cell.offsetWidth : cell.offsetLeft,
+      top: cell.offsetTop,
+      alignRight,
+    })
+  }
 
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>): void => {
     const next = nextHeatmapIndex(event.key, focusIndex, lastPast)
@@ -76,64 +111,87 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
   }
 
   return (
-    <div
-      role="grid"
-      aria-label="Daily note activity"
-      onKeyDown={moveFocus}
-      className="grid w-fit text-2xs text-text-muted"
-      style={{
-        gap: HEATMAP_GAP,
-        gridTemplateColumns: `${HEATMAP_LABEL_WIDTH - HEATMAP_GAP}px repeat(${weeks.length}, ${HEATMAP_CELL}px)`,
-        gridAutoRows: HEATMAP_CELL,
-      }}
-    >
-      <div role="row" className="contents">
-        <span role="columnheader" />
-        {weeks.map((week, column) => (
-          <span key={week[0]} role="columnheader" className="whitespace-nowrap" style={LABEL_STYLE}>
-            {labeledColumns.has(column) ? format(parseIsoDate(week[0]!), 'MMM') : null}
-          </span>
+    <div ref={wrapper} className="relative w-fit" onPointerLeave={() => setHover(null)}>
+      <div
+        role="grid"
+        aria-label="Daily note activity"
+        onKeyDown={moveFocus}
+        className="grid w-fit text-2xs text-text-muted"
+        style={{
+          gap: HEATMAP_GAP,
+          gridTemplateColumns: `${HEATMAP_LABEL_WIDTH - HEATMAP_GAP}px repeat(${weeks.length}, ${HEATMAP_CELL}px)`,
+          gridAutoRows: HEATMAP_CELL,
+        }}
+      >
+        <div role="row" className="contents">
+          <span role="columnheader" />
+          {weeks.map((week, column) => (
+            <span
+              key={week[0]}
+              role="columnheader"
+              className="whitespace-nowrap"
+              style={LABEL_STYLE}
+            >
+              {labeledColumns.has(column) ? format(parseIsoDate(week[0]!), 'MMM') : null}
+            </span>
+          ))}
+        </div>
+        {Array.from({ length: 7 }, (_, row) => (
+          <div key={row} role="row" className="contents">
+            <span role="rowheader" style={LABEL_STYLE}>
+              {LABELED_ROWS.has(row) ? format(parseIsoDate(weeks[0]![row]!), 'EEE') : null}
+            </span>
+            {weeks.map((week) => {
+              const date = week[row]!
+              const size = characters.get(date)
+              return (
+                <button
+                  key={date}
+                  ref={(element) => {
+                    if (element === null) {
+                      cells.current.delete(date)
+                    } else {
+                      cells.current.set(date, element)
+                    }
+                  }}
+                  type="button"
+                  role="gridcell"
+                  tabIndex={date === days[focusIndex] ? 0 : -1}
+                  disabled={date > today}
+                  aria-label={`${formatDayLabel(date, settings.dateFormat)} · ${daySummary(editCounts.get(date), size)}`}
+                  data-date={date}
+                  onPointerEnter={(event) => showTooltip(date, event.currentTarget)}
+                  onFocus={(event) => {
+                    setFocused(date)
+                    showTooltip(date, event.currentTarget)
+                  }}
+                  onBlur={() => setHover(null)}
+                  onClick={() => navigate({ kind: 'allNotes', filter: { kind: 'updated', date } })}
+                  className={cn(
+                    'rounded-[2px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text',
+                    date > today ? 'invisible' : LEVEL_CLASSES[activityLevel(size, thresholds)],
+                  )}
+                />
+              )
+            })}
+          </div>
         ))}
       </div>
-      {Array.from({ length: 7 }, (_, row) => (
-        <div key={row} role="row" className="contents">
-          <span role="rowheader" style={LABEL_STYLE}>
-            {LABELED_ROWS.has(row) ? format(parseIsoDate(weeks[0]![row]!), 'EEE') : null}
-          </span>
-          {weeks.map((week) => {
-            const date = week[row]!
-            const size = characters.get(date)
-            return (
-              <button
-                key={date}
-                ref={(element) => {
-                  if (element === null) {
-                    cells.current.delete(date)
-                  } else {
-                    cells.current.set(date, element)
-                  }
-                }}
-                type="button"
-                role="gridcell"
-                tabIndex={date === days[focusIndex] ? 0 : -1}
-                disabled={date > today}
-                title={
-                  size === undefined
-                    ? formatDayLabel(date, settings.dateFormat)
-                    : `${formatDayLabel(date, settings.dateFormat)} · ${numberFormat.format(size)} characters`
-                }
-                data-date={date}
-                onFocus={() => setFocused(date)}
-                onClick={() => navigate({ kind: 'allNotes', filter: { kind: 'updated', date } })}
-                className={cn(
-                  'rounded-[2px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text',
-                  date > today ? 'invisible' : LEVEL_CLASSES[activityLevel(size, thresholds)],
-                )}
-              />
-            )
-          })}
+      {hover === null ? null : (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-md bg-surface-inverse px-1.5 py-0.5 text-2xs text-text-on-inverse shadow-sm"
+          style={{
+            top: hover.top - 4,
+            ...(hover.alignRight
+              ? { right: (wrapper.current?.clientWidth ?? 0) - hover.left }
+              : { left: hover.left }),
+          }}
+        >
+          {formatCompactDate(hover.date, today, settings.dateFormat)} ·{' '}
+          {daySummary(editCounts.get(hover.date), characters.get(hover.date))}
         </div>
-      ))}
+      )}
     </div>
   )
 })

@@ -3,7 +3,7 @@ import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { DailyActivity } from '@reflect/core'
+import type { DailyActivity, DailyEditCount } from '@reflect/core'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { ActivitySection } from './activity-section.tsx'
@@ -11,11 +11,13 @@ import { ActivitySection } from './activity-section.tsx'
 const TODAY = '2026-10-03'
 
 const listDailyActivity = vi.hoisted(() => vi.fn<() => Promise<DailyActivity[]>>())
+const listDailyEditCounts = vi.hoisted(() => vi.fn<() => Promise<DailyEditCount[]>>())
 const settingsState = vi.hoisted(() => ({ activityHeatmapEnabled: true }))
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   listDailyActivity,
+  listDailyEditCounts,
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
@@ -67,6 +69,10 @@ function heatmap() {
 beforeEach(() => {
   window.sessionStorage.clear()
   settingsState.activityHeatmapEnabled = true
+  listDailyEditCounts.mockReset().mockResolvedValue([
+    { date: '2026-10-02', notes: 3 },
+    { date: '2026-09-29', notes: 1 },
+  ])
   listDailyActivity.mockReset().mockResolvedValue([
     { date: '2026-09-28', characters: 40 },
     { date: '2026-10-01', characters: 300 },
@@ -90,17 +96,32 @@ describe('ActivitySection', () => {
     }
   })
 
-  it('shades days by size, titles them, and leaves the future blank', async () => {
+  it('shades days by size, names them with their counts, and leaves the future blank', async () => {
     const view = await renderSection()
     await expect.element(heatmap()).toBeVisible()
 
     const cell = (date: string) =>
       view.container.querySelector<HTMLElement>(`[data-date="${CSS.escape(date)}"]`)!
     expect(cell('2026-10-02').className).toContain('bg-accent')
-    expect(cell('2026-10-02').title).toBe('2026-10-02 · 1,200 characters')
+    await expect
+      .element(page.getByRole('gridcell', { name: '2026-10-02 · 3 notes · 1,200 chars' }))
+      .toBeInTheDocument()
     expect(cell('2026-09-30').className).toContain('bg-surface-active')
-    expect(cell('2026-09-30').title).toBe('2026-09-30')
+    await expect
+      .element(page.getByRole('gridcell', { name: '2026-09-30 · No notes' }))
+      .toBeInTheDocument()
     expect(cell('2026-10-04').className).toContain('invisible')
+  })
+
+  it('shows one compact tooltip for the hovered day', async () => {
+    await renderSection()
+
+    await userEvent.hover(page.getByRole('gridcell', { name: /^2026-10-02/ }))
+    await expect.element(page.getByText('10-02 · 3 notes · 1,200 chars')).toBeVisible()
+
+    await userEvent.hover(page.getByRole('gridcell', { name: /^2026-09-29/ }))
+    await expect.element(page.getByText('09-29 · 1 note')).toBeVisible()
+    expect(page.getByText(/^10-02 ·/).query()).toBeNull()
   })
 
   it('shows more weeks in a wider sidebar, with fixed-size square cells', async () => {
@@ -121,7 +142,7 @@ describe('ActivitySection', () => {
   it('opens All Notes filtered to the notes edited on a clicked day', async () => {
     await renderSection()
 
-    await userEvent.click(page.getByRole('gridcell', { name: '2026-09-30', exact: true }))
+    await userEvent.click(page.getByRole('gridcell', { name: /^2026-09-30/ }))
 
     await expect.element(page.getByTestId('route')).toHaveTextContent(editedOn('2026-09-30'))
   })

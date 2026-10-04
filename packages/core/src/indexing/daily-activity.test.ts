@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
-import { listDailyActivity } from './daily-activity.ts'
+import { listDailyActivity, listDailyEditCounts } from './daily-activity.ts'
 
 const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
 
@@ -31,5 +31,14 @@ describe('listDailyActivity', () => {
     expect(query).not.toContain('search_fts')
     expect(query).toContain('has_content')
     expect(args['params']).toEqual(['daily', 1])
+  })
+
+  it('counts notes per local edit day, a daily note also on its own date', async () => {
+    mockInvoke.mockResolvedValue([{ date: '2026-10-02', notes: 3 }])
+
+    await expect(listDailyEditCounts()).resolves.toEqual([{ date: '2026-10-02', notes: 3 }])
+    const query = String(mockInvoke.mock.calls[0]![1]['sql'])
+    expect(query).toContain("'localtime'")
+    expect(query).toContain('union')
   })
 })

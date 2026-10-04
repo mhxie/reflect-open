@@ -98,7 +98,12 @@ export {
   type WikiLinkSuggestionResult,
 } from './queries.ts'
 export { resolveNoteTarget } from './resolve-target.ts'
-export { listDailyActivity, type DailyActivity } from './daily-activity.ts'
+export {
+  listDailyActivity,
+  listDailyEditCounts,
+  type DailyActivity,
+  type DailyEditCount,
+} from './daily-activity.ts'
 export {
   activityLevel,
   activityThresholds,

@@ -90,6 +90,9 @@ export const queryKeys = {
     dailyActivity(root: GraphRoot) {
       return [...this.graph(root), 'daily-activity'] as const
     },
+    dailyEditCounts(root: GraphRoot) {
+      return [...this.graph(root), 'daily-edit-counts'] as const
+    },
     onThisDay(root: GraphRoot, date: string) {
       return [...this.graph(root), 'on-this-day', date] as const
     },
