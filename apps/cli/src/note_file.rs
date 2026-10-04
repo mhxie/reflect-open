@@ -400,7 +400,8 @@ pub fn read_note(
 }
 
 /// Enforce the privacy contract without returning content (used by `path`).
-/// A missing file has nothing to protect.
+/// The raw bytes are classified, so a note that isn't UTF-8 is checked too.
+/// A missing file has nothing to protect; any other read failure refuses.
 pub fn ensure_not_private(
     root: &Path,
     rel_path: &str,
@@ -408,16 +409,21 @@ pub fn ensure_not_private(
 ) -> Result<(), CliError> {
     refuse_local_only(root, rel_path, local_only)?;
     let absolute = checked_note_path(root, rel_path)?;
-    let content = match fs::read_to_string(&absolute) {
-        Ok(content) => content,
+    let bytes = match fs::read(&absolute) {
+        Ok(bytes) => bytes,
         Err(_) if eviction_placeholder(&absolute).is_some_and(|path| path.is_file()) => {
             return Err(CliError::Runtime(format!(
                 "note is unavailable until iCloud downloads it: {rel_path}"
             )))
         }
-        Err(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(CliError::Runtime(format!(
+                "could not read {rel_path}: {error}"
+            )))
+        }
     };
-    refuse_withheld(rel_path, backup_privacy(content.as_bytes()))
+    refuse_withheld(rel_path, backup_privacy(&bytes))
 }
 
 /// Resolve one canonical graph-relative note path without following symlinks.
@@ -539,6 +545,30 @@ mod tests {
         }
         assert!(read_note(root.path(), "notes/plain.md", None).is_ok());
         assert!(ensure_not_private(root.path(), "notes/plain.md", None).is_ok());
+    }
+
+    /// `path` must not say where a locked note lives just because its bytes
+    /// aren't UTF-8: the check classifies the raw bytes.
+    #[test]
+    fn a_locked_note_that_is_not_utf8_is_refused() {
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(root.path().join("notes")).expect("mkdir");
+        fs::write(
+            root.path().join("notes/latin1.md"),
+            b"---\nprivate: true\n---\n# Caf\xe9 secret\n",
+        )
+        .expect("write");
+        fs::write(
+            root.path().join("notes/latin1-public.md"),
+            b"---\ntitle: Menu\n---\n# Caf\xe9\n",
+        )
+        .expect("write");
+        assert!(matches!(
+            ensure_not_private(root.path(), "notes/latin1.md", None),
+            Err(CliError::Private(_))
+        ));
+        assert!(ensure_not_private(root.path(), "notes/latin1-public.md", None).is_ok());
+        assert!(ensure_not_private(root.path(), "notes/missing.md", None).is_ok());
     }
 
     #[test]

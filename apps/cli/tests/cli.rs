@@ -892,6 +892,27 @@ fn show_and_path_refuse_a_note_whose_frontmatter_cannot_be_read() {
     );
 }
 
+/// A locked note whose bytes aren't UTF-8 is classified all the same: `path`
+/// and `open --print` refuse it instead of printing where it lives.
+#[test]
+fn path_and_open_refuse_a_locked_note_that_is_not_utf8() {
+    let fixture = graph();
+    fs::write(
+        fixture.root().join("notes/latin1.md"),
+        b"---\nprivate: true\n---\n# Caf\xe9 secret\n",
+    )
+    .unwrap();
+
+    for args in [
+        &["path", "notes/latin1.md"][..],
+        &["open", "notes/latin1.md", "--print"],
+    ] {
+        let output = reflect(&fixture, args);
+        assert_eq!(output.status.code(), Some(3), "{args:?}");
+        assert_eq!(stdout(&output), "", "{args:?}");
+    }
+}
+
 #[test]
 fn show_json_includes_the_daily_date() {
     let fixture = graph();
