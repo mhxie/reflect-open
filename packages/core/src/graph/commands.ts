@@ -194,7 +194,8 @@ export type ShareableNoteRead = z.infer<typeof shareableNoteReadSchema>
  * paths are model-supplied). Rust decides whether the note lies in a
  * local-only folder from the entry the path resolves to, so a case-folded or
  * aliased spelling answers `localOnly` exactly like the canonical path, and
- * nothing is read.
+ * nothing is read. Only a visible `.md` file is served: a hidden or
+ * non-Markdown path rejects with a `traversal` error.
  */
 export async function readNoteShareable(
   path: string,

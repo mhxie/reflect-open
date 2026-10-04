@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { isAppError } from '../../errors.ts'
 import { readNoteShareable } from '../../graph/commands.ts'
 import { isLocalOnlyPath } from '../../graph/local-only.ts'
+import { isNotePath } from '../../graph/paths.ts'
 import { parseNote } from '../../markdown/extract.ts'
 import { splitFrontmatter } from '../../markdown/frontmatter.ts'
 import {
@@ -21,6 +22,14 @@ import {
 
 /** The per-note refusal a private note's read returns — local-only notes share it. */
 export const PRIVATE_NOTE_REFUSAL = 'This note is marked private and cannot be read by AI.'
+
+/**
+ * The per-path refusal for anything that is not a note: a hidden file
+ * (`.git/config`, `.reflect/…`), an attachment, or an `assets/` description
+ * sidecar, which read_assets reads instead.
+ */
+export const NOT_A_NOTE_REFUSAL =
+  'Not a note path — pass .md note paths exactly as search_notes or the listings return them; read attachments with read_assets.'
 
 /** Cap on returned note content so one huge note can't flood the context. */
 export const MAX_NOTE_CONTENT_CHARS = 24_000
@@ -76,11 +85,18 @@ export interface ReadNoteDeps {
  * capped), or a structured per-note miss/refusal so one bad path never fails
  * the batch. Content is minted CloudSafe only after the live private re-check
  * (the frontmatter flag and the local-only path rule).
+ *
+ * Only note paths are read. The gate lives here rather than in
+ * {@link readShareableNote}, which read_assets also uses to read the
+ * `assets/` description sidecars.
  */
 export function buildReadOneNote(deps: ReadNoteDeps) {
   return async function readOneNote(path: string): Promise<ReadNoteResult> {
-    // The path is model-supplied: a note inside a local-only folder is refused
-    // before it is even read, whatever its frontmatter would say.
+    // The path is model-supplied: anything but a note is refused unread, and
+    // so is a note inside a local-only folder, whatever its frontmatter says.
+    if (!isNotePath(path)) {
+      return { ok: false, path, error: NOT_A_NOTE_REFUSAL }
+    }
     if (isLocalOnlyPath(path)) {
       return { ok: false, path, error: PRIVATE_NOTE_REFUSAL }
     }

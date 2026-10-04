@@ -588,6 +588,23 @@ describe('ChatScreen', () => {
     await expect.element(view.getByRole('code')).toMatchTextContent('const answer = 42')
   })
 
+  it('renders an answer without loading the remote images it names', async () => {
+    configureModel()
+    const answer = 'Here is the chart: ![x](https://example.invalid/p.png)'
+    scriptTurn([
+      { type: 'text-delta', text: answer },
+      { type: 'complete', messages: [{ role: 'assistant', content: answer }] },
+    ])
+    const view = await renderChat()
+
+    await userEvent.type(view.getByLabelText('Chat message'), 'show me the chart{Enter}')
+
+    // Settled and rendered, so the image had every chance to mount.
+    await expect.element(view.getByText('Here is the chart:')).toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Copy reply' })).toBeInTheDocument()
+    expect(view.container.querySelector('img[src^="https://example.invalid"]')).toBeNull()
+  })
+
   it('rejects a second send fired before the first one has rendered', async () => {
     configureModel()
     scriptTurn([

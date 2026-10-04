@@ -16,6 +16,7 @@ import {
 } from './read-assets.ts'
 import {
   MAX_NOTE_CONTENT_CHARS,
+  NOT_A_NOTE_REFUSAL,
   readShareableNote,
   type ReadNoteResult,
   type ReadNotesOutput,
@@ -300,6 +301,17 @@ describe('read_notes', () => {
     }
     expect(output.error).toContain('private')
     expect(JSON.stringify(output)).not.toContain(PRIVATE_BODY)
+  })
+
+  it('refuses a path that is not a note without reading it', async () => {
+    const read = vi.fn(async () => `# Leak\n\n${PRIVATE_BODY}\n`)
+    const tools = buildNoteTools({ readNoteFn: read })
+    const paths = ['.git/config', '.reflect/settings.json', 'assets/a.png.reflect.md']
+    const output = await runReadNotes(tools, paths)
+    expect(output.notes).toEqual(
+      paths.map((path) => ({ ok: false, path, error: NOT_A_NOTE_REFUSAL })),
+    )
+    expect(read).not.toHaveBeenCalled()
   })
 
   it('refuses a local-only note by its path without reading it', async () => {
@@ -733,8 +745,14 @@ describe('readShareableNote', () => {
     setBridge(null)
   })
 
-  /** A bridge answering `note_read_shareable` from Rust's verdict per path. */
-  function shareableBridge(localOnly: ReadonlySet<string>): string[] {
+  /**
+   * A bridge answering `note_read_shareable` from Rust's verdict per path,
+   * serving `contents[path]` (or a sentinel body) when it clears the read.
+   */
+  function shareableBridge(
+    localOnly: ReadonlySet<string>,
+    contents: Readonly<Record<string, string>> = {},
+  ): string[] {
     const requested: string[] = []
     setBridge({
       invoke: async (command, args) => {
@@ -745,7 +763,7 @@ describe('readShareableNote', () => {
         requested.push(path)
         return localOnly.has(path)
           ? { kind: 'localOnly' }
-          : { kind: 'content', content: `${PRIVATE_BODY} of ${path}` }
+          : { kind: 'content', content: contents[path] ?? `${PRIVATE_BODY} of ${path}` }
       },
       listen: async () => () => {},
     })
@@ -772,5 +790,21 @@ describe('readShareableNote', () => {
   it('throws a PrivateNoteError for a local-only verdict', async () => {
     shareableBridge(new Set(['people/visa.md']))
     await expect(readShareableNote('people/visa.md')).rejects.toBeInstanceOf(PrivateNoteError)
+  })
+
+  it('still reads the description sidecar read_assets asks for', async () => {
+    // The note-path gate belongs to read_notes alone: a sidecar under assets/
+    // is not a note, and read_assets reads it through this same reader.
+    const requested = shareableBridge(new Set(), {
+      'assets/chart.png.reflect.md': '---\nreflectAsset: true\n---\nA bar chart.\n',
+      'notes/deck.md': '# Deck\n\n![chart](assets/chart.png)\n',
+    })
+    const tools = buildNoteTools({ assetReferencingNotePathsFn: async () => ['notes/deck.md'] })
+    const output = await runReadAsset(tools, 'assets/chart.png')
+    expect(requested).toEqual(['assets/chart.png.reflect.md', 'notes/deck.md'])
+    expect(output).toMatchObject({
+      ok: true,
+      asset: { path: 'assets/chart.png', description: 'A bar chart.' },
+    })
   })
 })

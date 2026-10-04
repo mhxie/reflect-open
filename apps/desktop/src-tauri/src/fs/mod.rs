@@ -600,7 +600,8 @@ pub enum ShareableNoteRead {
 }
 
 /// Read a note bound for somewhere beyond this machine (the AI tools, whose
-/// paths are model-supplied). Rust decides local-only status, not the
+/// paths are model-supplied). Only a visible Markdown file is served
+/// ([`ensure_shareable_note_path`]). Rust decides local-only status, not the
 /// requested string: a folded spelling (`ſecure`, `SECURE`) or an in-graph
 /// alias of a local-only folder answers `LocalOnly` exactly like the
 /// canonical path. Otherwise identical to [`note_read`].
@@ -619,6 +620,7 @@ async fn read_shareable(
     local_only: Option<Arc<LocalOnlyFolders>>,
     path: String,
 ) -> AppResult<ShareableNoteRead> {
+    ensure_shareable_note_path(&path)?;
     // By name first, with no IO: a dangling or unmounted link still refuses
     // as local-only rather than as a traversal error.
     if local_only
@@ -637,6 +639,20 @@ async fn read_shareable(
         })
     })
     .await
+}
+
+/// A shareable read serves visible Markdown only: notes, and the
+/// `assets/<file>.reflect.md` description sidecars the read_assets tool reads.
+/// The traversal guard alone admits hidden trees (`.git/`, `.reflect/`) and
+/// every file type, and these paths are model-supplied, so anything else is
+/// refused before any IO.
+fn ensure_shareable_note_path(path: &str) -> AppResult<()> {
+    if reflect_graph_paths::is_safe_visible(path) && path.ends_with(".md") {
+        return Ok(());
+    }
+    Err(AppError::traversal(format!(
+        "not a shareable note path: {path}"
+    )))
 }
 
 /// How a [`note_read_local`] request found the note on disk.
@@ -2036,6 +2052,75 @@ mod local_only_command_tests {
                 assert!(deleted.is_ok() && cached.is_ok() && imported.is_ok());
                 assert!(!secure.join("memo.m4a").exists());
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod note_read_shareable_tests {
+    //! The shareable read serves visible Markdown only. Every path below
+    //! exists on disk, so a refusal is the path policy, never a missing file.
+    use super::*;
+    use tauri::Manager;
+
+    type MockApp = tauri::App<tauri::test::MockRuntime>;
+
+    fn open_graph() -> (MockApp, tempfile::TempDir) {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(GraphState::default());
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        io::bootstrap(&root).unwrap();
+        for (path, contents) in [
+            (".git/config", "[remote \"origin\"]"),
+            (".reflect/x.md", "# Runtime"),
+            ("notes/a.txt", "plain text"),
+            ("notes/a.md", "# A"),
+            ("assets/a.png.reflect.md", "A chart."),
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+        }
+        {
+            let state: State<GraphState> = app.state();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 1;
+            inner.root = Some(root);
+        }
+        (app, dir)
+    }
+
+    fn read(app: &MockApp, path: &str) -> AppResult<ShareableNoteRead> {
+        tauri::async_runtime::block_on(note_read_shareable(path.to_string(), None, app.state()))
+    }
+
+    #[test]
+    fn refuses_hidden_and_non_markdown_paths() {
+        let (app, _dir) = open_graph();
+        for path in [".git/config", ".reflect/x.md", "notes/a.txt"] {
+            let refused = read(&app, path);
+            assert!(
+                matches!(refused, Err(AppError::Traversal { .. })),
+                "{path}: {refused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn still_reads_notes_and_asset_sidecars() {
+        let (app, _dir) = open_graph();
+        for (path, expected) in [
+            ("notes/a.md", "# A"),
+            ("assets/a.png.reflect.md", "A chart."),
+        ] {
+            let served = read(&app, path);
+            assert!(
+                matches!(&served, Ok(ShareableNoteRead::Content { content }) if content == expected),
+                "{path}: {served:?}"
+            );
         }
     }
 }
