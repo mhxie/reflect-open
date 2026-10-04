@@ -3,6 +3,7 @@ import {
   reverseNoteListSort,
   toggleDevtools,
   untitledNotePath,
+  wikiCopies,
   type NoteListSort,
 } from '@reflect/core'
 import { attachFilesToNote } from '@/lib/attach-files.ts'
@@ -12,7 +13,7 @@ import { runGistPublish } from '@/lib/note-gist.ts'
 import { isNativeShell } from '@/lib/platform.ts'
 import { rebuildIndexVisibly } from '@/lib/rebuild-index.ts'
 import { openRouteInNewWindow } from '@/lib/windows/open-in-new-window.ts'
-import { allNotesRoute, routeForPath, type Route } from '@/routing/route.ts'
+import { allNotesRoute, type Route, routeForPath, routesEqual, wikiRoute } from '@/routing/route.ts'
 import { registerCommands } from './registry.ts'
 import type { AppCommand, CommandContext } from './types.ts'
 
@@ -57,6 +58,32 @@ function sortAllNotes(
   context.sortAllNotes(update)
   if (context.route().kind !== 'allNotes') {
     context.navigate(allNotesRoute(null))
+  }
+}
+
+/**
+ * Open the working wiki entry in the next language (Settings order,
+ * wrapping around) that has a copy of it. A note outside the wiki, or one
+ * with no other copy, stays put.
+ */
+async function switchWikiLanguage(context: CommandContext): Promise<void> {
+  const path = context.notePath()
+  if (path === null) {
+    return
+  }
+  const route = context.route()
+  const copies = await wikiCopies(path, context.wikiLanguages())
+  // A navigation, or a peek opened or closed, while the copies loaded wins
+  // over this switch.
+  if (!routesEqual(route, context.route()) || context.notePath() !== path) {
+    return
+  }
+  const current = copies.findIndex((copy) => copy.path === path)
+  const next = [...copies.slice(current + 1), ...copies.slice(0, current)].find(
+    (copy) => copy.path !== null,
+  )
+  if (current !== -1 && next?.path) {
+    context.navigate(routeForPath(next.path))
   }
 }
 
@@ -115,6 +142,21 @@ const APP_COMMANDS: AppCommand[] = [
     title: 'Reverse note order',
     keywords: ['all notes', 'sort', 'ascending', 'descending', 'oldest'],
     run: (context) => sortAllNotes(context, reverseNoteListSort),
+  },
+  // No default keybinding: the palette and the sidebar row keep it reachable.
+  {
+    id: 'nav.wiki',
+    title: 'Wiki',
+    keywords: ['knowledge', 'claims', 'sources', 'topics', 'certified', 'translation'],
+    run: (context) => context.navigate(wikiRoute()),
+  },
+  // No default keybinding: the palette and the note sidebar's language
+  // switch keep it reachable.
+  {
+    id: 'wiki.switchLanguage',
+    title: 'Switch wiki language',
+    keywords: ['wiki', 'translation', 'language', 'english', 'chinese', '中文'],
+    run: switchWikiLanguage,
   },
   {
     id: 'nav.tasks',

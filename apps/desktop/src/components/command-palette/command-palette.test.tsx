@@ -111,6 +111,7 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
     ...context,
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

@@ -1,4 +1,4 @@
-import type { NoteListSort } from '@reflect/core'
+import type { NoteListSort, WikiLanguage } from '@reflect/core'
 import type { Route } from '@/routing/route.ts'
 import type { NavigateOptions } from '@/routing/router.tsx'
 
@@ -69,6 +69,8 @@ export interface CommandContext {
   enableSemanticSearch: () => void
   /** Persist a new All Notes order (`allNotesSort`), computed from the current one. */
   sortAllNotes: (update: (current: NoteListSort) => NoteListSort) => void
+  /** The wiki's languages, source first (the `wikiLanguages` setting), read at run time. */
+  wikiLanguages: () => readonly WikiLanguage[]
 }
 
 export interface AppCommand {

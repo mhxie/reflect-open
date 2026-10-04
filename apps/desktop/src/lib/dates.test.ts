@@ -3,6 +3,7 @@ import {
   addDaysIso,
   formatCompactDate,
   formatDayLabel,
+  formatDayRecencyLabel,
   formatEditedLabel,
   formatFullDate,
   formatRecencyLabel,
@@ -120,6 +121,18 @@ describe('dates', () => {
       expect(formatRecencyLabel(new Date(2025, 11, 31, 13, 0).getTime(), dmy, now)).toBe(
         '31/12/2025',
       )
+    })
+  })
+
+  describe('formatDayRecencyLabel', () => {
+    // Wednesday, June 10 2026.
+    const now = new Date(2026, 5, 10, 21, 0)
+
+    it('says Today, then the weekday within the week, then the short date', () => {
+      expect(formatDayRecencyLabel('2026-06-10', { dateFormat: 'mdy' }, now)).toBe('Today')
+      expect(formatDayRecencyLabel('2026-06-08', { dateFormat: 'mdy' }, now)).toBe('Mon')
+      expect(formatDayRecencyLabel('2026-06-03', { dateFormat: 'mdy' }, now)).toBe('6/3/2026')
+      expect(formatDayRecencyLabel('2026-06-03', { dateFormat: 'iso' }, now)).toBe('2026-06-03')
     })
   })
 })

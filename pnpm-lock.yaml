@@ -82,6 +82,9 @@ importers:
       '@prosekit/core':
         specifier: ^0.13.3
         version: 0.13.3(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.1)
+      '@prosekit/pm':
+        specifier: ^0.1.20
+        version: 0.1.20
       '@reflect/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -139,6 +142,9 @@ importers:
       embla-carousel-react:
         specifier: ^8.6.0
         version: 8.6.0(react@19.3.0)
+      github-slugger:
+        specifier: ^2.0.0
+        version: 2.0.0
       lucide-react:
         specifier: ^1.45.0
         version: 1.47.0(react@19.3.0)

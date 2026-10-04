@@ -71,6 +71,7 @@ vi.mock('@/components/note-pane.tsx', () => ({
         discardPendingReplacement: () => {},
         findNext: () => {},
         findPrevious: () => {},
+        revealHeading: () => false,
       })
       return () => registerHandle(dailyDate, null)
     }, [dailyDate, registerHandle])

@@ -2,7 +2,7 @@ import { ulid } from 'ulidx'
 import { upsertFrontmatter } from '../markdown/frontmatter.ts'
 import { slugForTitle } from '../markdown/slug.ts'
 import { createNoteIfAbsent } from './commands.ts'
-import { wikiNoteReference } from './note-reference.ts'
+import { splitWikiLinkTarget, wikiNoteReference } from './note-reference.ts'
 import { notePath } from './paths.ts'
 import {
   resolveExistingWikiTarget,
@@ -171,11 +171,15 @@ export async function resolveOrCreateNoteWithTitle(
     }
   }
 
+  // A link into a missing note's heading (`[[Plan#Next]]`) creates `Plan`: the
+  // fragment addresses a heading inside the note, never its title.
+  const name = splitWikiLinkTarget(title).name
+
   // On a lost claim, re-resolve both projections before considering a
   // suffix: the winner may be the note this link meant.
   return await claimNotePathForSlug(
-    slugForTitle(title),
-    newNoteSource(title, body),
+    slugForTitle(name),
+    newNoteSource(name, body),
     generation,
     async () => {
       const collisionResolution = await resolveExistingWikiTarget(title, generation)

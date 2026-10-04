@@ -4,6 +4,7 @@ import { dailyPath } from '@reflect/core'
 import { NotePane } from '@/components/note-pane.tsx'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { formatDayLabel, todayIso } from '@/lib/dates.ts'
+import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useToday } from '@/lib/use-today.ts'
@@ -45,7 +46,14 @@ const CONTENT_GUTTER = 'reflect-content-gutter'
  * bookkeeping; index↔date is pure offset math.
  */
 export function DailyStream({ target }: DailyStreamProps): ReactElement {
-  const { arrivalSeq, arrivalFocusEditor, entryId, saveScrollState, savedScroll } = useRouter()
+  const {
+    arrivalSeq,
+    arrivalFocusEditor,
+    arrivalRevealHeading,
+    entryId,
+    saveScrollState,
+    savedScroll,
+  } = useRouter()
   const virtualizerRef = useRef<VirtualizerHandle>(null)
   // The window anchors at today-on-mount and stays stable for the view's life.
   // (`dayWindow`, not `window` — shadowing the DOM global here was a footgun.)
@@ -67,6 +75,18 @@ export function DailyStream({ target }: DailyStreamProps): ReactElement {
   useLayoutEffect(() => {
     targetDateRef.current = targetDate
   }, [targetDate])
+
+  // A followed link's `#fragment` (`[[2026-10-04#Agenda]]`) scrolls the
+  // arrival day to that heading, once: a day row that scrolls out and back
+  // remounts its pane, which must not jump to the heading again.
+  const [revealedKey, setRevealedKey] = useState<number | null>(null)
+  const arrivalReveal = useMemo(
+    (): { readonly date: string; readonly reveal: NoteReveal } | null =>
+      arrivalRevealHeading === null || arrivalSeq === revealedKey
+        ? null
+        : { date: targetDate, reveal: { fragment: arrivalRevealHeading, key: arrivalSeq } },
+    [arrivalRevealHeading, arrivalSeq, revealedKey, targetDate],
+  )
 
   // Mirrored like targetDate: the focus request belongs to the arrival that
   // bumped `arrivalSeq`, so the anchor effect reads it through a ref instead
@@ -291,6 +311,8 @@ export function DailyStream({ target }: DailyStreamProps): ReactElement {
                 onAutoFocused={consumeFocus}
                 gutterClassName={CONTENT_GUTTER}
                 editorClassName={isPast ? 'min-h-[100px]' : 'min-h-[60vh]'}
+                reveal={arrivalReveal?.date === date ? arrivalReveal.reveal : undefined}
+                onRevealed={setRevealedKey}
               />
             </section>
           )

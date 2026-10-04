@@ -40,6 +40,7 @@ function editorHandle(): NoteEditorHandle {
     discardPendingReplacement: vi.fn(),
     findNext: vi.fn(),
     findPrevious: vi.fn(),
+    revealHeading: () => false,
   }
 }
 

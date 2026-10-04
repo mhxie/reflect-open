@@ -5,6 +5,7 @@ import {
   resolveExistingWikiTarget,
   resolveOrCreateNoteWithTitle,
   resolveWikiTarget,
+  splitWikiLinkTarget,
 } from '@reflect/core'
 import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { reportAmbiguousNoteTitle } from '@/editor/ambiguous-note-feedback.ts'
@@ -35,6 +36,10 @@ function reportUnavailableNoteTitle(title: string): void {
  * the request never makes a link do nothing. A `peek` request (⌥-click) floats
  * the note over the editor where the workspace offers Peek.
  *
+ * A `#fragment` (`[[Plan#Next steps]]`, a wiki claim's `[[Entry#^c3]]`)
+ * never takes part in resolving or naming the note; the opened note scrolls
+ * to that heading on arrival, in place or in Peek.
+ *
  * Resolution is async, and the host pane can unmount or the user can act
  * again while it's in flight — a late navigate would yank the user somewhere
  * they've already left, so every navigation is gated on the shared link
@@ -64,12 +69,13 @@ export function useWikiLinkNavigation(
     }) => {
       const isStale = beginLinkIntent()
       const follow = peek ? peekNoteLink : navigateNoteLink
+      const { name, fragment } = splitWikiLinkTarget(target)
       const open = (route: NoteRoute): void => {
-        follow({ target: route, openInNewWindow })
+        follow({ target: route, openInNewWindow, revealHeading: fragment ?? undefined })
       }
       void (async () => {
         try {
-          const normalized = normalizeWikiTarget(target)
+          const normalized = normalizeWikiTarget(name)
           if (normalized.raw === '') {
             return
           }

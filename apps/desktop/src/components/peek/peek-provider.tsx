@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { openSession } from '@/editor/open-documents.ts'
 import { useNoteLinkNavigation, type NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
+import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { notePathForRoute, type NoteRoute } from '@/routing/route.ts'
 
@@ -17,6 +18,16 @@ export interface NotePeekTarget {
   readonly kind: 'note'
   readonly path: string
   readonly route: NoteRoute
+  /** Scroll the note to this heading once it shows (a followed link's fragment). */
+  readonly reveal?: NoteReveal
+}
+
+let revealKeys = 0
+
+/** A fresh reveal for `fragment`, distinct from every earlier one. */
+function peekReveal(fragment: string): NoteReveal {
+  revealKeys += 1
+  return { fragment, key: revealKeys }
 }
 
 /** What the peek panel shows: a note, or a graph-relative PDF read page by page. */
@@ -78,7 +89,12 @@ export function usePeekNavigation(scopeKey?: string | number | null): NoteLinkNa
   return useCallback(
     (options) => {
       const path = notePathForRoute(options.target, today)
+      const reveal = options.revealHeading === undefined ? null : peekReveal(options.revealHeading)
       if (!options.openInNewWindow && path !== null && path === peekedPath) {
+        // Already peeked: only a heading link has somewhere new to go.
+        if (reveal !== null && openPeek !== undefined) {
+          openPeek({ kind: 'note', path, route: options.target, reveal })
+        }
         return
       }
       if (
@@ -90,7 +106,12 @@ export function usePeekNavigation(scopeKey?: string | number | null): NoteLinkNa
         navigateNoteLink(options)
         return
       }
-      openPeek({ kind: 'note', path, route: options.target })
+      openPeek({
+        kind: 'note',
+        path,
+        route: options.target,
+        ...(reveal === null ? {} : { reveal }),
+      })
     },
     [navigateNoteLink, openPeek, peekedPath, today],
   )

@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query'
-import type { NoteAttachmentType } from '@reflect/core'
+import type { NoteAttachmentType, WikiLanguage } from '@reflect/core'
 
 type GraphRoot = string | undefined
 type PaletteSearchMode = 'hybrid' | 'lexical'
@@ -25,6 +25,27 @@ export const queryKeys = {
     },
     allNotesTags(root: GraphRoot) {
       return [...this.graph(root), 'all-notes-tags'] as const
+    },
+    /** Keyed on the wiki's language folders, so a Settings → Wiki edit refetches. */
+    wikiEntries(root: GraphRoot, asOf: string, languages: readonly WikiLanguage[]) {
+      return [
+        ...this.graph(root),
+        'wiki-entries',
+        asOf,
+        languages.map((language) => language.folder),
+      ] as const
+    },
+    hasWiki(root: GraphRoot, sourceFolder: string) {
+      return [...this.graph(root), 'has-wiki', sourceFolder] as const
+    },
+    /** Keyed on the languages' labels too: the cached copies carry them. */
+    wikiCopies(root: GraphRoot, path: string, languages: readonly WikiLanguage[]) {
+      return [
+        ...this.graph(root),
+        'wiki-copies',
+        path,
+        languages.map((language) => [language.folder, language.label]),
+      ] as const
     },
     paletteSuggestions(
       root: GraphRoot,

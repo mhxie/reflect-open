@@ -33,6 +33,7 @@ function fakeContext(overrides?: Partial<CommandContext>): CommandContext {
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
     ...overrides,
   }
 }

@@ -43,6 +43,7 @@ function commandContext(notePath: string | null): CommandContext {
     openHeadingPicker: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
   }
 }
 
@@ -121,6 +122,7 @@ describe('HeadingPicker', () => {
       discardPendingReplacement: vi.fn(),
       findNext: vi.fn(),
       findPrevious: vi.fn(),
+      revealHeading: () => false,
     }
     registerNoteEditorHandle(PATH, handle)
     try {

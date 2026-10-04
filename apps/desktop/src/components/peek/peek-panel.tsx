@@ -149,6 +149,7 @@ function NotePeek({
           path={target.path}
           {...(dailyDate !== null ? { dailyDate } : {})}
           autoFocus
+          reveal={target.reveal}
           className="flex min-h-full flex-col"
           gutterClassName="reflect-content-gutter"
           editorClassName="grow"

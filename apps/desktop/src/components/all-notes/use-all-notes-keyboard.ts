@@ -9,8 +9,11 @@ export interface AllNotesKeyboardOptions {
   orderedPaths: readonly string[]
   /** Open a note (Enter in place, ⌘Enter in a new window). */
   onOpen: (path: string, event?: ModClickEvent) => void
-  /** Ask to trash the selection (⌘⌫) — the screen opens its confirm dialog. */
-  onRequestTrash: () => void
+  /**
+   * Ask to trash the selection (⌘⌫) — the screen opens its confirm dialog.
+   * Omit it on a list whose notes aren't trashed from here; ⌘⌫ then stays unbound.
+   */
+  onRequestTrash?: (() => void) | undefined
   /** The All Notes surface; shortcuts back off when focus is outside it. */
   rootRef: RefObject<HTMLElement | null>
   /** Bring a row into view after a keyboard move (V1 scrolls the selection). */
@@ -114,7 +117,7 @@ export function useAllNotesKeyboard({
           event.preventDefault()
           onOpen(firstSelected, event)
         }
-      } else if (mod && event.key === 'Backspace') {
+      } else if (mod && event.key === 'Backspace' && onRequestTrash !== undefined) {
         if (selection.selectedCount > 0) {
           event.preventDefault()
           onRequestTrash()

@@ -5,7 +5,12 @@ import type { NoteRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 
 /** Open one concrete note from a link-like UI control. */
-export type NoteLinkNavigation = (options: { target: NoteRoute; openInNewWindow: boolean }) => void
+export type NoteLinkNavigation = (options: {
+  target: NoteRoute
+  openInNewWindow: boolean
+  /** A heading for the opened note to scroll to (a link's `#fragment`); in-window only. */
+  revealHeading?: string | undefined
+}) => void
 
 /**
  * Apply the app-wide note-link convention: `openInNewWindow` (decided at
@@ -31,10 +36,11 @@ export function useNoteLinkNavigation(scopeKey?: string | number | null): NoteLi
   }, [scopeKey])
 
   return useCallback(
-    ({ target, openInNewWindow }) => {
+    ({ target, openInNewWindow, revealHeading }) => {
       const isStale = beginLinkIntent()
+      const arrival = revealHeading === undefined ? undefined : { revealHeading }
       if (!openInNewWindow) {
-        navigate(target)
+        navigate(target, arrival)
         return
       }
 
@@ -49,7 +55,7 @@ export function useNoteLinkNavigation(scopeKey?: string | number | null): NoteLi
         if (opened || isStale() || !Object.is(scopeKeyRef.current, startedInScope)) {
           return
         }
-        navigate(target)
+        navigate(target, arrival)
       })()
     },
     [beginLinkIntent, navigate],

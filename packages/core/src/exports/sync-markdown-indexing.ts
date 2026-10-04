@@ -262,6 +262,7 @@ export {
   type AttachmentReferenceRow,
   type NoteListSort,
   type NoteListSortKey,
+  type SortDirection,
   type NoteTagFacet,
   type RecentNoteRow,
   type RecentNotesOptions,

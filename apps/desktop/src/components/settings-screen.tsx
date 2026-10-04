@@ -6,6 +6,7 @@ import { AiChatSection } from './settings/ai-chat-section.tsx'
 import { AiPromptsSection } from './settings/ai-prompts-section.tsx'
 import { AiProvidersSection } from './settings/ai-providers-section.tsx'
 import { AllNotesSection } from './settings/all-notes-section.tsx'
+import { WikiSection } from './settings/wiki-section.tsx'
 import { AppearanceSection } from './settings/appearance-section.tsx'
 import { AudioMemosSection } from './settings/audio-memos-section.tsx'
 import { DateTimeSection } from './settings/date-time-section.tsx'
@@ -33,6 +34,7 @@ export function SettingsScreen(): ReactElement {
         <DateTimeSection />
         <TemplatesSection />
         <AllNotesSection />
+        <WikiSection />
         <SearchSection />
         <AiProvidersSection />
         <AudioMemosSection />

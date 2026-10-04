@@ -69,6 +69,7 @@ vi.mock('@/editor/note-editor.tsx', async () => {
           discardPendingReplacement: () => {},
           findNext: () => {},
           findPrevious: () => {},
+          revealHeading: () => false,
         })
         return () => handleRef?.(null)
       }, [handleRef])

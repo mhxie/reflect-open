@@ -48,6 +48,7 @@ function fakeEditor(): NoteEditorHandle & { applied: string[] } {
     discardPendingReplacement: () => {},
     findNext: () => {},
     findPrevious: () => {},
+    revealHeading: () => false,
   }
 }
 

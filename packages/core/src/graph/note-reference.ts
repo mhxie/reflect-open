@@ -9,10 +9,10 @@ import { isNotePath, isSafeVisibleGraphPath } from './paths.ts'
  * file wins, a note title is the fallback), and `self` is a bare `#Heading`
  * that never leaves its source note.
  *
- * A `#fragment` is stripped and discarded: it must not reach the lookup (or
- * `[[Plan#Next]]` would search for a note called `Plan#Next`), and Reflect
- * does not navigate to headings. Restoring that feature means returning the
- * stripped value from here, nothing more.
+ * A `#fragment` is stripped: it must not reach the lookup (or `[[Plan#Next]]`
+ * would search for a note called `Plan#Next`). Link navigation reads it
+ * separately through {@link splitWikiLinkTarget} to scroll the opened note to
+ * that heading.
  */
 export type NoteReference =
   | { readonly kind: 'path'; readonly path: string }
@@ -38,6 +38,24 @@ const MARKDOWN_EXTENSION_RE = /\.md$/i
 function wikiTargetPath(raw: string): string {
   const hash = raw.indexOf('#')
   return (hash === -1 ? raw : raw.slice(0, hash)).trim()
+}
+
+/**
+ * A `[[wiki link]]` target split at its first `#`: the note it names and the
+ * heading fragment it points into (`Plan#Next steps` → `Plan` / `Next steps`;
+ * a wiki claim's `Entry#^c3` → `Entry` / `^c3`). The fragment is null when
+ * absent or blank; the name is empty for a bare `#Heading`. Both are trimmed.
+ */
+export function splitWikiLinkTarget(target: string): {
+  readonly name: string
+  readonly fragment: string | null
+} {
+  const hash = target.indexOf('#')
+  if (hash === -1) {
+    return { name: target.trim(), fragment: null }
+  }
+  const fragment = target.slice(hash + 1).trim()
+  return { name: target.slice(0, hash).trim(), fragment: fragment === '' ? null : fragment }
 }
 
 /** Everything before the first `#`, percent-decoded; null on a malformed escape. */
