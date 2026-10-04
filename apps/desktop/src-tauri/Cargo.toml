@@ -35,7 +35,9 @@ tauri-plugin-opener = "2.7.0"
 percent-encoding = "2.3.2"
 # `time` backs the bounded wait in `windows::close_note_windows` (tauri
 # already runs on tokio; this only makes the sleep primitive addressable).
-tokio = { version = "1.53.1", features = ["time", "sync", "fs", "io-util", "net"] }
+# `macros` backs the `select!` that races an on-device request against its
+# cancel (`src/on_device_http.rs`).
+tokio = { version = "1.53.1", features = ["time", "sync", "fs", "io-util", "net", "macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # `hooks` adds the authorizer API used to lock the read-only `db_query` bridge
@@ -75,6 +77,9 @@ image = { version = "0.25.10", default-features = false, features = [
   "webp",
 ] }
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls"] }
+# The parsed host behind the on-device transport's loopback check; the same
+# url crate reqwest parses with.
+url = "2.5.8"
 # Reflect V1 exports are zip archives of the graph-folder layout. Keep the
 # reader lean: stored entries plus the usual deflate method are enough here.
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

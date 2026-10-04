@@ -5750,6 +5750,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trash",
+ "url",
  "walkdir",
  "whisper-rs",
  "windows-native-keyring-store",
