@@ -905,3 +905,189 @@ fn scan_resolution_agrees_with_the_index_on_stems() {
     assert_eq!(stdout(&indexed), scanned_path);
     assert!(scanned_path.contains("a/Plan.md"));
 }
+
+// ---- local-only folders -----------------------------------------------------
+
+/// The record the desktop writes for the fixture's `finance/secure`.
+#[cfg(unix)]
+const SECURE: &str = r#"["secure"]"#;
+
+/// A graph whose `finance/secure` links into a raw store outside it, indexed
+/// the way the desktop does it: the public note by the shared fixture path,
+/// the local-only note as a private row the CLI's own walk can never see,
+/// and `record` (the raw `index_meta` value, normally the folder names).
+#[cfg(unix)]
+fn graph_with_local_only_note(record: Option<&str>) -> (Fixture, TempDir) {
+    let fixture = graph();
+    fixture.write_note("notes/public.md", "# Public\nledger overview\n");
+    fixture.build_index();
+    let raw = TempDir::new().unwrap();
+    let bank = "# Bank\nledger account 1234\n";
+    fs::create_dir_all(raw.path().join("secure")).unwrap();
+    fs::write(raw.path().join("secure/bank.md"), bank).unwrap();
+    fs::create_dir_all(fixture.root().join("finance")).unwrap();
+    std::os::unix::fs::symlink(
+        raw.path().join("secure"),
+        fixture.root().join("finance/secure"),
+    )
+    .unwrap();
+
+    let conn = rusqlite::Connection::open(fixture.root().join(".reflect/index.sqlite")).unwrap();
+    conn.execute(
+        "INSERT INTO notes(path, id, title, title_key, kind, daily_date, is_private,
+                           is_pinned, pinned_order, file_hash, mtime, updated_at, preview)
+         VALUES('finance/secure/bank.md', NULL, 'Bank', 'bank', 'note', NULL, 1, 0, NULL,
+                ?1, 1, 1, '')",
+        params![hash_content(bank)],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO note_claims(note_path, key, tier) VALUES('finance/secure/bank.md', 'bank', ?1)",
+        params![TIER_TITLE],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO search_fts(path, title, body) VALUES('finance/secure/bank.md', 'Bank', ?1)",
+        params![bank],
+    )
+    .unwrap();
+    if let Some(record) = record {
+        conn.execute(
+            "INSERT INTO index_meta(key, value) VALUES(?1, ?2)",
+            params![reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY, record],
+        )
+        .unwrap();
+    }
+    (fixture, raw)
+}
+
+#[cfg(unix)]
+#[test]
+fn local_only_rows_never_read_as_stale_or_surface_in_search() {
+    let (fixture, _raw) = graph_with_local_only_note(Some(SECURE));
+    let value = json(&reflect(&fixture, &["search", "ledger", "--json"]));
+    assert_eq!(value["stale"], false, "local-only rows must not count");
+    let results = value["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["path"], "notes/public.md");
+
+    // Control: without the desktop's record the hidden row reads as deleted.
+    let (unrecorded, _raw) = graph_with_local_only_note(None);
+    let value = json(&reflect(&unrecorded, &["search", "ledger", "--json"]));
+    assert_eq!(value["stale"], true);
+}
+
+#[cfg(unix)]
+#[test]
+fn resolving_to_a_local_only_note_is_refused_as_private() {
+    let (fixture, _raw) = graph_with_local_only_note(Some(SECURE));
+    for command in ["show", "path", "open"] {
+        let output = reflect(&fixture, &[command, "Bank", "--json"]);
+        assert_eq!(output.status.code(), Some(3), "{command}");
+        assert!(stderr(&output).contains("private"), "{command}");
+        assert!(!stdout(&output).contains("1234"), "{command}");
+    }
+}
+
+/// A record that is present but unreadable leaves which notes are local-only
+/// unknown, so every note read is refused (exit 3), public notes included:
+/// one that does not parse, and one the query cannot read at all (its table
+/// renamed away), which must not pass for "no record". The control with a
+/// readable record shows the public note.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_local_only_record_refuses_every_note_read() {
+    let (unparsable, _raw) = graph_with_local_only_note(Some("not json"));
+    let (unqueryable, _raw_too) = graph_with_local_only_note(Some(SECURE));
+    rusqlite::Connection::open(unqueryable.root().join(".reflect/index.sqlite"))
+        .unwrap()
+        .execute_batch("ALTER TABLE index_meta RENAME TO index_meta_old")
+        .unwrap();
+    let reads: [&[&str]; 4] = [
+        &["show", "Public"],
+        &["path", "Public"],
+        &["open", "Public", "--print"],
+        &["search", "ledger"],
+    ];
+    for fixture in [&unparsable, &unqueryable] {
+        for args in reads {
+            let output = reflect(fixture, args);
+            assert_eq!(output.status.code(), Some(3), "{args:?}");
+            assert!(
+                stderr(&output).contains("record of local-only folders is unreadable"),
+                "{args:?}: {}",
+                stderr(&output)
+            );
+            assert!(stdout(&output).is_empty(), "{args:?}");
+        }
+    }
+    let (readable, _raw) = graph_with_local_only_note(Some(SECURE));
+    let shown = reflect(&readable, &["show", "Public"]);
+    assert!(shown.status.success(), "{}", stderr(&shown));
+    assert!(stdout(&shown).contains("ledger overview"));
+}
+
+/// Like the desktop, the CLI keeps every recorded name, even one today's
+/// rules refuse (here a folder Reflect now manages), so the notes in it stay
+/// private; the control without the record shows the same note.
+#[cfg(unix)]
+#[test]
+fn a_recorded_name_todays_rules_refuse_keeps_its_notes_private() {
+    let (fixture, _raw) = graph_with_local_only_note(Some(r#"["notes"]"#));
+    for command in ["show", "path"] {
+        let output = reflect(&fixture, &[command, "Public"]);
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{command}: {}",
+            stderr(&output)
+        );
+        assert!(stdout(&output).is_empty(), "{command}");
+    }
+    let (unrecorded, _raw) = graph_with_local_only_note(None);
+    let shown = reflect(&unrecorded, &["show", "Public"]);
+    assert!(shown.status.success(), "{}", stderr(&shown));
+}
+
+/// An index file that exists but cannot be read (here bytes that are not a
+/// database; in practice, say, a write-ahead log only the app can recover)
+/// may record local-only folders the CLI cannot see, so `show`, `path` and
+/// `open` refuse every note (exit 3), a real-directory local-only note
+/// included, and `today` keeps working without the index. Control: with no
+/// index file at all, the same graph resolves by scanning the files.
+#[test]
+fn an_index_that_cannot_be_read_refuses_every_note_read() {
+    let fixture = graph();
+    fixture.write_note("notes/public.md", "# Public\nledger overview\n");
+    fixture.write_note("people/secure/visa.md", "# Visa\npassport 1234\n");
+    let index = fixture.root().join(".reflect/index.sqlite");
+    fs::write(&index, b"not a database").unwrap();
+    let reads: [&[&str]; 4] = [
+        &["show", "Public"],
+        &["show", "people/secure/visa.md"],
+        &["path", "Public"],
+        &["open", "Public", "--print"],
+    ];
+    for args in reads {
+        let output = reflect(&fixture, args);
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains("which notes are local-only is unknown"),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+        assert!(stdout(&output).is_empty(), "{args:?}");
+    }
+    assert!(reflect(&fixture, &["today", "--path"]).status.success());
+
+    fs::remove_file(&index).unwrap();
+    for args in [&["show", "Public"][..], &["path", "Public"]] {
+        let output = reflect(&fixture, args);
+        assert!(output.status.success(), "{args:?}: {}", stderr(&output));
+    }
+}

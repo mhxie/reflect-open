@@ -1,3 +1,4 @@
+import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
 import { foldKey } from '../markdown/keys.ts'
@@ -167,8 +168,11 @@ export async function rewriteLinksForTitleChange(
     }
   }
 
+  // A note inside a local-only folder is read-only: its links are never
+  // rewritten (the old-title alias keeps them resolving) and it is not a
+  // failure to report.
   const sources = [...new Set([...titleSources, ...backlinkSources])]
-    .filter((source) => source !== path)
+    .filter((source) => source !== path && !isLocalOnlyPath(source))
     .sort()
   const repoint =
     collision || destinationBlocked ? null : { fromKey: foldKey(fromTarget), to: toTarget }
@@ -269,8 +273,10 @@ export async function rewritePathLinksForMove(
     throw new Error(`move destination has no wiki spelling: ${toPath}`)
   }
   const fromPathKey = foldGraphPath(fromPath)
+  // Local-only notes are read-only; their path links dangle like any
+  // unwritable source's, without being read or reported.
   const sources = (await io.pathLinkSources(fromPathKey))
-    .filter((source) => source !== fromPath)
+    .filter((source) => source !== fromPath && !isLocalOnlyPath(source))
     .sort()
   const rewritten: string[] = []
   const failed: string[] = []

@@ -4,10 +4,12 @@
 //! plain functions over a [`Connection`] so the command layer ([`super`]) owns
 //! transactions and generation gating while these stay directly unit-testable.
 
+use reflect_graph_paths::LocalOnlyFolders;
+use reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
 use rusqlite::{params, Connection};
 use serde::Deserialize;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 /// A note's extracted projection, built in TS (Plan 03) and applied as one
 /// row-set. Mirrors the `indexedNoteSchema` zod contract in
@@ -291,7 +293,7 @@ pub(super) fn move_note(
         .prepare_cached("SELECT 1 FROM notes WHERE path = ?1")?
         .exists(params![to])?;
     if occupied {
-        return Err(crate::error::AppError::io(format!(
+        return Err(AppError::io(format!(
             "cannot move note: {to} is already indexed"
         )));
     }
@@ -371,5 +373,118 @@ pub(super) fn remove_note(conn: &Connection, path: &str) -> AppResult<()> {
         .execute(params![path])?;
     conn.prepare_cached("DELETE FROM search_fts WHERE path = ?1")?
         .execute(params![path])?;
+    Ok(())
+}
+
+/// The local-only rule, repeated on the write side: a note inside a
+/// local-only folder is private whatever its frontmatter says. The
+/// TypeScript projection already sets the flag; this keeps it set for any
+/// projection that arrives without it.
+pub(super) fn enforce_local_only(note: &mut IndexedNote, local_only: Option<&LocalOnlyFolders>) {
+    if local_only.is_some_and(|folders| folders.contains(&note.path)) {
+        note.is_private = true;
+    }
+}
+
+/// Mark one stored row private (a row move that landed inside a local-only
+/// folder: moves carry the old row's flag without reprojecting).
+pub(super) fn mark_private(conn: &Connection, path: &str) -> AppResult<()> {
+    set_private(conn, path, true)
+}
+
+/// Set a stored row's privacy flag (a no-op when no row is stored).
+pub(super) fn set_private(conn: &Connection, path: &str, private: bool) -> AppResult<()> {
+    conn.prepare_cached("UPDATE notes SET is_private = ?2 WHERE path = ?1")?
+        .execute(params![path, private])?;
+    Ok(())
+}
+
+/// A stored row's privacy flag, or `None` when no row is stored.
+pub(super) fn row_private(conn: &Connection, path: &str) -> AppResult<Option<bool>> {
+    match conn.query_row(
+        "SELECT is_private FROM notes WHERE path = ?1",
+        params![path],
+        |row| row.get::<_, bool>(0),
+    ) {
+        Ok(private) => Ok(Some(private)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Mark every stored row inside a local-only folder private: the open-time
+/// sweep for rows written before the folder was configured, which the
+/// content-hash-gated reconcile would never reproject. Returns how many rows
+/// changed.
+pub(super) fn mark_local_only_private(
+    conn: &Connection,
+    folders: &LocalOnlyFolders,
+) -> AppResult<usize> {
+    let paths: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT path FROM notes WHERE is_private = 0")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut marked = 0;
+    for path in paths.iter().filter(|path| folders.contains(path)) {
+        mark_private(conn, path)?;
+        marked += 1;
+    }
+    Ok(marked)
+}
+
+/// Record the graph's local-only folder names for read-only consumers (the
+/// CLI) under [`LOCAL_ONLY_FOLDERS_KEY`], or clear the key when none are
+/// configured. Unless `replace`, the record only grows: the names already
+/// recorded stay, the current folders join them, and a record that cannot
+/// be read is left as it is.
+pub(super) fn record_local_only_folders(
+    conn: &Connection,
+    local_only: Option<&LocalOnlyFolders>,
+    replace: bool,
+) -> AppResult<()> {
+    let mut names: Vec<String> = Vec::new();
+    if !replace {
+        let unreadable = |err: &dyn std::fmt::Display| {
+            tracing::warn!(
+                %err,
+                "the index's local-only record cannot be read; this paused open leaves it as it is"
+            );
+        };
+        match conn.query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            [LOCAL_ONLY_FOLDERS_KEY],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(raw) => match serde_json::from_str::<Vec<String>>(&raw) {
+                Ok(recorded) => names = recorded,
+                Err(err) => {
+                    unreadable(&err);
+                    return Ok(());
+                }
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(err) => {
+                unreadable(&err);
+                return Ok(());
+            }
+        }
+    }
+    for name in local_only.map(LocalOnlyFolders::names).unwrap_or_default() {
+        if !names.iter().any(|kept| kept.eq_ignore_ascii_case(name)) {
+            names.push(name.clone());
+        }
+    }
+    if names.is_empty() {
+        conn.prepare_cached("DELETE FROM index_meta WHERE key = ?1")?
+            .execute(params![LOCAL_ONLY_FOLDERS_KEY])?;
+        return Ok(());
+    }
+    let names = serde_json::to_string(&names).map_err(|err| AppError::io(err.to_string()))?;
+    conn.prepare_cached(
+        "INSERT INTO index_meta(key, value) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )?
+    .execute(params![LOCAL_ONLY_FOLDERS_KEY, names])?;
     Ok(())
 }

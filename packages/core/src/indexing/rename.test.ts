@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import { resolved, unresolved } from '../markdown/index.ts'
 import {
   nextAliases,
@@ -64,6 +65,34 @@ describe('rewriteLinksForTitleChange', () => {
     })
     expect(writes['notes/a.md']).toBe('See [[New Title]] for context.\n')
     expect(writes['notes/b.md']).toBe('Alias form: [[New Title|the doc]].\n')
+  })
+
+  it('never reads or rewrites a source inside a local-only folder', async () => {
+    const { io, writes } = fakeIo({
+      'notes/a.md': 'See [[Old Title]].\n',
+      'finance/secure/bank.md': 'Also [[Old Title]].\n',
+    })
+    const reads: string[] = []
+    const read = io.read
+    io.read = async (path) => {
+      reads.push(path)
+      return await read(path)
+    }
+    setLocalOnlyFolders(['secure'])
+    try {
+      const result = await rewriteLinksForTitleChange({
+        path: 'notes/target.md',
+        from: 'Old Title',
+        to: 'New Title',
+        io,
+      })
+      expect(result.rewritten).toEqual(['notes/a.md'])
+      expect(result.failed).toEqual([])
+      expect(reads).toEqual(['notes/a.md'])
+      expect(writes['finance/secure/bank.md']).toBeUndefined()
+    } finally {
+      setLocalOnlyFolders([])
+    }
   })
 
   it('skips the renamed note itself and sources without a rewritable link', async () => {
@@ -710,6 +739,24 @@ describe('rewritePathLinksForMove', () => {
       },
     }
   }
+
+  it('leaves path links inside local-only folders alone, unreported', async () => {
+    const { io, writes } = pathIo(
+      {
+        'Journal.md': 'See [[notes/plan-2]].',
+        'finance/secure/ledger.md': 'Plan: [[notes/plan-2]].',
+      },
+      ['Journal.md', 'finance/secure/ledger.md'],
+    )
+    setLocalOnlyFolders(['secure'])
+    try {
+      const result = await rewritePathLinksForMove('notes/plan-2.md', 'notes/roadmap.md', io)
+      expect(result).toEqual({ rewritten: ['Journal.md'], failed: [] })
+      expect(writes['finance/secure/ledger.md']).toBeUndefined()
+    } finally {
+      setLocalOnlyFolders([])
+    }
+  })
 
   it('retargets inbound path links and skips unreadable sources', async () => {
     const { io, writes } = pathIo(

@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog'
-import { assetFileName, errorMessage, importAsset } from '@reflect/core'
+import { assetFileName, errorMessage, importAsset, isLocalOnlyPath } from '@reflect/core'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -21,15 +21,16 @@ function escapeLinkLabel(name: string): string {
  * caret of the current note's editor — the same markdown a drag-and-drop
  * produces, so the two entry points can't drift.
  *
- * No-ops without an open graph, a routed note, or a mounted editor; a
- * cancelled picker inserts nothing. When one copy fails mid-batch, the links
+ * No-ops without an open graph, a routed note, or a mounted editor, and for a
+ * note inside a local-only folder (read-only; its files must not be copied
+ * into the synced `assets/`); a cancelled picker inserts nothing. When one copy fails mid-batch, the links
  * for the files that already landed are still inserted — they exist in
  * `assets/` either way, and an unlinked copy would be an invisible orphan.
  */
 export async function attachFilesToNote(context: CommandContext): Promise<void> {
   const generation = context.generation()
   const notePath = context.notePath()
-  if (generation === null || notePath === null) {
+  if (generation === null || notePath === null || isLocalOnlyPath(notePath)) {
     return
   }
   if (noteEditorHandleFor(notePath) === null) {

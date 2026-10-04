@@ -15,6 +15,7 @@ use std::time::UNIX_EPOCH;
 
 use reflect_graph_paths::{
     evicted_logical_path, eviction_placeholder, is_dataless, normalize_line_endings,
+    LocalOnlyFolders,
 };
 
 use crate::error::{AppError, AppResult};
@@ -150,32 +151,43 @@ const O_NOFOLLOW_ANY: i32 = 0x2000_0000;
 /// Apple platforms. Symlinks are outside the graph-content contract:
 /// discovery never lists them and the watcher reports them as removals; this
 /// closes the remaining door — a direct read through a stale route or index
-/// row. The root is canonicalized first (a vault may legitimately live
-/// *behind* a symlink — `/var`, a linked `~/Dropbox`); `O_NOFOLLOW_ANY` then
-/// polices only the components below it. Off Apple targets it falls back to
-/// a plain read (the lexical resolve guard still applies). The returned text
-/// uses `\n` line endings.
-pub(super) fn read_note_no_follow(root: &Path, abs: &Path) -> std::io::Result<String> {
+/// row. `base` must already be canonical (`resolve::resolve_read` returns the
+/// canonical graph root, or a local-only link's validated target) and is
+/// used as-is: `O_NOFOLLOW_ANY` then polices every component of
+/// `base.join(rest)`, so neither a symlink below the base nor one swapped into
+/// it after validation is followed. Off Apple targets it falls back to a
+/// plain read (the resolve guards still apply).
+pub(super) fn read_note_no_follow(base: &Path, rest: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut contents = String::new();
+    open_no_follow(base, rest)?.read_to_string(&mut contents)?;
+    Ok(normalize_line_endings(contents))
+}
+
+/// [`read_note_no_follow`] for bytes: a local-only attachment served to the
+/// webview.
+pub(super) fn read_bytes_no_follow(base: &Path, rest: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut contents = Vec::new();
+    open_no_follow(base, rest)?.read_to_end(&mut contents)?;
+    Ok(contents)
+}
+
+/// Open `base.join(rest)` for reading with every component policed by
+/// `O_NOFOLLOW_ANY` on Apple platforms (a plain open elsewhere).
+fn open_no_follow(base: &Path, rest: &Path) -> std::io::Result<fs::File> {
+    let path = base.join(rest);
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        use std::io::Read;
         use std::os::unix::fs::OpenOptionsExt;
-        let path = match abs.strip_prefix(root) {
-            Ok(rel) => root.canonicalize()?.join(rel),
-            Err(_) => abs.to_path_buf(),
-        };
-        let mut file = fs::OpenOptions::new()
+        fs::OpenOptions::new()
             .read(true)
             .custom_flags(O_NOFOLLOW_ANY)
-            .open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        Ok(normalize_line_endings(contents))
+            .open(path)
     }
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
-        let _ = root;
-        fs::read_to_string(abs).map(normalize_line_endings)
+        fs::File::open(path)
     }
 }
 
@@ -519,14 +531,22 @@ pub(super) fn collect_files(
 }
 
 /// Recursively list every eligible Markdown note from the graph root, via the
-/// shared vault walk (`reflect_graph_paths::walk_catalog`).
+/// shared vault walk (`reflect_graph_paths::walk_catalog`), following no
+/// local-only link.
 pub(super) fn collect_note_files(root: &Path) -> Vec<FileMeta> {
-    collect_file_catalog(root).notes
+    collect_file_catalog(root, None).notes
 }
 
-/// Build one snapshot of every eligible note and supported attachment.
-pub(super) fn collect_file_catalog(root: &Path) -> FileCatalog {
-    let catalog = reflect_graph_paths::walk_catalog(root);
+/// Build one snapshot of every eligible note and supported attachment,
+/// following the graph's local-only links when it has any.
+pub(super) fn collect_file_catalog(
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+) -> FileCatalog {
+    let catalog = match local_only {
+        Some(folders) => reflect_graph_paths::walk_catalog_with(root, folders),
+        None => reflect_graph_paths::walk_catalog(root),
+    };
     FileCatalog {
         notes: catalog.notes.into_iter().map(file_meta_from).collect(),
         attachments: catalog
@@ -579,12 +599,64 @@ mod tests {
         symlink(outside.path().join("real"), dir.path().join("linked")).unwrap();
         fs::write(dir.path().join("notes/plain.md"), "# plain").unwrap();
 
-        let root = dir.path();
-        assert!(read_note_no_follow(root, &root.join("notes/leaf.md")).is_err());
-        assert!(read_note_no_follow(root, &root.join("linked/secret.md")).is_err());
+        let root = dir.path().canonicalize().unwrap();
+        assert!(read_note_no_follow(&root, Path::new("notes/leaf.md")).is_err());
+        assert!(read_note_no_follow(&root, Path::new("linked/secret.md")).is_err());
         assert_eq!(
-            read_note_no_follow(root, &root.join("notes/plain.md")).unwrap(),
+            read_note_no_follow(&root, Path::new("notes/plain.md")).unwrap(),
             "# plain"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn local_only_reads_open_from_the_target_and_refuse_nested_symlinks() {
+        use std::os::unix::fs::symlink;
+        let raw = tempdir().unwrap();
+        let elsewhere = tempdir().unwrap();
+        let target = raw.path().canonicalize().unwrap().join("secure");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("bank.md"), "# Bank").unwrap();
+        fs::write(elsewhere.path().join("leak.md"), "# Leak").unwrap();
+        symlink(elsewhere.path(), target.join("alias")).unwrap();
+
+        assert_eq!(
+            read_note_no_follow(&target, Path::new("bank.md")).unwrap(),
+            "# Bank"
+        );
+        assert_eq!(
+            read_bytes_no_follow(&target, Path::new("bank.md")).unwrap(),
+            b"# Bank"
+        );
+        assert!(read_note_no_follow(&target, Path::new("alias/leak.md")).is_err());
+        assert!(read_bytes_no_follow(&target, Path::new("alias/leak.md")).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_base_is_opened_as_given_and_never_re_resolved() {
+        use std::os::unix::fs::symlink;
+        // A base that was canonical when validated, then swapped for a
+        // symlink: the open must refuse it rather than follow the new link.
+        let dir = tempdir().unwrap();
+        let parent = dir.path().canonicalize().unwrap();
+        let elsewhere = parent.join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(elsewhere.join("bank.md"), "# Swapped").unwrap();
+        let base = parent.join("secure");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("bank.md"), "# Bank").unwrap();
+        assert_eq!(
+            read_note_no_follow(&base, Path::new("bank.md")).unwrap(),
+            "# Bank"
+        );
+        fs::remove_dir_all(&base).unwrap();
+        symlink(&elsewhere, &base).unwrap();
+        assert!(read_note_no_follow(&base, Path::new("bank.md")).is_err());
+        // Control: re-resolving the base first, as the old open did, follows it.
+        assert_eq!(
+            fs::read_to_string(base.canonicalize().unwrap().join("bank.md")).unwrap(),
+            "# Swapped"
         );
     }
 
@@ -766,6 +838,52 @@ mod tests {
         );
     }
 
+    /// The exclusion marks are for Reflect's own rebuildable state only. On a
+    /// user's folder they would drop it from Time Machine, and Dropbox
+    /// deletes an ignored folder from its server and every other device: a
+    /// listing must never set any of them on a local-only folder.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_listing_never_marks_a_local_only_folder() {
+        use std::os::unix::fs::symlink;
+        for configured in [true, false] {
+            let dir = tempdir().unwrap();
+            let base = dir.path().canonicalize().unwrap();
+            let (root, raw) = (base.join("graph"), base.join("raw"));
+            bootstrap(&root).unwrap();
+            fs::create_dir_all(root.join("people/secure")).unwrap();
+            fs::create_dir_all(root.join("finance")).unwrap();
+            fs::create_dir_all(raw.join("finance/secure")).unwrap();
+            fs::write(root.join("people/secure/visa.md"), "# Visa").unwrap();
+            fs::write(raw.join("finance/secure/bank.md"), "# Bank").unwrap();
+            symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+            let folders = LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+
+            let catalog = collect_file_catalog(&root, configured.then_some(&folders));
+            assert_eq!(catalog.notes.len(), if configured { 2 } else { 1 });
+            // The File Provider and Dropbox ignores and the Time Machine
+            // exclusion, as `mark_dir_local_only` stores them.
+            let marks = [
+                "com.apple.fileprovider.ignore#P",
+                "com.dropbox.ignored",
+                "com.apple.metadata:com_apple_backup_excludeItem",
+            ];
+            let carried = |path: &Path| -> Vec<String> {
+                xattr::list(path)
+                    .unwrap()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .filter(|name| marks.contains(&name.as_str()))
+                    .collect()
+            };
+            // Control: the runtime directory carries every mark, so a mark
+            // would be observable here.
+            assert_eq!(carried(&root.join(REFLECT_DIR)).len(), marks.len());
+            for folder in [root.join("people/secure"), raw.join("finance/secure")] {
+                assert_eq!(carried(&folder), Vec::<String>::new(), "{folder:?}");
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn bootstrap_marks_a_present_git_dir_local_only() {
@@ -940,7 +1058,7 @@ mod tests {
         atomic_write_bytes(dir.path(), &dir.path().join("assets/photo.png"), b"png").unwrap();
         atomic_write_bytes(dir.path(), &dir.path().join("Media/clip.MP4"), b"video").unwrap();
 
-        let catalog = collect_file_catalog(dir.path());
+        let catalog = collect_file_catalog(dir.path(), None);
         let notes: Vec<&str> = catalog.notes.iter().map(|f| f.path.as_str()).collect();
         let attachments: Vec<&str> = catalog
             .attachments

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { echoLocalWrite } from '../indexing/local-write-echo.ts'
 import { getBridge, type Unlisten } from '../ipc/bridge.ts'
 import { call } from '../ipc/invoke.ts'
+import { setLocalOnlyFolders } from './local-only.ts'
 import {
   fileMetaSchema,
   graphImportProgressSchema,
@@ -22,9 +23,33 @@ import {
 /** Commands that return `()` from Rust serialize as `null` over IPC. */
 const voidSchema = z.null()
 
-/** Open an existing graph at `path` (ensures the standard layout exists). */
+/** The graph session whose local-only folders the predicate holds. */
+let localOnlyGeneration = -Infinity
+
+/**
+ * Record a graph session's local-only folders as this window's (see
+ * `./local-only.ts`). Generations only grow, so a response for an older
+ * session that lands late never replaces a newer graph's names. The
+ * predicate is the UI's and a first gate; every path off this machine is
+ * also refused by Rust against the graph that serves the bytes.
+ */
+function adoptLocalOnlyFolders(info: GraphInfo): void {
+  if (info.generation < localOnlyGeneration) {
+    return
+  }
+  localOnlyGeneration = info.generation
+  setLocalOnlyFolders(info.localOnlyFolders)
+}
+
+/**
+ * Open an existing graph at `path` (ensures the standard layout exists) and
+ * record its local-only folders as the session's: Rust's graph state
+ * switches with this call, so the predicate does too.
+ */
 export async function openGraph(path: string): Promise<GraphInfo> {
-  return await call('graph_open', { path }, graphInfoSchema)
+  const info = await call('graph_open', { path }, graphInfoSchema)
+  adoptLocalOnlyFolders(info)
+  return info
 }
 
 /**
@@ -43,7 +68,9 @@ export async function openNoteWindow(deepLink: string): Promise<void> {
  * one-shot deep link the window was created for. Errors when no graph is open.
  */
 export async function windowBootstrap(): Promise<WindowBootstrap> {
-  return await call('window_bootstrap', {}, windowBootstrapSchema)
+  const boot = await call('window_bootstrap', {}, windowBootstrapSchema)
+  adoptLocalOnlyFolders(boot.graph)
+  return boot
 }
 
 /**
@@ -56,9 +83,11 @@ export async function closeNoteWindows(): Promise<void> {
   await call('close_note_windows', {}, voidSchema)
 }
 
-/** Create a new graph at `path` and open it. */
+/** Create a new graph at `path` and open it (see {@link openGraph}). */
 export async function createGraph(path: string): Promise<GraphInfo> {
-  return await call('graph_create', { path }, graphInfoSchema)
+  const info = await call('graph_create', { path }, graphInfoSchema)
+  adoptLocalOnlyFolders(info)
+  return info
 }
 
 /**
@@ -127,7 +156,12 @@ export async function readNote(path: string, generation?: number): Promise<strin
 }
 
 const localNoteReadSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('content'), content: z.string() }),
+  z.object({
+    kind: z.literal('content'),
+    content: z.string(),
+    // Rust's verdict from the entry the path resolves to, not the spelling.
+    localOnly: z.boolean().default(false),
+  }),
   z.object({ kind: z.literal('evicted') }),
 ])
 
@@ -145,6 +179,28 @@ export type LocalNoteRead = z.infer<typeof localNoteReadSchema>
  */
 export async function readNoteLocal(path: string, generation?: number): Promise<LocalNoteRead> {
   return await call('note_read_local', { path, generation }, localNoteReadSchema)
+}
+
+const shareableNoteReadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('content'), content: z.string() }),
+  z.object({ kind: z.literal('localOnly') }),
+])
+
+/** How a {@link readNoteShareable} request found the note. */
+export type ShareableNoteRead = z.infer<typeof shareableNoteReadSchema>
+
+/**
+ * Read a note bound for somewhere beyond this machine (the AI tools, whose
+ * paths are model-supplied). Rust decides whether the note lies in a
+ * local-only folder from the entry the path resolves to, so a case-folded or
+ * aliased spelling answers `localOnly` exactly like the canonical path, and
+ * nothing is read.
+ */
+export async function readNoteShareable(
+  path: string,
+  generation?: number,
+): Promise<ShareableNoteRead> {
+  return await call('note_read_shareable', { path, generation }, shareableNoteReadSchema)
 }
 
 /**
@@ -297,8 +353,9 @@ export async function revealAsset(path: string, generation: number): Promise<voi
 
 /**
  * List every file (any extension) under a graph-relative directory, e.g.
- * `audio-memos`. A missing directory lists as empty. Pinned to `generation`
- * for the same reason as {@link readAsset}.
+ * `audio-memos`. A missing directory lists as empty, and files in a
+ * local-only folder (or a directory linked into one) are never listed.
+ * Pinned to `generation` for the same reason as {@link readAsset}.
  */
 export async function listDir(dir: string, generation: number): Promise<FileMeta[]> {
   return await call('dir_list', { dir, generation }, z.array(fileMetaSchema))

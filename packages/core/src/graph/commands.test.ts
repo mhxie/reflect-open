@@ -1,15 +1,73 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { subscribeOwnWrites } from '../indexing/local-write-echo.ts'
 import { setBridge } from '../ipc/bridge.ts'
+import { isLocalOnlyPath } from './local-only.ts'
 import {
   cancelReflectV1Import,
+  createGraph,
   createNoteIfAbsent,
   importReflectV1Zip,
   markReflectV1ImportOwnWrites,
   openAsset,
+  openGraph,
   subscribeImportProgress,
+  windowBootstrap,
   IMPORT_PROGRESS_EVENT,
 } from './commands.ts'
+
+/** A bridge answering the graph-open commands with `info` per command. */
+function graphBridge(infos: Record<string, { generation: number; localOnlyFolders: string[] }>) {
+  setBridge({
+    invoke: async (command) => {
+      const info = infos[command]
+      if (info === undefined) {
+        throw new Error(`unexpected command ${command}`)
+      }
+      const graph = { root: '/g', name: 'g', ...info }
+      return command === 'window_bootstrap'
+        ? { graph, indexGeneration: null, initialDeepLink: null }
+        : graph
+    },
+    listen: async () => () => {},
+  })
+}
+
+describe('local-only folders follow the open graph', () => {
+  // Module state persists across these tests, so generations only grow.
+  it('records the names from graph_open and clears them on a reopen with none', async () => {
+    graphBridge({ graph_open: { generation: 10, localOnlyFolders: ['secure'] } })
+    await openGraph('/g')
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(true)
+
+    graphBridge({ graph_open: { generation: 11, localOnlyFolders: [] } })
+    await openGraph('/g')
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(false)
+  })
+
+  it('records the names from graph_create and window_bootstrap', async () => {
+    graphBridge({ graph_create: { generation: 12, localOnlyFolders: ['raw'] } })
+    await createGraph('/g')
+    expect(isLocalOnlyPath('papers/raw/scan.png')).toBe(true)
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(false)
+
+    graphBridge({ window_bootstrap: { generation: 12, localOnlyFolders: ['secure'] } })
+    await windowBootstrap()
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(true)
+  })
+
+  it('never lets a late response for an older session replace the names', async () => {
+    graphBridge({ graph_open: { generation: 20, localOnlyFolders: ['secure'] } })
+    await openGraph('/g')
+    graphBridge({ graph_open: { generation: 19, localOnlyFolders: [] } })
+    await openGraph('/g')
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(true)
+
+    // Control: the next session's response does replace them.
+    graphBridge({ graph_open: { generation: 21, localOnlyFolders: [] } })
+    await openGraph('/g')
+    expect(isLocalOnlyPath('finance/secure/bank.md')).toBe(false)
+  })
+})
 
 afterEach(() => {
   setBridge(null)

@@ -1,5 +1,6 @@
 import { isAppError } from '../errors.ts'
 import { readNote } from '../graph/commands.ts'
+import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { assetReferenceMatches, assetReferencingNotePaths } from '../indexing/asset-refs.ts'
 import { parseNote } from '../markdown/extract.ts'
 import { getXArchiveOwners } from '../x-archive.ts'
@@ -13,7 +14,9 @@ import { getXArchiveOwners } from '../x-archive.ts'
  *
  * The contract: sendable only when the asset is referenced by ≥1 non-private
  * note and by **0** private notes. Candidates come from the index, but the
- * verdict is made from each candidate's live markdown, failing closed.
+ * verdict is made from each candidate's live markdown, failing closed. A note
+ * inside a local-only folder counts as private without being read, and an
+ * asset that itself lives in one is never sendable.
  */
 
 /** Outcome of the privacy gate for one asset. */
@@ -49,8 +52,14 @@ export async function classifyAssetFromNotes(
   readSource: (notePath: string) => Promise<string>,
   knownOwners?: readonly string[],
 ): Promise<AssetVerdict> {
+  if (isLocalOnlyPath(assetPath)) {
+    return 'skip-private'
+  }
   if (candidates.length === 0) {
     return 'skip-unreferenced'
+  }
+  if (candidates.some((notePath) => isLocalOnlyPath(notePath))) {
+    return 'skip-private'
   }
   const owners = knownOwners ?? (await getXArchiveOwners(assetPath))
   const references = [assetPath, ...owners]

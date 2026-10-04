@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RetrievalHit } from '../embeddings/retrieve.ts'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import {
   assertCloudAllowed,
   cloudSafeAssetDescription,
   cloudSafeLinkHref,
   cloudSafeNoteContent,
+  cloudSafeNoteListings,
   cloudSafeSearchHits,
   cloudSafeSelection,
   isPrivateNoteError,
@@ -191,5 +193,97 @@ describe('cloudSafeSelection', () => {
     expect(() => cloudSafeSelection({ path: PRIVATE_PATH, isPrivate: true }, PRIVATE_BODY)).toThrow(
       PrivateNoteError,
     )
+  })
+})
+
+describe('local-only folders', () => {
+  // A note inside a local-only folder carries no `private: true`, yet no
+  // gate may let its path, title, or content out.
+  const LOCAL_PATH = 'finance/secure/sentinel-local-01jxq3.md'
+  const LOCAL_TITLE = 'sentinel-local-title-01jxq3'
+
+  beforeEach(() => {
+    setLocalOnlyFolders(['secure'])
+  })
+  afterEach(() => {
+    setLocalOnlyFolders([])
+  })
+
+  it('refuses every single-note mint by path, whatever the flag says', () => {
+    const note = { path: LOCAL_PATH, isPrivate: false }
+    expect(() => assertCloudAllowed(note)).toThrow(PrivateNoteError)
+    expect(() =>
+      cloudSafeNoteContent({
+        ...note,
+        title: LOCAL_TITLE,
+        content: PRIVATE_BODY,
+        truncated: false,
+      }),
+    ).toThrow(PrivateNoteError)
+    expect(() => cloudSafeSelection(note, PRIVATE_BODY)).toThrow(PrivateNoteError)
+    expect(() => cloudSafeLinkHref(note, 'https://example.com')).toThrow(PrivateNoteError)
+    expect(() =>
+      cloudSafeAssetDescription({
+        path: 'finance/secure/scan.png',
+        isPrivate: false,
+        description: PRIVATE_BODY,
+        truncated: false,
+      }),
+    ).toThrow(PrivateNoteError)
+  })
+
+  it('drops local-only search hits without probing them', async () => {
+    const probed: string[] = []
+    const hits: RetrievalHit[] = [
+      {
+        path: 'notes/a.md',
+        title: 'Public',
+        score: 1,
+        snippet: 'body',
+        heading: null,
+        isPrivate: false,
+      },
+      {
+        path: LOCAL_PATH,
+        title: LOCAL_TITLE,
+        score: 0.9,
+        snippet: PRIVATE_BODY,
+        heading: null,
+        isPrivate: false,
+      },
+    ]
+    const safe = await cloudSafeSearchHits(hits, async (path) => {
+      probed.push(path)
+      return false
+    })
+    expect(probed).toEqual(['notes/a.md'])
+    const payload = JSON.stringify(safe)
+    expect(payload).not.toContain(LOCAL_PATH)
+    expect(payload).not.toContain(LOCAL_TITLE)
+  })
+
+  it('drops local-only listings without probing them', async () => {
+    const probed: string[] = []
+    const listing = (path: string, title: string) => ({
+      path,
+      isPrivate: false,
+      title,
+      dailyDate: null,
+      snippet: '',
+      modifiedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const safe = await cloudSafeNoteListings(
+      [listing('notes/a.md', 'Public'), listing(LOCAL_PATH, LOCAL_TITLE)],
+      async (path) => {
+        probed.push(path)
+        return false
+      },
+    )
+    expect(probed).toEqual(['notes/a.md'])
+    expect(JSON.stringify(safe)).not.toContain(LOCAL_TITLE)
+  })
+
+  it('leaves notes outside the folders to the frontmatter flag', () => {
+    expect(() => assertCloudAllowed({ path: 'finance/secured.md', isPrivate: false })).not.toThrow()
   })
 })

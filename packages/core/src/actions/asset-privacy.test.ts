@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import { getXArchiveOwners } from '../x-archive.ts'
 import { classifyAsset, classifyAssetFromNotes } from './asset-privacy.ts'
 
@@ -92,4 +93,31 @@ it('pins archive ownership to the classification graph generation', async () => 
   vi.mocked(getXArchiveOwners).mockRejectedValue(new Error('stale graph'))
   await expect(classifyAsset(asset, 42)).rejects.toThrow('stale graph')
   expect(getXArchiveOwners).toHaveBeenCalledWith(asset, 42)
+})
+
+describe('classifyAssetFromNotes: local-only folders', () => {
+  beforeEach(() => {
+    setLocalOnlyFolders(['secure'])
+    return () => setLocalOnlyFolders([])
+  })
+
+  it('never sends an asset referenced by a local-only note, without reading it', async () => {
+    const read = vi.fn(async (path: string) =>
+      path === 'notes/public.md' ? '![](assets/p.png)' : '',
+    )
+    await expect(
+      classifyAssetFromNotes('assets/p.png', ['notes/public.md', 'finance/secure/bank.md'], read),
+    ).resolves.toBe('skip-private')
+    expect(read).not.toHaveBeenCalledWith('finance/secure/bank.md')
+  })
+
+  it('never sends an asset that lives inside a local-only folder', async () => {
+    await expect(
+      classifyAssetFromNotes(
+        'finance/secure/scan.png',
+        ['notes/public.md'],
+        async () => '![](../finance/secure/scan.png)',
+      ),
+    ).resolves.toBe('skip-private')
+  })
 })

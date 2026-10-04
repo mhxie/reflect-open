@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import { setBridge } from '../ipc/bridge.ts'
 import { getBacklinks, resolveWikiTarget } from './queries.ts'
 import { searchNotes } from './filtered-search.ts'
@@ -506,21 +507,22 @@ describe('reconcileIndex move healing (Plan 17)', () => {
   const NEW = 'notes/meeting-notes.md'
   const CONTENT = '---\nid: 01abcdefghjkmnpqrstvwxyz00\n---\n# Meeting Notes\n'
 
-  /** A graph where OLD's row remains but the file now lives at NEW. */
-  function renameFake(options: { storedHash: string; content?: string }) {
+  /** A graph where OLD's row remains but the file now lives at NEW (or `to`). */
+  function renameFake(options: { storedHash: string; content?: string; to?: string }) {
+    const target = options.to ?? NEW
     const calls: Array<[string, Record<string, unknown>]> = []
     mockInvoke.mockImplementation(async (command, args) => {
       calls.push([command, args])
       if (command === 'index_reconcile_scan') {
         return {
           total: 1,
-          candidates: [{ path: NEW, modifiedMs: 9, storedMtime: null, storedHash: null }],
+          candidates: [{ path: target, modifiedMs: 9, storedMtime: null, storedHash: null }],
           orphans: [{ path: OLD, storedMtime: 1, storedHash: options.storedHash }],
           stalePlaceholders: [],
         }
       }
       if (command === 'note_read') {
-        if (args['path'] === NEW) {
+        if (args['path'] === target) {
           return options.content ?? CONTENT
         }
         throw { kind: 'notFound', message: 'missing' }
@@ -583,6 +585,24 @@ describe('reconcileIndex move healing (Plan 17)', () => {
     expect(apply).toBeDefined()
     const notes = apply![1]['notes'] as Array<{ path: string }>
     expect(notes.map((note) => note.path)).toEqual([NEW])
+  })
+
+  it('re-indexes a heal that crosses into a local-only folder, so privacy follows the path', async () => {
+    const local = 'finance/secure/meeting-notes.md'
+    setLocalOnlyFolders(['secure'])
+    try {
+      const calls = renameFake({ storedHash: await hashContent(CONTENT), to: local })
+
+      await reconcileIndex({ generation: 4 })
+
+      const commands = calls.map(([command]) => command)
+      expect(commands).toContain('index_move')
+      const apply = calls.find(([command]) => command === 'index_apply_batch')
+      const notes = apply?.[1]['notes'] as Array<{ path: string; isPrivate: boolean }>
+      expect(notes).toEqual([expect.objectContaining({ path: local, isPrivate: true })])
+    } finally {
+      setLocalOnlyFolders([])
+    }
   })
 
   it('a legacy file without an id still reconciles as delete+create', async () => {

@@ -354,6 +354,17 @@ pub struct TranscribeRequest {
     prompt: Option<String>,
 }
 
+/// The recording `path` names in the graph session `generation` pins. The
+/// transcript lands in an ordinary note, so a recording in a local-only
+/// folder (an `audio-memos/` linked into one) is refused like a share.
+fn recording_path(graph: &GraphState, generation: u64, path: &str) -> AppResult<PathBuf> {
+    if !path.starts_with(AUDIO_MEMOS_PREFIX) || !reflect_graph_paths::is_attachment(path) {
+        return Err(AppError::traversal(format!("not an audio memo: {path}")));
+    }
+    let (root, local_only) = crate::fs::graph_for(graph, Some(generation))?;
+    crate::fs::resolve_shareable_in_graph(&root, path, local_only.as_deref())
+}
+
 /// Transcribe one recording under `audio-memos/` on the device. Pinned to
 /// `generation` like every background-pass read: a graph switch mid-pass
 /// must not transcribe the *new* graph's same-named file.
@@ -372,11 +383,7 @@ pub async fn local_transcription_transcribe(
         prompt,
     } = request;
     let spec = spec(&model)?;
-    if !path.starts_with(AUDIO_MEMOS_PREFIX) || !reflect_graph_paths::is_attachment(&path) {
-        return Err(AppError::traversal(format!("not an audio memo: {path}")));
-    }
-    let root = crate::fs::root_for_generation(&graph, generation)?;
-    let recording = crate::fs::resolve_in_graph(&root, &path)?;
+    let recording = recording_path(&graph, generation, &path)?;
     let model_path = models::find_cached(&cache_dir(&app)?, spec.file)
         .ok_or_else(|| AppError::not_found("the on-device transcription model is not downloaded"))?
         .path;
@@ -495,6 +502,43 @@ mod tests {
             serde_json::to_value(undecodable).unwrap(),
             serde_json::json!({ "outcome": "undecodable", "reason": "no audio" })
         );
+    }
+
+    /// A recording in a real local-only folder, reached through an
+    /// `audio-memos/` linked into it, is refused before it is read; the
+    /// control session without folders resolves it.
+    #[cfg(unix)]
+    #[test]
+    fn a_recording_in_a_local_only_folder_is_never_transcribed() {
+        let memo = "audio-memos/audio-memo-2026-06-11-153022-845.m4a";
+        for configured in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            std::fs::create_dir_all(root.join("people/secure")).unwrap();
+            std::os::unix::fs::symlink(root.join("people/secure"), root.join("audio-memos"))
+                .unwrap();
+            std::fs::write(
+                root.join(memo.replace("audio-memos", "people/secure")),
+                b"m4a",
+            )
+            .unwrap();
+            let graph = GraphState::default();
+            {
+                let mut inner = graph.0.lock().unwrap();
+                inner.generation = 1;
+                inner.root = Some(root.clone());
+                inner.set_local_only(if configured {
+                    reflect_graph_paths::LocalOnlyFolders::new(["secure"], None)
+                } else {
+                    None
+                });
+            }
+            let resolved = recording_path(&graph, 1, memo);
+            assert_eq!(resolved.is_ok(), !configured, "{resolved:?}");
+            if let Err(err) = resolved {
+                assert!(format!("{err:?}").contains("local-only"), "{err:?}");
+            }
+        }
     }
 
     /// Decode → resample → whisper on a real recording. Needs

@@ -119,7 +119,9 @@ function Harness({ showScreen }: { showScreen: boolean }): ReactElement {
       <RouterProvider>
         <RouteProbe />
         <FocusChatProbe />
-        <ChatProvider graph={{ root: '/graphs/test', name: 'test-graph', generation: 1 }}>
+        <ChatProvider
+          graph={{ root: '/graphs/test', name: 'test-graph', generation: 1, localOnlyFolders: [] }}
+        >
           {showScreen ? <MobileChat /> : null}
         </ChatProvider>
       </RouterProvider>

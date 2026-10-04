@@ -95,7 +95,12 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 
 vi.mock('@/lib/provider-fetch.ts', () => ({ providerFetch: vi.fn() }))
 
-const GRAPH: GraphInfo = { root: '/graphs/test', name: 'test-graph', generation: 1 }
+const GRAPH: GraphInfo = {
+  root: '/graphs/test',
+  name: 'test-graph',
+  generation: 1,
+  localOnlyFolders: [],
+}
 
 const GRAPH_CONTEXT = cloudSafeGraphContext({
   graphName: 'test-graph',

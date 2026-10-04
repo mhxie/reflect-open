@@ -121,6 +121,7 @@ export {
   isCalendarDate,
   type GraphPathKind,
 } from '../graph/paths.ts'
+export { isLocalOnlyPath } from '../graph/local-only.ts'
 export {
   createAttachmentCatalog,
   isImageAttachmentPath,
@@ -169,6 +170,8 @@ export {
   readNote,
   readNoteLocal,
   type LocalNoteRead,
+  readNoteShareable,
+  type ShareableNoteRead,
   writeNote,
   createNoteIfAbsent,
   writeAsset,

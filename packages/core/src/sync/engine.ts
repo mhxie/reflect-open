@@ -72,6 +72,11 @@ export interface SyncEngineOptions {
   /** Surfaced when the size guardrail withholds files from backup. */
   onLargeFilesSkipped?: (files: SkippedFile[]) => void
   /**
+   * Surfaced when a pull skips another device's changes inside this graph's
+   * local-only folders: they stay in history but are never written here.
+   */
+  onLocalOnlyChangesSkipped?: (paths: string[]) => void
+  /**
    * Files a pull's merge changed on disk. The caller reindexes them directly:
    * pull-applied writes must reach the index even when the file watcher isn't
    * up yet (the launch pull can race the watcher start). Invoked synchronously
@@ -344,6 +349,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       // those changes out before the boundary gate stops subsequent Git work.
       if (outcome.changedFiles.length > 0) {
         remoteChanges(outcome.changedFiles)
+      }
+      if (outcome.frozenPaths.length > 0) {
+        options.onLocalOnlyChangesSkipped?.(outcome.frozenPaths)
       }
     }) // upToDate is a no-op
   }

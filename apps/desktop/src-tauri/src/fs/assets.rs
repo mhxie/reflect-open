@@ -30,8 +30,8 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 
-use super::resolve::resolve;
-use super::{root_for_generation, GraphState};
+use super::resolve::resolve_write;
+use super::{graph_for, root_for_generation, GraphState};
 
 /// Header carrying the upload id on `asset_upload_append` calls — raw-body
 /// requests have no JSON args, so the id travels out-of-band.
@@ -133,10 +133,11 @@ fn assets_dir_for(
     name: &str,
 ) -> AppResult<std::path::PathBuf> {
     ensure_asset_name(name)?;
-    let root = root_for_generation(state, generation)?;
+    let (root, local_only) = graph_for(state, Some(generation))?;
     // Resolve the target through the shared guard even though `name` is
-    // already vetted — defense in depth, and it canonicalizes symlink games.
-    resolve(&root, &format!("assets/{name}"))?;
+    // already vetted — defense in depth: it canonicalizes symlink games, and
+    // an `assets/` aliased into a local-only folder refuses the write.
+    resolve_write(&root, &format!("assets/{name}"), local_only.as_deref())?;
     let dir = root.join("assets");
     fs::create_dir_all(&dir)?;
     Ok(dir)
@@ -257,8 +258,8 @@ pub fn asset_upload_commit_path(
             "upload was started for a different graph session; dropping it",
         ));
     }
-    let root = root_for_generation(&state, generation)?;
-    let target = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let target = resolve_write(&root, &path, local_only.as_deref())?;
     persist_exact(upload.file, &target)?;
     super::invalidate_file_catalog(&state, &root);
     Ok(())
@@ -336,8 +337,8 @@ pub fn audio_memo_import(
             "not an audio memo path: {path}"
         )));
     }
-    let root = root_for_generation(&state, generation)?;
-    let target = resolve(&root, &path)?;
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let target = resolve_write(&root, &path, local_only.as_deref())?;
     import_exact(Path::new(&source_path), &staging_dir(&root)?, &target)?;
     super::invalidate_file_catalog(&state, &root);
     Ok(())

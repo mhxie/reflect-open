@@ -78,6 +78,8 @@ reqwest = { version = "0.12.28", default-features = false, features = ["rustls-t
 # Reflect V1 exports are zip archives of the graph-folder layout. Keep the
 # reader lean: stored entries plus the usual deflate method are enough here.
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# The watcher (desktop) and the Git merge's local-only check (every target).
+walkdir = "2.5.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 xattr = "1.6.1"
@@ -193,7 +195,6 @@ notify-debouncer-full = "0.7.0"
 # The watcher's pruned file-ID cache (rename stitching without the full-tree
 # walk) reuses the debouncer's own building blocks directly.
 file-id = "0.2.3"
-walkdir = "2.5.0"
 # Direct dependency on fastembed's own downloader, used to pre-fetch the
 # embedding model with byte-level progress (fastembed downloads silently).
 hf-hub = { version = "0.5.0", default-features = false, features = ["ureq", "native-tls"] }

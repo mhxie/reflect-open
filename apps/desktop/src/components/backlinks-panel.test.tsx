@@ -17,12 +17,16 @@ const { getBacklinksWithContext, getBacklinksPage } = vi.hoisted(() => {
   return { getBacklinksWithContext, getBacklinksPage }
 })
 const resolveOrCreateNoteWithTitle = vi.hoisted(() => vi.fn())
+const resolveWikiTarget = vi.hoisted(() => vi.fn())
 const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   getBacklinksWithContext: getBacklinksPage,
   resolveOrCreateNoteWithTitle,
+  resolveWikiTarget,
+  // The graph's local-only folders are `secure`.
+  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
@@ -58,6 +62,7 @@ beforeEach(() => {
   getBacklinksWithContext.mockReset()
   getBacklinksPage.mockClear()
   resolveOrCreateNoteWithTitle.mockReset()
+  resolveWikiTarget.mockReset()
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
 })
 
@@ -115,6 +120,36 @@ describe('BacklinksPanel', () => {
 
     await chip.click()
     await expect.element(view.getByTestId('route')).toMatchTextContent('notes/roadmap.md')
+    await view.unmount()
+  })
+
+  it('opens only existing notes from a local-only source snippet, never creating one', async () => {
+    getBacklinksWithContext.mockResolvedValue([
+      {
+        sourcePath: 'finance/secure/bank.md',
+        sourceTitle: 'Bank',
+        snippet: 'pay [[Private Plan]] per [[Roadmap]]',
+        posFrom: 0,
+        tasks: [],
+      },
+    ])
+    resolveWikiTarget.mockImplementation(async (raw: string) =>
+      raw === 'Roadmap'
+        ? { kind: 'resolved', ref: 'notes/roadmap.md' }
+        : { kind: 'unresolved', text: raw },
+    )
+    const view = await renderPanel('notes/source.md')
+    const chips = view.getByTestId('wikilink')
+    await expect.element(chips.first()).toMatchTextContent(/^Private Plan$/)
+
+    await chips.first().click()
+    await vi.waitFor(() => expect(resolveWikiTarget).toHaveBeenCalledWith('Private Plan'))
+    expect(resolveOrCreateNoteWithTitle).not.toHaveBeenCalled()
+    expect(view.getByTestId('route').element().textContent).not.toContain('Private Plan')
+
+    await chips.last().click()
+    await expect.element(view.getByTestId('route')).toMatchTextContent('notes/roadmap.md')
+    expect(resolveOrCreateNoteWithTitle).not.toHaveBeenCalled()
     await view.unmount()
   })
 

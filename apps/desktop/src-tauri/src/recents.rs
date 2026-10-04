@@ -25,7 +25,19 @@ pub struct RecentGraph {
     pub opened_ms: u64,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Points this test thread's recents store at a temp file, so a command
+    /// that opens a graph runs without touching the user's own list.
+    pub(crate) static TEST_STORE_PATH: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 fn store_path() -> AppResult<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_STORE_PATH.with(|path| path.borrow().clone()) {
+        return Ok(path);
+    }
     let base = dirs::config_dir().ok_or_else(|| AppError::io("no OS config dir"))?;
     Ok(base.join("reflect-open").join("recent-graphs.json"))
 }

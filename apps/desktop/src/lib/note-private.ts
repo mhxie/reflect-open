@@ -1,4 +1,4 @@
-import { errorMessage, parseNote, type NoteRow } from '@reflect/core'
+import { errorMessage, isLocalOnlyPath, parseNote, type NoteRow } from '@reflect/core'
 import { commitNoteFrontmatter, readNoteSource } from '@/lib/note-frontmatter.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
@@ -6,9 +6,16 @@ import type { NoteActionInput } from './notes/types.ts'
 
 const pendingPrivacy = new Set<string>()
 
-/** Toggle privacy with shared optimistic feedback and save-error reporting. Markdown owns the final state. */
+/**
+ * Toggle privacy with shared optimistic feedback and save-error reporting.
+ * Markdown owns the final state. A note inside a local-only folder is private
+ * by its path and read-only, so there is nothing to toggle.
+ */
 export async function toggleNotePrivate(input: NoteActionInput): Promise<void> {
   const { queryClient, root, generation, path } = input
+  if (isLocalOnlyPath(path)) {
+    return
+  }
   const key = JSON.stringify([root, generation, path])
   if (pendingPrivacy.has(key)) {
     return

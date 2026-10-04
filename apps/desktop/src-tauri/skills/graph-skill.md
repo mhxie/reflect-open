@@ -70,10 +70,12 @@ or exposing its current or historical content unless the user explicitly asks.
 
 ## Rules
 
-1. **Respect privacy.** Notes with `private: true` frontmatter are invisible
-   through the CLI by design — no content, no paths, no search hits. Never
-   work around this by reading graph files directly unless the user
-   explicitly asks for that.
+1. **Respect privacy.** Notes with `private: true` frontmatter, and every
+   note inside one of the graph's local-only folders, are invisible through
+   the CLI by design — no content, no paths, no search hits. Never work
+   around this by reading graph files directly unless the user explicitly
+   asks for that, and never edit, move, or copy anything inside a local-only
+   folder.
 2. **The CLI never writes.** Notes are plain markdown under the graph root
    (`daily/YYYY-MM-DD.md`, `notes/*.md`). To change a note, edit the file the
    CLI resolves (`reflect path <note>`); the running app picks the edit up.

@@ -21,6 +21,8 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   hasBridge: () => true,
   getOpenTasks,
   getCompletedTasks,
+  // The graph's local-only folders are `secure`.
+  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
 }))
 vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
@@ -564,6 +566,34 @@ describe('TasksScreen', () => {
     expect(view.getByRole('button', { name: 'first' }).element().getAttribute('aria-pressed')).toBe(
       'false',
     )
+    await view.unmount()
+  })
+
+  it('keeps a task from a local-only note read-only: no inline editor, inert checkbox', async () => {
+    getOpenTasks.mockResolvedValue([
+      task({
+        notePath: 'finance/secure/bank.md',
+        astPath: [2],
+        text: 'pay rent',
+        noteTitle: 'Bank',
+      }),
+      task({ notePath: 'notes/p.md', astPath: [3], text: 'second', noteTitle: 'Project' }),
+    ])
+    const view = await renderScreen()
+
+    await userEvent.click(await view.findByRole('button', { name: 'pay rent' }))
+    expect(
+      view.getByRole('button', { name: 'pay rent' }).element().getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(view.queryByTestId('task-editor')).toBeNull()
+    expect(
+      view.getByRole('button', { name: 'Complete: pay rent' }).element().hasAttribute('disabled'),
+    ).toBe(true)
+    expect(toggleTask).not.toHaveBeenCalled()
+
+    // Control: the ordinary task beside it still opens the inline editor.
+    await userEvent.click(view.getByRole('button', { name: 'second' }))
+    expect(view.getByTestId('task-editor').element().textContent).toContain('second')
     await view.unmount()
   })
 

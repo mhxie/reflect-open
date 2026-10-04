@@ -54,7 +54,7 @@ vi.mock('@/routing/app-shortcuts.ts', () => ({ useAppShortcuts: () => ({}) }))
 
 const { WorkspaceContent } = await import('./workspace-content.tsx')
 
-const GRAPH: GraphInfo = { root: '/notes', name: 'Notes', generation: 1 }
+const GRAPH: GraphInfo = { root: '/notes', name: 'Notes', generation: 1, localOnlyFolders: [] }
 
 beforeEach(async () => {
   workspaceState.collapsed = false

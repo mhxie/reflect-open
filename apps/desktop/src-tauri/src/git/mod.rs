@@ -157,16 +157,20 @@ pub async fn git_clone(url: String, path: String, token: Option<String>) -> AppR
     run_blocking(move || remote::clone(&url, Path::new(&path), token)).await
 }
 
-/// Commit every pending change (no-op when clean). See [`commit::commit_all`].
+/// Commit every pending change (no-op when clean), never staging the graph's
+/// local-only folders. See [`commit::commit_all`].
 #[tauri::command]
 pub async fn git_commit_all(
     message: String,
     generation: u64,
     state: State<'_, GraphState>,
 ) -> AppResult<CommitOutcome> {
-    let root = crate::fs::root_for_generation(&state, generation)?;
+    let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
     let started = std::time::Instant::now();
-    let outcome = run_blocking(move || commit::commit_all(&root, &message, MAX_FILE_BYTES)).await;
+    let outcome = run_blocking(move || {
+        commit::commit_all(&root, &message, MAX_FILE_BYTES, local_only.as_deref())
+    })
+    .await;
     if let Ok(outcome) = &outcome {
         tracing::info!(
             committed = outcome.committed,
@@ -190,14 +194,15 @@ pub async fn git_fetch(
 }
 
 /// Merge the fetched remote branch; conflicts are committed into the notes as
-/// labeled markers (see [`merge`]). The repo is never left mid-merge.
+/// labeled markers (see [`merge`]). The repo is never left mid-merge, and
+/// the graph's local-only folders are never written.
 #[tauri::command]
 pub async fn git_merge_remote(
     generation: u64,
     state: State<'_, GraphState>,
 ) -> AppResult<MergeOutcome> {
-    let root = crate::fs::root_for_generation(&state, generation)?;
-    let outcome = run_blocking(move || merge::merge_remote(&root)).await;
+    let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
+    let outcome = run_blocking(move || merge::merge_remote(&root, local_only.as_deref())).await;
     // Invalidate on both arms: a failed merge can still have moved the tree
     // partway through checkout, and a stale catalog would pin the old view.
     let root = crate::fs::root_for_generation(&state, generation)?;

@@ -1,5 +1,6 @@
-use super::resolve::resolve;
+use super::resolve::{resolve, resolve_write};
 use crate::error::{AppError, AppResult as Result};
+use reflect_graph_paths::LocalOnlyFolders;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -64,8 +65,15 @@ pub fn temporary_directory(root: &Path) -> Result<PathBuf> {
     fs::create_dir_all(&directory)?;
     resolve(root, ".reflect/x-archive")
 }
-pub fn atomic_json(root: &Path, relative: &str, value: &Value) -> Result<()> {
-    let path = resolve(root, relative)?;
+/// Write a post's JSON atomically, through the write guard with the graph's
+/// local-only folders.
+pub fn atomic_json(
+    root: &Path,
+    relative: &str,
+    value: &Value,
+    local_only: Option<&LocalOnlyFolders>,
+) -> Result<()> {
+    let path = resolve_write(root, relative, local_only)?;
     let parent = path
         .parent()
         .ok_or_else(|| AppError::parse("missing-parent"))?;
@@ -248,6 +256,32 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// A post's JSON never lands in a local-only folder through an `assets/`
+    /// aliased into one; without the folders the same write goes through.
+    #[cfg(unix)]
+    #[test]
+    fn a_post_is_never_archived_into_a_local_only_folder() {
+        for configured in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            std::fs::create_dir_all(root.join("people/secure")).unwrap();
+            std::os::unix::fs::symlink(root.join("people/secure"), root.join("assets")).unwrap();
+            let folders = LocalOnlyFolders::new(["secure"], None);
+            let folders = if configured { folders } else { None };
+            let written = atomic_json(
+                &root,
+                "assets/x/post-123.json",
+                &serde_json::json!({"data": {"id": "123"}}),
+                folders.as_ref(),
+            );
+            assert_eq!(written.is_ok(), !configured);
+            assert_eq!(
+                root.join("people/secure/x/post-123.json").exists(),
+                !configured
+            );
+        }
+    }
+
     #[test]
     fn shares_completed_urls_and_ignores_invalid_cache_candidates() {
         let root = tempfile::tempdir().unwrap();
@@ -261,7 +295,13 @@ mod tests {
         assert_eq!(find_cache(root.path(), &hash).unwrap().unwrap().name, name);
         for id in ["123", "456"] {
             let post = json!({ "data": { "id": id, "author": { "avatar": url } } });
-            atomic_json(root.path(), &format!("assets/x/post-{id}.json"), &post).unwrap();
+            atomic_json(
+                root.path(),
+                &format!("assets/x/post-{id}.json"),
+                &post,
+                None,
+            )
+            .unwrap();
             assert_eq!(resource_url(root.path(), id, &hash).unwrap(), url);
         }
     }
@@ -270,7 +310,7 @@ mod tests {
     fn rejects_unowned_resources_and_unsafe_paths() {
         let root = tempfile::tempdir().unwrap();
         let post = json!({"data":{"id":"123", "author":{"avatar":"https://pbs.twimg.com/a.png"}}});
-        atomic_json(root.path(), "assets/x/post-123.json", &post).unwrap();
+        atomic_json(root.path(), "assets/x/post-123.json", &post, None).unwrap();
         assert!(resource_url(
             root.path(),
             "123",
@@ -333,7 +373,7 @@ mod tests {
         let directory = temporary_directory(root.path()).unwrap();
         assert_eq!(directory, root.path().join(".reflect/x-archive"));
         let value = json!({"data":{"id":"123"}});
-        atomic_json(root.path(), "assets/x/post-123.json", &value).unwrap();
+        atomic_json(root.path(), "assets/x/post-123.json", &value, None).unwrap();
         assert_eq!(fs::read_dir(directory).unwrap().count(), 0);
         assert_eq!(
             fs::read_dir(root.path().join("assets/x")).unwrap().count(),
@@ -341,7 +381,7 @@ mod tests {
         );
         let huge = json!({"padding": "x".repeat(POST_JSON_MAX_BYTES)});
         assert!(matches!(
-            atomic_json(root.path(), "assets/x/post-123.json", &huge),
+            atomic_json(root.path(), "assets/x/post-123.json", &huge, None),
             Err(AppError::Parse { .. })
         ));
         assert_eq!(read_post(root.path(), "123").unwrap(), Some(value));

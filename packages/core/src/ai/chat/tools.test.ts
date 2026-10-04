@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolExecutionOptions } from '@reflect/modules/ai'
 import type { RetrievalHit, RetrieveOptions } from '../../embeddings/retrieve.ts'
+import { setLocalOnlyFolders } from '../../graph/local-only.ts'
+import { setBridge } from '../../ipc/bridge.ts'
+import { PrivateNoteError } from '../../privacy/checkers.ts'
 import type { DailyNoteRow, DailyNotesRange } from '../../indexing/queries.ts'
 import type { RecentNoteRow, RecentNotesOptions } from '../../indexing/note-list.ts'
 import {
@@ -11,7 +14,12 @@ import {
   type ReadAssetResult,
   type ReadAssetsOutput,
 } from './read-assets.ts'
-import { MAX_NOTE_CONTENT_CHARS, type ReadNoteResult, type ReadNotesOutput } from './read-notes.ts'
+import {
+  MAX_NOTE_CONTENT_CHARS,
+  readShareableNote,
+  type ReadNoteResult,
+  type ReadNotesOutput,
+} from './read-notes.ts'
 import {
   buildNoteTools,
   INVALID_TAG_ERROR,
@@ -292,6 +300,47 @@ describe('read_notes', () => {
     }
     expect(output.error).toContain('private')
     expect(JSON.stringify(output)).not.toContain(PRIVATE_BODY)
+  })
+
+  it('refuses a local-only note by its path without reading it', async () => {
+    setLocalOnlyFolders(['secure'])
+    try {
+      const read = vi.fn(async () => `# Bank\n\n${PRIVATE_BODY}\n`)
+      const tools = buildNoteTools({ readNoteFn: read })
+      const output = await runRead(tools, 'finance/Secure/bank.md')
+      if (output.ok) {
+        expect.unreachable('expected a refusal')
+      }
+      expect(output.error).toContain('private')
+      expect(read).not.toHaveBeenCalled()
+    } finally {
+      setLocalOnlyFolders([])
+    }
+  })
+
+  it('refuses a note the reader resolves into a local-only folder, keeping the batch', async () => {
+    // A folded spelling (`ſecure`) passes the name check; the reader's
+    // Rust-side verdict is what refuses it.
+    const folded = 'people/\u{17F}ecure/visa.md'
+    setLocalOnlyFolders(['secure'])
+    try {
+      const tools = buildNoteTools({
+        readNoteFn: async (path) => {
+          if (path === folded) {
+            throw new PrivateNoteError(path)
+          }
+          return '# Plan\n\nPublic.\n'
+        },
+      })
+      const output = await runReadNotes(tools, [folded, 'people/plan.md'])
+      expect(output.notes.map((note) => note.ok)).toEqual([false, true])
+      expect(output.notes[0]).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('private'),
+      })
+    } finally {
+      setLocalOnlyFolders([])
+    }
   })
 
   it('reports a missing note instead of throwing', async () => {
@@ -676,5 +725,52 @@ describe('list_daily_notes', () => {
     const output = await runDailies(tools, { start: '2026-06-01', end: '2026-06-30' })
     expect(output.days).toEqual([])
     expect(JSON.stringify(output)).not.toContain(PRIVATE_TITLE)
+  })
+})
+
+describe('readShareableNote', () => {
+  afterEach(() => {
+    setBridge(null)
+  })
+
+  /** A bridge answering `note_read_shareable` from Rust's verdict per path. */
+  function shareableBridge(localOnly: ReadonlySet<string>): string[] {
+    const requested: string[] = []
+    setBridge({
+      invoke: async (command, args) => {
+        if (command !== 'note_read_shareable') {
+          throw new Error(`unexpected command ${command}`)
+        }
+        const path = (args as { path: string }).path
+        requested.push(path)
+        return localOnly.has(path)
+          ? { kind: 'localOnly' }
+          : { kind: 'content', content: `${PRIVATE_BODY} of ${path}` }
+      },
+      listen: async () => () => {},
+    })
+    return requested
+  }
+
+  it("is the tools' default reader, and Rust's localOnly verdict refuses the note", async () => {
+    const folded = 'people/\u{17F}ecure/visa.md'
+    const requested = shareableBridge(new Set([folded]))
+    const tools = buildNoteTools()
+    const output = await runReadNotes(tools, [folded])
+    expect(requested).toEqual([folded])
+    expect(output.notes[0]).toMatchObject({ ok: false, error: expect.stringContaining('private') })
+    expect(JSON.stringify(output)).not.toContain(PRIVATE_BODY)
+  })
+
+  it('returns the content when Rust clears the note (control)', async () => {
+    shareableBridge(new Set())
+    await expect(readShareableNote('people/plan.md')).resolves.toBe(
+      `${PRIVATE_BODY} of people/plan.md`,
+    )
+  })
+
+  it('throws a PrivateNoteError for a local-only verdict', async () => {
+    shareableBridge(new Set(['people/visa.md']))
+    await expect(readShareableNote('people/visa.md')).rejects.toBeInstanceOf(PrivateNoteError)
   })
 })

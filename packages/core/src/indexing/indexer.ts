@@ -1,5 +1,6 @@
 import { errorMessage, isAppError } from '../errors.ts'
 import { listFiles, readNote } from '../graph/commands.ts'
+import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { parseNote } from '../markdown/index.ts'
 import {
   applyIndexedNote,
@@ -473,10 +474,13 @@ export async function reconcileIndex(options: IndexPassOptions): Promise<void> {
         continue
       }
       // The moved row carries the old path's facts: the main pass re-indexes
-      // at the new path only if the content actually changed in transit.
+      // at the new path only if the content actually changed in transit — or
+      // when the move crossed a local-only folder boundary, because the
+      // privacy flag derives from the path and the moved row still carries
+      // the old one.
       const orphan = removals.get(move.from)
       removals.delete(move.from)
-      if (orphan !== undefined) {
+      if (orphan !== undefined && isLocalOnlyPath(move.from) === isLocalOnlyPath(move.to)) {
         facts.set(move.to, { mtime: orphan.storedMtime, fileHash: orphan.storedHash })
       }
       onMoved?.(move.from, move.to)

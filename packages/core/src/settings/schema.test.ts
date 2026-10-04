@@ -255,6 +255,16 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ chatSystemPrompt: 42 }).chatSystemPrompt).toBe('')
   })
 
+  it('carries the Rust-owned localOnlyFolders key through verbatim, typos included', () => {
+    // Git exclusion and privacy hang off this key: a load-then-save must
+    // never normalize it, drop an entry, or default it away.
+    const localOnlyFolders = {
+      '/Users/me/Notes': { folders: ['secure', 7], rawRoot: '/Users/me/Raw' },
+      '/Users/me/Other': 'not even an object',
+    }
+    expect(settingsSchema.parse({ localOnlyFolders }).localOnlyFolders).toEqual(localOnlyFolders)
+  })
+
   it('preserves unknown keys so newer-version settings survive a round trip', () => {
     const parsed = settingsSchema.parse({ editorMarkdownSyntax: 'show', futureKey: true })
     expect(parsed).toEqual({

@@ -30,7 +30,7 @@ import {
 import { useNoteWindowBoot } from './use-note-window-boot.ts'
 
 const BOOT: WindowBootstrap = {
-  graph: { root: '/g', name: 'g', generation: 3 },
+  graph: { root: '/g', name: 'g', generation: 3, localOnlyFolders: [] },
   indexGeneration: 5,
   initialDeepLink: 'reflect://note/notes%2Ffoo.md',
 }

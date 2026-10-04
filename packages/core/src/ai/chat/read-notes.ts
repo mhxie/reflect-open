@@ -1,10 +1,13 @@
 import { z } from 'zod'
 import { isAppError } from '../../errors.ts'
+import { readNoteShareable } from '../../graph/commands.ts'
+import { isLocalOnlyPath } from '../../graph/local-only.ts'
 import { parseNote } from '../../markdown/extract.ts'
 import { splitFrontmatter } from '../../markdown/frontmatter.ts'
 import {
   cloudSafeNoteContent,
   isPrivateNoteError,
+  PrivateNoteError,
   type CloudNoteContent,
   type CloudSafe,
 } from '../../privacy/checkers.ts'
@@ -15,6 +18,9 @@ import {
  * name, and transcript unions stay in `./tools` — this module only knows how
  * to read one note.
  */
+
+/** The per-note refusal a private note's read returns — local-only notes share it. */
+export const PRIVATE_NOTE_REFUSAL = 'This note is marked private and cannot be read by AI.'
 
 /** Cap on returned note content so one huge note can't flood the context. */
 export const MAX_NOTE_CONTENT_CHARS = 24_000
@@ -47,6 +53,19 @@ export const readNotesInput = z.object({
     ),
 })
 
+/**
+ * The chat tools' note reader: Rust refuses a note in a local-only folder
+ * however its path is spelled, and the refusal surfaces as a
+ * {@link PrivateNoteError}, which every tool already treats as private.
+ */
+export async function readShareableNote(path: string): Promise<string> {
+  const read = await readNoteShareable(path)
+  if (read.kind === 'localOnly') {
+    throw new PrivateNoteError(path)
+  }
+  return read.content
+}
+
 /** The effects {@link buildReadOneNote} needs, already defaulted by the caller. */
 export interface ReadNoteDeps {
   readNoteFn: (path: string) => Promise<string>
@@ -55,16 +74,25 @@ export interface ReadNoteDeps {
 /**
  * Build the per-note reader for read_notes: the body (frontmatter stripped,
  * capped), or a structured per-note miss/refusal so one bad path never fails
- * the batch. Content is minted CloudSafe only after the live private re-check.
+ * the batch. Content is minted CloudSafe only after the live private re-check
+ * (the frontmatter flag and the local-only path rule).
  */
 export function buildReadOneNote(deps: ReadNoteDeps) {
   return async function readOneNote(path: string): Promise<ReadNoteResult> {
+    // The path is model-supplied: a note inside a local-only folder is refused
+    // before it is even read, whatever its frontmatter would say.
+    if (isLocalOnlyPath(path)) {
+      return { ok: false, path, error: PRIVATE_NOTE_REFUSAL }
+    }
     let source: string
     try {
       source = await deps.readNoteFn(path)
     } catch (cause) {
       if (isAppError(cause) && cause.kind === 'notFound') {
         return { ok: false, path, error: 'No note exists at this path.' }
+      }
+      if (isPrivateNoteError(cause)) {
+        return { ok: false, path, error: PRIVATE_NOTE_REFUSAL }
       }
       throw cause
     }
@@ -84,7 +112,7 @@ export function buildReadOneNote(deps: ReadNoteDeps) {
       }
     } catch (cause) {
       if (isPrivateNoteError(cause)) {
-        return { ok: false, path, error: 'This note is marked private and cannot be read by AI.' }
+        return { ok: false, path, error: PRIVATE_NOTE_REFUSAL }
       }
       throw cause
     }

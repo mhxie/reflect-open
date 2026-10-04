@@ -1,7 +1,8 @@
 use super::x_archive_store as archive;
 use crate::error::{AppError, AppResult as Result};
+use reflect_graph_paths::LocalOnlyFolders;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -46,6 +47,16 @@ const MAX_CONCURRENT_DOWNLOADS: usize = 4;
 static DOWNLOAD_SLOTS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(MAX_CONCURRENT_DOWNLOADS);
 
+/// Hold every download slot: a download that gets past its guards then
+/// waits instead of fetching, which keeps command-tier tests offline.
+#[cfg(test)]
+pub(super) async fn hold_every_slot() -> tokio::sync::SemaphorePermit<'static> {
+    DOWNLOAD_SLOTS
+        .acquire_many(MAX_CONCURRENT_DOWNLOADS as u32)
+        .await
+        .expect("download semaphore stays open")
+}
+
 fn client() -> Result<reqwest::Client> {
     static CLIENT: OnceLock<Result<reqwest::Client>> = OnceLock::new();
     CLIENT
@@ -73,13 +84,30 @@ fn allowed(url: &reqwest::Url) -> bool {
         && matches!(url.host_str(), Some("pbs.twimg.com" | "video.twimg.com"))
 }
 
-/// Start or join one download. Only the final validated file is visible in assets/x.
-pub async fn download(root: PathBuf, url: String) -> Result<archive::Receipt> {
+/// Start or join one download. Only the final validated file is visible in
+/// assets/x. Writes go through the write guard with the graph's local-only
+/// folders, so an `assets/` aliased into one is refused before anything is
+/// fetched.
+pub async fn download(
+    root: PathBuf,
+    local_only: Option<Arc<LocalOnlyFolders>>,
+    url: String,
+) -> Result<archive::Receipt> {
     let hash = archive::hash_url(&url)?;
-    shared_download(root.join(&hash), download_once(root, url, hash)).await
+    shared_download(root.join(&hash), download_once(root, local_only, url, hash)).await
 }
 
-async fn download_once(root: PathBuf, url: String, hash: String) -> Result<archive::Receipt> {
+/// The `assets/x` directory media lands in, through the write guard.
+fn media_directory(root: &Path, local_only: Option<&LocalOnlyFolders>) -> Result<PathBuf> {
+    super::resolve::resolve_write(root, "assets/x", local_only)
+}
+
+async fn download_once(
+    root: PathBuf,
+    local_only: Option<Arc<LocalOnlyFolders>>,
+    url: String,
+    hash: String,
+) -> Result<archive::Receipt> {
     let cache_root = root.clone();
     let cache_hash = hash.clone();
     if let Some(receipt) =
@@ -93,6 +121,7 @@ async fn download_once(root: PathBuf, url: String, hash: String) -> Result<archi
     if !allowed(&remote) {
         return Err(AppError::parse("unsupported-media-url"));
     }
+    let directory = media_directory(&root, local_only.as_deref())?;
     let _slot = DOWNLOAD_SLOTS
         .acquire()
         .await
@@ -110,7 +139,6 @@ async fn download_once(root: PathBuf, url: String, hash: String) -> Result<archi
     if response.content_length().is_some_and(|bytes| bytes > limit) {
         return Err(AppError::parse("media-too-large"));
     }
-    let directory = super::resolve::resolve(&root, "assets/x")?;
     tokio::fs::create_dir_all(&directory).await?;
 
     let temporary = tempfile::Builder::new()
@@ -130,7 +158,11 @@ async fn download_once(root: PathBuf, url: String, hash: String) -> Result<archi
     tauri::async_runtime::spawn_blocking(move || {
         let (extension, mime, bytes) = archive::sniff(temporary.path())?;
         let name = format!("url_sha256_{hash}.{extension}");
-        let path = super::resolve::resolve(&root, &format!("assets/x/{name}"))?;
+        let path = super::resolve::resolve_write(
+            &root,
+            &format!("assets/x/{name}"),
+            local_only.as_deref(),
+        )?;
         temporary.persist(path).map_err(|error| error.error)?;
         #[cfg(unix)]
         std::fs::File::open(directory)?.sync_all()?;
@@ -143,6 +175,48 @@ async fn download_once(root: PathBuf, url: String, hash: String) -> Result<archi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The aliased-assets fixture: `assets/` links into a real local-only
+    /// folder inside the graph.
+    #[cfg(unix)]
+    fn aliased_assets() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("people/secure")).unwrap();
+        std::os::unix::fs::symlink(root.join("people/secure"), root.join("assets")).unwrap();
+        (dir, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn media_never_lands_in_a_local_only_folder_through_an_aliased_assets() {
+        for configured in [true, false] {
+            let (_dir, root) = aliased_assets();
+            let folders = LocalOnlyFolders::new(["secure"], None);
+            let folders = if configured { folders } else { None };
+            // Control: without the folders the alias is an ordinary folder.
+            assert_eq!(
+                media_directory(&root, folders.as_ref()).is_ok(),
+                !configured
+            );
+        }
+        // The download refuses before fetching anything.
+        let (_dir, root) = aliased_assets();
+        let folders = LocalOnlyFolders::new(["secure"], None).map(Arc::new);
+        let refused = tauri::async_runtime::block_on(download(
+            root.clone(),
+            folders,
+            "https://pbs.twimg.com/media/never-fetched.jpg".into(),
+        ));
+        let message = format!("{:?}", refused.expect_err("refused"));
+        assert!(message.contains("local-only"), "{message}");
+        assert_eq!(
+            std::fs::read_dir(root.join("people/secure"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
 
     #[test]
     fn restricts_downloads_to_anonymous_https_cdn_urls() {
@@ -226,7 +300,8 @@ mod tests {
         let name = format!("url_sha256_{hash}.png");
         std::fs::write(directory.join(&name), b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
         let receipt =
-            tauri::async_runtime::block_on(download(root.path().to_owned(), url.into())).unwrap();
+            tauri::async_runtime::block_on(download(root.path().to_owned(), None, url.into()))
+                .unwrap();
         assert_eq!(receipt.name, name);
         assert_eq!(receipt.mime, "image/png");
         assert_eq!(std::fs::read_dir(directory).unwrap().count(), 1);
@@ -241,6 +316,7 @@ mod tests {
                 .unwrap();
             let pending = download(
                 root.path().to_owned(),
+                None,
                 "https://pbs.twimg.com/waits-for-capacity.png".into(),
             );
             assert!(tokio::time::timeout(Duration::from_millis(50), pending)
@@ -257,7 +333,7 @@ mod tests {
             .unwrap();
             let receipt = tokio::time::timeout(
                 Duration::from_secs(2),
-                download(root.path().to_owned(), url.into()),
+                download(root.path().to_owned(), None, url.into()),
             )
             .await
             .unwrap()

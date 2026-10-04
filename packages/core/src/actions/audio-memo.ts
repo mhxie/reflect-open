@@ -582,7 +582,9 @@ export interface ReconcileAudioMemosOutcome {
  * Notes), never a backlink-tombstoned session whose transcript was dropped.
  * A segment the provider refuses is cached as a terminal failure and
  * surfaces as one line in the assembled note — one bad container never
- * sinks the meeting. Any other failure stops the pass — one session's
+ * sinks the meeting. A session the graph refuses to read (a local-only
+ * folder linked in as `audio-memos/`) is skipped without a note, cache
+ * entry, or backlink. Any other failure stops the pass — one session's
  * network or auth error means the rest would fail the same way. Never
  * throws.
  */
@@ -664,6 +666,9 @@ export async function reconcileAudioMemos(
       }
       if (parts.status === 'oversize') {
         sawOversize = true
+        continue
+      }
+      if (parts.status === 'refused') {
         continue
       }
       if (parts.status === 'partial' || !isSessionReady(session, nowMs)) {

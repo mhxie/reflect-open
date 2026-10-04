@@ -29,7 +29,7 @@ vi.mock('@/routing/router.tsx', () => ({
 
 import { DeepLinkProvider } from './deep-link-provider.tsx'
 
-const GRAPH: GraphInfo = { root: '/g', name: 'g', generation: 7 }
+const GRAPH: GraphInfo = { root: '/g', name: 'g', generation: 7, localOnlyFolders: [] }
 
 beforeEach(() => {
   vi.clearAllMocks()

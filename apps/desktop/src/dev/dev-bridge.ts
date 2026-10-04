@@ -75,7 +75,12 @@ const iapProducts = [
  */
 export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
   const { files, index } = backend
-  const graphInfo = { root: DEV_GRAPH_ROOT, name: 'Dev Graph', generation: 1 }
+  const graphInfo = {
+    root: DEV_GRAPH_ROOT,
+    name: 'Dev Graph',
+    generation: 1,
+    localOnlyFolders: [],
+  }
   let settingsDocument: Record<string, unknown> = { mobileOnboarded: true }
   const assets = new Map<string, string>()
   let ownedProductId: string | null = null
@@ -168,6 +173,15 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       }
       case 'note_read_local': {
         // The in-memory store has no iCloud, so a note is never evicted.
+        const { path } = pathArgsSchema.parse(args)
+        const contents = files.read(path)
+        if (contents === null) {
+          throw new ReflectError('notFound', `no such note: ${path}`)
+        }
+        return { kind: 'content', content: contents, localOnly: false }
+      }
+      case 'note_read_shareable': {
+        // The in-memory dev graph configures no local-only folders.
         const { path } = pathArgsSchema.parse(args)
         const contents = files.read(path)
         if (contents === null) {

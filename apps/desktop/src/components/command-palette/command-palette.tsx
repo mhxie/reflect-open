@@ -12,6 +12,7 @@ import { formatDayLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
+import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
 import { COMMAND_ICONS, FALLBACK_COMMAND_ICON } from './command-icons.ts'
 import type { NoteEntry } from './entries.ts'
 import { NotePreview } from './note-preview.tsx'
@@ -221,12 +222,15 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                             className="size-4 shrink-0 text-text-muted"
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm">
-                              {entry.phrase !== null
-                                ? entry.phrase
-                                : entry.date !== null
-                                  ? formatDayLabel(entry.date, settings.dateFormat)
-                                  : displayNoteTitle(entry.title)}
+                            <span className="flex items-center gap-1.5 text-sm">
+                              <span className="min-w-0 truncate">
+                                {entry.phrase !== null
+                                  ? entry.phrase
+                                  : entry.date !== null
+                                    ? formatDayLabel(entry.date, settings.dateFormat)
+                                    : displayNoteTitle(entry.title)}
+                              </span>
+                              <LocalOnlyMark path={entry.path} />
                             </span>
                             {entry.phrase !== null && entry.date !== null ? (
                               <span className="block truncate text-xs text-text-muted">

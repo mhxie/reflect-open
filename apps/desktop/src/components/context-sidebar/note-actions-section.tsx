@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { isLocalOnlyPath } from '@reflect/core'
 import { Lock } from 'lucide-react'
 import { PinIcon } from '@/components/icons/pin-icon.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
@@ -32,11 +33,13 @@ const GIST_KEYBINDING = keybindingFor('note.publishGist')
  * the daily and note context sidebars; dailies are valid targets for both.
  * Pin reads the shared shelf cache, updated immediately by every pin entrypoint.
  * Privacy reads the note row cache shared by the palette and mobile actions.
+ * A note inside a local-only folder gets no section: every action would write
+ * or publish it, and its privacy is not a toggle.
  */
 export function NoteActionsSection({
   path,
   showTrash = false,
-}: NoteActionsSectionProps): ReactElement {
+}: NoteActionsSectionProps): ReactElement | null {
   const isPinned = usePinnedNotes().some((note) => note.path === path)
   const noteRow = useNoteRow(path)
   const isPrivate = noteRow?.isPrivate ?? false
@@ -57,6 +60,10 @@ export function NoteActionsSection({
     if (graph !== null) {
       await toggleNotePrivate({ queryClient, root: graph.root, generation: graph.generation, path })
     }
+  }
+
+  if (isLocalOnlyPath(path)) {
+    return null
   }
 
   return (

@@ -6,6 +6,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { setBridge } from '@reflect/core'
 import { GraphProvider, useGraph } from './graph-provider.tsx'
 import { SettingsProvider } from './settings-provider.tsx'
+import { dismissOperation, getOperations } from '@/lib/operations.ts'
 import { queryClient as appQueryClient, queryKeys } from '@/lib/query-client.ts'
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
@@ -24,6 +25,8 @@ let invokeLog: string[]
 /** Pending `graph_open` resolvers keyed by requested root. */
 let pendingOpens: Map<string, () => void>
 let failOpens: boolean
+/** The `localOnlyWarnings` a `graph_open` reports. */
+let openWarnings: string[]
 /** What `recent_graphs` returns — set before render to simulate prior opens. */
 let storedRecents: Array<{ root: string; name: string; openedMs: number }>
 /** What `list_files` returns — set before render to simulate existing notes. */
@@ -54,6 +57,7 @@ function installFakeBridge(): void {
   invokeLog = []
   pendingOpens = new Map()
   failOpens = false
+  openWarnings = []
   storedRecents = []
   storedFiles = []
   metaStore = {}
@@ -73,7 +77,12 @@ function installFakeBridge(): void {
         case 'graph_create': {
           const root = String(args['path'])
           generation += 1
-          return { root, name: root.split('/').findLast(Boolean) ?? '', generation }
+          return {
+            root,
+            name: root.split('/').findLast(Boolean) ?? '',
+            generation,
+            localOnlyFolders: [],
+          }
         }
         case 'graph_open': {
           if (failOpens) {
@@ -84,7 +93,13 @@ function installFakeBridge(): void {
             pendingOpens.set(root, resolve)
           })
           generation += 1
-          return { root, name: root.split('/').findLast(Boolean) ?? '', generation }
+          return {
+            root,
+            name: root.split('/').findLast(Boolean) ?? '',
+            generation,
+            localOnlyFolders: [],
+            localOnlyWarnings: openWarnings,
+          }
         }
         case 'recent_graphs':
           return storedRecents
@@ -199,6 +214,40 @@ describe('GraphProvider open sequencing', () => {
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
     // The superseded first open must not have committed its graph.
     expect(result.current.graph?.root).toBe('/b')
+  })
+
+  it('shows a graph’s local-only configuration problems when it opens', async () => {
+    const localOnlyOperations = () =>
+      getOperations().filter((operation) => operation.label === 'Local-only folders')
+    for (const operation of localOnlyOperations()) {
+      dismissOperation(operation.id)
+    }
+    const { result, act } = await renderHook(() => useGraph(), { wrapper })
+    await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
+
+    // Control: a clean configuration shows nothing.
+    await act(async () => {
+      const opening = result.current.openRecent('/clean')
+      await vi.waitFor(() => expect(invokeLog).toContain('graph_open:/clean'))
+      resolveOpen('/clean')
+      await opening
+    })
+    expect(localOnlyOperations()).toEqual([])
+
+    openWarnings = ['"ſecure" can’t be a local-only folder (it must be plain ASCII).']
+    await act(async () => {
+      const opening = result.current.openRecent('/notes')
+      await vi.waitFor(() => expect(invokeLog).toContain('graph_open:/notes'))
+      resolveOpen('/notes')
+      await opening
+    })
+    await vi.waitFor(() => expect(localOnlyOperations()).toHaveLength(1))
+    expect(localOnlyOperations()[0]).toMatchObject({
+      status: 'warning',
+      persistent: true,
+      message: openWarnings[0],
+    })
+    dismissOperation(localOnlyOperations()[0]!.id)
   })
 
   it('closes note windows BEFORE the backend open bumps the session', async () => {

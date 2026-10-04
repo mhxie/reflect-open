@@ -20,6 +20,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
+use reflect_graph_paths::LocalOnlyFolders;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -110,7 +111,8 @@ fn conflict_candidates(scope: SweepScope, ingested_paths: &[String]) -> Option<H
 /// the frontend just applied cleanly; their content becomes the new shadow
 /// base. `record_baseline` — snapshot every conflict-free note as its own
 /// base (iCloud adoption). `scope` — how much of the graph the version
-/// checks cover ([`SweepScope`]).
+/// checks cover ([`SweepScope`]). The graph's local-only folders never take
+/// part ([`run_sweep`]).
 #[tauri::command]
 pub async fn icloud_conflicts_scan(
     generation: u64,
@@ -121,12 +123,15 @@ pub async fn icloud_conflicts_scan(
     state: State<'_, GraphState>,
 ) -> AppResult<SweepOutcome> {
     let started = std::time::Instant::now();
-    let root = crate::fs::root_for_generation(&state, generation)?;
+    // Paused while the local-only configuration is unknown: the sweep
+    // writes, folds, and deletes, and could not tell what to leave alone.
+    let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
     let sweep_root = root.clone();
     let outcome = crate::blocking::run_blocking(move || {
         let candidates = conflict_candidates(scope, &ingested_paths);
         run_sweep(
             &sweep_root,
+            local_only.as_deref(),
             &skip_paths,
             &ingested_paths,
             record_baseline,
@@ -162,8 +167,16 @@ pub async fn icloud_conflicts_scan(
 /// the store-housekeeping passes (orphan pruning, archive pruning) run only
 /// on unscoped sweeps, because pruning against anything less than the full
 /// live set would drop bases for merely-unlisted notes.
+///
+/// `local_only` — the graph's local-only folders, which never take part: no
+/// ingest or baseline copies their content into a shadow base, no version
+/// check or collision fold writes, merges, or deletes in them, and a base
+/// recorded before the folder became local-only is pruned as unlisted.
+/// Decided per entry ([`crate::fs::entry_is_local_only`]), so a link, a real
+/// folder, and a folded spelling of either are all excluded.
 fn run_sweep(
     root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
     skip_paths: &[String],
     ingested_paths: &[String],
     record_baseline: bool,
@@ -172,8 +185,14 @@ fn run_sweep(
     let shadow = ShadowStore::new(root);
     let skip: BTreeSet<&str> = skip_paths.iter().map(String::as_str).collect();
     let mut outcome = SweepOutcome::default();
+    let excluded = |rel: &str| {
+        local_only.is_some_and(|folders| crate::fs::entry_is_local_only(root, rel, folders))
+    };
 
     for rel in ingested_paths {
+        if excluded(rel) {
+            continue;
+        }
         // A dirty open session may still overwrite this file with content
         // derived from an *older* state — advancing the base to the external
         // revision now would make a later diff3 read that overwrite as "we
@@ -185,7 +204,8 @@ fn run_sweep(
         advance_base_if_clean(root, rel, &shadow, false);
     }
 
-    let files = crate::fs::note_files(root);
+    let mut files = crate::fs::note_files(root);
+    files.retain(|file| !excluded(&file.path));
 
     if record_baseline {
         for file in &files {
@@ -823,7 +843,7 @@ mod tests {
             .record("daily/2026-07-04 2.md", "# Day\n\n- from phone\n")
             .unwrap();
 
-        let outcome = run_sweep(root.path(), &[], &[], false, None).unwrap();
+        let outcome = run_sweep(root.path(), None, &[], &[], false, None).unwrap();
 
         assert_eq!(outcome.auto_resolved, 1);
         assert!(outcome.needs_review.is_empty());
@@ -869,7 +889,7 @@ mod tests {
             .record("daily/2026-07-04.md", "- old lineage\n")
             .unwrap();
 
-        let outcome = run_sweep(root.path(), &[], &[], false, None).unwrap();
+        let outcome = run_sweep(root.path(), None, &[], &[], false, None).unwrap();
 
         assert!(root.path().join("daily/2026-07-04.md").exists());
         assert!(!root.path().join("daily/2026-07-04 2.md").exists());
@@ -891,7 +911,7 @@ mod tests {
         write(root.path(), "daily/.2026-07-04.md.icloud", "stub");
         write(root.path(), "daily/2026-07-04 2.md", "- phone only\n");
 
-        let outcome = run_sweep(root.path(), &[], &[], false, None).unwrap();
+        let outcome = run_sweep(root.path(), None, &[], &[], false, None).unwrap();
 
         assert!(!root.path().join("daily/2026-07-04.md").exists());
         assert!(root.path().join("daily/2026-07-04 2.md").exists());
@@ -916,7 +936,7 @@ mod tests {
             "- shared\n- phone wording\n- common tail\n",
         );
 
-        let outcome = run_sweep(root.path(), &[], &[], false, None).unwrap();
+        let outcome = run_sweep(root.path(), None, &[], &[], false, None).unwrap();
 
         assert_eq!(
             outcome.needs_review,
@@ -935,7 +955,7 @@ mod tests {
         write(root.path(), "notes/chapter.md", "# Chapter\n");
         write(root.path(), "notes/chapter 2.md", "# Chapter 2\n");
 
-        let outcome = run_sweep(root.path(), &[], &[], false, None).unwrap();
+        let outcome = run_sweep(root.path(), None, &[], &[], false, None).unwrap();
 
         assert!(outcome.changed.is_empty());
         assert_eq!(
@@ -952,6 +972,7 @@ mod tests {
 
         let outcome = run_sweep(
             root.path(),
+            None,
             &["daily/2026-07-04.md".to_string()],
             &[],
             false,
@@ -968,17 +989,25 @@ mod tests {
         let root = graph();
         write(root.path(), "notes/a.md", "# a\n");
         // Record a base, then delete the note externally — an orphaned base.
-        run_sweep(root.path(), &[], &["notes/a.md".to_string()], false, None).unwrap();
+        run_sweep(
+            root.path(),
+            None,
+            &[],
+            &["notes/a.md".to_string()],
+            false,
+            None,
+        )
+        .unwrap();
         assert!(ShadowStore::new(root.path()).base("notes/a.md").is_some());
         fs::remove_file(root.path().join("notes/a.md")).unwrap();
 
         // A candidate-scoped sweep leaves the orphan alone (pruning against
         // its narrower view would be wrong; deferring it is safe)…
-        run_sweep(root.path(), &[], &[], false, Some(HashSet::new())).unwrap();
+        run_sweep(root.path(), None, &[], &[], false, Some(HashSet::new())).unwrap();
         assert!(ShadowStore::new(root.path()).base("notes/a.md").is_some());
 
         // …and the next full sweep prunes it.
-        run_sweep(root.path(), &[], &[], false, None).unwrap();
+        run_sweep(root.path(), None, &[], &[], false, None).unwrap();
         assert!(ShadowStore::new(root.path()).base("notes/a.md").is_none());
     }
 
@@ -1011,7 +1040,7 @@ mod tests {
         write(root.path(), "daily/2026-07-04.md", "- a\n");
         write(root.path(), "daily/2026-07-04 2.md", "- b\n");
 
-        run_sweep(root.path(), &[], &[], false, Some(HashSet::new())).unwrap();
+        run_sweep(root.path(), None, &[], &[], false, Some(HashSet::new())).unwrap();
 
         assert!(!root.path().join("daily/2026-07-04 2.md").exists());
     }
@@ -1026,6 +1055,7 @@ mod tests {
 
         run_sweep(
             root.path(),
+            None,
             &["notes/open.md".to_string()],
             &["notes/open.md".to_string()],
             true, // even an adoption baseline must respect the dirty skip
@@ -1045,6 +1075,7 @@ mod tests {
 
         run_sweep(
             root.path(),
+            None,
             &[],
             &["../evil.md".to_string(), "/etc/hosts".to_string()],
             false,
@@ -1068,9 +1099,92 @@ mod tests {
             "<<<<<<< Mac\nmine\n=======\ntheirs\n>>>>>>> iPhone\n",
         );
 
-        run_sweep(root.path(), &[], &["notes/a.md".to_string()], true, None).unwrap();
+        run_sweep(
+            root.path(),
+            None,
+            &[],
+            &["notes/a.md".to_string()],
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(ShadowStore::new(root.path()).base("notes/a.md"), None);
+    }
+
+    /// A graph with a real local-only folder (`people/secure`) and a linked
+    /// one (`finance/secure`, into a raw store beside the graph).
+    #[cfg(unix)]
+    fn graph_with_local_only() -> (tempfile::TempDir, std::path::PathBuf, LocalOnlyFolders) {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, raw) = (base.join("graph"), base.join("raw"));
+        for sub in ["daily", "notes", ".reflect", "people/secure", "finance"] {
+            fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        fs::create_dir_all(raw.join("finance/secure")).unwrap();
+        write(&root, "notes/a.md", "# A\n");
+        write(&root, "people/secure/visa.md", "# Visa\n");
+        fs::write(raw.join("finance/secure/bank.md"), "# Bank\n").unwrap();
+        std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure"))
+            .unwrap();
+        let folders = LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+        (dir, root, folders)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_only_notes_never_become_shadow_bases() {
+        for configured in [true, false] {
+            let (_dir, root, folders) = graph_with_local_only();
+            let ingested: Vec<String> = [
+                "notes/a.md",
+                "people/secure/visa.md",
+                "finance/secure/bank.md",
+                "people/\u{17f}ecure/visa.md",
+            ]
+            .map(str::to_string)
+            .to_vec();
+            let local_only = configured.then_some(&folders);
+            // A scoped sweep: no orphan pruning, so every copy made shows.
+            run_sweep(
+                &root,
+                local_only,
+                &[],
+                &ingested,
+                true,
+                Some(HashSet::new()),
+            )
+            .unwrap();
+            let shadow = ShadowStore::new(&root);
+            assert_eq!(shadow.base("notes/a.md"), Some("# A\n".to_string()));
+            if configured {
+                assert_eq!(shadow.base("people/secure/visa.md"), None);
+                assert_eq!(shadow.base("finance/secure/bank.md"), None);
+                assert_eq!(shadow.base("people/\u{17f}ecure/visa.md"), None);
+            } else {
+                // Control: the stock sweep copies both into the shadow store,
+                // the linked one by reading through the link.
+                assert!(shadow.base("people/secure/visa.md").is_some());
+                assert!(shadow.base("finance/secure/bank.md").is_some());
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_base_recorded_before_a_folder_became_local_only_is_pruned() {
+        let (_dir, root, folders) = graph_with_local_only();
+        let shadow = ShadowStore::new(&root);
+        shadow.record("people/secure/visa.md", "# Visa\n").unwrap();
+        run_sweep(&root, None, &[], &[], false, None).unwrap();
+        assert!(shadow.base("people/secure/visa.md").is_some(), "control");
+        run_sweep(&root, Some(&folders), &[], &[], false, None).unwrap();
+        assert_eq!(shadow.base("people/secure/visa.md"), None);
+        assert_eq!(
+            fs::read_to_string(root.join("people/secure/visa.md")).unwrap(),
+            "# Visa\n"
+        );
     }
 
     #[test]
@@ -1079,12 +1193,20 @@ mod tests {
         write(root.path(), "notes/a.md", "# A\n");
         write(root.path(), "notes/b.md", "# B\n");
 
-        run_sweep(root.path(), &[], &[], true, None).unwrap();
+        run_sweep(root.path(), None, &[], &[], true, None).unwrap();
         let shadow = ShadowStore::new(root.path());
         assert_eq!(shadow.base("notes/a.md"), Some("# A\n".to_string()));
 
         write(root.path(), "notes/b.md", "# B updated externally\n");
-        run_sweep(root.path(), &[], &["notes/b.md".to_string()], false, None).unwrap();
+        run_sweep(
+            root.path(),
+            None,
+            &[],
+            &["notes/b.md".to_string()],
+            false,
+            None,
+        )
+        .unwrap();
         assert_eq!(
             shadow.base("notes/b.md"),
             Some("# B updated externally\n".to_string())
@@ -1315,5 +1437,90 @@ mod tests {
 
         assert_eq!(resolution.final_content, "newest clean\n");
         assert!(!resolution.marked);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod command_tests {
+    //! Command tier: `icloud_conflicts_scan` takes the graph's folders from
+    //! `GraphState`, and pauses while that configuration is unknown.
+    use super::*;
+    use tauri::Manager;
+
+    fn app_for(
+        root: &Path,
+        folders: Option<LocalOnlyFolders>,
+        unknown: bool,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(GraphState::default());
+        {
+            let state = app.state::<GraphState>();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 1;
+            inner.root = Some(root.to_path_buf());
+            inner.set_local_only(folders);
+            if unknown {
+                inner.set_local_only_unknown();
+            }
+        }
+        app
+    }
+
+    fn scan(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        ingested: &[&str],
+    ) -> AppResult<SweepOutcome> {
+        tauri::async_runtime::block_on(icloud_conflicts_scan(
+            1,
+            Vec::new(),
+            ingested.iter().map(|path| path.to_string()).collect(),
+            false,
+            SweepScope::Ingested,
+            app.state(),
+        ))
+    }
+
+    fn graph() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for sub in ["notes", ".reflect", "people/secure"] {
+            fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        fs::write(root.join("people/secure/visa.md"), "# Visa\n").unwrap();
+        fs::write(root.join("notes/a.md"), "# A\n").unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn the_command_keeps_a_local_only_ingest_out_of_the_shadow_store() {
+        for configured in [true, false] {
+            let (_dir, root) = graph();
+            let folders = configured.then(|| LocalOnlyFolders::new(["secure"], None).unwrap());
+            let app = app_for(&root, folders, false);
+            scan(&app, &["people/secure/visa.md", "notes/a.md"]).expect("scan");
+            let shadow = ShadowStore::new(&root);
+            assert_eq!(shadow.base("notes/a.md"), Some("# A\n".to_string()));
+            // Control: without the folders the command copies it in.
+            assert_eq!(shadow.base("people/secure/visa.md").is_some(), !configured);
+        }
+    }
+
+    #[test]
+    fn the_sweep_and_the_move_in_pause_while_the_configuration_is_unknown() {
+        let (_dir, root) = graph();
+        let folders = LocalOnlyFolders::new(["secure"], None);
+        let app = app_for(&root, folders, true);
+        let err = scan(&app, &["notes/a.md"]).expect_err("paused");
+        assert!(format!("{err:?}").contains("Sync is paused"), "{err:?}");
+        assert_eq!(ShadowStore::new(&root).base("notes/a.md"), None);
+        let adopt = tauri::async_runtime::block_on(super::super::storage::icloud_adopt_graph(
+            1,
+            app.state(),
+        ));
+        let err = adopt.expect_err("refused");
+        assert!(format!("{err:?}").contains("Sync is paused"), "{err:?}");
     }
 }

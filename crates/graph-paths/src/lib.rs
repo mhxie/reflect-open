@@ -10,11 +10,13 @@
 
 use std::path::{Component, Path, PathBuf};
 
+mod local_only;
 mod walk;
 
+pub use local_only::{folder_name_problem, LocalOnlyFolders, LocalOnlyLink};
 pub use walk::{
-    has_pruned_component, is_pruned_dir_name, walk_catalog, FileCatalog, FileEntry,
-    REFLECT_IGNORE_FILE,
+    has_pruned_component, is_pruned_dir_name, local_only_links, walk_catalog, walk_catalog_with,
+    FileCatalog, FileEntry, REFLECT_IGNORE_FILE,
 };
 
 /// Root trees reserved for Reflect-managed attachments and recordings.

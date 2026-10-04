@@ -146,7 +146,7 @@ function noteRow(path: string, isPrivate: boolean, title = 'Meeting') {
 }
 
 beforeEach(() => {
-  graphStore.set({ root: '/g', name: 'g', generation: 7 })
+  graphStore.set({ root: '/g', name: 'g', generation: 7, localOnlyFolders: [] })
   currentNoteRow = noteRow('notes/meeting.md', false)
   currentNoteRowSettled = true
   getNote

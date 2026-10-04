@@ -3,12 +3,15 @@ import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
 import {
   detectConflictMarkers,
   isDaily,
+  isLocalOnlyPath,
   isTemplatePath,
   isUntitledNotePath,
+  splitFrontmatter,
   untitledNoteSeed,
 } from '@reflect/core'
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
 import { ConflictNoteView } from '@/components/conflict-note-view.tsx'
+import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
 import { NoteLoading } from '@/components/note-loading.tsx'
 import { NoteOpenError } from '@/components/note-open-error.tsx'
 import { NoteSaveAlerts } from '@/components/note-save-alerts.tsx'
@@ -23,6 +26,7 @@ import {
   unregisterNoteEditorHandle,
 } from '@/editor/editor-handle-registry.ts'
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
+import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
@@ -112,8 +116,11 @@ interface NotePaneProps {
  * pipeline (debounced atomic writes, watcher-driven external reload, and a
  * non-destructive conflict prompt when an external change races unsaved edits).
  * Notes the editor can't faithfully round-trip open **protected** (read-only)
- * so a converter gap can never silently rewrite a file. Plan 06 mounts one of
- * these per day in the daily stream.
+ * so a converter gap can never silently rewrite a file. A note inside a
+ * local-only folder opens as a rendered, never-writing view instead of the
+ * editor: no save path, no attachment intake, link clicks that only navigate
+ * (never create), and nothing that reaches the network. Plan 06 mounts one
+ * of these per day in the daily stream.
  *
  * The pane is composition only: document semantics live in
  * `useNoteDocument`/`note-session.ts`, link-click behavior in
@@ -138,7 +145,8 @@ export function NotePaneComponent({
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const dailyNote = isDaily(path)
-  const lazyCreate = lazy && (dailyNote || isUntitledNotePath(path))
+  const localOnly = isLocalOnlyPath(path)
+  const lazyCreate = lazy && !localOnly && (dailyNote || isUntitledNotePath(path))
   // Templates rename via file operations only (settings, or outside the app):
   // the rename pipeline's slug targets live under `notes/`, so tracking a
   // template's title would move it out of `templates/`. The untitled `id:`
@@ -159,7 +167,8 @@ export function NotePaneComponent({
     // Every editable regular note maintains title-addressed links and
     // title-mirroring backlink displays. The coordinator separately limits
     // title-derived file moves to Reflect-managed notes.
-    trackRenames: !dailyNote && !template,
+    trackRenames: !dailyNote && !template && !localOnly,
+    readOnly: localOnly,
     // A missing ordinary note opens as a name-me template (old Reflect's
     // new-note flow): the seed — `id:` frontmatter plus an empty H1 the
     // caret lands in, ghosted "Untitled" by the title placeholder — only
@@ -182,13 +191,15 @@ export function NotePaneComponent({
     graphKey: graph?.root ?? null,
     dateFormat: settings.dateFormat,
   })
-  const onWikiLinkClick = useWikiLinkNavigation(generation)
+  // Without a generation the navigation only resolves: a link from a
+  // local-only note must never create a note.
+  const onWikiLinkClick = useWikiLinkNavigation(localOnly ? null : generation)
   const onNoteLinkClick = useMarkdownLinkNavigation(generation, path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete()
   const linkPreviewSession = useMemo(
     () =>
-      generation === null || graphKey === null
+      generation === null || graphKey === null || localOnly
         ? null
         : {
             path,
@@ -196,7 +207,7 @@ export function NotePaneComponent({
             graphKey,
             sessionEpoch: document.sessionEpoch,
           },
-    [path, generation, graphKey, document.sessionEpoch],
+    [path, generation, graphKey, localOnly, document.sessionEpoch],
   )
   const resolveLinkPreview = useLinkPreview(linkPreviewSession)
 
@@ -265,7 +276,9 @@ export function NotePaneComponent({
   }, [dailyDate, onExitBoundary])
 
   const editorContent =
-    document.status === 'ready' && !document.protected ? document.initialContent : null
+    document.status === 'ready' && !document.protected && !localOnly
+      ? document.initialContent
+      : null
   const xPostsReady = useXPostPreload(editorContent)
 
   if (document.status === 'loading' || (editorContent !== null && !xPostsReady)) {
@@ -279,6 +292,34 @@ export function NotePaneComponent({
         message={document.error}
         className={cn(gutterClassName, editorClassName, className)}
       />
+    )
+  }
+
+  if (localOnly) {
+    // A protected note's initial content is the whole file; otherwise it is
+    // the body the editor would show.
+    const body = document.protected
+      ? splitFrontmatter(document.initialContent).body
+      : document.initialContent
+    return (
+      <div className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
+        {/* A dashed sheet sets the read-only, device-bound note apart at a glance. */}
+        <div
+          data-testid="local-only-sheet"
+          className="rounded-xl border border-dashed border-border bg-surface-sunken/40 px-5 py-4"
+        >
+          <LocalOnlyNotice className="mb-3" />
+          <MarkdownPreview
+            content={body}
+            resolveImageUrl={resolveImageUrl}
+            resolveWikiEmbed={resolveWikiEmbed}
+            onWikiLinkClick={onWikiLinkClick}
+            remoteEmbeds={false}
+            className={cn('reflect-note-surface', editorClassName)}
+          />
+        </div>
+        {showBacklinks ? <BacklinksPanel path={path} /> : null}
+      </div>
     )
   }
 

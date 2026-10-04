@@ -124,7 +124,7 @@ fn commit_excludes_reflect_and_skips_when_clean() {
     let root = &fixture.graph_a;
     write(root, "notes/a.md", "# A\n");
 
-    let first = commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    let first = commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert!(first.committed);
     assert!(first.sha.is_some());
 
@@ -136,7 +136,7 @@ fn commit_excludes_reflect_and_skips_when_clean() {
         ".reflect/ leaked into backup: {paths:?}"
     );
 
-    let second = commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    let second = commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert!(!second.committed, "clean tree must not produce a commit");
 }
 
@@ -146,7 +146,7 @@ fn commit_describes_single_note_changes() {
     let root = &fixture.graph_a;
 
     write(root, "notes/project-atlas.md", "# Project Atlas\n");
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add Project Atlas");
 
     write(
@@ -154,11 +154,11 @@ fn commit_describes_single_note_changes() {
         "notes/project-atlas.md",
         "# Project Atlas\n\nNext step\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Update Project Atlas");
 
     fs::remove_file(root.join("notes/project-atlas.md")).unwrap();
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Delete Project Atlas");
 }
 
@@ -172,7 +172,7 @@ fn commit_uses_authored_note_subjects() {
         "notes/01arz3ndektsv4rrffq69g5fav.md",
         "---\ntitle: \"Project #1\"\n---\n# Ignored H1\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add Project #1");
 
     write(
@@ -180,11 +180,11 @@ fn commit_uses_authored_note_subjects() {
         "notes/01arz3ndektsv4rrffq69g5fav.md",
         "# Launch Review\n\n- agenda\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Update Launch Review");
 
     fs::remove_file(root.join("notes/01arz3ndektsv4rrffq69g5fav.md")).unwrap();
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Delete Launch Review");
 }
 
@@ -198,7 +198,7 @@ fn commit_describes_note_renames() {
         "notes/original.md",
         "# Original Name\n\n- stable body line one\n- stable body line two\n- stable body line three\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
 
     fs::remove_file(root.join("notes/original.md")).unwrap();
     write(
@@ -206,7 +206,7 @@ fn commit_describes_note_renames() {
         "notes/renamed.md",
         "# Renamed Name\n\n- stable body line one\n- stable body line two\n- stable body line three\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Rename Original Name to Renamed Name");
 }
 
@@ -220,7 +220,7 @@ fn commit_does_not_leak_private_authored_titles() {
         "notes/private-project.md",
         "---\nprivate: true\ntitle: Secret Plan\n---\n# Secret Heading\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add private note");
 }
 
@@ -231,7 +231,7 @@ fn commit_summarizes_note_batches() {
 
     write(root, "daily/2026-06-23.md", "# Daily\n");
     write(root, "notes/project-atlas.md", "# Project Atlas\n");
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add 2 notes");
 
     write(root, "daily/2026-06-23.md", "# Daily\n\n- one\n");
@@ -240,7 +240,7 @@ fn commit_summarizes_note_batches() {
         "notes/project-atlas.md",
         "# Project Atlas\n\nNext step\n",
     );
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Update 2 notes");
 }
 
@@ -251,7 +251,7 @@ fn commit_mentions_note_and_attachment_batches() {
 
     write(root, "notes/capture.md", "# Capture\n");
     write(root, "assets/screenshot.png", "not really a png\n");
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add 1 note and 1 attachment");
 }
 
@@ -262,7 +262,7 @@ fn commit_describes_mixed_note_and_file_batches_by_action() {
 
     write(root, "notes/capture.md", "# Capture\n");
     write(root, "books/book.json", "{}\n");
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Add 1 note and 1 file");
 }
 
@@ -271,7 +271,7 @@ fn commit_falls_back_for_metadata_only_changes() {
     let fixture = fixture();
     let root = &fixture.graph_a;
 
-    commit_all(root, "Update notes", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
     assert_eq!(head_message(root), "Update notes");
 }
 
@@ -280,10 +280,10 @@ fn commit_records_deletions() {
     let fixture = fixture();
     let root = &fixture.graph_a;
     write(root, "notes/gone.md", "# Gone\n");
-    commit_all(root, "add", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "add", MAX_FILE_BYTES, None).unwrap();
 
     fs::remove_file(root.join("notes/gone.md")).unwrap();
-    let outcome = commit_all(root, "delete", MAX_FILE_BYTES).unwrap();
+    let outcome = commit_all(root, "delete", MAX_FILE_BYTES, None).unwrap();
     assert!(outcome.committed);
     assert!(!head_tree_paths(root).contains(&"notes/gone.md".to_string()));
 }
@@ -295,12 +295,12 @@ fn oversized_files_are_skipped_and_reported() {
     // Commit the scaffold first: tracked-but-unchanged files (like the
     // .gitignore, larger than the tiny test threshold) must NOT be reported —
     // only files whose changes are actually being withheld.
-    commit_all(root, "scaffold", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "scaffold", MAX_FILE_BYTES, None).unwrap();
 
     write(root, "notes/small.md", "tiny\n");
     write(root, "assets/huge.bin", "0123456789abcdef");
 
-    let outcome = commit_all(root, "guarded", 10).unwrap();
+    let outcome = commit_all(root, "guarded", 10, None).unwrap();
     assert!(outcome.committed);
     assert_eq!(
         outcome.skipped_large_files.len(),
@@ -320,7 +320,7 @@ fn push_and_fetch_round_trip() {
     let fixture = fixture();
     let root = &fixture.graph_a;
     write(root, "notes/a.md", "# A\n");
-    let first = commit_all(root, "first", MAX_FILE_BYTES).unwrap();
+    let first = commit_all(root, "first", MAX_FILE_BYTES, None).unwrap();
     assert!(first.ahead >= 1, "{first:?}");
 
     let outcome = push(root, None).unwrap();
@@ -332,7 +332,7 @@ fn push_and_fetch_round_trip() {
 
     // The engine's skip condition: a clean no-op commit that is also not
     // ahead means there is nothing to push at all.
-    let idle = commit_all(root, "noop", MAX_FILE_BYTES).unwrap();
+    let idle = commit_all(root, "noop", MAX_FILE_BYTES, None).unwrap();
     assert!(!idle.committed);
     assert_eq!(idle.ahead, 0);
 }
@@ -342,7 +342,7 @@ fn disconnect_drops_origin_but_keeps_history() {
     let fixture = fixture();
     let root = &fixture.graph_a;
     write(root, "notes/a.md", "# A\n");
-    commit_all(root, "first", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "first", MAX_FILE_BYTES, None).unwrap();
     push(root, None).unwrap();
 
     let after = super::disconnect(root).unwrap();
@@ -361,7 +361,7 @@ fn clone_restores_a_backup_into_an_empty_destination() {
     let fixture = fixture();
     let root = &fixture.graph_a;
     write(root, "notes/a.md", "# A\n");
-    commit_all(root, "first", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "first", MAX_FILE_BYTES, None).unwrap();
     push(root, None).unwrap();
 
     let target = fixture._dir.path().join("restored");
@@ -380,7 +380,7 @@ fn first_sync_against_an_empty_remote_pushes() {
     let fixture = fixture();
     let root = &fixture.graph_a;
     write(root, "notes/a.md", "# A\n");
-    commit_all(root, "first", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "first", MAX_FILE_BYTES, None).unwrap();
 
     // The engine's launch cycle is commit → fetch → merge → push. A brand-new
     // backup repo has no remote branch yet; that must not error the cycle
@@ -388,7 +388,7 @@ fn first_sync_against_an_empty_remote_pushes() {
     let delta = fetch(root, None).unwrap();
     assert_eq!(delta.behind, 0);
     assert!(delta.ahead >= 1, "local commits count as ahead: {delta:?}");
-    let merged = merge_remote(root).unwrap();
+    let merged = merge_remote(root, None).unwrap();
     assert!(matches!(merged.kind, MergeKind::UpToDate), "{merged:?}");
     assert!(push(root, None).unwrap().pushed);
 }
@@ -410,7 +410,7 @@ fn connecting_an_existing_backup_on_another_branch_pulls_its_history() {
     Repository::init_opts(&seed, &seed_opts).unwrap();
     setup(&seed, Some(remote_url.clone()), None).unwrap();
     write(&seed, "notes/existing.md", "# Existing\n");
-    commit_all(&seed, "seed", MAX_FILE_BYTES).unwrap();
+    commit_all(&seed, "seed", MAX_FILE_BYTES, None).unwrap();
     push(&seed, None).unwrap();
 
     // A fresh graph (local default would be `main`) connects to it; the
@@ -425,9 +425,9 @@ fn connecting_an_existing_backup_on_another_branch_pulls_its_history() {
 
     // The engine's launch cycle: the local root commit and the remote history
     // are unrelated, and the merge must still integrate them.
-    commit_all(&root, "local notes", MAX_FILE_BYTES).unwrap();
+    commit_all(&root, "local notes", MAX_FILE_BYTES, None).unwrap();
     fetch(&root, None).unwrap();
-    let merged = merge_remote(&root).unwrap();
+    let merged = merge_remote(&root, None).unwrap();
     assert!(
         matches!(
             merged.kind,
@@ -453,14 +453,14 @@ fn aligning_onto_a_stale_local_branch_keeps_the_working_tree() {
     // History: commit 1, a stale local `master` pointing at it, then commit 2
     // on `main` with newer content.
     write(root, "notes/ours.md", "# Ours v1\n");
-    commit_all(root, "v1", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "v1", MAX_FILE_BYTES, None).unwrap();
     {
         let repo = Repository::open(root).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         repo.branch("master", &head, false).unwrap();
     }
     write(root, "notes/ours.md", "# Ours v2\n");
-    commit_all(root, "v2", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "v2", MAX_FILE_BYTES, None).unwrap();
 
     // Aligning onto the stale name must keep our content (HEAD's commit and
     // the working tree are untouched — the stale branch loses the name, we
@@ -472,7 +472,7 @@ fn aligning_onto_a_stale_local_branch_keeps_the_working_tree() {
 
     // And the repo is immediately usable: a no-op commit stays a no-op (the
     // tree still matches HEAD — nothing was silently reverted).
-    let outcome = commit_all(root, "noop", MAX_FILE_BYTES).unwrap();
+    let outcome = commit_all(root, "noop", MAX_FILE_BYTES, None).unwrap();
     assert!(!outcome.committed, "align must not desync tree and HEAD");
 }
 
@@ -481,16 +481,16 @@ fn non_fast_forward_push_is_rejected_as_data() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     write(root_a, "notes/a.md", "# A\n");
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
     write(&root_b, "notes/b.md", "# B\n");
-    commit_all(&root_b, "from b", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "from b", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     write(root_a, "notes/c.md", "# C\n");
-    commit_all(root_a, "from a", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "from a", MAX_FILE_BYTES, None).unwrap();
     let rejected = push(root_a, None).unwrap();
     assert!(!rejected.pushed);
     assert!(
@@ -502,7 +502,7 @@ fn non_fast_forward_push_is_rejected_as_data() {
     let delta = fetch(root_a, None).unwrap();
     assert_eq!(delta.behind, 1);
     assert_eq!(delta.ahead, 1);
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
     assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
     // The merge reports what it wrote (b's note) so the caller can reindex
     // without depending on the file watcher — with the file's real mtime.
@@ -526,18 +526,18 @@ fn conflicting_edits_are_committed_with_labeled_markers() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     write(root_a, "notes/shared.md", "# Shared\n\noriginal line\n");
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
     write(&root_b, "notes/shared.md", "# Shared\n\nedited on b\n");
-    commit_all(&root_b, "b edit", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     write(root_a, "notes/shared.md", "# Shared\n\nedited on a\n");
-    commit_all(root_a, "a edit", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a edit", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
     assert!(
         matches!(merged.kind, MergeKind::MergedWithConflicts),
         "{merged:?}"
@@ -564,7 +564,7 @@ fn conflicting_edits_are_committed_with_labeled_markers() {
     assert!(push(root_a, None).unwrap().pushed);
 
     fetch(&root_b, None).unwrap();
-    let converged = merge_remote(&root_b).unwrap();
+    let converged = merge_remote(&root_b, None).unwrap();
     assert!(
         matches!(converged.kind, MergeKind::FastForward),
         "{converged:?}"
@@ -577,18 +577,18 @@ fn edit_vs_delete_keeps_the_edit() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     write(root_a, "notes/keep.md", "# Keep\n\noriginal\n");
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
     write(&root_b, "notes/keep.md", "# Keep\n\nedited on b\n");
-    commit_all(&root_b, "b edit", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     fs::remove_file(root_a.join("notes/keep.md")).unwrap();
-    commit_all(root_a, "a delete", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a delete", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
     assert!(
         matches!(merged.kind, MergeKind::MergedWithConflicts),
         "{merged:?}"
@@ -604,18 +604,18 @@ fn binary_conflict_keeps_both_copies() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     fs::write(root_a.join("assets/img.bin"), b"\x00base\x01").unwrap();
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
     fs::write(root_b.join("assets/img.bin"), b"\x00from-b\x01").unwrap();
-    commit_all(&root_b, "b image", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b image", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     fs::write(root_a.join("assets/img.bin"), b"\x00from-a\x01").unwrap();
-    commit_all(root_a, "a image", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a image", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
     assert!(
         matches!(merged.kind, MergeKind::MergedWithConflicts),
         "{merged:?}"
@@ -639,14 +639,14 @@ fn detached_head_is_a_typed_error_not_a_panic() {
     let fixture = fixture();
     let root = &fixture.graph_a;
     write(root, "notes/a.md", "# A\n");
-    commit_all(root, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root, "base", MAX_FILE_BYTES, None).unwrap();
     {
         let repo = Repository::open(root).unwrap();
         let oid = repo.head().unwrap().target().unwrap();
         repo.set_head_detached(oid).unwrap();
     }
 
-    let err = merge_remote(root).unwrap_err();
+    let err = merge_remote(root, None).unwrap_err();
     let crate::error::AppError::Io { message } = err else {
         panic!("expected an Io error, got {err:?}");
     };
@@ -662,7 +662,7 @@ fn merging_into_an_unborn_repo_adopts_the_remote_history() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     write(root_a, "notes/a.md", "# A\n");
-    commit_all(root_a, "seed", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "seed", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     // A fresh graph with no commits yet (unborn HEAD) connects to an existing
@@ -673,7 +673,7 @@ fn merging_into_an_unborn_repo_adopts_the_remote_history() {
     setup(&root, Some(fixture.remote_url.clone()), None).unwrap();
     fetch(&root, None).unwrap();
 
-    let merged = merge_remote(&root).unwrap();
+    let merged = merge_remote(&root, None).unwrap();
     assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
     assert_eq!(read(&root, "notes/a.md"), "# A\n");
     let upsert = merged
@@ -694,7 +694,7 @@ fn rename_rename_conflict_keeps_both_names_and_confirms_the_removal() {
         "notes/orig.md",
         "# Original\n\nshared content that travels with the rename\n",
     );
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
@@ -703,7 +703,7 @@ fn rename_rename_conflict_keeps_both_names_and_confirms_the_removal() {
         root_b.join("notes/renamed-b.md"),
     )
     .unwrap();
-    commit_all(&root_b, "b rename", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b rename", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     fs::rename(
@@ -711,14 +711,14 @@ fn rename_rename_conflict_keeps_both_names_and_confirms_the_removal() {
         root_a.join("notes/renamed-a.md"),
     )
     .unwrap();
-    commit_all(root_a, "a rename", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a rename", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
 
     // Rename detection turns this into three conflict groups: ours-only
     // (renamed-a), theirs-only (renamed-b), and ancestor-only (orig — gone on
     // both sides). The last one must be cleared from the index or the merge
     // tree could not be written at all.
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
     assert!(
         matches!(merged.kind, MergeKind::MergedWithConflicts),
         "{merged:?}"
@@ -746,23 +746,23 @@ fn failed_merge_completion_still_clears_the_merge_state() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     write(root_a, "notes/keep.md", "# Keep\n\noriginal\n");
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
     write(&root_b, "notes/keep.md", "# Keep\n\nedited on b\n");
-    commit_all(&root_b, "b edit", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     fs::remove_file(root_a.join("notes/keep.md")).unwrap();
-    commit_all(root_a, "a delete", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a delete", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
 
     // Make restoring the surviving edit fail mid-completion: the notes
     // directory refuses new files, so write_blob cannot recreate keep.md.
     let notes_dir = root_a.join("notes");
     fs::set_permissions(&notes_dir, fs::Permissions::from_mode(0o555)).unwrap();
-    let result = merge_remote(root_a);
+    let result = merge_remote(root_a, None);
     fs::set_permissions(&notes_dir, fs::Permissions::from_mode(0o755)).unwrap();
     assert!(result.is_err(), "{result:?}");
 
@@ -772,7 +772,7 @@ fn failed_merge_completion_still_clears_the_merge_state() {
     drop(repo);
 
     // …and the next cycle recovers on its own.
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
     assert!(
         matches!(merged.kind, MergeKind::MergedWithConflicts),
         "{merged:?}"
@@ -827,7 +827,7 @@ fn rename_on_one_device_merges_with_edit_on_the_other() {
     let root_a = &fixture.graph_a;
     let base = "# Meeting Notes\n\n- agenda point one\n- agenda point two\n- agenda point three\n";
     write(root_a, "notes/01arz3ndektsv4rrffq69g5fav.md", base);
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     // Device B edits a body line of the old path.
@@ -837,7 +837,7 @@ fn rename_on_one_device_merges_with_edit_on_the_other() {
         "notes/01arz3ndektsv4rrffq69g5fav.md",
         "# Meeting Notes\n\n- agenda point one\n- agenda point two EDITED ON B\n- agenda point three\n",
     );
-    commit_all(&root_b, "b edit", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     // Device A renames the file the way the rename pipeline does: the slug
@@ -848,9 +848,9 @@ fn rename_on_one_device_merges_with_edit_on_the_other() {
         "notes/meeting-notes.md",
         "# Meeting Notes\n\n- agenda point one\n- agenda point two\n- agenda point three\n",
     );
-    commit_all(root_a, "rename", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "rename", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
 
     // Rename detection (libgit2 merge default) lands B's edit in the moved
     // file — no conflict, no resurrected ULID path.
@@ -869,7 +869,7 @@ fn same_title_created_on_two_devices_surfaces_as_a_review_conflict() {
     let fixture = fixture();
     let root_a = &fixture.graph_a;
     write(root_a, "notes/seed.md", "# Seed\n");
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
@@ -878,7 +878,7 @@ fn same_title_created_on_two_devices_surfaces_as_a_review_conflict() {
         "notes/meeting.md",
         "# Meeting\n\nnotes from device b\n",
     );
-    commit_all(&root_b, "b creates", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b creates", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     write(
@@ -886,9 +886,9 @@ fn same_title_created_on_two_devices_surfaces_as_a_review_conflict() {
         "notes/meeting.md",
         "# Meeting\n\nnotes from device a\n",
     );
-    commit_all(root_a, "a creates", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a creates", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
 
     assert!(
         matches!(merged.kind, MergeKind::MergedWithConflicts),
@@ -915,7 +915,7 @@ fn diverging_renames_keep_both_files_and_never_wedge() {
     let root_a = &fixture.graph_a;
     let base = "# Shared\n\n- line one\n- line two\n- line three\n";
     write(root_a, "notes/01arz3ndektsv4rrffq69g5fav.md", base);
-    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     push(root_a, None).unwrap();
 
     let root_b = second_device(&fixture);
@@ -925,7 +925,7 @@ fn diverging_renames_keep_both_files_and_never_wedge() {
         "notes/title-b.md",
         "# Title B\n\n- line one\n- line two\n- line three\n",
     );
-    commit_all(&root_b, "b rename", MAX_FILE_BYTES).unwrap();
+    commit_all(&root_b, "b rename", MAX_FILE_BYTES, None).unwrap();
     push(&root_b, None).unwrap();
 
     fs::remove_file(root_a.join("notes/01arz3ndektsv4rrffq69g5fav.md")).unwrap();
@@ -934,9 +934,9 @@ fn diverging_renames_keep_both_files_and_never_wedge() {
         "notes/title-a.md",
         "# Title A\n\n- line one\n- line two\n- line three\n",
     );
-    commit_all(root_a, "a rename", MAX_FILE_BYTES).unwrap();
+    commit_all(root_a, "a rename", MAX_FILE_BYTES, None).unwrap();
     fetch(root_a, None).unwrap();
-    let merged = merge_remote(root_a).unwrap();
+    let merged = merge_remote(root_a, None).unwrap();
 
     // Whatever the merge classifies this as, the invariants hold: no wedge,
     // both titles' content present, the old path gone, and the result pushes.
@@ -948,4 +948,874 @@ fn diverging_renames_keep_both_files_and_never_wedge() {
     assert!(read(root_a, "notes/title-a.md").contains("Title A"));
     assert!(read(root_a, "notes/title-b.md").contains("Title B"));
     assert!(push(root_a, None).unwrap().pushed);
+}
+
+/// A graph whose `finance/secure` is a symlink into a raw store outside it,
+/// plus a real `people/secure/` folder — the graph's `.gitignore` is the
+/// stock default, which knows nothing about either.
+#[cfg(unix)]
+fn graph_with_local_only_folders(base: &Path, name: &str) -> PathBuf {
+    let root = base.join(name);
+    scaffold_graph(&root);
+    setup(&root, None, None).unwrap();
+    let raw = base.join(format!("{name}-raw"));
+    write(&raw, "finance/secure/bank.md", "# Bank\n\naccount 1234\n");
+    fs::create_dir_all(root.join("finance")).unwrap();
+    std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+    write(&root, "people/secure/passport.md", "# Passport\n");
+    write(&root, "notes/public.md", "# Public\n");
+    assert!(!read(&root, ".gitignore").contains("secure"));
+    root
+}
+
+#[cfg(unix)]
+#[test]
+fn local_only_folders_are_never_staged_even_without_an_ignore_pattern() {
+    let dir = tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+
+    // Control: without the configuration the stock backup stages the link
+    // itself — a blob whose content is the raw store's absolute path — and
+    // the real folder's notes.
+    let unguarded = graph_with_local_only_folders(&base, "unguarded");
+    commit_all(&unguarded, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    let paths = head_tree_paths(&unguarded);
+    assert!(paths.contains(&"finance/secure".to_string()), "{paths:?}");
+    assert!(paths.contains(&"people/secure/passport.md".to_string()));
+
+    let guarded = graph_with_local_only_folders(&base, "guarded");
+    let folders =
+        reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&base.join("guarded-raw")))
+            .unwrap();
+    let outcome = commit_all(&guarded, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(outcome.committed);
+    let paths = head_tree_paths(&guarded);
+    assert!(paths.contains(&"notes/public.md".to_string()), "{paths:?}");
+    assert!(
+        !paths.iter().any(|path| path.contains("secure")),
+        "a local-only folder leaked into the backup: {paths:?}"
+    );
+
+    // A later edit inside the raw store still commits nothing new.
+    write(
+        &base.join("guarded-raw"),
+        "finance/secure/bank.md",
+        "# Bank\n\nchanged\n",
+    );
+    write(&guarded, "people/secure/visa.md", "# Visa\n");
+    let again = commit_all(&guarded, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(!again.committed, "only local-only content changed");
+}
+
+#[test]
+fn tracked_files_inside_a_local_only_folder_are_frozen_not_updated() {
+    // A folder committed before it was configured local-only: the ignore
+    // rule cannot reach tracked paths, so the staging guard keeps every
+    // later change (edits and deletions alike) out of the backup.
+    let fixture = fixture();
+    let root = &fixture.graph_a;
+    write(root, "personal/secure/old.md", "# Old\n");
+    commit_all(root, "Update notes", MAX_FILE_BYTES, None).unwrap();
+
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None).unwrap();
+    write(
+        root,
+        "personal/secure/old.md",
+        "# Old\n\nnew private line\n",
+    );
+    write(root, "notes/a.md", "# A\n");
+    commit_all(root, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    let repo = Repository::open(root).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let blob = tree
+        .get_path(Path::new("personal/secure/old.md"))
+        .unwrap()
+        .to_object(&repo)
+        .unwrap()
+        .peel_to_blob()
+        .unwrap();
+    assert_eq!(blob.content(), b"# Old\n");
+
+    fs::remove_file(root.join("personal/secure/old.md")).unwrap();
+    commit_all(root, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(head_tree_paths(root).contains(&"personal/secure/old.md".to_string()));
+}
+
+/// Commit `files` on top of `root`'s HEAD straight into the object store
+/// (the working tree is untouched), so a test can author paths a
+/// case-folding filesystem could never hold side by side.
+fn commit_files_directly(root: &Path, files: &[(&str, &str)]) {
+    let repo = Repository::open(root).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut update = git2::build::TreeUpdateBuilder::new();
+    for (path, contents) in files {
+        let blob = repo.blob(contents.as_bytes()).unwrap();
+        update.upsert(*path, blob, git2::FileMode::Blob);
+    }
+    let tree = repo
+        .find_tree(update.create_updated(&repo, &head.tree().unwrap()).unwrap())
+        .unwrap();
+    let sig = git2::Signature::now("Device B", "b@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "from b", &tree, &[&head])
+        .unwrap();
+}
+
+fn head_blob(root: &Path, rel: &str) -> Vec<u8> {
+    let repo = Repository::open(root).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let entry = tree.get_path(Path::new(rel)).unwrap();
+    let blob = repo.find_blob(entry.id()).unwrap();
+    blob.content().to_vec()
+}
+
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
+const LOCAL_EDIT: &str = "# X\n\nlocal private edit\n";
+
+/// Device A committed `finance/secure/x.md` as a real folder, then made it
+/// local-only: moved it into a raw store, linked it back, and edited the
+/// raw copy (a frozen local edit Git must never see or revert). Device B is
+/// an unconfigured clone from before the migration.
+#[cfg(unix)]
+struct Migrated {
+    fixture: Fixture,
+    raw: PathBuf,
+    folders: reflect_graph_paths::LocalOnlyFolders,
+    root_b: PathBuf,
+}
+
+#[cfg(unix)]
+fn migrated(ignorecase: bool) -> Migrated {
+    let fixture = fixture();
+    let root_a = fixture.graph_a.clone();
+    write(&root_a, "finance/secure/x.md", "# X\n\noriginal\n");
+    write(&root_a, "notes/a.md", "# A\n");
+    commit_all(&root_a, "base", MAX_FILE_BYTES, None).unwrap();
+    push(&root_a, None).unwrap();
+    let root_b = second_device(&fixture);
+
+    let raw = fixture._dir.path().canonicalize().unwrap().join("raw");
+    fs::create_dir_all(raw.join("finance")).unwrap();
+    fs::rename(root_a.join("finance/secure"), raw.join("finance/secure")).unwrap();
+    std::os::unix::fs::symlink(raw.join("finance/secure"), root_a.join("finance/secure")).unwrap();
+    Repository::open(&root_a)
+        .unwrap()
+        .config()
+        .unwrap()
+        .set_bool("core.ignorecase", ignorecase)
+        .unwrap();
+    write(&raw, "finance/secure/x.md", LOCAL_EDIT);
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+    // The sync cycle commits first: nothing local-only is staged.
+    let commit = commit_all(&root_a, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(!commit.committed);
+    Migrated {
+        fixture,
+        raw,
+        folders,
+        root_b,
+    }
+}
+
+#[cfg(unix)]
+fn raw_edit_survived(migrated: &Migrated) -> bool {
+    is_symlink(&migrated.fixture.graph_a.join("finance/secure"))
+        && fs::read_to_string(migrated.raw.join("finance/secure/x.md"))
+            .ok()
+            .as_deref()
+            == Some(LOCAL_EDIT)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fast_forward_never_touches_a_migrated_local_only_folder() {
+    for ignorecase in [true, false] {
+        let migrated = migrated(ignorecase);
+        let root_a = &migrated.fixture.graph_a;
+        write(&migrated.root_b, "notes/a.md", "# A\n\nedited on b\n");
+        commit_all(&migrated.root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
+        push(&migrated.root_b, None).unwrap();
+
+        fetch(root_a, None).unwrap();
+        let merged = merge_remote(root_a, Some(&migrated.folders)).unwrap();
+        assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+        assert!(raw_edit_survived(&migrated), "ignorecase={ignorecase}");
+        assert_eq!(read(root_a, "notes/a.md"), "# A\n\nedited on b\n");
+        assert!(merged.frozen_paths.is_empty(), "{merged:?}");
+        let repo = Repository::open(root_a).unwrap();
+        assert_eq!(
+            repo.head().unwrap().target(),
+            repo.refname_to_id("refs/remotes/origin/main").ok()
+        );
+        let again = commit_all(
+            root_a,
+            "Update notes",
+            MAX_FILE_BYTES,
+            Some(&migrated.folders),
+        );
+        assert!(!again.unwrap().committed);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn without_the_configuration_a_fast_forward_writes_through_the_link() {
+    // Control: the stock forced checkout "restores" the tracked file,
+    // through the link or by replacing it.
+    for ignorecase in [true, false] {
+        let migrated = migrated(ignorecase);
+        write(&migrated.root_b, "notes/a.md", "# A\n\nedited on b\n");
+        commit_all(&migrated.root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
+        push(&migrated.root_b, None).unwrap();
+        fetch(&migrated.fixture.graph_a, None).unwrap();
+        let _ = merge_remote(&migrated.fixture.graph_a, None);
+        assert!(!raw_edit_survived(&migrated), "ignorecase={ignorecase}");
+    }
+}
+
+/// A never-tracked link, and a remote that adds files inside it: under its
+/// own name and, where the filesystem folds, under a folded spelling.
+#[cfg(unix)]
+fn link_with_remote_additions() -> (
+    Fixture,
+    PathBuf,
+    reflect_graph_paths::LocalOnlyFolders,
+    bool,
+) {
+    let fixture = fixture();
+    let root_a = fixture.graph_a.clone();
+    write(&root_a, "notes/a.md", "# A\n");
+    commit_all(&root_a, "base", MAX_FILE_BYTES, None).unwrap();
+    push(&root_a, None).unwrap();
+    let root_b = second_device(&fixture);
+
+    let raw = fixture._dir.path().canonicalize().unwrap().join("raw");
+    write(&raw, "finance/secure/bank.md", "# Bank\n");
+    fs::create_dir_all(root_a.join("finance")).unwrap();
+    std::os::unix::fs::symlink(raw.join("finance/secure"), root_a.join("finance/secure")).unwrap();
+    let folds = root_a.join("finance/\u{17f}ecure").exists();
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+
+    commit_files_directly(
+        &root_b,
+        &[
+            ("finance/secure/remote.md", "# Remote\n"),
+            ("finance/\u{17f}ecure/folded.md", "# Folded\n"),
+            ("notes/b.md", "# B\n"),
+        ],
+    );
+    push(&root_b, None).unwrap();
+    fetch(&root_a, None).unwrap();
+    (fixture, raw, folders, folds)
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_additions_inside_a_local_only_link_are_recorded_but_never_written() {
+    let (fixture, raw, folders, folds) = link_with_remote_additions();
+    let root_a = &fixture.graph_a;
+    let merged = merge_remote(root_a, Some(&folders)).unwrap();
+    assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+
+    let mut raw_files: Vec<_> = fs::read_dir(raw.join("finance/secure"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    raw_files.sort();
+    assert_eq!(raw_files, vec!["bank.md"], "{merged:?}");
+    assert!(is_symlink(&root_a.join("finance/secure")));
+    assert_eq!(read(root_a, "notes/b.md"), "# B\n");
+
+    let mut expected = vec!["finance/secure/remote.md".to_string()];
+    if folds {
+        expected.push("finance/\u{17f}ecure/folded.md".to_string());
+    }
+    let mut frozen = merged.frozen_paths.clone();
+    frozen.sort();
+    expected.sort();
+    assert_eq!(frozen, expected);
+    assert!(merged
+        .changed_files
+        .iter()
+        .all(|change| !expected.contains(&change.path)));
+    let index = Repository::open(root_a).unwrap().index().unwrap();
+    assert!(index
+        .get_path(Path::new("finance/secure/remote.md"), 0)
+        .is_some());
+    let again = commit_all(root_a, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+    assert!(!again.committed);
+}
+
+#[cfg(unix)]
+#[test]
+fn without_the_configuration_remote_additions_land_in_the_raw_store() {
+    let (fixture, raw, _, _) = link_with_remote_additions();
+    let root_a = &fixture.graph_a;
+    let result = merge_remote(root_a, None);
+    assert!(
+        result.is_err()
+            || raw.join("finance/secure/remote.md").exists()
+            || !is_symlink(&root_a.join("finance/secure")),
+        "{result:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_diverged_merge_holds_local_only_paths_and_history_follows_the_remote() {
+    let migrated = migrated(true);
+    let root_a = &migrated.fixture.graph_a;
+    write(root_a, "notes/b.md", "# B\n");
+    let local = commit_all(root_a, "a edit", MAX_FILE_BYTES, Some(&migrated.folders)).unwrap();
+    assert!(local.committed);
+
+    write(
+        &migrated.root_b,
+        "finance/secure/x.md",
+        "# X\n\nedited on b\n",
+    );
+    write(&migrated.root_b, "finance/secure/new.md", "# New\n");
+    write(&migrated.root_b, "notes/a.md", "# A\n\nedited on b\n");
+    commit_all(&migrated.root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
+    push(&migrated.root_b, None).unwrap();
+
+    fetch(root_a, None).unwrap();
+    let merged = merge_remote(root_a, Some(&migrated.folders)).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert!(raw_edit_survived(&migrated));
+    assert!(!migrated.raw.join("finance/secure/new.md").exists());
+    assert_eq!(read(root_a, "notes/a.md"), "# A\n\nedited on b\n");
+    assert_eq!(read(root_a, "notes/b.md"), "# B\n");
+    let mut frozen = merged.frozen_paths.clone();
+    frozen.sort();
+    assert_eq!(frozen, vec!["finance/secure/new.md", "finance/secure/x.md"]);
+    assert_eq!(
+        merged
+            .changed_files
+            .iter()
+            .map(|change| change.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["notes/a.md"]
+    );
+
+    // History has both parents and the other device's versions.
+    let repo = Repository::open(root_a).unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2);
+    assert_eq!(
+        Some(head.parent_id(1).unwrap()),
+        repo.refname_to_id("refs/remotes/origin/main").ok()
+    );
+    assert_eq!(
+        head_blob(root_a, "finance/secure/x.md"),
+        b"# X\n\nedited on b\n"
+    );
+    assert_eq!(head_blob(root_a, "finance/secure/new.md"), b"# New\n");
+    let again = commit_all(
+        root_a,
+        "Update notes",
+        MAX_FILE_BYTES,
+        Some(&migrated.folders),
+    )
+    .unwrap();
+    assert!(!again.committed);
+    assert!(push(root_a, None).unwrap().pushed);
+}
+
+#[cfg(unix)]
+#[test]
+fn without_the_configuration_a_diverged_merge_refuses_or_clobbers() {
+    let migrated = migrated(true);
+    let root_a = &migrated.fixture.graph_a;
+    write(root_a, "notes/b.md", "# B\n");
+    commit_all(root_a, "a edit", MAX_FILE_BYTES, Some(&migrated.folders)).unwrap();
+    write(
+        &migrated.root_b,
+        "finance/secure/x.md",
+        "# X\n\nedited on b\n",
+    );
+    commit_all(&migrated.root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
+    push(&migrated.root_b, None).unwrap();
+    fetch(root_a, None).unwrap();
+    let result = merge_remote(root_a, None);
+    assert!(
+        result.is_err() || !raw_edit_survived(&migrated),
+        "{result:?}"
+    );
+}
+
+/// Command tier: `git_merge_remote` and `git_commit_all` take the open
+/// graph's local-only folders from `GraphState`, with a control session
+/// that has none.
+#[cfg(unix)]
+#[test]
+fn the_git_commands_take_local_only_folders_from_the_open_graph() {
+    use tauri::Manager;
+    for configured in [true, false] {
+        let (fixture, raw, folders, _) = link_with_remote_additions();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(crate::fs::GraphState::default());
+        {
+            let state: tauri::State<crate::fs::GraphState> = app.state();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 1;
+            inner.root = Some(fixture.graph_a.clone());
+            inner.set_local_only(configured.then(|| folders.clone()));
+        }
+        let merged = tauri::async_runtime::block_on(super::git_merge_remote(1, app.state()));
+        let committed = tauri::async_runtime::block_on(super::git_commit_all(
+            "Update notes".to_string(),
+            1,
+            app.state(),
+        ));
+        if configured {
+            let merged = merged.unwrap();
+            assert!(merged
+                .frozen_paths
+                .contains(&"finance/secure/remote.md".to_string()));
+            assert!(!raw.join("finance/secure/remote.md").exists());
+            assert!(!committed.unwrap().committed);
+            assert!(!head_tree_paths(&fixture.graph_a).contains(&"finance/secure".to_string()));
+        } else {
+            // Control: the stock pull writes through (or replaces) the link,
+            // and the stock commit stages what is left there.
+            assert!(
+                merged.is_err()
+                    || raw.join("finance/secure/remote.md").exists()
+                    || !is_symlink(&fixture.graph_a.join("finance/secure"))
+            );
+        }
+    }
+}
+
+/// Command tier: with the settings file unreadable at open, which folders
+/// are local-only is unknown, so commit and merge refuse loudly; the control
+/// session (configuration known, here none) commits.
+#[test]
+fn sync_refuses_while_the_local_only_configuration_is_unknown() {
+    use tauri::Manager;
+    for unknown in [true, false] {
+        let fixture = fixture();
+        write(&fixture.graph_a, "notes/a.md", "# A\n");
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(crate::fs::GraphState::default());
+        {
+            let state: tauri::State<crate::fs::GraphState> = app.state();
+            let mut inner = state.0.lock().unwrap();
+            inner.generation = 1;
+            inner.root = Some(fixture.graph_a.clone());
+            if unknown {
+                inner.set_local_only_unknown();
+            }
+        }
+        let committed = tauri::async_runtime::block_on(super::git_commit_all(
+            "Update notes".to_string(),
+            1,
+            app.state(),
+        ));
+        let merged = tauri::async_runtime::block_on(super::git_merge_remote(1, app.state()));
+        if unknown {
+            let message = format!("{:?}", committed.expect_err("commit refused"));
+            assert!(message.contains("Sync is paused"), "{message}");
+            assert!(merged.is_err());
+            let repo = Repository::open(&fixture.graph_a).unwrap();
+            assert!(repo
+                .head()
+                .ok()
+                .and_then(|head| head.peel_to_commit().ok())
+                .is_none());
+        } else {
+            assert!(committed.unwrap().committed);
+            assert!(head_tree_paths(&fixture.graph_a).contains(&"notes/a.md".to_string()));
+        }
+    }
+}
+
+const LINK: i32 = 0o120000;
+const FILE: i32 = 0o100644;
+
+/// Commit on top of `root`'s HEAD by editing a flattened index of its tree,
+/// leaving the working tree alone: `(path, Some((bytes, mode)))` writes a file
+/// or link at `path`, `(path, None)` removes it; either way whatever sat at
+/// or under `path` goes first, so a test can change an entry's type.
+/// One edit for [`commit_index_edits`]: the bytes and mode to write, or
+/// `None` to remove.
+type IndexEdit<'a> = (&'a str, Option<(&'a [u8], i32)>);
+
+fn commit_index_edits(root: &Path, edits: &[IndexEdit<'_>]) {
+    let repo = Repository::open(root).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut index = git2::Index::new().unwrap();
+    index.read_tree(&head.tree().unwrap()).unwrap();
+    for (path, edit) in edits {
+        if index.get_path(Path::new(path), 0).is_some() {
+            index.remove_path(Path::new(path)).unwrap();
+        }
+        index.remove_dir(Path::new(path), 0).unwrap();
+        if let Some((bytes, mode)) = edit {
+            index
+                .add(&git2::IndexEntry {
+                    ctime: git2::IndexTime::new(0, 0),
+                    mtime: git2::IndexTime::new(0, 0),
+                    dev: 0,
+                    ino: 0,
+                    mode: *mode as u32,
+                    uid: 0,
+                    gid: 0,
+                    file_size: 0,
+                    id: repo.blob(bytes).unwrap(),
+                    flags: 0,
+                    flags_extended: 0,
+                    path: path.as_bytes().to_vec(),
+                })
+                .unwrap();
+        }
+    }
+    let tree = repo.find_tree(index.write_tree_to(&repo).unwrap()).unwrap();
+    let sig = git2::Signature::now("Device B", "b@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "from b", &tree, &[&head])
+        .unwrap();
+}
+
+fn index_paths(root: &Path) -> Vec<String> {
+    let index = Repository::open(root).unwrap().index().unwrap();
+    index
+        .iter()
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect()
+}
+
+/// After a pull: the next commit is clean and a further pull still works.
+#[cfg(unix)]
+fn assert_sync_keeps_flowing(
+    root_a: &Path,
+    root_b: &Path,
+    folders: &reflect_graph_paths::LocalOnlyFolders,
+) {
+    let again = commit_all(root_a, "Update notes", MAX_FILE_BYTES, Some(folders)).unwrap();
+    assert!(!again.committed, "the pull left the index off HEAD");
+    commit_index_edits(root_b, &[("notes/later.md", Some((b"# Later\n", FILE)))]);
+    push(root_b, None).unwrap();
+    fetch(root_a, None).unwrap();
+    merge_remote(root_a, Some(folders)).expect("a later pull");
+    assert_eq!(read(root_a, "notes/later.md"), "# Later\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_local_only_link_that_becomes_a_folder_upstream_never_wedges_a_pull() {
+    for diverged in [false, true] {
+        let fixture = fixture();
+        let root_a = fixture.graph_a.clone();
+        write(&root_a, "notes/a.md", "# A\n");
+        commit_all(&root_a, "base", MAX_FILE_BYTES, None).unwrap();
+        push(&root_a, None).unwrap();
+        let root_b = second_device(&fixture);
+        // Another device committed its own link (it has no configuration).
+        commit_index_edits(
+            &root_b,
+            &[("finance/secure", Some((b"/elsewhere/secure", LINK)))],
+        );
+        push(&root_b, None).unwrap();
+
+        let raw = fixture._dir.path().canonicalize().unwrap().join("raw");
+        write(&raw, "finance/secure/bank.md", "# Bank\n");
+        fs::create_dir_all(root_a.join("finance")).unwrap();
+        std::os::unix::fs::symlink(raw.join("finance/secure"), root_a.join("finance/secure"))
+            .unwrap();
+        let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+        fetch(&root_a, None).unwrap();
+        merge_remote(&root_a, Some(&folders)).expect("pull the link");
+
+        // Upstream, the link becomes a real folder.
+        commit_index_edits(
+            &root_b,
+            &[
+                ("finance/secure", None),
+                ("finance/secure/x.md", Some((b"# X\n", FILE))),
+            ],
+        );
+        push(&root_b, None).unwrap();
+        if diverged {
+            write(&root_a, "notes/b.md", "# B\n");
+            assert!(
+                commit_all(&root_a, "a edit", MAX_FILE_BYTES, Some(&folders))
+                    .unwrap()
+                    .committed
+            );
+        }
+        fetch(&root_a, None).unwrap();
+        let merged = merge_remote(&root_a, Some(&folders)).expect("pull the folder");
+        assert!(
+            merged
+                .frozen_paths
+                .contains(&"finance/secure/x.md".to_string()),
+            "{merged:?}"
+        );
+        assert!(is_symlink(&root_a.join("finance/secure")));
+        let mut raw_files: Vec<_> = fs::read_dir(raw.join("finance/secure"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        raw_files.sort();
+        assert_eq!(raw_files, vec!["bank.md"]);
+        let paths = index_paths(&root_a);
+        assert!(
+            paths.contains(&"finance/secure/x.md".to_string()),
+            "{paths:?}"
+        );
+        assert!(!paths.contains(&"finance/secure".to_string()), "{paths:?}");
+        assert_sync_keeps_flowing(&root_a, &root_b, &folders);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_local_only_folder_that_becomes_a_link_upstream_never_wedges_a_pull() {
+    for diverged in [false, true] {
+        let migrated = migrated(true);
+        let root_a = &migrated.fixture.graph_a;
+        commit_index_edits(
+            &migrated.root_b,
+            &[("finance/secure", Some((b"/elsewhere", LINK)))],
+        );
+        push(&migrated.root_b, None).unwrap();
+        if diverged {
+            write(root_a, "notes/b.md", "# B\n");
+            assert!(
+                commit_all(root_a, "a edit", MAX_FILE_BYTES, Some(&migrated.folders))
+                    .unwrap()
+                    .committed
+            );
+        }
+        fetch(root_a, None).unwrap();
+        let merged = merge_remote(root_a, Some(&migrated.folders)).expect("pull the link");
+        assert!(
+            merged.frozen_paths.contains(&"finance/secure".to_string()),
+            "{merged:?}"
+        );
+        assert!(raw_edit_survived(&migrated));
+        let paths = index_paths(root_a);
+        assert!(paths.contains(&"finance/secure".to_string()), "{paths:?}");
+        assert!(
+            !paths.contains(&"finance/secure/x.md".to_string()),
+            "{paths:?}"
+        );
+        assert_sync_keeps_flowing(root_a, &migrated.root_b, &migrated.folders);
+    }
+}
+
+/// Device A keeps a never-committed local-only folder inside `people/`;
+/// upstream, `people/` becomes a file. Checking that file out would delete
+/// the folder, notes and all.
+#[cfg(unix)]
+fn folder_replaced_by_a_file(diverged: bool) -> (Fixture, reflect_graph_paths::LocalOnlyFolders) {
+    let fixture = fixture();
+    let root_a = fixture.graph_a.clone();
+    write(&root_a, "people/plan.md", "# Plan\n");
+    commit_all(&root_a, "base", MAX_FILE_BYTES, None).unwrap();
+    push(&root_a, None).unwrap();
+    let root_b = second_device(&fixture);
+    Repository::open(&root_a)
+        .unwrap()
+        .config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    write(&root_a, "people/secure/visa.md", "# Visa\n");
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None).unwrap();
+    commit_index_edits(&root_b, &[("people", Some((b"now a file\n", FILE)))]);
+    push(&root_b, None).unwrap();
+    if diverged {
+        write(&root_a, "notes/b.md", "# B\n");
+        assert!(
+            commit_all(&root_a, "a edit", MAX_FILE_BYTES, Some(&folders))
+                .unwrap()
+                .committed
+        );
+    }
+    fetch(&root_a, None).unwrap();
+    (fixture, folders)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pull_refuses_to_replace_a_folder_holding_a_local_only_folder() {
+    for diverged in [false, true] {
+        let (fixture, folders) = folder_replaced_by_a_file(diverged);
+        let root_a = &fixture.graph_a;
+        let head = Repository::open(root_a).unwrap().head().unwrap().target();
+        let err = merge_remote(root_a, Some(&folders)).expect_err("refused");
+        assert!(format!("{err:?}").contains("people"), "{err:?}");
+        assert_eq!(read(root_a, "people/secure/visa.md"), "# Visa\n");
+        let repo = Repository::open(root_a).unwrap();
+        assert_eq!(repo.head().unwrap().target(), head);
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn without_the_configuration_a_pull_deletes_the_folder_or_fails() {
+    let (fixture, _) = folder_replaced_by_a_file(false);
+    let root_a = &fixture.graph_a;
+    let result = merge_remote(root_a, None);
+    assert!(
+        result.is_err() || !root_a.join("people/secure/visa.md").exists(),
+        "{result:?}"
+    );
+}
+
+/// A pull whose checkout fails part-way leaves the index and the ref
+/// together on the old commit, and the next pull goes through.
+#[cfg(unix)]
+#[test]
+fn a_failed_pull_leaves_the_index_and_ref_together_and_the_next_one_works() {
+    use std::os::unix::fs::PermissionsExt;
+    let migrated = migrated(true);
+    let root_a = &migrated.fixture.graph_a;
+    write(&root_a.join("people"), "plan.md", "# Plan\n");
+    commit_all(root_a, "plan", MAX_FILE_BYTES, Some(&migrated.folders)).unwrap();
+    push(root_a, None).unwrap();
+    fetch(&migrated.root_b, None).unwrap();
+    merge_remote(&migrated.root_b, None).unwrap();
+    commit_index_edits(
+        &migrated.root_b,
+        &[
+            ("notes/a.md", Some((b"# A\n\nedited on b\n", FILE))),
+            ("people/plan.md", Some((b"# Plan\n\nedited on b\n", FILE))),
+        ],
+    );
+    push(&migrated.root_b, None).unwrap();
+    fetch(root_a, None).unwrap();
+
+    let repo = Repository::open(root_a).unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+    let locked = root_a.join("people");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    let failed = merge_remote(root_a, Some(&migrated.folders));
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(failed.is_err(), "{failed:?}");
+    let repo = Repository::open(root_a).unwrap();
+    assert_eq!(repo.head().unwrap().target(), Some(head));
+    let mut index = repo.index().unwrap();
+    let head_tree = repo.find_commit(head).unwrap().tree_id();
+    assert_eq!(
+        index.write_tree().unwrap(),
+        head_tree,
+        "the index left HEAD"
+    );
+
+    let merged = merge_remote(root_a, Some(&migrated.folders)).expect("the retry");
+    assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+    assert_eq!(read(root_a, "people/plan.md"), "# Plan\n\nedited on b\n");
+    assert!(raw_edit_survived(&migrated));
+    let again = commit_all(
+        root_a,
+        "Update notes",
+        MAX_FILE_BYTES,
+        Some(&migrated.folders),
+    );
+    assert!(!again.unwrap().committed);
+}
+
+/// The index write itself fails after a successful checkout (a stale
+/// index.lock): HEAD and the index stay on the old commit, and the retry
+/// goes through with nothing frozen disturbed.
+#[cfg(unix)]
+#[test]
+fn a_pull_whose_index_write_fails_leaves_head_and_the_retry_works() {
+    let migrated = migrated(true);
+    let root_a = &migrated.fixture.graph_a;
+    commit_index_edits(
+        &migrated.root_b,
+        &[("notes/a.md", Some((b"# A\n\nedited on b\n", FILE)))],
+    );
+    push(&migrated.root_b, None).unwrap();
+    fetch(root_a, None).unwrap();
+
+    let repo = Repository::open(root_a).unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+    let lock = root_a.join(".git/index.lock");
+    fs::write(&lock, b"").unwrap();
+    let failed = merge_remote(root_a, Some(&migrated.folders));
+    fs::remove_file(&lock).unwrap();
+    assert!(failed.is_err(), "{failed:?}");
+    let repo = Repository::open(root_a).unwrap();
+    assert_eq!(repo.head().unwrap().target(), Some(head));
+    let head_tree = repo.find_commit(head).unwrap().tree_id();
+    assert_eq!(repo.index().unwrap().write_tree().unwrap(), head_tree);
+
+    let merged = merge_remote(root_a, Some(&migrated.folders)).expect("the retry");
+    assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+    assert_eq!(read(root_a, "notes/a.md"), "# A\n\nedited on b\n");
+    assert!(raw_edit_survived(&migrated));
+    let again = commit_all(
+        root_a,
+        "Update notes",
+        MAX_FILE_BYTES,
+        Some(&migrated.folders),
+    );
+    assert!(!again.unwrap().committed);
+}
+
+/// A local-only link deleted upstream: the pull drops its index entry (no
+/// stale entry left behind), never touches the link here, and the next
+/// commit is clean, on both arms.
+#[cfg(unix)]
+#[test]
+fn a_local_only_link_deleted_upstream_leaves_no_stale_index_entry() {
+    for diverged in [false, true] {
+        let fixture = fixture();
+        let root_a = fixture.graph_a.clone();
+        write(&root_a, "notes/a.md", "# A\n");
+        commit_all(&root_a, "base", MAX_FILE_BYTES, None).unwrap();
+        push(&root_a, None).unwrap();
+        let root_b = second_device(&fixture);
+        commit_index_edits(
+            &root_b,
+            &[("finance/secure", Some((b"/elsewhere/secure", LINK)))],
+        );
+        push(&root_b, None).unwrap();
+
+        let raw = fixture._dir.path().canonicalize().unwrap().join("raw");
+        write(&raw, "finance/secure/bank.md", "# Bank\n");
+        fs::create_dir_all(root_a.join("finance")).unwrap();
+        std::os::unix::fs::symlink(raw.join("finance/secure"), root_a.join("finance/secure"))
+            .unwrap();
+        let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+        fetch(&root_a, None).unwrap();
+        merge_remote(&root_a, Some(&folders)).expect("pull the link");
+        assert!(index_paths(&root_a).contains(&"finance/secure".to_string()));
+
+        commit_index_edits(&root_b, &[("finance/secure", None)]);
+        push(&root_b, None).unwrap();
+        if diverged {
+            write(&root_a, "notes/b.md", "# B\n");
+            assert!(
+                commit_all(&root_a, "a edit", MAX_FILE_BYTES, Some(&folders))
+                    .unwrap()
+                    .committed
+            );
+        }
+        fetch(&root_a, None).unwrap();
+        let merged = merge_remote(&root_a, Some(&folders)).expect("pull the deletion");
+        assert!(
+            merged.frozen_paths.contains(&"finance/secure".to_string()),
+            "{merged:?}"
+        );
+        assert!(!index_paths(&root_a).contains(&"finance/secure".to_string()));
+        assert!(!head_tree_paths(&root_a).contains(&"finance/secure".to_string()));
+        assert!(is_symlink(&root_a.join("finance/secure")));
+        assert_eq!(read(&raw, "finance/secure/bank.md"), "# Bank\n");
+        let again = commit_all(&root_a, "Update notes", MAX_FILE_BYTES, Some(&folders)).unwrap();
+        assert!(!again.committed);
+    }
 }

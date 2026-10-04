@@ -4,6 +4,7 @@ import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
 
 /**
  * The shared column template (Subject · Snippet · Tags · Updated) — the header
@@ -96,6 +97,7 @@ export const AllNotesRow = memo(function AllNotesRow({
           selected ? 'text-accent' : 'text-text',
         )}
       >
+        <LocalOnlyMark path={note.path} className="mr-1" />
         {displayNoteTitle(note.title)}
       </button>
       <span

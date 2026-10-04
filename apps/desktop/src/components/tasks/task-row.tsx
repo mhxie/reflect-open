@@ -6,7 +6,7 @@ import {
   type ReactElement,
 } from 'react'
 import { Circle, CircleCheck } from 'lucide-react'
-import { displayNoteTitle, type OpenTask } from '@reflect/core'
+import { displayNoteTitle, isLocalOnlyPath, type OpenTask } from '@reflect/core'
 import { getIsComposing } from '@meowdown/core'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { getTaskKey } from '@/lib/tasks/task-identity.ts'
@@ -14,6 +14,7 @@ import { useTaskCheckboxToggle } from '@/lib/tasks/use-task-checkbox-toggle.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
 import { TaskEditor, type TaskNavigate } from './task-editor.tsx'
 import { TaskText } from './task-text.tsx'
 
@@ -67,6 +68,11 @@ interface TaskRowProps {
  * extends a range. Completing optimistically drops the row; an archived
  * (completed) row shows struck through. A checkbox click on any selected row in
  * a multi-selection completes or reopens the selected rows together.
+ *
+ * A task in a local-only note is read-only: the row still selects, but it
+ * never mounts the inline editor (whose wiki links could create a public note
+ * titled with local-only text, and whose embeds fetch from the network) and
+ * its checkbox stays inert.
  */
 export function TaskRow({
   task,
@@ -93,6 +99,8 @@ export function TaskRow({
   const { settings } = useSettings()
   const { toggle, isPending } = useTaskCheckboxToggle(task)
   const checkboxToggleControllerRef = useRef<(() => void) | null>(null)
+  const readOnly = isLocalOnlyPath(task.notePath)
+  const editable = editing && !readOnly
   const checkboxPending = isPending || taskActionPending
   const done = task.checked
   const label = task.text || 'Empty task'
@@ -107,7 +115,7 @@ export function TaskRow({
     onSelect({ metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey })
   }
   const selectFromRow = (event: MouseEvent<HTMLLIElement>): void => {
-    if (editing) {
+    if (editable) {
       return
     }
     // Shift-click selects a range; stop the browser turning that into a text
@@ -124,7 +132,7 @@ export function TaskRow({
       onClick={selectFromRow}
       className={cn(
         'group/task flex min-h-10 items-start gap-3 border-b border-border bg-surface px-4 py-2 lg:px-12',
-        !editing && 'cursor-pointer',
+        !editable && 'cursor-pointer',
         selected
           ? 'bg-accent-soft ring-1 ring-inset ring-accent/20 dark:ring-accent/10'
           : 'hover:bg-surface-hover dark:bg-surface dark:hover:bg-surface-hover',
@@ -134,10 +142,10 @@ export function TaskRow({
         type="button"
         data-task-row
         aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
-        disabled={checkboxPending}
+        disabled={checkboxPending || readOnly}
         onClick={(event) => {
           event.stopPropagation()
-          if (editing) {
+          if (editable) {
             checkboxToggleControllerRef.current?.()
             return
           }
@@ -157,7 +165,7 @@ export function TaskRow({
           <Circle aria-hidden className="size-[18px]" strokeWidth={2} />
         )}
       </button>
-      {editing ? (
+      {editable ? (
         <TaskEditor
           task={task}
           onCommit={onEditCommit}
@@ -190,13 +198,14 @@ export function TaskRow({
       {showSource ? (
         <button
           type="button"
-          disabled={editing}
+          disabled={editable}
           onClick={(event) => {
             event.stopPropagation()
             onOpen(task.notePath, event)
           }}
           className="flex h-6 shrink-0 items-center whitespace-nowrap text-xs text-text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none"
         >
+          <LocalOnlyMark path={task.notePath} className="mr-1" />
           {task.dailyDate !== null
             ? formatDayLabel(task.dailyDate, settings.dateFormat)
             : displayNoteTitle(task.noteTitle)}

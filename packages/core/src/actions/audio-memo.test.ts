@@ -490,6 +490,51 @@ describe('reconcileAudioMemos', () => {
     expect(ensureBacklinkTargetMock).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['cloud', 'local'] as const)(
+    'skips a recording the graph refuses to read (%s) and continues, writing nothing about it',
+    async (engine) => {
+      const earlier = audioMemoIdentity(new Date(2026, 5, 10, 9, 0, 0, 0), 'audio/mp4')
+      const earlierName = earlier.audioPath.slice(earlier.audioPath.lastIndexOf('/') + 1)
+      listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath), fileMeta(earlier.audioPath)])
+      const refused = {
+        kind: 'traversal',
+        message: `local-only notes and files never leave this machine: ${earlier.audioPath}`,
+      }
+      if (engine === 'cloud') {
+        readAssetMock.mockRejectedValueOnce(refused)
+      } else {
+        transcribeLocallyMock.mockRejectedValueOnce(refused)
+      }
+
+      const outcome = await reconcile({ engine })
+
+      expect(outcome).toEqual({ pending: 2, transcribed: 1, rejected: 0, stopped: null })
+      expect(writeNoteMock).toHaveBeenCalledWith(MEMO.notePath, expect.any(String), 3)
+      for (const [path, content] of writeNoteMock.mock.calls) {
+        expect(path).not.toBe(earlier.notePath)
+        expect(content).not.toContain(earlierName)
+      }
+      for (const [name] of writeTranscriptCacheMock.mock.calls) {
+        expect(name).not.toContain(earlierName)
+      }
+    },
+  )
+
+  it('a pause in sharing still stops the pass instead of skipping the recording', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    readAssetMock.mockRejectedValueOnce({ kind: 'io', message: 'Sharing is paused' })
+
+    const outcome = await reconcile()
+
+    expect(outcome).toEqual({
+      pending: 1,
+      transcribed: 0,
+      rejected: 0,
+      stopped: { reason: 'io', message: 'Sharing is paused' },
+    })
+    expect(writeNoteMock).not.toHaveBeenCalled()
+  })
+
   it('a failed note write stops before the backlink — the transcript is never tombstoned away', async () => {
     listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
     writeNoteMock.mockRejectedValue({ kind: 'io', message: 'disk full' })

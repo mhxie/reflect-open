@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use git2::{Index, IndexAddOption};
+use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
 
 use crate::error::AppResult;
@@ -40,10 +41,15 @@ pub struct CommitOutcome {
 /// when the staged tree already matches HEAD — the sync engine uses that
 /// (with `ahead`) to skip the network entirely, which is what makes the loop
 /// safe: pull-applied writes match HEAD and produce no-ops.
+///
+/// Local-only folders are never staged: neither the folder entry (Git
+/// stores a symlinked folder as a link blob whose content is the target
+/// path) nor anything inside one.
 pub(super) fn commit_all(
     root: &Path,
     fallback_message: &str,
     max_file_bytes: u64,
+    local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<CommitOutcome> {
     let repo = open_existing(root)?;
     ensure_clean_state(&repo)?;
@@ -51,9 +57,15 @@ pub(super) fn commit_all(
     // runtime directory must never enter a backup commit (Plan 21 — a synced
     // `.reflect/` is index corruption on every other device).
     repo.add_ignore_rule("/.reflect/")?;
+    // The same guarantee for local-only folders, by name at any depth. No
+    // trailing slash: a symlink is a file to Git, and `secure/` would only
+    // match a real directory.
+    if let Some(folders) = local_only {
+        repo.add_ignore_rule(&local_only_ignore_rules(folders))?;
+    }
 
     let mut index = repo.index()?;
-    let skipped = add_all_with_size_guard(&mut index, root, max_file_bytes)?;
+    let skipped = add_all_with_size_guard(&mut index, root, max_file_bytes, local_only)?;
 
     let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
     if parent.is_none() && index.is_empty() {
@@ -99,6 +111,7 @@ fn add_all_with_size_guard(
     index: &mut Index,
     root: &Path,
     max_file_bytes: u64,
+    local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<Vec<SkippedFile>> {
     // Size + mtime already in the index, so the guard can tell "oversized and
     // unchanged" (skip silently — its old version is already backed up) from
@@ -126,6 +139,18 @@ fn add_all_with_size_guard(
 
     let skipped: RefCell<Vec<SkippedFile>> = RefCell::new(Vec::new());
     let mut size_guard = |path: &Path, _spec: &[u8]| -> i32 {
+        // Defense in depth behind the ignore rule, which cannot reach a path
+        // the index already tracks: a local-only entry is never added,
+        // updated, or recorded as deleted, however the filesystem spells it.
+        if local_only.is_some_and(|folders| {
+            crate::fs::entry_is_local_only(
+                root,
+                &path.to_string_lossy().replace('\\', "/"),
+                folders,
+            )
+        }) {
+            return 1;
+        }
         let Ok(meta) = root.join(path).metadata() else {
             // Deleted file: let the staging proceed so the removal is recorded.
             return 0;
@@ -174,4 +199,50 @@ fn ahead_of_remote(repo: &git2::Repository) -> usize {
     super::remote::local_delta(repo)
         .map(|delta| delta.ahead)
         .unwrap_or(1)
+}
+
+/// One gitignore pattern per local-only folder name, matching that name at
+/// any depth, folder entry and contents alike.
+fn local_only_ignore_rules(folders: &LocalOnlyFolders) -> String {
+    folders
+        .names()
+        .iter()
+        .map(|name| literal_ignore_pattern(name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Escape a name so gitignore matches it literally: glob metacharacters
+/// lose their meaning, a leading `!`/`#` cannot turn the rule into a
+/// negation or a comment, and trailing spaces survive gitignore's trimming.
+fn literal_ignore_pattern(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let last_non_space = chars.iter().rposition(|character| *character != ' ');
+    let mut pattern = String::with_capacity(name.len() + 2);
+    for (index, &character) in chars.iter().enumerate() {
+        let trailing_space = character == ' ' && last_non_space.is_none_or(|last| index > last);
+        let special = matches!(character, '*' | '?' | '[' | ']' | '\\')
+            || (index == 0 && matches!(character, '!' | '#'));
+        if trailing_space || special {
+            pattern.push('\\');
+        }
+        pattern.push(character);
+    }
+    pattern
+}
+
+#[cfg(test)]
+mod tests {
+    use super::literal_ignore_pattern;
+
+    #[test]
+    fn folder_names_become_literal_ignore_patterns() {
+        assert_eq!(literal_ignore_pattern("secure"), "secure");
+        assert_eq!(literal_ignore_pattern("[private]*"), r"\[private\]\*");
+        assert_eq!(literal_ignore_pattern("!keep"), r"\!keep");
+        assert_eq!(literal_ignore_pattern("#tag"), r"\#tag");
+        assert_eq!(literal_ignore_pattern("a!b#c"), "a!b#c");
+        assert_eq!(literal_ignore_pattern("spaced  "), r"spaced\ \ ");
+        assert_eq!(literal_ignore_pattern("in between"), "in between");
+    }
 }

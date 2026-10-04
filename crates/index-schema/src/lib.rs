@@ -29,6 +29,13 @@ pub const LATEST_SCHEMA_VERSION: usize = 23;
 /// derivation version, distinct from the schema version above).
 pub const PROJECTION_VERSION_KEY: &str = "projection_version";
 
+/// The `index_meta` key holding the graph's local-only folder names as a JSON
+/// array of strings, written by the desktop on every index open (absent when
+/// none are configured). Rows inside those folders are private and, for a
+/// symlinked folder, invisible to a reader's own vault walk — the CLI reads
+/// the names here instead of the desktop's settings.
+pub const LOCAL_ONLY_FOLDERS_KEY: &str = "local_only_folders";
+
 #[cfg(feature = "vec")]
 mod schema {
     use std::ffi::{c_char, c_int};

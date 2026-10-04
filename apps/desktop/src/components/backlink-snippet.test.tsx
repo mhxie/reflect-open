@@ -16,6 +16,11 @@ vi.mock('@/lib/operations.ts', () => ({
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 } }),
 }))
+vi.mock('@reflect/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@reflect/core')>()),
+  // The graph's local-only folders are `secure`.
+  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
+}))
 
 /**
  * A context with one round task, one square box, and a nested round task —
@@ -175,9 +180,62 @@ describe('BacklinkSnippet wiki-link chips', () => {
     await expect.element(chips.first()).toMatchTextContent(/^Dad$/)
     await expect.element(chips.last()).toMatchTextContent(/^Tim MacCaw$/)
     await chips.first().click()
+    // The source note rides along: the navigation decides by it whether an
+    // unresolved target may be created.
     expect(onWikilinkClick).toHaveBeenCalledWith(
       expect.objectContaining({ target: 'Tim MacCaw // Dad' }),
+      'notes/meeting.md',
     )
+    await view.unmount()
+  })
+})
+
+describe('BacklinkSnippet saved embed snapshots', () => {
+  const THUMBNAIL = 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg'
+  const showsImage = (container: HTMLElement, src: string): boolean =>
+    [...container.querySelectorAll('img')].some((img) => img.getAttribute('src') === src)
+  const SNAPSHOT = JSON.stringify({
+    snapshot: {
+      kind: 'youtube-video',
+      data: {
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        title: 'A video',
+        author_name: 'Someone',
+        author_url: 'https://www.youtube.com/@someone',
+        thumbnail_url: THUMBNAIL,
+        thumbnail_width: 480,
+        thumbnail_height: 360,
+        width: 200,
+        height: 113,
+      },
+    },
+  })
+  const TEXT = `- see ![](https://www.youtube.com/watch?v=dQw4w9WgXcQ)<!-- ${SNAPSHOT} -->`
+
+  function renderFrom(notePath: string) {
+    return render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <BacklinkSnippet text={TEXT} notePath={notePath} tasks={[]} onWikilinkClick={() => {}} />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('never renders a snapshot card from a local-only source', async () => {
+    const view = await renderFrom('finance/secure/bank.md')
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('[data-meowdown-embed="youtube"]')).not.toBeNull()
+    })
+    expect(showsImage(view.container, THUMBNAIL)).toBe(false)
+    await view.unmount()
+  })
+
+  it('renders it from an ordinary source (control)', async () => {
+    const view = await renderFrom('notes/meeting.md')
+    await vi.waitFor(() => {
+      expect(showsImage(view.container, THUMBNAIL)).toBe(true)
+    })
     await view.unmount()
   })
 })

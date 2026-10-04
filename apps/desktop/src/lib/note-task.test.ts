@@ -28,6 +28,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   readNote,
   writeNote,
+  isLocalOnlyPath: (path: string) => path.startsWith('finance/secure/'),
 }))
 
 /** The `index`th task of `source` as the index would hand it to the Tasks view. */
@@ -72,6 +73,22 @@ beforeEach(() => {
 })
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+describe('local-only notes', () => {
+  it('refuses every task write without reading or writing the note', async () => {
+    const local = {
+      notePath: 'finance/secure/bank.md',
+      astPath: [0],
+      markdown: 'do it',
+      checked: false,
+    }
+    await expect(toggleTask(local, 7)).rejects.toThrow(/local-only/)
+    await expect(insertTask(local.notePath, 7)).rejects.toThrow(/local-only/)
+    expect(openSession).not.toHaveBeenCalled()
+    expect(readNote).not.toHaveBeenCalled()
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+})
 
 describe('write serialization', () => {
   it('serializes concurrent writes to the same note — no read/write interleave', async () => {

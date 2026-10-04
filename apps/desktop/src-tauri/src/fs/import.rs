@@ -37,7 +37,8 @@ use crate::error::{AppError, AppResult};
 
 use super::import_assets::{self, DownloadOutcome};
 use super::io::{atomic_write_bytes, file_occupied};
-use super::resolve::resolve;
+use super::resolve::{resolve, resolve_write};
+use reflect_graph_paths::LocalOnlyFolders;
 
 /// Summary returned to the settings UI after an import completes.
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -258,8 +259,12 @@ fn ensure_has_notes(entries: &[ImportEntry]) -> AppResult<()> {
 /// `füße.md` and `füsse.md` to the same path), and a conflicting daily note
 /// has the imported body appended instead. `on_progress` receives
 /// `(processed, total)` per zip entry for the writing stage.
+///
+/// Nothing lands in a local-only folder: an entry that would is refused up
+/// front, before anything is written, so the import never half-applies.
 pub(super) fn finalize_import(
     root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
     prepared: PreparedImport,
     mut outcomes: HashMap<String, DownloadOutcome>,
     mut on_progress: impl FnMut(usize, usize),
@@ -270,6 +275,16 @@ pub(super) fn finalize_import(
         prefixes,
         ..
     } = prepared;
+
+    if local_only.is_some() {
+        for relative in entries
+            .iter()
+            .map(|entry| entry.relative.as_str())
+            .chain((!urls.is_empty()).then_some("assets/download"))
+        {
+            resolve_write(root, relative, local_only)?;
+        }
+    }
 
     let assets_dir = root.join("assets");
     let mut url_replacements = HashMap::new();
@@ -338,7 +353,7 @@ pub(super) fn finalize_import(
         match plan_other_entry(root, entry, &claimed)? {
             EntryPlan::SkipIdentical => skipped_files += 1,
             EntryPlan::Write { relative, renamed } => {
-                let target = resolve(root, &relative)?;
+                let target = resolve_write(root, &relative, local_only)?;
                 atomic_write_bytes(root, &target, &entry.bytes)?;
                 names.record(&target);
                 imported_files += 1;
@@ -381,7 +396,7 @@ pub(super) fn finalize_import(
         match plan_note_entry(root, entry, &mut names, &claimed)? {
             NotePlan::SkipIdentical => skipped_files += 1,
             NotePlan::Write { relative, renamed } => {
-                let target = resolve(root, &relative)?;
+                let target = resolve_write(root, &relative, local_only)?;
                 atomic_write_bytes(root, &target, &entry.bytes)?;
                 names.record(&target);
                 imported_files += 1;
@@ -391,7 +406,7 @@ pub(super) fn finalize_import(
                 changed_paths.push(relative);
             }
             NotePlan::Merge { merged } => {
-                let target = resolve(root, &entry.relative)?;
+                let target = resolve_write(root, &entry.relative, local_only)?;
                 atomic_write_bytes(root, &target, &merged)?;
                 merged_files += 1;
                 changed_paths.push(entry.relative.clone());
@@ -843,12 +858,12 @@ mod tests {
                 .map(|prefix| (*prefix).to_string())
                 .collect(),
         };
-        finalize_import(root, prepared, HashMap::new(), |_, _| {})
+        finalize_import(root, None, prepared, HashMap::new(), |_, _| {})
     }
 
     fn import_zip_into_graph(root: &Path, zip_path: &Path) -> AppResult<ImportSummary> {
         let prepared = prepare_zip_import(root, zip_path)?;
-        finalize_import(root, prepared, HashMap::new(), |_, _| {})
+        finalize_import(root, None, prepared, HashMap::new(), |_, _| {})
     }
 
     fn no_cancel() -> Arc<AtomicBool> {
@@ -956,6 +971,35 @@ mod tests {
         ["/proc/self/fd", "/dev/fd"]
             .into_iter()
             .find_map(|path| fs::read_dir(path).ok().map(|entries| entries.count()))
+    }
+
+    #[test]
+    fn an_entry_inside_a_local_only_folder_refuses_the_import_before_any_write() {
+        let import = |local_only: Option<&LocalOnlyFolders>| {
+            let root = tempdir().unwrap();
+            fs::create_dir_all(root.path().join("notes/secure")).unwrap();
+            let prepared = PreparedImport {
+                entries: entries(&[
+                    ("notes/a.md", "# A\n"),
+                    ("notes/secure/bank.md", "# Bank\n"),
+                ]),
+                staging: super::super::assets::staging_dir(root.path()).unwrap(),
+                urls: Vec::new(),
+                prefixes: Vec::new(),
+            };
+            let result =
+                finalize_import(root.path(), local_only, prepared, HashMap::new(), |_, _| {});
+            (result, root)
+        };
+        let folders = LocalOnlyFolders::new(["secure"], None).unwrap();
+        let (refused, root) = import(Some(&folders));
+        assert!(refused.is_err());
+        assert!(!root.path().join("notes/a.md").exists());
+        assert!(!root.path().join("notes/secure/bank.md").exists());
+        // Control: without the configuration both entries import.
+        let (imported, root) = import(None);
+        assert_eq!(imported.unwrap().imported_files, 2);
+        assert!(root.path().join("notes/secure/bank.md").exists());
     }
 
     #[test]
@@ -1509,7 +1553,7 @@ mod tests {
             no_cancel(),
             no_progress(),
         ))?;
-        finalize_import(root, prepared, downloads, |_, _| {})
+        finalize_import(root, None, prepared, downloads, |_, _| {})
     }
 
     #[test]
@@ -1607,7 +1651,7 @@ mod tests {
             "asset downloads kept too many file descriptors open: before {before}, after {after}"
         );
 
-        let summary = finalize_import(root.path(), prepared, downloads, |_, _| {}).unwrap();
+        let summary = finalize_import(root.path(), None, prepared, downloads, |_, _| {}).unwrap();
         assert_eq!(summary.imported_files, 1);
         assert_eq!(summary.downloaded_assets, ASSET_COUNT);
         assert_eq!(summary.failed_asset_downloads, 0);
@@ -1761,9 +1805,13 @@ mod tests {
         };
         let mut seen = Vec::new();
 
-        finalize_import(root.path(), prepared, HashMap::new(), |done, total| {
-            seen.push((done, total))
-        })
+        finalize_import(
+            root.path(),
+            None,
+            prepared,
+            HashMap::new(),
+            |done, total| seen.push((done, total)),
+        )
         .unwrap();
 
         assert_eq!(seen, vec![(1, 3), (2, 3), (3, 3)]);

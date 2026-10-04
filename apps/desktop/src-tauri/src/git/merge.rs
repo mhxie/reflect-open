@@ -18,15 +18,31 @@
 //! the other device's version
 //! >>>>>>> other device
 //! ```
+//!
+//! **Local-only folders are frozen.** With folders configured, no merge or
+//! fast-forward ever creates, writes, or deletes a path that is, or that the
+//! filesystem resolves into, a local-only folder (or out of the graph). Each
+//! such folder moves as one unit, so a type change (a link becoming a folder
+//! upstream) is one entry's change: a fast-forward checks out only the other
+//! changed paths, and a diverged merge runs against the remote with each
+//! unit held at this device's version. The repository still follows the
+//! other device: HEAD and the index take its version of each unit, so
+//! history keeps it and the next commit stays clean, while this device's
+//! files are never touched. Paths tracked before the folder became
+//! local-only therefore stay frozen on disk and are never checked out again;
+//! each skipped change is reported in [`MergeOutcome::frozen_paths`]. A
+//! remote change that would replace a working-tree folder holding a
+//! local-only folder (with a file) is refused before anything is written.
 
 use std::fs;
 use std::path::Path;
 
 use git2::build::CheckoutBuilder;
-use git2::{Index, IndexEntry, MergeOptions, Repository};
+use git2::{Index, IndexEntry, IndexTime, MergeOptions, Repository};
+use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 use super::repo::{current_branch, ensure_clean_state, open_existing, signature};
 
@@ -78,6 +94,9 @@ pub struct MergeOutcome {
     /// Deletions carry `modified_ms: None`; upserts carry the written file's
     /// real mtime.
     pub changed_files: Vec<ChangedFile>,
+    /// The other device's changes inside this device's local-only folders:
+    /// recorded in history, never written here. The sync layer warns.
+    pub frozen_paths: Vec<String>,
 }
 
 /// One side of an index conflict, lifted out of the index so the borrow ends
@@ -94,9 +113,22 @@ fn side_of(entry: Option<IndexEntry>) -> Option<ConflictSide> {
     })
 }
 
+/// Whether a merge must never write `path` on this device (see
+/// `fs::entry_is_local_only`: by name, by a folded alias such as
+/// `ſecure` for a `secure` link, or through a parent that resolves into a
+/// local-only folder or out of the graph).
+fn is_frozen(root: &Path, folders: &LocalOnlyFolders, path: &str) -> bool {
+    crate::fs::entry_is_local_only(root, path, folders)
+}
+
 /// Merge the fetched `origin/<branch>` into the local branch. Pre-condition
-/// (the sync engine guarantees it): local changes are already committed.
-pub(super) fn merge_remote(root: &Path) -> AppResult<MergeOutcome> {
+/// (the sync engine guarantees it): local changes are already committed,
+/// except inside local-only folders, which are never committed and which
+/// this merge never writes (see the module docs).
+pub(super) fn merge_remote(
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<MergeOutcome> {
     let repo = open_existing(root)?;
     ensure_clean_state(&repo)?;
     let branch = current_branch(&repo)?;
@@ -109,6 +141,7 @@ pub(super) fn merge_remote(root: &Path) -> AppResult<MergeOutcome> {
             kind: MergeKind::UpToDate,
             conflicted_paths: Vec::new(),
             changed_files: Vec::new(),
+            frozen_paths: Vec::new(),
         });
     };
     let annotated = repo.find_annotated_commit(remote_oid)?;
@@ -119,6 +152,7 @@ pub(super) fn merge_remote(root: &Path) -> AppResult<MergeOutcome> {
             kind: MergeKind::UpToDate,
             conflicted_paths: Vec::new(),
             changed_files: Vec::new(),
+            frozen_paths: Vec::new(),
         });
     }
 
@@ -128,19 +162,68 @@ pub(super) fn merge_remote(root: &Path) -> AppResult<MergeOutcome> {
         let new_tree = repo.find_commit(remote_oid)?.tree()?;
         let mut changed_files = changed_between(&repo, old_tree.as_ref(), &new_tree)?;
         let refname = format!("refs/heads/{branch}");
-        repo.reference(&refname, remote_oid, true, "reflect sync: fast-forward")?;
-        repo.set_head(&refname)?;
-        // Force is safe here: the pre-merge invariant is a committed working
-        // tree, so there is nothing uncommitted to clobber.
-        repo.checkout_head(Some(CheckoutBuilder::new().force()))?;
+        let frozen_paths = match local_only {
+            None => {
+                repo.reference(&refname, remote_oid, true, "reflect sync: fast-forward")?;
+                repo.set_head(&refname)?;
+                // Force is safe here: with no local-only folders the
+                // pre-merge invariant is a committed working tree, so there
+                // is nothing uncommitted to clobber.
+                repo.checkout_head(Some(CheckoutBuilder::new().force()))?;
+                Vec::new()
+            }
+            Some(folders) => {
+                // Never a full forced checkout: it would also "restore"
+                // tracked local-only paths whose frozen copies differ, writing
+                // through the link. Only the changed, writable paths are
+                // checked out. The working tree goes first, the index is
+                // written once, and the ref moves last. A failure up to and
+                // including the index write leaves the index and the ref
+                // together on the old commit, and a retry checks the same
+                // paths out again. Only a failure to move the ref after the
+                // index write leaves the index ahead of HEAD; the next commit
+                // then records the pulled files as a local change, which the
+                // following merge reconciles with the identical remote one.
+                let plan = plan_pull(root, folders, std::mem::take(&mut changed_files));
+                ensure_no_folder_replaced(root, folders, &plan.allowed)?;
+                checkout_paths(&repo, &new_tree, &plan.allowed)?;
+                let mut follow: Vec<String> = plan
+                    .allowed
+                    .iter()
+                    .map(|change| change.path.clone())
+                    .collect();
+                follow.extend(plan.units.iter().cloned());
+                let mut index = repo.index()?;
+                follow_tree_in_index(&repo, &mut index, &new_tree, &follow)?;
+                index.write()?;
+                repo.reference(&refname, remote_oid, true, "reflect sync: fast-forward")?;
+                repo.set_head(&refname)?;
+                changed_files = plan.allowed;
+                plan.frozen
+            }
+        };
         // Stamp mtimes only now — the checkout above is what wrote the files.
         stamp_modified_times(root, &mut changed_files);
         return Ok(MergeOutcome {
             kind: MergeKind::FastForward,
             conflicted_paths: Vec::new(),
             changed_files,
+            frozen_paths,
         });
     }
+
+    // With local-only folders, merge against a stand-in for the remote whose
+    // frozen units hold this device's version: ours == theirs there, so
+    // whatever base the merge picks it neither writes nor checks them.
+    let held = match local_only {
+        Some(folders) => held_units(&repo, root, folders, remote_oid)?,
+        None => Vec::new(),
+    };
+    let annotated = if held.is_empty() {
+        annotated
+    } else {
+        repo.find_annotated_commit(remote_without(&repo, remote_oid, &held)?)?
+    };
 
     let mut merge_opts = MergeOptions::new();
     let mut checkout = CheckoutBuilder::new();
@@ -155,11 +238,11 @@ pub(super) fn merge_remote(root: &Path) -> AppResult<MergeOutcome> {
     // behind would trip `ensure_clean_state` on every later cycle and wedge
     // sync until a manual repair — exactly what this design forbids. Clear it
     // on every path; the next cycle re-derives anything a failed attempt lost.
-    let result = complete_merge(&repo, root, remote_oid);
+    let result = complete_merge(&repo, root, remote_oid, &held, local_only);
     if result.is_err() {
         let _ = repo.cleanup_state();
     }
-    let (conflicted_paths, changed_files) = result?;
+    let (conflicted_paths, changed_files, frozen_paths) = result?;
 
     let kind = if conflicted_paths.is_empty() {
         MergeKind::Merged
@@ -170,7 +253,288 @@ pub(super) fn merge_remote(root: &Path) -> AppResult<MergeOutcome> {
         kind,
         conflicted_paths,
         changed_files,
+        frozen_paths,
     })
+}
+
+/// What a pull with local-only folders does with each changed path, decided
+/// before anything is written.
+struct PullPlan {
+    /// The changed paths it checks out.
+    allowed: Vec<ChangedFile>,
+    /// Frozen units, each the shortest frozen prefix of a changed path:
+    /// never written here, and moved whole, so a type change at one (a link
+    /// becoming a folder) is one entry's change, not a file meeting a folder.
+    units: Vec<String>,
+    /// The changed paths inside those units: the warning payload.
+    frozen: Vec<String>,
+}
+
+fn plan_pull(root: &Path, folders: &LocalOnlyFolders, changes: Vec<ChangedFile>) -> PullPlan {
+    let mut plan = PullPlan {
+        allowed: Vec::new(),
+        units: Vec::new(),
+        frozen: Vec::new(),
+    };
+    for change in changes {
+        match frozen_unit(root, folders, &change.path) {
+            Some(unit) => {
+                if !plan.units.contains(&unit) {
+                    plan.units.push(unit);
+                }
+                plan.frozen.push(change.path);
+            }
+            None => plan.allowed.push(change),
+        }
+    }
+    plan
+}
+
+/// The shortest prefix of `path` this device must never write
+/// ([`is_frozen`]), or `None` when it may write the path.
+fn frozen_unit(root: &Path, folders: &LocalOnlyFolders, path: &str) -> Option<String> {
+    let mut prefix = String::new();
+    for component in path.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(component);
+        if is_frozen(root, folders, &prefix) {
+            return Some(prefix);
+        }
+    }
+    None
+}
+
+/// Whether `path` lies at or under one of `units`.
+fn under_any(units: &[String], path: &str) -> bool {
+    units.iter().any(|unit| {
+        path == unit
+            || path
+                .strip_prefix(unit.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+/// Refuse, before anything is written, a write that would replace a
+/// working-tree folder holding a local-only folder or link (another device
+/// turned `people/` into a file): the checkout would delete the folder,
+/// notes and all, and history has no copy of them.
+fn ensure_no_folder_replaced(
+    root: &Path,
+    folders: &LocalOnlyFolders,
+    writes: &[ChangedFile],
+) -> AppResult<()> {
+    for change in writes {
+        if holds_local_only(&root.join(&change.path), folders) {
+            return Err(AppError::io(format!(
+                "Sync paused: another device replaced the folder \"{}\", which holds a \
+                 local-only folder, with a file. Move the local-only folder out of it, then \
+                 sync again.",
+                change.path
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `path` is a real directory with a local-only folder or link
+/// somewhere below it, by on-disk name like the walk. An unreadable entry
+/// counts: fail closed.
+fn holds_local_only(path: &Path, folders: &LocalOnlyFolders) -> bool {
+    if !fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) {
+        return false;
+    }
+    walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .min_depth(1)
+        .into_iter()
+        .any(|entry| match entry {
+            Err(_) => true,
+            Ok(entry) => {
+                (entry.file_type().is_dir() || entry.file_type().is_symlink())
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| folders.is_folder_name(name))
+            }
+        })
+}
+
+/// Check out exactly `changes` from `tree`, forcibly (the pre-merge
+/// invariant holds for every path outside local-only folders), into the
+/// working tree only: the caller writes the index once, afterwards. An empty
+/// pathspec would mean every path, so no changes means no checkout.
+fn checkout_paths(repo: &Repository, tree: &git2::Tree, changes: &[ChangedFile]) -> AppResult<()> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let mut checkout = CheckoutBuilder::new();
+    checkout
+        .force()
+        .disable_pathspec_match(true)
+        .update_index(false);
+    for change in changes {
+        checkout.path(change.path.as_str());
+    }
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+    Ok(())
+}
+
+/// Make the index match `tree` at and under each of `paths`, without
+/// touching the working tree: clear every path first, then copy the tree's
+/// files and links there (a whole subtree for a folder), so a type change
+/// never meets its old self as a file/folder collision. The stat fields stay
+/// zero: the next commit re-reads the few files involved (and never a
+/// local-only path), so it stays clean.
+fn follow_tree_in_index(
+    repo: &Repository,
+    index: &mut Index,
+    tree: &git2::Tree,
+    paths: &[String],
+) -> AppResult<()> {
+    for path in paths {
+        let path = Path::new(path);
+        if index.get_path(path, 0).is_some() {
+            index.remove_path(path)?;
+        }
+        index.remove_dir(path, 0)?;
+    }
+    for path in paths {
+        for (path, id, mode) in entries_under(repo, tree, path)? {
+            index.add(&IndexEntry {
+                ctime: IndexTime::new(0, 0),
+                mtime: IndexTime::new(0, 0),
+                dev: 0,
+                ino: 0,
+                mode: mode as u32,
+                uid: 0,
+                gid: 0,
+                file_size: 0,
+                id,
+                flags: 0,
+                flags_extended: 0,
+                path,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Every file, link, and submodule entry of `tree` at or under `path`, as
+/// `(path bytes, id, mode)`; empty when `tree` has nothing there.
+fn entries_under(
+    repo: &Repository,
+    tree: &git2::Tree,
+    path: &str,
+) -> AppResult<Vec<(Vec<u8>, git2::Oid, i32)>> {
+    let entry = match tree.get_path(Path::new(path)) {
+        Ok(entry) => entry,
+        Err(err) if err.code() == git2::ErrorCode::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err.into()),
+    };
+    if entry.kind() != Some(git2::ObjectType::Tree) {
+        return Ok(vec![(
+            path.as_bytes().to_vec(),
+            entry.id(),
+            entry.filemode(),
+        )]);
+    }
+    let subtree = repo.find_tree(entry.id())?;
+    let mut out = Vec::new();
+    subtree.walk(git2::TreeWalkMode::PreOrder, |prefix, child| {
+        if child.kind() != Some(git2::ObjectType::Tree) {
+            let mut full = format!("{path}/{prefix}").into_bytes();
+            full.extend_from_slice(child.name_bytes());
+            out.push((full, child.id(), child.filemode()));
+        }
+        git2::TreeWalkResult::Ok
+    })?;
+    Ok(out)
+}
+
+/// The frozen units a diverged merge must hold: those of every path where
+/// the remote differs from local HEAD. Refuses, before the merge writes
+/// anything, a remote change that would replace a folder holding a
+/// local-only folder.
+fn held_units(
+    repo: &Repository,
+    root: &Path,
+    folders: &LocalOnlyFolders,
+    remote_oid: git2::Oid,
+) -> AppResult<Vec<String>> {
+    let local = repo.head()?.peel_to_commit()?;
+    let remote = repo.find_commit(remote_oid)?;
+    let remote_tree = remote.tree()?;
+    let plan = plan_pull(
+        root,
+        folders,
+        changed_between(repo, Some(&local.tree()?), &remote_tree)?,
+    );
+    // The merge writes only where the remote changed since the base.
+    let base_tree = match repo.merge_base(local.id(), remote_oid) {
+        Ok(base) => Some(repo.find_commit(base)?.tree()?),
+        Err(_) => None,
+    };
+    let mut writes = changed_between(repo, base_tree.as_ref(), &remote_tree)?;
+    writes.retain(|change| !under_any(&plan.units, &change.path));
+    ensure_no_folder_replaced(root, folders, &writes)?;
+    Ok(plan.units)
+}
+
+/// A dangling stand-in for the remote commit: its tree with every held unit
+/// set to local HEAD's version (a whole subtree, a single entry, or
+/// nothing), and its parents, so the merge base is unchanged. Built through
+/// a flattened index, so a unit whose type differs between the two sides
+/// swaps cleanly. The merge commit itself names the real remote.
+fn remote_without(
+    repo: &Repository,
+    remote_oid: git2::Oid,
+    held: &[String],
+) -> AppResult<git2::Oid> {
+    let local_tree = repo.head()?.peel_to_tree()?;
+    let remote = repo.find_commit(remote_oid)?;
+    let mut index = Index::new()?;
+    index.read_tree(&remote.tree()?)?;
+    follow_tree_in_index(repo, &mut index, &local_tree, held)?;
+    let tree = repo.find_tree(index.write_tree_to(repo)?)?;
+    let parents: Vec<git2::Commit> = remote.parents().collect();
+    let parents: Vec<&git2::Commit> = parents.iter().collect();
+    let sig = signature(repo)?;
+    Ok(repo.commit(
+        None,
+        &sig,
+        &sig,
+        "reflect sync: remote changes outside local-only folders",
+        &tree,
+        &parents,
+    )?)
+}
+
+/// The held units the remote changed since the merge base (all of them
+/// when there is no base): history takes the remote's version there.
+fn remote_changed_units(
+    repo: &Repository,
+    local: git2::Oid,
+    remote: &git2::Commit,
+    held: &[String],
+) -> AppResult<Vec<String>> {
+    let base_tree = match repo.merge_base(local, remote.id()) {
+        Ok(base) => Some(repo.find_commit(base)?.tree()?),
+        Err(_) => None,
+    };
+    let remote_tree = remote.tree()?;
+    let mut changed = Vec::new();
+    for unit in held {
+        let base = match &base_tree {
+            Some(tree) => entries_under(repo, tree, unit)?,
+            None => Vec::new(),
+        };
+        if base != entries_under(repo, &remote_tree, unit)? {
+            changed.push(unit.clone());
+        }
+    }
+    Ok(changed)
 }
 
 /// The post-`repo.merge` half: materialize conflicts, commit the merge with
@@ -181,17 +545,31 @@ fn complete_merge(
     repo: &Repository,
     root: &Path,
     remote_oid: git2::Oid,
-) -> AppResult<(Vec<String>, Vec<ChangedFile>)> {
+    held: &[String],
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<(Vec<String>, Vec<ChangedFile>, Vec<String>)> {
     let mut index = repo.index()?;
-    let conflicted_paths = resolve_conflicts(repo, root, &mut index)?;
-    index.write()?;
-
-    let tree = repo.find_tree(index.write_tree()?)?;
+    let conflicted_paths = resolve_conflicts(repo, root, &mut index, local_only)?;
     let local_commit = repo.head()?.peel_to_commit()?;
     let remote_commit = repo.find_commit(remote_oid)?;
+    let remote_tree = remote_commit.tree()?;
+    // Held units merged as this device's version; where the other device
+    // changed one, history takes its version instead. The files stay frozen.
+    let followed = remote_changed_units(repo, local_commit.id(), &remote_commit, held)?;
+    follow_tree_in_index(repo, &mut index, &remote_tree, &followed)?;
+    index.write()?;
+    let frozen_paths: Vec<String> =
+        changed_between(repo, Some(&local_commit.tree()?), &remote_tree)?
+            .into_iter()
+            .map(|change| change.path)
+            .filter(|path| under_any(&followed, path))
+            .collect();
+
+    let tree = repo.find_tree(index.write_tree()?)?;
     // The working tree is final here (merge checkout + conflict resolution
     // wrote everything), so the stamped mtimes are the files' real ones.
     let mut changed_files = changed_between(repo, Some(&local_commit.tree()?), &tree)?;
+    changed_files.retain(|change| !under_any(held, &change.path));
     stamp_modified_times(root, &mut changed_files);
     let sig = signature(repo)?;
     let message = if conflicted_paths.is_empty() {
@@ -208,7 +586,7 @@ fn complete_merge(
         &[&local_commit, &remote_commit],
     )?;
     repo.cleanup_state()?;
-    Ok((conflicted_paths, changed_files))
+    Ok((conflicted_paths, changed_files, frozen_paths))
 }
 
 /// Diff two trees into the watcher's change shape: what the merge wrote or
@@ -266,7 +644,12 @@ fn stamp_modified_times(root: &Path, changes: &mut [ChangedFile]) {
 /// - **binary vs binary** — keep ours in place and the other device's copy
 ///   alongside (`name (conflict).ext`);
 /// - **deleted on both** — confirm the removal.
-fn resolve_conflicts(repo: &Repository, root: &Path, index: &mut Index) -> AppResult<Vec<String>> {
+fn resolve_conflicts(
+    repo: &Repository,
+    root: &Path,
+    index: &mut Index,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<Vec<String>> {
     if !index.has_conflicts() {
         return Ok(Vec::new());
     }
@@ -290,10 +673,14 @@ fn resolve_conflicts(repo: &Repository, root: &Path, index: &mut Index) -> AppRe
     for conflict in conflicts {
         match (conflict.our, conflict.their) {
             (Some(our), Some(their)) => {
-                conflicted_paths.extend(resolve_both_edited(repo, root, index, our, their)?);
+                conflicted_paths.extend(resolve_both_edited(
+                    repo, root, index, our, their, local_only,
+                )?);
             }
             (Some(edited), None) | (None, Some(edited)) => {
-                conflicted_paths.push(resolve_edit_vs_delete(repo, root, index, edited)?);
+                conflicted_paths.push(resolve_edit_vs_delete(
+                    repo, root, index, edited, local_only,
+                )?);
             }
             (None, None) => {
                 if let Some(ancestor) = conflict.ancestor {
@@ -315,15 +702,16 @@ fn resolve_both_edited(
     index: &mut Index,
     our: ConflictSide,
     their: ConflictSide,
+    local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<Vec<String>> {
     let binary = repo.find_blob(our.id)?.is_binary() || repo.find_blob(their.id)?.is_binary();
     if !binary {
         index.add_path(Path::new(&our.path))?;
         return Ok(vec![our.path]);
     }
-    write_blob(repo, root, &our.path, our.id)?;
+    write_blob(repo, root, &our.path, our.id, local_only)?;
     let copy = conflict_copy_path(&their.path);
-    write_blob(repo, root, &copy, their.id)?;
+    write_blob(repo, root, &copy, their.id, local_only)?;
     index.add_path(Path::new(&our.path))?;
     index.add_path(Path::new(&copy))?;
     Ok(vec![our.path, copy])
@@ -337,15 +725,29 @@ fn resolve_edit_vs_delete(
     root: &Path,
     index: &mut Index,
     edited: ConflictSide,
+    local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<String> {
-    write_blob(repo, root, &edited.path, edited.id)?;
+    write_blob(repo, root, &edited.path, edited.id, local_only)?;
     index.add_path(Path::new(&edited.path))?;
     Ok(edited.path)
 }
 
-fn write_blob(repo: &Repository, root: &Path, rel: &str, id: git2::Oid) -> AppResult<()> {
+/// Write a blob into the working tree. With local-only folders configured
+/// the target goes through the write guard: `fs::write` follows symlinks,
+/// and a held path can never conflict, so a refusal here is a bug surfacing
+/// loudly rather than a write through a link.
+fn write_blob(
+    repo: &Repository,
+    root: &Path,
+    rel: &str,
+    id: git2::Oid,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
     let blob = repo.find_blob(id)?;
-    let target = root.join(rel);
+    let target = match local_only {
+        Some(folders) => crate::fs::resolve_write_in_graph(root, rel, Some(folders))?,
+        None => root.join(rel),
+    };
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
