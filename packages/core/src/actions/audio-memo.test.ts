@@ -29,6 +29,7 @@ import {
   writeTranscriptCache,
 } from '../graph/commands.ts'
 import { transcribeAudio } from '../ai/transcribe.ts'
+import { localModelStatus, transcribeLocally } from '../ai/local-transcription.ts'
 import { TranscriptionRejectedError } from '../ai/transcribe-http.ts'
 import { getSecret } from '../secrets/keychain.ts'
 
@@ -56,6 +57,11 @@ vi.mock('../ai/transcribe', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../ai/transcribe.ts')>()),
   transcribeAudio: vi.fn(),
 }))
+vi.mock('../ai/local-transcription', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ai/local-transcription.ts')>()),
+  localModelStatus: vi.fn(),
+  transcribeLocally: vi.fn(),
+}))
 vi.mock('../ai/audio-memo-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../ai/audio-memo-title.ts')>()),
   generateAudioMemoTitle: generateAudioMemoTitleMock,
@@ -80,6 +86,8 @@ const readTranscriptCacheMock = vi.mocked(readTranscriptCache)
 const writeTranscriptCacheMock = vi.mocked(writeTranscriptCache)
 const writeNoteMock = vi.mocked(writeNote)
 const transcribeMock = vi.mocked(transcribeAudio)
+const localModelStatusMock = vi.mocked(localModelStatus)
+const transcribeLocallyMock = vi.mocked(transcribeLocally)
 const getSecretMock = vi.mocked(getSecret)
 
 const PROVIDERS: AiProvidersState = {
@@ -108,6 +116,9 @@ function reconcile(overrides: Partial<ReconcileAudioMemosInput> = {}) {
     generation: 3,
     formatTranscript: false,
     transcriptionPrompt: '',
+    engine: 'cloud',
+    localModel: 'large-v3-turbo',
+    transcriptionLanguage: '',
     ...overrides,
   })
 }
@@ -124,6 +135,12 @@ beforeEach(() => {
   writeNoteMock.mockResolvedValue(undefined)
   getSecretMock.mockResolvedValue('sk-live-key')
   transcribeMock.mockResolvedValue('memo transcript')
+  localModelStatusMock.mockResolvedValue({ status: 'ready' })
+  transcribeLocallyMock.mockResolvedValue({
+    outcome: 'transcribed',
+    text: 'local transcript',
+    segments: [{ startMs: 0, endMs: 1500, text: 'local transcript' }],
+  })
   generateAudioMemoTitleMock.mockResolvedValue('Memo Transcript')
   formatAudioMemoTranscriptMock.mockResolvedValue({
     title: 'Planning the launch',
@@ -288,6 +305,72 @@ describe('reconcileAudioMemos', () => {
       fallbackTitle: 'Audio memo 2026-06-11 15:30:22',
     })
     expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
+  })
+
+  it('transcribes on-device in place: no asset read, no provider call, timed segments cached', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+
+    const outcome = await reconcile({
+      engine: 'local',
+      transcriptionLanguage: 'zh',
+      transcriptionPrompt: 'Names: Ocavue',
+      formatTranscript: true,
+    })
+
+    expect(outcome).toEqual({ pending: 1, transcribed: 1, rejected: 0, stopped: null })
+    expect(transcribeLocallyMock).toHaveBeenCalledWith({
+      path: MEMO.audioPath,
+      generation: 3,
+      model: 'large-v3-turbo',
+      language: 'zh',
+      prompt: 'Names: Ocavue',
+    })
+    expect(readAssetMock).not.toHaveBeenCalled()
+    expect(transcribeMock).not.toHaveBeenCalled()
+    expect(writeTranscriptCacheMock).toHaveBeenCalledWith(
+      'audio-memo-2026-06-11-153022-845.webm.json',
+      JSON.stringify({
+        text: 'local transcript',
+        segments: [{ startMs: 0, endMs: 1500, text: 'local transcript' }],
+      }),
+      3,
+    )
+    expect(writeNoteMock.mock.calls[0]?.[1]).toContain('\n\nlocal transcript\n')
+    // Nothing leaves the device: no formatting pass, and the title is derived
+    // locally (no credentials) even with a provider and auto-format configured.
+    expect(formatAudioMemoTranscriptMock).not.toHaveBeenCalled()
+    expect(generateAudioMemoTitleMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ credentials: expect.anything() }),
+    )
+    expect(getSecretMock).not.toHaveBeenCalled()
+  })
+
+  it('leaves memos pending while the on-device model is not downloaded', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+    localModelStatusMock.mockResolvedValue({ status: 'missing' })
+
+    const outcome = await reconcile({ engine: 'local' })
+
+    expect(outcome).toEqual({
+      pending: 1,
+      transcribed: 0,
+      rejected: 0,
+      stopped: {
+        reason: 'config',
+        message: 'The on-device transcription model is not downloaded.',
+      },
+    })
+    expect(transcribeLocallyMock).not.toHaveBeenCalled()
+    expect(writeNoteMock).not.toHaveBeenCalled()
+  })
+
+  it('sends the spoken-language choice to the cloud provider', async () => {
+    listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
+
+    await reconcile({ transcriptionLanguage: 'ja' })
+
+    expect(transcribeMock).toHaveBeenCalledWith(expect.objectContaining({ language: 'ja' }))
+    expect(localModelStatusMock).not.toHaveBeenCalled()
   })
 
   it('passes the transcription hint to every segment call', async () => {

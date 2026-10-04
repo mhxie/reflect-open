@@ -76,6 +76,17 @@ describe('transcribeAudio (openai)', () => {
     expect((calls[2]!.body as FormData).get('prompt')).toBeNull()
   })
 
+  it('sends the spoken language when set and omits it otherwise', async () => {
+    const calls: RecordedCall[] = []
+    const fetchFn = recordingFetch(calls, () => jsonResponse(200, { text: 'ok' }))
+
+    await transcribeAudio(request({ fetchFn, language: 'zh' }))
+    await transcribeAudio(request({ fetchFn, language: '' }))
+
+    expect((calls[0]!.body as FormData).get('language')).toBe('zh')
+    expect((calls[1]!.body as FormData).get('language')).toBeNull()
+  })
+
   it('names webm recordings .webm', async () => {
     const calls: RecordedCall[] = []
     const fetchFn = recordingFetch(calls, () => jsonResponse(200, { text: 'hi' }))
@@ -217,6 +228,22 @@ describe('transcribeAudio (google)', () => {
       'Transcribe this audio recording verbatim. Return only the transcribed text, with no commentary or formatting.\nNames: Ocavue',
     )
     expect(text(1)).not.toContain('Ocavue')
+  })
+
+  it('names the spoken language in the instruction, before the hint', async () => {
+    const calls: RecordedCall[] = []
+    const fetchFn = recordingFetch(calls, () => geminiResponse('ok'))
+
+    await transcribeAudio(
+      request({ provider: 'google', fetchFn, language: 'zh', prompt: 'Names: Ocavue' }),
+    )
+
+    const body = JSON.parse(String(calls[0]!.body)) as {
+      contents: { parts: { text?: string }[] }[]
+    }
+    expect(body.contents[0]!.parts[0]!.text).toBe(
+      'Transcribe this audio recording verbatim. Return only the transcribed text, with no commentary or formatting.\nThe spoken language is ISO 639 "zh".\nNames: Ocavue',
+    )
   })
 
   it('posts inline base64 audio to the fixed transcription model', async () => {

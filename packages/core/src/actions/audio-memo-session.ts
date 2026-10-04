@@ -1,19 +1,8 @@
 import { z } from 'zod'
 import { errorMessage, isAppError } from '../errors.ts'
-import {
-  TRANSCRIPTION_MAX_SEGMENT_BYTES,
-  type TranscriptionProvider,
-} from '../ai/provider-config.ts'
-import { transcribeAudio } from '../ai/transcribe.ts'
+import { transcriptSegmentSchema, type TranscriptSegment } from '../ai/local-transcription.ts'
 import { isTranscriptionOversize, isTranscriptionRejected } from '../ai/transcribe-http.ts'
-import { base64ToBytes } from '../lib/base64.ts'
-import {
-  readAsset,
-  readAssetBinary,
-  readTranscriptCache,
-  writeTranscriptCache,
-} from '../graph/commands.ts'
-import { hasBinaryIpc } from '../ipc/bridge.ts'
+import { readTranscriptCache, writeTranscriptCache } from '../graph/commands.ts'
 import type { AudioMemoIdentity } from './audio-memo.ts'
 
 /**
@@ -124,8 +113,13 @@ export function isSessionReady(session: AudioMemoSession, nowMs: number): boolea
   )
 }
 
-/** A segment's terminal transcription result, as cached and as stitched. */
-export type AudioMemoPartResult = { text: string } | { rejected: string }
+/**
+ * A segment's terminal transcription result, as cached and as stitched.
+ * `segments` (on-device engine only) time the text within the part.
+ */
+export type AudioMemoPartResult =
+  | { text: string; segments?: TranscriptSegment[] | undefined }
+  | { rejected: string }
 
 /**
  * Per-part transcript cache, inside the graph but under `.reflect/` so the
@@ -138,7 +132,7 @@ export function partTranscriptName(part: AudioMemoPart): string {
 }
 
 const partResultSchema = z.union([
-  z.object({ text: z.string() }),
+  z.object({ text: z.string(), segments: z.array(transcriptSegmentSchema).optional() }),
   z.object({ rejected: z.string() }),
 ])
 
@@ -202,14 +196,27 @@ async function writePartTranscript(
   await writeTranscriptCache(partTranscriptName(part), encodePartResult(result), generation)
 }
 
+/** What an engine returns for one stored segment. */
+export interface SegmentTranscript {
+  text: string
+  segments?: TranscriptSegment[] | undefined
+}
+
+/**
+ * One engine's way of transcribing a stored segment: a cloud provider uploads
+ * its bytes, the on-device engine reads it in place
+ * (`audio-memo-transcribers.ts`).
+ */
+export interface SegmentTranscriber {
+  /** Largest segment this engine takes; a bigger one waits, never tombstones. */
+  maxSegmentBytes: number
+  transcribe: (part: AudioMemoPart) => Promise<SegmentTranscript>
+}
+
 export interface TranscribeSessionPartsInput {
   session: AudioMemoSession
-  provider: TranscriptionProvider
-  apiKey: string
-  /** User transcription hint, if any. */
-  prompt: string
+  transcriber: SegmentTranscriber
   generation: number
-  fetchFn?: typeof fetch | undefined
   /** Abort gate, consulted before and after every slow await. */
   isStale: () => boolean
 }
@@ -246,7 +253,7 @@ export async function transcribeSessionParts(
     if (part.placeholder) {
       return { status: 'partial' }
     }
-    if (part.sizeBytes > TRANSCRIPTION_MAX_SEGMENT_BYTES) {
+    if (part.sizeBytes > input.transcriber.maxSegmentBytes) {
       return { status: 'oversize' }
     }
     if (part.sizeBytes === 0) {
@@ -256,24 +263,13 @@ export async function transcribeSessionParts(
       results.push({ text: '' })
       continue
     }
-    const bytes = hasBinaryIpc()
-      ? await readAssetBinary(part.path, input.generation)
-      : base64ToBytes(await readAsset(part.path, input.generation))
-    if (input.isStale()) {
-      return { status: 'stale' }
-    }
     let result: AudioMemoPartResult
     try {
-      const text = await transcribeAudio({
-        provider: input.provider,
-        apiKey: input.apiKey,
-        prompt: input.prompt,
-        audio: new Blob([bytes], { type: part.memo.mimeType }),
-        mimeType: part.memo.mimeType,
-        fetchFn: input.fetchFn,
-        isStale: input.isStale,
-      })
-      result = { text }
+      const transcript = await input.transcriber.transcribe(part)
+      result =
+        transcript.segments === undefined
+          ? { text: transcript.text }
+          : { text: transcript.text, segments: transcript.segments }
     } catch (cause) {
       if (isTranscriptionOversize(cause)) {
         return { status: 'oversize' }

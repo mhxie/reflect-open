@@ -53,6 +53,13 @@ mod watcher;
 #[cfg(mobile)]
 #[path = "watcher_mobile.rs"]
 mod watcher;
+// On-device transcription needs whisper.cpp on Metal, so only macOS carries
+// the real module; every other target answers `unsupported`.
+#[cfg(target_os = "macos")]
+mod local_transcription;
+#[cfg(not(target_os = "macos"))]
+#[path = "local_transcription_unsupported.rs"]
+mod local_transcription;
 
 use tauri::{Emitter, Manager};
 
@@ -114,6 +121,8 @@ fn init_tracing() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    local_transcription::prepare_process_environment();
     init_tracing();
     let builder = tauri::Builder::default();
 
@@ -272,6 +281,7 @@ pub fn run() {
         .manage(quit::QuitState::default())
         .manage(windows::WindowInit::default())
         .manage(embed::EmbedState::default())
+        .manage(local_transcription::LocalTranscriptionState::default())
         .invoke_handler(tauri::generate_handler![
             fs::x_archive::x_archive_write,
             fs::x_archive::x_archive_resolve,
@@ -348,6 +358,12 @@ pub fn run() {
             embed::embed_status,
             embed::embed_ensure,
             embed::embed_texts,
+            local_transcription::local_transcription_status,
+            local_transcription::local_transcription_download,
+            local_transcription::local_transcription_delete,
+            local_transcription::local_transcription_transcribe,
+            local_transcription::local_transcription_check_updates,
+            local_transcription::local_transcription_skip_update,
             watcher::watch_start,
             watcher::watch_stop,
             menu::menu_install_paste_and_match_style,

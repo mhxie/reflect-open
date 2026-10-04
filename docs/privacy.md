@@ -39,6 +39,14 @@ disk at call time), and it is covered by tests.
   transcript; the title-generation call still receives that transcript.
 - **When:** when you record a memo, and on retry for memos still awaiting
   transcription.
+- **On-device engine (macOS):** choosing *On this Mac* in Settings transcribes with a
+  Whisper model running locally on Metal; the recording never leaves the device. The
+  model downloads **from Hugging Face** when you ask for it (0.6–1.6 GB), carrying no
+  user data. While *Check for model updates* is on (the default), Reflect asks Hugging
+  Face at most once a day whether the downloaded model has newer weights; that request
+  carries no user data either, and newer weights install only when you accept them.
+  Nothing else leaves the device either: on-device memos skip the text-model pass,
+  keeping the raw transcript and a title taken from its first words.
 
 ## Semantic search (off by default)
 
@@ -161,6 +169,8 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | --- | --- | --- | --- |
 | AI chat | Your chosen provider | Yes — private-note tool reads are blocked | Yes (needs your key) |
 | Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
+| On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |
+| Transcription model update check | Hugging Face | No | On once the model is downloaded |
 | Embeddings | Nowhere (on-device) | — | Yes (opt-in download) |
 | Model download | Hugging Face | No | Yes (opt-in) |
 | Backup | Your git repository | Yes — including private notes | Yes (needs connecting) |

@@ -123,6 +123,25 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
   "NSMenuItem",
   "NSWorkspace",
 ] }
+# On-device audio-memo transcription (`src/local_transcription/`): whisper.cpp
+# on Metal, fed by AudioToolbox's ExtAudioFile (m4a/AAC, WAV), which resamples
+# to the model's 16 kHz in the same pass.
+whisper-rs = { version = "0.16.0", features = ["metal", "tracing_backend"] }
+objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "ExtendedAudioFile",
+  "objc2-core-audio-types",
+  "objc2-core-foundation",
+] }
+objc2-core-audio-types = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "CoreAudioBaseTypes",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFURL"] }
+# WebKit's MediaRecorder writes WebM/Opus, which AudioToolbox can't open:
+# symphonia demuxes it and libopus (built from source) decodes straight to 16 kHz.
+symphonia = { version = "0.6.1", default-features = false, features = ["mkv"] }
+symphonia-adapter-libopus = "0.3.0"
 
 # Apple Contacts integration (`contacts.rs`): live CNContactStore lookups on
 # macOS and iOS — never a mirrored copy of the address book. block2 bridges the

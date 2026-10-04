@@ -46,6 +46,21 @@ touches a Reflect server, because there isn't one.
   `Transcription auto-format` disabled, that pass generates only the title and
   the note stores the raw provider transcript. Formatting failures also fall
   back to the raw text and a local title rather than retrying speech-to-text.
+- **On-device engine (macOS).** Settings → Audio memos can switch the engine
+  to *On this Mac*: whisper.cpp on Metal
+  (`apps/desktop/src-tauri/src/local_transcription/`) reads each segment in
+  place from the graph, so no provider, key, or size ceiling is involved, and
+  its cached result also keeps per-segment timings. WebM/Opus recordings are
+  demuxed by symphonia and decoded at 16 kHz by libopus; other containers go
+  through AudioToolbox's ExtAudioFile. A file that isn't decodable audio gets
+  one failure line rather than a retry every pass. The model downloads on demand from
+  Hugging Face into the same cache the embedding model uses, verified against
+  its SHA-256. A downloaded model is pinned: a daily check offers newer weights
+  (toast, plus Update and Skip This Version in Settings) and never installs
+  them on its own. The engines share one seam (`SegmentTranscriber` in
+  `@reflect/core`), and the spoken-language setting reaches both. The
+  on-device engine is fully offline: its transcripts skip the text-model pass
+  and are titled from their own first words.
   The reconciler
   (`apps/desktop/src/lib/transcription-reconciler.ts`) writes a dedicated
   transcript note, resolves or creates the `Audio memos` category note, and
@@ -61,7 +76,7 @@ touches a Reflect server, because there isn't one.
 | Upload to Reflect servers for transcription | Direct provider call with the user's own key       |
 | Transcription quota tied to plan         | No quotas; provider bills the user directly           |
 | Audio stored in the cloud account        | Audio is a file in the graph (`audio-memos/`), backed up by git like everything else |
-| Works only online                        | Recording works offline; transcription catches up later |
+| Works only online                        | Recording works offline; transcription catches up later, or runs offline on macOS's on-device engine |
 | Optional transcript auto-formatting      | Default-on in the BYOK title pass; disable body formatting in Settings |
 
 ## Notes and follow-ups

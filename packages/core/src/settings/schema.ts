@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
+  LOCAL_TRANSCRIPTION_MODEL_IDS,
+} from '../ai/local-transcription-models.ts'
 import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
 
 /**
@@ -234,13 +238,51 @@ export function normalizeTranscriptionPrompt(value: string): string {
 /**
  * Free-text context for audio-memo transcription (for example names the
  * provider tends to misspell). Sent verbatim with every segment as the
- * provider's prompt (OpenAI) or appended to the instruction (Gemini). Empty
- * (the default) sends nothing.
+ * provider's prompt (OpenAI) or appended to the instruction (Gemini); the
+ * on-device model takes it as its initial prompt. Empty (the default) sends
+ * nothing.
  */
 export const transcriptionPromptSchema = z
   .string()
   .catch('')
   .transform(normalizeTranscriptionPrompt)
+
+/**
+ * Which engine transcribes audio memos: the configured cloud provider (the
+ * default) or the on-device Whisper model (macOS only), which keeps the
+ * recording on this device and downloads its model once from Settings.
+ */
+export const transcriptionEngineSchema = z.enum(['cloud', 'local']).catch('cloud')
+
+export type TranscriptionEngine = z.infer<typeof transcriptionEngineSchema>
+
+/** The on-device model; choosing another one downloads it on demand. */
+export const localTranscriptionModelSchema = z
+  .enum(LOCAL_TRANSCRIPTION_MODEL_IDS)
+  .catch(DEFAULT_LOCAL_TRANSCRIPTION_MODEL)
+
+/** Canonicalize a spoken-language choice: an ISO 639-1/2 code, or empty. */
+export function normalizeTranscriptionLanguage(value: string): string {
+  const code = value.trim().toLowerCase()
+  return /^[a-z]{2,3}$/.test(code) ? code : ''
+}
+
+/**
+ * The spoken language of audio memos, as an ISO 639 code sent to either
+ * engine. Empty (the default) detects it per recording — the better choice
+ * when one memo mixes languages.
+ */
+export const transcriptionLanguageSchema = z
+  .string()
+  .catch('')
+  .transform(normalizeTranscriptionLanguage)
+
+/**
+ * Whether the on-device model's upstream is checked (at most daily) for newer
+ * weights. Updates are only ever offered: a downloaded model never changes
+ * until the user accepts one.
+ */
+export const localTranscriptionUpdateChecksSchema = z.boolean().catch(true)
 
 /**
  * Whether the user has finished the mobile onboarding choice (Plan 19, step
@@ -544,6 +586,10 @@ export const settingsSchema = z.looseObject({
   describeAssets: describeAssetsSchema,
   transcriptionFormat: transcriptionFormatSchema,
   transcriptionPrompt: transcriptionPromptSchema,
+  transcriptionEngine: transcriptionEngineSchema,
+  localTranscriptionModel: localTranscriptionModelSchema,
+  transcriptionLanguage: transcriptionLanguageSchema,
+  localTranscriptionUpdateChecks: localTranscriptionUpdateChecksSchema,
   contactsEnabled: contactsEnabledSchema,
   mobileOnboarded: mobileOnboardedSchema,
   mobileStorage: mobileStorageKindSchema,

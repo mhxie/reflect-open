@@ -7,6 +7,7 @@ import type {
 } from '@reflect/core'
 import {
   createTranscriptionReconciler,
+  type TranscriptionChoice,
   type TranscriptionReconciler,
 } from './transcription-reconciler.ts'
 
@@ -50,16 +51,20 @@ let onFileChanges: ((changes: FileChange[]) => void) | null = null
 const unlisten = vi.fn()
 let reconciler: TranscriptionReconciler | null = null
 
+const CLOUD: TranscriptionChoice = { engine: 'cloud', localModel: 'large-v3-turbo', language: '' }
+
 function create(
   providers: AiProvidersState = PROVIDERS,
   getTranscriptionFormat: () => boolean = () => true,
   getTranscriptionPrompt: () => string = () => '',
+  getTranscriptionChoice: () => TranscriptionChoice = () => CLOUD,
 ): TranscriptionReconciler {
   reconciler = createTranscriptionReconciler({
     generation: 3,
     getProviders: () => providers,
     getTranscriptionFormat,
     getTranscriptionPrompt,
+    getTranscriptionChoice,
   })
   return reconciler
 }
@@ -148,6 +153,36 @@ describe('createTranscriptionReconciler', () => {
     await flush()
 
     expect(reconcileAudioMemos).not.toHaveBeenCalled()
+  })
+
+  it('runs the on-device engine without any cloud model, reading the choice lazily', async () => {
+    let choice: TranscriptionChoice = {
+      engine: 'local',
+      localModel: 'large-v3-turbo-q8_0',
+      language: 'zh',
+    }
+    const subject = create(
+      NO_PROVIDERS,
+      () => true,
+      () => '',
+      () => choice,
+    )
+    subject.start()
+    await flush()
+
+    expect(reconcileAudioMemos).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        engine: 'local',
+        localModel: 'large-v3-turbo-q8_0',
+        transcriptionLanguage: 'zh',
+      }),
+    )
+
+    choice = CLOUD
+    subject.schedule()
+    await flush()
+    // Back on the cloud engine with no cloud model: the gate holds.
+    expect(reconcileAudioMemos).toHaveBeenCalledTimes(1)
   })
 
   it('coalesces triggers landing mid-pass into exactly one follow-up', async () => {
