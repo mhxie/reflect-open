@@ -57,14 +57,24 @@ fn every_corpus_case_classifies_as_specified() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
-/// The two parsers may disagree on a case's class, never on whether the note
-/// is withheld: every note TS treats as private is private or unreadable
-/// here, and vice versa.
+/// The two parsers may disagree on a case's class, and on whether the note is
+/// withheld only where the case pins that `divergence`: every other note TS
+/// treats as private is private or unreadable here, and vice versa.
 #[test]
-fn both_sides_agree_on_what_is_withheld() {
+fn the_sides_disagree_on_withholding_only_where_a_case_pins_it() {
     for case in corpus_cases() {
         let withheld = |side| expectation(&case, side).0 != "public";
-        assert_eq!(withheld("rust"), withheld("ts"), "{}", case["name"]);
+        let observed = match (withheld("rust"), withheld("ts")) {
+            (true, false) => Some("rustStricter"),
+            (false, true) => Some("tsStricter"),
+            _ => None,
+        };
+        assert_eq!(
+            case.get("divergence").and_then(Value::as_str),
+            observed,
+            "{}",
+            case["name"]
+        );
         if case.get("rust").is_some() || case.get("ts").is_some() {
             assert!(
                 case["why"].as_str().is_some_and(|why| !why.is_empty()),

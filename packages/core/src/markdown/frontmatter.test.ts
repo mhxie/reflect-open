@@ -71,6 +71,35 @@ describe('parseFrontmatter', () => {
     expect(warning).toMatch(/not a mapping/i)
   })
 
+  it('reads a block of only comments, or a bare null, as empty frontmatter', () => {
+    for (const raw of ['# private: true', '--- # private: true', '~ # private: true']) {
+      const { data, warning, privacy } = parseFrontmatter(raw)
+      expect(warning, raw).toBeUndefined()
+      expect(privacy, raw).toEqual({ kind: 'public' })
+      expect(data, raw).toEqual({ aliases: [], private: false, pinned: false, ignoredContacts: [] })
+    }
+  })
+
+  it('reads nothing from a block holding a character the Rust reader would read differently', () => {
+    for (const raw of [
+      'title: x\0',
+      '\u{FEFF}title: x',
+      'title: x\rpinned: true',
+      'title: x\u{7}',
+    ]) {
+      const { data, warning } = parseFrontmatter(raw)
+      expect(warning, JSON.stringify(raw)).toMatch(/control character/)
+      expect(data.title, JSON.stringify(raw)).toBeUndefined()
+    }
+    expect(parseFrontmatter('title: x\r\npinned: true').data.pinned).toBe(true)
+  })
+
+  it('reads every block as YAML 1.2, whatever its %YAML directive says', () => {
+    // YAML 1.1 would make `yes` a boolean, which no string field accepts.
+    expect(parseFrontmatter('%YAML 1.1\n--- #c\ntitle: yes').data.title).toBe('yes')
+    expect(parseFrontmatter('%YAML 1.1\n--- #c\nyes: 1\ntrue: 2').warning).toBeUndefined()
+  })
+
   it('reads the private flag fail-closed: an unrecognized value counts as private', () => {
     expect(parseFrontmatter('private: true').data.private).toBe(true)
     expect(parseFrontmatter('private: yes').data.private).toBe(true)

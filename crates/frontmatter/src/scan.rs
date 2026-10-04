@@ -5,15 +5,19 @@
 //!
 //! The load decision mirrors `loadFrontmatterBlock` in
 //! `packages/core/src/markdown/frontmatter-load.ts`, which applies the same
-//! rules to yaml's document: a block either side refuses is "not loaded" on
-//! both, and its privacy then comes from the line scan alone.
+//! rules (size, characters, documents, duplicate keys, aliases, root shape)
+//! to yaml's document. The two parsers still disagree on some syntax each
+//! accepts, so a block one side loads may not load on the other; those
+//! divergences are pinned in `fixtures/frontmatter-privacy.json`.
 
 use std::collections::{HashMap, HashSet};
 
-use saphyr_parser::{Event, Parser, Tag};
+use saphyr_parser::{Event, Parser, ScalarStyle, Tag};
 
 use crate::classify::UnreadableReason;
-use crate::scalar::{classify_untagged, key_identity, Scalar, ValueClass, CORE_TAG_PREFIX};
+use crate::scalar::{
+    classify_untagged, key_identity, resolve_null, Scalar, ValueClass, CORE_TAG_PREFIX,
+};
 
 /// Blocks larger than this are never parsed (256 KiB).
 pub(crate) const MAX_BLOCK_BYTES: usize = 256 * 1024;
@@ -92,12 +96,15 @@ pub(crate) enum Load {
     NotLoaded(UnreadableReason),
 }
 
-/// Decide whether `raw` loads: one document whose root is a plain mapping,
-/// no duplicate keys, aliases within both budgets, and at most
-/// [`MAX_BLOCK_BYTES`].
+/// Decide whether `raw` loads: at most [`MAX_BLOCK_BYTES`], no character the
+/// two parsers read differently, one document whose root is a plain mapping
+/// (or empty), no duplicate keys, and aliases within both budgets.
 pub(crate) fn load(raw: &str) -> Load {
     if raw.len() > MAX_BLOCK_BYTES {
         return Load::NotLoaded(UnreadableReason::TooLarge);
+    }
+    if has_unloadable_character(raw) {
+        return Load::NotLoaded(UnreadableReason::ParseFailed);
     }
     let Ok((tree, more_documents)) = parse_tree(raw) else {
         return Load::NotLoaded(UnreadableReason::ParseFailed);
@@ -117,6 +124,29 @@ pub(crate) fn load(raw: &str) -> Load {
         return Load::NotLoaded(UnreadableReason::NotAMapping);
     }
     Load::Loaded(tree)
+}
+
+/// Whether `raw` holds a character the two parsers read differently, so that
+/// neither may load the block: anything outside YAML's printable set (saphyr
+/// stops at a NUL as if the input ended, yaml reads on), a byte-order mark
+/// anywhere (yaml drops a leading one, saphyr keeps it in the first key), or
+/// a CR outside a CRLF (saphyr breaks the line there, yaml doesn't). Mirrors
+/// `UNLOADABLE_CHARACTER` in `frontmatter-load.ts`.
+fn has_unloadable_character(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    raw.char_indices()
+        .any(|(index, character)| match character {
+            '\r' => bytes.get(index + 1) != Some(&b'\n'),
+            '\u{feff}' => true,
+            '\t'
+            | '\n'
+            | ' '..='~'
+            | '\u{85}'
+            | '\u{a0}'..='\u{d7ff}'
+            | '\u{e000}'..='\u{fffd}'
+            | '\u{10000}'..='\u{10ffff}' => false,
+            _ => true,
+        })
 }
 
 /// Build the first document's tree from the event stream. `Err` on any
@@ -331,18 +361,36 @@ fn subtree_alias_count(tree: &Tree, start: NodeId, anchors: &[Option<(u64, u64)>
         .unwrap_or(0)
 }
 
-/// Whether the root is a mapping with no tag but `!!map` and no merge key.
-/// yaml merges `<<` keys in some modes and not others, so a root that has
-/// one can't be read the same way everywhere.
+/// Whether the root reads as a plain mapping: a mapping tagged at most `!!map`
+/// or the non-specific `!` (which resolves to `!!map`), with no merge key, or
+/// an empty root — no node, or a bare null scalar such as `~` or the nothing
+/// after `--- #comment` — which holds no keys at all. yaml merges `<<` keys
+/// in some modes and not others, so a root that has one can't be read the
+/// same way everywhere.
 fn has_plain_mapping_root(tree: &Tree) -> bool {
-    let Some(NodeKind::Mapping(mapping)) = tree.root.map(|root| &tree.nodes[root].kind) else {
-        return false;
+    let Some(root) = tree.root else {
+        return true;
     };
-    let map_tag = format!("{CORE_TAG_PREFIX}map");
-    if mapping.tag.as_ref().is_some_and(|tag| *tag != map_tag) {
-        return false;
+    match &tree.nodes[root].kind {
+        NodeKind::Mapping(mapping) => {
+            let map_tag = format!("{CORE_TAG_PREFIX}map");
+            if mapping
+                .tag
+                .as_ref()
+                .is_some_and(|tag| *tag != map_tag && tag != "!")
+            {
+                return false;
+            }
+            !tree.root_pairs().any(|(key, _)| is_merge_key(tree, key))
+        }
+        NodeKind::Scalar(scalar) => {
+            !tree.nodes[root].anchored
+                && scalar.tag.is_none()
+                && scalar.style == ScalarStyle::Plain
+                && resolve_null(&scalar.text).is_some()
+        }
+        NodeKind::Sequence(_) | NodeKind::Alias(_) => false,
     }
-    !tree.root_pairs().any(|(key, _)| is_merge_key(tree, key))
 }
 
 /// A `<<` key in any spelling, or any key tagged `!!merge`.
@@ -433,6 +481,53 @@ mod tests {
     fn a_plain_mapping_loads() {
         assert!(load_reason("title: Foo\naliases: [a, b]").is_none());
         assert!(load_reason("!!map {title: Foo}").is_none());
+        assert!(load_reason("! {title: Foo}").is_none());
+        assert!(load_reason("title: Foo\r\naliases: [a]\r\n").is_none());
+        assert!(load_reason("title: \"a\u{85}b\u{2028}c\"").is_none());
+    }
+
+    /// A block with no node, or only a bare null, has no keys: it loads as an
+    /// empty mapping, so a commented-out `# private: true` unlocks the note
+    /// as it does in yaml.
+    #[test]
+    fn an_empty_root_loads_as_an_empty_mapping() {
+        for raw in ["# only a comment", "--- # private: true", "~", "null"] {
+            let Load::Loaded(tree) = load(raw) else {
+                panic!("{raw:?} must load");
+            };
+            assert_eq!(tree.root_pairs().count(), 0, "{raw:?}");
+        }
+        for raw in ["&a ~", "!!null", "\"\"", "x"] {
+            assert_eq!(
+                load_reason(raw),
+                Some(UnreadableReason::NotAMapping),
+                "{raw:?}"
+            );
+        }
+    }
+
+    /// saphyr ends its input at a NUL, keeps a byte-order mark in the first
+    /// key, and breaks lines at a bare CR; yaml does none of these. Neither
+    /// side loads such a block.
+    #[test]
+    fn characters_the_parsers_read_differently_refuse_the_block() {
+        for raw in [
+            "title: x\0\nprivate:\n  true",
+            "\u{feff}private: true",
+            "title: \"a\u{feff}b\"",
+            "title: x\rprivate: false",
+            "title: x\r",
+            "title: x\u{7}",
+            "title: x\u{7f}",
+            "title: x\u{9f}",
+            "title: x\u{fffe}",
+        ] {
+            assert_eq!(
+                load_reason(raw),
+                Some(UnreadableReason::ParseFailed),
+                "{raw:?}"
+            );
+        }
     }
 
     #[test]
@@ -445,7 +540,6 @@ mod tests {
         assert_eq!(load_reason("1: a\n1.0: b"), Some(ParseFailed));
         assert_eq!(load_reason("a: 1\n--- b"), Some(MultipleDocuments));
         assert_eq!(load_reason("- a\n- b"), Some(NotAMapping));
-        assert_eq!(load_reason("# only a comment"), Some(NotAMapping));
         assert_eq!(load_reason("!custom {a: 1}"), Some(NotAMapping));
         assert_eq!(load_reason("<<: {a: 1}"), Some(NotAMapping));
         assert_eq!(load_reason("!!merge <<: {a: 1}"), Some(NotAMapping));

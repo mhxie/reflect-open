@@ -43,7 +43,10 @@ just-flagged note. Frontmatter the CLI can't read with certainty (YAML that
 doesn't parse but mentions `private` or holds a backslash, a `private` value
 that is neither true nor false, a block behind a byte-order mark) is treated
 as private too; the stderr message says why, so the YAML can be fixed. The
-desktop app applies the same rules (`crates/frontmatter`).
+desktop app classifies with the same rules, pinned against this crate
+(`crates/frontmatter`) by a shared corpus; on some malformed YAML the two
+parsers disagree on whether the block parses at all
+(`fixtures/parity/README.txt`).
 
 Notes inside the graph's local-only folders (configured in the desktop app,
 which records the folder names in the index) are treated the same way: never

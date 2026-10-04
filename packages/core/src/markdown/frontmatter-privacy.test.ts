@@ -44,6 +44,7 @@ const corpusSchema = z.object({
       source: z.string(),
       rust: expectationSchema.optional(),
       ts: expectationSchema.optional(),
+      divergence: z.enum(['rustStricter', 'tsStricter']).optional(),
       why: z.string().optional(),
     }),
   ),
@@ -79,28 +80,20 @@ describe('frontmatter privacy corpus (shared with the Rust classifier)', () => {
     expect(parsed.frontmatter.private).toBe(want.kind !== 'public')
   })
 
-  it('never lets the two sides disagree on whether a note is withheld', () => {
+  it('lets the sides disagree on whether a note is withheld only where a case pins it', () => {
     for (const entry of corpus.cases) {
       const withheld = (side: 'rust' | 'ts'): boolean => expectation(entry, side).kind !== 'public'
-      expect(withheld('ts'), entry.name).toBe(withheld('rust'))
+      const observed =
+        withheld('rust') === withheld('ts')
+          ? undefined
+          : withheld('rust')
+            ? 'rustStricter'
+            : 'tsStricter'
+      expect(entry.divergence, entry.name).toBe(observed)
       if (entry.rust !== undefined || entry.ts !== undefined) {
         expect(entry.why, `${entry.name}: an override needs a why`).toMatch(/\S/)
       }
     }
-  })
-})
-
-describe('one-sided parser divergences', () => {
-  // Where the two YAML parsers disagree on whether a block loads, the sides
-  // disagree on withholding it, so the shared corpus can't list the case; each
-  // side pins its own verdict (`fixtures/parity/README.txt`).
-  it('pins the TS verdict where the parsers disagree on loading a block', () => {
-    // saphyr rejects a tab after ':' and withholds this block; yaml reads `false`.
-    expect(frontmatterPrivacy('---\nprivate:\tfalse\n---\n')).toEqual({ kind: 'public' })
-    // yaml's YAML 1.1 mode calls `yes` and `true` the same key; saphyr doesn't.
-    expect(
-      frontmatterPrivacy('---\n%YAML 1.1\n--- #c\nyes: 1\ntrue: 2\nprivate: false\n---\n'),
-    ).toEqual({ kind: 'unreadable', reason: 'parseFailed' })
   })
 })
 

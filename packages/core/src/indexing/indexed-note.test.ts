@@ -10,7 +10,7 @@ import {
 
 describe('buildIndexedNote', () => {
   it('carries the projection version whose private bit fails closed', () => {
-    expect(PROJECTION_VERSION).toBe(25)
+    expect(PROJECTION_VERSION).toBe(26)
   })
 
   it('marks a note private when its frontmatter cannot be read', () => {

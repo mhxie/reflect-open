@@ -90,8 +90,10 @@ impl fmt::Display for UnreadableReason {
 /// - **Loaded block:** the root `private` value (tags unwrapped, aliases
 ///   resolved): true/1/1.0/yes/on is `Private`; false/0/null/no/off/empty or
 ///   no key is `Public`; anything else is `Unreadable(UnrecognizedValue)`.
-/// - **Block not loaded** (see the pre-scan): `Unreadable` when it contains
-///   `private` or a backslash (a YAML escape can spell the key), else `Public`.
+/// - **Block not loaded** (see the pre-scan; this includes a block holding a
+///   NUL, a byte-order mark, a CR outside a CRLF, or another character outside
+///   YAML's printable set): `Unreadable` when it contains `private` or a
+///   backslash (a YAML escape can spell the key), else `Public`.
 pub fn backup_privacy(bytes: &[u8]) -> BackupPrivacy {
     let (bom, source) = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
         Some(rest) => (true, rest),
@@ -312,22 +314,35 @@ mod tests {
         );
     }
 
-    /// Where the two YAML parsers disagree on whether a block loads, the
-    /// sides disagree on withholding it, so the shared corpus can't list the
-    /// case; each side pins its own verdict (`fixtures/parity/README.txt`).
+    /// saphyr ends its input at a NUL and keeps a byte-order mark in the first
+    /// key, where yaml (and so the app) reads on: a `private: true` behind
+    /// either stays withheld because neither side loads the block.
     #[test]
-    fn one_sided_parser_divergences_are_pinned() {
-        // saphyr rejects a tab after ':'; the block mentions `private`.
+    fn a_lock_behind_a_nul_or_a_byte_order_mark_stays_withheld() {
+        for block in [
+            "\u{feff}private: true",
+            "\u{feff}&a private: !!bool yes",
+            "\u{feff}{private: true}",
+            "title: x # \0\nprivate:\n  yes",
+            "title: x\0\n? private\n: true",
+            "title: x\0\nprivate: >-\n  on",
+            "title: x\0\n\"\\u0070rivate\": true",
+            "k: &k private\ntitle: x\0\n*k : true",
+        ] {
+            assert_eq!(
+                classify(block),
+                unreadable(UnreadableReason::ParseFailed),
+                "{block:?}"
+            );
+        }
+        // The fence's own byte-order mark keeps its reason; one inside the
+        // block is a character the block can't hold.
         assert_eq!(
-            classify("private:\tfalse"),
+            backup_privacy(b"\xEF\xBB\xBF---\n\xEF\xBB\xBFprivate: true\n---\n"),
             unreadable(UnreadableReason::ParseFailed)
         );
-        // yaml's YAML 1.1 mode calls `yes` and `true` the same key; saphyr
-        // doesn't, so here the block loads.
-        assert_eq!(
-            classify("%YAML 1.1\n--- #c\nyes: 1\ntrue: 2\nprivate: false"),
-            PUBLIC
-        );
+        // A refused block that never mentions `private` stays public.
+        assert_eq!(classify("title: x\u{7}y"), PUBLIC);
     }
 
     #[test]

@@ -14,15 +14,35 @@ import {
 /**
  * Whether one frontmatter block loads — the TS half of the Rust pre-scan
  * (`crates/frontmatter/src/scan.rs`), applying the same rules to yaml's
- * document: one document, no parse errors (duplicate keys included), aliases
- * that name earlier anchors and stay within both budgets, a root that is a
- * plain mapping without merge keys, and at most 256 KiB. A block either side
- * refuses is "not loaded" on both: its fields read as empty, and its privacy
- * comes from the line scan alone.
+ * document: at most 256 KiB, no character the two parsers read differently,
+ * one document read as YAML 1.2, no parse errors (duplicate keys included),
+ * aliases that name earlier anchors and stay within both budgets, and a root
+ * that is a plain mapping without merge keys (or empty). A block that doesn't
+ * load reads as empty fields, and its privacy comes from the line scan and
+ * the not-loaded rule. The two parsers still disagree on some syntax each
+ * accepts; those divergences are pinned in `fixtures/frontmatter-privacy.json`.
  */
 
 /** Blocks larger than this many UTF-8 bytes are never parsed (256 KiB). */
 export const MAX_FRONTMATTER_BYTES = 256 * 1024
+
+/**
+ * A character the two parsers read differently, so that neither loads a
+ * block holding one: anything outside YAML's printable set (saphyr stops at a
+ * NUL as if the input ended, yaml reads on; a lone surrogate can't reach Rust
+ * at all), a byte-order mark anywhere (yaml drops a leading one, saphyr keeps
+ * it in the first key), or a CR outside a CRLF (saphyr breaks the line there,
+ * yaml doesn't). Mirrors `has_unloadable_character` in the Rust pre-scan.
+ */
+const UNLOADABLE_CHARACTER =
+  /[^\t\n\r\u{20}-\u{7E}\u{85}\u{A0}-\u{D7FF}\u{E000}-\u{FEFE}\u{FF00}-\u{FFFD}\u{10000}-\u{10FFFF}]|\r(?!\n)/u
+
+/**
+ * Always the YAML 1.2 core schema, as in Rust: a `%YAML 1.1` directive would
+ * switch yaml to 1.1 scalars (`yes`, `0b1`, `1_000`, timestamps), and with
+ * them to duplicate keys and merges saphyr never sees.
+ */
+const PARSE_OPTIONS = { schema: 'core', resolveKnownTags: true } as const
 
 /**
  * The most nodes alias expansion may add. The Rust loader clones an anchored
@@ -55,7 +75,7 @@ export interface RootPair {
 export type FrontmatterBlockLoad =
   | {
       readonly loaded: true
-      /** The block as plain JS, exactly what yaml's `parse` returns. */
+      /** The block as plain JS, as yaml's `parse` returns it (`{}` for an empty root). */
       readonly value: unknown
       readonly rootPairs: readonly RootPair[]
     }
@@ -78,9 +98,15 @@ export function loadFrontmatterBlock(raw: string): FrontmatterBlockLoad {
   if (utf8ByteLength(raw) > MAX_FRONTMATTER_BYTES) {
     return notLoaded('tooLarge', 'frontmatter is larger than 256 KiB; ignored')
   }
+  if (UNLOADABLE_CHARACTER.test(raw)) {
+    return notLoaded(
+      'parseFailed',
+      'invalid YAML frontmatter: it holds a control character, a byte-order mark, or a lone carriage return',
+    )
+  }
   let document: Document.Parsed
   try {
-    document = parseDocument(raw)
+    document = parseDocument(raw, PARSE_OPTIONS)
   } catch (cause) {
     return notLoaded('parseFailed', invalidYaml(cause))
   }
@@ -112,6 +138,9 @@ export function loadFrontmatterBlock(raw: string): FrontmatterBlockLoad {
     )
   }
   const root = document.contents
+  if (isEmptyRoot(root)) {
+    return { loaded: true, value: {}, rootPairs: [] }
+  }
   if (!isMap(root) || (root.tag !== undefined && root.tag !== CORE_MAP_TAG)) {
     return notLoaded('notAMapping', 'frontmatter is not a mapping; ignored')
   }
@@ -133,6 +162,22 @@ export function loadFrontmatterBlock(raw: string): FrontmatterBlockLoad {
 
 function notLoaded(reason: FrontmatterLoadFailure, warning: string): FrontmatterBlockLoad {
   return { loaded: false, reason, warning }
+}
+
+/**
+ * A root with no keys at all: no node (only comments), or a bare null scalar
+ * such as `~` or the nothing after `--- #comment`. It loads as an empty
+ * mapping, so a commented-out `# private: true` unlocks the note, as in yaml.
+ */
+function isEmptyRoot(root: ParsedNode | null): boolean {
+  return (
+    root === null ||
+    (isScalar(root) &&
+      root.type === 'PLAIN' &&
+      root.tag === undefined &&
+      root.anchor === undefined &&
+      root.value === null)
+  )
 }
 
 function invalidYaml(cause: unknown): string {

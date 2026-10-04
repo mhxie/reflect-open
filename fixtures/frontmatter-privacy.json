@@ -1,8 +1,9 @@
 {
   "about": [
     "The frontmatter privacy corpus: one spec, two classifiers. Rust (crates/frontmatter, tests/corpus.rs) and TS (packages/core/src/markdown/frontmatter-privacy.test.ts) both assert every case.",
-    "privacy is public | private | unreadable; reason names why an unreadable block can't be read. A `rust` or `ts` object overrides the expectation for that side only, with `why`: the two YAML parsers disagree there, so the class may differ, but whether the note is withheld (private or unreadable) never may.",
-    "Add a case for any new tricky YAML. Known one-sided divergences that can't be listed here are in fixtures/parity/README.txt."
+    "privacy is public | private | unreadable; reason names why an unreadable block can't be read. A `rust` or `ts` object overrides the expectation for that side only, with `why`: the two YAML parsers (saphyr, yaml) disagree there.",
+    "Where the sides disagree on whether the note is withheld at all, `divergence` names the stricter side (rustStricter or tsStricter): each parser accepts some syntax the other rejects, and a block one side can't load is withheld there when it mentions private. Both corpus tests fail on any disagreement a case doesn't pin.",
+    "Add a case for any new tricky YAML; fixtures/parity/README.txt explains the divergence classes."
   ],
   "cases": [
     {
@@ -520,8 +521,7 @@
     {
       "name": "comment-only block",
       "source": "---\n# private: true\n---\nbody\n",
-      "privacy": "unreadable",
-      "reason": "notAMapping"
+      "privacy": "public"
     },
     {
       "name": "merge key",
@@ -595,6 +595,332 @@
       "source": "\ufeff---\nprivate: maybe\n---\nbody\n",
       "privacy": "unreadable",
       "reason": "unrecognizedValue"
+    },
+    {
+      "name": "byte-order mark opening the first key, true",
+      "source": "---\n\ufeffprivate: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "byte-order mark opening the first key, false",
+      "source": "---\n\ufeffprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "byte-order mark before an inner document start",
+      "source": "---\n\ufeff--- private: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "byte-order marks before the fence and the first key",
+      "source": "\ufeff---\n\ufeffprivate: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "byte-order mark inside a quoted title",
+      "source": "---\ntitle: \"a\ufeffb\"\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "byte-order mark in a block that never mentions private",
+      "source": "---\n\ufefftitle: x\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "NUL before a next-line value",
+      "source": "---\ntitle: x\u0000\nprivate:\n  true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "NUL before an explicit key",
+      "source": "---\ntitle: x\u0000\n? private\n: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "NUL before a block scalar value",
+      "source": "---\ntitle: x\u0000\nprivate: |\n  true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "NUL before an escaped key",
+      "source": "---\ntitle: x\u0000\n\"\\u0070rivate\": true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "NUL in a comment before a next-line value",
+      "source": "---\ntitle: x # \u0000\nprivate:\n  yes\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "NUL beside a locking line",
+      "source": "---\ntitle: x\u0000\nprivate: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "lone CR before private: false",
+      "source": "---\ntitle: x\rprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "lone CR before a locking line",
+      "source": "---\ntitle: x\rprivate: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "lone CR inside a quoted title",
+      "source": "---\ntitle: \"x\ry\"\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "bell character beside private: false",
+      "source": "---\ntitle: x\u0007y\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "C1 control beside private: false",
+      "source": "---\ntitle: x\u0080y\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "control character in a block that never mentions private",
+      "source": "---\ntitle: x\u0007y\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "next line, line and paragraph separators are ordinary characters",
+      "source": "---\ntitle: x\u0085y\u2028z\u2029\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "non-specific tag on the root mapping, false",
+      "source": "---\n! {private: false}\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "non-specific tag on the root mapping, true",
+      "source": "---\n! {private: true}\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "empty document with a comment",
+      "source": "---\n--- # private: true\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "bare null root with a comment",
+      "source": "---\n~ # private: true\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "anchored null root",
+      "source": "---\n&a ~ # private\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "notAMapping"
+    },
+    {
+      "name": "YAML 1.1 directive with yes and true keys",
+      "source": "---\n%YAML 1.1\n--- #c\nyes: 1\ntrue: 2\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "YAML 1.1 directive with n and no keys",
+      "source": "---\n%YAML 1.1\n--- #c\nn: 1\nno: 2\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "YAML 1.1 directive with 1_000 and 1000 keys",
+      "source": "---\n%YAML 1.1\n--- #c\n1_000: a\n1000: b\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "YAML 1.1 directive with a merge key",
+      "source": "---\n%YAML 1.1\n--- #c\nmeta:\n  <<: {a: 1}\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "float-tagged integer key beside the integer",
+      "source": "---\n!!float 1: a\n1: b\nprivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "float-tagged decimal key beside the integer",
+      "source": "---\n!!float 1.0: a\n1: b\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "map-tagged scalar key repeating a key",
+      "source": "---\n!!map a: 1\na: 2\nprivate: false\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "tab after the colon before false",
+      "source": "---\nprivate:\tfalse\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "saphyr rejects a tab after ':'; yaml reads `private: false`. The block mentions private, so Rust withholds it"
+    },
+    {
+      "name": "tab after another key's colon",
+      "source": "---\ntitle:\tx\nprivate: false\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "saphyr rejects a tab after any key's ':', so Rust withholds every block that also mentions private"
+    },
+    {
+      "name": "tab after an explicit key indicator",
+      "source": "---\n?\tk\n: v\nprivate: false\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "saphyr rejects a tab after '?'; yaml reads the explicit key"
+    },
+    {
+      "name": "indented value of an explicit key",
+      "source": "---\n? k\n  : v\nprivate: false\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "saphyr rejects a ':' indented past its '?'; yaml reads it"
+    },
+    {
+      "name": "repeated YAML directive",
+      "source": "---\n%YAML 1.2\n%YAML 1.2\n--- #c\nprivate: false\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "saphyr rejects a second %YAML directive; yaml keeps the last"
+    },
+    {
+      "name": "lone surrogate escape",
+      "source": "---\ntitle: \"\\uD83D\"\nprivate: false\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "saphyr can't hold a lone UTF-16 surrogate and fails; yaml keeps it in a JS string"
+    },
+    {
+      "name": "tab before the first key",
+      "source": "---\n\tprivate: false\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml rejects a tab that indents a line; saphyr reads past it"
+    },
+    {
+      "name": "anchor run into a flow mapping",
+      "source": "---\n&b{private: off}\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml rejects an anchor with no space before '{'; saphyr ends the anchor there"
+    },
+    {
+      "name": "anchor run into a flow sequence",
+      "source": "---\nprivate: false\ntags: &a[a, b]\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml rejects an anchor with no space before '['; saphyr ends the anchor there"
+    },
+    {
+      "name": "literal indicator inside a flow mapping",
+      "source": "---\nprivate: false\nmeta: {k: |v}\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml rejects a block scalar indicator in a flow collection; saphyr reads `|v` as plain text"
+    },
+    {
+      "name": "folded indicator inside a flow sequence",
+      "source": "---\nprivate: false\ntags: [a, >b]\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml rejects a block scalar indicator in a flow collection; saphyr reads `>b` as plain text"
+    },
+    {
+      "name": "multi-line plain scalar in a flow sequence",
+      "source": "---\nprivate: false\na: [b\nc]\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml requires a flow collection's continuation line to be indented; saphyr doesn't"
+    },
+    {
+      "name": "multi-line quoted explicit key",
+      "source": "---\n? \"x\nprivate: true\"\n: v\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml requires a quoted key's continuation line to be indented; saphyr folds it into the key"
+    },
+    {
+      "name": "merge-tagged scalar key in a nested mapping",
+      "source": "---\nprivate: false\nmeta: {!!merge a: 1}\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml applies an explicit !!merge tag and fails on a scalar merge source; saphyr reads a plain key"
     }
   ]
 }

@@ -132,7 +132,7 @@ pub(crate) fn resolve_core_tagged<'text>(
     }
 }
 
-fn resolve_null(text: &str) -> Option<CoreValue<'_>> {
+pub(crate) fn resolve_null(text: &str) -> Option<CoreValue<'_>> {
     matches!(text, "" | "~" | "null" | "Null" | "NULL").then_some(CoreValue::Null)
 }
 
@@ -229,9 +229,11 @@ fn is_core_float(text: &str) -> bool {
     index == bytes.len()
 }
 
-/// A mapping key's identity as yaml compares keys for its duplicate-key
-/// error: the resolved value, where an unresolved tag falls back to the
-/// string. `None` for keys that never compare equal (NaN, other core tags).
+/// A mapping key's identity as yaml (core schema) compares keys for its
+/// duplicate-key error: the resolved value, where a tag that doesn't resolve
+/// the text falls back to the string. `None` for keys that never compare
+/// equal (NaN; `!!binary`, `!!timestamp` and `!!merge`, which yaml turns into
+/// objects).
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) enum KeyIdentity {
     Null,
@@ -243,16 +245,18 @@ pub(crate) enum KeyIdentity {
 
 /// The identity yaml's duplicate-key check would give `scalar`.
 pub(crate) fn key_identity(scalar: &Scalar) -> Option<KeyIdentity> {
+    let text = scalar.text.as_str();
     let value = match scalar.tag.as_deref() {
         Some(tag) => match core_tag_suffix(tag) {
-            Some(suffix @ ("str" | "null" | "bool" | "int" | "float")) => {
-                resolve_core_tagged(suffix, &scalar.text).unwrap_or(CoreValue::Str(&scalar.text))
-            }
-            Some(_) => return None,
-            None => CoreValue::Str(&scalar.text),
+            Some("binary" | "timestamp" | "merge") => return None,
+            // yaml's float tag takes no integers: `!!float 1` is the string "1".
+            Some("float") if resolve_int(text).is_some() => CoreValue::Str(text),
+            // Collection tags (`!!map`) and unknown ones resolve no scalar.
+            Some(suffix) => resolve_core_tagged(suffix, text).unwrap_or(CoreValue::Str(text)),
+            None => CoreValue::Str(text),
         },
-        None if scalar.style == ScalarStyle::Plain => resolve_plain(&scalar.text),
-        None => CoreValue::Str(&scalar.text),
+        None if scalar.style == ScalarStyle::Plain => resolve_plain(text),
+        None => CoreValue::Str(text),
     };
     Some(match value {
         CoreValue::Null => KeyIdentity::Null,
@@ -400,5 +404,30 @@ mod tests {
         };
         assert_ne!(key_identity(&quoted_one), key_identity(&plain("1")));
         assert_eq!(key_identity(&plain(".nan")), None);
+        let core = |suffix: &str| format!("{CORE_TAG_PREFIX}{suffix}");
+        // yaml's float tag rejects an integer, which stays the string "1".
+        assert_ne!(
+            key_identity(&tagged(&core("float"), "1")),
+            key_identity(&plain("1"))
+        );
+        assert_eq!(
+            key_identity(&tagged(&core("float"), "1.0")),
+            key_identity(&plain("1"))
+        );
+        // A collection or unknown tag on a scalar key leaves its text.
+        for suffix in ["map", "seq", "set", "omap", "pairs", "foo"] {
+            assert_eq!(
+                key_identity(&tagged(&core(suffix), "a")),
+                key_identity(&plain("a")),
+                "{suffix}"
+            );
+        }
+        for suffix in ["binary", "timestamp", "merge"] {
+            assert_eq!(
+                key_identity(&tagged(&core(suffix), "YQ==")),
+                None,
+                "{suffix}"
+            );
+        }
     }
 }

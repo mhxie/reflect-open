@@ -129,6 +129,8 @@ mod tests {
             parse("---\n<<: {x: 1}\ntitle: Merged\n---\n"),
             Frontmatter::default()
         );
+        // saphyr would stop at the NUL and read `title: First`; yaml reads on.
+        assert_eq!(parse("---\ntitle: First\0\n---\n"), Frontmatter::default());
     }
 
     #[test]

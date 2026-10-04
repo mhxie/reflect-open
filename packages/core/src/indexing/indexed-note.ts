@@ -116,8 +116,12 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * read (malformed YAML that mentions `private`, an unrecognized `private`
  * value, a block behind a byte-order mark) now counts as private, so existing
  * rows must reproject.
+ * 26 - `notes.is_private` again: a block holding a NUL, a byte-order mark, a
+ * lone CR or another non-printable character doesn't load (so it is withheld
+ * when it mentions `private`), every block reads as YAML 1.2, and a block of
+ * only comments is empty.
  */
-export const PROJECTION_VERSION = 25
+export const PROJECTION_VERSION = 26
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
