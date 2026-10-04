@@ -28,11 +28,16 @@ export interface ChatAttachment {
   dataUrl: string
 }
 
-/** One renderable slice of an assistant message. */
+/**
+ * One renderable slice of an assistant message. `history-withheld` marks the
+ * turn whose send first left earlier exchanges out
+ * ({@link HISTORY_WITHHELD_NOTICE}); it is chrome, not a reply.
+ */
 export type AssistantPart =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; call: NoteToolCall; result: NoteToolResult | null; error: string | null }
   | { kind: 'notice'; tone: 'error' | 'info'; text: string }
+  | { kind: 'history-withheld' }
 
 /** One user message and everything the assistant did in response. */
 export interface ChatTurn {
@@ -61,6 +66,23 @@ export function isToolPending(part: Extract<AssistantPart, { kind: 'tool' }>): b
 export const NO_REPLY_NOTICE =
   'I couldn’t finish answering — try narrowing your question or asking again.'
 
+/**
+ * Shown when a cloud turn's send left out earlier exchanges that used notes
+ * which are private now (`./history-privacy`). A transcript shows it once
+ * ({@link showsHistoryWithheld}), on the first turn that withheld any.
+ */
+export const HISTORY_WITHHELD_NOTICE =
+  'Earlier messages that used notes now private are no longer sent to the AI provider.'
+
+/**
+ * Whether a transcript already carries the {@link HISTORY_WITHHELD_NOTICE}.
+ * Hosts skip a later turn's `history-withheld` event when it does, so the
+ * notice appears once, not on every turn that resends without those exchanges.
+ */
+export function showsHistoryWithheld(turns: readonly ChatTurn[]): boolean {
+  return turns.some((turn) => turn.parts.some((part) => part.kind === 'history-withheld'))
+}
+
 /** Whether the parts already carry something the user can read as a reply. */
 function hasRenderableReply(parts: AssistantPart[]): boolean {
   return parts.some(
@@ -71,6 +93,8 @@ function hasRenderableReply(parts: AssistantPart[]): boolean {
 /** Fold one stream event into an assistant message's parts (immutable). */
 export function appendEvent(parts: AssistantPart[], event: ChatStreamEvent): AssistantPart[] {
   switch (event.type) {
+    case 'history-withheld':
+      return [...parts, { kind: 'history-withheld' }]
     case 'text-delta': {
       const last = parts.at(-1)
       if (last?.kind === 'text') {
@@ -161,6 +185,10 @@ export function userMessage(text: string, attachments: readonly ChatAttachment[]
  * unanswered question would break the role alternation some providers
  * enforce, and invite the model to answer a question the transcript shows
  * as failed.
+ *
+ * This is everything the turns hold; `streamChat` then leaves out, for a
+ * cloud model, each exchange that used a note that is private now
+ * (`./history-privacy`).
  */
 export function buildHistory(turns: readonly ChatTurn[]): ModelMessage[] {
   return turns

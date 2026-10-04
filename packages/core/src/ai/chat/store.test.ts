@@ -155,6 +155,24 @@ describe('loadChatMessages', () => {
     expect(await loadChatMessages('conv-1')).toEqual([assetsTurn])
   })
 
+  it('saves the withheld-history marker and loads it back', async () => {
+    const markedTurn: ChatTurn = {
+      ...turn,
+      parts: [{ kind: 'history-withheld' }, { kind: 'text', text: 'A cat, per [[Cats]].' }],
+    }
+    invoke.mockResolvedValue(null)
+    await saveChatMessage({ conversation, turn: markedTurn, createdMs: 2_000, generation: 7 })
+    expect(invoke).toHaveBeenCalledWith(
+      'chat_message_save',
+      expect.objectContaining({
+        message: expect.objectContaining({ parts: JSON.stringify(markedTurn.parts) }),
+      }),
+    )
+
+    invoke.mockResolvedValue([messageRow({ parts: JSON.stringify(markedTurn.parts) })])
+    expect(await loadChatMessages('conv-1')).toEqual([markedTurn])
+  })
+
   it('loads a row saved before read_assets existed unchanged', async () => {
     // Rows written before read_assets existed carry only the older tools;
     // widening the schema must not change how they load.

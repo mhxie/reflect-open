@@ -20,6 +20,7 @@ import {
   loadChatMessages,
   resolveChatModel,
   saveChatMessage,
+  showsHistoryWithheld,
   streamChat,
   userMessage,
   type AiProviderConfig,
@@ -228,6 +229,9 @@ export function ChatProvider({ graph, children }: ChatProviderProps): ReactEleme
 
       const turnId = crypto.randomUUID()
       const messages = [...buildHistory(turnsRef.current), userMessage(trimmed, attached)]
+      // The transcript shows the withheld-history notice once; later turns
+      // that still send without those exchanges don't repeat it.
+      const withheldShown = showsHistoryWithheld(turnsRef.current)
       const customSystemPrompt = chatSystemPromptRef.current
       // Everything the settle-time save needs, captured now: a turn detached
       // by New chat (or a conversation switch) still persists into the
@@ -306,6 +310,9 @@ export function ChatProvider({ graph, children }: ChatProviderProps): ReactEleme
           signal: controller.signal,
         })
         for await (const event of events) {
+          if (event.type === 'history-withheld' && withheldShown) {
+            continue
+          }
           // Every terminal event carries the turn's messages — for a stopped or
           // failed turn that's the completed steps plus partial text, so the
           // derived history matches what stayed on screen.

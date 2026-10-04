@@ -3,12 +3,13 @@ import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement, ReactNode } from 'react'
-import type {
-  AiProviderConfig,
-  ChatModelSelection,
-  ChatStreamEvent,
-  Settings,
-  StreamChatOptions,
+import {
+  HISTORY_WITHHELD_NOTICE,
+  type AiProviderConfig,
+  type ChatModelSelection,
+  type ChatStreamEvent,
+  type Settings,
+  type StreamChatOptions,
 } from '@reflect/core'
 import { ChatProvider } from '@/providers/chat-provider.tsx'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
@@ -154,6 +155,22 @@ describe('MobileChat', () => {
     await expect.element(page.getByText('what did I write?')).toBeVisible()
     // A send that goes through clears the provider-held draft.
     await expect.element(composer).toHaveValue('')
+  })
+
+  it('shows the withheld-history notice in the transcript', async () => {
+    configureModel()
+    scriptTurn([
+      { type: 'history-withheld' },
+      { type: 'text-delta', text: 'Answered without them.' },
+      { type: 'complete', messages: [{ role: 'assistant', content: 'Answered without them.' }] },
+    ])
+    await render(<Harness showScreen />)
+
+    fireEvent.change(page.getByLabelText('Chat message'), { target: { value: 'go on' } })
+    await page.getByRole('button', { name: 'Send' }).click()
+
+    await expect.element(page.getByText('Answered without them.')).toBeVisible()
+    await expect.element(page.getByText(HISTORY_WITHHELD_NOTICE)).toBeVisible()
   })
 
   it('keeps the draft and the conversation across a screen unmount (tab switch)', async () => {

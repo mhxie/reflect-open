@@ -7,7 +7,15 @@ import type {
   LanguageModelV3Usage,
 } from '@ai-sdk/provider'
 import type { RetrievalHit } from '../../embeddings/retrieve.ts'
+import {
+  applyProjection,
+  connectIndex,
+  openMigratedIndex,
+  project,
+} from '../../indexing/flow-test-harness.ts'
+import { setBridge } from '../../ipc/bridge.ts'
 import { cloudSafeGraphContext } from '../../privacy/checkers.ts'
+import type { AiProviderConfig } from '../../settings/schema.ts'
 import { languageModel } from '../language-model.ts'
 import { fitToContextWindow } from './context-window.ts'
 import { MAX_STEPS, streamChat, streamChatTurn, type ChatStreamEvent } from './stream-chat.ts'
@@ -117,8 +125,37 @@ describe('streamChat', () => {
   it('does not start a provider request when stopped while the model loads', async () => {
     const controller = new AbortController()
     const loading = Promise.withResolvers<Awaited<ReturnType<typeof languageModel>>>()
+    const loadStarted = Promise.withResolvers<void>()
     const model = new MockLanguageModelV3({ doStream: sequence([textTurn('never')]) })
-    languageModelMock.mockReturnValueOnce(loading.promise)
+    languageModelMock.mockImplementationOnce(() => {
+      loadStarted.resolve()
+      return loading.promise
+    })
+    const events = collect(
+      streamChat({
+        config: { id: 'cfg', provider: 'openai', model: 'gpt-5.5', keyHint: 'test' },
+        apiKey: 'sk-test',
+        fetchFn: globalThis.fetch,
+        messages: [{ role: 'user', content: 'hello' }],
+        today: '2026-09-04',
+        semanticSearchEnabled: false,
+        customSystemPrompt: '',
+        context: null,
+        signal: controller.signal,
+      }),
+    )
+    // The history privacy check runs first; stop once the model is loading.
+    await loadStarted.promise
+    controller.abort()
+    loading.resolve(model)
+
+    expect(await events).toEqual([{ type: 'aborted', messages: [] }])
+    expect(model.doStreamCalls).toHaveLength(0)
+  })
+
+  it('does not load the model when stopped during the history privacy check', async () => {
+    const controller = new AbortController()
+    const loads = languageModelMock.mock.calls.length
     const events = collect(
       streamChat({
         config: { id: 'cfg', provider: 'openai', model: 'gpt-5.5', keyHint: 'test' },
@@ -133,10 +170,9 @@ describe('streamChat', () => {
       }),
     )
     controller.abort()
-    loading.resolve(model)
 
     expect(await events).toEqual([{ type: 'aborted', messages: [] }])
-    expect(model.doStreamCalls).toHaveLength(0)
+    expect(languageModelMock.mock.calls.length).toBe(loads)
   })
 
   it('normalizes a model-loading failure and permits a later turn', async () => {
@@ -195,6 +231,115 @@ describe('streamChat', () => {
 
     expect(model.doStreamCalls).toHaveLength(1)
     expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).toContain(customSystemPrompt)
+  })
+})
+
+describe('streamChat history privacy', () => {
+  const PRIVATE_BODY = 'sentinel-body-01jxq3'
+  const PRIVATE_QUESTION = 'sentinel-question-01jxq3'
+
+  /** An earlier exchange that read one note through read_notes. */
+  function readExchange(question: string, path: string, title: string, body: string) {
+    const toolCallId = `call-${path}`
+    const messages: ModelMessage[] = [
+      { role: 'user', content: question },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool-call', toolCallId, toolName: 'read_notes', input: { paths: [path] } },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId,
+            toolName: 'read_notes',
+            output: {
+              type: 'json',
+              value: {
+                notes: [{ ok: true, note: { path, title, content: body, truncated: false } }],
+              },
+            },
+          },
+        ],
+      },
+      { role: 'assistant', content: `${title} says ${body}` },
+    ]
+    return messages
+  }
+
+  const HISTORY: ModelMessage[] = [
+    ...readExchange(PRIVATE_QUESTION, PRIVATE_PATH, PRIVATE_TITLE, PRIVATE_BODY),
+    ...readExchange('and atlas?', 'notes/atlas.md', 'Atlas Launch Plan', 'launch plan'),
+    { role: 'user', content: 'anything else?' },
+  ]
+
+  function turn(config: AiProviderConfig) {
+    return streamChat({
+      config,
+      apiKey: 'sk-test',
+      fetchFn: globalThis.fetch,
+      messages: HISTORY,
+      today: '2026-06-11',
+      semanticSearchEnabled: false,
+      customSystemPrompt: '',
+      context: null,
+    })
+  }
+
+  it('sends a cloud model no exchange that read a note private now', async () => {
+    // The note was public when the first exchange read it; it is locked now.
+    const database = openMigratedIndex()
+    applyProjection(database, project('notes/atlas.md', '# Atlas Launch Plan\n', 1))
+    applyProjection(
+      database,
+      project(PRIVATE_PATH, `---\nprivate: true\n---\n# ${PRIVATE_TITLE}\n`, 2),
+    )
+    connectIndex(database)
+    const model = new MockLanguageModelV3({ doStream: sequence([textTurn('Nothing else.')]) })
+    languageModelMock.mockResolvedValueOnce(model)
+    try {
+      const events = await collect(
+        turn({ id: 'cfg', provider: 'openai', model: 'gpt-5.5', keyHint: 'test' }),
+      )
+
+      expect(events[0]).toEqual({ type: 'history-withheld' })
+      expect(events.at(-1)?.type).toBe('complete')
+      const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)
+      for (const sentinel of [PRIVATE_PATH, PRIVATE_TITLE, PRIVATE_BODY, PRIVATE_QUESTION]) {
+        expect(outbound).not.toContain(sentinel)
+      }
+      expect(outbound).toContain('notes/atlas.md')
+      expect(outbound).toContain('anything else?')
+    } finally {
+      setBridge(null)
+      database.close()
+    }
+  })
+
+  it('sends a model on this Mac the full history', async () => {
+    // No bridge installed: asking the index would fail the turn.
+    const model = new MockLanguageModelV3({ doStream: sequence([textTurn('Nothing else.')]) })
+    languageModelMock.mockResolvedValueOnce(model)
+    const baseUrl = 'http://localhost:11434/v1'
+
+    const events = await collect(
+      turn({
+        id: 'ollama',
+        provider: 'openai-compatible',
+        model: 'llama3.2',
+        baseUrl,
+        keyHint: '',
+        onDevice: { baseUrl, model: 'llama3.2' },
+      }),
+    )
+
+    expect(events.map((event) => event.type)).toEqual(['text-delta', 'complete'])
+    const outbound = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(outbound).toContain(PRIVATE_BODY)
+    expect(outbound).toContain(PRIVATE_QUESTION)
   })
 })
 

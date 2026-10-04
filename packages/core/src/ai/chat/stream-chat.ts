@@ -4,7 +4,9 @@ import { languageModel } from '../language-model.ts'
 import { modelContextWindow } from '../provider-catalog.ts'
 import type { AiProviderConfig } from '../../settings/schema.ts'
 import type { CloudGraphContext, CloudSafe } from '../../privacy/checkers.ts'
+import { modelTarget } from '../../privacy/on-device.ts'
 import { fitToContextWindow } from './context-window.ts'
+import { historyForTarget } from './history-privacy.ts'
 import { chatSystemPrompt } from './system-prompt.ts'
 import {
   buildNoteTools,
@@ -61,8 +63,13 @@ export interface StreamChatOptions {
   signal?: AbortSignal
 }
 
-/** One normalized event in a chat turn's stream. */
+/**
+ * One normalized event in a chat turn's stream. `history-withheld` comes
+ * first, before any provider call, when the send leaves out earlier exchanges
+ * that used notes which are private now (`./history-privacy`).
+ */
 export type ChatStreamEvent =
+  | { type: 'history-withheld' }
   | { type: 'text-delta'; text: string }
   | { type: 'tool-call'; call: NoteToolCall }
   | { type: 'tool-result'; result: NoteToolResult }
@@ -73,15 +80,22 @@ export type ChatStreamEvent =
 
 /**
  * Run one chat turn against the user's configured provider, yielding
- * normalized {@link ChatStreamEvent}s. The history is first fitted to the
- * model's context budget ({@link fitToContextWindow}) — a long conversation
- * trims its oldest turns here rather than erroring at the provider. See
+ * normalized {@link ChatStreamEvent}s. A cloud model first loses every
+ * earlier exchange that used a note that is private now
+ * ({@link historyForTarget}); then the history is fitted to the model's
+ * context budget ({@link fitToContextWindow}) — a long conversation trims its
+ * oldest turns here rather than erroring at the provider. See
  * {@link streamChatTurn} for the stream's contract.
  */
 export async function* streamChat(options: StreamChatOptions): AsyncGenerator<ChatStreamEvent> {
   try {
     options.signal?.throwIfAborted()
-    const messages = fitToContextWindow(options.messages, {
+    const history = await historyForTarget(options.messages, modelTarget(options.config))
+    options.signal?.throwIfAborted()
+    if (history.withheldTurns > 0) {
+      yield { type: 'history-withheld' }
+    }
+    const messages = fitToContextWindow(history.messages, {
       contextWindow: modelContextWindow(options.config.provider, options.config.model),
       systemPrompt: chatSystemPrompt({
         today: options.today,

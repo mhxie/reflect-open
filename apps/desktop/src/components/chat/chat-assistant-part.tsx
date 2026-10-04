@@ -1,5 +1,5 @@
 import { useDeferredValue, type ReactElement } from 'react'
-import type { AssistantPart } from '@reflect/core'
+import { HISTORY_WITHHELD_NOTICE, type AssistantPart } from '@reflect/core'
 import { Bubble, BubbleContent } from '@/components/ui/bubble.tsx'
 import { Marker, MarkerContent } from '@/components/ui/marker.tsx'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
@@ -13,7 +13,7 @@ interface ChatAssistantPartProps {
 
 /**
  * One assistant transcript part: live markdown, tool
- * activity, or a terminal notice.
+ * activity, or a notice.
  */
 export function ChatAssistantPart({ part, onWikiLinkClick }: ChatAssistantPartProps): ReactElement {
   switch (part.kind) {
@@ -22,17 +22,23 @@ export function ChatAssistantPart({ part, onWikiLinkClick }: ChatAssistantPartPr
     case 'tool':
       return <ChatToolChip part={part} />
     case 'notice':
-      return (
-        <Marker
-          className={cn(
-            'reflect-chat-message text-sm',
-            part.tone === 'error' ? 'text-destructive' : 'text-text-muted italic',
-          )}
-        >
-          <MarkerContent>{part.text}</MarkerContent>
-        </Marker>
-      )
+      return <ChatNotice tone={part.tone} text={part.text} />
+    case 'history-withheld':
+      return <ChatNotice tone="info" text={HISTORY_WITHHELD_NOTICE} />
   }
+}
+
+function ChatNotice({ tone, text }: { tone: 'error' | 'info'; text: string }): ReactElement {
+  return (
+    <Marker
+      className={cn(
+        'reflect-chat-message text-sm',
+        tone === 'error' ? 'text-destructive' : 'text-text-muted italic',
+      )}
+    >
+      <MarkerContent>{text}</MarkerContent>
+    </Marker>
+  )
 }
 
 /**

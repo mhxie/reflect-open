@@ -6,6 +6,7 @@ import type { ReactElement } from 'react'
 import {
   aiProvider,
   cloudSafeGraphContext,
+  HISTORY_WITHHELD_NOTICE,
   type AiProviderConfig,
   type ChatModelSelection,
   type ChatStreamEvent,
@@ -603,6 +604,41 @@ describe('ChatScreen', () => {
     await expect.element(view.getByText('Here is the chart:')).toBeInTheDocument()
     await expect.element(view.getByRole('button', { name: 'Copy reply' })).toBeInTheDocument()
     expect(view.container.querySelector('img[src^="https://example.invalid"]')).toBeNull()
+  })
+
+  it('shows the withheld-history notice once, and keeps thinking under it', async () => {
+    configureModel()
+    const reply = Promise.withResolvers<void>()
+    streamChat.mockImplementationOnce(() =>
+      (async function* (): AsyncGenerator<ChatStreamEvent> {
+        yield { type: 'history-withheld' }
+        await reply.promise
+        yield { type: 'text-delta', text: 'First answer.' }
+        yield { type: 'complete', messages: [{ role: 'assistant', content: 'First answer.' }] }
+      })(),
+    )
+    const view = await renderChat()
+
+    await userEvent.type(view.getByLabelText('Chat message'), 'first{Enter}')
+    await expect.element(view.getByText(HISTORY_WITHHELD_NOTICE)).toBeInTheDocument()
+    // The notice comes before the provider answers, so the turn still shows
+    // it is waiting for a reply.
+    await expect.element(view.getByText('Thinking…')).toBeInTheDocument()
+
+    reply.resolve()
+    await expect.element(view.getByText('First answer.')).toBeInTheDocument()
+    expect(view.getByText('Thinking…').query()).toBeNull()
+    await expect.element(view.getByRole('button', { name: 'Copy reply' })).toBeInTheDocument()
+
+    // A later turn that still sends without those exchanges doesn't repeat it.
+    scriptTurn([
+      { type: 'history-withheld' },
+      { type: 'text-delta', text: 'Second answer.' },
+      { type: 'complete', messages: [{ role: 'assistant', content: 'Second answer.' }] },
+    ])
+    await userEvent.type(view.getByLabelText('Chat message'), 'second{Enter}')
+    await expect.element(view.getByText('Second answer.')).toBeInTheDocument()
+    expect(view.getByText(HISTORY_WITHHELD_NOTICE).elements()).toHaveLength(1)
   })
 
   it('rejects a second send fired before the first one has rendered', async () => {
