@@ -39,7 +39,7 @@ async function runBackfill(
   generation: number,
   providers: AiProvidersState,
 ): Promise<ReconcileAssetDescriptionsOutcome> {
-  const operation = startOperation('Describing assets')
+  const operation = startOperation('Describing assets', { background: true })
   let outcome: ReconcileAssetDescriptionsOutcome
   try {
     outcome = await reconcileAssetDescriptions({

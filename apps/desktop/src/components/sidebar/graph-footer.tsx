@@ -5,6 +5,7 @@ import { FolderOpen, GraduationCap, LocateFixed, PanelsTopLeft, Settings } from 
 import { GraphSwatch } from '@/components/graph-swatch.tsx'
 import { ReflectAppsDialog } from '@/components/reflect-apps-dialog.tsx'
 import { ShortcutKeys } from '@/components/shortcut-keys.tsx'
+import { ActivityTray } from '@/components/sidebar/activity-tray.tsx'
 import { GraphMenuItem } from '@/components/sidebar/graph-menu-item.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -178,6 +179,7 @@ export function GraphFooter({ graph, context }: GraphFooterProps): ReactElement 
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ActivityTray />
       <Tooltip>
         <TooltipTrigger
           render={

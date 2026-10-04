@@ -33,7 +33,7 @@ export function rebuildIndexVisibly(generation: number): Promise<void> {
 }
 
 async function runRebuild(generation: number): Promise<void> {
-  const operation = startOperation('Rebuilding search index')
+  const operation = startOperation('Rebuilding search index', { background: true })
   const skippedNotes: string[] = []
   try {
     await rebuildIndex({

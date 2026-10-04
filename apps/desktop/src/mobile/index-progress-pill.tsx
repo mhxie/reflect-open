@@ -1,22 +1,10 @@
 import { useSyncExternalStore, type ReactElement } from 'react'
-import { getIndexProgress, subscribeIndexProgress } from '@/lib/index-progress.ts'
+import {
+  getIndexProgress,
+  isIndexProgressWorthShowing,
+  subscribeIndexProgress,
+} from '@/lib/index-progress.ts'
 import { useKeyboardVisible } from '@/mobile/use-keyboard.ts'
-
-/**
- * Below this listing size the pass finishes before a pill is worth showing —
- * rendering one would just flash on every open.
- */
-const MIN_TOTAL = 100
-
-/**
- * Files the pass must have actually *read* before the pill appears. A pass
- * runs on every open and every resume, and even a healthy one sweeps the
- * whole listing (`done` counts skips) — so graph size alone would show the
- * pill every single time. Real reads are what make a pass long: a first
- * index crosses this within its first second; a skip-everything repeat pass
- * stays at zero and never surfaces.
- */
-const MIN_WORKED = 100
 
 /**
  * Progress for the running index pass, in the sync pill's shape. Appears only
@@ -29,12 +17,7 @@ export function IndexProgressPill(): ReactElement | null {
   const progress = useSyncExternalStore(subscribeIndexProgress, getIndexProgress)
   const keyboardVisible = useKeyboardVisible()
 
-  if (
-    progress === null ||
-    progress.total < MIN_TOTAL ||
-    progress.worked < MIN_WORKED ||
-    keyboardVisible
-  ) {
+  if (progress === null || !isIndexProgressWorthShowing(progress) || keyboardVisible) {
     return null
   }
 
