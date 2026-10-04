@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
+use reflect_cli::commands::search::SearchMode;
 use reflect_cli::error::CliError;
 use reflect_cli::{commands, graph};
 
@@ -14,7 +15,8 @@ use reflect_cli::{commands, graph};
 /// The graph resolves from --graph, then $REFLECT_GRAPH, then the nearest
 /// ancestor of the current directory containing .reflect/. Notes marked
 /// `private: true` are never returned. Exit codes: 0 ok, 1 error, 2 usage,
-/// 3 not found or private, 4 search index missing.
+/// 3 not found or private, 4 search index missing, 5 the app isn't serving
+/// the graph (semantic and hybrid search).
 #[derive(Parser)]
 #[command(name = "reflect", version)]
 struct Cli {
@@ -45,6 +47,9 @@ enum Command {
         /// Maximum number of results
         #[arg(long, default_value_t = 20)]
         limit: usize,
+        /// lexical reads the index; semantic and hybrid ask the running Reflect app
+        #[arg(long, value_enum, default_value_t = SearchMode::Lexical)]
+        mode: SearchMode,
     },
     /// Print a note, resolved by date, path, title, or alias
     Show {
@@ -70,7 +75,9 @@ fn run(cli: &Cli) -> Result<(), CliError> {
     let graph = graph::resolve(cli.graph.as_deref())?;
     match &cli.command {
         Command::Today { path } => commands::today::run(&graph, cli.json, *path),
-        Command::Search { query, limit } => commands::search::run(&graph, cli.json, query, *limit),
+        Command::Search { query, limit, mode } => {
+            commands::search::run(&graph, cli.json, query, *limit, *mode)
+        }
         Command::Show { note } => commands::show::run(&graph, cli.json, note),
         Command::Path { note } => commands::path::run(&graph, cli.json, note),
         Command::Open { note, print } => commands::open::run(&graph, cli.json, note, *print),

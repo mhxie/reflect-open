@@ -48,6 +48,9 @@ pub struct OpenJson<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct SearchJson<'a> {
     pub query: &'a str,
+    /// The mode that ran: `lexical`, or what the app answered with (it falls
+    /// back to `lexical` while its semantic search is off or loading).
+    pub mode: &'a str,
     /// True when files on disk diverge from the index — results may be stale.
     pub stale: bool,
     pub results: Vec<HitJson>,

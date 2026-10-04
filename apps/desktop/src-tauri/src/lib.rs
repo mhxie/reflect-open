@@ -36,6 +36,7 @@ mod menu;
 mod on_device_http;
 mod quit;
 mod recents;
+mod search_ipc;
 mod secrets;
 mod settings;
 mod skill;
@@ -279,6 +280,7 @@ pub fn run() {
         .manage(fs::GraphState::default())
         .manage(background_task::BackgroundTaskState::default())
         .manage(activity::ActivityState::default())
+        .manage(search_ipc::SearchIpcState::default())
         .manage(fs::ImportCancel::default())
         .manage(fs::assets::AssetUploads::default())
         .manage(db::IndexState::default())
@@ -298,6 +300,9 @@ pub fn run() {
             background_task::background_task_end,
             activity::activity_begin,
             activity::activity_end,
+            search_ipc::search_ipc_start,
+            search_ipc::search_ipc_stop,
+            search_ipc::search_ipc_respond,
             icloud::storage::mobile_storage,
             icloud::storage::mobile_storage_local,
             icloud::storage::icloud_download_pending,

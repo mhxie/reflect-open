@@ -22,6 +22,28 @@ pub const REFLECT_DIR: &str = ".reflect";
 /// The index database's filename inside [`REFLECT_DIR`].
 pub const INDEX_FILE: &str = "index.sqlite";
 
+/// The Unix socket a running app answers `reflect search --mode
+/// semantic|hybrid` on, inside [`REFLECT_DIR`].
+pub const SEARCH_SOCKET_FILE: &str = "search.sock";
+
+/// `sockaddr_un.sun_path` holds 104 bytes on macOS (108 on Linux), one of
+/// them the terminating NUL.
+pub const MAX_SOCKET_PATH_BYTES: usize = 103;
+
+/// Where the app serving `root` listens for CLI searches, or why a graph that
+/// deep can't have a socket at all.
+pub fn search_socket_path(root: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let path = root.join(REFLECT_DIR).join(SEARCH_SOCKET_FILE);
+    let length = path.as_os_str().len();
+    if length > MAX_SOCKET_PATH_BYTES {
+        return Err(format!(
+            "the graph's path is too long for a search socket ({length} bytes, at most \
+             {MAX_SOCKET_PATH_BYTES})"
+        ));
+    }
+    Ok(path)
+}
+
 /// `user_version` after every migration has run. Read-only consumers compare
 /// this against `PRAGMA user_version` to detect an index written by a newer
 /// (or older) app than they were built for.

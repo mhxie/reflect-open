@@ -2,8 +2,9 @@
 
 A small, self-contained read/discovery CLI over a Reflect graph (Plan 14). It
 reads the graph's markdown files directly and opens `.reflect/index.sqlite`
-strictly read-only — no running desktop app required. It never writes: markdown
-edits are the write path, and the index is refreshed by the desktop app.
+strictly read-only — no running desktop app required, except for semantic and
+hybrid `search`, which ask it. It never writes: markdown edits are the write
+path, and the index is refreshed by the desktop app.
 
 ```
 reflect today              # print today's daily note
@@ -69,6 +70,7 @@ all, they scan the files.
 | 2 | usage error |
 | 3 | note not found, or note is private (every note, while the index or its local-only record is unreadable) |
 | 4 | search index missing or unusable (`search` only) |
+| 5 | the Reflect app isn't serving this graph, or couldn't answer (`search --mode semantic\|hybrid` only) |
 
 ## Commands
 
@@ -92,7 +94,7 @@ this is how editors/scripts create them).
 { "date": "…", "path": "…", "absolutePath": "…", "exists": false }
 ```
 
-### `reflect search <query> [--limit N] [--json]`
+### `reflect search <query> [--limit N] [--mode lexical|semantic|hybrid] [--json]`
 
 Search over note titles and bodies, ranked like the app: exact, prefix, and
 per-term title matches lead, followed by title-boosted bm25 matches. Title
@@ -118,10 +120,23 @@ still return. The human-readable listing shows a v1-style `Title // Alias`
 note by its first segment, as the app does; `--json` keeps the complete title
 in `title`.
 
+`--mode` defaults to `lexical`, everything above. `semantic` and `hybrid` rank
+by meaning as well, which needs the embedding model the Reflect app runs: the
+CLI asks the app serving this graph over a Unix socket in `.reflect/`
+(`search.sock`, owner-only), and the app answers with the same retrieval ⌘K
+and its AI tools use. The CLI never loads a model or reads the vector table,
+and still re-checks every returned path against the file's own frontmatter.
+When the app isn't open on this graph, or can't answer, the exit code is `5`,
+so a script can fall back to `lexical`. While the app's semantic search is
+off or its model is loading, it answers lexically and `"mode"` says so;
+`"stale"` is always `false` here, since the app's index is live. A graph
+whose path makes the socket longer than 103 bytes can't be searched this way.
+
 ```jsonc
 // reflect search "meeting notes" --json
 {
   "query": "meeting notes",
+  "mode": "lexical",
   "stale": false,
   "results": [
     { "path": "notes/standup.md", "title": "Standup", "snippet": "…meeting notes…", "score": -1.94 }

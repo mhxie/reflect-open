@@ -710,6 +710,7 @@ fn search_json_shape() {
 
     let value = json(&reflect(&fixture, &["search", "searchable", "--json"]));
     assert_eq!(value["query"], "searchable");
+    assert_eq!(value["mode"], "lexical");
     assert_eq!(value["stale"], false);
     let results = value["results"].as_array().unwrap();
     assert_eq!(results.len(), 1);
@@ -720,6 +721,88 @@ fn search_json_shape() {
         .unwrap()
         .contains("searchable"));
     assert!(results[0]["score"].is_number());
+}
+
+/// A stand-in for the app's search socket: answers one connection with
+/// `reply` and hands back the request line it read.
+#[cfg(unix)]
+fn serve_search_once(fixture: &Fixture, reply: &str) -> std::thread::JoinHandle<String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    let listener = UnixListener::bind(fixture.root().join(".reflect/search.sock")).unwrap();
+    let reply = format!("{reply}\n");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut request)
+            .unwrap();
+        stream.write_all(reply.as_bytes()).unwrap();
+        request
+    })
+}
+
+/// Hybrid search asks the app over the socket, reports the mode the app ran,
+/// and still re-checks every path against the file: a note the app's index
+/// thinks public but whose file says `private: true` never prints.
+#[cfg(unix)]
+#[test]
+fn search_hybrid_asks_the_app_and_keeps_the_privacy_recheck() {
+    let fixture = graph();
+    fixture.write_note("notes/a.md", "# Alpha\nwombat storage\n");
+    fixture.write_note(
+        "notes/secret.md",
+        "---\nprivate: true\n---\n# Secret\nwombat\n",
+    );
+    fixture.build_index();
+    let server = serve_search_once(
+        &fixture,
+        r#"{"mode":"hybrid","results":[
+            {"path":"notes/a.md","title":"Alpha","snippet":"wombat storage","score":0.03},
+            {"path":"notes/secret.md","title":"Secret","snippet":"wombat","score":0.02}]}"#
+            .replace('\n', "")
+            .as_str(),
+    );
+
+    let output = reflect(
+        &fixture,
+        &["search", "wombat", "--mode", "hybrid", "--json"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json(&output);
+    assert_eq!(value["mode"], "hybrid");
+    let paths: Vec<&str> = value["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["notes/a.md"]);
+
+    let request: serde_json::Value = serde_json::from_str(&server.join().unwrap()).unwrap();
+    assert_eq!(
+        request,
+        serde_json::json!({ "v": 1, "query": "wombat", "mode": "hybrid", "limit": 20 })
+    );
+}
+
+/// No app serving the graph, or an app that couldn't answer: exit 5, so a
+/// caller can fall back to lexical search or another engine.
+#[cfg(unix)]
+#[test]
+fn semantic_search_without_a_serving_app_exits_5() {
+    let fixture = graph();
+    fixture.build_index();
+    let output = reflect(&fixture, &["search", "wombat", "--mode", "semantic"]);
+    assert_eq!(output.status.code(), Some(5));
+    assert!(stderr(&output).contains("open it in the Reflect app"));
+
+    let server = serve_search_once(&fixture, r#"{"error":"the index is closed"}"#);
+    let output = reflect(&fixture, &["search", "wombat", "--mode", "semantic"]);
+    server.join().unwrap();
+    assert_eq!(output.status.code(), Some(5));
+    assert!(stderr(&output).contains("the index is closed"));
 }
 
 #[test]
@@ -1074,6 +1157,37 @@ fn local_only_rows_never_read_as_stale_or_surface_in_search() {
     assert_eq!(value["stale"], true);
 }
 
+/// Answers from the app's socket pass the same re-check: a note in a
+/// local-only folder never prints, whatever the app sends back.
+#[cfg(unix)]
+#[test]
+fn app_search_results_skip_local_only_notes() {
+    let (fixture, _raw) = graph_with_local_only_note(Some(SECURE));
+    let server = serve_search_once(
+        &fixture,
+        r#"{"mode":"hybrid","results":[
+            {"path":"finance/secure/bank.md","title":"Bank","snippet":"ledger","score":0.03},
+            {"path":"notes/public.md","title":"Public","snippet":"ledger","score":0.02}]}"#
+            .replace('\n', "")
+            .as_str(),
+    );
+    let output = reflect(
+        &fixture,
+        &["search", "ledger", "--mode", "hybrid", "--json"],
+    );
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json(&output);
+    let paths: Vec<&str> = value["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["notes/public.md"]);
+    assert!(!stdout(&output).contains("1234"));
+}
+
 #[cfg(unix)]
 #[test]
 fn resolving_to_a_local_only_note_is_refused_as_private() {
@@ -1100,11 +1214,12 @@ fn an_unreadable_local_only_record_refuses_every_note_read() {
         .unwrap()
         .execute_batch("ALTER TABLE index_meta RENAME TO index_meta_old")
         .unwrap();
-    let reads: [&[&str]; 4] = [
+    let reads: [&[&str]; 5] = [
         &["show", "Public"],
         &["path", "Public"],
         &["open", "Public", "--print"],
         &["search", "ledger"],
+        &["search", "ledger", "--mode", "hybrid"],
     ];
     for fixture in [&unparsable, &unqueryable] {
         for args in reads {
