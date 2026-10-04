@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../../ipc/bridge.ts'
 import { loadChatMessages, saveChatMessage } from './store.ts'
-import type { ChatTurn } from './transcript.ts'
+import type { AssistantPart, ChatTurn } from './transcript.ts'
 
 /**
  * The store against a scripted bridge: writes assert the exact Rust command
@@ -110,6 +110,87 @@ describe('loadChatMessages', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     invoke.mockResolvedValue([messageRow({ parts: JSON.stringify([{ kind: 'mystery' }]) })])
     expect(await loadChatMessages('conv-1')).toEqual([])
+  })
+
+  it('saves read_assets calls and results and loads them back intact', async () => {
+    const assetsTurn: ChatTurn = {
+      ...turn,
+      parts: [
+        {
+          kind: 'tool',
+          call: {
+            tool: 'assets',
+            toolCallId: 'tool-1',
+            paths: ['assets/chart.png', 'assets/a.pdf'],
+          },
+          result: {
+            tool: 'assets',
+            toolCallId: 'tool-1',
+            assets: [
+              { path: 'assets/chart.png', error: null },
+              { path: 'assets/a.pdf', error: 'This asset cannot be read by AI.' },
+            ],
+          },
+          error: null,
+        },
+        {
+          kind: 'tool',
+          call: { tool: 'assets', toolCallId: 'tool-2', paths: ['assets/b.png'] },
+          result: null,
+          error: 'disk error',
+        },
+        { kind: 'text', text: 'A bar chart.' },
+      ],
+    }
+    invoke.mockResolvedValue(null)
+    await saveChatMessage({ conversation, turn: assetsTurn, createdMs: 2_000, generation: 7 })
+    expect(invoke).toHaveBeenCalledWith(
+      'chat_message_save',
+      expect.objectContaining({
+        message: expect.objectContaining({ parts: JSON.stringify(assetsTurn.parts) }),
+      }),
+    )
+
+    invoke.mockResolvedValue([messageRow({ parts: JSON.stringify(assetsTurn.parts) })])
+    expect(await loadChatMessages('conv-1')).toEqual([assetsTurn])
+  })
+
+  it('loads a row saved before read_assets existed unchanged', async () => {
+    // Rows written before read_assets existed carry only the older tools;
+    // widening the schema must not change how they load.
+    const olderParts: AssistantPart[] = [
+      {
+        kind: 'tool',
+        call: { tool: 'read', toolCallId: 'tool-1', paths: ['notes/a.md'] },
+        result: {
+          tool: 'read',
+          toolCallId: 'tool-1',
+          notes: [{ path: 'notes/a.md', title: 'Cats', error: null }],
+        },
+        error: null,
+      },
+      {
+        kind: 'tool',
+        call: { tool: 'recents', toolCallId: 'tool-2', tag: null },
+        result: { tool: 'recents', toolCallId: 'tool-2', tag: null, notes: [], error: null },
+        error: null,
+      },
+      {
+        kind: 'tool',
+        call: { tool: 'dailies', toolCallId: 'tool-3', start: '2026-06-01', end: '2026-06-02' },
+        result: {
+          tool: 'dailies',
+          toolCallId: 'tool-3',
+          start: '2026-06-01',
+          end: '2026-06-02',
+          days: [{ path: 'daily/2026-06-01.md', title: '2026-06-01' }],
+        },
+        error: null,
+      },
+      { kind: 'text', text: 'Cats, per [[Cats]].' },
+    ]
+    invoke.mockResolvedValue([messageRow({ parts: JSON.stringify(olderParts) })])
+    expect(await loadChatMessages('conv-1')).toEqual([{ ...turn, parts: olderParts }])
   })
 
   it('upgrades a legacy single-note read part to the batch shape', async () => {
