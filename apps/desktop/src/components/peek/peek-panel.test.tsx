@@ -6,7 +6,7 @@ import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import '@/test-utils/locator.ts'
 import { PeekPanel } from './peek-panel.tsx'
-import { PeekProvider, usePeekNavigation } from './peek-provider.tsx'
+import { PeekProvider, usePeek, usePeekNavigation } from './peek-provider.tsx'
 
 const openPaths = vi.hoisted(() => new Set<string>())
 const openRouteInNewWindow = vi.hoisted(() => vi.fn(async () => true))
@@ -17,6 +17,17 @@ vi.mock('@/components/note-pane.tsx', () => ({
   NotePane: ({ path }: { path: string }) => <p>pane:{path}</p>,
 }))
 vi.mock('@/hooks/use-note-row.ts', () => ({ useNoteRow: () => null }))
+vi.mock('./pdf-peek-pages.tsx', () => ({
+  PdfPeekPages: ({ path }: { path: string }) => <p>pages:{path}</p>,
+}))
+vi.mock('@/providers/graph-provider.tsx', () => ({
+  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 3 } }),
+}))
+const openAsset = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('@reflect/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@reflect/core')>()),
+  openAsset,
+}))
 vi.mock('@/lib/use-today.ts', () => ({ useToday: () => '2026-10-03' }))
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({ settings: { dateFormat: 'mdy' } }),
@@ -37,6 +48,15 @@ function Opener({ path }: { path: string }): ReactElement {
   )
 }
 
+function PdfOpener(): ReactElement {
+  const peek = usePeek()
+  return (
+    <button type="button" onClick={() => peek?.openPeek({ kind: 'pdf', path: 'papers/a.pdf' })}>
+      open pdf
+    </button>
+  )
+}
+
 function RouteProbe(): ReactElement {
   const { route } = useRouter()
   return <output data-testid="route">{JSON.stringify(route)}</output>
@@ -47,6 +67,7 @@ function renderPeek() {
     <RouterProvider>
       <PeekProvider>
         <Opener path={PAST} />
+        <PdfOpener />
         <PeekPanel />
         <RouteProbe />
       </PeekProvider>
@@ -123,5 +144,16 @@ describe('Peek', () => {
 
     await vi.waitFor(() => expect(openRouteInNewWindow).toHaveBeenCalled())
     expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('reads a PDF page by page, with a way out to its default app', async () => {
+    await renderPeek()
+
+    await userEvent.click(page.getByRole('button', { name: 'open pdf' }))
+
+    const pdf = page.getByRole('dialog', { name: 'Peek: a.pdf' })
+    await expect.element(pdf.getByText('pages:papers/a.pdf')).toBeVisible()
+    await userEvent.click(pdf.getByRole('button', { name: 'Open in default app' }))
+    expect(openAsset).toHaveBeenCalledWith('papers/a.pdf', 3)
   })
 })

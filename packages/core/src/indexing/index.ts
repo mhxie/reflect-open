@@ -132,12 +132,14 @@ export {
   type NoteListSortKey,
 } from './note-list-sort.ts'
 export {
+  listAttachmentPreviews,
   listNotes,
   listNoteTags,
   listRecentNotes,
   type NoteListEntry,
   type NoteListOptions,
   type NoteTagFacet,
+  type PreviewableAttachmentType,
   type RecentNoteRow,
   type RecentNotesOptions,
 } from './note-list.ts'

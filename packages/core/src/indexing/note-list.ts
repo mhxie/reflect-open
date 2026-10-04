@@ -101,6 +101,31 @@ function notesWithAttachment(type: NoteAttachmentType) {
   )
 }
 
+/** The attachment types whose files have a visual preview (an image, a PDF's first page). */
+export type PreviewableAttachmentType = Extract<NoteAttachmentType, 'image' | 'pdf'>
+
+/**
+ * Each note's first attachment of `type` (graph-relative, alphabetical), for
+ * the All Notes gallery: note path → attachment path.
+ */
+export async function listAttachmentPreviews(
+  type: PreviewableAttachmentType,
+): Promise<Map<string, string>> {
+  const rows = await db
+    .selectFrom('assets')
+    .select(['assets.notePath', (eb) => eb.fn.min('assets.assetPath').as('assetPath')])
+    .where((eb) =>
+      eb.or(
+        ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) =>
+          eb('assets.assetPath', 'like', `%.${extension}`),
+        ),
+      ),
+    )
+    .groupBy('assets.notePath')
+    .execute()
+  return new Map(rows.map((row) => [row.notePath, row.assetPath]))
+}
+
 /**
  * Notes last edited on the local day `date`, plus that day's daily note — an
  * edit made later (or a sync re-stamping mtimes) must not hide the entry the

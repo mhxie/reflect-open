@@ -15,6 +15,7 @@ import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
 import { NoteLoading } from '@/components/note-loading.tsx'
 import { NoteOpenError } from '@/components/note-open-error.tsx'
 import { NoteSaveAlerts } from '@/components/note-save-alerts.tsx'
+import { usePeek } from '@/components/peek/peek-provider.tsx'
 import { ProtectedNoteView } from '@/components/protected-note-view.tsx'
 import { SuggestedContactCard } from '@/components/suggested-contact-card.tsx'
 import { SyncConflictNotice } from '@/components/sync-conflict-notice.tsx'
@@ -181,6 +182,15 @@ export function NotePaneComponent({
     // notes stay unseeded — the date is their identity.
     ...(needsSeed ? { missingSeed: seed.seed } : {}),
   })
+  // A double-clicked PDF reads in Peek where the workspace offers it.
+  const openPeek = usePeek()?.openPeek
+  const openPdf = useMemo(
+    () =>
+      openPeek === undefined
+        ? undefined
+        : (pdfPath: string) => openPeek({ kind: 'pdf', path: pdfPath }),
+    [openPeek],
+  )
   const {
     resolveImageUrl,
     resolveEmbed,
@@ -191,7 +201,7 @@ export function NotePaneComponent({
     saveFile,
     resolveFileInfo,
     saveError,
-  } = useAssetPersistence(generation, path)
+  } = useAssetPersistence(generation, path, openPdf)
   const renderWikilinkHoverCard = useWikiLinkHoverPreview({
     generation,
     graphKey: graph?.root ?? null,

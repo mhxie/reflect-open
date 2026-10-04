@@ -13,10 +13,14 @@ import { useToday } from '@/lib/use-today.ts'
 import { notePathForRoute, type NoteRoute } from '@/routing/route.ts'
 
 /** A note shown in the peek panel, with the route its "Open" button takes. */
-export interface PeekTarget {
+export interface NotePeekTarget {
+  readonly kind: 'note'
   readonly path: string
   readonly route: NoteRoute
 }
+
+/** What the peek panel shows: a note, or a graph-relative PDF read page by page. */
+export type PeekTarget = NotePeekTarget | { readonly kind: 'pdf'; readonly path: string }
 
 interface PeekContextValue {
   readonly target: PeekTarget | null
@@ -27,8 +31,9 @@ interface PeekContextValue {
 const PeekContext = createContext<PeekContextValue | null>(null)
 
 /**
- * Arc-style Peek for the workspace: a note opened from the sidebar floats over
- * the editor instead of replacing it, so the user keeps their place.
+ * Arc-style Peek for the workspace: a note opened from the sidebar, or a PDF
+ * opened from a note, floats over the editor instead of replacing it, so the
+ * user keeps their place.
  */
 export function PeekProvider({ children }: { children: ReactNode }): ReactElement {
   const [target, setTarget] = useState<PeekTarget | null>(null)
@@ -53,7 +58,7 @@ export function usePeekNavigation(scopeKey?: string | number | null): NoteLinkNa
   const today = useToday()
   const navigateNoteLink = useNoteLinkNavigation(scopeKey)
   const openPeek = peek?.openPeek
-  const peekedPath = peek?.target?.path
+  const peekedPath = peek?.target?.kind === 'note' ? peek.target.path : undefined
   return useCallback(
     (options) => {
       const path = notePathForRoute(options.target, today)
@@ -69,7 +74,7 @@ export function usePeekNavigation(scopeKey?: string | number | null): NoteLinkNa
         navigateNoteLink(options)
         return
       }
-      openPeek({ path, route: options.target })
+      openPeek({ kind: 'note', path, route: options.target })
     },
     [navigateNoteLink, openPeek, peekedPath, today],
   )
