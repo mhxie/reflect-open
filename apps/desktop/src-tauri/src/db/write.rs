@@ -35,6 +35,8 @@ pub struct IndexedNote {
     /// The file carries Git conflict markers (sync merge, Plan 12).
     pub(super) has_conflict: bool,
     pub(super) has_content: bool,
+    /// Characters of display text — what the user wrote, sans Markdown syntax.
+    pub(super) body_chars: i64,
     /// The published GitHub Gist's html url, when the note has one.
     pub(super) gist_url: Option<String>,
     /// The body changed since it was last published to the gist.
@@ -148,8 +150,8 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
     remove_note(conn, &note.path)?;
 
     conn.prepare_cached(
-        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17)",
+        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18)",
     )?
     .execute(params![
         note.path,
@@ -169,6 +171,7 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
         note.mtime,
         note.preview,
         i64::from(note.has_content),
+        note.body_chars,
     ])?;
     {
         let mut stmt = conn.prepare_cached(

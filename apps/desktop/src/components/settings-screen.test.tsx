@@ -315,6 +315,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -375,6 +376,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -449,6 +451,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -530,6 +533,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -590,6 +594,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -643,6 +648,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -705,6 +711,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -764,6 +771,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -786,6 +794,17 @@ describe('SettingsScreen', () => {
       .element(dateTime.getByRole('combobox', { name: 'Start week on' }))
       .toBeInTheDocument()
     expect(appearance.getByRole('combobox', { name: 'Start week on' }).query()).toBeNull()
+  })
+
+  it('toggling the activity heatmap off persists', async () => {
+    await renderScreen()
+    const toggle = page.getByRole('switch', { name: /activity heatmap/i })
+    await expect.element(toggle).toHaveAttribute('aria-checked', 'true')
+
+    await toggle.click()
+
+    await expect.element(toggle).toHaveAttribute('aria-checked', 'false')
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ activityHeatmapEnabled: false }))
   })
 
   it('selecting Sunday persists the week start day', async () => {
@@ -829,6 +848,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -900,6 +920,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -953,6 +974,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person', 'meeting'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1035,6 +1057,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1104,6 +1127,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1175,6 +1199,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1238,6 +1263,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1344,6 +1370,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1487,6 +1514,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1556,6 +1584,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},
@@ -1616,6 +1645,7 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['book', 'link', 'person'],
           allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
           allNotesSort: { key: 'updated', direction: 'desc' },
+          activityHeatmapEnabled: true,
           calendarEnabled: false,
           calendarIds: [],
           graphColors: {},

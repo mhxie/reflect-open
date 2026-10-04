@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { dailyPath } from '@reflect/core'
+import { ActivitySection } from './activity-section.tsx'
 import { DailyEventsSection } from './daily-events-section.tsx'
 import { DayCalendar } from './day-calendar.tsx'
 import { DayTasksSection } from './day-tasks-section.tsx'
@@ -19,10 +20,11 @@ interface DailyContextSidebarProps {
 /**
  * The daily note's contextual sidebar (modeled on the old app's note context
  * sidebar): the month calendar up top — itself the day-navigation surface,
- * with a jump-to-today button — then the day's tasks, note actions, the day's
- * calendar events, the same day in earlier years, and semantic neighbors.
- * Inbound links live under the note itself (the incoming-backlinks section),
- * not here. Rendered in the AppShell's right region on daily routes only.
+ * with a jump-to-today button — then the day's tasks, journaling activity,
+ * note actions, the day's calendar events, the same day in earlier years,
+ * and semantic neighbors. Inbound links live under the note itself (the
+ * incoming-backlinks section), not here. Rendered in the AppShell's right
+ * region on daily routes only.
  */
 export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactElement {
   const today = useToday()
@@ -39,6 +41,7 @@ export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactEl
       <DayCalendar selectedDate={date} today={today} />
       <div className="my-4 space-y-4 pb-4">
         <DayTasksSection date={date} />
+        <ActivitySection />
         <NoteActionsSection path={dailyPath(date)} />
         <DailyEventsSection date={date} />
         <OnThisDaySection date={date} />

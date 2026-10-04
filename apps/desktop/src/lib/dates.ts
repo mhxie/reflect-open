@@ -57,6 +57,22 @@ export function formatShortDate(date: string, dateFormat: DateFormat): string {
 }
 
 /**
+ * The shortest unambiguous date label: `10/2` for `mdy`, `2/10` for `dmy`,
+ * `10-02` for `iso`, with the year added when `date` falls outside `today`'s.
+ */
+export function formatCompactDate(date: string, today: string, dateFormat: DateFormat): string {
+  const sameYear = date.slice(0, 4) === today.slice(0, 4)
+  switch (dateFormat) {
+    case 'dmy':
+      return format(parseIsoDate(date), sameYear ? 'd/M' : 'd/M/yy')
+    case 'iso':
+      return sameYear ? date.slice(5) : date
+    case 'mdy':
+      return format(parseIsoDate(date), sameYear ? 'M/d' : 'M/d/yy')
+  }
+}
+
+/**
  * A date label per the date-format setting: `June 10th, 2026` for `mdy`,
  * `10th June, 2026` for `dmy`, and `2026-06-10` for `iso` (the forms the
  * settings screen shows as the options themselves).

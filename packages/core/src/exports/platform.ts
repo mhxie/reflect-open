@@ -279,6 +279,7 @@ export {
   allNotesFilterTagsSchema,
   allNotesFilterAttachmentsSchema,
   allNotesSortSchema,
+  activityHeatmapEnabledSchema,
   calendarEnabledSchema,
   calendarIdsSchema,
   graphColorSchema,

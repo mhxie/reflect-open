@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version that adds recording audio to assets', () => {
-    expect(PROJECTION_VERSION).toBe(23)
+  it('carries the projection version that adds body sizes', () => {
+    expect(PROJECTION_VERSION).toBe(24)
   })
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {
@@ -233,6 +233,20 @@ describe('buildIndexedNote', () => {
     expect(hasContentOf('[](notes/foo.md)\n')).toBe(true)
     // No token at all, but a reader still sees it.
     expect(hasContentOf('🎉\n')).toBe(true)
+  })
+
+  it('sizes a note by its display text, not its syntax or asset descriptions', () => {
+    const bodyCharsOf = (source: string): number =>
+      buildIndexedNote(parseNote({ path: 'daily/2026-06-09.md', source }), {
+        fileHash: 'h',
+        mtime: 0,
+        source,
+        assetText: 'A long OCR description of an attached scan',
+      }).bodyChars
+
+    expect(bodyCharsOf('今天写了七个字\n')).toBe(7)
+    expect(bodyCharsOf('**bold** and [[Foo]]\n')).toBe('bold and Foo'.length)
+    expect(bodyCharsOf('![](assets/beach.png)\n')).toBe(0)
   })
 
   it('marks daily notes with their date and carries no id', () => {

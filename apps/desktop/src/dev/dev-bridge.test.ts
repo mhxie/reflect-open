@@ -24,6 +24,7 @@ function projection(path: string, mtime: number, fileHash: string): IndexedNote 
     pinnedOrder: null,
     hasConflict: false,
     hasContent: true,
+    bodyChars: 0,
     gistUrl: null,
     gistStale: false,
     fileHash,

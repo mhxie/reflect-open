@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDaysIso,
+  formatCompactDate,
   formatDayLabel,
   formatFullDate,
   formatRecencyLabel,
@@ -51,6 +52,14 @@ describe('dates', () => {
     expect(formatShortDate('2026-06-09', 'mdy')).toBe('6/9/2026')
     expect(formatShortDate('2026-06-09', 'dmy')).toBe('9/6/2026')
     expect(formatShortDate('2026-06-09', 'iso')).toBe('2026-06-09')
+  })
+
+  it('formatCompactDate drops the year inside the current one', () => {
+    expect(formatCompactDate('2026-10-02', '2026-10-03', 'mdy')).toBe('10/2')
+    expect(formatCompactDate('2026-10-02', '2026-10-03', 'dmy')).toBe('2/10')
+    expect(formatCompactDate('2026-10-02', '2026-10-03', 'iso')).toBe('10-02')
+    expect(formatCompactDate('2025-12-31', '2026-10-03', 'mdy')).toBe('12/31/25')
+    expect(formatCompactDate('2025-12-31', '2026-10-03', 'iso')).toBe('2025-12-31')
   })
 
   describe('formatTimeOfDay', () => {

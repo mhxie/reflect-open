@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type ReactElement } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
-import type { NoteListEntry, NoteListSort, NoteListSortKey } from '@reflect/core'
+import type { DateFormat, NoteListEntry, NoteListSort, NoteListSortKey } from '@reflect/core'
+import { formatShortDate } from '@/lib/dates.ts'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import { useSettings } from '@/providers/settings-provider.tsx'
 import type { AllNotesFilter } from '@/routing/route.ts'
 import { ALL_NOTES_GRID, AllNotesRow } from './all-notes-row.tsx'
 import { ATTACHMENT_FILTER_NOUNS } from './attachment-filter-labels.ts'
@@ -49,6 +51,7 @@ export function AllNotesTable({
   onOpen,
   registerScrollToIndex,
 }: AllNotesTableProps): ReactElement | null {
+  const { settings } = useSettings()
   const rows = notes ?? []
   const { clickSelect, isSelected } = selection
   const virtualizerRef = useRef<VirtualizerHandle>(null)
@@ -88,7 +91,9 @@ export function AllNotesTable({
         <SortHeader label="Updated" sortKey="updated" sort={sort} onSort={onSort} alignEnd />
       </div>
       {notes.length === 0 ? (
-        <p className="py-8 pl-12 pr-7 text-sm text-text-muted">{emptyListMessage(filter)}</p>
+        <p className="py-8 pl-12 pr-7 text-sm text-text-muted">
+          {emptyListMessage(filter, settings.dateFormat)}
+        </p>
       ) : (
         <Virtualizer
           ref={virtualizerRef}
@@ -115,11 +120,15 @@ export function AllNotesTable({
 }
 
 /** What an empty list says under `filter`. */
-function emptyListMessage(filter: AllNotesFilter | null): string {
-  if (filter === null) {
-    return 'No notes yet.'
+function emptyListMessage(filter: AllNotesFilter | null, dateFormat: DateFormat): string {
+  switch (filter?.kind) {
+    case undefined:
+      return 'No notes yet.'
+    case 'tag':
+      return `No notes tagged #${filter.tag}.`
+    case 'attachment':
+      return `No notes with ${ATTACHMENT_FILTER_NOUNS[filter.type]}.`
+    case 'updated':
+      return `No notes edited on ${formatShortDate(filter.date, dateFormat)}.`
   }
-  return filter.kind === 'tag'
-    ? `No notes tagged #${filter.tag}.`
-    : `No notes with ${ATTACHMENT_FILTER_NOUNS[filter.type]}.`
 }

@@ -85,9 +85,11 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
  */
 const TAG_TOKEN_RE = /^#\p{L}[\p{L}\p{N}/_-]*$/u
 
-/** Epoch ms of the **local** start of `YYYY-MM-DD` (+`days`). */
-function localDayStartMs(date: string, days = 0): number {
-  // Callers gate on ISO_DATE_RE first, so the split always yields three parts.
+/**
+ * Epoch ms of the **local** start of `YYYY-MM-DD` (+`days`). `date` must already
+ * be a validated ISO date.
+ */
+export function localDayStartMs(date: string, days = 0): number {
   const parts = date.split('-').map(Number)
   const year = parts[0]!
   const month = parts[1]!

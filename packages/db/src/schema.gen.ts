@@ -94,6 +94,7 @@ export interface NoteKeys {
 }
 
 export interface Notes {
+  bodyChars: Generated<number>;
   dailyDate: string | null;
   fileHash: string;
   gistStale: Generated<number>;

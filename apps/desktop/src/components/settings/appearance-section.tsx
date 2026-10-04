@@ -6,6 +6,7 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
 import { SettingsSection } from './section.tsx'
+import { SettingsSwitchField } from './switch-field.tsx'
 
 interface ThemeOption {
   value: ThemePreference
@@ -20,9 +21,9 @@ const THEME_OPTIONS: ThemeOption[] = [
 ]
 
 /**
- * Theme picker as radio cards (the original app's idiom). Edits the settings
- * document directly — the ThemeProvider applies whatever is persisted, so
- * this section needs no theme context of its own.
+ * Theme picker as radio cards (the original app's idiom) and the activity
+ * heatmap toggle. Edits the settings document directly — the ThemeProvider
+ * applies whatever is persisted, so this section needs no theme context.
  */
 export function AppearanceSection(): ReactElement {
   const { settings, updateSettings } = useSettings()
@@ -60,6 +61,12 @@ export function AppearanceSection(): ReactElement {
           })}
         </div>
       </SettingsField>
+      <SettingsSwitchField
+        legend="Activity heatmap"
+        description="Show how much you wrote each day in the daily sidebar."
+        checked={settings.activityHeatmapEnabled}
+        onCheckedChange={(checked) => updateSettings({ activityHeatmapEnabled: checked })}
+      />
     </SettingsSection>
   )
 }

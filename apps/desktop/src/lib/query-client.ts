@@ -20,6 +20,9 @@ export const queryKeys = {
     allNotesWithAttachment(root: GraphRoot, type: NoteAttachmentType) {
       return [...this.allNotes(root), 'attachment', type] as const
     },
+    allNotesUpdatedOn(root: GraphRoot, date: string) {
+      return [...this.allNotes(root), 'updated', date] as const
+    },
     allNotesTags(root: GraphRoot) {
       return [...this.graph(root), 'all-notes-tags'] as const
     },
@@ -83,6 +86,12 @@ export const queryKeys = {
     },
     dailyEmpty(root: GraphRoot, path: string) {
       return [...this.graph(root), 'daily-empty', path] as const
+    },
+    dailyActivity(root: GraphRoot) {
+      return [...this.graph(root), 'daily-activity'] as const
+    },
+    dailyEditCounts(root: GraphRoot) {
+      return [...this.graph(root), 'daily-edit-counts'] as const
     },
     onThisDay(root: GraphRoot, date: string) {
       return [...this.graph(root), 'on-this-day', date] as const
