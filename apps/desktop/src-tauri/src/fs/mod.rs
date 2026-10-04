@@ -8,6 +8,12 @@
 
 pub mod asset_protocol;
 pub mod assets;
+// Nothing calls it yet: later waves route local-only edits through it
+// (note_write, note_create, note_delete, move_note_file), and Git sync's
+// displacement and commit reads and the on-device note read build on it.
+#[cfg(unix)]
+#[cfg_attr(not(test), allow(dead_code))]
+mod beneath;
 mod import;
 mod import_assets;
 mod io;

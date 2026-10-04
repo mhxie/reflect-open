@@ -86,6 +86,14 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 # The watcher (desktop) and the Git merge's local-only check (every target).
 walkdir = "2.5.0"
 
+# Directory-fd IO that never follows a symlink (`src/fs/beneath.rs`): rustix
+# for the `*at` calls, libc for `O_NOFOLLOW_ANY`, getrandom for unguessable
+# staging and trash names. All three are already in the lockfile.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs"] }
+libc = "0.2.189"
+getrandom = "0.4.3"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 xattr = "1.6.1"
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }

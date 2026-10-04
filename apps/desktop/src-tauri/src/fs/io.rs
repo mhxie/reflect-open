@@ -40,8 +40,11 @@ const APPLE_EXCLUSION_KEYS: [&str; 2] = [
     "NSURLUbiquitousItemIsExcludedFromSyncKey",
     "NSURLIsExcludedFromBackupKey",
 ];
+/// The provider-ignore attributes File Provider extensions and Dropbox honor:
+/// set on Reflect's own runtime directories, and carried over when a
+/// no-follow replace swaps in a new file for one that has them (`beneath`).
 #[cfg(target_os = "macos")]
-const LOCAL_ONLY_XATTRS: [(&str, &[u8]); 2] = [
+pub(super) const LOCAL_ONLY_XATTRS: [(&str, &[u8]); 2] = [
     ("com.apple.fileprovider.ignore#P", b"1"),
     ("com.dropbox.ignored", b"1"),
 ];
@@ -140,13 +143,6 @@ fn create_runtime_file(path: &Path, contents: &str) -> AppResult<()> {
     }
 }
 
-/// `O_NOFOLLOW_ANY` from the macOS SDK's `<sys/fcntl.h>` (also in Apple's
-/// open-source XNU): refuse to open when **any** path component is a
-/// symlink, atomically — no check-then-use window. Spelled out here because
-/// the `libc` crate does not bind it yet.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-const O_NOFOLLOW_ANY: i32 = 0x2000_0000;
-
 /// Read a note's markdown with symlink traversal refused at open time on
 /// Apple platforms. Symlinks are outside the graph-content contract:
 /// discovery never lists them and the watcher reports them as removals; this
@@ -165,9 +161,11 @@ pub(super) fn read_note_no_follow(base: &Path, rest: &Path) -> std::io::Result<S
 }
 
 /// Open `base.join(rest)` for reading with every component policed by
-/// `O_NOFOLLOW_ANY` on Apple platforms (a plain open elsewhere). Attachment
-/// reads (the asset protocol, PDF previews) go through
-/// `resolve::ReadTarget::open`, which picks this open for a local-only entry.
+/// `O_NOFOLLOW_ANY` on Apple platforms (a plain open elsewhere): the open
+/// refuses when **any** path component is a symlink, atomically, with no
+/// check-then-use window. Attachment reads (the asset protocol, PDF
+/// previews) go through `resolve::ReadTarget::open`, which picks this open
+/// for a local-only entry.
 pub(super) fn open_no_follow(base: &Path, rest: &Path) -> std::io::Result<fs::File> {
     let path = base.join(rest);
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -175,7 +173,7 @@ pub(super) fn open_no_follow(base: &Path, rest: &Path) -> std::io::Result<fs::Fi
         use std::os::unix::fs::OpenOptionsExt;
         fs::OpenOptions::new()
             .read(true)
-            .custom_flags(O_NOFOLLOW_ANY)
+            .custom_flags(libc::O_NOFOLLOW_ANY)
             .open(path)
     }
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
