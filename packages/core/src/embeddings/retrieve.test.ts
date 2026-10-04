@@ -28,6 +28,7 @@ function row(path: string, distance: number, overrides?: Partial<ChunkHitRow>): 
     heading: null,
     text: ` about ${path} `,
     isPrivate: 0,
+    modelId: 'all-MiniLM-L6-v2',
     distance,
     ...overrides,
   }
@@ -58,8 +59,36 @@ describe('bestChunkPerNote', () => {
 
   it('excludes the seed note and respects the limit', () => {
     const rows = [row('notes/self.md', 0.0), row('notes/a.md', 0.1), row('notes/b.md', 0.2)]
-    const hits = bestChunkPerNote(rows, 1, 'notes/self.md')
+    const hits = bestChunkPerNote(rows, 1, { excludePath: 'notes/self.md' })
     expect(hits.map((hit) => hit.path)).toEqual(['notes/a.md'])
+  })
+
+  it('an explicit maxDistance replaces the model cutoff', () => {
+    const rows = [row('notes/near.md', 0.3), row('notes/far.md', 0.95)]
+    const everything = bestChunkPerNote(rows, 12, { maxDistance: 2 })
+    expect(everything.map((hit) => hit.path)).toEqual(['notes/near.md', 'notes/far.md'])
+    const strict = bestChunkPerNote(rows, 12, { maxDistance: 0.2 })
+    expect(strict).toEqual([])
+  })
+
+  it("cuts each row at its own model's cutoff", () => {
+    const rows = [
+      row('notes/gemma-near.md', 0.6, { modelId: 'embeddinggemma-300m' }),
+      row('notes/gemma-far.md', 0.66, { modelId: 'embeddinggemma-300m' }),
+      row('notes/minilm.md', 0.66),
+    ]
+    expect(bestChunkPerNote(rows, 12).map((hit) => hit.path)).toEqual([
+      'notes/gemma-near.md',
+      'notes/minilm.md',
+    ])
+  })
+
+  it('a chunk from a model no longer offered uses the default model cutoff', () => {
+    const rows = [
+      row('notes/a.md', 0.6, { modelId: 'retired-model' }),
+      row('notes/b.md', 0.75, { modelId: 'retired-model' }),
+    ]
+    expect(bestChunkPerNote(rows, 12).map((hit) => hit.path)).toEqual(['notes/a.md'])
   })
 
   it('trims snippets and converts the private flag', () => {
@@ -85,7 +114,7 @@ describe('mergeNearestFirst (multi-seed related notes)', () => {
     const fromLeadChunk = [row('notes/self.md', 0.0)]
     const fromLaterChunk = [row('notes/self.md', 0.0), row('notes/afternoon.md', 0.4)]
     const merged = mergeNearestFirst([fromLeadChunk, fromLaterChunk])
-    const hits = bestChunkPerNote(merged, 10, 'notes/self.md')
+    const hits = bestChunkPerNote(merged, 10, { excludePath: 'notes/self.md' })
     expect(hits.map((hit) => hit.path)).toEqual(['notes/afternoon.md'])
   })
 
@@ -137,11 +166,21 @@ describe('retrieve', () => {
   function fakeIndex(answers: {
     everyTerm: object[]
     anyTerm: object[]
+    knn?: object[]
+    loadedModel?: string
   }): Array<[string, unknown]> {
     const calls: Array<[string, unknown]> = []
     setBridge({
       invoke: async (command, args) => {
         calls.push([command, args])
+        if (command === 'embed_status') {
+          return answers.loadedModel === undefined
+            ? { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
+            : { status: 'ready', model: answers.loadedModel, dims: 384 }
+        }
+        if (command === 'embed_texts') {
+          return [[0.1, 0.2]]
+        }
         const sql = String(args['sql'] ?? '')
         if (sql.includes('materialized')) {
           return answers.everyTerm
@@ -151,6 +190,9 @@ describe('retrieve', () => {
         }
         if (sql.includes('"is_private"')) {
           return [{ path: 'notes/exact.md', is_private: 0 }]
+        }
+        if (sql.includes('embedding_vectors v')) {
+          return answers.knn ?? []
         }
         return []
       },
@@ -212,5 +254,41 @@ describe('retrieve', () => {
     expect(
       calls.some(([, args]) => String((args as { sql?: string }).sql).includes('ORDER BY bm25')),
     ).toBe(false)
+  })
+
+  it('ignores vectors another model wrote, until the table is refitted', async () => {
+    const knnRow = {
+      path: 'notes/near.md',
+      title: 'Near',
+      heading: null,
+      text: 'near',
+      isPrivate: 0,
+      distance: 0.1,
+    }
+    fakeIndex({
+      everyTerm: [],
+      anyTerm: [],
+      loadedModel: 'embeddinggemma-300m',
+      knn: [{ ...knnRow, modelId: 'all-MiniLM-L6-v2' }],
+    })
+    expect(await retrieve('notes about storage', { mode: 'semantic' })).toEqual([])
+
+    fakeIndex({
+      everyTerm: [],
+      anyTerm: [],
+      loadedModel: 'embeddinggemma-300m',
+      knn: [{ ...knnRow, modelId: 'embeddinggemma-300m' }],
+    })
+    const hits = await retrieve('notes about storage', { mode: 'semantic', maxDistance: 2 })
+    expect(hits.map((hit) => hit.path)).toEqual(['notes/near.md'])
+  })
+
+  it('embeds the semantic query as a query, not a passage', async () => {
+    const calls = fakeIndex({ everyTerm: [], anyTerm: [] })
+    await retrieve('where did we land on pricing', { mode: 'semantic' })
+    expect(calls.find(([command]) => command === 'embed_texts')?.[1]).toEqual({
+      texts: ['where did we land on pricing'],
+      role: 'query',
+    })
   })
 })

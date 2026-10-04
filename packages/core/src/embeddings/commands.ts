@@ -19,7 +19,12 @@ export const embedStatusSchema = z.discriminatedUnion('status', [
     status: z.literal('loading'),
     progress: embedProgressSchema.optional(),
   }),
-  z.object({ status: z.literal('ready'), model: z.string() }),
+  z.object({
+    status: z.literal('ready'),
+    model: z.string(),
+    /** The width the model's vectors (and so the vector table) have. */
+    dims: z.number().int().positive(),
+  }),
   z.object({ status: z.literal('failed'), message: z.string() }),
 ])
 export type EmbedStatus = z.infer<typeof embedStatusSchema>
@@ -31,14 +36,37 @@ export function embedStatus(): Promise<EmbedStatus> {
   return call('embed_status', {}, embedStatusSchema)
 }
 
-/** Load (downloading on first use) the model. Resolves with the outcome. */
-export function embedEnsure(): Promise<EmbedStatus> {
-  return call('embed_ensure', {}, embedStatusSchema)
+/**
+ * Load `model` (downloading on first use; the runtime's default when absent),
+ * replacing any other loaded model. Resolves with the outcome.
+ */
+export function embedEnsure(model?: string): Promise<EmbedStatus> {
+  return call('embed_ensure', { model: model ?? null }, embedStatusSchema)
 }
 
-/** Embed texts → 384-dim vectors. Errors unless status is `ready`. */
-export function embedTexts(texts: string[]): Promise<number[][]> {
-  return call('embed_texts', { texts }, vectorsSchema)
+/**
+ * Embed texts with the loaded model. `role` picks the prefix the model was
+ * trained with: a search query and a stored passage embed differently.
+ * Errors unless status is `ready`.
+ */
+export function embedTexts(
+  texts: string[],
+  role: 'query' | 'passage' = 'passage',
+): Promise<number[][]> {
+  return call('embed_texts', { texts, role }, vectorsSchema)
+}
+
+/**
+ * Fit the vector table to the loaded model before embedding into it: another
+ * model's vectors are dropped and the table recreated at `dims`
+ * (generation-pinned). Resolves `true` when it reset anything.
+ */
+export function embedPrepareIndex(
+  model: string,
+  dims: number,
+  generation: number,
+): Promise<boolean> {
+  return call('embed_prepare_index', { model, dims, generation }, z.boolean())
 }
 
 /** One chunk in the `embed_apply` payload; `vector` only for new/changed. */

@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_SENTRY_DSN?: string
   /** `off` in local builds (`pnpm tauri:build:local`): no update checks or update UI. */
   readonly VITE_UPDATES?: string
+  /** `1` in a dev app launched to score search (`src/dev/search-eval-runner.tsx`). */
+  readonly VITE_SEARCH_EVAL?: string
 }
 
 /** App version injected from the canonical Tauri configuration by Vite. */

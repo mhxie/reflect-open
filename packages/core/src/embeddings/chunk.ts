@@ -1,4 +1,5 @@
 import { parseNote, splitFrontmatter } from '../markdown/index.ts'
+import { isUnsegmented } from '../indexing/cjk.ts'
 import { hashContent } from '../indexing/hash.ts'
 import {
   MAX_ASSET_TEXT_CHARS,
@@ -22,25 +23,94 @@ export interface NoteChunk {
   contentHash: string
 }
 
-/** Accumulate sentences up to this size before starting a new chunk. */
-const TARGET_CHARS = 1000
+/**
+ * Chunk sizes are in approximate model tokens, not characters: a Han, kana or
+ * Hangul character is about one token, other text about one per four
+ * characters, so a thousand characters of Chinese would overrun the 512-token
+ * window the embedding models read while the same span of English fits twice.
+ */
+/** Accumulate sentences up to this many tokens before starting a new chunk. */
+const TARGET_TOKENS = 300
+/** No chunk runs past this (the window less room for the title context). */
+const MAX_TOKENS = 450
 /** A trailing chunk smaller than this merges into its predecessor. */
-const MIN_CHARS = 200
+const MIN_TOKENS = 50
 
-/** Sentence-ish boundaries: end punctuation + space, or a blank line. */
+/** Approximate model tokens in `text` (see the size note above). */
+export function approxTokens(text: string): number {
+  let unsegmented = 0
+  let other = 0
+  for (const char of text) {
+    if (isUnsegmented(char)) {
+      unsegmented += 1
+    } else if (char.trim() !== '') {
+      other += 1
+    }
+  }
+  return unsegmented + Math.ceil(other / 4)
+}
+
+/**
+ * Sentence-ish boundaries: end punctuation + space, a CJK sentence end (no
+ * space follows one), or a line break — list items and short lines are units
+ * too. A span still over {@link MAX_TOKENS} (an unpunctuated wall of text) is
+ * cut by size, at the last space before the limit when there is one.
+ */
 function sentenceSpans(text: string, base: number): Array<{ from: number; to: number }> {
   const spans: Array<{ from: number; to: number }> = []
   let start = 0
-  const breaks = /[.!?][)"'”]?\s+|\n{2,}/g
+  const breaks = /[.!?][)"'”]?\s+|[。！？；…]+[」』”’）)]*|\n+/g
+  const push = (from: number, to: number): void => {
+    for (const piece of splitBySize(text, from, to)) {
+      spans.push({ from: base + piece.from, to: base + piece.to })
+    }
+  }
   for (const match of text.matchAll(breaks)) {
     const end = match.index + match[0].length
-    spans.push({ from: base + start, to: base + end })
+    push(start, end)
     start = end
   }
   if (start < text.length) {
-    spans.push({ from: base + start, to: base + text.length })
+    push(start, text.length)
   }
   return spans
+}
+
+/** `text[from, to)` in pieces of at most {@link MAX_TOKENS}. */
+function splitBySize(text: string, from: number, to: number): Array<{ from: number; to: number }> {
+  if (approxTokens(text.slice(from, to)) <= MAX_TOKENS) {
+    return [{ from, to }]
+  }
+  const pieces: Array<{ from: number; to: number }> = []
+  let pieceFrom = from
+  let tokens = 0
+  let pending = 0 // characters toward the next token of space-delimited text
+  let lastSpace = -1
+  let at = from
+  while (at < to) {
+    const char = String.fromCodePoint(text.codePointAt(at)!)
+    if (isUnsegmented(char)) {
+      tokens += 1
+    } else if (char.trim() === '') {
+      lastSpace = at
+    } else if (++pending === 4) {
+      tokens += 1
+      pending = 0
+    }
+    at += char.length
+    if (tokens >= MAX_TOKENS) {
+      const cut = lastSpace > pieceFrom ? lastSpace + 1 : at
+      pieces.push({ from: pieceFrom, to: cut })
+      pieceFrom = cut
+      tokens = approxTokens(text.slice(cut, at))
+      pending = 0
+      lastSpace = -1
+    }
+  }
+  if (pieceFrom < to) {
+    pieces.push({ from: pieceFrom, to })
+  }
+  return pieces
 }
 
 interface Section {
@@ -51,14 +121,16 @@ interface Section {
 
 /**
  * Accumulate one run of text into chunks: sentence spans gather toward
- * {@link TARGET_CHARS}, offsets are `base`-relative into the enclosing
- * document. No runt-tail merging here — each caller owns its own merge rule
- * (the note merges only its final chunk, asset bodies merge per body).
+ * {@link TARGET_TOKENS} without passing {@link MAX_TOKENS}; offsets are
+ * `base`-relative into the enclosing document. No runt-tail merging here —
+ * each caller owns its own merge rule (the note merges only its final chunk,
+ * asset bodies merge per body).
  */
 async function chunkRun(text: string, base: number, heading: string | null): Promise<NoteChunk[]> {
   const chunks: NoteChunk[] = []
   let chunkFrom = -1
   let chunkTo = -1
+  let chunkTokens = 0
   const flush = async (): Promise<void> => {
     if (chunkFrom === -1) {
       return
@@ -78,11 +150,17 @@ async function chunkRun(text: string, base: number, heading: string | null): Pro
     chunkFrom = -1
   }
   for (const span of sentenceSpans(text, base)) {
+    const spanTokens = approxTokens(text.slice(span.from - base, span.to - base))
+    if (chunkFrom !== -1 && chunkTokens + spanTokens > MAX_TOKENS) {
+      await flush()
+    }
     if (chunkFrom === -1) {
       chunkFrom = span.from
+      chunkTokens = 0
     }
     chunkTo = span.to
-    if (chunkTo - chunkFrom >= TARGET_CHARS) {
+    chunkTokens += spanTokens
+    if (chunkTokens >= TARGET_TOKENS) {
       await flush()
     }
   }
@@ -92,9 +170,10 @@ async function chunkRun(text: string, base: number, heading: string | null): Pro
 
 /**
  * Merge the final chunk into its predecessor when it is a runt (smaller than
- * {@link MIN_CHARS}) under the same heading — a tail that reads better (and
- * embeds better) merged. `sliceText` re-slices the merged span from the
- * source the positions index into.
+ * {@link MIN_TOKENS}) under the same heading — a tail that reads better (and
+ * embeds better) merged, unless the merge would overrun {@link MAX_TOKENS}.
+ * `sliceText` re-slices the merged span from the source the positions index
+ * into.
  */
 async function mergeRuntTail(
   chunks: NoteChunk[],
@@ -105,7 +184,12 @@ async function mergeRuntTail(
   }
   const last = chunks[chunks.length - 1]!
   const prev = chunks[chunks.length - 2]!
-  if (last.text.length >= MIN_CHARS || prev.heading !== last.heading) {
+  const lastTokens = approxTokens(last.text)
+  if (
+    lastTokens >= MIN_TOKENS ||
+    prev.heading !== last.heading ||
+    approxTokens(prev.text) + lastTokens > MAX_TOKENS
+  ) {
     return chunks
   }
   const text = sliceText(prev.posFrom, last.posTo)

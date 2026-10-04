@@ -58,6 +58,7 @@ export {
   endBackgroundTask,
   type BackgroundTaskToken,
 } from '../app/background-task.ts'
+export { withActivity } from '../app/activity.ts'
 export { WINDOW_NAVIGATE_EVENT, subscribeWindowNavigate } from '../app/window-events.ts'
 export { toggleDevtools } from '../app/devtools.ts'
 export {
@@ -73,6 +74,7 @@ export {
   embedEnsure,
   embedTexts,
   embedApply,
+  embedPrepareIndex,
   embedRemove,
   subscribeEmbedStatus,
   embedStatusSchema,
@@ -80,6 +82,14 @@ export {
   type EmbedProgress,
   type EmbedChunkPayload,
 } from '../embeddings/commands.ts'
+export {
+  DEFAULT_SEMANTIC_MODEL,
+  SEMANTIC_MODEL_IDS,
+  SEMANTIC_MODELS,
+  semanticModel,
+  type SemanticModel,
+  type SemanticModelId,
+} from '../embeddings/models.ts'
 export { embedNote, backfillEmbeddings } from '../embeddings/pipeline.ts'
 export {
   retrieve,

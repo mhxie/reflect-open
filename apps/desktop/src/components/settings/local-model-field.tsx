@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { LOCAL_TRANSCRIPTION_MODELS } from '@reflect/core'
-import { formatModelSize } from '@/lib/local-model-updates.ts'
+import { formatModelSize } from '@/lib/format-model-size.ts'
 import { useLocalModelStatus } from '@/lib/use-local-model-status.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'

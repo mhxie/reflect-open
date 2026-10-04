@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
-import { embedNote } from './pipeline.ts'
+import { embedNote, passageText } from './pipeline.ts'
 
 afterEach(() => {
   setBridge(null)
@@ -111,6 +111,20 @@ describe('embedNote', () => {
     const count = await embedNote({ path: 'notes/a.md', generation: 1, modelId: MODEL })
     expect(count).toBe(2)
     expect(embedded).toHaveLength(1) // one batched embed_texts call
+    expect(applied[0]!.chunks.every((chunk) => chunk.vector !== null)).toBe(true)
+  })
+
+  it('embeds a long note a few chunks per call, so searches can interleave', async () => {
+    const sections = Array.from({ length: 20 }, (_, index) => `# Part ${index}\n\nText ${index}.`)
+    const { embedded, applied } = fakePipelineBridge({
+      content: `${sections.join('\n\n')}\n`,
+      storedRows: [],
+    })
+    const count = await embedNote({ path: 'notes/long.md', generation: 1, modelId: MODEL })
+    expect(count).toBe(20)
+    expect(embedded.map((texts) => texts.length)).toEqual([8, 8, 4])
+    // One apply with every vector, in chunk order.
+    expect(applied).toHaveLength(1)
     expect(applied[0]!.chunks.every((chunk) => chunk.vector !== null)).toBe(true)
   })
 
@@ -256,6 +270,10 @@ describe('embedNote', () => {
     })
     const count = await embedNote({ path: 'notes/a.md', generation: 1, modelId: MODEL })
     expect(count).toBe(1)
-    expect(second.embedded).toEqual([['Now a snowy mountain pass.']])
+    // Embedded with its context: the note title and the asset as heading.
+    expect(second.embedded).toEqual([
+      [passageText('Trip', { heading: 'pic.png', text: 'Now a snowy mountain pass.' })],
+    ])
+    expect(second.embedded[0]![0]).toBe('Trip › pic.png\n\nNow a snowy mountain pass.')
   })
 })

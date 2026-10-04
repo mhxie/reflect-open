@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_ASSET_TEXT_CHARS } from '../indexing/asset-description-text.ts'
-import { chunkAssetDescriptions, chunkNote } from './chunk.ts'
+import { approxTokens, chunkAssetDescriptions, chunkNote } from './chunk.ts'
 
 const PATH = 'notes/a.md'
 
@@ -147,5 +147,38 @@ describe('chunkAssetDescriptions', () => {
 
   it('returns nothing for no bodies', async () => {
     expect(await chunkAssetDescriptions([], BASE)).toEqual([])
+  })
+})
+
+describe('chunking text in scripts without spaces', () => {
+  it('counts a CJK character as a token and other text at four characters each', () => {
+    expect(approxTokens('東京旅行')).toBe(4)
+    expect(approxTokens('abcdefgh')).toBe(2)
+    expect(approxTokens('我们 use Python')).toBe(2 + 3)
+  })
+
+  it('splits Chinese prose at its sentence ends and keeps chunks inside the window', async () => {
+    const sentence = '今天我们讨论了下一季度的预算安排和人员规划。'
+    const source = `# 会议\n\n${sentence.repeat(60)}`
+    const chunks = await chunkNote(PATH, source)
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const chunk of chunks) {
+      expect(approxTokens(chunk.text)).toBeLessThanOrEqual(450)
+      // Every chunk but the last ends on a sentence end.
+      expect(source.slice(chunk.posFrom, chunk.posTo)).toBe(chunk.text)
+    }
+    for (const chunk of chunks.slice(0, -1)) {
+      expect(chunk.text.trimEnd().endsWith('。')).toBe(true)
+    }
+  })
+
+  it('cuts an unpunctuated wall of text by size', async () => {
+    const source = `# Wall\n\n${'字'.repeat(2000)}`
+    const chunks = await chunkNote(PATH, source)
+    expect(chunks.length).toBeGreaterThanOrEqual(4)
+    for (const chunk of chunks) {
+      expect(approxTokens(chunk.text)).toBeLessThanOrEqual(450)
+    }
+    expect(chunks.map((chunk) => chunk.text).join('')).toContain('字'.repeat(2000))
   })
 })

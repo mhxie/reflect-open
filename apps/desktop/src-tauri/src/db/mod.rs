@@ -733,6 +733,30 @@ pub fn embed_apply(
     Ok(())
 }
 
+/// Fit the vector table to the loaded embedding model before a backfill: a
+/// different model's vectors (and their chunks) are dropped and the table is
+/// recreated at `dims` (no-op if stale). Returns whether it reset anything.
+#[tauri::command]
+pub fn embed_prepare_index(
+    model: String,
+    dims: usize,
+    generation: u64,
+    index: State<IndexState>,
+    background_tasks: State<BackgroundTaskState>,
+) -> AppResult<bool> {
+    let _background_task =
+        background_task::scoped(&background_tasks, "Reflect embeddings preparation");
+    let mut state = lock_state(&index)?;
+    if state.generation != generation {
+        return Ok(false);
+    }
+    let conn = state.conn.as_mut().ok_or_else(AppError::no_graph)?;
+    let tx = conn.transaction()?;
+    let reset = embed_write::prepare_vectors(&tx, &model, dims)?;
+    tx.commit()?;
+    Ok(reset)
+}
+
 /// Drop a deleted note's chunks + vectors (no-op if stale).
 #[tauri::command]
 pub fn embed_remove(

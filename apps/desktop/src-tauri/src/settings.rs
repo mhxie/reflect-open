@@ -33,7 +33,7 @@ fn store_path() -> AppResult<PathBuf> {
     if let Some(path) = TEST_STORE_PATH.with(|path| path.borrow().clone()) {
         return Ok(path);
     }
-    let base = dirs::config_dir().ok_or_else(|| AppError::io("no OS config dir"))?;
+    let base = crate::dev_harness::config_dir()?;
     Ok(base.join("reflect-open").join("settings.json"))
 }
 

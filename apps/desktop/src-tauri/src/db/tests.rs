@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use super::chat_write::{delete_conversation, save_message, ChatConversation, ChatMessageRow};
-use super::embed_write::{apply_chunks, remove_chunks, EmbeddedChunk};
+use super::embed_write::{apply_chunks, prepare_vectors, remove_chunks, EmbeddedChunk};
 use super::migrations::{migrate, migrate_to, open_in_memory, open_index_at, validate_migrations};
 use super::query::run_query;
 use super::scan::scan_reconcile;
@@ -2947,4 +2947,28 @@ fn a_paused_open_leaves_a_record_it_cannot_read_unchanged() {
     let (_, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
     assert!(paused);
     assert_eq!(recorded_names(&fixture.root), ["secure"]);
+}
+
+#[test]
+fn switching_embedding_models_refits_the_vector_table() {
+    let conn = migrated();
+    index_note(&conn, "notes/a.md");
+    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
+
+    // An index from before the marker holds the original model's vectors.
+    assert!(!prepare_vectors(&conn, "all-MiniLM-L6-v2", 384).unwrap());
+    assert_eq!(chunk_rows(&conn).len(), 1);
+
+    assert!(prepare_vectors(&conn, "embeddinggemma-300m", 768).unwrap());
+    assert_eq!(chunk_rows(&conn), vec![]);
+    assert_eq!(vector_count(&conn), 0);
+    // The recreated table takes the new width and refuses the old one.
+    let mut wide = chunk("a2", Some(vec![0.1; 768]));
+    wide.model_id = "embeddinggemma-300m".to_string();
+    apply_chunks(&conn, "notes/a.md", &[wide]).unwrap();
+    assert_eq!(vector_count(&conn), 1);
+    assert!(apply_chunks(&conn, "notes/a.md", &[chunk("a3", Some(vec384(0.1)))]).is_err());
+
+    assert!(!prepare_vectors(&conn, "embeddinggemma-300m", 768).unwrap());
+    assert_eq!(vector_count(&conn), 1);
 }

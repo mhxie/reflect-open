@@ -1,10 +1,18 @@
 import { useEffect, useRef } from 'react'
-import { embedNote, embedRemove, isNotePath, subscribeIndexApplied } from '@reflect/core'
+import {
+  embedNote,
+  embedPrepareIndex,
+  embedRemove,
+  isNotePath,
+  subscribeIndexApplied,
+  withActivity,
+} from '@reflect/core'
 import {
   backfillEmbeddingsVisibly,
   consumeLegacySemanticOptIn,
   ensureEmbeddingsVisibly,
 } from '@/lib/semantic.ts'
+import { setSemanticIndexProgress } from '@/lib/semantic-index-progress.ts'
 import { useEmbedStatus } from '@/lib/use-embed-status.ts'
 import { isMainWindow } from '@/lib/windows/window-role.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -14,12 +22,14 @@ import { useSettings } from '@/providers/settings-provider.tsx'
  * Keeps embeddings in sync with the graph (Plan 09). Renders nothing; mounted
  * once per workspace. Three jobs:
  *
- * - load the model whenever `semanticSearchEnabled` is on and the runtime is
- *   untouched — at launch for users who opted in earlier (the cache makes
- *   that instant) and the moment the setting flips on (the one place the
- *   first download starts);
+ * - load the configured model whenever `semanticSearchEnabled` is on and the
+ *   runtime is untouched or holds another model — at launch for users who
+ *   opted in earlier (the cache makes that instant), the moment the setting
+ *   flips on (the one place the first download starts), and when the model
+ *   setting changes;
  * - run one incremental backfill per graph-open once `ready` (hash-skip makes
- *   this cheap when nothing changed);
+ *   this cheap when nothing changed), publishing its progress for the search
+ *   settings;
  * - follow the index: changed notes re-embed, deleted notes drop vectors.
  *   Work is serialized on one queue so passes can't interleave.
  *
@@ -37,8 +47,11 @@ import { useSettings } from '@/providers/settings-provider.tsx'
  * model just idles for the rest of the session), and re-enabling catches up
  * via the cheap hash-skip backfill.
  */
+/** Backfill progress is published every this many notes: smooth, not a render per note. */
+const PROGRESS_STEP = 10
+
 export function EmbeddingsSync(): null {
-  const { graph, indexGeneration } = useGraph()
+  const { graph, indexGeneration, indexing } = useGraph()
   const { settings, updateSettings } = useSettings()
   const status = useEmbedStatus()
   const queue = useRef<Promise<void>>(Promise.resolve())
@@ -50,8 +63,13 @@ export function EmbeddingsSync(): null {
   // Main window only: a secondary note window loading the model and
   // re-embedding on the same watcher stream would duplicate every write.
   const enabled = settings.semanticSearchEnabled && isMainWindow()
-  const ready = status.status === 'ready'
-  const modelId = status.status === 'ready' ? status.model : null
+  const wanted = settings.semanticModel
+  // Ready means ready with the configured model: until a switch lands, the
+  // previous model must not write vectors into the table.
+  const loaded = status.status === 'ready' && status.model === wanted ? status : null
+  const ready = loaded !== null
+  const modelId = loaded?.model ?? null
+  const dims = loaded?.dims ?? null
 
   // The opt-in predates the settings document (it lived in localStorage);
   // carry it over once so those users keep semantic search across the move.
@@ -61,33 +79,68 @@ export function EmbeddingsSync(): null {
     }
   }, [updateSettings])
 
-  // Load while enabled and untouched. Deliberately not retried on `failed`:
-  // an automatic loop would hammer a broken download — recovery rides the
-  // explicit enable/retry actions instead (see retryFailedEmbeddings).
+  // Load while enabled and untouched, or holding another model. Deliberately
+  // not retried on `failed`: an automatic loop would hammer a broken download
+  // — recovery rides the explicit enable/retry actions instead (see
+  // retryFailedEmbeddings).
+  const loadedModel = status.status === 'ready' ? status.model : null
   useEffect(() => {
-    if (enabled && status.status === 'uninitialized') {
-      void ensureEmbeddingsVisibly()
+    if (
+      enabled &&
+      (status.status === 'uninitialized' || (loadedModel !== null && loadedModel !== wanted))
+    ) {
+      void ensureEmbeddingsVisibly(wanted)
     }
-  }, [enabled, status.status])
+  }, [enabled, status.status, loadedModel, wanted])
 
-  // One backfill per (graph, model) once ready, then live post-apply
-  // follow-up. `enabled` is part of the gate so a mid-session disable tears
-  // this down: pending queue items see `active` go false and skip, and the
-  // subscription drops.
+  // One backfill per (graph, model) once ready and the index pass has
+  // settled, then live post-apply follow-up. The backfill reads the note list
+  // once, so starting it mid-pass would miss notes the pass hasn't indexed
+  // yet; a pass starting later tears it down, and the hash-skip makes the
+  // rerun after it cheap. `enabled` is part of the gate so a mid-session
+  // disable tears this down: pending queue items see `active` go false and
+  // skip, and the subscription drops.
   useEffect(() => {
-    if (!enabled || !ready || generation === null || root === null || modelId === null) {
+    if (
+      !enabled ||
+      !ready ||
+      indexing ||
+      generation === null ||
+      root === null ||
+      modelId === null ||
+      dims === null
+    ) {
       return
     }
     let active = true
 
     queue.current = queue.current
-      .then(() => {
+      .then(async () => {
         if (!active) {
           return
         }
-        return backfillEmbeddingsVisibly({ generation, modelId, isStale: () => !active }).then(
-          () => {},
-        )
+        // A model switch first refits the vector table to the new width.
+        await embedPrepareIndex(modelId, dims, generation)
+        if (!active) {
+          return
+        }
+        try {
+          // A switch re-embeds the whole graph, often with the window hidden.
+          await withActivity('Embedding notes for semantic search', () =>
+            backfillEmbeddingsVisibly({
+              generation,
+              modelId,
+              onProgress: (done, total) => {
+                if (active && (done === total || done % PROGRESS_STEP === 0)) {
+                  setSemanticIndexProgress({ done, total })
+                }
+              },
+              isStale: () => !active,
+            }),
+          )
+        } finally {
+          setSemanticIndexProgress(null)
+        }
       })
       .catch((cause) => {
         // A rejection here must not poison the queue (later change items
@@ -122,7 +175,7 @@ export function EmbeddingsSync(): null {
       active = false
       unlisten()
     }
-  }, [enabled, ready, generation, root, modelId])
+  }, [enabled, ready, indexing, generation, root, modelId, dims])
 
   return null
 }

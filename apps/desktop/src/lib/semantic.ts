@@ -72,17 +72,17 @@ async function awaitTerminalStatus(initial: EmbedStatus): Promise<EmbedStatus> {
  * only loads an `uninitialized` runtime, because reacting to `failed` would
  * loop a broken download forever.
  */
-export async function retryFailedEmbeddings(): Promise<void> {
+export async function retryFailedEmbeddings(model: string): Promise<void> {
   const status = await embedStatus()
   if (status.status === 'failed') {
-    await ensureEmbeddingsVisibly()
+    await ensureEmbeddingsVisibly(model)
   }
 }
 
-/** Load (downloading if needed) the model. Resolves with the outcome. */
-export async function ensureEmbeddingsVisibly(): Promise<EmbedStatus> {
+/** Load (downloading if needed) `model`. Resolves with the outcome. */
+export async function ensureEmbeddingsVisibly(model: string): Promise<EmbedStatus> {
   try {
-    return await awaitTerminalStatus(await embedEnsure())
+    return await awaitTerminalStatus(await embedEnsure(model))
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause)
     return { status: 'failed', message }
@@ -93,6 +93,7 @@ export async function ensureEmbeddingsVisibly(): Promise<EmbedStatus> {
 export async function backfillEmbeddingsVisibly(options: {
   generation: number
   modelId: string
+  onProgress?: (done: number, total: number) => void
   isStale?: () => boolean
 }): Promise<'completed' | 'aborted' | 'failed'> {
   try {

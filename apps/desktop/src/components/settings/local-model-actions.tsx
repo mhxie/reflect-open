@@ -8,9 +8,9 @@ import {
   type LocalTranscriptionModelId,
 } from '@reflect/core'
 import { InlineAlert } from '@/components/inline-alert.tsx'
+import { formatModelSize } from '@/lib/format-model-size.ts'
 import {
   clearPendingLocalModelUpdate,
-  formatModelSize,
   installLocalModelUpdate,
   skipPendingLocalModelUpdate,
   usePendingLocalModelUpdate,
