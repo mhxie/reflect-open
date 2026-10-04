@@ -10,7 +10,7 @@ import {
 } from '@/mobile/search-filters/filter-state.ts'
 import { useKeyboardVisible } from '@/mobile/use-keyboard.ts'
 import { useWakeToToday } from '@/mobile/use-wake-to-today.ts'
-import { routesEqual, type Route } from '@/routing/route.ts'
+import { allNotesRoute, routesEqual, type Route } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 
 type DailyRoute = Extract<Route, { kind: 'today' }> | Extract<Route, { kind: 'daily' }>
@@ -69,7 +69,7 @@ export function MobileShell(): ReactElement {
     if (next === 'all') {
       // The double-tap is a search gesture: land on the tab with its search
       // input focused (the Daily tab's capture double-tap, All-flavored).
-      navigate({ kind: 'allNotes', tag: null }, doubleTap ? { focusEditor: true } : undefined)
+      navigate(allNotesRoute(null), doubleTap ? { focusEditor: true } : undefined)
       return
     }
 

@@ -10,7 +10,7 @@ import {
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker.tsx'
 import { Spinner } from '@/components/ui/spinner.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { routeForPath } from '@/routing/route.ts'
+import { allNotesRoute, routeForPath } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { isModEvent } from '@meowdown/core'
 
@@ -105,7 +105,7 @@ export function ChatToolChip({ part }: ChatToolChipProps): ReactElement {
       call.tag !== null && isTagName(call.tag) ? (
         <button
           type="button"
-          onClick={() => navigate({ kind: 'allNotes', tag: call.tag })}
+          onClick={() => navigate(allNotesRoute(call.tag))}
           className="underline-offset-2 hover:text-text hover:underline"
         >
           #{call.tag}

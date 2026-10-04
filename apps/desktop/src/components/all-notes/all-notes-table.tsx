@@ -4,13 +4,15 @@ import type { NoteListEntry } from '@reflect/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { AllNotesFilter } from '@/routing/route.ts'
 import { ALL_NOTES_GRID, AllNotesRow } from './all-notes-row.tsx'
+import { ATTACHMENT_FILTER_NOUNS } from './attachment-filter-labels.ts'
 
 interface AllNotesTableProps {
   /** `undefined` while the index query settles (renders nothing, not "empty"). */
   notes: NoteListEntry[] | undefined
-  /** The active tag filter, for the empty state's wording. */
-  tag: string | null
+  /** The active filter, for the empty state's wording. */
+  filter: AllNotesFilter | null
   /** The shared row selection (click/keyboard); rows read their selected state from it. */
   selection: ListSelection
   onOpen: (path: string, event?: ModClickEvent) => void
@@ -35,7 +37,7 @@ const ESTIMATED_ROW_HEIGHT = 48
  */
 export function AllNotesTable({
   notes,
-  tag,
+  filter,
   selection,
   onOpen,
   registerScrollToIndex,
@@ -79,9 +81,7 @@ export function AllNotesTable({
         <span className="text-right">Updated</span>
       </div>
       {notes.length === 0 ? (
-        <p className="py-8 pl-12 pr-7 text-sm text-text-muted">
-          {tag === null ? 'No notes yet.' : `No notes tagged #${tag}.`}
-        </p>
+        <p className="py-8 pl-12 pr-7 text-sm text-text-muted">{emptyListMessage(filter)}</p>
       ) : (
         <Virtualizer
           ref={virtualizerRef}
@@ -105,4 +105,14 @@ export function AllNotesTable({
       )}
     </>
   )
+}
+
+/** What an empty list says under `filter`. */
+function emptyListMessage(filter: AllNotesFilter | null): string {
+  if (filter === null) {
+    return 'No notes yet.'
+  }
+  return filter.kind === 'tag'
+    ? `No notes tagged #${filter.tag}.`
+    : `No notes with ${ATTACHMENT_FILTER_NOUNS[filter.type]}.`
 }

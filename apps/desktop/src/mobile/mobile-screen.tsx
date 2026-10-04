@@ -3,7 +3,7 @@ import { useToday } from '@/lib/use-today.ts'
 import { MobileDaily } from '@/mobile/screens/daily.tsx'
 import { MobileNote } from '@/mobile/screens/note.tsx'
 import type { AllNotesFilters } from '@/mobile/search-filters/filter-state.ts'
-import type { Route } from '@/routing/route.ts'
+import { allNotesFilterTag, type Route } from '@/routing/route.ts'
 
 const MobileAllNotes = lazy(async () => {
   const { MobileAllNotes } = await import('@/mobile/screens/all-notes.tsx')
@@ -70,7 +70,7 @@ export function MobileScreen({
         <MobileAllNotes
           query={allQuery}
           onQueryChange={onAllQueryChange}
-          tag={route.tag}
+          tag={allNotesFilterTag(route.filter)}
           filters={allFilters}
           onFiltersChange={onAllFiltersChange}
         />

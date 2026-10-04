@@ -138,6 +138,77 @@ describe('listNotes', () => {
     expect(tagArgs['params']).toEqual(['book', 'note', 'daily'])
   })
 
+  it('narrows both queries to notes referencing an attachment type, daily notes included', async () => {
+    mockInvoke
+      .mockResolvedValueOnce([
+        {
+          path: 'papers/socc.md',
+          title: 'SoCC',
+          mtime: 2000,
+          preview: '',
+          is_pinned: 0,
+          pinned_order: null,
+        },
+      ])
+      .mockResolvedValueOnce([{ note_path: 'papers/socc.md', tag: 'paper' }])
+
+    const entries = await listNotes({ attachment: 'pdf' })
+
+    expect(entries.map((entry) => [entry.path, entry.tags])).toEqual([
+      ['papers/socc.md', ['paper']],
+    ])
+    for (const [, args] of mockInvoke.mock.calls) {
+      const statement = String(args['sql'])
+      expect(statement).toContain(
+        '"notes"."path" in (select "assets"."note_path" as "path" from "assets"',
+      )
+      expect(statement).toContain('"assets"."asset_path" like ?')
+      expect(statement).not.toContain('union')
+      expect(args['params']).toEqual(expect.arrayContaining(['note', 'daily', '%.pdf']))
+    }
+  })
+
+  it('counts YouTube links as video alongside local video files', async () => {
+    mockInvoke.mockResolvedValue([])
+
+    await listNotes({ attachment: 'video' })
+
+    const [, listArgs] = mockInvoke.mock.calls[0]!
+    const listSql = String(listArgs['sql'])
+    expect(listSql).toContain('union select "links"."source_path" as "path" from "links"')
+    expect(listArgs['params']).toEqual(
+      expect.arrayContaining(['%.mp4', '%.mov', 'md', '%youtube.com/watch%', '%youtu.be/%']),
+    )
+  })
+
+  it('counts every audio-memos recording as audio and never as video', async () => {
+    mockInvoke.mockResolvedValue([])
+
+    await listNotes({ attachment: 'audio' })
+    const [, audioArgs] = mockInvoke.mock.calls[0]!
+    expect(audioArgs['params']).toEqual(
+      expect.arrayContaining(['%.m4a', 'audio-memos/%', '%/audio-memos/%']),
+    )
+
+    mockInvoke.mockClear()
+    await listNotes({ attachment: 'video' })
+    const [, videoArgs] = mockInvoke.mock.calls[0]!
+    expect(String(videoArgs['sql'])).toContain('not (')
+    expect(videoArgs['params']).toEqual(
+      expect.arrayContaining(['%.webm', 'audio-memos/%', '%/audio-memos/%']),
+    )
+  })
+
+  it('applies one filter at a time, the tag over the attachment type', async () => {
+    mockInvoke.mockResolvedValue([])
+
+    await listNotes({ tag: 'Book', attachment: 'pdf' })
+
+    const [, listArgs] = mockInvoke.mock.calls[0]!
+    expect(String(listArgs['sql'])).not.toContain('"assets"')
+    expect(listArgs['params']).toEqual(['book', 'note', 'daily'])
+  })
+
   it('skips the tag fetch entirely when no notes match', async () => {
     mockInvoke.mockResolvedValue([])
     await expect(listNotes({ tag: 'nothing' })).resolves.toEqual([])

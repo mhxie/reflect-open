@@ -285,7 +285,7 @@ describe('reconcileAudioMemos', () => {
     expect(writeNoteMock.mock.calls).toEqual([
       [
         MEMO.notePath,
-        '---\naliases: [audio-memo-2026-06-11-153022-845]\n---\n\n# Memo Transcript\n\n[Recording](audio-memos/audio-memo-2026-06-11-153022-845.webm)\n\nmemo transcript\n',
+        '---\naliases: [audio-memo-2026-06-11-153022-845]\n---\n\n# Memo Transcript\n\nmemo transcript\n\n[Recording](audio-memos/audio-memo-2026-06-11-153022-845.webm)\n',
         3,
       ],
       [
@@ -402,7 +402,7 @@ describe('reconcileAudioMemos', () => {
     expect(writeNoteMock).toHaveBeenCalledWith(
       MEMO.notePath,
       expect.stringContaining(
-        '# Planning the launch\n\n[Recording](audio-memos/audio-memo-2026-06-11-153022-845.webm)\n\nWe reviewed the launch.\n\n## Next steps\n\n- Invite beta users',
+        '# Planning the launch\n\nWe reviewed the launch.\n\n## Next steps\n\n- Invite beta users\n\n[Recording](audio-memos/audio-memo-2026-06-11-153022-845.webm)\n',
       ),
       3,
     )

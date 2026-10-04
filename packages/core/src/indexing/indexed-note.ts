@@ -4,6 +4,7 @@ import {
   noteBasenameKey,
   wikiNoteReference,
 } from '../graph/note-reference.ts'
+import { ATTACHMENT_TYPE_EXTENSIONS } from '../graph/attachment-types.ts'
 import { isLocalOnlyPath } from '../graph/local-only.ts'
 import {
   dateFromDailyPath,
@@ -26,6 +27,7 @@ import {
   splitFrontmatter,
   subjectAliases,
   wikiLinkTargetForTitle,
+  type Frontmatter,
   type ParsedNote,
 } from '../markdown/index.ts'
 import { previewSnippet } from './snippet.ts'
@@ -104,8 +106,11 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * rebuild keeps embeddings: their chunk text didn't change.
  * 22 - tasks are keyed by AST path (`tasks.ast_path`, migration 0024) and
  * store Markdown instead of plain text, so every note's tasks must reproject.
+ * 23 - a recording note's `audio:` frontmatter file joins `assets` (see
+ * {@link recordingAudio}), so the All Notes audio filter finds recordings
+ * already on disk.
  */
-export const PROJECTION_VERSION = 22
+export const PROJECTION_VERSION = 23
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -248,6 +253,21 @@ export const indexedNoteSchema = z.object({
   tasks: z.array(indexedTaskSchema),
 })
 export type IndexedNote = z.infer<typeof indexedNoteSchema>
+
+/**
+ * A recording note's `audio:` file (`recordings/transcript.ts`), which no link
+ * names, as an asset so the audio filter finds it. Outside the graph the path
+ * matches no attachment; inside, it counts as a reference like a link would.
+ */
+function recordingAudio(frontmatter: Frontmatter): string[] {
+  const audio = frontmatter['audio']
+  if (typeof audio !== 'string') {
+    return []
+  }
+  const path = audio.trim()
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  return path.includes('.') && ATTACHMENT_TYPE_EXTENSIONS.audio.includes(extension) ? [path] : []
+}
 
 /**
  * The `aliases` projection: `aliases:` frontmatter verbatim, then the linkable
@@ -405,7 +425,12 @@ export function buildIndexedNote(
     emails: extractEmailFields(body).map((email) => ({ email, emailKey: foldEmail(email) })),
     // One reference can contribute several candidate spellings; the
     // projection stores each path once.
-    assets: [...new Set(parsed.assets.map((asset) => asset.path))],
+    assets: [
+      ...new Set([
+        ...parsed.assets.map((asset) => asset.path),
+        ...recordingAudio(parsed.frontmatter),
+      ]),
+    ],
     tasks: parsed.tasks.map((task) => ({
       astPath: encodeTaskPath(task.astPath),
       markdown: task.markdown,

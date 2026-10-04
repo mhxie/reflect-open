@@ -1,25 +1,34 @@
 import type { ReactElement } from 'react'
-import { foldTag, type NoteTagFacet } from '@reflect/core'
+import { foldTag, NOTE_ATTACHMENT_TYPES, type NoteTagFacet } from '@reflect/core'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import type { AllNotesFilter } from '@/routing/route.ts'
+import { ATTACHMENT_FILTER_LABELS } from './attachment-filter-labels.ts'
 import { CustomFilterMenu } from './custom-filter-menu.tsx'
 import { FilterTab } from './filter-tab.tsx'
 
 interface AllNotesFiltersProps {
-  /** The active tag filter (`null` = the All tab). */
-  tag: string | null
+  /** The active filter (`null` = the All tab). */
+  filter: AllNotesFilter | null
   /** Every tag carried by a non-daily note, for the Custom menu. */
   facets: NoteTagFacet[]
-  onSelect: (tag: string | null) => void
+  onSelect: (filter: AllNotesFilter | null) => void
 }
 
 /**
  * The All Notes filter bar: an All tab, one tab per pinned tag (the
- * `allNotesFilterTags` setting), and a Custom combobox offering every
- * remaining tag plus free entry of any tag name. Tag matching is
- * case-insensitive throughout, same as the `#tag` search token.
+ * `allNotesFilterTags` setting), one per enabled attachment type (the
+ * `allNotesFilterAttachments` setting), and a Custom combobox offering every
+ * remaining tag plus free entry of any tag name. One filter at a time. Tag
+ * matching is case-insensitive throughout, same as the `#tag` search token.
  */
-export function AllNotesFilters({ tag, facets, onSelect }: AllNotesFiltersProps): ReactElement {
+export function AllNotesFilters({ filter, facets, onSelect }: AllNotesFiltersProps): ReactElement {
   const { settings } = useSettings()
+  const tag = filter?.kind === 'tag' ? filter.tag : null
+  const activeType = filter?.kind === 'attachment' ? filter.type : null
+  // A type switched off in settings keeps its tab while it is the active filter.
+  const types = NOTE_ATTACHMENT_TYPES.filter(
+    (type) => settings.allNotesFilterAttachments.includes(type) || type === activeType,
+  )
 
   // The setting is user-edited JSON — dedupe case-insensitively and drop
   // blanks so a hand-edited document can't render twin or empty tabs.
@@ -41,19 +50,31 @@ export function AllNotesFilters({ tag, facets, onSelect }: AllNotesFiltersProps)
   return (
     <div
       role="group"
-      aria-label="Filter by tag"
+      aria-label="Filter notes"
       className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-surface shadow-sm"
     >
-      <FilterTab label="All" active={tag === null} onClick={() => onSelect(null)} />
+      <FilterTab label="All" active={filter === null} onClick={() => onSelect(null)} />
       {pinned.map((pinnedTag) => (
         <FilterTab
           key={foldTag(pinnedTag)}
           label={`#${pinnedTag}`}
           active={activeKey === foldTag(pinnedTag)}
-          onClick={() => onSelect(pinnedTag)}
+          onClick={() => onSelect({ kind: 'tag', tag: pinnedTag })}
         />
       ))}
-      <CustomFilterMenu facets={customFacets} activeTag={customTag} onSelect={onSelect} />
+      {types.map((type) => (
+        <FilterTab
+          key={type}
+          label={ATTACHMENT_FILTER_LABELS[type]}
+          active={activeType === type}
+          onClick={() => onSelect({ kind: 'attachment', type })}
+        />
+      ))}
+      <CustomFilterMenu
+        facets={customFacets}
+        activeTag={customTag}
+        onSelect={(next) => onSelect({ kind: 'tag', tag: next })}
+      />
     </div>
   )
 }

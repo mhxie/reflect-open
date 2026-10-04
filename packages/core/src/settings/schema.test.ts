@@ -31,6 +31,7 @@ describe('settingsSchema', () => {
       dateFormat: 'mdy',
       weekStartDay: 'monday',
       allNotesFilterTags: ['book', 'link', 'person'],
+      allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       calendarEnabled: false,
       calendarIds: [],
       graphColors: {},
@@ -161,6 +162,20 @@ describe('settingsSchema', () => {
       'meeting',
     ])
     expect(settingsSchema.parse({ allNotesFilterTags: [] }).allNotesFilterTags).toEqual([])
+    expect(
+      settingsSchema.parse({ allNotesFilterAttachments: ['video', 'pdf', 'pdf'] })
+        .allNotesFilterAttachments,
+    ).toEqual(['pdf', 'video'])
+    expect(
+      settingsSchema.parse({ allNotesFilterAttachments: ['hologram', 'audio'] })
+        .allNotesFilterAttachments,
+    ).toEqual(['audio'])
+    expect(
+      settingsSchema.parse({ allNotesFilterAttachments: [] }).allNotesFilterAttachments,
+    ).toEqual([])
+    expect(
+      settingsSchema.parse({ allNotesFilterAttachments: 'pdf' }).allNotesFilterAttachments,
+    ).toEqual(['pdf', 'image', 'audio', 'video'])
     expect(settingsSchema.parse({ calendarEnabled: true }).calendarEnabled).toBe(true)
     expect(settingsSchema.parse({ calendarEnabled: false }).calendarEnabled).toBe(false)
     expect(settingsSchema.parse({ calendarIds: ['cal-1', 'cal-2'] }).calendarIds).toEqual([
@@ -300,6 +315,7 @@ describe('settingsSchema', () => {
       dateFormat: 'mdy',
       weekStartDay: 'monday',
       allNotesFilterTags: ['book', 'link', 'person'],
+      allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       calendarEnabled: false,
       calendarIds: [],
       graphColors: {},

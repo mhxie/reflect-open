@@ -150,6 +150,7 @@ export {
   type AttachmentCatalog,
   type WikiEmbedTarget,
 } from '../graph/attachment-resolution.ts'
+export { NOTE_ATTACHMENT_TYPES, type NoteAttachmentType } from '../graph/attachment-types.ts'
 export {
   wikiNoteReference,
   markdownNoteReference,
@@ -276,6 +277,7 @@ export {
   weekStartDaySchema,
   weekStartDow,
   allNotesFilterTagsSchema,
+  allNotesFilterAttachmentsSchema,
   calendarEnabledSchema,
   calendarIdsSchema,
   graphColorSchema,
@@ -305,6 +307,7 @@ export {
   type DateFormat,
   type WeekStartDay,
   type AllNotesFilterTags,
+  type AllNotesFilterAttachments,
   type CalendarIds,
   type GraphColor,
   type GraphColors,

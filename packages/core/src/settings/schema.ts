@@ -5,6 +5,7 @@ import {
 } from '../ai/local-transcription-models.ts'
 import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
 import { DEFAULT_SEMANTIC_MODEL, SEMANTIC_MODEL_IDS } from '../embeddings/models.ts'
+import { NOTE_ATTACHMENT_TYPES } from '../graph/attachment-types.ts'
 
 /**
  * The user-settings schema — the policy half of the settings store. Rust
@@ -198,6 +199,19 @@ export function weekStartDow(weekStartDay: WeekStartDay): 0 | 1 | 6 {
 export const allNotesFilterTagsSchema = z.array(z.string()).catch(['book', 'link', 'person'])
 
 export type AllNotesFilterTags = z.infer<typeof allNotesFilterTagsSchema>
+
+/**
+ * Attachment types offered as one-click filters on the All Notes screen, after
+ * the pinned tags: all four by default. Stored entries are normalized to the
+ * fixed {@link NOTE_ATTACHMENT_TYPES} order, and an unknown entry (a type from
+ * a newer build) is dropped rather than resetting the list.
+ */
+export const allNotesFilterAttachmentsSchema = z
+  .array(z.unknown())
+  .transform((values) => NOTE_ATTACHMENT_TYPES.filter((type) => values.includes(type)))
+  .catch([...NOTE_ATTACHMENT_TYPES])
+
+export type AllNotesFilterAttachments = z.infer<typeof allNotesFilterAttachmentsSchema>
 
 /**
  * Whether semantic search is on. Off by default — turning it on downloads the
@@ -642,6 +656,7 @@ export const settingsSchema = z.looseObject({
   dateFormat: dateFormatSchema,
   weekStartDay: weekStartDaySchema,
   allNotesFilterTags: allNotesFilterTagsSchema,
+  allNotesFilterAttachments: allNotesFilterAttachmentsSchema,
   calendarEnabled: calendarEnabledSchema,
   calendarIds: calendarIdsSchema,
   graphColors: graphColorsSchema,

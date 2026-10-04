@@ -6,7 +6,7 @@ import { runGistPublish } from '@/lib/note-gist.ts'
 import { isNativeShell } from '@/lib/platform.ts'
 import { rebuildIndexVisibly } from '@/lib/rebuild-index.ts'
 import { openRouteInNewWindow } from '@/lib/windows/open-in-new-window.ts'
-import { routeForPath, type Route } from '@/routing/route.ts'
+import { allNotesRoute, routeForPath, type Route } from '@/routing/route.ts'
 import { registerCommands } from './registry.ts'
 import type { AppCommand, CommandContext } from './types.ts'
 
@@ -70,7 +70,7 @@ const APP_COMMANDS: AppCommand[] = [
     title: 'All notes',
     keywords: ['notes', 'list', 'browse', 'library'],
     keybinding: 'Mod-Shift-a',
-    run: (context) => context.navigate({ kind: 'allNotes', tag: null }),
+    run: (context) => context.navigate(allNotesRoute(null)),
   },
   {
     id: 'nav.tasks',

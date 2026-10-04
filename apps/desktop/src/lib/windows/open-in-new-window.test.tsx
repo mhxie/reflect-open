@@ -49,7 +49,7 @@ describe('openRouteInNewWindow', () => {
   })
 
   it('declines routes the deep-link grammar does not name', async () => {
-    await expect(openRouteInNewWindow({ kind: 'allNotes', tag: null })).resolves.toBe(false)
+    await expect(openRouteInNewWindow({ kind: 'allNotes', filter: null })).resolves.toBe(false)
     expect(openNoteWindow).not.toHaveBeenCalled()
   })
 

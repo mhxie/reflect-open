@@ -247,7 +247,7 @@ describe('app commands', () => {
     const clearScrollState = vi.fn()
     const { context } = fakeContext({
       clearScrollState,
-      route: () => ({ kind: 'allNotes', tag: null }),
+      route: () => ({ kind: 'allNotes', filter: null }),
     })
     await command('note.new').run(context)
     expect(clearScrollState).not.toHaveBeenCalled()
