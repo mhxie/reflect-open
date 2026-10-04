@@ -1,12 +1,15 @@
 import { generateText } from '@reflect/modules/ai'
-import { describe, expect, it } from 'vitest'
-import type { AiProviderConfig } from '../settings/schema.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { setBridge } from '../ipc/bridge.ts'
+import { modelTarget, resolveOnDeviceTarget } from '../privacy/on-device.ts'
+import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
+import { fakeOnDeviceServer } from '../testing/fake-on-device-server.ts'
 import {
   ANTHROPIC_DIRECT_BROWSER_ACCESS_HEADER,
   ANTHROPIC_DIRECT_BROWSER_ACCESS_VALUE,
 } from './anthropic-headers.ts'
 import { APP_REVIEW_STUB_KEY, DEMO_REPLY_TEXT } from './app-review-demo.ts'
-import { languageModel } from './language-model.ts'
+import { languageModel, languageModelFor } from './language-model.ts'
 
 interface RecordedCall {
   readonly url: string
@@ -43,11 +46,31 @@ const OPENROUTER_CONFIG: AiProviderConfig = {
 }
 
 const OPENAI_COMPATIBLE_CONFIG: AiProviderConfig = {
+  id: 'cfg-lan',
+  provider: 'openai-compatible',
+  model: 'llama-local',
+  baseUrl: 'http://192.168.1.5:1234/v1',
+  keyHint: '',
+}
+
+const ON_DEVICE_CONFIG: OpenAiCompatibleProviderConfig = {
   id: 'cfg-local',
   provider: 'openai-compatible',
   model: 'llama-local',
   baseUrl: 'http://localhost:1234/v1',
   keyHint: '',
+}
+
+/** An OpenAI-compatible chat completion answering "ok". */
+function chatCompletion(model: string): string {
+  return JSON.stringify({
+    id: 'chatcmpl_local',
+    object: 'chat.completion',
+    created: 0,
+    model,
+    choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  })
 }
 
 function recordingAnthropicFetch(calls: RecordedCall[]): typeof fetch {
@@ -153,6 +176,10 @@ function recordingOpenAICompatibleFetch(calls: RecordedCall[]): typeof fetch {
   }
 }
 
+afterEach(() => {
+  setBridge(null)
+})
+
 describe('languageModel', () => {
   it('routes a GPT-5.6 model through OpenAI Responses', async () => {
     const calls: RecordedCall[] = []
@@ -221,8 +248,33 @@ describe('languageModel', () => {
     })
 
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.url).toBe('http://localhost:1234/v1/chat/completions')
+    expect(calls[0]!.url).toBe('http://192.168.1.5:1234/v1/chat/completions')
     expect(calls[0]!.headers.get('Authorization')).toBeNull()
+  })
+
+  it('sends an endpoint on this Mac through the on-device transport, never the caller fetch', async () => {
+    const server = fakeOnDeviceServer(() => ({
+      headers: [['content-type', 'application/json']],
+      chunks: [chatCompletion(ON_DEVICE_CONFIG.model)],
+    }))
+    setBridge(server.bridge)
+    const callerFetch = vi.fn<typeof fetch>()
+
+    const result = await generateText({
+      model: await languageModel(ON_DEVICE_CONFIG, 'local-key', callerFetch),
+      prompt: 'hello',
+      maxRetries: 0,
+    })
+
+    expect(result.text).toBe('ok')
+    expect(callerFetch).not.toHaveBeenCalled()
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toMatchObject({
+      method: 'POST',
+      url: 'http://localhost:1234/v1/chat/completions',
+    })
+    expect(server.requests[0]!.headers).toContainEqual(['authorization', 'Bearer local-key'])
+    expect(server.openRequests()).toEqual([])
   })
 
   it('returns the local demo model for the App Review demo key', async () => {
@@ -249,5 +301,42 @@ describe('languageModel', () => {
       maxRetries: 0,
     })
     expect(result.text).toBe(DEMO_REPLY_TEXT)
+  })
+})
+
+describe('languageModelFor', () => {
+  it('builds an on-device target over the loopback transport, never the cloud fetch', async () => {
+    const server = fakeOnDeviceServer(() => ({
+      headers: [['content-type', 'application/json']],
+      chunks: [chatCompletion(ON_DEVICE_CONFIG.model)],
+    }))
+    setBridge(server.bridge)
+    const target = resolveOnDeviceTarget({
+      ...ON_DEVICE_CONFIG,
+      onDevice: { baseUrl: ON_DEVICE_CONFIG.baseUrl, model: ON_DEVICE_CONFIG.model },
+    })!
+    const cloudFetch = vi.fn<typeof fetch>()
+
+    const bound = await languageModelFor(target, '', cloudFetch)
+    const result = await generateText({ model: bound.model, prompt: 'hello', maxRetries: 0 })
+
+    expect(bound.target).toBe(target)
+    expect(Object.isFrozen(bound)).toBe(true)
+    expect(result.text).toBe('ok')
+    expect(cloudFetch).not.toHaveBeenCalled()
+    expect(server.requests.map((request) => request.url)).toEqual([
+      'http://localhost:1234/v1/chat/completions',
+    ])
+  })
+
+  it('builds a cloud target over the cloud fetch', async () => {
+    const calls: RecordedCall[] = []
+    const target = modelTarget(OPENROUTER_CONFIG)
+
+    const bound = await languageModelFor(target, 'sk-or-v1-test', recordingOpenRouterFetch(calls))
+    await generateText({ model: bound.model, prompt: 'hello', maxRetries: 0 })
+
+    expect(bound.target.kind).toBe('cloud')
+    expect(calls.map((call) => call.url)).toEqual(['https://openrouter.ai/api/v1/chat/completions'])
   })
 })

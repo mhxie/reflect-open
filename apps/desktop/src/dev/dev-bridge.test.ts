@@ -119,6 +119,25 @@ describe('dev bridge background task parity', () => {
   })
 })
 
+describe('dev bridge on-device transport', () => {
+  it('says model servers on this Mac need the desktop app instead of reaching them', async () => {
+    const bridge = createDevBridge({
+      files: createDevFileStore({}),
+      index: await createDevIndexDb(),
+    })
+
+    for (const command of ['on_device_http_send', 'on_device_http_read', 'on_device_http_cancel']) {
+      await expect(
+        bridge.invoke(command, { requestId: 'request-1' }),
+        command,
+      ).rejects.toMatchObject({
+        kind: 'unsupported',
+        message: expect.stringContaining('needs the desktop app'),
+      })
+    }
+  })
+})
+
 describe('dev bridge note_create parity', () => {
   it('claims a free path and returns its persisted modified time', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_234)

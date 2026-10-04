@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { setBridge } from '../ipc/bridge.ts'
+import { fakeOnDeviceServer } from '../testing/fake-on-device-server.ts'
 import { APP_REVIEW_STUB_KEY } from './app-review-demo.ts'
 import { validateApiKey } from './validate-key.ts'
 
@@ -9,6 +11,10 @@ function fetchReturning(status: number): typeof fetch {
 const fetchThrowing: typeof fetch = async () => {
   throw new TypeError('network down')
 }
+
+afterEach(() => {
+  setBridge(null)
+})
 
 describe('validateApiKey', () => {
   it('sends the provider-specific auth headers to the model-listing endpoint', async () => {
@@ -29,12 +35,12 @@ describe('validateApiKey', () => {
       {
         provider: 'openai-compatible',
         apiKey: 'local-secret',
-        baseUrl: 'http://localhost:1234/v1/',
+        baseUrl: 'http://192.168.1.5:1234/v1/',
       },
       recordingFetch,
     )
     await validateApiKey(
-      { provider: 'openai-compatible', apiKey: '', baseUrl: 'http://localhost:1234/v1' },
+      { provider: 'openai-compatible', apiKey: '', baseUrl: 'http://192.168.1.5:1234/v1' },
       recordingFetch,
     )
 
@@ -47,9 +53,9 @@ describe('validateApiKey', () => {
     expect(calls[2]!.headers['x-goog-api-key']).toBe('AIza-test')
     expect(calls[3]!.url).toBe('https://openrouter.ai/api/v1/key')
     expect(calls[3]!.headers['Authorization']).toBe('Bearer sk-or-v1-test')
-    expect(calls[4]!.url).toBe('http://localhost:1234/v1/models')
+    expect(calls[4]!.url).toBe('http://192.168.1.5:1234/v1/models')
     expect(calls[4]!.headers['Authorization']).toBe('Bearer local-secret')
-    expect(calls[5]!.url).toBe('http://localhost:1234/v1/models')
+    expect(calls[5]!.url).toBe('http://192.168.1.5:1234/v1/models')
     expect(calls[5]!.headers['Authorization']).toBeUndefined()
   })
 
@@ -84,10 +90,68 @@ describe('validateApiKey', () => {
     ).toBe('invalid')
     expect(
       await validateApiKey(
-        { provider: 'openai-compatible', apiKey: '', baseUrl: 'http://localhost:1234/v1' },
+        { provider: 'openai-compatible', apiKey: '', baseUrl: 'http://192.168.1.5:1234/v1' },
         fetchReturning(401),
       ),
     ).toBe('invalid')
+  })
+
+  it('probes an endpoint on this Mac through the on-device transport', async () => {
+    const server = fakeOnDeviceServer((request) => ({
+      status: request.headers.length === 0 ? 401 : 200,
+      chunks: ['{"data":[]}'],
+    }))
+    setBridge(server.bridge)
+    const callerFetch = vi.fn<typeof fetch>()
+
+    expect(
+      await validateApiKey(
+        {
+          provider: 'openai-compatible',
+          apiKey: 'local-secret',
+          baseUrl: 'http://localhost:11434/v1',
+        },
+        callerFetch,
+      ),
+    ).toBe('valid')
+    expect(
+      await validateApiKey(
+        { provider: 'openai-compatible', apiKey: '', baseUrl: 'http://127.0.0.1:1234/v1' },
+        callerFetch,
+      ),
+    ).toBe('invalid')
+
+    expect(callerFetch).not.toHaveBeenCalled()
+    expect(server.requests.map(({ method, url, headers }) => ({ method, url, headers }))).toEqual([
+      {
+        method: 'GET',
+        url: 'http://localhost:11434/v1/models',
+        headers: [['authorization', 'Bearer local-secret']],
+      },
+      { method: 'GET', url: 'http://127.0.0.1:1234/v1/models', headers: [] },
+    ])
+    // Only the status is read, and no unread body is left holding a slot.
+    expect(server.openRequests()).toEqual([])
+  })
+
+  it('reads a failed on-device probe as unreachable', async () => {
+    setBridge({
+      invoke: async () => {
+        throw {
+          kind: 'network',
+          message: 'error sending request: Connection refused (os error 61)',
+        }
+      },
+      listen: async () => () => {},
+    })
+
+    expect(
+      await validateApiKey({
+        provider: 'openai-compatible',
+        apiKey: '',
+        baseUrl: 'http://localhost:11434/v1',
+      }),
+    ).toBe('unreachable')
   })
 
   it('reads anything that is not an auth decision as unreachable', async () => {

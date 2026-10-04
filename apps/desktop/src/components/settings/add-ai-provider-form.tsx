@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { FormProvider, useForm, useWatch } from 'react-hook-form'
 import {
   AI_PROVIDERS,
   DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
@@ -7,6 +7,7 @@ import {
   aiProviderIdSchema,
   aiProviderRequiresApiKey,
   isHttpBaseUrl,
+  isLoopbackHttpUrl,
   isPlainHttpRemoteBaseUrl,
   type AiProviderId,
 } from '@reflect/core'
@@ -23,6 +24,8 @@ import {
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { useAddAiProviderSubmit } from '@/hooks/use-add-ai-provider-submit.ts'
 import type { NewAiProvider } from '@/hooks/use-ai-providers.ts'
+import { parseContextWindowInput } from '@/lib/on-device-settings.ts'
+import { AddAiProviderLocalFields } from './add-ai-provider-local-fields.tsx'
 import { ModelCombobox } from './model-combobox.tsx'
 
 interface AddAiProviderFormProps {
@@ -31,12 +34,38 @@ interface AddAiProviderFormProps {
   onClose: () => void
 }
 
-interface AddAiProviderValues {
+/** The add form's fields (`AddAiProviderLocalFields` reads them too). */
+export interface AddAiProviderValues {
   provider: AiProviderId
   model: string
   baseUrl: string
   apiKey: string
   isDefault: boolean
+  /** OpenAI-compatible only: attest the endpoint runs `model` on this Mac. */
+  onDevice: boolean
+  /** OpenAI-compatible only: the model accepts image input. */
+  supportsImages: boolean
+  /** OpenAI-compatible only: the context length as typed; blank for the server's default. */
+  contextWindow: string
+}
+
+/** The draft to persist; the OpenAI-compatible extras are read only for that provider. */
+function draftFrom({
+  onDevice,
+  supportsImages,
+  contextWindow,
+  ...values
+}: AddAiProviderValues): NewAiProvider {
+  if (values.provider !== 'openai-compatible') {
+    return values
+  }
+  const parsed = parseContextWindowInput(contextWindow)
+  return {
+    ...values,
+    onDevice: onDevice && isLoopbackHttpUrl(values.baseUrl),
+    supportsImages,
+    contextWindow: parsed.kind === 'tokens' ? parsed.tokens : undefined,
+  }
 }
 
 const FIELD_LABEL_CLASS = 'text-xs font-medium text-text-secondary'
@@ -47,15 +76,19 @@ const FIELD_LABEL_CLASS = 'text-xs font-medium text-text-secondary'
  * {@link useAddAiProviderSubmit}, shared with the mobile sheet.
  */
 export function AddAiProviderForm({ onAdd, onClose }: AddAiProviderFormProps): ReactElement {
-  const { register, control, handleSubmit, setValue, formState } = useForm<AddAiProviderValues>({
+  const form = useForm<AddAiProviderValues>({
     defaultValues: {
       provider: AI_PROVIDERS[0].id,
       model: AI_PROVIDERS[0].models[0].id,
       baseUrl: '',
       apiKey: '',
       isDefault: false,
+      onDevice: false,
+      supportsImages: false,
+      contextWindow: '',
     },
   })
+  const { register, control, handleSubmit, setValue, formState } = form
   const { submitError, unverified, resetUnverified, submit } = useAddAiProviderSubmit({
     onAdd,
     onDone: onClose,
@@ -69,7 +102,7 @@ export function AddAiProviderForm({ onAdd, onClose }: AddAiProviderFormProps): R
   const apiKeyRequired = aiProviderRequiresApiKey(provider.id)
 
   const submitForm = handleSubmit(async (values) => {
-    await submit(values)
+    await submit(draftFrom(values))
   })
 
   return (
@@ -95,6 +128,9 @@ export function AddAiProviderForm({ onAdd, onClose }: AddAiProviderFormProps): R
               'baseUrl',
               next.id === 'openai-compatible' ? DEFAULT_OPENAI_COMPATIBLE_BASE_URL : '',
             )
+            setValue('onDevice', false)
+            setValue('supportsImages', false)
+            setValue('contextWindow', '')
             resetUnverified()
           }}
         >
@@ -172,6 +208,12 @@ export function AddAiProviderForm({ onAdd, onClose }: AddAiProviderFormProps): R
             </InlineAlert>
           ) : null}
         </label>
+      ) : null}
+
+      {isOpenAICompatible ? (
+        <FormProvider {...form}>
+          <AddAiProviderLocalFields onEndpointChange={resetUnverified} />
+        </FormProvider>
       ) : null}
 
       <label className="flex flex-col gap-1">

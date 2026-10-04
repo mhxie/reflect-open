@@ -8,7 +8,11 @@ import {
   normalizeOpenAICompatibleBaseUrl,
   setSecret,
   withAiProviderAdded,
+  withAiProviderCapabilities,
+  withAiProviderModel,
+  withAiProviderOnDevice,
   withAiProviderRemoved,
+  type AiProviderCapabilities,
   type AiProviderConfig,
   type AiProviderId,
   type AppError,
@@ -29,6 +33,40 @@ export interface NewAiProvider {
   baseUrl?: string | undefined
   apiKey: string
   isDefault: boolean
+  /**
+   * OpenAI-compatible only: the user attests the endpoint runs `model` on
+   * this Mac. Honored only for a loopback base URL.
+   */
+  onDevice?: boolean | undefined
+  /** OpenAI-compatible only: the model accepts image input. */
+  supportsImages?: boolean | undefined
+  /** OpenAI-compatible only: the server's context window, in tokens. */
+  contextWindow?: number | undefined
+}
+
+/** The settings entry for `draft`, before its optional OpenAI-compatible declarations. */
+function newEntry(id: string, draft: NewAiProvider, apiKey: string): AiProviderConfig {
+  const keyHint = apiKeyHint(apiKey)
+  return draft.provider === 'openai-compatible'
+    ? {
+        id,
+        provider: draft.provider,
+        model: draft.model,
+        baseUrl: normalizeOpenAICompatibleBaseUrl(draft.baseUrl ?? ''),
+        keyHint,
+      }
+    : { id, provider: draft.provider, model: draft.model, keyHint }
+}
+
+function draftCapabilities(draft: NewAiProvider): AiProviderCapabilities {
+  const capabilities: AiProviderCapabilities = {}
+  if (draft.supportsImages !== undefined) {
+    capabilities.supportsImages = draft.supportsImages
+  }
+  if (draft.contextWindow !== undefined) {
+    capabilities.contextWindow = draft.contextWindow
+  }
+  return capabilities
 }
 
 interface UseAiProvidersValue {
@@ -47,8 +85,19 @@ interface UseAiProvidersValue {
   removeProvider: (id: string) => Promise<void>
   /** Make the entry with `id` the app-wide default. */
   makeDefault: (id: string) => void
-  /** Change the default model used by the configured provider entry. */
+  /**
+   * Change the default model used by the configured provider entry. An
+   * on-device attestation for another model is dropped.
+   */
   setDefaultModel: (id: string, model: string) => void
+  /**
+   * Attest that an OpenAI-compatible entry runs its model on this Mac, for
+   * exactly its current base URL and model, or withdraw that. Attesting an
+   * entry whose base URL is not a loopback host changes nothing.
+   */
+  setOnDevice: (id: string, attest: boolean) => void
+  /** Change what an OpenAI-compatible entry declares about its model. */
+  setCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
 }
 
 export function useAiProviders(): UseAiProvidersValue {
@@ -86,27 +135,16 @@ export function useAiProviders(): UseAiProvidersValue {
         await setSecret(aiKeySecretName(id), apiKey)
       }
       updateSettingsWith((current) => {
-        const entry: AiProviderConfig =
-          draft.provider === 'openai-compatible'
-            ? {
-                id,
-                provider: draft.provider,
-                model: draft.model,
-                baseUrl: normalizeOpenAICompatibleBaseUrl(draft.baseUrl ?? ''),
-                keyHint: apiKeyHint(apiKey),
-              }
-            : {
-                id,
-                provider: draft.provider,
-                model: draft.model,
-                keyHint: apiKeyHint(apiKey),
-              }
         const next = withAiProviderAdded(
           { providers: current.aiProviders, defaultProviderId: current.defaultAiProviderId },
-          entry,
+          newEntry(id, draft, apiKey),
           draft.isDefault,
         )
-        return { aiProviders: next.providers, defaultAiProviderId: next.defaultProviderId }
+        let providers = withAiProviderCapabilities(next.providers, id, draftCapabilities(draft))
+        if (draft.onDevice === true) {
+          providers = withAiProviderOnDevice(providers, id, true)
+        }
+        return { aiProviders: providers, defaultAiProviderId: next.defaultProviderId }
       })
     },
     [whenSettingsLoaded, updateSettingsWith],
@@ -146,9 +184,25 @@ export function useAiProviders(): UseAiProvidersValue {
         return
       }
       updateSettingsWith((current) => ({
-        aiProviders: current.aiProviders.map((provider) =>
-          provider.id === id ? { ...provider, model: normalizedModel } : provider,
-        ),
+        aiProviders: withAiProviderModel(current.aiProviders, id, normalizedModel),
+      }))
+    },
+    [updateSettingsWith],
+  )
+
+  const setOnDevice = useCallback(
+    (id: string, attest: boolean): void => {
+      updateSettingsWith((current) => ({
+        aiProviders: withAiProviderOnDevice(current.aiProviders, id, attest),
+      }))
+    },
+    [updateSettingsWith],
+  )
+
+  const setCapabilities = useCallback(
+    (id: string, capabilities: AiProviderCapabilities): void => {
+      updateSettingsWith((current) => ({
+        aiProviders: withAiProviderCapabilities(current.aiProviders, id, capabilities),
       }))
     },
     [updateSettingsWith],
@@ -161,5 +215,7 @@ export function useAiProviders(): UseAiProvidersValue {
     removeProvider,
     makeDefault,
     setDefaultModel,
+    setOnDevice,
+    setCapabilities,
   }
 }

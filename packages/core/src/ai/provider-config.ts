@@ -1,4 +1,5 @@
-import type { AiProviderConfig } from '../settings/schema.ts'
+import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
+import { MIN_CONTEXT_WINDOW, type AiProviderConfig } from '../settings/schema.ts'
 
 /**
  * Pure transforms over the configured-AI-provider state (Plan 10). The
@@ -54,6 +55,94 @@ export function withAiProviderRemoved(state: AiProvidersState, id: string): AiPr
     defaultProviderId:
       state.defaultProviderId === id ? (providers[0]?.id ?? null) : state.defaultProviderId,
   }
+}
+
+function withEntry(
+  providers: AiProviderConfig[],
+  id: string,
+  update: (entry: AiProviderConfig) => AiProviderConfig,
+): AiProviderConfig[] {
+  return providers.map((entry) => (entry.id === id ? update(entry) : entry))
+}
+
+/**
+ * Make `model` the default model of entry `id`. An on-device attestation
+ * names one model, so it is dropped when `model` differs from it; turning it
+ * back on asks the user again.
+ */
+export function withAiProviderModel(
+  providers: AiProviderConfig[],
+  id: string,
+  model: string,
+): AiProviderConfig[] {
+  return withEntry(providers, id, (entry) =>
+    entry.provider === 'openai-compatible' && entry.onDevice && entry.onDevice.model !== model
+      ? { ...entry, model, onDevice: null }
+      : { ...entry, model },
+  )
+}
+
+/**
+ * Attest that OpenAI-compatible entry `id` runs its model on this Mac, for
+ * exactly its current base URL and model, or withdraw the attestation.
+ * Attesting an entry whose base URL is not a loopback host is refused: the
+ * entry stays as it was. Withdrawing always applies.
+ */
+export function withAiProviderOnDevice(
+  providers: AiProviderConfig[],
+  id: string,
+  attest: boolean,
+): AiProviderConfig[] {
+  return withEntry(providers, id, (entry) => {
+    if (entry.provider !== 'openai-compatible') {
+      return entry
+    }
+    if (!attest) {
+      return { ...entry, onDevice: null }
+    }
+    return isLoopbackHttpUrl(entry.baseUrl)
+      ? { ...entry, onDevice: { baseUrl: entry.baseUrl, model: entry.model } }
+      : entry
+  })
+}
+
+/** What an OpenAI-compatible entry declares about its model; omitted fields stay as they are. */
+export interface AiProviderCapabilities {
+  supportsImages?: boolean
+  /** The server's context window in tokens, or `null` to clear it. */
+  contextWindow?: number | null
+}
+
+/**
+ * Update what OpenAI-compatible entry `id` declares about its model. A
+ * context window that is not a whole number of at least
+ * {@link MIN_CONTEXT_WINDOW} tokens is ignored.
+ */
+export function withAiProviderCapabilities(
+  providers: AiProviderConfig[],
+  id: string,
+  capabilities: AiProviderCapabilities,
+): AiProviderConfig[] {
+  return withEntry(providers, id, (entry) => {
+    if (entry.provider !== 'openai-compatible') {
+      return entry
+    }
+    const next = { ...entry }
+    if (capabilities.supportsImages !== undefined) {
+      next.supportsImages = capabilities.supportsImages
+    }
+    const { contextWindow } = capabilities
+    if (contextWindow === null) {
+      next.contextWindow = undefined
+    } else if (
+      contextWindow !== undefined &&
+      Number.isSafeInteger(contextWindow) &&
+      contextWindow >= MIN_CONTEXT_WINDOW
+    ) {
+      next.contextWindow = contextWindow
+    }
+    return next
+  })
 }
 
 /**

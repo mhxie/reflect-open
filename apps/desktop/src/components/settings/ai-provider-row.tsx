@@ -1,15 +1,20 @@
 import type { ReactElement } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Laptop, Trash2 } from 'lucide-react'
 import {
   aiModelLabel,
   aiProvider,
   aiProviderRequiresApiKey,
   errorMessage,
+  resolveOnDeviceTarget,
+  type AiProviderCapabilities,
   type AiProviderConfig,
 } from '@reflect/core'
+import { Badge } from '@/components/ui/badge.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import { onDeviceBadgeText } from '@/lib/on-device-settings.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { ModelCombobox } from './model-combobox.tsx'
+import { OpenAiCompatibleProviderOptions } from './openai-compatible-provider-options.tsx'
 
 interface AiProviderRowProps {
   config: AiProviderConfig
@@ -19,21 +24,28 @@ interface AiProviderRowProps {
   onMakeDefault: (id: string) => void
   /** Change the default model used by this provider entry. */
   onSetDefaultModel: (id: string, model: string) => void
+  /** Attest or withdraw that an OpenAI-compatible entry runs on this Mac. */
+  onSetOnDevice: (id: string, attest: boolean) => void
+  /** Change what an OpenAI-compatible entry declares about its model. */
+  onSetCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
   /** Remove the entry and its keychain secret; rejects on failure. */
   onRemove: (id: string) => Promise<void>
 }
 
 /**
  * One configured AI provider in the settings list: provider + default model,
- * the stored key's trailing characters, and the default/remove controls. The
- * row owns its own removal (including surfacing a keychain failure as an
- * operation).
+ * the stored key's trailing characters, and the default/remove controls; an
+ * OpenAI-compatible entry adds its endpoint, the "On this Mac" badge while
+ * its attestation holds, and its on-device options. The row owns its own
+ * removal (including surfacing a keychain failure as an operation).
  */
 export function AiProviderRow({
   config,
   isDefault,
   onMakeDefault,
   onSetDefaultModel,
+  onSetOnDevice,
+  onSetCapabilities,
   onRemove,
 }: AiProviderRowProps): ReactElement {
   const provider = aiProvider(config.provider)
@@ -41,6 +53,7 @@ export function AiProviderRow({
   const modelLabel = aiModelLabel(config.provider, config.model)
   const name = `${providerLabel} — ${modelLabel}`
   const showKeyHint = aiProviderRequiresApiKey(config.provider) || config.keyHint !== ''
+  const onThisMac = resolveOnDeviceTarget(config) !== null
 
   const remove = (): void => {
     onRemove(config.id).catch((error: unknown) => {
@@ -63,6 +76,12 @@ export function AiProviderRow({
         </p>
         {config.provider === 'openai-compatible' ? (
           <p className="mt-0.5 truncate text-xs text-text-muted">{config.baseUrl}</p>
+        ) : null}
+        {onThisMac ? (
+          <Badge variant="secondary" className="mt-1 max-w-full">
+            <Laptop aria-hidden strokeWidth={1.75} />
+            <span className="truncate">{onDeviceBadgeText(config.model)}</span>
+          </Badge>
         ) : null}
       </div>
       <ModelCombobox
@@ -99,6 +118,15 @@ export function AiProviderRow({
           <Trash2 aria-hidden strokeWidth={1.75} />
         </Button>
       </div>
+      {config.provider === 'openai-compatible' ? (
+        <div className="col-span-3">
+          <OpenAiCompatibleProviderOptions
+            config={config}
+            onSetOnDevice={onSetOnDevice}
+            onSetCapabilities={onSetCapabilities}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

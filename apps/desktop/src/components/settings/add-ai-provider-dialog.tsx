@@ -34,7 +34,10 @@ export function AddAiProviderDialog({ onAdd, onClose }: AddAiProviderDialogProps
       }}
     >
       <Suspense>
-        <DialogContent showCloseButton={false} className="max-w-md">
+        <DialogContent
+          showCloseButton={false}
+          className="max-h-[calc(100dvh-2rem)] max-w-md overflow-y-auto"
+        >
           <DialogHeader>
             <DialogTitle>Add AI provider</DialogTitle>
             <DialogDescription>

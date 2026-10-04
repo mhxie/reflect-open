@@ -12,6 +12,7 @@
 //! [`calendar`] (read-only Apple Calendar access),
 //! [`contacts`] (live Apple Contacts lookups),
 //! [`menu`] (the macOS app menu, incl. Paste and Match Style),
+//! [`on_device_http`] (the loopback-only transport for model servers on this Mac),
 //! [`error`] (the shared error contract).
 
 mod background_task;
@@ -30,6 +31,7 @@ mod graph_gitignore;
 mod icloud;
 mod link_preview;
 mod menu;
+mod on_device_http;
 mod quit;
 mod recents;
 mod secrets;
@@ -282,6 +284,7 @@ pub fn run() {
         .manage(windows::WindowInit::default())
         .manage(embed::EmbedState::default())
         .manage(local_transcription::LocalTranscriptionState::default())
+        .manage(on_device_http::OnDeviceHttpState::default())
         .invoke_handler(tauri::generate_handler![
             fs::x_archive::x_archive_write,
             fs::x_archive::x_archive_resolve,
@@ -389,6 +392,9 @@ pub fn run() {
             capture::capture_oembed_fetch,
             editor_link_preview::link_preview_fetch_html,
             editor_link_preview::link_preview_fetch_icon,
+            on_device_http::on_device_http_send,
+            on_device_http::on_device_http_read,
+            on_device_http::on_device_http_cancel,
             git::git_status,
             git::git_setup,
             git::git_disconnect,
