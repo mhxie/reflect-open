@@ -2058,6 +2058,8 @@ fn accepted_roots_let_separate_histories_join() {
     commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
     let own = head_oid(root_a);
     push(root_a, None, &[]).unwrap();
+    // Another device on this graph's history, from before the join.
+    let root_b = second_device(&fixture);
     let separate = replace_remote_history(&fixture, &[("notes/old.md", "# Old\n")]);
     fetch(root_a, None).unwrap();
 
@@ -2075,6 +2077,112 @@ fn accepted_roots_let_separate_histories_join() {
     assert_eq!(remote_main(&fixture), separate);
     assert!(push(root_a, None, &[separate, own]).unwrap().pushed);
     assert_eq!(remote_main(&fixture), head_oid(root_a));
+
+    // Both roots are now in the history on both sides, so later syncs never
+    // check them again: with nothing accepted, sync keeps flowing.
+    write(root_a, "notes/a.md", "# A\n\nafter the join\n");
+    commit_all(root_a, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    fetch(root_a, None).unwrap();
+    let again = merge_remote(root_a, None, &[]).unwrap();
+    assert!(matches!(again.kind, MergeKind::UpToDate), "{again:?}");
+    assert!(push(root_a, None, &[]).unwrap().pushed);
+
+    // The other device accepts the joined root for the one pull that brings
+    // it in, then syncs both ways with nothing accepted.
+    fetch(&root_b, None).unwrap();
+    let message = paused_message(merge_remote(&root_b, None, &[]).unwrap_err());
+    assert!(message.contains(&separate.to_string()), "{message}");
+    let joined = merge_remote(&root_b, None, &[separate]).unwrap();
+    assert!(matches!(joined.kind, MergeKind::FastForward), "{joined:?}");
+    write(&root_b, "notes/b.md", "# B\n");
+    commit_all(&root_b, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    assert!(push(&root_b, None, &[]).unwrap().pushed);
+    fetch(root_a, None).unwrap();
+    let pulled = merge_remote(root_a, None, &[]).unwrap();
+    assert!(matches!(pulled.kind, MergeKind::FastForward), "{pulled:?}");
+    assert_eq!(read(root_a, "notes/b.md"), "# B\n");
+    assert!(head_tree_paths(root_a).contains(&"notes/old.md".to_string()));
+}
+
+/// Once the backup holds a separate history, the next edit's push (commit,
+/// then push, with no fetch) shares no history with the backup's branch: it
+/// is non-fast-forward before anything is uploaded, so the engine pulls,
+/// and the pull's pause, with the recovery that fits, is what the user sees
+/// rather than a push refusal naming this graph's own root.
+#[test]
+fn a_push_against_a_separate_history_pulls_first() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    write(root_a, "notes/a.md", "# A\n");
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
+    let own = head_oid(root_a);
+    push(root_a, None, &[]).unwrap();
+    let separate = replace_remote_history(&fixture, &[("notes/old.md", "# Old\n")]);
+    fetch(root_a, None).unwrap();
+    paused_message(merge_remote(root_a, None, &[]).unwrap_err());
+
+    write(root_a, "notes/b.md", "# B\n");
+    commit_all(root_a, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    let before = snapshot(root_a);
+    let outcome = push(root_a, None, &[]).unwrap();
+    assert!(!outcome.pushed && outcome.non_fast_forward, "{outcome:?}");
+    assert_eq!(remote_main(&fixture), separate);
+
+    fetch(root_a, None).unwrap();
+    let message = paused_message(merge_remote(root_a, None, &[]).unwrap_err());
+    assert!(message.contains(&separate.to_string()), "{message}");
+    assert!(message.contains(&own.to_string()), "{message}");
+    assert!(
+        message.contains("re-clone this graph from the backup; otherwise restore"),
+        "{message}"
+    );
+    assert_eq!(snapshot(root_a), before);
+    assert_eq!(remote_main(&fixture), separate);
+}
+
+/// The guard checks a push against the last-fetched remote branch, while
+/// the server packs it against its live branch. Here the backup is
+/// restored to drop a separate root this graph took in (it adopted the
+/// backup with no history of its own, which checks nothing). The stale
+/// fetch still reaches that root, so the server's moved branch stops the
+/// push before anything is uploaded, and after the pull the guard refuses
+/// the root instead of fast-forwarding it back onto the backup.
+#[test]
+fn a_push_checks_the_servers_branch_not_a_stale_fetch() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    write(root_a, "notes/a.md", "# A\n");
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
+    push(root_a, None, &[]).unwrap();
+    let restored = remote_main(&fixture);
+    let root_b = second_device(&fixture);
+    let separate = merge_separate_history(&root_b, &[("notes/old.md", "# Old\n")]);
+    push_unguarded(&root_b);
+    let root_c = fixture._dir.path().join("graph-c");
+    scaffold_graph(&root_c);
+    setup(&root_c, Some(fixture.remote_url.clone()), None).unwrap();
+    fetch(&root_c, None).unwrap();
+    merge_remote(&root_c, None, &[]).unwrap();
+    assert_eq!(read(&root_c, "notes/old.md"), "# Old\n");
+    Repository::open(&fixture.remote_url)
+        .unwrap()
+        .reference("refs/heads/main", restored, true, "restore the backup")
+        .unwrap();
+
+    write(&root_c, "notes/c.md", "# C\n");
+    commit_all(&root_c, "Update notes", MAX_FILE_BYTES, None).unwrap();
+    let outcome = push(&root_c, None, &[]).unwrap();
+    assert!(!outcome.pushed && outcome.non_fast_forward, "{outcome:?}");
+    assert_eq!(remote_main(&fixture), restored);
+
+    fetch(&root_c, None).unwrap();
+    let merged = merge_remote(&root_c, None, &[]).unwrap();
+    assert!(matches!(merged.kind, MergeKind::UpToDate), "{merged:?}");
+    let refused = push(&root_c, None, &[]).unwrap();
+    assert!(!refused.pushed && !refused.non_fast_forward, "{refused:?}");
+    let message = refused.rejection_message.unwrap_or_default();
+    assert!(message.contains(&separate.to_string()), "{message}");
+    assert_eq!(remote_main(&fixture), restored);
 }
 
 #[test]

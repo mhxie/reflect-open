@@ -6,11 +6,15 @@
 //! device made. Either way removed notes and history come back (a device
 //! still on a replaced history merges it back in). So sync never joins a
 //! history root the graph has not accepted: a pull checks the commits it
-//! would bring in (`merge::merge_remote`) and pauses, a push checks the
-//! commits it would upload (`remote::push`) and refuses, both before
-//! anything changes. Roots already in the history on the other side are
-//! never checked again, an unborn HEAD adopts the remote's history as
-//! before, and the first push (no remote branch yet) goes out as before.
+//! would bring in (`merge::merge_remote`) and pauses before any ref, index,
+//! or working-tree change; a push checks the commits it would upload
+//! (`remote::push`) and refuses before uploading anything. The push checks
+//! against the last-fetched remote branch, so it first makes sure that is
+//! the server's branch and that this one descends from it; otherwise it
+//! pulls first, and the pull's pause is the one the user sees. Roots
+//! already in the history on the other side are never checked again, an
+//! unborn HEAD adopts the remote's history as before, and the first push (to
+//! a branch the server does not have) goes out as before.
 //!
 //! The list lives in the user settings document under [`SETTINGS_KEY`],
 //! keyed by graph root, as full 40-character commit ids:
@@ -183,8 +187,9 @@ pub(super) fn ensure_pull_accepted(
     }
     message.push_str(&format!(
         " If you expected this (for example, another device started its own graph and then \
-         joined the backup), {}. If not, restore the backup repository from a good copy, or \
-         re-clone this graph from the backup.",
+         joined the backup), {}. If not: when the backup's history is the one to keep (it was \
+         rewritten on purpose, say), re-clone this graph from the backup; otherwise restore \
+         the backup repository from a good copy.",
         accept_hint(root, incoming.len() + outgoing.len())
     ));
     Err(AppError::io(message))
@@ -192,7 +197,11 @@ pub(super) fn ensure_pull_accepted(
 
 /// Why a push of `local` must not go out: it would upload a history root
 /// the remote branch at `known` lacks and the graph at `root` has not
-/// accepted. `None` when the push may proceed.
+/// accepted. `None` when the push may proceed. `remote::push` asks only
+/// once `local` descends from `known`, so the root is in this graph's own
+/// history (a merge made outside Reflect, a join that accepted only the
+/// other side's root, a backup restored to a copy without it), and the
+/// backup's history is the way out when the join was not meant.
 pub(super) fn push_refusal(
     repo: &Repository,
     root: &Path,
@@ -230,13 +239,14 @@ fn listed(ids: &[Oid]) -> String {
 }
 
 /// How to accept roots: the list loads at graph open, so an edit takes
-/// effect only once the graph opens again.
+/// effect only once the graph opens again. The graph's key is spelled as a
+/// JSON string, so a path holding a quote or a backslash copies over intact.
 fn accept_hint(root: &Path, count: usize) -> String {
     let pronoun = if count == 1 { "it" } else { "them" };
+    let key = serde_json::Value::String(root.to_string_lossy().into_owned());
     format!(
-        "add {pronoun} to \"{SETTINGS_KEY}\" under \"{}\" in Reflect's settings.json, then \
-         reopen the graph",
-        root.display()
+        "add {pronoun} to \"{SETTINGS_KEY}\" under {key} in Reflect's settings.json, then \
+         reopen the graph"
     )
 }
 
@@ -365,5 +375,19 @@ mod tests {
         assert_eq!(loaded.roots, vec![oid(ROOT_A)]);
         assert_eq!(loaded.warnings.len(), 1, "{:?}", loaded.warnings);
         assert!(loaded.warnings[0].contains("\"d39c5fa\""));
+    }
+
+    /// The pause names the graph's key as JSON, so pasting it into the
+    /// settings file yields a key that parses and matches the folder.
+    #[test]
+    fn the_accept_hint_spells_the_graph_key_as_json() {
+        let root = Path::new(r#"/vaults/a "quoted" \ vault"#);
+        let hint = accept_hint(root, 2);
+        let key = r#""/vaults/a \"quoted\" \\ vault""#;
+        assert!(hint.contains(&format!("under {key} in")), "{hint}");
+        assert_eq!(
+            serde_json::from_str::<String>(key).unwrap(),
+            root.to_string_lossy()
+        );
     }
 }

@@ -372,8 +372,10 @@ fn ensure_units_already_tracked(head_tree: &git2::Tree, units: &[String]) -> App
         "Sync paused: the backup has files inside {folders} {}, which this graph's history does \
          not track. Pulling them would keep them in every later backup from this device, so \
          Reflect stops instead. Remove them from the backup in a separate clone (git rm -r \
-         --cached on {them}, then commit and push), or restore the backup repository from a \
-         good copy, then sync again.",
+         --cached on {them}, then commit and push; any other device that tracks {them}, the \
+         phone included, then deletes its copies at its next sync, though history keeps them, \
+         so copy what you need off those devices first), or restore the backup repository from \
+         a good copy, then sync again.",
         untracked.join(", ")
     )))
 }

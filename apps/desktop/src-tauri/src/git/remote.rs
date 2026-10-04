@@ -6,7 +6,7 @@
 //! HTTPS; without one, credentials resolve locally — the SSH agent for ssh
 //! remotes (Plan 16 V1; generic HTTPS waits for V2's credential helpers).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 
 use git2::{Cred, CredentialType, FetchOptions, PushOptions, RemoteCallbacks, Repository};
@@ -35,12 +35,18 @@ pub struct RemoteDelta {
 #[serde(rename_all = "camelCase")]
 pub struct PushOutcome {
     pub pushed: bool,
-    /// The remote moved past us (another device pushed first): the caller
-    /// pulls, merges, and retries. Auth/network failures are `AppError`s,
-    /// never this.
+    /// The remote moved past us (another device pushed first), or this
+    /// device has not merged the remote branch yet: the caller pulls,
+    /// merges, and retries. Reflect reports it before uploading anything
+    /// when the branch has diverged from the last-fetched remote branch, or
+    /// when the server's branch is no longer the one last fetched.
+    /// Auth/network failures are `AppError`s, never this.
     pub non_fast_forward: bool,
     pub rejection_message: Option<String>,
 }
+
+/// Why a push waits for a pull, when Reflect decides it before uploading.
+const PULL_FIRST: &str = "the backup changed since this device last merged it";
 
 /// Pick a credential for one callback invocation.
 ///
@@ -186,10 +192,22 @@ pub(super) fn clone(url: &str, target: &Path, token: Option<String>) -> AppResul
 /// errors — the sync engine branches on them (non-fast-forward → pull/merge/
 /// retry; anything else → surface the remote's message).
 ///
-/// A push that would upload a history root the last-fetched remote branch
-/// lacks and `accepted_roots` does not list is refused the same way, before
-/// any network (see [`super::history_roots`]). The first push, with no
-/// remote branch yet, goes out as before.
+/// The history guard (see [`super::history_roots`]) checks the commits the
+/// push would upload against the last-fetched remote branch, so it makes
+/// sure that is the branch the server has:
+///
+/// - A branch that has diverged from the last-fetched one, or shares no
+///   history with it, is non-fast-forward before any network: the server
+///   would refuse it anyway, and the pull that follows pauses on a separate
+///   history with the message and recovery that fit it.
+/// - Otherwise a push that would upload a history root `accepted_roots`
+///   does not list is refused, before any network.
+/// - If the server's branch is no longer the last-fetched one (another
+///   device pushed, or the backup was restored to an older commit), the push
+///   stops before anything is uploaded and reports non-fast-forward, so the
+///   retry checks against a fresh fetch.
+///
+/// The first push, to a branch the server does not have, goes out as before.
 pub(super) fn push(
     root: &Path,
     token: Option<String>,
@@ -198,11 +216,20 @@ pub(super) fn push(
     let repo = open_existing(root)?;
     let branch = current_branch(&repo)?;
     let mut remote = origin(&repo)?;
-    let local = repo.refname_to_id(&format!("refs/heads/{branch}")).ok();
+    let target = format!("refs/heads/{branch}");
+    let local = repo.refname_to_id(&target).ok();
     let known = repo
         .refname_to_id(&format!("refs/remotes/origin/{branch}"))
         .ok();
     if let (Some(local), Some(known)) = (local, known) {
+        // `graph_descendant_of` is false for the commit itself.
+        if local != known && !repo.graph_descendant_of(local, known)? {
+            return Ok(PushOutcome {
+                pushed: false,
+                non_fast_forward: true,
+                rejection_message: Some(PULL_FIRST.to_string()),
+            });
+        }
         if let Some(message) = push_refusal(&repo, root, local, known, accepted_roots)? {
             return Ok(PushOutcome {
                 pushed: false,
@@ -214,8 +241,28 @@ pub(super) fn push(
 
     let rejection: RefCell<Option<String>> = RefCell::new(None);
     let sideband: RefCell<String> = RefCell::new(String::new());
+    let stale = Cell::new(false);
     let result = {
         let mut callbacks = callbacks_with_credentials(token);
+        // libgit2 checks the fast-forward and builds the pack against the
+        // server's live branch, not the last-fetched one the guard checked:
+        // a stale one can reach a root the server no longer has, which the
+        // pack would then carry back. A server branch that has moved stops
+        // the push here, before anything is uploaded. The outcome travels
+        // through `stale`, so it never depends on how libgit2 and git2 relay
+        // a callback's error.
+        callbacks.push_negotiation(|updates| {
+            let moved = updates.iter().any(|update| {
+                update.dst_refname_bytes() == target.as_bytes()
+                    && !update.src().is_zero()
+                    && Some(update.src()) != known
+            });
+            if moved {
+                stale.set(true);
+                return Err(git2::Error::from_str(PULL_FIRST));
+            }
+            Ok(())
+        });
         callbacks.push_update_reference(|_refname, status| {
             if let Some(message) = status {
                 *rejection.borrow_mut() = Some(message.to_string());
@@ -236,6 +283,13 @@ pub(super) fn push(
         remote.push(&[refspec.as_str()], Some(&mut opts))
     };
 
+    if stale.get() {
+        return Ok(PushOutcome {
+            pushed: false,
+            non_fast_forward: true,
+            rejection_message: Some(PULL_FIRST.to_string()),
+        });
+    }
     let rejection = rejection.into_inner();
     let sideband = sideband.into_inner();
     match result {

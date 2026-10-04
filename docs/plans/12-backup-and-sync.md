@@ -156,27 +156,44 @@ present) · `Backup failed` (action needed). Git mechanics never surface.
      working-tree change, `git_merge_remote` walks the incoming commits (remote, hiding
      HEAD) and pauses with a `Sync paused:` IO error naming every root (parentless)
      commit the graph has not accepted, plus the graph's own unaccepted roots the remote
-     lacks, since joining uploads them next. `git_push` walks the outgoing commits (HEAD,
-     hiding the last-fetched remote branch) and refuses an unaccepted root as data
-     (`pushed: false`, not non-fast-forward: the engine shows `rejected`, no retry
-     loop). Accepted roots are the Rust-owned per-graph settings key
+     lacks, since joining uploads them next. The fetch before it has already downloaded
+     those commits into `.git`; the pause only keeps them out of the branch, the index,
+     and the notes. `git_push` checks against the last-fetched remote branch. A local
+     branch that does not descend from it (diverged, or a separate history) is
+     non-fast-forward before any network, so the engine fetches and merges, and a
+     separate history on the remote surfaces as the merge's pause, never as a push
+     refusal. Otherwise it walks the outgoing commits (HEAD, hiding that branch) and
+     refuses an unaccepted root as data (`pushed: false`, not non-fast-forward: the
+     engine shows `rejected`, no retry loop); that root is in this graph's own history.
+     A push that passes stops at libgit2's push negotiation, as non-fast-forward and
+     before anything is uploaded, when the server's branch is not the last-fetched one
+     (another device pushed, or the backup was restored to an older commit): libgit2
+     packs against the live branch, so a stale ref could hide a root the server no
+     longer has. Accepted roots are the Rust-owned per-graph settings key
      `acceptedHistoryRoots: { "<graph root>": ["<40-hex id>", …] }`, loaded at graph
      open into `GraphState` like `backupMaxFileMiB`: malformed ids are dropped with a
-     warning shown at open, and an edit applies when the graph next opens. Roots the
-     other side already reaches are never rechecked; an unborn HEAD and a first push
-     (no remote branch) keep the old path. Connecting a graph that already has history
-     (local history included) to an existing backup is such a join and pauses until both
-     roots are listed. Recovery: accept the roots and reopen the graph, or restore the
-     remote from a good copy / re-clone the stale device
-     ([generic remotes](../generic-git-remotes.md#when-it-fails)).
+     warning shown at open, and an edit applies when the graph next opens.
+     Roots the other side already reaches are never rechecked; an unborn HEAD and a first
+     push (to a branch the server does not have) keep the old path. Connecting a graph
+     that already has history (local history included) to an existing backup is such a
+     join and pauses until both roots are listed, and every other device on this fork
+     pauses on a joining device's root until its own list has it. Recovery: accept the
+     roots and reopen the graph, or re-clone the stale device when the backup's history
+     is the one to keep / restore the remote from a good copy when it is not
+     ([generic remotes](../generic-git-remotes.md#when-it-fails)). The guard compares
+     roots only: a rewrite that keeps the original root commit is not a separate
+     history to it, so devices still on the old history must stop before such a rewrite.
    - **New local-only folders pause too.** Commits never add, update, or delete a
      local-only entry, so a unit a pull follows into the index stays in every later
      commit. With local-only folders configured, a pull that would follow a frozen unit
      HEAD does not track (a fast-forward: any changed unit; a diverged merge: the units
      the remote changed since the base) pauses before anything is written; units HEAD
      already tracks keep following the remote. Nothing is deleted automatically: the way
-     out is `git rm -r --cached <folder>` in a separate clone, then commit and push
-     ([privacy](../privacy.md#local-only-folders-macos-off-by-default)).
+     out is `git rm -r --cached <folder>` in a separate clone, then commit and push. That
+     deletes the folder's copies on every other device that tracks it (the phone
+     included) at its next sync, history keeping them, so those devices copy what they
+     need first and stop editing the folder, or their next edit brings it back and the
+     pause returns ([privacy](../privacy.md#local-only-folders-macos-off-by-default)).
 
 6. **Index coordination** (Plan 04): merges/pulls register written paths in the
    suppression set and reindex after writes settle; our own commits must not re-mark
@@ -215,8 +232,8 @@ present) · `Backup failed` (action needed). Git mechanics never surface.
 - **A separate history never joins on its own** (this fork): an unaccepted root commit,
   incoming or outgoing, pauses sync until the user accepts it in `acceptedHistoryRoots`
   or repairs the remote, and so does a pull that would start tracking a local-only
-  folder. Each pause happens before anything changes, so it never leaves the repository
-  mid-operation.
+  folder. Each pause happens before the notes, the branch, the index, or the merge state
+  change, so it never leaves the repository mid-operation.
 - **Disconnect is per-graph; sign-out is per-machine** — never conflated.
 - **Checkpoint = commit** (shared recovery primitive with Plan 10); quit commits
   locally, never pushes.

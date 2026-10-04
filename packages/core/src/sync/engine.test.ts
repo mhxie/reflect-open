@@ -338,6 +338,47 @@ describe('createSyncEngine', () => {
     engine.stop()
   })
 
+  it('shows the pull’s pause when a debounced push against a separate history must pull first', async () => {
+    // Rust reports a push that shares no history with the backup as
+    // non-fast-forward before uploading anything, so the edit's push-only
+    // cycle pulls, and the pull's pause (not a push refusal) is what shows.
+    const paused =
+      'Sync paused: the backup brings in history that starts from a commit this graph has not accepted.'
+    const calls = fakeGit((command) => {
+      if (command === 'git_push') {
+        return NON_FAST_FORWARD
+      }
+      if (command === 'git_merge_remote') {
+        throw { kind: 'io', message: paused }
+      }
+      return defaultResponses(command)
+    })
+    const statuses: SyncStatus[] = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onStatus: (status) => {
+        statuses.push(status)
+      },
+      idleMs: 10,
+    })
+
+    engine.noteChanged()
+    await vi.runAllTimersAsync()
+
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_push',
+      'git_fetch',
+      'git_merge_remote',
+    ])
+    expect(statuses).toEqual([
+      { state: 'syncing' },
+      { state: 'error', errorKind: 'other', message: paused },
+    ])
+    engine.stop()
+  })
+
   it('preserves the full-cycle mode when syncNow lands mid-cycle', async () => {
     const pushGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
     const calls = fakeGit((command) => {
