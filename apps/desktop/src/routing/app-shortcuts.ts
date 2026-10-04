@@ -218,6 +218,7 @@ export function useAppShortcuts(): CommandContext {
   const routeRef = useRef(route)
   const focusedDailyDateRef = useRef(focusedDailyDate)
   const peekedPathRef = useRef(peekedPath)
+  const wikiLanguagesRef = useRef(settings.wikiLanguages)
   // The note being worked on: a peeked note, else the focused stream day (so a
   // note-scoped command targets the day the context sidebar shows — see
   // `effectiveDailyDate`), else the routed note.
@@ -239,6 +240,7 @@ export function useAppShortcuts(): CommandContext {
     routeRef.current = route
     focusedDailyDateRef.current = focusedDailyDate
     peekedPathRef.current = peekedPath
+    wikiLanguagesRef.current = settings.wikiLanguages
   })
 
   const context = useMemo<CommandContext>(
@@ -296,6 +298,7 @@ export function useAppShortcuts(): CommandContext {
       },
       sortAllNotes: (update) =>
         updateSettingsWith((current) => ({ allNotesSort: update(current.allNotesSort) })),
+      wikiLanguages: () => wikiLanguagesRef.current,
     }),
     [
       semanticModel,

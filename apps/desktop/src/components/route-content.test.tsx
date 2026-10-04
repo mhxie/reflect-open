@@ -65,6 +65,7 @@ vi.mock('@/editor/note-editor.tsx', async () => {
           discardPendingReplacement: () => {},
           findNext: () => {},
           findPrevious: () => {},
+          revealHeading: () => false,
         })
         return () => handleRef?.(null)
       }, [handleRef])
@@ -103,6 +104,13 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
       editorMarkdownSyntax: 'hide',
       allNotesFilterTags: ['book', 'link', 'person'],
       allNotesSort: { key: 'updated', direction: 'desc' },
+      wikiLanguages: [
+        { label: 'English', folder: 'wiki' },
+        { label: '简体中文', folder: 'wiki-cn' },
+      ],
+      wikiSort: { key: 'title', direction: 'asc' },
+      wikiGroupByTopic: false,
+      wikiFoldedTopics: [],
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       aiProviders: [],
       defaultAiProviderId: null,

@@ -11,6 +11,8 @@ import {
   NOTE_LIST_SORT_KEYS,
   SORT_DIRECTIONS,
 } from '../indexing/note-list-sort.ts'
+import { normalizeWikiLanguages } from '../wiki/languages.ts'
+import { DEFAULT_WIKI_SORT, WIKI_SORT_KEYS } from '../wiki/sort-keys.ts'
 
 /**
  * The user-settings schema — the policy half of the settings store. Rust
@@ -214,6 +216,28 @@ export const allNotesSortSchema = z
   .catch({ ...DEFAULT_NOTE_LIST_SORT })
 
 export type AllNotesSort = z.infer<typeof allNotesSortSchema>
+
+/**
+ * The wiki's languages, source first (see `wiki/languages.ts`): English in
+ * `wiki/` and Simplified Chinese in `wiki-cn/` by default. Global across
+ * graphs. Invalid or overlapping entries are dropped and an empty list reads
+ * as the default, so every reader can rely on a usable, non-empty list.
+ */
+export const wikiLanguagesSchema = z
+  .array(z.unknown())
+  .catch([])
+  .transform((entries) => normalizeWikiLanguages(entries))
+
+/** The Wiki screen's order. An unknown value reads as the default (title, A–Z). */
+export const wikiSortSchema = z
+  .object({ key: z.enum(WIKI_SORT_KEYS), direction: z.enum(SORT_DIRECTIONS) })
+  .catch({ ...DEFAULT_WIKI_SORT })
+
+/** Group the Wiki screen by topic folder (on) or list every entry flat. Flat by default. */
+export const wikiGroupByTopicSchema = z.boolean().catch(false)
+
+/** Topic folders folded on the Wiki screen's grouped view. */
+export const wikiFoldedTopicsSchema = z.array(z.string()).catch([])
 
 /** Show the journaling heatmap in the daily sidebar. On by default. */
 export const activityHeatmapEnabledSchema = z.boolean().catch(true)
@@ -712,6 +736,10 @@ export const settingsSchema = z.looseObject({
   allNotesFilterTags: allNotesFilterTagsSchema,
   allNotesFilterAttachments: allNotesFilterAttachmentsSchema,
   allNotesSort: allNotesSortSchema,
+  wikiLanguages: wikiLanguagesSchema,
+  wikiSort: wikiSortSchema,
+  wikiGroupByTopic: wikiGroupByTopicSchema,
+  wikiFoldedTopics: wikiFoldedTopicsSchema,
   activityHeatmapEnabled: activityHeatmapEnabledSchema,
   statusBarEnabled: statusBarEnabledSchema,
   calendarEnabled: calendarEnabledSchema,

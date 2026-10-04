@@ -157,6 +157,7 @@ export {
 } from '../graph/attachment-types.ts'
 export {
   wikiNoteReference,
+  splitWikiLinkTarget,
   markdownNoteReference,
   noteBasenameKey,
   type NoteReference,

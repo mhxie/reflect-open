@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { markdownNoteReference, noteBasenameKey, wikiNoteReference } from './note-reference.ts'
+import {
+  markdownNoteReference,
+  noteBasenameKey,
+  splitWikiLinkTarget,
+  wikiNoteReference,
+} from './note-reference.ts'
 
 describe('wikiNoteReference', () => {
   it('reads a bare target as a folded name key', () => {
@@ -179,5 +184,21 @@ describe('noteBasenameKey', () => {
     // NFD filename (as macOS reports it), NFC key: the fold normalizes.
     expect(noteBasenameKey('Cafe\u{301}.md')).toBe('caf\u{E9}')
     expect(noteBasenameKey('Caf\u{E9}.md')).toBe('caf\u{E9}')
+  })
+})
+
+describe('splitWikiLinkTarget', () => {
+  it('splits a target into the note it names and the heading it points into', () => {
+    expect(splitWikiLinkTarget(' Plan # Next steps ')).toEqual({
+      name: 'Plan',
+      fragment: 'Next steps',
+    })
+    expect(splitWikiLinkTarget('Anchoring#^c3')).toEqual({ name: 'Anchoring', fragment: '^c3' })
+  })
+
+  it('has no fragment without a #, and no name for a bare heading link', () => {
+    expect(splitWikiLinkTarget('Plan')).toEqual({ name: 'Plan', fragment: null })
+    expect(splitWikiLinkTarget('Plan# ')).toEqual({ name: 'Plan', fragment: null })
+    expect(splitWikiLinkTarget('#Next')).toEqual({ name: '', fragment: 'Next' })
   })
 })

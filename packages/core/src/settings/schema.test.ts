@@ -36,6 +36,13 @@ describe('settingsSchema', () => {
       allNotesFilterTags: ['book', 'link', 'person'],
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       allNotesSort: { key: 'updated', direction: 'desc' },
+      wikiLanguages: [
+        { label: 'English', folder: 'wiki' },
+        { label: '简体中文', folder: 'wiki-cn' },
+      ],
+      wikiSort: { key: 'title', direction: 'asc' },
+      wikiGroupByTopic: false,
+      wikiFoldedTopics: [],
       activityHeatmapEnabled: true,
       statusBarEnabled: true,
       calendarEnabled: false,
@@ -208,6 +215,25 @@ describe('settingsSchema', () => {
       key: 'updated',
       direction: 'desc',
     })
+    expect(
+      settingsSchema.parse({ wikiLanguages: [{ label: '日本語', folder: '/wiki-ja/' }] })
+        .wikiLanguages,
+    ).toEqual([{ label: '日本語', folder: 'wiki-ja' }])
+    expect(settingsSchema.parse({ wikiLanguages: 'wiki' }).wikiLanguages).toEqual([
+      { label: 'English', folder: 'wiki' },
+      { label: '简体中文', folder: 'wiki-cn' },
+    ])
+    expect(settingsSchema.parse({ wikiSort: { key: 'stars', direction: 'asc' } }).wikiSort).toEqual(
+      {
+        key: 'title',
+        direction: 'asc',
+      },
+    )
+    expect(settingsSchema.parse({ wikiGroupByTopic: true }).wikiGroupByTopic).toBe(true)
+    expect(settingsSchema.parse({ wikiGroupByTopic: 'yes' }).wikiGroupByTopic).toBe(false)
+    expect(settingsSchema.parse({ wikiFoldedTopics: ['memory'] }).wikiFoldedTopics).toEqual([
+      'memory',
+    ])
     expect(settingsSchema.parse({ activityHeatmapEnabled: false }).activityHeatmapEnabled).toBe(
       false,
     )
@@ -358,6 +384,13 @@ describe('settingsSchema', () => {
       allNotesFilterTags: ['book', 'link', 'person'],
       allNotesFilterAttachments: ['pdf', 'image', 'audio', 'video'],
       allNotesSort: { key: 'updated', direction: 'desc' },
+      wikiLanguages: [
+        { label: 'English', folder: 'wiki' },
+        { label: '简体中文', folder: 'wiki-cn' },
+      ],
+      wikiSort: { key: 'title', direction: 'asc' },
+      wikiGroupByTopic: false,
+      wikiFoldedTopics: [],
       activityHeatmapEnabled: true,
       statusBarEnabled: true,
       calendarEnabled: false,

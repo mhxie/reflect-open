@@ -115,6 +115,12 @@ export interface NoteEditorHandle {
   findNext(): void
   /** Select the previous find match, wrapping at the document start. */
   findPrevious(): void
+  /**
+   * Move the caret to the heading a link's `#fragment` names — by its text
+   * (case-insensitive, whitespace collapsed) or its GitHub-style slug, repeats
+   * numbered `-1`, `-2` — and scroll it into view; false when none matches.
+   */
+  revealHeading(fragment: string): boolean
 }
 
 interface NoteEditorProps {
@@ -351,6 +357,7 @@ export function NoteEditor({
       discardPendingReplacement: () => innerRef.current?.discardPendingReplacement(),
       findNext: () => innerRef.current?.findNext(),
       findPrevious: () => innerRef.current?.findPrevious(),
+      revealHeading: (fragment) => innerRef.current?.revealHeading(fragment) ?? false,
     }),
     [],
   )

@@ -35,9 +35,13 @@ function Host({ generation }: { generation: number | null }): ReactNode {
 }
 
 function RouteProbe(): ReactNode {
-  const { route, arrivalFocusEditor } = useRouter()
+  const { route, arrivalFocusEditor, arrivalRevealHeading } = useRouter()
   return (
-    <output data-testid="route" data-focus={String(arrivalFocusEditor)}>
+    <output
+      data-testid="route"
+      data-focus={String(arrivalFocusEditor)}
+      data-reveal={arrivalRevealHeading ?? ''}
+    >
       {JSON.stringify(route)}
     </output>
   )
@@ -92,6 +96,39 @@ describe('useWikiLinkNavigation', () => {
       expect(view.getByTestId('peek').element().textContent).toContain('notes/target.md'),
     )
     expect(view.getByTestId('route').element().textContent).toBe('{"kind":"today"}')
+    await view.unmount()
+  })
+
+  it('opens a heading link by the note name and asks it to reveal the heading', async () => {
+    resolveOrCreateNoteWithTitle.mockResolvedValue({ kind: 'resolved', path: 'wiki/Anchoring.md' })
+    const view = await renderHost()
+
+    lastHandler?.({ target: 'Anchoring#^c3', openInNewWindow: false })
+
+    await vi.waitFor(() => expect(currentRoute(view)).toContain('wiki/Anchoring.md'))
+    expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Anchoring', 1)
+    expect(view.getByTestId('route').element().getAttribute('data-reveal')).toBe('^c3')
+    await view.unmount()
+  })
+
+  it('peeks a heading link scrolled to its heading, re-targeting a note already peeked', async () => {
+    resolveOrCreateNoteWithTitle.mockResolvedValue({ kind: 'resolved', path: 'wiki/Anchoring.md' })
+    const view = await render(
+      <RouterProvider>
+        <PeekProvider>
+          <Host generation={1} />
+          <PeekProbe />
+        </PeekProvider>
+      </RouterProvider>,
+    )
+    const peeked = (): string => view.getByTestId('peek').element().textContent ?? ''
+
+    lastHandler?.({ target: 'Anchoring#^c3', openInNewWindow: false, peek: true })
+    await vi.waitFor(() => expect(peeked()).toContain('"fragment":"^c3"'))
+    expect(peeked()).toContain('"path":"wiki/Anchoring.md"')
+
+    lastHandler?.({ target: 'Anchoring#^c5', openInNewWindow: false, peek: true })
+    await vi.waitFor(() => expect(peeked()).toContain('"fragment":"^c5"'))
     await view.unmount()
   })
 

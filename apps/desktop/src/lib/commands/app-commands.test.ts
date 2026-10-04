@@ -17,6 +17,13 @@ const runCopyDeepLink = vi.hoisted(() => vi.fn(async () => undefined))
 const runCopyNotePath = vi.hoisted(() => vi.fn(async () => undefined))
 const isNativeShell = vi.hoisted(() => vi.fn(() => true))
 const toggleDevtools = vi.hoisted(() => vi.fn(async () => undefined))
+const wikiCopies = vi.hoisted(() =>
+  vi.fn<
+    (
+      path: string,
+    ) => Promise<{ language: { label: string; folder: string }; path: string | null }[]>
+  >(async () => []),
+)
 const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
 const operationFail = vi.hoisted(() => vi.fn())
 const startOperation = vi.hoisted(() =>
@@ -43,6 +50,7 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   rebuildIndex,
   embedStatus,
   toggleDevtools,
+  wikiCopies,
 }))
 
 // Importing registers the commands (module side effect, like production).
@@ -91,6 +99,7 @@ function fakeContext(overrides?: Partial<CommandContext>) {
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
     ...overrides,
   }
   return { context, navigated, navigateOptions }
@@ -426,5 +435,79 @@ describe('app commands', () => {
     } finally {
       resetOperations()
     }
+  })
+})
+
+describe('wiki.switchLanguage', () => {
+  const english = { label: 'English', folder: 'wiki' }
+  const chinese = { label: '简体中文', folder: 'wiki-cn' }
+  const japanese = { label: '日本語', folder: 'wiki-ja' }
+
+  it('opens the next language with a copy, wrapping past the last one', async () => {
+    wikiCopies.mockResolvedValue([
+      { language: english, path: 'wiki/memory/A.md' },
+      { language: chinese, path: null },
+      { language: japanese, path: 'wiki-ja/memory/A.md' },
+    ])
+    const fromEnglish = fakeContext({
+      route: () => ({ kind: 'note', path: 'wiki/memory/A.md' }),
+    })
+    await command('wiki.switchLanguage').run(fromEnglish.context)
+    expect(fromEnglish.navigated).toEqual([{ kind: 'note', path: 'wiki-ja/memory/A.md' }])
+
+    const fromJapanese = fakeContext({
+      route: () => ({ kind: 'note', path: 'wiki-ja/memory/A.md' }),
+    })
+    await command('wiki.switchLanguage').run(fromJapanese.context)
+    expect(fromJapanese.navigated).toEqual([{ kind: 'note', path: 'wiki/memory/A.md' }])
+  })
+
+  it('gives way to a navigation made while it looked up the copies', async () => {
+    let route: Route = { kind: 'note', path: 'wiki/memory/A.md' }
+    wikiCopies.mockImplementation(async () => {
+      route = { kind: 'today' }
+      return [
+        { language: english, path: 'wiki/memory/A.md' },
+        { language: chinese, path: 'wiki-cn/memory/A.md' },
+      ]
+    })
+    const moved = fakeContext({ route: () => route })
+
+    await command('wiki.switchLanguage').run(moved.context)
+
+    expect(moved.navigated).toEqual([])
+    wikiCopies.mockReset()
+  })
+
+  it('gives way when the peeked note it started from changes', async () => {
+    let notePath: string | null = 'wiki/memory/A.md'
+    wikiCopies.mockImplementation(async () => {
+      notePath = 'notes/other.md'
+      return [
+        { language: english, path: 'wiki/memory/A.md' },
+        { language: chinese, path: 'wiki-cn/memory/A.md' },
+      ]
+    })
+    const peeked = fakeContext({ notePath: () => notePath })
+
+    await command('wiki.switchLanguage').run(peeked.context)
+
+    expect(peeked.navigated).toEqual([])
+    wikiCopies.mockReset()
+  })
+
+  it('stays put outside the wiki or without another copy', async () => {
+    wikiCopies.mockResolvedValue([])
+    const outside = fakeContext({ route: () => ({ kind: 'note', path: 'notes/plan.md' }) })
+    await command('wiki.switchLanguage').run(outside.context)
+    expect(outside.navigated).toEqual([])
+
+    wikiCopies.mockResolvedValue([
+      { language: english, path: 'wiki/memory/A.md' },
+      { language: chinese, path: null },
+    ])
+    const alone = fakeContext({ route: () => ({ kind: 'note', path: 'wiki/memory/A.md' }) })
+    await command('wiki.switchLanguage').run(alone.context)
+    expect(alone.navigated).toEqual([])
   })
 })

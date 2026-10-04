@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { ListRow } from './list-row.tsx'
+import { ListRowSubject } from './list-row-subject.tsx'
 
 /**
  * The shared column template (Subject · Snippet · Tags · Updated) — the header
@@ -26,11 +28,7 @@ interface AllNotesRowProps {
   onOpen: (path: string, event?: ModClickEvent) => void
 }
 
-/**
- * One note in the All Notes table. Clicking the row body **selects** it (V1's
- * multi-select: plain = exclusive, ⌘/Ctrl = toggle, Shift = range); the
- * indicator gutter toggles it; the subject or a double-click opens the note.
- */
+/** One note in the All Notes table: subject, snippet, tags, and when it was last edited. */
 export const AllNotesRow = memo(function AllNotesRow({
   note,
   selected,
@@ -40,66 +38,23 @@ export const AllNotesRow = memo(function AllNotesRow({
 }: AllNotesRowProps): ReactElement {
   const { settings } = useSettings()
   return (
-    <div
-      onClick={(event) => {
-        // Shift-click selects a range; stop the browser turning that into a text
-        // selection across the rows.
-        if (event.shiftKey) {
-          event.preventDefault()
-        }
-        onSelect(note.path, event)
-      }}
-      onDoubleClick={(event) => onOpen(note.path, event)}
-      className={cn(
-        'group/row relative h-12 cursor-default select-none',
-        ALL_NOTES_GRID,
-        selected
-          ? 'border-y border-accent/20 bg-accent-soft text-text dark:border-accent/10 dark:text-text'
-          : 'shadow-[var(--border-hairline)] hover:bg-surface-hover',
-      )}
+    <ListRow
+      path={note.path}
+      grid={ALL_NOTES_GRID}
+      noun="note"
+      selected={selected}
+      onSelect={onSelect}
+      onToggle={onToggle}
+      onOpen={onOpen}
     >
-      <button
-        type="button"
-        aria-label={selected ? 'Deselect note' : 'Select note'}
-        aria-pressed={selected}
-        onClick={(event) => {
-          event.stopPropagation()
-          onToggle(note.path, event)
-        }}
-        className={cn(
-          'group absolute inset-y-0 left-0 flex w-12 items-center justify-center opacity-0 transition-opacity duration-100 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none',
-          selected ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100',
-        )}
-      >
-        <span
-          aria-hidden
-          className={cn(
-            'size-2 rounded-full transition-transform duration-150 group-hover:scale-110',
-            selected ? 'bg-accent' : 'ring-1 ring-accent',
-          )}
-        />
-      </button>
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation()
-          // A browser double-click emits click, click, dblclick. The first
-          // title click already opens; suppress repeats so modifier-double-
-          // click cannot race multiple native opens for the same window.
-          if (event.detail > 1) {
-            return
-          }
-          onOpen(note.path, event)
-        }}
-        onDoubleClick={(event) => event.stopPropagation()}
-        className={cn(
-          'truncate text-left text-[13px] font-medium focus-visible:outline-none',
-          selected ? 'text-accent' : 'text-text',
-        )}
+      <ListRowSubject
+        path={note.path}
+        onOpen={onOpen}
+        className={selected ? 'text-accent' : 'text-text'}
       >
         <LocalOnlyMark path={note.path} className="mr-1" />
         {displayNoteTitle(note.title)}
-      </button>
+      </ListRowSubject>
       <span
         className={cn('truncate text-[13px]', selected ? 'text-accent' : 'text-text-secondary')}
       >
@@ -111,6 +66,6 @@ export const AllNotesRow = memo(function AllNotesRow({
       <span className="whitespace-nowrap text-right text-[13px] tabular-nums text-text-secondary">
         {note.mtime > 0 ? formatRecencyLabel(note.mtime, settings) : '—'}
       </span>
-    </div>
+    </ListRow>
   )
 })

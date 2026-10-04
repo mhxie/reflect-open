@@ -25,6 +25,10 @@ const TasksScreen = lazy(async () => {
   const { TasksScreen } = await import('@/components/tasks/tasks-screen.tsx')
   return { default: TasksScreen }
 })
+const WikiScreen = lazy(async () => {
+  const { WikiScreen } = await import('@/components/wiki/wiki-screen.tsx')
+  return { default: WikiScreen }
+})
 
 /**
  * The route → view mapping (Plan 06): the single place a {@link Route} kind
@@ -55,6 +59,10 @@ function RouteContentBody(): ReactElement {
       // Owns its scroll container (a card flow with a fixed header), so no
       // ScrollRestored wrapper — same shape as All Notes.
       return <AttachmentsScreen type={route.type} tag={route.tag} />
+    case 'wiki':
+      // Owns its scroll container (topic sections under a sticky header), so
+      // no ScrollRestored wrapper — same shape as All Notes.
+      return <WikiScreen filter={route.filter} language={route.language} />
     case 'tasks':
       // Owns its scroll container (a grouped list with a fixed header), so no
       // ScrollRestored wrapper — same shape as All Notes.

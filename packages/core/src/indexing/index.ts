@@ -130,6 +130,7 @@ export {
   reverseNoteListSort,
   type NoteListSort,
   type NoteListSortKey,
+  type SortDirection,
 } from './note-list-sort.ts'
 export {
   buildAttachmentLibrary,

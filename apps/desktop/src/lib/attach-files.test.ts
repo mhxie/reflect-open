@@ -37,6 +37,7 @@ function contextFor(notePath: string | null, generation: number | null): Command
     openTemplateCreate: vi.fn(),
     enableSemanticSearch: vi.fn(),
     sortAllNotes: vi.fn(),
+    wikiLanguages: () => [],
     clearScrollState: vi.fn(),
   }
 }
@@ -58,6 +59,7 @@ function editorHandle(): NoteEditorHandle & {
     discardPendingReplacement: () => {},
     findNext: () => {},
     findPrevious: () => {},
+    revealHeading: () => false,
   }
 }
 

@@ -1,10 +1,12 @@
 import { useState, type DragEvent, type ReactElement } from 'react'
-import { isUntitledNotePath, type GraphInfo } from '@reflect/core'
-import { FilePlus, Images, ListChecks, MessageSquare, SquarePen } from 'lucide-react'
+import { isUntitledNotePath, isWikiPath, type GraphInfo } from '@reflect/core'
+import { FilePlus, Images, Library, ListChecks, MessageSquare, SquarePen } from 'lucide-react'
 import { AudioMemoButton } from '@/components/audio-memo/audio-memo-button.tsx'
 import { RecordingStrip } from '@/components/audio-memo/recording-strip.tsx'
 import { ListIcon } from '@/components/icons/list-icon.tsx'
 import { PencilIcon } from '@/components/icons/pencil-icon.tsx'
+import { useHasWiki } from '@/hooks/use-has-wiki.ts'
+import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { keybindingFor } from '@/lib/commands/app-commands.ts'
 import { runCommand } from '@/lib/commands/registry.ts'
@@ -43,6 +45,13 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
   const currentNotePath = notePathForRoute(route, today)
   const hasActivePinnedNote =
     currentNotePath !== null && pinned.some((note) => note.path === currentNotePath)
+  const hasWiki = useHasWiki()
+  const wikiLanguages = useWikiLanguages()
+  const openWikiNote =
+    hasWiki &&
+    route.kind === 'note' &&
+    isWikiPath(route.path, wikiLanguages) &&
+    !hasActivePinnedNote
 
   // Wrap the 16px Lucide glyphs in the custom icons' 24px box so nav rows
   // share one icon footprint.
@@ -131,10 +140,28 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
             // highlight until the birth rename — so the two never light at once.
             active={
               route.kind === 'allNotes' ||
-              (route.kind === 'note' && !isUntitledNotePath(route.path) && !hasActivePinnedNote)
+              (route.kind === 'note' &&
+                !isUntitledNotePath(route.path) &&
+                !hasActivePinnedNote &&
+                !openWikiNote)
             }
             onClick={() => void runCommand('nav.allNotes', context)}
           />
+          {hasWiki ? (
+            <SidebarItem
+              icon={
+                <span className={lucideBox}>
+                  <Library aria-hidden strokeWidth={1.75} className="size-4" />
+                </span>
+              }
+              label="Wiki"
+              binding={keybindingFor('nav.wiki') ?? undefined}
+              // Lit while reading an entry or its translation, which All notes
+              // then leaves unlit — the same hand-off New note and All notes use.
+              active={route.kind === 'wiki' || openWikiNote}
+              onClick={() => void runCommand('nav.wiki', context)}
+            />
+          ) : null}
           <SidebarItem
             icon={
               <span className={lucideBox}>
