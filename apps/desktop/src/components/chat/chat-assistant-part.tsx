@@ -39,6 +39,10 @@ export function ChatAssistantPart({ part, onWikiLinkClick }: ChatAssistantPartPr
  * Streamed deltas can arrive faster than a long code block re-highlights, so
  * the markdown renders from a deferred value: React drops the intermediate
  * renders instead of queueing them.
+ *
+ * The markdown is model output, which a prompt-injected note can steer, so it
+ * renders without remote embeds: otherwise an image URL in an answer could
+ * carry note content to any server the moment the answer renders.
  */
 function ChatAssistantText({
   text,
@@ -54,6 +58,7 @@ function ChatAssistantText({
         <MarkdownPreview
           content={content}
           onWikiLinkClick={onWikiLinkClick}
+          remoteEmbeds={false}
           className="reflect-chat-message text-sm"
         />
       </BubbleContent>
