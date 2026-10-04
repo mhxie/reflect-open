@@ -123,6 +123,52 @@ function compareDated(left: OpenTask, right: OpenTask): number {
   return compareTaskPaths(left.astPath, right.astPath)
 }
 
+/** One day's open tasks for a daily sidebar (see {@link tasksForDay}). */
+export interface DayTasks {
+  /** Explicitly due before today, earliest due first — listed only on today. */
+  overdue: OpenTask[]
+  /** The day's tasks; on today, also every older daily task still open. */
+  due: OpenTask[]
+}
+
+/** Newest effective date first, then document order — today's tasks before stale ones. */
+function compareRecentFirst(left: OpenTask, right: OpenTask): number {
+  const leftDate = effectiveDate(left) ?? ''
+  const rightDate = effectiveDate(right) ?? ''
+  if (leftDate !== rightDate) {
+    return leftDate > rightDate ? -1 : 1
+  }
+  if (left.notePath !== right.notePath) {
+    return left.notePath < right.notePath ? -1 : 1
+  }
+  return compareTaskPaths(left.astPath, right.astPath)
+}
+
+/**
+ * The open tasks a daily sidebar lists for `day`. On `today`: Overdue, then
+ * Current newest first, so an unfinished task carries over without crowding
+ * out today's. Any other day: the tasks dated that day.
+ */
+export function tasksForDay(tasks: readonly OpenTask[], day: string, today: string): DayTasks {
+  if (day !== today) {
+    return {
+      overdue: [],
+      due: tasks.filter((task) => effectiveDate(task) === day).sort(compareDated),
+    }
+  }
+  const overdue: OpenTask[] = []
+  const due: OpenTask[] = []
+  for (const task of tasks) {
+    const bucket = taskDateBucket(task, today)
+    if (bucket === 'overdue') {
+      overdue.push(task)
+    } else if (bucket === 'current') {
+      due.push(task)
+    }
+  }
+  return { overdue: overdue.sort(compareDated), due: due.sort(compareRecentFirst) }
+}
+
 /**
  * Compare two notes by pin shelf precedence: pinned before unpinned, then
  * numbered pins (`pinned: <n>`, ascending) before bare `pinned: true`. Returns 0
