@@ -106,6 +106,7 @@ describe('appMenuLayout', () => {
       'palette.open',
       'nav.today',
       'nav.allNotes',
+      'nav.wiki',
       'nav.attachments',
       'history.back',
       'history.forward',
@@ -114,6 +115,8 @@ describe('appMenuLayout', () => {
       expect(referenced).toContain(commandId)
     }
     expect(keybindingFor('nav.allNotes')).toBe('Mod-Shift-a')
+    expect(keybindingFor('nav.wiki')).toBe('Mod-Shift-w')
+    expect(keybindingFor('nav.attachments')).toBe('Mod-Shift-m')
   })
 
   it('lists each command at most once across the whole menu', () => {

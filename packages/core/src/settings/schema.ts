@@ -107,11 +107,10 @@ export interface SidebarWidthRange {
 }
 
 /**
- * The workspace (left) sidebar's range. The minimum keeps the sidebar clear
- * of the macOS traffic lights, which float over its top-left corner at an
- * OS-controlled position; the maximum protects the note pane.
+ * The workspace (left) sidebar's range. The minimum leaves room for its
+ * navigation and macOS window controls; the maximum protects the note pane.
  */
-export const SIDEBAR_WIDTH_RANGE: SidebarWidthRange = { min: 200, max: 480, fallback: 260 }
+export const SIDEBAR_WIDTH_RANGE: SidebarWidthRange = { min: 160, max: 480, fallback: 260 }
 
 /**
  * The contextual (right) panel's range. Its minimum is higher than the

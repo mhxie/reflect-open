@@ -104,7 +104,7 @@ describe('SidebarResizeHandle', () => {
 
     firePointer(handle, 'pointermove', { pointerId: 7, clientX: -1200 })
     firePointer(handle, 'pointerup', { pointerId: 7, clientX: -1200 })
-    expect(settingsState.updateSettings).toHaveBeenCalledWith({ sidebarWidth: 200 })
+    expect(settingsState.updateSettings).toHaveBeenCalledWith({ sidebarWidth: 160 })
   })
 
   it('widens the context panel when dragged leftward', async () => {
@@ -293,7 +293,7 @@ describe('SidebarResizeHandle', () => {
     const workspaceHandle = await renderHandle('workspace')
 
     fireKey(workspaceHandle, 'Home')
-    expect(settingsState.updateSettings).toHaveBeenLastCalledWith({ sidebarWidth: 200 })
+    expect(settingsState.updateSettings).toHaveBeenLastCalledWith({ sidebarWidth: 160 })
 
     fireKey(workspaceHandle, 'End')
     expect(settingsState.updateSettings).toHaveBeenLastCalledWith({ sidebarWidth: 480 })
@@ -315,7 +315,7 @@ describe('SidebarResizeHandle', () => {
 
     expect(handle.getAttribute('aria-orientation')).toBe('vertical')
     expect(handle.getAttribute('aria-controls')).toBe('workspace-sidebar')
-    expect(handle.getAttribute('aria-valuemin')).toBe('200')
+    expect(handle.getAttribute('aria-valuemin')).toBe('160')
     expect(handle.getAttribute('aria-valuemax')).toBe('480')
     expect(handle.getAttribute('aria-valuenow')).toBe('260')
   })

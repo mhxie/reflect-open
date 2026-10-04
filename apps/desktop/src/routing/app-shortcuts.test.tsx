@@ -248,6 +248,8 @@ describe('app shortcuts', () => {
     for (const key of [
       'Mod-d',
       'Mod-Shift-a',
+      'Mod-Shift-w',
+      'Mod-Shift-m',
       'Mod-n',
       'Mod-Shift-n',
       'Mod-Shift-o',
@@ -478,6 +480,16 @@ describe('app shortcuts', () => {
 
     await act(() => press('a', { shiftKey: true }))
     expect(result.current.router.route).toEqual({ kind: 'allNotes', filter: null })
+  })
+
+  it('⌘⇧W opens Wiki and ⌘⇧M opens Attachments', async () => {
+    const { result, act } = await shortcutsHook()
+
+    await act(() => press('W', { shiftKey: true }))
+    expect(result.current.router.route).toEqual({ kind: 'wiki', filter: null, language: null })
+
+    await act(() => press('M', { shiftKey: true }))
+    expect(result.current.router.route).toEqual({ kind: 'attachments', type: null, tag: null })
   })
 
   it('⌘⇧N starts a fresh chat when the chat route is active', async () => {

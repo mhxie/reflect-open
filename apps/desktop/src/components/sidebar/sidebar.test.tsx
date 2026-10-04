@@ -303,13 +303,11 @@ describe('Sidebar', () => {
     const wiki = view.getByRole('button', { name: 'Wiki', exact: true })
     await expect.element(wiki).toBeInTheDocument()
 
-    const rows = view
-      .getByRole('navigation', { name: 'Primary' })
-      .getByRole('button')
-      .elements()
-      .map((row) => row.textContent ?? '')
-    const allNotes = rows.findIndex((label) => /all notes/i.test(label))
-    expect(rows[allNotes + 1]).toBe('Wiki')
+    const rows = view.getByRole('navigation', { name: 'Primary' }).getByRole('button').elements()
+    const allNotes = rows.indexOf(
+      view.getByRole('button', { name: 'All notes', exact: true }).element(),
+    )
+    expect(rows[allNotes + 1]).toBe(wiki.element())
 
     await wiki.click()
     await vi.waitFor(() =>
