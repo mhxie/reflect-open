@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
-import type { ReactElement } from 'react'
+import { Suspense, type ReactElement } from 'react'
 import { normalizeWikiLanguages, setBridge, type Settings } from '@reflect/core'
-import { wikiRoute } from '@/routing/route.ts'
+import { wikiRoute, type Route } from '@/routing/route.ts'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { WikiScreen } from './wiki-screen.tsx'
@@ -178,6 +178,7 @@ const WIKI: Fixture = {
 }
 
 let fixture: Fixture = WIKI
+let pendingNoteLoad: Promise<void> | undefined
 
 const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
 setBridge({ invoke: mockInvoke, listen: async () => () => {} })
@@ -200,6 +201,7 @@ let unreadable = new Set<string>()
 
 beforeEach(() => {
   fixture = WIKI
+  pendingNoteLoad = undefined
   unreadable = new Set()
   settingsStore.reset()
   mockInvoke.mockReset()
@@ -235,6 +237,9 @@ function RouteProbe(): ReactElement {
 
 function RoutedScreen(): ReactElement {
   const { route } = useRouter()
+  if (route.kind === 'note' && pendingNoteLoad !== undefined) {
+    throw pendingNoteLoad
+  }
   return route.kind === 'wiki' ? (
     <WikiScreen filter={route.filter} language={route.language} />
   ) : (
@@ -247,10 +252,12 @@ function renderScreen(language: string | null = null) {
   return render(
     <QueryClientProvider client={client}>
       <RouterProvider initialRoute={wikiRoute({ language })}>
-        <div style={{ height: '100vh' }}>
-          <RoutedScreen />
-        </div>
-        <RouteProbe />
+        <Suspense fallback={null}>
+          <div style={{ height: '100vh' }}>
+            <RoutedScreen />
+          </div>
+          <RouteProbe />
+        </Suspense>
       </RouterProvider>
     </QueryClientProvider>,
   )
@@ -258,6 +265,13 @@ function renderScreen(language: string | null = null) {
 
 function probedRoute(view: Awaited<ReturnType<typeof renderScreen>>): unknown {
   return JSON.parse(view.getByTestId('route').element().textContent ?? 'null')
+}
+
+async function expectRoute(
+  view: Awaited<ReturnType<typeof renderScreen>>,
+  route: Route,
+): Promise<void> {
+  await vi.waitFor(() => expect(probedRoute(view)).toEqual(route))
 }
 
 /** Entry subjects in render order (the gutter toggle is the row's pressed button). */
@@ -317,9 +331,7 @@ describe('WikiScreen', () => {
 
     await view.getByRole('button', { name: '简体中文', exact: true }).click()
 
-    await vi.waitFor(() =>
-      expect(probedRoute(view)).toEqual({ kind: 'wiki', filter: null, language: 'wiki-cn' }),
-    )
+    await expectRoute(view, { kind: 'wiki', filter: null, language: 'wiki-cn' })
     await expect.element(view.getByText('间隔练习胜过集中练习。')).toBeInTheDocument()
     expect(view.getByText('Spaced sessions beat cramming.').query()).toBeNull()
     expect(rowTitles(view)).toEqual([
@@ -331,7 +343,7 @@ describe('WikiScreen', () => {
     await expectLocatorToHaveCount(view.getByRole('img', { name: 'Not in 简体中文 yet' }), 3)
 
     await view.getByRole('button', { name: 'Spacing Effect (中文)' }).click()
-    expect(probedRoute(view)).toEqual({ kind: 'note', path: 'wiki-cn/memory/Spacing Effect.md' })
+    await expectRoute(view, { kind: 'note', path: 'wiki-cn/memory/Spacing Effect.md' })
     await view.unmount()
   })
 
@@ -340,8 +352,28 @@ describe('WikiScreen', () => {
 
     await view.getByRole('button', { name: 'Retrieval Practice' }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'note', path: 'wiki/memory/Retrieval Practice.md' })
+    await expectRoute(view, { kind: 'note', path: 'wiki/memory/Retrieval Practice.md' })
     await view.unmount()
+  })
+
+  it('commits note navigation after a suspended destination becomes ready', async () => {
+    let release: (() => void) | undefined
+    pendingNoteLoad = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const view = await renderScreen('wiki-cn')
+    try {
+      await view.getByRole('button', { name: 'Retrieval Practice' }).click()
+
+      expect(probedRoute(view)).toEqual(wikiRoute({ language: 'wiki-cn' }))
+      pendingNoteLoad = undefined
+      release?.()
+      await expectRoute(view, { kind: 'note', path: 'wiki/memory/Retrieval Practice.md' })
+    } finally {
+      pendingNoteLoad = undefined
+      release?.()
+      await view.unmount()
+    }
   })
 
   it('sorts from the column headers and remembers the order', async () => {
@@ -398,7 +430,7 @@ describe('WikiScreen', () => {
 
     view.container.querySelector<HTMLElement>('[aria-label="Wiki"]')?.focus()
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}')
-    expect(probedRoute(view)).toEqual({ kind: 'note', path: 'wiki/motivation/Zeigarnik Effect.md' })
+    await expectRoute(view, { kind: 'note', path: 'wiki/motivation/Zeigarnik Effect.md' })
 
     await view.getByRole('button', { name: /^motivation/ }).click({ modifiers: ['Alt'] })
     expect(rowTitles(view)).toEqual([])
@@ -411,13 +443,19 @@ describe('WikiScreen', () => {
     const header = view.getByRole('banner')
     await header.getByRole('button', { name: 'Flagged 1' }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'wiki', filter: { kind: 'flagged' }, language: null })
+    await expectRoute(view, { kind: 'wiki', filter: { kind: 'flagged' }, language: null })
     expect(rowTitles(view)).toEqual(['Retrieval Practice'])
 
     await header.getByRole('button', { name: 'Missing 简体中文 2' }).click()
+    await expectRoute(view, {
+      kind: 'wiki',
+      filter: { kind: 'untranslated', folder: 'wiki-cn' },
+      language: null,
+    })
     expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Zeigarnik Effect'])
 
     await header.getByRole('button', { name: 'Unreviewed 1' }).click()
+    await expectRoute(view, { kind: 'wiki', filter: { kind: 'unreviewed' }, language: null })
     expect(rowTitles(view)).toEqual(['Zeigarnik Effect'])
     // No entry carries a tag, so there is no Tag menu to offer.
     expect(view.getByRole('button', { name: 'Tag' }).query()).toBeNull()
@@ -437,7 +475,7 @@ describe('WikiScreen', () => {
 
     await header.getByRole('button', { name: 'Missing 中文 2' }).click()
 
-    expect(probedRoute(view)).toEqual({
+    await expectRoute(view, {
       kind: 'wiki',
       filter: { kind: 'untranslated', folder: 'wiki-cn' },
       language: null,
@@ -446,7 +484,7 @@ describe('WikiScreen', () => {
 
     await header.getByRole('button', { name: 'Missing 中文 3' }).click()
 
-    expect(probedRoute(view)).toEqual({
+    await expectRoute(view, {
       kind: 'wiki',
       filter: { kind: 'untranslated', folder: 'wiki-tw' },
       language: null,
