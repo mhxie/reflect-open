@@ -83,6 +83,12 @@ export function attachOperationToasts(): () => void {
       }
     }
     for (const operation of operations) {
+      // Running background work lives in the activity tray; it toasts only
+      // once it needs attention.
+      if (operation.background && operation.status === 'running') {
+        nextIds.delete(operation.id)
+        continue
+      }
       showOperationToast(operation)
     }
     shownIds = nextIds

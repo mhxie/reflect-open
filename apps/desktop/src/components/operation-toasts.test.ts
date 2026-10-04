@@ -25,6 +25,21 @@ afterEach(() => {
 })
 
 describe('attachOperationToasts', () => {
+  it('keeps running background work out of the toasts until it needs attention', () => {
+    const handle = startOperation('Describing assets', { background: true })
+    handle.progress(1, 4)
+    expect(toast.add).not.toHaveBeenCalled()
+
+    handle.warn('2 assets skipped')
+    expect(toast.add).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 'operation-1',
+        description: '2 assets skipped',
+        type: 'warning',
+      }),
+    )
+  })
+
   it('creates and updates a toast with a stable operation id', () => {
     const handle = startOperation('Rebuilding search index')
 

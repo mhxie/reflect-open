@@ -91,7 +91,7 @@ export async function installLocalModelUpdate(): Promise<void> {
     return
   }
   setPending(null)
-  const operation = startOperation('Updating the transcription model')
+  const operation = startOperation('Updating the transcription model', { background: true })
   const unlisten = await subscribeLocalModelStatus((model, status) => {
     if (model === update.model && status.status === 'downloading' && status.progress) {
       operation.progress(status.progress.downloaded, status.progress.total)
