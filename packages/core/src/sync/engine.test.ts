@@ -136,6 +136,7 @@ describe('createSyncEngine', () => {
       'git_commit_all',
       'git_push',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -299,7 +300,12 @@ describe('createSyncEngine', () => {
     await engine.syncNow()
     await vi.runAllTimersAsync()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch', 'git_merge_remote'])
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+    ])
     expect(statuses).toEqual([
       { state: 'syncing' },
       { state: 'error', errorKind: 'other', message: paused },
@@ -370,6 +376,7 @@ describe('createSyncEngine', () => {
       'git_commit_all',
       'git_push',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
     ])
     expect(statuses).toEqual([
@@ -406,6 +413,7 @@ describe('createSyncEngine', () => {
       'git_push',
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -477,6 +485,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -532,9 +541,11 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -581,6 +592,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -593,6 +605,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -637,6 +650,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -676,7 +690,12 @@ describe('createSyncEngine', () => {
 
     const syncing = engine.syncNow()
     await vi.advanceTimersByTimeAsync(0)
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch', 'git_merge_remote'])
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+    ])
 
     engine.stop()
     mergeGate.resolve?.({
@@ -686,7 +705,12 @@ describe('createSyncEngine', () => {
     })
     await syncing
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch', 'git_merge_remote'])
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+    ])
     expect(remoteChanges).not.toHaveBeenCalled()
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
   })
@@ -721,6 +745,7 @@ describe('createSyncEngine', () => {
     expect(commandsBeforeStop).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -756,7 +781,12 @@ describe('createSyncEngine', () => {
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch', 'git_merge_remote'])
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+    ])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
   })
 
@@ -771,6 +801,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -909,7 +940,12 @@ describe('createSyncEngine', () => {
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch', 'git_merge_remote'])
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+    ])
     engine.stop()
   })
 
@@ -928,6 +964,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -1032,6 +1069,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -1046,10 +1084,12 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual([
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
       'git_commit_all',
       'git_fetch',
+      'git_commit_all',
       'git_merge_remote',
       'git_push',
     ])
@@ -1125,5 +1165,200 @@ describe('createSyncEngine', () => {
 
     expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
+  })
+
+  it('commits before every merge, the push-retry merge included', async () => {
+    let pushes = 0
+    const calls = fakeGit((command) => {
+      if (command === 'git_push') {
+        pushes += 1
+        return pushes === 1 ? NON_FAST_FORWARD : PUSHED
+      }
+      return defaultResponses(command)
+    })
+    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+
+    await engine.syncNow()
+
+    // Saves made while a fetch was on the network are committed before the
+    // merge that follows it, so a pull meets as few uncommitted bytes as
+    // possible.
+    const commands = commandsOf(calls)
+    for (const [position, command] of commands.entries()) {
+      if (command === 'git_merge_remote') {
+        expect(commands[position - 1]).toBe('git_commit_all')
+      }
+    }
+    expect(commands.filter((command) => command === 'git_merge_remote')).toHaveLength(2)
+    engine.stop()
+  })
+
+  it('retries a deferred pull with a fresh commit, at most twice per cycle', async () => {
+    const calls = fakeGit((command) =>
+      command === 'git_merge_remote'
+        ? { kind: 'deferred', conflictedPaths: [], changedFiles: [] }
+        : defaultResponses(command),
+    )
+    const statuses: SyncStatus[] = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onStatus: (status) => {
+        statuses.push(status)
+      },
+    })
+
+    await engine.syncNow()
+
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+      'git_commit_all',
+      'git_merge_remote',
+      'git_commit_all',
+      'git_merge_remote',
+    ])
+    expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'other' })
+    engine.stop()
+  })
+
+  it('carries on once a deferred pull lands on its retry', async () => {
+    let merges = 0
+    const calls = fakeGit((command) => {
+      if (command === 'git_merge_remote') {
+        merges += 1
+        return merges === 1 ? { kind: 'deferred', conflictedPaths: [], changedFiles: [] } : MERGED
+      }
+      return defaultResponses(command)
+    })
+    const statuses: SyncStatus[] = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onStatus: (status) => {
+        statuses.push(status)
+      },
+    })
+
+    await engine.syncNow()
+
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+      'git_commit_all',
+      'git_merge_remote',
+      'git_push',
+    ])
+    expect(statuses.at(-1)).toEqual({ state: 'idle' })
+    engine.stop()
+  })
+
+  it('hands displaced pairs over before the pull’s changed files', async () => {
+    const displaced = {
+      from: 'daily/2026-10-04.md',
+      to: 'daily/2026-10-04 (this device).md',
+      keptOut: false,
+      tracked: false,
+      differentNote: false,
+    }
+    fakeGit((command) =>
+      command === 'git_merge_remote'
+        ? {
+            kind: 'fastForward',
+            conflictedPaths: [],
+            changedFiles: [
+              { path: displaced.from, kind: 'upsert' },
+              { path: displaced.to, kind: 'upsert' },
+            ],
+            displaced: [displaced],
+          }
+        : defaultResponses(command),
+    )
+    const order: string[] = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onDisplaced: (pairs) => {
+        order.push(`displaced:${pairs.map((pair) => pair.to).join(',')}`)
+      },
+      onRemoteChanges: (changes) => {
+        order.push(`changes:${changes.length}`)
+      },
+    })
+
+    await engine.syncNow()
+
+    expect(order).toEqual(['displaced:daily/2026-10-04 (this device).md', 'changes:2'])
+    engine.stop()
+  })
+
+  it('stays quiet about displacement when a pull moved nothing (control)', async () => {
+    fakeGit(defaultResponses)
+    const onDisplaced = vi.fn()
+    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok', onDisplaced })
+
+    await engine.syncNow()
+
+    expect(onDisplaced).not.toHaveBeenCalled()
+    engine.stop()
+  })
+
+  it('reports a withheld file once per cycle, however many commits it makes', async () => {
+    fakeGit((command) =>
+      command === 'git_commit_all'
+        ? {
+            committed: true,
+            sha: 'abc',
+            ahead: 1,
+            skippedLargeFiles: [{ path: 'assets/movie.mp4', size: 200_000_000 }],
+          }
+        : defaultResponses(command),
+    )
+    const skipped: Array<{ path: string }[]> = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getToken: async () => 'tok',
+      onLargeFilesSkipped: (files) => {
+        skipped.push(files)
+      },
+    })
+
+    await engine.syncNow()
+
+    expect(skipped).toEqual([[{ path: 'assets/movie.mp4', size: 200_000_000 }]])
+    engine.stop()
+  })
+
+  it('pushes what the commit after the fetch recorded, even on a clean fast-forward', async () => {
+    let commits = 0
+    const calls = fakeGit((command) => {
+      if (command === 'git_commit_all') {
+        commits += 1
+        return commits === 1 ? CLEAN_COMMIT : COMMITTED
+      }
+      if (command === 'git_fetch') {
+        return { ahead: 0, behind: 1 }
+      }
+      if (command === 'git_merge_remote') {
+        return { kind: 'fastForward', conflictedPaths: [], changedFiles: [] }
+      }
+      return defaultResponses(command)
+    })
+    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+
+    await engine.syncNow()
+
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+      'git_push',
+    ])
+    engine.stop()
   })
 })

@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  clearDisplacedNotes,
   emitFileChanges,
+  isRecentlyDisplaced,
   setBridge,
+  setDisplacedNotesGeneration,
   subscribeFileChanges,
   type FileChange,
   type GraphInfo,
 } from '@reflect/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
+import { getOperations, resetOperations } from '@/lib/operations.ts'
 import { setPlatformSurface } from '@/lib/platform-surface.ts'
 import { createBackupController, type BackupState } from './backup-controller.ts'
 
@@ -22,9 +26,15 @@ const httpFetch = vi.mocked(tauriFetch)
 afterEach(() => {
   setBridge(null)
   httpFetch.mockReset()
+  clearDisplacedNotes()
+  resetOperations()
 })
 
 const GRAPH: GraphInfo = { root: '/g', name: 'G', generation: 3, localOnlyFolders: [] }
+
+beforeEach(() => {
+  setDisplacedNotesGeneration(GRAPH.generation)
+})
 
 const AUTH = JSON.stringify({ kind: 'pat', token: 'ghp_abc' })
 const CLEAN_COMMIT = { committed: false, sha: null, ahead: 0, skippedLargeFiles: [] }
@@ -43,6 +53,8 @@ interface FakeOptions {
   gateIndexApply?: boolean
   /** Make every direct index write throw (the projection-failure path). */
   failIndexApply?: boolean
+  /** Runs as each direct index write arrives, before it lands. */
+  onIndexApply?: () => void
   /** Hold the listen promise until `release()` (the teardown-race window). */
   gateListen?: boolean
   /** Make the watcher subscription throw (the unusable-watcher path). */
@@ -124,6 +136,7 @@ function fakeBridge(options: FakeOptions = {}) {
         case 'note_read':
           return '# Remote note\n'
         case 'index_apply_batch':
+          options.onIndexApply?.()
           indexApplyCount += 1
           if (options.failIndexApply === true) {
             throw { kind: 'io', message: 'index write failed' }
@@ -523,12 +536,13 @@ describe('createBackupController', () => {
     try {
       await controller.start()
       await vi.waitFor(() => {
-        expect(commitCount(calls)).toBe(1) // the launch pull's commit
+        // A full cycle commits before its fetch and again before its merge.
+        expect(commitCount(calls)).toBe(2) // the launch pull's commits
       })
 
       window.dispatchEvent(new Event('focus'))
       await vi.waitFor(() => {
-        expect(commitCount(calls)).toBe(2)
+        expect(commitCount(calls)).toBe(4)
       })
     } finally {
       controller.dispose()
@@ -541,12 +555,13 @@ describe('createBackupController', () => {
     try {
       await controller.start()
       await vi.waitFor(() => {
-        expect(commitCount(calls)).toBe(1) // the launch pull's commit
+        // A full cycle commits before its fetch and again before its merge.
+        expect(commitCount(calls)).toBe(2) // the launch pull's commits
       })
 
       window.dispatchEvent(new Event('online'))
       await vi.waitFor(() => {
-        expect(commitCount(calls)).toBe(2)
+        expect(commitCount(calls)).toBe(4)
       })
     } finally {
       controller.dispose()
@@ -559,12 +574,13 @@ describe('createBackupController', () => {
     const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
     await controller.start()
     await vi.waitFor(() => {
-      expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(1)
+      // The launch pull's commits: before its fetch and before its merge.
+      expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(2)
     })
 
     document.dispatchEvent(new Event('visibilitychange'))
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(1)
+    expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(2)
 
     visibility.mockRestore()
     controller.dispose()
@@ -587,7 +603,8 @@ describe('createBackupController', () => {
       visibility.mockReturnValue('visible')
       document.dispatchEvent(new Event('visibilitychange'))
       await vi.waitFor(() => {
-        expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(1)
+        // A full cycle commits before its fetch and again before its merge.
+        expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(2)
       })
       expect(calls.filter((command) => command === 'git_fetch')).toHaveLength(1)
 
@@ -599,13 +616,13 @@ describe('createBackupController', () => {
 
       // Both the immediate online trigger and the edit's 10s mobile debounce
       // are dropped while hidden.
-      expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(1)
+      expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(2)
       expect(calls.filter((command) => command === 'git_fetch')).toHaveLength(1)
 
       visibility.mockReturnValue('visible')
       document.dispatchEvent(new Event('visibilitychange'))
       await vi.runAllTimersAsync()
-      expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(2)
+      expect(calls.filter((command) => command === 'git_commit_all')).toHaveLength(4)
       // Foreground replay is full, so it fetches rather than merely pushing
       // the edit that arrived while hidden.
       expect(calls.filter((command) => command === 'git_fetch')).toHaveLength(2)
@@ -625,16 +642,18 @@ describe('createBackupController', () => {
       try {
         await controller.start()
         await vi.waitFor(() => {
-          expect(commitCount(calls)).toBe(1) // the launch pull's commit
+          // The launch pull commits before its fetch and again before its merge.
+          expect(commitCount(calls)).toBe(2)
+          expect(calls).toContain('git_merge_remote')
         })
         vi.useFakeTimers()
         emitFileChanges([{ path: 'notes/edited.md', kind: 'upsert', modifiedMs: 1 }])
         await vi.advanceTimersByTimeAsync(10_000)
-        if (commitCount(calls) > 1) {
+        if (commitCount(calls) > 2) {
           return 10_000
         }
         await vi.advanceTimersByTimeAsync(20_000)
-        return commitCount(calls) > 1 ? 30_000 : Infinity
+        return commitCount(calls) > 2 ? 30_000 : Infinity
       } finally {
         vi.useRealTimers()
         setPlatformSurface({ mobileApp: false })
@@ -644,6 +663,66 @@ describe('createBackupController', () => {
 
     expect(await debouncedCommitDelay(false)).toBe(30_000)
     expect(await debouncedCommitDelay(true)).toBe(10_000)
+  })
+
+  it('records a pull’s displaced notes and names the copy before indexing either path', async () => {
+    const from = 'daily/2026-10-04.md'
+    const to = 'daily/2026-10-04 (this device).md'
+    const recordedAtIndexing: boolean[] = []
+    const { invocations } = fakeBridge({
+      mergeOutcome: {
+        kind: 'fastForward',
+        conflictedPaths: [],
+        changedFiles: [
+          { path: from, kind: 'upsert', modifiedMs: 1 },
+          { path: to, kind: 'upsert', modifiedMs: 2 },
+        ],
+        displaced: [{ from, to, keptOut: false, tracked: false, differentNote: false }],
+      },
+      onIndexApply: () => {
+        recordedAtIndexing.push(isRecentlyDisplaced(from, to))
+      },
+    })
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    await controller.start()
+    await vi.waitFor(() => {
+      expect(recordedAtIndexing).toEqual([true])
+    })
+
+    // Both paths index as ordinary notes: never as a move.
+    expect(invocations.map((call) => call.command)).not.toContain('index_move')
+    const indexed = invocations
+      .filter((call) => call.command === 'index_apply_batch')
+      .flatMap((call) => (call.args['notes'] as Array<{ path: string }>).map((note) => note.path))
+    expect(indexed.sort()).toEqual([from, to].sort())
+    const warning = getOperations().find((operation) => operation.label === 'Syncing')
+    expect(warning?.status).toBe('warning')
+    expect(warning?.message).toContain(`“${to}”`)
+    controller.dispose()
+  })
+
+  it('cannot record an old controller’s displaced paths in a new graph session', async () => {
+    const from = 'notes/plan.md'
+    const to = 'notes/plan (this device).md'
+    fakeBridge({
+      mergeOutcome: {
+        kind: 'fastForward',
+        conflictedPaths: [],
+        changedFiles: [],
+        displaced: [{ from, to, keptOut: false, tracked: false, differentNote: false }],
+      },
+    })
+    setDisplacedNotesGeneration(GRAPH.generation + 1)
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    try {
+      await controller.start()
+      await vi.waitFor(() => {
+        expect(getOperations().some((operation) => operation.status === 'warning')).toBe(true)
+      })
+      expect(isRecentlyDisplaced(from, to)).toBe(false)
+    } finally {
+      controller.dispose()
+    }
   })
 
   it('fans a pull’s writes whole to the local file-changes channel — consumers filter by path', async () => {

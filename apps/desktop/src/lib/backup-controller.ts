@@ -16,9 +16,11 @@ import {
   isNotePath,
   loadGithubAuth,
   parseGithubRemote,
+  recordDisplacedNotes,
   ReflectError,
   subscribeFileChanges,
   type ChangedFile,
+  type DisplacedFile,
   type GithubRepoRef,
   type GraphInfo,
   type SyncEngine,
@@ -26,6 +28,7 @@ import {
   type Unlisten,
 } from '@reflect/core'
 import { setBackupFlusher } from '@/lib/backup-flush.ts'
+import { displacedNotesMessage } from '@/lib/displaced-notes.ts'
 import { invalidateGithubAuth } from '@/lib/github-auth-state.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { isNativeShell } from '@/lib/platform.ts'
@@ -153,6 +156,17 @@ export function createBackupController(options: BackupControllerOptions): Backup
       dispose()
     }
     setBackupFlusher(null)
+  }
+
+  /**
+   * A pull moved this device's files aside rather than overwrite them. The
+   * engine calls this before the same pull's changed files reach the index,
+   * so move healing already knows the pairs (both paths index as ordinary
+   * files, never as a move); open editors follow through `note:displaced`.
+   */
+  function onDisplaced(displaced: DisplacedFile[]): void {
+    recordDisplacedNotes(displaced, generation)
+    startOperation('Syncing').warn(displacedNotesMessage(displaced))
   }
 
   function onRemoteChanges(changes: ChangedFile[]): void | Promise<void> {
@@ -367,6 +381,7 @@ export function createBackupController(options: BackupControllerOptions): Backup
             `Not applied here (local-only folders stay as they are): ${paths.join(', ')}`,
           )
         },
+        onDisplaced,
         onRemoteChanges,
       })
       setState({ phase: 'connected', remoteUrl, repo, status: { state: 'idle' } })

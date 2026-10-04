@@ -1,4 +1,4 @@
-import { moveNoteIndexed } from '@reflect/core'
+import { moveNoteIndexed, readNote } from '@reflect/core'
 import { emitNoteMoved } from '@/lib/note-moves.ts'
 import { openSession, retargetOpenDocument } from './open-documents.ts'
 
@@ -62,5 +62,40 @@ export function followHealedMove(from: string, to: string): void {
     owner.retarget(to)
     retargetOpenDocument(from, to, owner)
   }
+  emitNoteMoved(from, to)
+}
+
+/**
+ * Follow a pull's displaced note within its issuing graph session. The read
+ * is generation-pinned; a graph switch or changed owner discards its result.
+ * Only sessions that follow their moved bytes are re-keyed and announced.
+ */
+export async function followDisplacedNote(
+  from: string,
+  to: string,
+  keptOut: boolean,
+  generation: number,
+  isCurrent: () => boolean,
+): Promise<void> {
+  if (!isCurrent()) {
+    return
+  }
+  const owner = openSession(from)
+  if (owner === null) {
+    return
+  }
+  let incomingAtFrom: string | null
+  try {
+    incomingAtFrom = await readNote(from, generation)
+  } catch {
+    incomingAtFrom = null
+  }
+  if (!isCurrent() || openSession(from) !== owner || owner.path !== from) {
+    return // closed, moved, or followed elsewhere while the read was out
+  }
+  if (!owner.followDisplacement(to, incomingAtFrom, keptOut)) {
+    return
+  }
+  retargetOpenDocument(from, to, owner)
   emitNoteMoved(from, to)
 }

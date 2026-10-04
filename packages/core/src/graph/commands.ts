@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { echoLocalWrite } from '../indexing/local-write-echo.ts'
+import { setDisplacedNotesGeneration } from '../indexing/note-displaced.ts'
 import { getBridge, type Unlisten } from '../ipc/bridge.ts'
 import { call } from '../ipc/invoke.ts'
 import { setLocalOnlyFolders } from './local-only.ts'
@@ -25,8 +26,8 @@ import {
 /** Commands that return `()` from Rust serialize as `null` over IPC. */
 const voidSchema = z.null()
 
-/** The graph session whose local-only folders the predicate holds. */
-let localOnlyGeneration = -Infinity
+/** The graph session whose local-only folders and displacement records this window holds. */
+let adoptedGraphGeneration = -Infinity
 
 /**
  * Record a graph session's local-only folders as this window's (see
@@ -35,12 +36,13 @@ let localOnlyGeneration = -Infinity
  * predicate is the UI's and a first gate; every path off this machine is
  * also refused by Rust against the graph that serves the bytes.
  */
-function adoptLocalOnlyFolders(info: GraphInfo): void {
-  if (info.generation < localOnlyGeneration) {
+function adoptGraphSession(info: GraphInfo): void {
+  if (info.generation < adoptedGraphGeneration) {
     return
   }
-  localOnlyGeneration = info.generation
+  adoptedGraphGeneration = info.generation
   setLocalOnlyFolders(info.localOnlyFolders)
+  setDisplacedNotesGeneration(info.generation)
 }
 
 /**
@@ -50,7 +52,7 @@ function adoptLocalOnlyFolders(info: GraphInfo): void {
  */
 export async function openGraph(path: string): Promise<GraphInfo> {
   const info = await call('graph_open', { path }, graphInfoSchema)
-  adoptLocalOnlyFolders(info)
+  adoptGraphSession(info)
   return info
 }
 
@@ -71,7 +73,7 @@ export async function openNoteWindow(deepLink: string): Promise<void> {
  */
 export async function windowBootstrap(): Promise<WindowBootstrap> {
   const boot = await call('window_bootstrap', {}, windowBootstrapSchema)
-  adoptLocalOnlyFolders(boot.graph)
+  adoptGraphSession(boot.graph)
   return boot
 }
 
@@ -88,7 +90,7 @@ export async function closeNoteWindows(): Promise<void> {
 /** Create a new graph at `path` and open it (see {@link openGraph}). */
 export async function createGraph(path: string): Promise<GraphInfo> {
   const info = await call('graph_create', { path }, graphInfoSchema)
-  adoptLocalOnlyFolders(info)
+  adoptGraphSession(info)
   return info
 }
 

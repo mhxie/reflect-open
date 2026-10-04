@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDocumentBinding, type BindFactories } from './document-binding.ts'
-import type { NoteSession } from './note-session.ts'
+import { createNoteSession, type NoteSession } from './note-session.ts'
 import { openSession } from './open-documents.ts'
 import type { RenameCoordinator } from './rename-coordinator.ts'
 
@@ -23,6 +23,7 @@ function fakeSession(path: string) {
     retarget: (to: string) => {
       current = to
     },
+    followDisplacement: () => false,
     load: () => {},
     editorChanged: () => {},
     externalChanged: () => {},
@@ -140,5 +141,46 @@ describe('createDocumentBinding', () => {
     expect(dispose).toHaveBeenCalled()
     await microtasks()
     expect(settle).toHaveBeenCalledTimes(1)
+  })
+
+  it('a displaced session handed off flushes to the copy, never to the old path', async () => {
+    const from = 'daily/2026-10-04.md'
+    const to = 'daily/2026-10-04 (this device).md'
+    const files = new Map<string, string>([[from, '# Today\n']])
+    const writes: string[] = []
+    const session = createNoteSession({
+      path: from,
+      io: {
+        read: async (path) => files.get(path) ?? '',
+        write: async (path, contents, expected) => {
+          if (expected !== (files.get(path) ?? null)) {
+            throw { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+          }
+          writes.push(path)
+          files.set(path, contents)
+        },
+      },
+      classify: () => 'exact',
+      onSnapshot: () => {},
+      applyContent: () => {},
+      saveDebounceMs: 60_000,
+    })
+    const binding = createDocumentBinding()
+    binding.bind(from, factories(session, null))
+    session.load()
+    await microtasks()
+    session.editorChanged('# Today\n\nunsaved\n')
+
+    // The pull: this device's bytes move to the copy, the phone's take `from`.
+    files.set(to, files.get(from) ?? '')
+    files.set(from, '# From the phone\n')
+    expect(session.followDisplacement(to, '# From the phone\n', false)).toBe(true)
+    binding.unbind(from) // the pane unmounts before any adopting bind
+    await microtasks()
+    await microtasks()
+
+    expect(writes).toEqual([to])
+    expect(files.get(to)).toBe('# Today\n\nunsaved\n')
+    expect(files.get(from)).toBe('# From the phone\n')
   })
 })

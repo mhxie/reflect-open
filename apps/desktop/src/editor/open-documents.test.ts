@@ -11,6 +11,7 @@ function fakeSession(path: string, log: string[]): NoteSession {
   return {
     path,
     retarget: () => {},
+    followDisplacement: () => false,
     load: () => {},
     editorChanged: () => {},
     externalChanged: () => {

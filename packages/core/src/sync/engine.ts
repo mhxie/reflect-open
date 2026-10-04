@@ -5,6 +5,8 @@ import {
   gitMergeRemote,
   gitPush,
   type ChangedFile,
+  type CommitOutcome,
+  type DisplacedFile,
   type SkippedFile,
 } from './commands.ts'
 
@@ -21,6 +23,11 @@ import {
  *   and nothing ahead and ends without touching the network.
  * - **Single flight.** One cycle at a time; work requested mid-cycle runs as
  *   one follow-up afterwards, keeping the strongest mode requested.
+ * - **Commit before every merge.** Saves made while a fetch was on the
+ *   network are committed before the merge runs, so a pull meets as few
+ *   uncommitted bytes as possible. One that still races the commit defers
+ *   the pull (Rust writes nothing), and the cycle commits and pulls again,
+ *   a bounded number of times.
  * - **Stop is immediate.** `stop()` aborts the engine's signal: no further
  *   status emissions, and an in-flight cycle unwinds at its next step
  *   boundary (the one git command already issued completes; nothing further
@@ -77,6 +84,14 @@ export interface SyncEngineOptions {
    */
   onLocalOnlyChangesSkipped?: (paths: string[]) => void
   /**
+   * Surfaced when a pull moved this device's uncommitted entries out of the
+   * paths it wrote (each to `name (this device).ext`). Invoked synchronously
+   * at the merge boundary, before {@link SyncEngineOptions.onRemoteChanges}
+   * hears about the same pull, so the owner can record the pairs before the
+   * changed files are indexed.
+   */
+  onDisplaced?: (displaced: DisplacedFile[]) => void
+  /**
    * Files a pull's merge changed on disk. The caller reindexes them directly:
    * pull-applied writes must reach the index even when the file watcher isn't
    * up yet (the launch pull can race the watcher start). Invoked synchronously
@@ -129,8 +144,26 @@ const DEFAULT_MAX_WAIT_MS = 5 * 60_000
  */
 const MAX_PUSH_ATTEMPTS = 3
 
+/**
+ * Deferred pulls a cycle retries. A pull defers when a note changed after the
+ * cycle's commit (Rust then writes nothing); each retry commits and pulls
+ * again. A note that keeps changing faster than that surfaces as an error
+ * and the next cycle tries again.
+ */
+const MAX_DEFERRED_RETRIES = 2
+
 /** A push the remote refused for a non-divergence reason (e.g. push protection). */
 class PushRejectedError extends Error {}
+
+/** What one cycle has done so far, shared by its commits and merges. */
+interface CyclePass {
+  /** Some commit in this cycle recorded changes (so a push is due). */
+  committed: boolean
+  /** Deferred pulls retried so far. */
+  deferrals: number
+  /** Paths the size guardrail withheld that were already reported. */
+  readonly reportedSkips: Set<string>
+}
 
 /** Internal control flow: the owner suspended cycles while one command was in flight. */
 class CycleSuppressedError extends Error {}
@@ -300,10 +333,8 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     remoteChanges: (changes: ChangedFile[]) => void,
   ): Promise<void> {
     const token = options.localOnly === true ? null : await step(options.getToken())
-    const commit = await step(gitCommitAll('Update notes', options.generation))
-    if (commit.skippedLargeFiles.length > 0) {
-      options.onLargeFilesSkipped?.(commit.skippedLargeFiles)
-    }
+    const pass: CyclePass = { committed: false, deferrals: 0, reportedSkips: new Set() }
+    const commit = await commitAll(pass)
     if (options.localOnly === true) {
       return // the commit is the whole cycle — the repo has no remote
     }
@@ -318,9 +349,9 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
     } else {
       // Launch/focus: pick up other devices' changes even with nothing to push.
       const delta = await step(gitFetch(token, options.generation))
-      const merged = await merge(remoteChanges)
-      const localOnly = commit.committed || delta.ahead > 0
-      if (!localOnly && (merged.kind === 'upToDate' || merged.kind === 'fastForward')) {
+      const merged = await merge(remoteChanges, pass)
+      const ownChanges = pass.committed || delta.ahead > 0
+      if (!ownChanges && (merged.kind === 'upToDate' || merged.kind === 'fastForward')) {
         return // pulled cleanly and have nothing of our own — no push needed
       }
     }
@@ -335,25 +366,63 @@ export function createSyncEngine(options: SyncEngineOptions): SyncEngine {
       // The normal two-device race: another device pushed first. Converge and
       // retry — a conflicted merge still commits (markers in the note).
       await step(gitFetch(token, options.generation))
-      await merge(remoteChanges)
+      await merge(remoteChanges, pass)
     }
     throw new PushRejectedError(
       'the backup repo kept changing while syncing; will retry on the next edit',
     )
   }
 
-  /** Merge fetched changes and start any changed-file notification. */
-  async function merge(remoteChanges: (changes: ChangedFile[]) => void): Promise<{ kind: string }> {
-    return await step(gitMergeRemote(options.generation), (outcome) => {
-      // The command may already have rewritten files before suspension. Fan
-      // those changes out before the boundary gate stops subsequent Git work.
-      if (outcome.changedFiles.length > 0) {
-        remoteChanges(outcome.changedFiles)
+  /**
+   * Commit everything pending. The size guardrail reports each withheld file
+   * once per cycle, however many commits the cycle makes.
+   */
+  async function commitAll(pass: CyclePass): Promise<CommitOutcome> {
+    const commit = await step(gitCommitAll('Update notes', options.generation))
+    pass.committed ||= commit.committed
+    const fresh = commit.skippedLargeFiles.filter((file) => !pass.reportedSkips.has(file.path))
+    if (fresh.length > 0) {
+      for (const file of fresh) {
+        pass.reportedSkips.add(file.path)
       }
-      if (outcome.frozenPaths.length > 0) {
-        options.onLocalOnlyChangesSkipped?.(outcome.frozenPaths)
+      options.onLargeFilesSkipped?.(fresh)
+    }
+    return commit
+  }
+
+  /**
+   * Commit, then merge fetched changes and start any notification. A pull a
+   * racing save deferred wrote nothing: commit and merge again, at most
+   * {@link MAX_DEFERRED_RETRIES} times per cycle.
+   */
+  async function merge(
+    remoteChanges: (changes: ChangedFile[]) => void,
+    pass: CyclePass,
+  ): Promise<{ kind: string }> {
+    for (;;) {
+      await commitAll(pass)
+      const merged = await step(gitMergeRemote(options.generation), (outcome) => {
+        // The command may already have rewritten files before suspension.
+        // Fan those changes out before the boundary gate stops subsequent Git
+        // work, the displaced pairs first.
+        if (outcome.displaced.length > 0) {
+          options.onDisplaced?.(outcome.displaced)
+        }
+        if (outcome.changedFiles.length > 0) {
+          remoteChanges(outcome.changedFiles)
+        }
+        if (outcome.frozenPaths.length > 0) {
+          options.onLocalOnlyChangesSkipped?.(outcome.frozenPaths)
+        }
+      }) // upToDate is a no-op
+      if (merged.kind !== 'deferred') {
+        return merged
       }
-    }) // upToDate is a no-op
+      if (pass.deferrals >= MAX_DEFERRED_RETRIES) {
+        throw new Error('a note kept changing while syncing; will retry on the next sync')
+      }
+      pass.deferrals += 1
+    }
   }
 
   function syncNow(): Promise<void> {

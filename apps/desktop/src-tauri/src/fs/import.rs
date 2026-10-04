@@ -350,6 +350,9 @@ pub(super) fn finalize_import(
         if is_note_markdown(&entry.relative) {
             continue;
         }
+        // Planned and written under the note write guard, like every other
+        // write into the graph: a Git pull never lands between the two.
+        let _writing = super::note_write_guard();
         match plan_other_entry(root, entry, &claimed)? {
             EntryPlan::SkipIdentical => skipped_files += 1,
             EntryPlan::Write { relative, renamed } => {
@@ -393,6 +396,7 @@ pub(super) fn finalize_import(
         if !is_note_markdown(&entry.relative) {
             continue;
         }
+        let _writing = super::note_write_guard();
         match plan_note_entry(root, entry, &mut names, &claimed)? {
             NotePlan::SkipIdentical => skipped_files += 1,
             NotePlan::Write { relative, renamed } => {

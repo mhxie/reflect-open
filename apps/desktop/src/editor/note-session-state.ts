@@ -2,6 +2,7 @@ import {
   appendBlock,
   detectConflictMarkers,
   errorMessage,
+  frontmatterPrivacy,
   isAppError,
   upsertFrontmatter,
 } from '@reflect/core'
@@ -350,6 +351,43 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     void reconcileFromDisk()
   }
 
+  /** The live document's frontmatter locks it (or can't be read): fail closed. */
+  function livePrivate(): boolean {
+    return status === 'ready' && frontmatterPrivacy(header + buffer).kind !== 'public'
+  }
+
+  function followDisplacement(
+    to: string,
+    incomingAtFrom: string | null,
+    keptOut: boolean,
+  ): boolean {
+    if (disposed) {
+      return false
+    }
+    if (!keptOut && !dirty && conflict === null && !livePrivate()) {
+      // A clean, public note: the other device's note now holds the path,
+      // and this document adopts it like any external change.
+      externalChanged()
+      return false
+    }
+    if (conflict !== null && (incomingAtFrom === null || conflict === incomingAtFrom)) {
+      // The parked "theirs" is the other device's note, which keeps the old
+      // path: it is no longer this document's conflict. When the old path
+      // couldn't be read there is no telling, so the conflict is re-derived
+      // from the moved bytes below; kept, a stale one would make Keep mine
+      // write against bytes the copy never held.
+      conflict = null
+    }
+    path = to
+    emit()
+    externalChanged()
+    if (dirty && conflict === null) {
+      // Saves resume at the new path, checked against the moved bytes.
+      scheduleSave()
+    }
+    return true
+  }
+
   function keepMine(): void {
     if (conflict !== null) {
       disk = conflict
@@ -524,6 +562,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     retarget: (to: string) => {
       path = to
     },
+    followDisplacement,
     load,
     editorChanged,
     externalChanged,

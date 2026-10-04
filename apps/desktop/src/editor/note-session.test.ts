@@ -1073,3 +1073,157 @@ describe('frontmatter separator line', () => {
     expect(writes.at(-1)?.contents).toBe('---\nid: x\n---\n\nhello')
   })
 })
+
+describe('followDisplacement', () => {
+  const FROM = 'daily/2026-10-04.md'
+  const TO = 'daily/2026-10-04 (this device).md'
+  const INCOMING = '# From the phone\n'
+
+  /** A session on FROM over a two-path disk where every write is checked. */
+  function displacementHarness(initial: string) {
+    const files = new Map<string, string>([[FROM, initial]])
+    const writes: Array<{ path: string; contents: string; expected: string | null }> = []
+    const snapshots: NoteSessionSnapshot[] = []
+    const applied: string[] = []
+    const session = createNoteSession({
+      path: FROM,
+      io: {
+        read: async (path) => {
+          const contents = files.get(path)
+          if (contents === undefined) {
+            throw { kind: 'notFound', message: 'missing' }
+          }
+          return contents
+        },
+        write: async (path, contents, expected) => {
+          if (expected !== (files.get(path) ?? null)) {
+            throw { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+          }
+          writes.push({ path, contents, expected })
+          files.set(path, contents)
+        },
+      },
+      classify: () => 'exact',
+      onSnapshot: (snapshot) => {
+        snapshots.push(snapshot)
+      },
+      applyContent: (markdown) => {
+        applied.push(markdown)
+      },
+      saveDebounceMs: 10,
+    })
+    /** What the pull does: the bytes at FROM move to TO; the phone's take FROM. */
+    function pull(): void {
+      files.set(TO, files.get(FROM) ?? '')
+      files.set(FROM, INCOMING)
+    }
+    return { files, writes, snapshots, applied, session, pull }
+  }
+
+  it('follows a dirty session with a parked conflict; keep mine writes only the copy', async () => {
+    const h = displacementHarness('# Today\n')
+    h.session.load()
+    await settled()
+    h.session.editorChanged('# Today\n\nmine\n')
+    h.files.set(FROM, '# Today\n\nfrom another editor\n')
+    h.session.externalChanged()
+    await settled()
+    expect(h.snapshots.at(-1)?.conflict).toBe('# Today\n\nfrom another editor\n')
+
+    h.pull()
+    expect(h.session.followDisplacement(TO, INCOMING, false)).toBe(true)
+    await settled()
+    expect(h.session.path).toBe(TO)
+    expect(h.snapshots.at(-1)?.conflict).toBe('# Today\n\nfrom another editor\n')
+
+    h.session.keepMine()
+    await settled()
+    expect(h.writes).toEqual([
+      { path: TO, contents: '# Today\n\nmine\n', expected: '# Today\n\nfrom another editor\n' },
+    ])
+    expect(h.files.get(FROM)).toBe(INCOMING)
+  })
+
+  it('drops a parked conflict that is the incoming note, then saves to the copy', async () => {
+    const h = displacementHarness('# Today\n')
+    h.session.load()
+    await settled()
+    h.session.editorChanged('# Today\n\nmine\n')
+    h.pull()
+    // The pull's file event reached the editor first: it parked the phone's note.
+    h.session.externalChanged()
+    await settled()
+    expect(h.snapshots.at(-1)?.conflict).toBe(INCOMING)
+
+    expect(h.session.followDisplacement(TO, INCOMING, false)).toBe(true)
+    await settled()
+
+    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.writes).toEqual([{ path: TO, contents: '# Today\n\nmine\n', expected: '# Today\n' }])
+    expect(h.files.get(FROM)).toBe(INCOMING)
+  })
+
+  it('re-derives a parked conflict from the copy when the old path could not be read', async () => {
+    const h = displacementHarness('# Today\n')
+    h.session.load()
+    await settled()
+    h.session.editorChanged('# Today\n\nmine\n')
+    h.pull()
+    h.session.externalChanged()
+    await settled()
+    expect(h.snapshots.at(-1)?.conflict).toBe(INCOMING)
+
+    // The follow-up read of FROM failed: whether the parked note is the
+    // incoming one is unknown, so the copy's bytes decide.
+    expect(h.session.followDisplacement(TO, null, false)).toBe(true)
+    await settled()
+
+    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.writes).toEqual([{ path: TO, contents: '# Today\n\nmine\n', expected: '# Today\n' }])
+    expect(h.files.get(FROM)).toBe(INCOMING)
+  })
+
+  it('follows a clean session when the moved note was kept out', async () => {
+    const h = displacementHarness('# Today\n')
+    h.session.load()
+    await settled()
+    h.pull()
+
+    expect(h.session.followDisplacement(TO, INCOMING, true)).toBe(true)
+    await settled()
+
+    expect(h.session.path).toBe(TO)
+    expect(h.applied).toEqual([])
+    expect(h.writes).toEqual([])
+  })
+
+  it('follows a clean session whose live header is private', async () => {
+    const locked = '---\nprivate: true\n---\n\n# Today\n'
+    const h = displacementHarness(locked)
+    h.session.load()
+    await settled()
+    h.pull()
+
+    expect(h.session.followDisplacement(TO, INCOMING, false)).toBe(true)
+    await settled()
+
+    expect(h.session.path).toBe(TO)
+    expect(h.session.content()).toBe(locked)
+    expect(h.writes).toEqual([])
+  })
+
+  it('keeps a clean public session where it is, adopting the incoming note', async () => {
+    const h = displacementHarness('# Today\n')
+    h.session.load()
+    await settled()
+    h.pull()
+
+    expect(h.session.followDisplacement(TO, INCOMING, false)).toBe(false)
+    await settled()
+
+    expect(h.session.path).toBe(FROM)
+    expect(h.applied.at(-1)).toBe(INCOMING)
+    expect(h.session.content()).toBe(INCOMING)
+    expect(h.writes).toEqual([])
+  })
+})

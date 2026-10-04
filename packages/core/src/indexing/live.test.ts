@@ -337,10 +337,13 @@ describe('applyIndexChanges move healing (Plan 17)', () => {
   const CONTENT = '---\nid: 01abcdefghjkmnpqrstvwxyz00\n---\n# Meeting Notes\n'
 
   /** Bridge where OLD is indexed (with the id) and NEW exists on disk. */
-  function renameBridge(options?: { rowId?: string | null }) {
+  function renameBridge(options?: { rowId?: string | null; oldPathExists?: boolean }) {
     const calls: Array<[string, Record<string, unknown>]> = []
     fakeBridge(async (command, args) => {
       calls.push([command, args])
+      if (command === 'note_exists') {
+        return args['path'] === OLD ? (options?.oldPathExists ?? false) : true
+      }
       if (command === 'note_read') {
         if (args['path'] === NEW) {
           return CONTENT
@@ -412,6 +415,30 @@ describe('applyIndexChanges move healing (Plan 17)', () => {
     )
 
     expect(moves).toEqual([[OLD, NEW]])
+  })
+
+  it('never pairs when `from` still exists: a pull moved this device’s note aside', async () => {
+    // The pull wrote the other device's note at OLD and moved this device's
+    // (same id) to NEW. Healing would retarget an open editor onto the copy.
+    const calls = renameBridge({ oldPathExists: true })
+    const moves: Array<[string, string]> = []
+
+    await applyIndexChanges(
+      [
+        { path: OLD, kind: 'remove' },
+        { path: NEW, kind: 'upsert' },
+      ],
+      7,
+      undefined,
+      (from, to) => {
+        moves.push([from, to])
+      },
+    )
+
+    const commands = calls.map(([command]) => command)
+    expect(commands).not.toContain('index_move')
+    expect(moves).toEqual([])
+    expect(commands).toContain('index_apply_batch')
   })
 
   it('falls back to delete+create when the ids do not match', async () => {

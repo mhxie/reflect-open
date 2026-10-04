@@ -9,10 +9,41 @@ use git2::{Repository, RepositoryInitOptions};
 use tempfile::{tempdir, TempDir};
 
 use super::commit::commit_all;
+use super::displace::DisplacedFile;
 use super::max_file_size::DEFAULT_MAX_FILE_BYTES as MAX_FILE_BYTES;
-use super::merge::{merge_remote, MergeKind};
+use super::merge::{MergeKind, MergeOutcome, PullPolicy};
 use super::remote::{fetch, push};
 use super::{setup, status};
+use crate::error::AppResult;
+use reflect_graph_paths::LocalOnlyFolders;
+
+/// Pull with the default size limit, the way most tests need it; the
+/// entries left displaced are in the outcome.
+fn merge_remote(
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+    accepted_roots: &[git2::Oid],
+) -> AppResult<MergeOutcome> {
+    pull(root, local_only, accepted_roots, MAX_FILE_BYTES).0
+}
+
+/// Pull with an explicit size limit, returning the result and every entry
+/// the pull left displaced, which a failed pull reports too.
+fn pull(
+    root: &Path,
+    local_only: Option<&LocalOnlyFolders>,
+    accepted_roots: &[git2::Oid],
+    max_file_bytes: u64,
+) -> (AppResult<MergeOutcome>, Vec<DisplacedFile>) {
+    let policy = PullPolicy {
+        local_only,
+        accepted_roots,
+        max_file_bytes,
+    };
+    let mut displaced = Vec::new();
+    let outcome = super::merge::merge_remote(root, &policy, &mut displaced);
+    (outcome, displaced)
+}
 
 /// Scaffold a minimal graph layout (what `fs::bootstrap` produces).
 fn scaffold_graph(root: &Path) {
@@ -1225,19 +1256,44 @@ fn a_fast_forward_never_touches_a_migrated_local_only_folder() {
     }
 }
 
+/// Control: without the configuration a fast-forward still writes only the
+/// paths the other device changed. (The forced checkout of HEAD it replaced
+/// "restored" the tracked file here, through the link or by replacing it.)
+/// When the other device does change a path behind the link, the link is
+/// moved aside, never written through.
 #[cfg(unix)]
 #[test]
-fn without_the_configuration_a_fast_forward_writes_through_the_link() {
-    // Control: the stock forced checkout "restores" the tracked file,
-    // through the link or by replacing it.
+fn without_the_configuration_a_fast_forward_writes_only_what_changed() {
     for ignorecase in [true, false] {
         let migrated = migrated(ignorecase);
+        let root_a = &migrated.fixture.graph_a;
         write(&migrated.root_b, "notes/a.md", "# A\n\nedited on b\n");
         commit_all(&migrated.root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
         push(&migrated.root_b, None, &[]).unwrap();
-        fetch(&migrated.fixture.graph_a, None).unwrap();
-        let _ = merge_remote(&migrated.fixture.graph_a, None, &[]);
-        assert!(!raw_edit_survived(&migrated), "ignorecase={ignorecase}");
+        fetch(root_a, None).unwrap();
+        let merged = merge_remote(root_a, None, &[]).unwrap();
+        assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+        assert_eq!(read(root_a, "notes/a.md"), "# A\n\nedited on b\n");
+        assert!(raw_edit_survived(&migrated), "ignorecase={ignorecase}");
+
+        write(
+            &migrated.root_b,
+            "finance/secure/x.md",
+            "# X\n\nedited on b\n",
+        );
+        commit_all(&migrated.root_b, "b edit", MAX_FILE_BYTES, None).unwrap();
+        push(&migrated.root_b, None, &[]).unwrap();
+        fetch(root_a, None).unwrap();
+        let merged = merge_remote(root_a, None, &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(migrated.raw.join("finance/secure/x.md")).unwrap(),
+            LOCAL_EDIT,
+            "ignorecase={ignorecase}"
+        );
+        assert!(is_symlink(&root_a.join("finance/secure (this device)")));
+        assert_eq!(read(root_a, "finance/secure/x.md"), "# X\n\nedited on b\n");
+        assert_eq!(merged.displaced.len(), 1, "{merged:?}");
+        assert_eq!(merged.displaced[0].from, "finance/secure");
     }
 }
 
@@ -1425,7 +1481,11 @@ fn the_git_commands_take_local_only_folders_from_the_open_graph() {
             inner.root = Some(fixture.graph_a.clone());
             inner.set_local_only(configured.then(|| folders.clone()));
         }
-        let merged = tauri::async_runtime::block_on(super::git_merge_remote(1, app.state()));
+        let merged = tauri::async_runtime::block_on(super::git_merge_remote(
+            1,
+            app.handle().clone(),
+            app.state(),
+        ));
         let committed = tauri::async_runtime::block_on(super::git_commit_all(
             "Update notes".to_string(),
             1,
@@ -1479,7 +1539,11 @@ fn sync_refuses_while_the_local_only_configuration_is_unknown() {
             1,
             app.state(),
         ));
-        let merged = tauri::async_runtime::block_on(super::git_merge_remote(1, app.state()));
+        let merged = tauri::async_runtime::block_on(super::git_merge_remote(
+            1,
+            app.handle().clone(),
+            app.state(),
+        ));
         if unknown {
             let message = format!("{:?}", committed.expect_err("commit refused"));
             assert!(message.contains("Sync is paused"), "{message}");
@@ -2442,7 +2506,11 @@ fn the_git_commands_take_accepted_roots_from_the_open_graph() {
         };
 
         open(&root_a, 1);
-        let merged = tauri::async_runtime::block_on(super::git_merge_remote(1, app.state()));
+        let merged = tauri::async_runtime::block_on(super::git_merge_remote(
+            1,
+            app.handle().clone(),
+            app.state(),
+        ));
         open(&other.graph_a, 2);
         let pushed = tauri::async_runtime::block_on(super::git_push(None, 2, app.state()))
             .expect("a push outcome");
@@ -2458,3 +2526,6 @@ fn the_git_commands_take_accepted_roots_from_the_open_graph() {
         }
     }
 }
+
+/// Pull safety: displacement, deferral, the write guard, and rollback.
+mod displacement;

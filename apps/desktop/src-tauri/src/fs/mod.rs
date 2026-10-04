@@ -8,6 +8,13 @@
 
 pub mod asset_protocol;
 pub mod assets;
+// Git sync's displacement walks and moves through it today; later waves
+// route local-only edits through it too (note_write, note_create,
+// note_delete, move_note_file), and Git's commit reads and the on-device
+// note read build on it.
+#[cfg(unix)]
+#[cfg_attr(not(test), allow(dead_code))]
+mod beneath;
 mod image_thumbnail;
 mod import;
 mod import_assets;
@@ -55,6 +62,16 @@ pub use self::import::ImportCancel;
 /// machinery (shadow bases, resolution writes) so every graph write follows
 /// the same crash-safe, sync-clean path.
 pub(crate) use self::io::atomic_write_bytes;
+
+/// The no-follow directory walk, shared with Git sync's pull: it moves this
+/// device's uncommitted entries out of the paths it writes (`git::displace`)
+/// and writes conflict copies without clobbering anything.
+#[cfg(unix)]
+pub(crate) use self::beneath::{
+    entry_beneath, names_beneath, open_dir_beneath, persist_beneath, read_beneath,
+    read_link_beneath, remove_beneath, rename_beneath, subdir_beneath, BeneathDir, BeneathError,
+    EntryKind, EntryStat, Persist, Persisted, Renamed,
+};
 
 /// "Occupied" probe (real file OR eviction placeholder), shared with the
 /// iCloud sweep's collision folding — an evicted canonical note must not be
@@ -728,6 +745,28 @@ pub async fn note_read_local(
 
 static NOTE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
+/// Serialize a write into the graph's working tree with Git sync's pull.
+/// Note writes and creates, asset writes, note moves, and the V1 import's
+/// writes take it; a pull holds it from the scan that moves this
+/// device's uncommitted entries out of its way until the working tree is
+/// final (`git::merge`), so nothing lands in between to be overwritten. A
+/// pull can hold it for seconds, so the commands that take it run on the
+/// blocking pool, never on the main thread. A panic while it was held
+/// poisons nothing: the guard protects ordering, not data.
+pub(crate) fn note_write_guard() -> NoteWriteGuard {
+    NoteWriteGuard {
+        _held: NOTE_WRITE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    }
+}
+
+/// The note write guard, held ([`note_write_guard`]); dropping it lets the
+/// next writer or pull in. A function that must run under it takes one.
+pub(crate) struct NoteWriteGuard {
+    _held: std::sync::MutexGuard<'static, ()>,
+}
+
 /// Atomically write a note's markdown by graph-relative path. `generation` pins
 /// the write to the graph it was issued for (see `root_for_generation`).
 ///
@@ -744,14 +783,17 @@ static NOTE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 ///
 /// `expected_contents` is compared with the note as [`note_read`] returns it,
 /// with `\n` line endings. `contents` is written as given.
+///
+/// Runs on the blocking pool: the write waits on the note write guard,
+/// which a Git pull holds through its checkout.
 #[tauri::command]
-pub fn note_write(
+pub async fn note_write(
     path: String,
     contents: String,
     generation: u64,
     check_contents: Option<bool>,
     expected_contents: Option<String>,
-    state: State<GraphState>,
+    state: State<'_, GraphState>,
 ) -> AppResult<Option<u64>> {
     if check_contents != Some(true) {
         return Err(AppError::parse(
@@ -760,7 +802,11 @@ pub fn note_write(
     }
     let (root, local_only) = graph_for(&state, Some(generation))?;
     let target = resolve_write(&root, &path, local_only.as_deref())?;
-    let modified_ms = write_note_revision(&root, &target, &contents, expected_contents.as_deref())?;
+    let written = root.clone();
+    let modified_ms = crate::blocking::run_blocking(move || {
+        write_note_revision(&written, &target, &contents, expected_contents.as_deref())
+    })
+    .await?;
     invalidate_file_catalog(&state, &root);
     Ok(modified_ms)
 }
@@ -771,9 +817,7 @@ fn write_note_revision(
     contents: &str,
     expected: Option<&str>,
 ) -> AppResult<Option<u64>> {
-    let _guard = NOTE_WRITE_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = note_write_guard();
     // The graph root may legitimately sit behind a symlink (`/var`, a linked
     // `~/Dropbox`): canonicalize it once, police the rest.
     let rest = target
@@ -793,19 +837,23 @@ fn write_note_revision(
 /// Atomically create a note only when `path` is still free. Unlike
 /// [`note_write`], this is a no-clobber claim: a concurrent sync checkout or
 /// creator wins as `Collision`, with its file left byte-for-byte intact.
+/// Runs on the blocking pool, like [`note_write`].
 #[tauri::command]
-pub fn note_create(
+pub async fn note_create(
     path: String,
     contents: String,
     generation: u64,
-    state: State<GraphState>,
+    state: State<'_, GraphState>,
 ) -> AppResult<NoteCreateOutcome> {
     let (root, local_only) = graph_for(&state, Some(generation))?;
-    let _guard = NOTE_WRITE_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let target = resolve_write(&root, &path, local_only.as_deref())?;
-    match atomic_create(&root, &target, &contents)? {
+    let created = root.clone();
+    let outcome = crate::blocking::run_blocking(move || {
+        let _guard = note_write_guard();
+        let target = resolve_write(&created, &path, local_only.as_deref())?;
+        atomic_create(&created, &target, &contents)
+    })
+    .await?;
+    match outcome {
         AtomicCreateOutcome::Created(modified_ms) => {
             invalidate_file_catalog(&state, &root);
             Ok(NoteCreateOutcome::Created { modified_ms })
@@ -817,12 +865,13 @@ pub fn note_create(
 /// Atomically write a binary asset (pasted/dropped image) by graph-relative
 /// path. Contents arrive base64-encoded — Tauri IPC args are JSON, and pasted
 /// images are small enough that the ~33% encoding overhead is irrelevant.
+/// Runs on the blocking pool, like [`note_write`].
 #[tauri::command]
-pub fn asset_write(
+pub async fn asset_write(
     path: String,
     contents_base64: String,
     generation: u64,
-    state: State<GraphState>,
+    state: State<'_, GraphState>,
 ) -> AppResult<()> {
     use base64::Engine;
     let (root, local_only) = graph_for(&state, Some(generation))?;
@@ -830,7 +879,12 @@ pub fn asset_write(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(contents_base64.as_bytes())
         .map_err(|err| AppError::io(format!("invalid base64 asset payload: {err}")))?;
-    atomic_write_bytes(&root, &target, &bytes)?;
+    let written = root.clone();
+    crate::blocking::run_blocking(move || {
+        let _guard = note_write_guard();
+        atomic_write_bytes(&written, &target, &bytes)
+    })
+    .await?;
     invalidate_file_catalog(&state, &root);
     Ok(())
 }
@@ -1094,8 +1148,11 @@ pub fn note_exists(path: String, state: State<GraphState>) -> AppResult<bool> {
 /// (`db::write::move_note`): the collision probe raced something — nothing is
 /// deleted or overwritten, the caller compensates, and the rename simply
 /// reports failed. One rule, no adoption heuristics; the filename drifts
-/// until the next settled rename retries.
+/// until the next settled rename retries. Runs under the note write guard
+/// (`_writing`), so a pull never moves either end out from under it; the
+/// caller takes it before any other lock it holds across the move.
 pub(crate) fn move_note_file(
+    _writing: &NoteWriteGuard,
     root: &Path,
     from: &str,
     to: &str,
@@ -1611,6 +1668,7 @@ mod note_create_tests {
 mod move_tests {
     use super::{
         asset_file_url, ensure_readable_attachment_path, ensure_revealable_path, move_note_file,
+        note_write_guard,
     };
     use std::fs;
 
@@ -1624,7 +1682,14 @@ mod move_tests {
     fn renames_when_the_destination_is_free() {
         let root = graph();
         fs::write(root.path().join("notes/a.md"), "# A\n").unwrap();
-        move_note_file(root.path(), "notes/a.md", "notes/b.md", None).unwrap();
+        move_note_file(
+            &note_write_guard(),
+            root.path(),
+            "notes/a.md",
+            "notes/b.md",
+            None,
+        )
+        .unwrap();
         assert!(!root.path().join("notes/a.md").exists());
         assert_eq!(
             fs::read_to_string(root.path().join("notes/b.md")).unwrap(),
@@ -1639,7 +1704,14 @@ mod move_tests {
         let root = graph();
         fs::write(root.path().join("notes/a.md"), "# Mine\n").unwrap();
         fs::write(root.path().join("notes/b.md"), "# Theirs\n").unwrap();
-        assert!(move_note_file(root.path(), "notes/a.md", "notes/b.md", None).is_err());
+        assert!(move_note_file(
+            &note_write_guard(),
+            root.path(),
+            "notes/a.md",
+            "notes/b.md",
+            None
+        )
+        .is_err());
         assert_eq!(
             fs::read_to_string(root.path().join("notes/a.md")).unwrap(),
             "# Mine\n"
@@ -1658,7 +1730,14 @@ mod move_tests {
         let root = graph();
         fs::write(root.path().join("notes/a.md"), "# Mine\n").unwrap();
         fs::write(root.path().join("notes/.b.md.icloud"), "stub").unwrap();
-        assert!(move_note_file(root.path(), "notes/a.md", "notes/b.md", None).is_err());
+        assert!(move_note_file(
+            &note_write_guard(),
+            root.path(),
+            "notes/a.md",
+            "notes/b.md",
+            None
+        )
+        .is_err());
         assert!(root.path().join("notes/a.md").exists());
     }
 
@@ -1822,14 +1901,14 @@ mod note_write_command_tests {
         check_contents: Option<bool>,
         expected_contents: Option<&str>,
     ) -> AppResult<Option<u64>> {
-        note_write(
+        tauri::async_runtime::block_on(note_write(
             path.to_string(),
             "# Replaced".to_string(),
             1,
             check_contents,
             expected_contents.map(str::to_string),
             session.app.state(),
-        )
+        ))
     }
 
     #[test]
@@ -2034,22 +2113,37 @@ mod local_only_command_tests {
             let created = "people/\u{17f}ecure/new.md".to_string();
             // Checked against the file's real bytes, so only the path refuses.
             let visa = Some("# Visa".to_string());
+            assert!(tauri::async_runtime::block_on(note_write(
+                FOLDED.to_string(),
+                "x".into(),
+                1,
+                Some(true),
+                visa,
+                state()
+            ))
+            .is_err());
             assert!(
-                note_write(FOLDED.to_string(), "x".into(), 1, Some(true), visa, state()).is_err()
+                tauri::async_runtime::block_on(note_create(created, "x".into(), 1, state()))
+                    .is_err()
             );
-            assert!(note_create(created, "x".into(), 1, state()).is_err());
             assert!(note_delete(FOLDED.to_string(), 1, state()).is_err());
             let folders = LocalOnlyFolders::new(["secure"], None);
             assert!(move_note_file(
+                &note_write_guard(),
                 &session.root,
                 "people/plan.md",
                 "people/\u{17f}ecure/plan.md",
                 folders.as_ref(),
             )
             .is_err());
-            assert!(
-                move_note_file(&session.root, FOLDED, "people/visa.md", folders.as_ref()).is_err()
-            );
+            assert!(move_note_file(
+                &note_write_guard(),
+                &session.root,
+                FOLDED,
+                "people/visa.md",
+                folders.as_ref()
+            )
+            .is_err());
         }
         assert_eq!(
             fs::read_to_string(session.root.join("people/secure/visa.md")).unwrap(),

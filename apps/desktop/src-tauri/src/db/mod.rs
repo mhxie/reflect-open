@@ -375,6 +375,13 @@ pub struct NoteMoveRequest {
     from_address: write::MovedNoteAddress,
 }
 
+/// Stays a synchronous, main-thread command like the other index writes:
+/// the rename protocol relies on its order against the retargeted session's
+/// next save (`moveNoteCarryingSession`). It runs under the note write
+/// guard, which a Git pull holds through its checkout, so a rename issued
+/// mid-pull waits for the pull; the guard is taken before the index lock,
+/// so the index is never held meanwhile (lock order: the guard, then the
+/// index; a pull never takes the index lock).
 #[tauri::command]
 pub fn note_move_indexed<R: tauri::Runtime>(
     request: NoteMoveRequest,
@@ -391,6 +398,7 @@ pub fn note_move_indexed<R: tauri::Runtime>(
     crate::fs::resolve_write_in_graph(&root, &request.from, local_only.as_deref())?;
     crate::fs::resolve_write_in_graph(&root, &request.to, local_only.as_deref())?;
     {
+        let writing = crate::fs::note_write_guard();
         let mut state = lock_state(&index)?;
         let conn = state.conn.as_mut().ok_or_else(AppError::no_graph)?;
         let was_private = write::row_private(conn, &request.from)?;
@@ -401,9 +409,13 @@ pub fn note_move_indexed<R: tauri::Runtime>(
             &request.to_address,
             local_only.as_deref(),
         )?;
-        if let Err(err) =
-            crate::fs::move_note_file(&root, &request.from, &request.to, local_only.as_deref())
-        {
+        if let Err(err) = crate::fs::move_note_file(
+            &writing,
+            &root,
+            &request.from,
+            &request.to,
+            local_only.as_deref(),
+        ) {
             // Compensate: the disk refused, so the rows go back — with their
             // privacy flag, which the forward move may have set. Best-effort —
             // a failed compensation must surface the *original* error, and the

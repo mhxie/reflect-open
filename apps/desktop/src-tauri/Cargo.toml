@@ -87,6 +87,20 @@ url = "2.5.8"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # The watcher (desktop) and the Git merge's local-only check (every target).
 walkdir = "2.5.0"
+# A Git pull compares names the way APFS does: canonical decomposition, then
+# full Unicode case folding (`ß` is `ss` there, `ﬂ` is `fl`), so it never
+# misses a name the volume aliases (`git/displace.rs`). Both are already in
+# the lockfile.
+unicase = "2.9.0"
+unicode-normalization = "0.1.25"
+
+# Directory-fd IO that never follows a symlink (`src/fs/beneath.rs`): rustix
+# for the `*at` calls, libc for `O_NOFOLLOW_ANY`, getrandom for unguessable
+# staging and trash names. All three are already in the lockfile.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs"] }
+libc = "0.2.189"
+getrandom = "0.4.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 xattr = "1.6.1"

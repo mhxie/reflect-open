@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { subscribeOwnWrites } from '../indexing/local-write-echo.ts'
+import {
+  clearDisplacedNotes,
+  isRecentlyDisplaced,
+  recordDisplacedNotes,
+} from '../indexing/note-displaced.ts'
 import { setBridge } from '../ipc/bridge.ts'
 import { isLocalOnlyPath } from './local-only.ts'
 import {
@@ -71,6 +76,47 @@ describe('local-only folders follow the open graph', () => {
 
 afterEach(() => {
   setBridge(null)
+  clearDisplacedNotes()
+})
+
+describe('displacement records follow the file graph session', () => {
+  const pair = { from: 'notes/a.md', to: 'notes/a (this device).md' }
+
+  it('changes scope on open, create, and secondary-window bootstrap', async () => {
+    graphBridge({ graph_open: { generation: 30, localOnlyFolders: [] } })
+    await openGraph('/g')
+    recordDisplacedNotes([pair], 30)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
+
+    graphBridge({ graph_create: { generation: 31, localOnlyFolders: [] } })
+    await createGraph('/g')
+    recordDisplacedNotes([pair], 30)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(false)
+    recordDisplacedNotes([pair], 31)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
+
+    graphBridge({ window_bootstrap: { generation: 32, localOnlyFolders: [] } })
+    await windowBootstrap()
+    recordDisplacedNotes([pair], 31)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(false)
+    recordDisplacedNotes([pair], 32)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
+  })
+
+  it('cannot reactivate an older session when its open response arrives late', async () => {
+    graphBridge({ graph_open: { generation: 34, localOnlyFolders: [] } })
+    await openGraph('/g')
+    recordDisplacedNotes([pair], 34)
+    graphBridge({ graph_open: { generation: 33, localOnlyFolders: [] } })
+    await openGraph('/g')
+
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
+    clearDisplacedNotes()
+    recordDisplacedNotes([pair], 33)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(false)
+    recordDisplacedNotes([pair], 34)
+    expect(isRecentlyDisplaced(pair.from, pair.to)).toBe(true)
+  })
 })
 
 describe('graph commands', () => {

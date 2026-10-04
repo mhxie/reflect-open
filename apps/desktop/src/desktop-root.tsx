@@ -3,6 +3,7 @@ import { subscribeNoteMoved } from '@reflect/core'
 import { App } from '@/app.tsx'
 import { followHealedMove } from '@/editor/move-note.ts'
 import { AppErrorBoundary } from '@/components/app-error-boundary.tsx'
+import { NoteDisplacements } from '@/components/note-displacements.tsx'
 import { attachOperationToasts } from '@/components/operation-toasts.ts'
 import { Toaster } from '@/components/ui/toast.tsx'
 import { WindowDragRegion } from '@/components/window-drag-region.tsx'
@@ -65,6 +66,7 @@ export function DesktopRoot(): ReactElement {
     <AppErrorBoundary>
       <UpdateProvider>
         <GraphProvider>
+          <NoteDisplacements />
           <TooltipProvider>
             <SidebarWidthEffect />
             <WindowDragRegion />

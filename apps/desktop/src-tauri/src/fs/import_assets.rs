@@ -565,11 +565,14 @@ pub(super) fn same_file_bytes(existing: &Path, staged: &Path) -> AppResult<bool>
 /// Persist a staged download at its planned name. The plan already verified
 /// the name was free; `persist_noclobber` keeps a concurrent claim from
 /// silently clobbering — losing that race is a loud error, not a rename.
+/// Holds the note write guard, so it never lands mid-pull, where the pull's
+/// checkout could overwrite it.
 pub(super) fn persist_planned(
     fetched: FetchedAsset,
     assets_dir: &Path,
     name: &str,
 ) -> AppResult<()> {
+    let _guard = super::note_write_guard();
     std::fs::create_dir_all(assets_dir)?;
     fetched
         .file

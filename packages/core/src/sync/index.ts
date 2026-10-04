@@ -19,6 +19,7 @@ export {
   pushOutcomeSchema,
   skippedFileSchema,
   changedFileSchema,
+  displacedFileSchema,
   type GitStatus,
   type CommitOutcome,
   type RemoteDelta,
@@ -26,6 +27,7 @@ export {
   type PushOutcome,
   type SkippedFile,
   type ChangedFile,
+  type DisplacedFile,
 } from './commands.ts'
 export {
   GITHUB_APP_CLIENT_ID,

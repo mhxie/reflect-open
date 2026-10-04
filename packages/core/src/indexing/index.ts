@@ -28,6 +28,16 @@ export { cjkColumnText } from './cjk.ts'
 export { INDEX_WRITTEN_EVENT, subscribeIndexWritten } from './index-written.ts'
 export { NOTE_MOVED_EVENT, subscribeNoteMoved } from './note-moved.ts'
 export {
+  NOTE_DISPLACED_EVENT,
+  DISPLACED_RECORD_TTL_MS,
+  subscribeNoteDisplaced,
+  recordDisplacedNotes,
+  setDisplacedNotesGeneration,
+  isRecentlyDisplaced,
+  clearDisplacedNotes,
+  type NoteDisplacement,
+} from './note-displaced.ts'
+export {
   subscribeIndexChanges,
   applyIndexChanges,
   type ApplyErrorHandler,
