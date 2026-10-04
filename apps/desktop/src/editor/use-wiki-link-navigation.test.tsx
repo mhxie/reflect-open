@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import type { ReactNode } from 'react'
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { useWikiLinkNavigation } from './use-wiki-link-navigation.ts'
 
@@ -22,7 +23,9 @@ vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
 }))
 vi.mock('@/lib/operations.ts', () => ({ startOperation }))
 
-let lastHandler: ((options: { target: string; openInNewWindow: boolean }) => void) | null = null
+let lastHandler:
+  | ((options: { target: string; openInNewWindow: boolean; peek?: boolean }) => void)
+  | null = null
 let navigate: ReturnType<typeof useRouter>['navigate'] | null = null
 
 function Host({ generation }: { generation: number | null }): ReactNode {
@@ -65,7 +68,33 @@ beforeEach(() => {
   navigate = null
 })
 
+function PeekProbe(): ReactNode {
+  const target = usePeek()?.target ?? null
+  return <output data-testid="peek">{JSON.stringify(target)}</output>
+}
+
 describe('useWikiLinkNavigation', () => {
+  it('peeks the resolved note on request instead of navigating', async () => {
+    resolveOrCreateNoteWithTitle.mockResolvedValue({ kind: 'resolved', path: 'notes/target.md' })
+    const view = await render(
+      <RouterProvider>
+        <PeekProvider>
+          <Host generation={1} />
+          <RouteProbe />
+          <PeekProbe />
+        </PeekProvider>
+      </RouterProvider>,
+    )
+
+    lastHandler?.({ target: 'Target', openInNewWindow: false, peek: true })
+
+    await vi.waitFor(() =>
+      expect(view.getByTestId('peek').element().textContent).toContain('notes/target.md'),
+    )
+    expect(view.getByTestId('route').element().textContent).toBe('{"kind":"today"}')
+    await view.unmount()
+  })
+
   it('navigates to the resolved note', async () => {
     resolveOrCreateNoteWithTitle.mockResolvedValue({
       kind: 'resolved',

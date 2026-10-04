@@ -16,6 +16,12 @@ function isoDay(offsetDays: number): string {
   return `${year}-${month}-${day}`
 }
 
+/** Today's month and day a year ago, so the On this day section has an entry. */
+function isoYearAgo(): string {
+  const [year, rest] = [Number(isoDay(0).slice(0, 4)), isoDay(0).slice(4)]
+  return `${String(year - 1).padStart(4, '0')}${rest}`
+}
+
 /** Frontmatter block for a seeded note. Ids are fixed Crockford-base32 ULIDs. */
 function frontmatter(entries: Record<string, string>): string {
   const lines = Object.entries(entries).map(([key, value]) => `${key}: ${value}`)
@@ -50,6 +56,11 @@ export function seedGraphFiles(): Record<string, string> {
     [`daily/${isoDay(4)}.md`]: [
       `- Deep-work day on sync conflict handling`,
       `- Saved [Local-first software](https://www.inkandswitch.com/local-first/) #link`,
+      ``,
+    ].join('\n'),
+    [`daily/${isoYearAgo()}.md`]: [
+      `- Forked Reflect and sketched what the desktop app should become`,
+      `- Started a [[Reading List]] for the year`,
       ``,
     ].join('\n'),
     [`daily/${isoDay(7)}.md`]: [

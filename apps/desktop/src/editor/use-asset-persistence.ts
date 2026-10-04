@@ -104,7 +104,12 @@ export interface AssetPersistence {
  * `path` also scopes the error banner to the note being edited (a pane is
  * reused across note switches).
  */
-export function useAssetPersistence(generation: number | null, path: string): AssetPersistence {
+export function useAssetPersistence(
+  generation: number | null,
+  path: string,
+  /** Where an embedded PDF opens on double-click; the default app when absent. */
+  openPdf?: (path: string) => void,
+): AssetPersistence {
   const [saveError, setSaveError] = useState<AssetSaveError | null>(null)
   // Stamps the note session a save was started for. The pane outlives the
   // note (and graph session) it shows, so a save that finishes after a
@@ -175,9 +180,10 @@ export function useAssetPersistence(generation: number | null, path: string): As
       createPdfEmbedResolver({
         generation,
         notePath: path,
-        openAsset: (assetPath) => void openAsset(assetPath),
+        openAsset: (assetPath) =>
+          openPdf === undefined ? void openAsset(assetPath) : openPdf(assetPath),
       }),
-    [generation, path, openAsset],
+    [generation, path, openAsset, openPdf],
   )
 
   const saveFile = useCallback(

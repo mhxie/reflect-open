@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react'
 import type { OpenTask } from '@reflect/core'
-import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import { useDayTasks } from '@/lib/tasks/use-day-tasks.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { DayTaskRow } from './day-task-row.tsx'
 import { SidebarSection } from './sidebar-section.tsx'
 
@@ -42,7 +42,7 @@ function capRuns(runs: readonly TaskRun[], limit: number): TaskRun[] {
 export function DayTasksSection({ date }: DayTasksSectionProps): ReactElement | null {
   const today = useToday()
   const { navigate } = useRouter()
-  const navigateNoteLink = useNoteLinkNavigation(date)
+  const navigateNoteLink = usePeekNavigation(date)
   const { overdue, due } = useDayTasks(date, today)
   const total = overdue.length + due.length
   if (total === 0) {

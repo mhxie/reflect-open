@@ -17,6 +17,7 @@ import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
 import { ShortcutsProvider, useShortcuts } from '@/providers/shortcuts-provider.tsx'
 import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
 import { MOD_KEY, NON_MOD_KEY } from '@/test-utils/mod-key.ts'
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { useAppShortcuts } from './app-shortcuts.ts'
 import { RouterProvider, useRouter } from './router.tsx'
 
@@ -104,6 +105,7 @@ function shortcutsHook(client = new QueryClient()) {
         palette: usePalette(),
         shortcuts: useShortcuts(),
         sidebar: useSidebar(),
+        peek: usePeek(),
       }
     },
     {
@@ -115,7 +117,9 @@ function shortcutsHook(client = new QueryClient()) {
                 <NoteTemplatesProvider>
                   <HeadingPickerProvider>
                     <SidebarProvider>
-                      <FocusedDailyProvider>{children}</FocusedDailyProvider>
+                      <FocusedDailyProvider>
+                        <PeekProvider>{children}</PeekProvider>
+                      </FocusedDailyProvider>
                     </SidebarProvider>
                   </HeadingPickerProvider>
                 </NoteTemplatesProvider>
@@ -413,6 +417,21 @@ describe('app shortcuts', () => {
 
     await act(() => press('g', { shiftKey: true }))
     expect(findPreviousInNote).toHaveBeenCalledTimes(1)
+  })
+
+  it('⌘F and note commands target a peeked note', async () => {
+    const { result, act } = await shortcutsHook()
+    await act(() =>
+      result.current.peek?.openPeek({
+        kind: 'note',
+        path: 'notes/peeked.md',
+        route: { kind: 'note', path: 'notes/peeked.md' },
+      }),
+    )
+
+    expect(result.current.context.notePath()).toBe('notes/peeked.md')
+    await act(() => press('f'))
+    expect(openNoteFindForPath).toHaveBeenCalledWith('notes/peeked.md')
   })
 
   it(String.raw`⌘\ toggles the sidebar in both directions`, async () => {

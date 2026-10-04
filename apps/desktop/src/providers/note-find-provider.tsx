@@ -20,6 +20,7 @@ import { isMainWindow } from '@/lib/windows/window-role.ts'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
 import { focusedNotePathForRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 
 const NO_MATCHES: SearchStatus = { total: 0, active: 0 }
 
@@ -61,7 +62,8 @@ export function NoteFindProvider({ children }: { children: ReactNode }): ReactEl
   const { route, arrivalSeq } = useRouter()
   const today = useToday()
   const focusedDailyDate = useFocusedDailyDate()
-  const notePath = focusedNotePathForRoute(route, today, focusedDailyDate)
+  const peekedPath = usePeekedNotePath()
+  const notePath = peekedPath ?? focusedNotePathForRoute(route, today, focusedDailyDate)
 
   const [session, setSession] = useState<{ path: string; arrival: number } | null>(null)
   const [query, setQuery] = useState('')

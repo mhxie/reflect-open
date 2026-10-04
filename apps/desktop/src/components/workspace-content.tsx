@@ -10,6 +10,7 @@ import { SearchIpcResponder } from '@/components/search-ipc-responder.tsx'
 import { LocalModelUpdates } from '@/components/local-model-updates.tsx'
 import { NoteFindBar } from '@/components/note-find-bar.tsx'
 import { NoteStatusBar } from '@/components/note-status-bar.tsx'
+import { PeekPanel } from '@/components/peek/peek-panel.tsx'
 import { HeadingPicker } from '@/components/outline/heading-picker.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { ShortcutsDialog } from '@/components/shortcuts-dialog.tsx'
@@ -67,6 +68,7 @@ export function WorkspaceContent({ graph }: WorkspaceContentProps): ReactElement
           <RouteContent />
         </div>
         <NoteStatusBar />
+        <PeekPanel />
 
         <NoteFindBar />
         <CommandPalette context={commandContext} />

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toggleNotePinned } from '@/lib/note-pin.ts'
 import { toggleNotePrivate } from '@/lib/note-private.ts'
@@ -25,6 +25,7 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 import { useShortcuts } from '@/providers/shortcuts-provider.tsx'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
 import { useTheme } from '@/providers/theme-provider.tsx'
+import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { focusedNotePathForRoute } from './route.ts'
 import { useRouter } from './router.tsx'
 
@@ -171,6 +172,7 @@ export function useAppShortcuts(): CommandContext {
   const { route, navigate, back, forward, clearScrollState } = useRouter()
   const queryClient = useQueryClient()
   const focusedDailyDate = useFocusedDailyDate()
+  const peekedPath = usePeekedNotePath()
   const { resolvedTheme, setTheme } = useTheme()
   const { graph, recents, openRecent } = useGraph()
   const { openPalette, open: paletteOpen } = usePalette()
@@ -215,6 +217,16 @@ export function useAppShortcuts(): CommandContext {
   const openRecentRef = useRef(openRecent)
   const routeRef = useRef(route)
   const focusedDailyDateRef = useRef(focusedDailyDate)
+  const peekedPathRef = useRef(peekedPath)
+  // The note being worked on: a peeked note, else the focused stream day (so a
+  // note-scoped command targets the day the context sidebar shows — see
+  // `effectiveDailyDate`), else the routed note.
+  const workingNotePath = useCallback(
+    (): string | null =>
+      peekedPathRef.current ??
+      focusedNotePathForRoute(routeRef.current, todayIso(), focusedDailyDateRef.current),
+    [],
+  )
   useEffect(() => {
     paletteOpenRef.current = paletteOpen
     shortcutsOpenRef.current = shortcutsOpen
@@ -226,25 +238,18 @@ export function useAppShortcuts(): CommandContext {
     openRecentRef.current = openRecent
     routeRef.current = route
     focusedDailyDateRef.current = focusedDailyDate
+    peekedPathRef.current = peekedPath
   })
 
   const context = useMemo<CommandContext>(
     () => ({
       navigate,
       route: () => routeRef.current,
-      // Resolve through the focused stream day so a note-scoped command targets
-      // the same day the context sidebar shows (see `effectiveDailyDate`); off
-      // the daily views it falls back to the routed note.
-      notePath: () =>
-        focusedNotePathForRoute(routeRef.current, todayIso(), focusedDailyDateRef.current),
+      notePath: workingNotePath,
       togglePin: async () => {
         const root = graphRootRef.current
         const generation = generationRef.current
-        const path = focusedNotePathForRoute(
-          routeRef.current,
-          todayIso(),
-          focusedDailyDateRef.current,
-        )
+        const path = workingNotePath()
         if (root !== null && generation !== null && path !== null) {
           await toggleNotePinned({ queryClient, root, generation, path })
         }
@@ -252,11 +257,7 @@ export function useAppShortcuts(): CommandContext {
       togglePrivate: async () => {
         const root = graphRootRef.current
         const generation = generationRef.current
-        const path = focusedNotePathForRoute(
-          routeRef.current,
-          todayIso(),
-          focusedDailyDateRef.current,
-        )
+        const path = workingNotePath()
         if (root !== null && generation !== null && path !== null) {
           await toggleNotePrivate({ queryClient, root, generation, path })
         }
@@ -268,9 +269,7 @@ export function useAppShortcuts(): CommandContext {
       toggleSidebar,
       newChat,
       openNoteFind: () => {
-        openNoteFindForPath(
-          focusedNotePathForRoute(routeRef.current, todayIso(), focusedDailyDateRef.current),
-        )
+        openNoteFindForPath(workingNotePath())
       },
       findNextInNote,
       findPreviousInNote,

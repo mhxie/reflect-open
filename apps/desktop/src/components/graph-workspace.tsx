@@ -20,6 +20,7 @@ import { SidebarProvider } from '@/providers/sidebar-provider.tsx'
 import { SyncProvider } from '@/providers/sync-provider.tsx'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { RouterProvider } from '@/routing/router.tsx'
+import { PeekProvider } from '@/components/peek/peek-provider.tsx'
 
 interface GraphWorkspaceProps {
   graph: GraphInfo
@@ -58,21 +59,25 @@ export function GraphWorkspace({ graph }: GraphWorkspaceProps): ReactElement {
                             {/* Tracks the focused day in the daily stream so the right
                               sidebar describes it, not just the routed day. */}
                             <FocusedDailyProvider>
-                              <NoteFindProvider>
-                                {/* A ⌘-clicked note window is chrome-free: the
+                              {/* Above Find and the shortcuts, which follow a peeked note;
+                                    a note window has no panel, so its links navigate. */}
+                              <PeekProvider enabled={isMainWindow()}>
+                                <NoteFindProvider>
+                                  {/* A ⌘-clicked note window is chrome-free: the
                                   routed view only, no sidebar/palette shell.
                                   The V1 import lives above the routed views so
                                   closing settings can't orphan a running
                                   import; main window only — its dialog is the
                                   import's single face. */}
-                                {isMainWindow() ? (
-                                  <V1ImportProvider graph={graph}>
-                                    <WorkspaceContent graph={graph} />
-                                  </V1ImportProvider>
-                                ) : (
-                                  <NoteWindowContent />
-                                )}
-                              </NoteFindProvider>
+                                  {isMainWindow() ? (
+                                    <V1ImportProvider graph={graph}>
+                                      <WorkspaceContent graph={graph} />
+                                    </V1ImportProvider>
+                                  ) : (
+                                    <NoteWindowContent />
+                                  )}
+                                </NoteFindProvider>
+                              </PeekProvider>
                             </FocusedDailyProvider>
                           </ChatProvider>
                         </AssetDescribeProvider>

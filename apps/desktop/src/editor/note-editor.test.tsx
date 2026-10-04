@@ -145,6 +145,7 @@ describe('NoteEditor wiki-link chips', () => {
     expect(onWikiLinkClick).toHaveBeenCalledWith({
       target: 'Tim MacCaw // Dad',
       openInNewWindow: false,
+      peek: false,
     })
   })
 })

@@ -188,7 +188,12 @@ interface NoteEditorProps {
    * Mod-Enter key press that followed the link) — handlers read its
    * modifiers, e.g. ⌘-click opens the target in a new window.
    */
-  onWikiLinkClick?: (options: { target: string; openInNewWindow: boolean }) => void
+  onWikiLinkClick?: (options: {
+    target: string
+    openInNewWindow: boolean
+    /** ⌥-click: peek the note over the editor rather than navigate. */
+    peek?: boolean
+  }) => void
   /**
    * Click on a rendered Markdown link whose href is graph-local (scheme-less
    * and not an asset): a note link like `[Plan](./Plan.md)`. Receives the
@@ -361,7 +366,11 @@ export function NoteEditor({
 
   const handleWikilinkClick = useCallback(
     (payload: { target: string; event: MouseEvent | KeyboardEvent; mod: boolean }) =>
-      onWikiLinkClickRef.current?.({ target: payload.target, openInNewWindow: payload.mod }),
+      onWikiLinkClickRef.current?.({
+        target: payload.target,
+        openInNewWindow: payload.mod,
+        peek: !payload.mod && payload.event.altKey,
+      }),
     [],
   )
   const handleTagClick = useCallback(

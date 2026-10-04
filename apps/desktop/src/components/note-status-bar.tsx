@@ -10,6 +10,7 @@ import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { focusedNotePathForRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 
 const numberFormat = new Intl.NumberFormat()
 
@@ -21,8 +22,8 @@ const TYPING_IDLE_MS = 1500
 
 /**
  * A translucent full-width status bar along the editor's bottom edge,
- * VS Code-style, for the note being edited — the routed note, or the focused
- * day in the stream: when it was last edited, and its live character count
+ * VS Code-style, for the note being edited — a peeked note, the routed note,
+ * or the focused day in the stream: when it was last edited, and its live character count
  * (with the selection's, while there is one). Fades out while the user types,
  * Arc-style, and off in settings hides it. Never takes pointer events, so it
  * can't cover text the user clicks.
@@ -32,7 +33,8 @@ export function NoteStatusBar(): ReactElement | null {
   const today = useToday()
   const focusedDailyDate = useFocusedDailyDate()
   const { settings } = useSettings()
-  const path = focusedNotePathForRoute(route, today, focusedDailyDate)
+  const peekedPath = usePeekedNotePath()
+  const path = peekedPath ?? focusedNotePathForRoute(route, today, focusedDailyDate)
   const status = useNoteStatus(path)
   const visible = settings.statusBarEnabled && status !== null
   const mtime = useNoteMtime(visible ? path : null)
@@ -51,6 +53,8 @@ export function NoteStatusBar(): ReactElement | null {
       className={cn(
         'pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-6 items-center justify-end gap-3 border-t border-border/50 bg-surface/50 px-4 text-2xs tabular-nums text-text-muted backdrop-blur-[2px] transition-opacity duration-300',
         typing && 'opacity-0',
+        // Over the Peek backdrop while it shows the peeked note.
+        peekedPath !== null && 'z-30',
       )}
     >
       {editedAt > 0 ? (

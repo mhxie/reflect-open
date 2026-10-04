@@ -1,11 +1,12 @@
-import { act } from 'react'
+import { act, type ReactElement } from 'react'
 import { cleanup, render } from 'vitest-browser-react'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearNoteStatus, publishNoteStatus } from '@/editor/status/note-status-store.ts'
 import type { Route } from '@/routing/route.ts'
 import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { NoteStatusBar } from './note-status-bar.tsx'
 
 vi.mock('@/lib/use-today.ts', () => ({ useToday: () => '2026-10-03' }))
@@ -19,6 +20,24 @@ const mtime = vi.hoisted(() => ({ value: null as number | null }))
 vi.mock('@/hooks/use-note-mtime.ts', () => ({ useNoteMtime: () => mtime.value }))
 
 const owner = Symbol('test')
+
+function PeekOpener(): ReactElement {
+  const peek = usePeek()
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        peek?.openPeek({
+          kind: 'note',
+          path: 'notes/peeked.md',
+          route: { kind: 'note', path: 'notes/peeked.md' },
+        })
+      }
+    >
+      peek
+    </button>
+  )
+}
 
 function renderBar(initialRoute: Route) {
   return render(
@@ -137,5 +156,34 @@ describe('NoteStatusBar', () => {
 
     document.dispatchEvent(new MouseEvent('mousemove'))
     await vi.waitFor(() => expect(bar().className).not.toContain('opacity-0'))
+  })
+
+  it('follows a peeked note, above the Peek backdrop', async () => {
+    publishNoteStatus('notes/a.md', owner, {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+    })
+    publishNoteStatus('notes/peeked.md', owner, {
+      characters: 77,
+      selectedCharacters: 0,
+      editedAt: null,
+    })
+    const view = await render(
+      <RouterProvider initialRoute={{ kind: 'note', path: 'notes/a.md' }}>
+        <PeekProvider>
+          <PeekOpener />
+          <NoteStatusBar />
+        </PeekProvider>
+      </RouterProvider>,
+    )
+    const bar = page.getByRole('status', { name: 'Note status' })
+    await expect.element(bar.getByText('10 chars')).toBeVisible()
+
+    await userEvent.click(page.getByRole('button', { name: 'peek' }))
+
+    await expect.element(bar.getByText('77 chars')).toBeVisible()
+    expect(view.container.querySelector('[role="status"]')!.className).toContain('z-30')
+    clearNoteStatus('notes/peeked.md', owner)
   })
 })
