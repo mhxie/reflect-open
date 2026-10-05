@@ -203,6 +203,23 @@ describe('historyForTarget', () => {
     await expect(historyForTarget(history, CLOUD, 1)).rejects.toMatchObject({ kind: 'auth' })
   })
 
+  it('keeps a note read whose embedded attachment became private, since reads carry no attachment text', async () => {
+    const notes = {
+      'notes/atlas.md': '![scan](assets/scan.png)',
+      'assets/scan.png.reflect.md': 'Public caption',
+    }
+    openIndex(notes, [['notes/atlas.md', 'assets/scan.png']])
+    notes['assets/scan.png.reflect.md'] = '---\nprivate: true\n---\nPrivate caption'
+    const history = [
+      ...exchange('atlas?', 'read_notes', readNotes('notes/atlas.md'), 'Atlas answer'),
+      user('next'),
+    ]
+    expect(await historyForTarget(history, CLOUD, 1)).toEqual({
+      messages: history,
+      withheldTurns: 0,
+    })
+  })
+
   it('withholds a legacy caption after its sidecar becomes private before reindexing', async () => {
     const notes = {
       'notes/atlas.md': '![scan](assets/scan.png)',
@@ -220,7 +237,7 @@ describe('historyForTarget', () => {
     })
   })
 
-  it('withholds an earlier search snippet when its live sidecar gains private provenance', async () => {
+  it("refuses a cloud turn after an earlier search snippet's sidecar becomes private", async () => {
     const notes = {
       'notes/atlas.md': '![scan](assets/scan.png)',
       'assets/scan.png.reflect.md': 'Public caption',

@@ -19,6 +19,17 @@ import {
   resolveAttachmentLink,
 } from '../../graph/attachment-resolution.ts'
 
+/**
+ * Whether a search snapshot may hold attachment text: false only when its
+ * attachment-text hash is the empty text's. A missing hash (a snapshot from an
+ * older build) counts as holding some, so callers fail closed.
+ */
+export async function snapshotHasAttachmentText(
+  assetTextHash: string | undefined,
+): Promise<boolean> {
+  return assetTextHash === undefined || assetTextHash !== (await hashContent(''))
+}
+
 /** Recheck live and indexed asset references before exposing a search snapshot to a model. */
 export async function hasRestrictedSearchSources(
   path: string,

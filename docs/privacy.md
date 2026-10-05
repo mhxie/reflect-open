@@ -10,7 +10,7 @@ carries.
 The one hard rule sits above all of it: **a note with `private: true` frontmatter never
 has its content sent to any external service.** This is enforced in code at every AI
 call site (the `CloudSafe` type brand in `packages/core/src/ai/` — content for a
-  cloud provider cannot even be constructed from a private note, and the flag is re-read from
+cloud provider cannot even be constructed from a private note, and the flag is re-read from
 disk at call time), and it is covered by tests. The rule fails closed: frontmatter Reflect
 can't read with certainty — YAML that doesn't parse but mentions `private`, a `private`
 value that is neither true nor false, a block hidden behind a byte-order mark — counts

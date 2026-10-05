@@ -79,4 +79,19 @@ describe('local OCR maintenance', () => {
     expect(await reconcileCachedAssetOcr(7)).toEqual([PATH])
     expect(readAssetForDevice).not.toHaveBeenCalled()
   })
+
+  it('reports only sources it invalidates on a wake scan', async () => {
+    expect(await reconcileCachedAssetOcr(7, undefined, { reindexCached: false })).toEqual([])
+    expect(readAssetForDevice).toHaveBeenCalledWith(PATH, 7)
+
+    vi.mocked(readAssetForDevice).mockResolvedValue(new Uint8Array([3, 4]))
+    expect(await reconcileCachedAssetOcr(7, undefined, { reindexCached: false })).toEqual([PATH])
+  })
+
+  it('does not re-report an already invalidated source on a wake scan', async () => {
+    vi.mocked(readAssetOcrCache).mockResolvedValue(
+      JSON.stringify({ version: 1, status: 'invalid', deviceOnly: true, assetPath: PATH }),
+    )
+    expect(await reconcileCachedAssetOcr(7, undefined, { reindexCached: false })).toEqual([])
+  })
 })

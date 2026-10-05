@@ -9,10 +9,27 @@ import {
   readAssetOcrState,
 } from './asset-ocr-cache.ts'
 
-/** Check existing OCR sources after open/wake or file changes, without generating new OCR. */
+/** How {@link reconcileCachedAssetOcr} reports what needs reindexing. */
+export interface ReconcileAssetOcrOptions {
+  /**
+   * Report every cached source, valid or invalid, so notes referencing them
+   * are reindexed (graph open, or a retry after a failed reindex). Defaults
+   * to true for a full scan. Otherwise only sources this pass invalidates
+   * are reported.
+   */
+  readonly reindexCached?: boolean
+}
+
+/**
+ * Check existing OCR sources after open/wake or file changes, without
+ * generating new OCR. Scans `changed` (attachment paths or bare names), or
+ * every cached source when omitted. Returns the asset paths whose
+ * referencing notes need reindexing.
+ */
 export async function reconcileCachedAssetOcr(
   generation: number,
   changed?: readonly string[],
+  { reindexCached = changed === undefined }: ReconcileAssetOcrOptions = {},
 ): Promise<string[]> {
   const references = changed ?? (await cachedAssetOcrPaths(generation))
   const catalog = await listAttachments(generation)
@@ -33,10 +50,10 @@ export async function reconcileCachedAssetOcr(
     const cached = await readAssetOcrState(path, generation)
     if (cached === null) continue
     if (cached.status === 'invalid') {
-      invalidated.push(path)
+      if (reindexCached) invalidated.push(path)
       continue
     }
-    if (changed === undefined) invalidated.push(path)
+    if (reindexCached) invalidated.push(path)
     let currentHash: string | null
     try {
       currentHash = await hashBytes(await readAssetForDevice(path, generation))

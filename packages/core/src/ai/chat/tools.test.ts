@@ -34,7 +34,10 @@ import {
   type SearchNotesOutput,
 } from './tools.ts'
 
-vi.mock('./search-privacy', () => ({ hasRestrictedSearchSources: vi.fn(async () => false) }))
+vi.mock('./search-privacy', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./search-privacy.ts')>()),
+  hasRestrictedSearchSources: vi.fn(async () => false),
+}))
 vi.mock('../../actions/asset-ocr-cache', () => ({ readAssetOcrState: async () => null }))
 vi.mock('../../privacy/on-device-verification', () => ({ verifyOnDeviceServer: async () => 'ok' }))
 
@@ -66,7 +69,7 @@ describe('verified local note tools', () => {
     const tools = buildNoteTools({
       target,
       generation: 1,
-      retrieveFn: async () => [hit({ snippet: PRIVATE_BODY })],
+      retrieveFn: async () => [hit({ snippet: PRIVATE_BODY, assetTextHash: 'a'.repeat(64) })],
       readDeviceNoteFn: async (path) => ({
         content: path.endsWith('.reflect.md') ? PRIVATE_BODY : '# Public',
         localOnly: path.endsWith('.reflect.md'),
@@ -769,6 +772,21 @@ describe('list_recent_notes', () => {
     }
     expect(output.notes).toEqual([])
     expect(JSON.stringify(output)).not.toContain(PRIVATE_TITLE)
+  })
+
+  it('keeps a public row that embeds restricted attachments, since listings carry no attachment text', async () => {
+    const hasRestrictedSearchSourcesFn = vi.fn(async () => true)
+    const tools = buildNoteTools({
+      listRecentNotesFn: async () => [recentRow({})],
+      readNoteFn: async () => '# Trip\n![[scan.png]]\n',
+      hasRestrictedSearchSourcesFn,
+    })
+    const output = await runRecents(tools, {})
+    if (!output.ok) {
+      expect.unreachable('expected a listing')
+    }
+    expect(output.notes).toHaveLength(1)
+    expect(hasRestrictedSearchSourcesFn).not.toHaveBeenCalled()
   })
 
   it('fails closed: an unreadable row is dropped, not sent', async () => {

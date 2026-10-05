@@ -34,7 +34,7 @@ import {
   type LocalSafe,
 } from '../../privacy/local-checkers.ts'
 import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
-import { hasRestrictedSearchSources } from './search-privacy.ts'
+import { hasRestrictedSearchSources, snapshotHasAttachmentText } from './search-privacy.ts'
 import { ReflectError } from '../../errors.ts'
 
 /**
@@ -195,7 +195,12 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
   // just-saved `private: true`, so each candidate's frontmatter is re-read
   // from disk. Fail closed — a note that can't be read can't be cleared
   // for sending. A local-only note is private by its path and never read.
-  const isPrivateLive = async (path: string, assetTextHash?: string): Promise<boolean> => {
+  // Only a search hit can carry attachment text (listings show the note's
+  // own preview), so only a hit's snapshot has its attachments rechecked.
+  const isPrivateLive = async (
+    path: string,
+    searchSnapshot: Pick<SearchSnapshot, 'assetTextHash'> | null = null,
+  ): Promise<boolean> => {
     if (isLocalOnlyPath(path)) {
       return true
     }
@@ -205,11 +210,11 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
         return (
           read.localOnly ||
           notePrivate(read.content) ||
-          (await restrictedSources(path, read.content, assetTextHash))
+          (await restrictedSources(path, read.content, searchSnapshot))
         )
       }
       const source = await readNoteFn(path)
-      return notePrivate(source) || (await restrictedSources(path, source, assetTextHash))
+      return notePrivate(source) || (await restrictedSources(path, source, searchSnapshot))
     } catch {
       return true
     }
@@ -218,8 +223,15 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
   async function restrictedSources(
     path: string,
     source: string,
-    assetTextHash?: string,
+    searchSnapshot: Pick<SearchSnapshot, 'assetTextHash'> | null,
   ): Promise<boolean> {
+    if (
+      searchSnapshot === null ||
+      !(await snapshotHasAttachmentText(searchSnapshot.assetTextHash))
+    ) {
+      return false
+    }
+    const { assetTextHash } = searchSnapshot
     return await (options.hasRestrictedSearchSourcesFn?.(path, source, assetTextHash) ??
       hasRestrictedSearchSources(path, source, readNoteFn, options.generation, assetTextHash))
   }
@@ -278,15 +290,17 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
               hits.map(async (hit) =>
                 localSafeSearchHit(target, {
                   ...hit,
-                  isPrivate: hit.isPrivate || (await isPrivateLive(hit.path, hit.assetTextHash)),
+                  isPrivate: hit.isPrivate || (await isPrivateLive(hit.path, hit)),
                 }),
               ),
             ),
           }
         }
-        const snapshots = new Map(hits.map((hit) => [hit.path, hit.assetTextHash]))
+        const snapshots = new Map(hits.map((hit) => [hit.path, hit]))
         return {
-          hits: await cloudSafeSearchHits(hits, (path) => isPrivateLive(path, snapshots.get(path))),
+          hits: await cloudSafeSearchHits(hits, (path) =>
+            isPrivateLive(path, snapshots.get(path) ?? null),
+          ),
         }
       },
     },

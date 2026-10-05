@@ -57,6 +57,12 @@ export async function readAssetOcrState(
     }
     throw cause
   }
+  const state = parseCacheState(contents)
+  return state?.assetPath === assetPath ? state : null
+}
+
+/** A cache file's state, or null when it is not JSON or not a known state. */
+function parseCacheState(contents: string): AssetOcrState | null {
   let value: unknown
   try {
     value = JSON.parse(contents)
@@ -64,7 +70,7 @@ export async function readAssetOcrState(
     return null
   }
   const parsed = cacheStateSchema.safeParse(value)
-  return parsed.success && parsed.data.assetPath === assetPath ? parsed.data : null
+  return parsed.success ? parsed.data : null
 }
 
 /** Invalidate stale OCR while retaining its device-only provenance. */
@@ -90,15 +96,8 @@ export async function cachedAssetOcrPaths(generation: number): Promise<string[]>
       if (isAppError(cause) && cause.kind === 'notFound') continue
       throw cause
     }
-    let value: unknown
-    try {
-      value = JSON.parse(contents)
-    } catch {
-      continue
-    }
-    const parsed = cacheStateSchema.safeParse(value)
-    if (parsed.success && (await hashContent(parsed.data.assetPath)) === key)
-      paths.push(parsed.data.assetPath)
+    const state = parseCacheState(contents)
+    if (state !== null && (await hashContent(state.assetPath)) === key) paths.push(state.assetPath)
   }
   return paths
 }

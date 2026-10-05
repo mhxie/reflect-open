@@ -6,7 +6,6 @@ import { readNoteShareable } from '../../graph/commands.ts'
 import { descriptionPathFor } from '../../graph/paths.ts'
 import { notePrivate } from '../../privacy/checkers.ts'
 import { assetReferenceMatches } from '../../indexing/asset-refs.ts'
-import { hashContent } from '../../indexing/hash.ts'
 import { db } from '../../indexing/db.ts'
 import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
 import { isAppError, ReflectError } from '../../errors.ts'
@@ -14,7 +13,7 @@ import { readAssetOcrState } from '../../actions/asset-ocr-cache.ts'
 import { isXArchiveAssetPath } from '../../x-archive.ts'
 import { splitIntoTurnSegments } from './context-window.ts'
 import { toolResultSources, type ToolResultSources } from './tools.ts'
-import { hasRestrictedSearchSources } from './search-privacy.ts'
+import { hasRestrictedSearchSources, snapshotHasAttachmentText } from './search-privacy.ts'
 
 /**
  * Chat history privacy at resend. Every turn resends the earlier exchanges,
@@ -176,9 +175,8 @@ async function refuseCloudRestrictedSearchSnapshots(
   privateNow: PrivatePaths,
   generation?: number,
 ): Promise<void> {
-  const emptyHash = await hashContent('')
   for (const snapshot of snapshots) {
-    if (snapshot.assetTextHash === emptyHash) continue
+    if (!(await snapshotHasAttachmentText(snapshot.assetTextHash))) continue
     const source = privateNow.liveSources.get(snapshot.path)
     if (
       snapshot.assetTextHash === undefined ||
@@ -238,15 +236,7 @@ async function privateNowPaths(
     try {
       const source = await readPublicNote(path, generation)
       liveSources.set(path, source)
-      if (
-        notePrivate(source) ||
-        (await hasRestrictedSearchSources(
-          path,
-          source,
-          (notePath) => readPublicNote(notePath, generation),
-          generation,
-        ))
-      ) {
+      if (notePrivate(source)) {
         privateNotes.add(path)
       }
     } catch {

@@ -14,15 +14,22 @@ export function startAssetOcrMaintenance(generation: number): () => void {
   if (!hasBridge()) return () => {}
   const changed = new Set<string>()
   let fullScan = true
+  // Open (and a retry after a failed reindex) reindexes every cached source;
+  // a wake scan reindexes only what it invalidates.
+  let reindexCached = true
   let loggedError: string | null = null
   const loop = createBackgroundReconciler({
     pass: async (isStale) => {
       const batch = [...changed]
       const scanAll = fullScan
+      const reindexAll = reindexCached
       fullScan = false
+      reindexCached = false
       for (const path of batch) changed.delete(path)
       try {
-        const invalidated = await reconcileCachedAssetOcr(generation, scanAll ? undefined : batch)
+        const invalidated = await reconcileCachedAssetOcr(generation, scanAll ? undefined : batch, {
+          reindexCached: scanAll && reindexAll,
+        })
         if (isStale()) return
         const affected = [...new Set([...batch, ...invalidated])]
         if (affected.length > 0) {
@@ -33,6 +40,7 @@ export function startAssetOcrMaintenance(generation: number): () => void {
       } catch (cause) {
         for (const path of batch) changed.add(path)
         fullScan = true
+        reindexCached = true
         const message = errorMessage(cause)
         if (!isStale() && loggedError !== message) {
           loggedError = message
