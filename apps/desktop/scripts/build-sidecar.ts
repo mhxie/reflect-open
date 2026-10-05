@@ -1,0 +1,37 @@
+// Builds the sidecar binaries and stages them where tauri-build expects them:
+// src-tauri/binaries/<name>-<target-triple>[.exe].
+
+import { copyFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { exec } from 'tinyexec'
+import { getHostTriple, INHERIT, log, TARGET_DIR, TAURI_SRC_DIR } from './helpers.ts'
+
+const SIDECARS = [
+  { crate: 'reflect-cli', binary: 'reflect' },
+  { crate: 'reflect-capture-host', binary: 'reflect-capture-host' },
+]
+
+async function main(): Promise<void> {
+  const platform = process.env.TAURI_ENV_PLATFORM
+  if (platform === 'ios' || platform === 'android') {
+    return
+  }
+
+  // Tauri exports the target triple to its before-commands.
+  const triple = process.env.TAURI_ENV_TARGET_TRIPLE ?? (await getHostTriple())
+  // The explicit --target keeps the artifacts out of target/release/, where
+  // tauri-build copies the de-suffixed sidecars.
+  const packages = SIDECARS.flatMap((sidecar) => ['-p', sidecar.crate])
+  await exec('cargo', ['build', '--release', ...packages, '--target', triple], INHERIT)
+
+  const extension = triple.includes('windows') ? '.exe' : ''
+  const binariesDir = join(TAURI_SRC_DIR, 'binaries')
+  mkdirSync(binariesDir, { recursive: true })
+  for (const { binary } of SIDECARS) {
+    const staged = join(binariesDir, `${binary}-${triple}${extension}`)
+    copyFileSync(join(TARGET_DIR, triple, 'release', `${binary}${extension}`), staged)
+    log(`staged ${staged}`)
+  }
+}
+
+await main()
