@@ -122,6 +122,8 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * only comments is empty.
  * 27 - file reads normalize line endings without changing the privacy verdict,
  * so existing file hashes and Markdown-derived rows must be rebuilt.
+ * 28 - attachment text records device-only provenance and its source hash,
+ * so existing notes and embedding chunks must be rebuilt.
  */
 export const PROJECTION_VERSION = 28
 

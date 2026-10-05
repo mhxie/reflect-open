@@ -126,7 +126,7 @@ describe('chatSystemPrompt', () => {
     })
 
     expect(prompt).toContain('Grounding rules:')
-    expect(prompt).toContain('Private notes are excluded from search')
+    expect(prompt).toContain('Private notes and on-device OCR text are excluded from search')
     expect(prompt).toContain('User-configured system prompt')
     expect(prompt).toContain('Challenge my assumptions.\nAnswer with a short recommendation.')
     expect(prompt).not.toContain('\n  Challenge my assumptions.')
