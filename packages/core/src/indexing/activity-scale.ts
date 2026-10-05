@@ -1,4 +1,5 @@
 import { addDaysIso, weekdayIso } from '@reflect/utils'
+import { isNotNullish } from '@ocavue/utils'
 import type { DailyActivity } from './daily-activity.ts'
 
 /** A heatmap cell's intensity: 0 for no entry, 1–4 by size. */
@@ -68,9 +69,11 @@ export function heatmapWeeks(today: string, weeksBefore: number, weekStartsOn: n
  * labeled only when the next label is far enough away not to collide.
  */
 export function monthLabelColumns(weeks: readonly (readonly string[])[]): number[] {
-  const starts = weeks.flatMap((week, column) =>
-    column > 0 && week[0]?.slice(0, 7) !== weeks[column - 1]?.[0]?.slice(0, 7) ? [column] : [],
-  )
+  const starts = weeks
+    .map((week, column) =>
+      column > 0 && week[0]?.slice(0, 7) !== weeks[column - 1]?.[0]?.slice(0, 7) ? column : null,
+    )
+    .filter(isNotNullish)
   const next = starts[0]
   return next === undefined || next >= MIN_LABEL_GAP ? [0, ...starts] : starts
 }

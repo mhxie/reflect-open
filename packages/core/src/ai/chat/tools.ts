@@ -1,4 +1,5 @@
 import type { Tool, TypedToolCall, TypedToolResult } from '@reflect/modules/ai'
+import { isNotNullish } from '@ocavue/utils'
 import { z } from 'zod'
 import { isLocalOnlyPath } from '../../graph/local-only.ts'
 import { retrieve, type RetrievalHit, type RetrieveOptions } from '../../embeddings/retrieve.ts'
@@ -461,7 +462,7 @@ const storedResultSources = new Map<string, z.ZodType<ToolResultSources>>([
     'read_assets',
     z.object({ assets: z.array(assetReadSchema) }).transform(({ assets }) => ({
       notes: [],
-      assets: assets.flatMap((entry) => (entry.ok ? [entry.asset.path] : [])),
+      assets: assets.map((entry) => (entry.ok ? entry.asset.path : null)).filter(isNotNullish),
     })),
   ],
   [

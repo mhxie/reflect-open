@@ -1,4 +1,5 @@
 import { sql } from 'kysely'
+import { isNotNullish } from '@ocavue/utils'
 import { db } from './db.ts'
 
 /** How much was written in one day's daily note. */
@@ -22,9 +23,11 @@ export async function listDailyActivity(): Promise<DailyActivity[]> {
     .select(['dailyDate', 'bodyChars as characters'])
     .orderBy('dailyDate')
     .execute()
-  return rows.flatMap((row) =>
-    row.dailyDate === null ? [] : [{ date: row.dailyDate, characters: row.characters }],
-  )
+  return rows
+    .map((row) =>
+      row.dailyDate === null ? null : { date: row.dailyDate, characters: row.characters },
+    )
+    .filter(isNotNullish)
 }
 
 /** How many notes one local day touched. */

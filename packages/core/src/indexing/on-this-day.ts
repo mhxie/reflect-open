@@ -1,3 +1,4 @@
+import { isNotNullish } from '@ocavue/utils'
 import { db } from './db.ts'
 
 /** One earlier year's daily note shown under "On this day". */
@@ -28,16 +29,16 @@ export async function listOnThisDay(date: string): Promise<OnThisDayEntry[]> {
     .select(['path', 'dailyDate', 'preview'])
     .orderBy('dailyDate', 'desc')
     .execute()
-  return rows.flatMap((row) =>
-    row.dailyDate === null
-      ? []
-      : [
-          {
+  return rows
+    .map((row) =>
+      row.dailyDate === null
+        ? null
+        : {
             path: row.path,
             dailyDate: row.dailyDate,
             preview: row.preview,
             yearsAgo: Number(year) - Number(row.dailyDate.slice(0, 4)),
           },
-        ],
-  )
+    )
+    .filter(isNotNullish)
 }

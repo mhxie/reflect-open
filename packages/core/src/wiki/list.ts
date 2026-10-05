@@ -1,4 +1,5 @@
 import { sql, type RawBuilder } from 'kysely'
+import { isNotNullish } from '@ocavue/utils'
 import { isAppError } from '../errors.ts'
 import { readNoteLocal } from '../graph/commands.ts'
 import { db } from '../indexing/db.ts'
@@ -248,10 +249,12 @@ export async function listWikiEntries(options: ListWikiEntriesOptions): Promise<
   // A note at an entry's relative path in a translation folder is the
   // entry's copy in that language.
   const notes = new Map(rows.map((row) => [row.path, row]))
-  const entries = rows.flatMap((row) => {
-    const location = wikiLocation(row.path, languages)
-    return location?.language === source ? [{ row, relative: location.relativePath }] : []
-  })
+  const entries = rows
+    .map((row) => {
+      const location = wikiLocation(row.path, languages)
+      return location?.language === source ? { row, relative: location.relativePath } : null
+    })
+    .filter(isNotNullish)
   for (const path of summaryCache.keys()) {
     if (!notes.has(path)) {
       summaryCache.delete(path)
