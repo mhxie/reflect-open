@@ -21,7 +21,11 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { orderPinnedFilterTags, type PinnedTagMove } from '@reflect/core'
-import { cancelPinnedTagDrag, type PinnedTagDragSession } from './cancel-pinned-tag-drag.ts'
+import {
+  cancelPinnedTagDrag,
+  markPinnedTagDragEscape,
+  type PinnedTagDragSession,
+} from './cancel-pinned-tag-drag.ts'
 import { PinnedTagFilterRowPreview } from './pinned-tag-filter-row-preview.tsx'
 import { PinnedTagFilterRow, type PinnedTagControl } from './pinned-tag-filter-row.tsx'
 
@@ -149,6 +153,7 @@ export function PinnedTagSortableList({
       onKeyDownCapture={(event) => {
         if (activeTag !== null && event.key === 'Escape') {
           event.preventDefault()
+          markPinnedTagDragEscape(event.nativeEvent)
         }
       }}
     >

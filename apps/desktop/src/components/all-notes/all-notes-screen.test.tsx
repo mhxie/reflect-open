@@ -742,6 +742,35 @@ describe('AllNotesScreen — pinned tag management', () => {
     await view.unmount()
   })
 
+  it('closes management with Escape when the focused action hint is visible', async () => {
+    const view = await renderScreen()
+    try {
+      await openPinnedFilters(view)
+      const actions = page.getByRole('button', { name: 'Actions for #book' })
+      await actions.click()
+      const menuItem = page.getByRole('menuitem', { name: 'Move to bottom', exact: true })
+      await expect.element(menuItem).toBeVisible()
+      const menu = menuItem.element().closest('[data-slot="dropdown-menu-content"]')
+      expect(menu).toBeInTheDocument()
+      await userEvent.keyboard('{Escape}')
+      await expect.element(actions).toHaveFocus()
+      await vi.waitFor(() => expect(menu?.isConnected).toBe(false))
+      await hover(page.getByRole('button', { name: 'Done', exact: true }))
+      await hover(actions)
+      await expect
+        .element(page.getByText('Move or unpin this filter', { exact: true }))
+        .toBeVisible()
+
+      await userEvent.keyboard('{Escape}')
+      await expect
+        .element(page.getByRole('list', { name: 'Pinned filters' }))
+        .not.toBeInTheDocument()
+      await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    } finally {
+      await view.unmount()
+    }
+  })
+
   it('reorders from the drag handle with the pointer and saves only on drop', async () => {
     const view = await renderScreen()
     await openPinnedFilters(view)

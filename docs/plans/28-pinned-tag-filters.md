@@ -161,6 +161,7 @@ The README keeps a short fork overview. Supported additions and their controls
 live in the [fork feature guide](../fork-features.md), grouped by workflow.
 
 Validation: `pnpm check`, `pnpm build`, four core tests, 58 Settings tests per
-browser, and 100 All Notes/settings-provider/Wiki/Attachments tests per browser
+browser, and 101 All Notes/settings-provider/Wiki/Attachments tests per browser
 passed in Chromium and WebKit. Browser coverage includes pending-pointer
-teardown, keyboard cancellation, external updates, focus, and narrow layouts.
+teardown, keyboard cancellation, tooltip dismissal, external updates, focus,
+and narrow layouts.

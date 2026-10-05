@@ -1,3 +1,15 @@
+const dragEscapes = new WeakSet<Event>()
+
+/** Identify Escape events owned by the pinned-filter drag session. */
+export function isPinnedTagDragEscape(event: Event): boolean {
+  return dragEscapes.has(event)
+}
+
+/** Mark drag cancellation so other prevented Escapes can still dismiss management. */
+export function markPinnedTagDragEscape(event: KeyboardEvent): void {
+  dragEscapes.add(event)
+}
+
 /** The native activator needed to cancel an owned sortable sensor on teardown. */
 export interface PinnedTagDragSession {
   readonly activator: HTMLElement
@@ -19,6 +31,9 @@ export function cancelPinnedTagDrag(session: PinnedTagDragSession): void {
 
   // dnd-kit's sensors have no public teardown method. Their native cancel
   // events detach listeners; a prevented Escape keeps the managed popup open.
+  if (event instanceof KeyboardEvent) {
+    markPinnedTagDragEscape(event)
+  }
   event.preventDefault()
   target.dispatchEvent(event)
 }

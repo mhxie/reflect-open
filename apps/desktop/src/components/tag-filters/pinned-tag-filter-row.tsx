@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactElement } from 'react'
+import type { ComponentProps, CSSProperties, ReactElement } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { PinnedTagMove } from '@reflect/core'
@@ -30,6 +30,15 @@ interface PinnedTagFilterRowProps {
     element: HTMLButtonElement | null,
   ) => void
   menuFinalFocus: (tag: string) => HTMLElement | null
+}
+
+const allowTooltipEscapePropagation: NonNullable<ComponentProps<typeof Tooltip>['onOpenChange']> = (
+  _open,
+  details,
+) => {
+  if (details.reason === 'escape-key') {
+    details.allowPropagation()
+  }
 }
 
 /** A display-only tag label with a dedicated reorder handle and action menu. */
@@ -68,7 +77,7 @@ export function PinnedTagFilterRow({
           'after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary',
       )}
     >
-      <Tooltip disabled={sorting}>
+      <Tooltip disabled={sorting} onOpenChange={allowTooltipEscapePropagation}>
         <TooltipTrigger
           render={
             <Button
@@ -92,7 +101,7 @@ export function PinnedTagFilterRow({
           Drag to reorder. Space or Enter picks up and drops; ↑/↓ moves; Escape cancels.
         </TooltipContent>
       </Tooltip>
-      <Tooltip disabled={sorting}>
+      <Tooltip disabled={sorting} onOpenChange={allowTooltipEscapePropagation}>
         <TooltipTrigger render={<span />} className="min-w-0 flex-1 truncate text-text">
           #{tag}
         </TooltipTrigger>
@@ -101,7 +110,7 @@ export function PinnedTagFilterRow({
         </TooltipContent>
       </Tooltip>
       <DropdownMenu>
-        <Tooltip disabled={sorting}>
+        <Tooltip disabled={sorting} onOpenChange={allowTooltipEscapePropagation}>
           <DropdownMenuTrigger
             disabled={sorting}
             ref={(element) => registerControl(tag, 'menu', element)}

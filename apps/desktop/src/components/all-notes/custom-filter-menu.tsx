@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { foldTag, isTagName, type NoteTagFacet } from '@reflect/core'
 import { ArrowLeft, ChevronDown, Pin, Settings2 } from 'lucide-react'
+import { isPinnedTagDragEscape } from '@/components/tag-filters/cancel-pinned-tag-drag.ts'
 import { Button } from '@/components/ui/button.tsx'
 import {
   Command,
@@ -109,7 +110,7 @@ export function CustomFilterMenu({
           !next &&
           management !== undefined &&
           details.reason === 'escape-key' &&
-          details.event.defaultPrevented
+          isPinnedTagDragEscape(details.event)
         ) {
           details.cancel()
           details.allowPropagation()
