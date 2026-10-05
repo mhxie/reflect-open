@@ -265,6 +265,63 @@ describe('historyForTarget', () => {
     await expect(historyForTarget(history, CLOUD, 1)).rejects.toMatchObject({ kind: 'auth' })
   })
 
+  it('withholds, rather than refuses, a search with attachment text whose note is locked now', async () => {
+    openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
+    const history: ModelMessage[] = [
+      ...exchange('atlas?', 'read_notes', readNotes('notes/atlas.md'), 'Atlas ships.'),
+      ...exchange(
+        'search?',
+        'search_notes',
+        json({
+          hits: [
+            {
+              path: 'notes/x.md',
+              title: 'Diary',
+              snippet: 'Old caption',
+              assetTextHash: await hashContent('Old caption'),
+            },
+          ],
+        }),
+        'Found it.',
+      ),
+      user('next'),
+    ]
+
+    expect(await historyForTarget(history, CLOUD, 1)).toEqual({
+      messages: [...history.slice(0, 4), user('next')],
+      withheldTurns: 1,
+    })
+  })
+
+  it('reads each live source once however many exchanges name it', async () => {
+    openIndex({ 'notes/atlas.md': PUBLIC })
+    const reads: string[] = []
+    const bridge = getBridge()
+    setBridge({
+      ...bridge,
+      invoke: (command, args) => {
+        if (command === 'note_read_shareable') {
+          reads.push(String(args['path']))
+        }
+        return bridge.invoke(command, args)
+      },
+    })
+    const history: ModelMessage[] = [
+      ...exchange('one', 'read_notes', readNotes('notes/atlas.md'), 'One.'),
+      ...exchange(
+        'two',
+        'list_recent_notes',
+        json({ ok: true, notes: [listing('notes/atlas.md')] }),
+        'Two.',
+      ),
+      ...exchange('three', 'read_notes', readNotes('notes/atlas.md'), 'Three.'),
+      user('next'),
+    ]
+
+    expect((await historyForTarget(history, CLOUD)).withheldTurns).toBe(0)
+    expect(reads).toEqual(['notes/atlas.md'])
+  })
+
   it('refuses the entire cloud turn when an earlier local result carries private provenance', async () => {
     const history: ModelMessage[] = [
       ...exchange(
@@ -294,19 +351,39 @@ describe('historyForTarget', () => {
   it('leaves out the whole exchange that read a note made private since', async () => {
     openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
     const history: ModelMessage[] = [
-      ...exchange('what does x say?', 'read_notes', readNotes('notes/x.md'), 'x says answer-1'),
       ...exchange('and atlas?', 'read_notes', readNotes('notes/atlas.md'), 'Atlas ships.'),
+      ...exchange('what does x say?', 'read_notes', readNotes('notes/x.md'), 'x says answer-1'),
       user('thanks'),
     ]
 
     const result = await historyForTarget(history, CLOUD)
 
     expect(result.withheldTurns).toBe(1)
-    expect(result.messages).toEqual(history.slice(4))
+    expect(result.messages).toEqual([...history.slice(0, 4), user('thanks')])
     const sent = JSON.stringify(result.messages)
     expect(sent).not.toContain('notes/x.md')
     expect(sent).not.toContain('what does x say?')
     expect(sent).not.toContain('answer-1')
+  })
+
+  it('leaves out every later exchange too, since an answer can repeat what was withheld', async () => {
+    openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
+    const history: ModelMessage[] = [
+      ...exchange('atlas?', 'read_notes', readNotes('notes/atlas.md'), 'Atlas ships.'),
+      ...exchange('what does x say?', 'read_notes', readNotes('notes/x.md'), 'x says answer-1'),
+      user('translate that to French'),
+      { role: 'assistant', content: 'x dit answer-1' },
+      ...exchange('and atlas again?', 'read_notes', readNotes('notes/atlas.md'), 'Still ships.'),
+      user('next'),
+    ]
+
+    const result = await historyForTarget(history, CLOUD)
+
+    expect(result).toEqual({
+      messages: [...history.slice(0, 4), user('next')],
+      withheldTurns: 3,
+    })
+    expect(JSON.stringify(result.messages)).not.toContain('answer-1')
   })
 
   it('leaves out an exchange that read a note in a folder made local-only', async () => {
@@ -406,18 +483,16 @@ describe('historyForTarget', () => {
 
     const result = await historyForTarget(history, CLOUD)
 
-    expect(result.withheldTurns).toBe(2)
-    expect(result.messages.filter((message) => message.role === 'user')).toEqual([
-      user('dailies'),
-      user('next'),
-    ])
+    expect(result.withheldTurns).toBe(3)
+    expect(result.messages).toEqual([user('next')])
   })
 
   it('keeps the roles alternating around the exchanges it leaves out', async () => {
     openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
     const history: ModelMessage[] = [
       ...exchange('one', 'read_notes', readNotes('notes/atlas.md'), 'One.'),
-      ...exchange('two', 'read_notes', readNotes('notes/x.md'), 'Two.'),
+      user('two'),
+      { role: 'assistant', content: 'Two.' },
       ...exchange('three', 'read_notes', readNotes('notes/atlas.md', 'notes/x.md'), 'Three.'),
       user('four'),
       { role: 'assistant', content: 'Four.' },
@@ -437,7 +512,7 @@ describe('historyForTarget', () => {
     ])
     expect(messages.filter((message) => message.role === 'user')).toEqual([
       user('one'),
-      user('four'),
+      user('two'),
       user('five'),
     ])
   })
@@ -550,16 +625,16 @@ describe('historyForTarget', () => {
     openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
     const history: ModelMessage[] = [
       ...exchange(
-        'legacy read',
-        'read_note',
-        json({ ok: true, note: { path: 'notes/x.md', title: 'Diary', content: 'x' } }),
-        'Diary.',
-      ),
-      ...exchange(
         'legacy recents',
         'list_recent_notes',
         json({ notes: [listing('notes/atlas.md')] }),
         'Atlas.',
+      ),
+      ...exchange(
+        'legacy read',
+        'read_note',
+        json({ ok: true, note: { path: 'notes/x.md', title: 'Diary', content: 'x' } }),
+        'Diary.',
       ),
       user('next'),
     ]
@@ -682,6 +757,8 @@ describe('historyForTarget fails closed', () => {
     ]
 
     expect((await historyForTarget(history, CLOUD)).withheldTurns).toBe(2)
+    // Nothing after the first unreadable exchange is checked.
+    expect(queries).toHaveLength(0)
   })
 
   it('leaves out an exchange whose stored tool message is malformed', async () => {

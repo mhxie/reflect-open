@@ -5,6 +5,7 @@ import {
   YOUTUBE_VIDEO_URL_FRAGMENTS,
   type NoteAttachmentType,
 } from '../graph/attachment-types.ts'
+import type { AttachmentCatalog } from '../graph/attachment-resolution.ts'
 import { AUDIO_MEMOS_DIR } from '../graph/paths.ts'
 import { foldTag } from '../markdown/index.ts'
 import { db } from './db.ts'
@@ -108,15 +109,18 @@ function notesWithAttachment(type: NoteAttachmentType) {
 export type PreviewableAttachmentType = Extract<NoteAttachmentType, 'image' | 'pdf'>
 
 /**
- * Each note's first attachment of `type` (graph-relative, alphabetical), for
- * the All Notes gallery: note path → attachment path.
+ * Each note's attachments of `type`, for the All Notes gallery: note path →
+ * graph-relative paths in document order. A reference contributes every
+ * candidate spelling it may mean (`attachmentReferenceCandidates`), in
+ * resolution order, so the gallery picks the first that exists with
+ * {@link firstExistingAttachment}.
  */
 export async function listAttachmentPreviews(
   type: PreviewableAttachmentType,
-): Promise<Map<string, string>> {
+): Promise<Map<string, string[]>> {
   const rows = await db
     .selectFrom('assets')
-    .select(['assets.notePath', (eb) => eb.fn.min('assets.assetPath').as('assetPath')])
+    .select(['assets.notePath', 'assets.assetPath'])
     .where((eb) =>
       eb.or(
         ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) =>
@@ -124,9 +128,32 @@ export async function listAttachmentPreviews(
         ),
       ),
     )
-    .groupBy('assets.notePath')
+    // Rows are written in document order, each reference's spellings in
+    // resolution order.
+    .orderBy(sql`"assets"."rowid"`)
     .execute()
-  return new Map(rows.map((row) => [row.notePath, row.assetPath]))
+  const previews = new Map<string, string[]>()
+  for (const row of rows) {
+    const paths = previews.get(row.notePath)
+    if (paths === undefined) {
+      previews.set(row.notePath, [row.assetPath])
+    } else {
+      paths.push(row.assetPath)
+    }
+  }
+  return previews
+}
+
+/**
+ * The first of `candidates` (one note's {@link listAttachmentPreviews} entry)
+ * that `catalog` holds; without a catalog yet, the first candidate. Undefined
+ * when none exists.
+ */
+export function firstExistingAttachment(
+  candidates: readonly string[],
+  catalog: Pick<AttachmentCatalog, 'has'> | null,
+): string | undefined {
+  return catalog === null ? candidates[0] : candidates.find((path) => catalog.has(path))
 }
 
 /**

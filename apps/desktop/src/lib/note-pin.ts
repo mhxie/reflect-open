@@ -1,7 +1,6 @@
 import {
-  detectConflictMarkers,
   errorMessage,
-  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
   isPinned,
   parseNote,
   type FilteredSearchHit,
@@ -55,6 +54,11 @@ function applyPinnedState(input: NoteActionInput, note: PinnedNote, isPinned: bo
 
 async function updatePin(input: NoteActionInput, kind: 'toggle' | 'unpin'): Promise<void> {
   const { queryClient, root, generation, path } = input
+  // A read-only local-only note's frontmatter can't be written; the pin
+  // shortcut must not flash a pin that Rust then refuses.
+  if (isLocalOnlyReadOnlyPath(path)) {
+    return
+  }
   const key = JSON.stringify([root, generation, path])
   if (pendingPins.has(key)) {
     return
@@ -69,26 +73,20 @@ async function updatePin(input: NoteActionInput, kind: 'toggle' | 'unpin'): Prom
     const shelf = queryClient.getQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes(root))
     const previous = shelf?.find((note) => note.path === path)
     const row = queryClient.getQueryData<NoteRow | null>(queryKeys.index.note(root, path))
-    const source = kind === 'unpin' ? null : await readNoteSource(path)
-    const parsed = source === null ? null : parseNote({ path, source })
     // A shelf that has never loaded can't say what the next order is. `true`
     // still pins; the note sorts last until a reorder numbers it.
     const pin = shelf === undefined ? true : getNextPinOrder(shelf)
-    const preview = {
-      ...(previous ?? {
-        ...pinnedNoteFor(path, row ?? null),
-        pinnedOrder: pin === true ? null : pin,
-      }),
-      isPrivate:
-        parsed === null
-          ? (row?.isPrivate ?? false)
-          : parsed.frontmatter.private || isLocalOnlyPath(path),
-      hasConflict: source === null ? (row?.hasConflict ?? false) : detectConflictMarkers(source),
+    const preview = previous ?? {
+      ...pinnedNoteFor(path, row ?? null),
+      pinnedOrder: pin === true ? null : pin,
     }
     const predicted = kind === 'unpin' ? false : previous === undefined
     applyPinnedState(input, preview, predicted)
 
-    const actual = parsed !== null && !isPinned(parsed.frontmatter)
+    const actual =
+      kind === 'unpin'
+        ? false
+        : !isPinned(parseNote({ path, source: await readNoteSource(path) }).frontmatter)
     await commitNoteFrontmatter(path, { pinned: actual ? pin : false }, generation)
     if (actual !== predicted) {
       applyPinnedState(input, preview, actual)

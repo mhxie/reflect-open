@@ -89,9 +89,12 @@ export interface ReconcileAssetDescriptionsOutcome {
    * described (a sync pull, the user); the new file is kept as it is.
    */
   skippedChanged: number
-  /** Skipped — larger than the size cap. */
+  /** Skipped — larger than the size cap, or a type this platform can't read. */
   skippedOversize: number
-  /** Permanent provider refusals — logged, no description written. */
+  /**
+   * Permanent refusals — logged, no description written: the provider refused
+   * the asset, or (local OCR) its source couldn't be read or recognized.
+   */
   refused: number
   /**
    * Asset paths for which a description was written this pass. The caller

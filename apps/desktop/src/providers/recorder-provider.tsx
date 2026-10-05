@@ -114,13 +114,15 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
         }
       })
       .catch((cause: unknown) => console.error('recorder status failed:', cause))
-    void subscribeRecorderStatus(setStatus).then((stop) => {
-      if (active) {
-        unlisten = stop
-      } else {
-        stop()
-      }
-    })
+    void subscribeRecorderStatus(setStatus)
+      .then((stop) => {
+        if (active) {
+          unlisten = stop
+        } else {
+          stop()
+        }
+      })
+      .catch((cause: unknown) => console.error('recorder status subscription failed:', cause))
     return () => {
       active = false
       unlisten?.()
@@ -139,13 +141,15 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
       for (const listener of levelListenersRef.current) {
         listener(level)
       }
-    }).then((stop) => {
-      if (active) {
-        unlisten = stop
-      } else {
-        stop()
-      }
     })
+      .then((stop) => {
+        if (active) {
+          unlisten = stop
+        } else {
+          stop()
+        }
+      })
+      .catch((cause: unknown) => console.error('recorder level subscription failed:', cause))
     return () => {
       active = false
       unlisten?.()
@@ -194,7 +198,9 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
     }
     void subscribeRecorderWarnings((code) => {
       startOperation('Recording').warn(WARNING_MESSAGES[code] ?? code)
-    }).then(keep)
+    })
+      .then(keep)
+      .catch((cause: unknown) => console.error('recorder warning subscription failed:', cause))
     void subscribeRecorderFinished(() => {
       localModelStatus(settingsRef.current.localTranscriptionModel)
         .then((model) => {
@@ -203,7 +209,9 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
           }
         })
         .catch((cause: unknown) => console.error('recording model status failed:', cause))
-    }).then(keep)
+    })
+      .then(keep)
+      .catch((cause: unknown) => console.error('recorder finished subscription failed:', cause))
     return () => {
       active = false
       for (const stop of teardown) {
@@ -229,8 +237,7 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
       onWritten: (paths) => setLastTranscript(paths.at(-1) ?? null),
       getSettings: async (): Promise<RecordingPassSettings> => {
         const current = settingsRef.current
-        const lookupContacts =
-          current.contactsEnabled && isContactsReadable(await contactsAuthorizationStatus())
+        const lookupContacts = current.contactsEnabled && (await canReadContacts())
         return {
           localModel: current.localTranscriptionModel,
           transcriptionLanguage: current.transcriptionLanguage,
@@ -288,6 +295,17 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
   )
 
   return <RecorderContext value={value}>{children}</RecorderContext>
+}
+
+/** Whether contacts can be read; an unanswerable check reads as no, so a
+ * failed permission query never fails the recording pass. */
+async function canReadContacts(): Promise<boolean> {
+  try {
+    return isContactsReadable(await contactsAuthorizationStatus())
+  } catch (cause) {
+    console.error('recording contacts check failed:', cause)
+    return false
+  }
 }
 
 /** The recorder, or null outside a {@link RecorderProvider}. */

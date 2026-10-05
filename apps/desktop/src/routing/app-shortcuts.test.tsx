@@ -165,8 +165,6 @@ function pinnedNotes(count = 10): PinnedNote[] {
     path: `notes/pin-${index + 1}.md`,
     title: `Pin ${index + 1}`,
     dailyDate: null,
-    isPrivate: false,
-    hasConflict: false,
     pinnedOrder: index + 1,
   }))
 }
@@ -652,13 +650,7 @@ describe('app shortcuts', () => {
   it('opens a pinned daily note at its date', async () => {
     const client = new QueryClient()
     client.setQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes('/g'), [
-      {
-        path: 'daily/2025-05-02.md',
-        title: '2025-05-02',
-        dailyDate: '2025-05-02',
-        isPrivate: false,
-        hasConflict: false,
-      },
+      { path: 'daily/2025-05-02.md', title: '2025-05-02', dailyDate: '2025-05-02' },
     ])
     const { result, act } = await shortcutsHook(client)
 
@@ -670,13 +662,7 @@ describe('app shortcuts', () => {
   it('a saved command context reads pins from the current graph', async () => {
     const client = pinnedClient(1)
     client.setQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes('/other'), [
-      {
-        path: 'notes/other.md',
-        title: 'Other',
-        dailyDate: null,
-        isPrivate: false,
-        hasConflict: false,
-      },
+      { path: 'notes/other.md', title: 'Other', dailyDate: null },
     ])
     const { result, act } = await shortcutsHook(client)
     const context = result.current.context

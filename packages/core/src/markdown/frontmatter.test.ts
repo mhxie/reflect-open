@@ -189,14 +189,32 @@ describe('upsertFrontmatter', () => {
     expect(upsertFrontmatter(source, {})).toBe(source)
   })
 
-  it('refuses to write over a block hidden behind a byte-order mark', () => {
+  it('patches a block hidden behind a byte-order mark and drops the mark', () => {
     // A new block in front would leave the old one, `private` and all, as body.
-    expect(() =>
-      upsertFrontmatter('\u{FEFF}---\nprivate: true\n---\nbody', { pinned: true }),
-    ).toThrow(/byte-order mark/)
+    const pinned = upsertFrontmatter('\u{FEFF}---\nprivate: true\n---\nbody', { pinned: true })
+    expect(pinned).toBe('---\nprivate: true\npinned: true\n---\n\nbody')
+    expect(frontmatterPrivacy(pinned)).toEqual({ kind: 'private' })
+    // So a note whose only block hides there can be locked.
+    const locked = upsertFrontmatter('\u{FEFF}---\ntitle: Diary\n---\n\nsecret', {
+      private: true,
+    })
+    expect(locked).toBe('---\ntitle: Diary\nprivate: true\n---\n\nsecret')
+    expect(frontmatterPrivacy(locked)).toEqual({ kind: 'private' })
     // A mark with no block behind it keeps the usual behavior.
     expect(upsertFrontmatter('\u{FEFF}# Body', { id: 'x' })).toBe(
       '---\nid: x\n---\n\n\u{FEFF}# Body',
+    )
+  })
+
+  it('writes the block with the CRLF line endings the document uses', () => {
+    const locked = upsertFrontmatter('---\r\ntitle: Diary\r\n---\r\n\r\nbody\r\n', {
+      private: true,
+    })
+    expect(locked).toBe('---\r\ntitle: Diary\r\nprivate: true\r\n---\r\n\r\nbody\r\n')
+    expect(splitFrontmatter(locked).body).toBe('body\r\n')
+    expect(frontmatterPrivacy(locked)).toEqual({ kind: 'private' })
+    expect(upsertFrontmatter('# Note\r\nbody\r\n', { private: true })).toBe(
+      '---\r\nprivate: true\r\n---\r\n\r\n# Note\r\nbody\r\n',
     )
   })
 

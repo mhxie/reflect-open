@@ -137,7 +137,18 @@ function upgradeLegacyReadPart(part: unknown): unknown {
   return upgraded
 }
 
-const partsSchema: z.ZodType<AssistantPart[]> = z.array(
+/**
+ * `Right` when `Left` and `Right` accept the same values, else `never`. The
+ * part schema must match {@link AssistantPart} both ways: a transcript part
+ * the schema lacks would make every row holding one fail to load.
+ */
+type SameShape<Left, Right> = [Left] extends [Right]
+  ? [Right] extends [Left]
+    ? Right
+    : never
+  : never
+
+const partsSchema: z.ZodType<SameShape<z.infer<typeof partSchema>, AssistantPart>[]> = z.array(
   z.preprocess(upgradeLegacyReadPart, partSchema),
 )
 

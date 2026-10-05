@@ -15,8 +15,8 @@
 use serde::Serialize;
 
 pub(super) use self::imp::{
-    clear_recovery, create_note, land_attachment, move_note, read_recovery, trash_note, write_note,
-    write_recovery,
+    carry_recovery, clear_recovery, create_note, forget_recovery, land_attachment, move_note,
+    read_recovery, trash_note, write_note, write_recovery, TrashStage,
 };
 
 /// One session's kept unsaved text and its version receipt, as the app restores it.
@@ -35,8 +35,9 @@ pub struct NoteRecovery {
 #[cfg(unix)]
 mod imp {
     use std::ffi::OsStr;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
+    pub(in crate::fs) use super::super::beneath::TrashStage;
     use super::super::beneath::{self, BeneathDir, BeneathError, Persist, Persisted, Renamed};
     use super::super::resolve::LocalOnlyEntry;
     use super::super::{NoteCreateOutcome, CHANGED_ON_DISK};
@@ -133,11 +134,12 @@ mod imp {
         })
     }
 
-    /// Move the note into a fresh `.reflect/trash/<random>/` directory and
-    /// return its path there, for the OS trash. Only a regular file whose
+    /// Stage the note for the OS trash: in a fresh `.reflect/trash/<random>/`
+    /// directory, or, when its folder is on another volume than the graph,
+    /// in a fresh hidden directory beside it. Only a regular file whose
     /// bytes are on this Mac moves: a symlink is refused, and so is a
     /// dataless file, whose bytes would stay behind in its file provider.
-    pub(in crate::fs) fn trash_note(entry: &LocalOnlyEntry) -> AppResult<PathBuf> {
+    pub(in crate::fs) fn trash_note(entry: &LocalOnlyEntry) -> AppResult<TrashStage> {
         let root = graph_root(&entry.graph_root)?;
         let (dir, name) = parent_and_name(entry, false)?;
         beneath::regular_file_beneath(&dir, name)?;
@@ -220,6 +222,31 @@ mod imp {
         }
     }
 
+    /// Drop every session's kept unsaved text of the note at `path`, which
+    /// was deleted. Best effort: a failure is logged, never fails the delete.
+    pub(in crate::fs) fn forget_recovery(root: &Path, path: &str) {
+        let forgotten = graph_root(root).and_then(|root| Ok(beneath::drop_recovery(&root, path)?));
+        if let Err(err) = forgotten {
+            tracing::warn!(
+                ?err,
+                "failed to drop the kept unsaved text of a deleted note"
+            );
+        }
+    }
+
+    /// Carry the kept unsaved text of the note at `from` to `to`, where it
+    /// moved. Best effort: a failure is logged, never fails the move.
+    pub(in crate::fs) fn carry_recovery(root: &Path, from: &str, to: &str) {
+        let carried =
+            graph_root(root).and_then(|root| Ok(beneath::move_recovery(&root, from, to)?));
+        if let Err(err) = carried {
+            tracing::warn!(
+                ?err,
+                "failed to carry the kept unsaved text of a moved note"
+            );
+        }
+    }
+
     /// Drop the kept unsaved text of the note at `path`; having none is fine.
     pub(in crate::fs) fn clear_recovery(
         root: &Path,
@@ -250,6 +277,24 @@ mod imp {
         AppError::traversal("local-only folders are read-only on this platform")
     }
 
+    /// Never staged here: every edit refuses on this platform.
+    #[derive(Debug)]
+    pub(in crate::fs) enum TrashStage {}
+
+    impl TrashStage {
+        pub(in crate::fs) fn path(&self) -> PathBuf {
+            match *self {}
+        }
+
+        pub(in crate::fs) fn trashed(self) {
+            match self {}
+        }
+
+        pub(in crate::fs) fn refused(self) -> AppResult<bool> {
+            match self {}
+        }
+    }
+
     pub(in crate::fs) fn write_note(
         _entry: &LocalOnlyEntry,
         _contents: &str,
@@ -265,9 +310,13 @@ mod imp {
         Err(unsupported())
     }
 
-    pub(in crate::fs) fn trash_note(_entry: &LocalOnlyEntry) -> AppResult<PathBuf> {
+    pub(in crate::fs) fn trash_note(_entry: &LocalOnlyEntry) -> AppResult<TrashStage> {
         Err(unsupported())
     }
+
+    pub(in crate::fs) fn forget_recovery(_root: &Path, _path: &str) {}
+
+    pub(in crate::fs) fn carry_recovery(_root: &Path, _from: &str, _to: &str) {}
 
     pub(in crate::fs) fn move_note(
         _from: &LocalOnlyEntry,

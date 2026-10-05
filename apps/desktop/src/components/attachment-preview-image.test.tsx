@@ -30,7 +30,7 @@ vi.mock('@/editor/use-note-attachments.ts', () => ({
 }))
 
 describe('AttachmentPreviewImage', () => {
-  it('falls back to the raster filter when the shell refuses the thumbnail', async () => {
+  it('falls back to the budgeted raster filter when the shell refuses the thumbnail', async () => {
     const onLoadSize = vi.fn()
     const onError = vi.fn()
     const view = await render(
@@ -48,7 +48,7 @@ describe('AttachmentPreviewImage', () => {
 
     await vi.waitFor(() => expect(onLoadSize).toHaveBeenCalledWith(1, 1))
     expect(view.container.querySelector('img')?.getAttribute('src')).toBe(
-      `${sources.image}#asset?reflect-preview=raster&v=1-1`,
+      `${sources.image}#asset?reflect-preview=raster&budget=thumb&v=1-1`,
     )
     expect(onError).not.toHaveBeenCalled()
   })

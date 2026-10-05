@@ -14,6 +14,12 @@ export const assetOcrCacheSchema = z.object({
   assetPath: z.string(),
   sourceHash: z.string().regex(/^[a-f\d]{64}$/u),
   sourceSize: z.number().int().nonnegative(),
+  /**
+   * The source's modification time (epoch ms) as listed before its bytes
+   * were read; lets a wake scan skip re-hashing an untouched file. Absent in
+   * entries written before it existed, which are always re-hashed.
+   */
+  sourceModifiedMs: z.number().nonnegative().optional(),
   providerId: z.string(),
   model: z.string(),
   baseUrl: z.string(),

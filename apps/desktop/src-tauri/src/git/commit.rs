@@ -151,7 +151,9 @@ fn add_all_with_size_guard(
         }) {
             return 1;
         }
-        let Ok(meta) = root.join(path).metadata() else {
+        // Never through a link: Git records a symlink as its target path,
+        // so only a regular file's own size can reach the guardrail.
+        let Ok(meta) = std::fs::symlink_metadata(root.join(path)) else {
             // Deleted file: let the staging proceed so the removal is recorded.
             return 0;
         };

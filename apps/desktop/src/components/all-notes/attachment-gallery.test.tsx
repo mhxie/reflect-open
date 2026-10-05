@@ -8,10 +8,12 @@ import '@/test-utils/locator.ts'
 import { AttachmentGallery } from './attachment-gallery.tsx'
 
 const listAttachmentPreviews = vi.hoisted(() => vi.fn())
+const listAttachments = vi.hoisted(() => vi.fn())
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   listAttachmentPreviews,
+  listAttachments,
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 } }),
@@ -54,7 +56,11 @@ const selection = {
   clickSelect: vi.fn(),
 } as unknown as ListSelection & { clickSelect: ReturnType<typeof vi.fn> }
 
-function renderGallery(type: 'pdf' | 'image', onOpen = vi.fn()) {
+function renderGallery(
+  type: 'pdf' | 'image',
+  onOpen = vi.fn(),
+  registerScrollToIndex: (scrollToIndex: (index: number) => void) => void = vi.fn(),
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
@@ -63,6 +69,7 @@ function renderGallery(type: 'pdf' | 'image', onOpen = vi.fn()) {
         notes={[entry('papers/socc.md', 'SoCC paper'), entry('notes/trip.md', 'Trip')]}
         selection={selection}
         onOpen={onOpen}
+        registerScrollToIndex={registerScrollToIndex}
       />
     </QueryClientProvider>,
   )
@@ -72,14 +79,19 @@ beforeEach(() => {
   vi.clearAllMocks()
   listAttachmentPreviews.mockResolvedValue(
     new Map([
-      ['papers/socc.md', 'papers/a.pdf'],
-      ['notes/trip.md', 'assets/map.png'],
+      // `a.pdf` linked from `papers/` may mean either spelling; only one exists.
+      ['papers/socc.md', ['a.pdf', 'papers/a.pdf']],
+      ['notes/trip.md', ['notes/assets/map.png', 'assets/map.png']],
     ]),
   )
+  listAttachments.mockResolvedValue([
+    { path: 'papers/a.pdf', size: 10 },
+    { path: 'assets/map.png', size: 10 },
+  ])
 })
 
 describe('AttachmentGallery', () => {
-  it('shows each note’s first attachment, a PDF as its first page', async () => {
+  it('shows each note’s first existing attachment, a PDF as its first page', async () => {
     const view = await renderGallery('pdf')
 
     await expect.element(page.getByRole('list', { name: 'Notes with PDFs' })).toBeVisible()
@@ -116,5 +128,18 @@ describe('AttachmentGallery', () => {
     onOpen.mockClear()
     await userEvent.dblClick(card, { position: { x: 20, y: 20 } })
     expect(onOpen).toHaveBeenCalledWith('papers/socc.md', expect.anything())
+  })
+
+  it('lets keyboard navigation bring a card into view', async () => {
+    const registerScrollToIndex = vi.fn<(scrollToIndex: (index: number) => void) => void>()
+    const view = await renderGallery('pdf', vi.fn(), registerScrollToIndex)
+    await expect.element(page.getByRole('list', { name: 'Notes with PDFs' })).toBeVisible()
+
+    const cards = view.container.querySelectorAll('li')
+    const scrollIntoView = vi.spyOn(cards[1]!, 'scrollIntoView')
+    const scrollToIndex = registerScrollToIndex.mock.calls.at(-1)![0]
+    scrollToIndex(1)
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
   })
 })

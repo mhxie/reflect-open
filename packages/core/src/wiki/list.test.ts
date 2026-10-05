@@ -77,7 +77,7 @@ function serve(): void {
       if (content === undefined) {
         throw { kind: 'notFound', message: 'gone' }
       }
-      return { kind: 'content', content }
+      return { kind: 'content', content, localOnly: false }
     }
     if (command !== 'db_query') {
       return null

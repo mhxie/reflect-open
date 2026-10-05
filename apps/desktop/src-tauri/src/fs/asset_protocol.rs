@@ -20,6 +20,9 @@
 //! Passive previews append `?reflect-preview=raster`; those responses are
 //! served only when byte sniffing identifies PNG, JPEG, GIF, or WebP content,
 //! so an SVG renamed with a raster extension cannot load subresources there.
+//! A card's fallback after a failed thumbnail adds `&budget=thumb`, which
+//! also refuses (`413`) an image past the thumbnail size or decode budget,
+//! so the webview never decodes in full what the shell would not.
 //!
 //! `?reflect-preview=pdf-page&page=N&width=W` passes the same checks and
 //! answers with a page PNG rendered by `pdf_render`; the PDF's own bytes
@@ -48,6 +51,8 @@ use super::GraphState;
 /// the CSP `img-src` grant in `tauri.conf.json` spell it out literally.
 pub(crate) const SCHEME: &str = "reflect-asset";
 const PREVIEW_RASTER_QUERY: &str = "reflect-preview=raster";
+/// Holds a passive raster preview to the thumbnail budget (see the module docs).
+const THUMBNAIL_BUDGET_QUERY: &str = "budget=thumb";
 
 /// Protocol entry point (`register_asynchronous_uri_scheme_protocol`). Runs
 /// on the webview's calling thread — on WebKit, the app's main thread — so it
@@ -90,12 +95,19 @@ pub(crate) fn handle<R: Runtime>(
         return;
     }
     let preview_raster_only = requests_preview_raster(request.uri().query());
+    let thumbnail_budget =
+        preview_raster_only && has_query_parameter(request.uri().query(), THUMBNAIL_BUDGET_QUERY);
     tauri::async_runtime::spawn_blocking(move || {
         if !method_allowed {
             responder.respond(status_response(StatusCode::METHOD_NOT_ALLOWED));
             return;
         }
-        responder.respond(response_for(&app, &request_path, preview_raster_only));
+        responder.respond(response_for(
+            &app,
+            &request_path,
+            preview_raster_only,
+            thumbnail_budget,
+        ));
     });
 }
 
@@ -103,8 +115,14 @@ fn response_for<R: Runtime>(
     app: &AppHandle<R>,
     request_path: &str,
     preview_raster_only: bool,
+    thumbnail_budget: bool,
 ) -> Response<Cow<'static, [u8]>> {
-    match serve(app, request_path) {
+    let served = if thumbnail_budget {
+        serve_within_thumbnail_budget(app, request_path)
+    } else {
+        serve(app, request_path)
+    };
+    match served {
         Ok((mime, bytes)) => {
             if preview_raster_only && !is_preview_safe_raster_mime(&mime) {
                 return status_response(StatusCode::UNSUPPORTED_MEDIA_TYPE);
@@ -123,11 +141,11 @@ fn response_for<R: Runtime>(
 }
 
 fn requests_preview_raster(query: Option<&str>) -> bool {
-    query.is_some_and(|query| {
-        query
-            .split('&')
-            .any(|parameter| parameter == PREVIEW_RASTER_QUERY)
-    })
+    has_query_parameter(query, PREVIEW_RASTER_QUERY)
+}
+
+fn has_query_parameter(query: Option<&str>, expected: &str) -> bool {
+    query.is_some_and(|query| query.split('&').any(|parameter| parameter == expected))
 }
 
 fn is_preview_safe_raster_mime(mime: &str) -> bool {
@@ -177,6 +195,29 @@ fn io_status(err: &std::io::Error) -> StatusCode {
         std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+/// [`serve`], refusing (`413`) a file past the thumbnail size budget before
+/// reading it, and an image whose header is past the decode budget after.
+fn serve_within_thumbnail_budget<R: Runtime>(
+    app: &AppHandle<R>,
+    request_path: &str,
+) -> Result<(String, Vec<u8>), StatusCode> {
+    let located = locate(app, request_path)?;
+    let file = located.target.open().map_err(|err| io_status(&err))?;
+    let len = file.metadata().map_err(|err| io_status(&err))?.len();
+    if len > image_thumbnail::MAX_IMAGE_BYTES {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    let mut bytes = Vec::with_capacity(len as usize);
+    file.take(image_thumbnail::MAX_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| io_status(&err))?;
+    if !image_thumbnail::passive_fallback_allowed(&bytes) {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    let mime = MimeType::parse(&bytes, &located.rel);
+    Ok((mime, bytes))
 }
 
 fn serve<R: Runtime>(
@@ -285,7 +326,7 @@ async fn serve_thumbnail<R: Runtime>(
             &located.root,
             located.local_only.as_deref(),
             &located.rel,
-            &located.target,
+            located.target,
             request,
         )
         .map_err(thumbnail_status)
@@ -595,6 +636,29 @@ mod tests {
         ] {
             assert_eq!(serve_thumb(path, 320).unwrap_err(), status, "{path}");
         }
+
+        // A card's raster fallback is held to the thumbnail budget: an image
+        // whose header declares a canvas past it is refused, never read out
+        // for the webview to decode in full; a plain raster read still is.
+        let mut huge = b"GIF89a".to_vec();
+        huge.extend(16_000u16.to_le_bytes());
+        huge.extend(16_000u16.to_le_bytes());
+        huge.extend([0x80, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x2c, 0, 0, 0, 0]);
+        huge.extend(16_000u16.to_le_bytes());
+        huge.extend(16_000u16.to_le_bytes());
+        huge.extend([0, 2, 0, 0x3b]);
+        std::fs::write(root.join("assets/huge.gif"), huge).unwrap();
+        assert_eq!(
+            serve_within_thumbnail_budget(app.handle(), "4/assets/huge.gif").unwrap_err(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert!(serve(app.handle(), "4/assets/huge.gif").is_ok());
+        let (mime, _) = serve_within_thumbnail_budget(app.handle(), "4/assets/photo.png").unwrap();
+        assert_eq!(mime, "image/png");
+        assert!(has_query_parameter(
+            Some("reflect-preview=raster&budget=thumb&v=1-2"),
+            THUMBNAIL_BUDGET_QUERY
+        ));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use git2::{Commit, Delta, DiffOptions, Repository, Tree};
-use reflect_frontmatter::{backup_privacy, split_frontmatter};
+use reflect_frontmatter::{backup_privacy, parse_frontmatter, split_frontmatter};
 
 use crate::error::AppResult;
 
@@ -327,46 +327,12 @@ fn authored_note_title(source: &str) -> Option<AuthoredNoteTitle> {
         .map(AuthoredNoteTitle::Public)
 }
 
+/// The frontmatter `title` as the app reads it: a string from a block that
+/// loads, never a guess from a line of YAML that doesn't.
 fn frontmatter_title(raw: Option<&str>) -> Option<String> {
-    frontmatter_scalar(raw?, "title").filter(|title| !title.trim().is_empty())
-}
-
-fn frontmatter_scalar(raw: &str, key: &str) -> Option<String> {
-    for line in raw.lines() {
-        let Some((candidate, value)) = line.split_once(':') else {
-            continue;
-        };
-        if candidate.trim() == key {
-            return Some(unquote_scalar(value.trim()));
-        }
-    }
-    None
-}
-
-fn unquote_scalar(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.len() >= 2 {
-        let bytes = trimmed.as_bytes();
-        let quote = bytes[0];
-        if quote == b'"' || quote == b'\'' {
-            if let Some(end) = trimmed[1..]
-                .bytes()
-                .position(|byte| byte == quote)
-                .map(|index| index + 1)
-            {
-                let trailing = trimmed[end + 1..].trim_start();
-                if trailing.is_empty() || trailing.starts_with('#') {
-                    return trimmed[1..end].to_string();
-                }
-            }
-        }
-    }
-    trimmed
-        .split_once(" #")
-        .map(|(head, _comment)| head)
-        .unwrap_or(trimmed)
-        .trim()
-        .to_string()
+    parse_frontmatter(raw)
+        .title
+        .filter(|title| !title.trim().is_empty())
 }
 
 fn first_h1(body: &str) -> Option<String> {
@@ -496,4 +462,43 @@ fn limit_subject(subject: String) -> String {
         .take(MAX_SUBJECT_CHARS.saturating_sub(3))
         .chain("...".chars())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn title(source: &str) -> Option<String> {
+        match authored_note_title(source)? {
+            AuthoredNoteTitle::Public(title) => Some(title),
+            AuthoredNoteTitle::Private => None,
+        }
+    }
+
+    /// The subject names a note by the title the app reads, from YAML that
+    /// loads: never a nested or block-scalar `title:` line, and a block that
+    /// doesn't load falls back to the H1.
+    #[test]
+    fn titles_come_from_the_shared_frontmatter_parser() {
+        assert_eq!(
+            title("---\ntitle: \"Project #1\" # c\n---\n# H1\n").as_deref(),
+            Some("Project #1")
+        );
+        assert_eq!(
+            title("---\nmeta:\n  title: Nested\n---\n# Heading\n").as_deref(),
+            Some("Heading")
+        );
+        assert_eq!(
+            title("---\nnotes: |\n  title: Inside a block\n---\n# Heading\n").as_deref(),
+            Some("Heading")
+        );
+        assert_eq!(
+            title("---\ntitle: First\ntags: [unclosed\n---\n# Heading\n").as_deref(),
+            Some("Heading")
+        );
+        assert_eq!(
+            title("---\ntitle: 2024\n---\n# Heading\n").as_deref(),
+            Some("Heading")
+        );
+    }
 }

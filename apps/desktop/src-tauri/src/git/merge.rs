@@ -117,7 +117,10 @@ pub struct ChangedFile {
     pub path: String,
     pub kind: ChangeKind,
     /// Last-modified time of the written file (epoch ms; upserts only), so
-    /// the reindex stamps the real mtime like the watcher path does.
+    /// the reindex stamps the real mtime like the watcher path does. Omitted
+    /// when unknown (every removal), as the watcher's `FileChange` does: the
+    /// TypeScript schema takes an absent field, not `null`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_ms: Option<u64>,
 }
 
@@ -172,12 +175,14 @@ pub(super) struct PullPolicy<'a> {
 struct ConflictSide {
     path: String,
     id: git2::Oid,
+    mode: u32,
 }
 
 fn side_of(entry: Option<IndexEntry>) -> Option<ConflictSide> {
     entry.map(|entry| ConflictSide {
         path: String::from_utf8_lossy(&entry.path).into_owned(),
         id: entry.id,
+        mode: entry.mode,
     })
 }
 
@@ -284,6 +289,7 @@ fn fast_forward(
         follow.extend(plan.units.iter().cloned());
         let mut index = repo.index()?;
         follow_tree_in_index(repo, &mut index, &new_tree, &follow)?;
+        stamp_index_stats(&mut index, root, &plan.allowed)?;
         index.write()?;
         let refname = format!("refs/heads/{branch}");
         repo.reference(&refname, remote_oid, true, "reflect sync: fast-forward")?;
@@ -369,7 +375,7 @@ fn merge_diverged(
             .our_label(OUR_LABEL)
             .their_label(THEIR_LABEL);
         repo.merge(&[&annotated], Some(&mut merge_opts), Some(&mut checkout))?;
-        complete_merge(repo, root, remote_oid, &held, &followed, policy.local_only)
+        complete_merge(repo, root, remote_oid, &held, &followed, policy)
     });
     if landed.is_err() {
         // The repo may carry MERGE_* state now; a failure that leaves it
@@ -595,9 +601,10 @@ fn checkout_paths(repo: &Repository, tree: &git2::Tree, changes: &[ChangedFile])
 /// Make the index match `tree` at and under each of `paths`, without
 /// touching the working tree: clear every path first, then copy the tree's
 /// files and links there (a whole subtree for a folder), so a type change
-/// never meets its old self as a file/folder collision. The stat fields stay
-/// zero: the next commit re-reads the few files involved (and never a
-/// local-only path), so it stays clean.
+/// never meets its old self as a file/folder collision. The stat fields are
+/// left zero: a caller that also checked those files out records their stat
+/// afterwards ([`stamp_index_stats`]), since libgit2 re-hashes a zero-stat
+/// entry on every later commit and never writes the stat back.
 fn follow_tree_in_index(
     repo: &Repository,
     index: &mut Index,
@@ -629,6 +636,42 @@ fn follow_tree_in_index(
             })?;
         }
     }
+    Ok(())
+}
+
+/// Record the on-disk stat of each upsert in `changes`, just checked out
+/// from the tree its (already followed) index entry names, as a checkout
+/// that updates the index would. Held under the note write guard, so no app
+/// write lands between the checkout and the stat.
+#[cfg(unix)]
+fn stamp_index_stats(index: &mut Index, root: &Path, changes: &[ChangedFile]) -> AppResult<()> {
+    use std::os::unix::fs::MetadataExt;
+    for change in changes {
+        if matches!(change.kind, ChangeKind::Remove) {
+            continue;
+        }
+        let Some(mut entry) = index.get_path(Path::new(&change.path), 0) else {
+            continue;
+        };
+        let Ok(meta) = fs::symlink_metadata(root.join(&change.path)) else {
+            continue;
+        };
+        // Truncated to the index's 32-bit fields, as Git itself stores them.
+        entry.ctime = IndexTime::new(meta.ctime() as i32, meta.ctime_nsec() as u32);
+        entry.mtime = IndexTime::new(meta.mtime() as i32, meta.mtime_nsec() as u32);
+        entry.dev = meta.dev() as u32;
+        entry.ino = meta.ino() as u32;
+        entry.uid = meta.uid();
+        entry.gid = meta.gid();
+        entry.file_size = meta.len() as u32;
+        index.add(&entry)?;
+    }
+    Ok(())
+}
+
+/// Elsewhere the entries keep zero stats: correct, only slower to commit.
+#[cfg(not(unix))]
+fn stamp_index_stats(_index: &mut Index, _root: &Path, _changes: &[ChangedFile]) -> AppResult<()> {
     Ok(())
 }
 
@@ -758,13 +801,13 @@ fn complete_merge(
     remote_oid: git2::Oid,
     held: &[String],
     followed: &[String],
-    local_only: Option<&LocalOnlyFolders>,
+    policy: &PullPolicy<'_>,
 ) -> AppResult<(Vec<String>, Vec<ChangedFile>, Vec<String>)> {
     let mut index = repo.index()?;
     let local_commit = repo.head()?.peel_to_commit()?;
     let remote_commit = repo.find_commit(remote_oid)?;
     let remote_tree = remote_commit.tree()?;
-    let conflicted_paths = resolve_conflicts(repo, root, &mut index, &remote_tree, local_only)?;
+    let conflicted_paths = resolve_conflicts(repo, root, &mut index, &remote_tree, policy)?;
     // Held units merged as this device's version; where the other device
     // changed one (`followed`), history takes its version instead. The files
     // stay frozen.
@@ -785,6 +828,17 @@ fn complete_merge(
     // wrote everything), so the stamped mtimes are the files' real ones.
     let mut changed_files = changed_between(repo, Some(&local_commit.tree()?), &tree)?;
     changed_files.retain(|change| !under_any(held, &change.path));
+    // A conflicted file was rewritten on disk even where history keeps this
+    // device's version (a marker file over the size limit), so it reindexes.
+    for path in &conflicted_paths {
+        if !changed_files.iter().any(|change| change.path == *path) {
+            changed_files.push(ChangedFile {
+                path: path.clone(),
+                kind: ChangeKind::Upsert,
+                modified_ms: None,
+            });
+        }
+    }
     stamp_modified_times(root, &mut changed_files);
     let sig = signature(repo)?;
     let message = if conflicted_paths.is_empty() {
@@ -890,8 +944,9 @@ fn resolve_conflicts(
     root: &Path,
     index: &mut Index,
     remote_tree: &git2::Tree,
-    local_only: Option<&LocalOnlyFolders>,
+    policy: &PullPolicy<'_>,
 ) -> AppResult<Vec<String>> {
+    let local_only = policy.local_only;
     if !index.has_conflicts() {
         return Ok(Vec::new());
     }
@@ -922,7 +977,7 @@ fn resolve_conflicts(
                     our,
                     their,
                     remote_tree,
-                    local_only,
+                    policy,
                 )?);
             }
             (Some(edited), None) | (None, Some(edited)) => {
@@ -942,8 +997,12 @@ fn resolve_conflicts(
 
 /// Both sides changed the file. Text: the merge checkout already wrote the
 /// labeled marker file, so staging the working copy clears the conflict
-/// entries. Binary: markers would corrupt the bytes — keep ours in place and
-/// write the other device's version alongside, at a free name.
+/// entries — unless that file is at or above the backup size limit, which
+/// no commit may record: history then keeps this device's version (the
+/// other device's is the merge's second parent), and the marked-up file
+/// stays on disk as an edit every later commit withholds and reports.
+/// Binary: markers would corrupt the bytes — keep ours in place and write
+/// the other device's version alongside, at a free name.
 fn resolve_both_edited(
     repo: &Repository,
     root: &Path,
@@ -951,11 +1010,17 @@ fn resolve_both_edited(
     our: ConflictSide,
     their: ConflictSide,
     remote_tree: &git2::Tree,
-    local_only: Option<&LocalOnlyFolders>,
+    policy: &PullPolicy<'_>,
 ) -> AppResult<Vec<String>> {
+    let local_only = policy.local_only;
     let binary = repo.find_blob(our.id)?.is_binary() || repo.find_blob(their.id)?.is_binary();
     if !binary {
-        index.add_path(Path::new(&our.path))?;
+        let marked_bytes = fs::symlink_metadata(root.join(&our.path)).map_or(0, |meta| meta.len());
+        if marked_bytes >= policy.max_file_bytes {
+            stage_side(index, &our)?;
+        } else {
+            index.add_path(Path::new(&our.path))?;
+        }
         return Ok(vec![our.path]);
     }
     write_blob(repo, root, &our.path, our.id, local_only)?;
@@ -963,6 +1028,28 @@ fn resolve_both_edited(
     index.add_path(Path::new(&our.path))?;
     index.add_path(Path::new(&copy))?;
     Ok(vec![our.path, copy])
+}
+
+/// Stage `side`'s committed blob at its path (clearing that path's conflict
+/// entries), leaving the working tree alone.
+fn stage_side(index: &mut Index, side: &ConflictSide) -> AppResult<()> {
+    // Unlike `add_path`, a plain `add` leaves the conflict stages in place.
+    index.conflict_remove(Path::new(&side.path))?;
+    index.add(&IndexEntry {
+        ctime: IndexTime::new(0, 0),
+        mtime: IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: side.mode,
+        uid: 0,
+        gid: 0,
+        file_size: 0,
+        id: side.id,
+        flags: 0,
+        flags_extended: 0,
+        path: side.path.as_bytes().to_vec(),
+    })?;
+    Ok(())
 }
 
 /// One side edited what the other deleted (either direction): restore and
@@ -1127,7 +1214,42 @@ mod seam {
 
 #[cfg(test)]
 mod path_tests {
-    use super::conflict_copy_path;
+    use super::{conflict_copy_path, ChangeKind, ChangedFile, MergeKind, MergeOutcome};
+
+    /// The shape `mergeOutcomeSchema` parses: a removal (or an upsert whose
+    /// mtime could not be read) carries no `modifiedMs` at all, since the
+    /// schema refuses `null` and a refused outcome loses the pull's reindex.
+    #[test]
+    fn outcomes_serialize_for_the_typescript_boundary() {
+        let outcome = MergeOutcome {
+            changed_files: vec![
+                ChangedFile {
+                    path: "notes/gone.md".into(),
+                    kind: ChangeKind::Remove,
+                    modified_ms: None,
+                },
+                ChangedFile {
+                    path: "notes/new.md".into(),
+                    kind: ChangeKind::Upsert,
+                    modified_ms: Some(1_700_000_000_000),
+                },
+            ],
+            ..MergeOutcome::nothing(MergeKind::FastForward)
+        };
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap(),
+            serde_json::json!({
+                "kind": "fastForward",
+                "conflictedPaths": [],
+                "changedFiles": [
+                    { "path": "notes/gone.md", "kind": "remove" },
+                    { "path": "notes/new.md", "kind": "upsert", "modifiedMs": 1_700_000_000_000_u64 },
+                ],
+                "frozenPaths": [],
+                "displaced": [],
+            })
+        );
+    }
 
     #[test]
     fn conflict_copies_stay_in_their_directory() {

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { recordDisplacedNotes, subscribeNoteDisplaced } from '@reflect/core'
 import { followDisplacedNote } from '@/editor/move-note.ts'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
@@ -11,7 +11,11 @@ export function NoteDisplacements(): null {
   const { graph, status } = useGraph()
   const generation = status === 'ready' ? graph?.generation : undefined
   const currentGeneration = useRef(generation)
-  currentGeneration.current = generation
+  // Committed before the subscription effect's cleanup runs, so a generation
+  // that has changed is seen at once; never written during render.
+  useLayoutEffect(() => {
+    currentGeneration.current = generation
+  }, [generation])
 
   useEffect(() => {
     if (!bridgeReady || generation === undefined) {

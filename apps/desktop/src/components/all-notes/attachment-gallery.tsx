@@ -1,8 +1,9 @@
-import type { ReactElement } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FileText } from 'lucide-react'
 import {
   displayNoteTitle,
+  firstExistingAttachment,
   listAttachmentPreviews,
   type NoteListEntry,
   type PreviewableAttachmentType,
@@ -11,6 +12,7 @@ import { AttachmentPreviewImage } from '@/components/attachment-preview-image.ts
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
+import { createAttachmentCatalogQueryOptions } from '@/lib/query-options.ts'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
@@ -23,6 +25,8 @@ interface AttachmentGalleryProps {
   notes: readonly NoteListEntry[]
   selection: ListSelection
   onOpen: (path: string, event?: ModClickEvent) => void
+  /** Registers how keyboard navigation brings the card at an index into view. */
+  registerScrollToIndex: (scrollToIndex: (index: number) => void) => void
 }
 
 /** Card thumbnails are at most this wide (CSS px), so previews render at a small bucket. */
@@ -30,7 +34,8 @@ const CARD_WIDTH = 220
 
 /**
  * All Notes filtered to images or PDFs, as a gallery after Arc's Library: each
- * note a card showing its first such attachment (a PDF's first page). Cards
+ * note a card showing its first such attachment that exists (a PDF's first
+ * page). Cards
  * follow the list's conventions — click selects, ⌘/Shift extend the
  * selection, a double-click or the title opens the note.
  */
@@ -39,24 +44,44 @@ export function AttachmentGallery({
   notes,
   selection,
   onOpen,
+  registerScrollToIndex,
 }: AttachmentGalleryProps): ReactElement {
   const { graph } = useGraph()
   const { settings } = useSettings()
   const bridgeReady = useBridgeReady()
+  const generation = graph?.generation ?? null
   const { data: previews } = useQuery({
     queryKey: queryKeys.index.attachmentPreviews(graph?.root, type),
     queryFn: () => listAttachmentPreviews(type),
     enabled: bridgeReady && graph !== null,
   })
-  const generation = graph?.generation ?? null
+  // An attachment reference names several candidate paths; the catalog says
+  // which exists.
+  const { data: catalog } = useQuery({
+    ...createAttachmentCatalogQueryOptions(generation ?? 0),
+    enabled: bridgeReady && generation !== null,
+  })
+  const listRef = useRef<HTMLUListElement>(null)
+
+  // Cards render in the list's order, so the selection's index is the card's.
+  useEffect(() => {
+    registerScrollToIndex((index) => {
+      listRef.current?.children[index]?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [registerScrollToIndex])
 
   return (
     <ul
+      ref={listRef}
       aria-label={type === 'pdf' ? 'Notes with PDFs' : 'Notes with images'}
       className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-4 py-5 pr-7 pl-12"
     >
       {notes.map((note) => {
-        const assetPath = previews?.get(note.path)
+        const candidates = previews?.get(note.path)
+        const assetPath =
+          candidates === undefined
+            ? undefined
+            : firstExistingAttachment(candidates, catalog ?? null)
         const placeholder = (
           <FileText aria-hidden strokeWidth={1.5} className="size-6 text-text-muted" />
         )

@@ -565,6 +565,9 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     // Same re-gating as the clean-reload path: never load lossy content into a
     // live editor whose next save would drop what it can't model.
     adoptCleanContent(content)
+    // Choosing theirs discards the unsaved text: drop the copy kept for it
+    // (and a restored one), or the next open would offer it back.
+    clearHeldRecovery(recoveryVersion, restoredRecovery)
   }
 
   function restoreRecovery(): void {
@@ -578,15 +581,28 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     ) {
       return
     }
-    const doc = splitDoc(recovery.contents)
-    // The kept copy stays until this text lands, then goes like this
-    // session's own.
-    restoredRecovery = recovery
+    const kept = recovery
+    const doc = splitDoc(kept.contents)
+    // The kept copy stays until this text lands (or Load theirs drops it),
+    // then goes like this session's own.
+    restoredRecovery = kept
     recovery = null
     header = doc.header
     buffer = doc.body
     classifyHeader()
     applyToEditor(doc.body)
+    if (!missing && kept.sourceRevision !== disk) {
+      // Disk moved on since the text was kept: restoring must not silently
+      // replace that newer version. Park it exactly like an external change
+      // over unsaved edits — the kept revision is the base, the current file
+      // is "theirs" — so Keep mine / Load theirs decides.
+      cancelScheduledSave()
+      conflict = disk
+      disk = kept.sourceRevision ?? ''
+      dirty = true
+      emit()
+      return
+    }
     dirty = header + buffer !== disk
     emit()
     if (dirty) {
@@ -617,7 +633,14 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
     if (disposed || isProtected || status !== 'ready') {
       return false
     }
-    header = splitDoc(upsertFrontmatter(header + buffer, frontmatterPatchToYaml(patch))).header
+    const patched = splitDoc(upsertFrontmatter(header + buffer, frontmatterPatchToYaml(patch)))
+    // Only the header is taken from the patch, so one that rewrote the body
+    // (a block behind a byte-order mark, which the editor shows as body)
+    // would leave that old block, `private` and all, below the new one.
+    if (patched.body !== buffer) {
+      throw new Error('refusing to update frontmatter the editor shows as body')
+    }
+    header = patched.header
     classifyHeader()
     dirty = header + buffer !== disk
     emit()

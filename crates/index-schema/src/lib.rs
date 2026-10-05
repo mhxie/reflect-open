@@ -26,6 +26,10 @@ pub const INDEX_FILE: &str = "index.sqlite";
 /// semantic|hybrid` on, inside [`REFLECT_DIR`].
 pub const SEARCH_SOCKET_FILE: &str = "search.sock";
 
+/// The most results one search may ask for: the app's socket refuses more,
+/// and the CLI holds every mode to it so `--limit` means the same in each.
+pub const MAX_SEARCH_RESULTS: usize = 100;
+
 /// `sockaddr_un.sun_path` holds 104 bytes on macOS (108 on Linux), one of
 /// them the terminating NUL.
 pub const MAX_SOCKET_PATH_BYTES: usize = 103;

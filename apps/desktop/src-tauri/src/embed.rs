@@ -30,7 +30,7 @@ pub struct ModelSpec {
 }
 
 /// The models on offer; the first is the default (the original model, so an
-/// existing index keeps its vectors).
+/// existing index keeps its vector table's width).
 pub const MODELS: &[ModelSpec] = &[
     ModelSpec {
         id: "all-MiniLM-L6-v2",
@@ -415,21 +415,35 @@ pub async fn embed_ensure(
     Ok(status)
 }
 
+/// The loaded model, provided it is `expected` when the caller names one: a
+/// caller that read the model id before a switch must not receive another
+/// model's vectors under that id.
+fn loaded_model(runtime: &Runtime, expected: Option<&str>) -> AppResult<Arc<Loaded>> {
+    match runtime {
+        Runtime::Ready(loaded) if expected.is_none_or(|model| model == loaded.spec.id) => {
+            Ok(Arc::clone(loaded))
+        }
+        Runtime::Ready(_) => Err(AppError::io(
+            "the embedding model changed; embed again with the loaded model",
+        )),
+        _ => Err(AppError::io("embedding model is not loaded")),
+    }
+}
+
 /// Embed a batch of texts into the loaded model's vectors, off the UI thread,
 /// prefixed for their `role` as the model expects. Errors if the model isn't
-/// `Ready` (callers gate on `embed_status`/`embed_ensure`).
+/// `Ready` (callers gate on `embed_status`/`embed_ensure`), or isn't `model`
+/// when the caller names the one it expects.
 #[tauri::command]
 pub async fn embed_texts(
     texts: Vec<String>,
     role: Option<TextRole>,
+    model: Option<String>,
     state: State<'_, EmbedState>,
 ) -> AppResult<Vec<Vec<f32>>> {
     let loaded = {
         let runtime = lock_state(&state)?;
-        match &*runtime {
-            Runtime::Ready(loaded) => Arc::clone(loaded),
-            _ => return Err(AppError::io("embedding model is not loaded")),
-        }
+        loaded_model(&runtime, model.as_deref())?
     };
     let prefix = match role.unwrap_or_default() {
         TextRole::Query => loaded.spec.query_prefix,

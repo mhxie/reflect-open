@@ -97,9 +97,10 @@ struct Slot {
     epoch: u64,
 }
 
-/// The process-wide model slot.
+/// The process-wide model slot, and the lock that lets one load run at a
+/// time without holding the slot.
 #[derive(Default, Clone)]
-pub struct Engine(Arc<Mutex<Slot>>);
+pub struct Engine(Arc<Mutex<Slot>>, Arc<Mutex<()>>);
 
 impl Engine {
     /// Transcribe 16 kHz mono `samples` with the model at `model_path`.
@@ -187,21 +188,26 @@ impl Engine {
     }
 
     fn context(&self, model_path: &Path) -> Result<Arc<WhisperContext>, String> {
-        let mut slot = self
-            .0
+        if let Some(context) = self.loaded(model_path)? {
+            return Ok(context);
+        }
+        // Loading takes seconds; the slot stays unlocked meanwhile so a
+        // release (a model delete, on the main thread) never waits for it.
+        // Loads still run one at a time: a second caller waits here, then
+        // finds the first one's model instead of loading another copy.
+        let _loading = self
+            .1
             .lock()
             .map_err(|_| "the transcription engine lock was poisoned".to_string())?;
-        if let Some(loaded) = slot.loaded.as_mut() {
-            if loaded.model_path == model_path {
-                loaded.last_used = Instant::now();
-                return Ok(Arc::clone(&loaded.context));
-            }
+        if let Some(context) = self.loaded(model_path)? {
+            return Ok(context);
         }
         install_logging();
         let context =
             WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
                 .map(Arc::new)
                 .map_err(|err| format!("loading the model: {err}"))?;
+        let mut slot = self.lock()?;
         slot.epoch += 1;
         let epoch = slot.epoch;
         slot.loaded = Some(Loaded {
@@ -212,6 +218,25 @@ impl Engine {
         });
         self.watch_idle(epoch);
         Ok(context)
+    }
+
+    /// The loaded model, if it is the one at `model_path`.
+    fn loaded(&self, model_path: &Path) -> Result<Option<Arc<WhisperContext>>, String> {
+        let mut slot = self.lock()?;
+        Ok(slot
+            .loaded
+            .as_mut()
+            .filter(|loaded| loaded.model_path == model_path)
+            .map(|loaded| {
+                loaded.last_used = Instant::now();
+                Arc::clone(&loaded.context)
+            }))
+    }
+
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Slot>, String> {
+        self.0
+            .lock()
+            .map_err(|_| "the transcription engine lock was poisoned".to_string())
     }
 
     fn touch(&self) {

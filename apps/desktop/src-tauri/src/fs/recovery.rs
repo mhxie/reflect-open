@@ -45,6 +45,10 @@ pub async fn note_recovery_write(
 }
 
 /// The kept unsaved text of the local-only note at `path`, or `None`.
+///
+/// Takes no note write guard: copies land and go with single renames and
+/// unlinks, so a read never sees half of one, and opening a note must not
+/// wait out a Git pull's checkout.
 #[tauri::command]
 pub async fn note_recovery_read(
     path: String,
@@ -52,11 +56,7 @@ pub async fn note_recovery_read(
     state: State<'_, GraphState>,
 ) -> AppResult<Option<NoteRecovery>> {
     let root = recovery_root(&state, generation, &path)?;
-    crate::blocking::run_blocking(move || {
-        let _guard = note_write_guard();
-        local_only_edit::read_recovery(&root, &path)
-    })
-    .await
+    crate::blocking::run_blocking(move || local_only_edit::read_recovery(&root, &path)).await
 }
 
 /// Drop this version of a session's copy; missing or newer copies stay untouched.
@@ -193,18 +193,34 @@ mod tests {
     }
 
     #[test]
-    fn a_recovery_read_waits_for_a_pull_without_blocking_its_command_future() {
+    fn a_recovery_read_never_waits_for_a_pull() {
+        let session = session(secure());
+        let _pulling = note_write_guard();
+        assert_eq!(
+            note_recovery_read("finance/secure/bank.md".into(), 1, session.app.state()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_recovery_write_waits_for_a_pull_without_blocking_its_command_future() {
         let session = session(secure());
         let guard = note_write_guard();
-        let mut read = Box::pin(super::note_recovery_read(
+        let mut write = Box::pin(super::note_recovery_write(
             "finance/secure/bank.md".into(),
+            "unsaved".into(),
+            OWNER_A.into(),
+            None,
             1,
             session.app.state(),
         ));
         let mut context = Context::from_waker(Waker::noop());
-        assert!(matches!(read.as_mut().poll(&mut context), Poll::Pending));
+        assert!(matches!(write.as_mut().poll(&mut context), Poll::Pending));
         drop(guard);
-        assert_eq!(tauri::async_runtime::block_on(read).unwrap(), None);
+        assert_eq!(
+            tauri::async_runtime::block_on(write).unwrap().contents,
+            "unsaved"
+        );
     }
 
     #[test]

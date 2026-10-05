@@ -53,11 +53,12 @@ import {
  * its first words, as audio memos always have been.
  *
  * Raw-first like audio memos: the recording sits in local staging until every
- * step has succeeded, and each step is idempotent, so a failed pass (model not
- * downloaded, a write conflict, an offline archive folder) simply retries on
- * the next trigger. The transcript link in the daily note is the tombstone: a
- * recording whose link exists is only archived, never written again, so
- * deleting the transcript note doesn't bring it back.
+ * step has succeeded, and each step is idempotent, so a failed recording (model
+ * not downloaded, a write conflict, an offline archive folder) simply retries
+ * on the next trigger, while the recordings after it still go ahead. The
+ * transcript link in the daily note is the tombstone: a recording whose link
+ * exists is only archived, never written again, so deleting the transcript
+ * note doesn't bring it back.
  *
  * Privacy: recording, transcription, and archiving are all local. Calendar
  * and contacts are read through the OS, as the events panel reads them.
@@ -317,6 +318,8 @@ export async function reconcileRecordings(
 
   let modelReady: boolean | null = null
   let waitingForModel = false
+  /** The first failure; later recordings still get their turn. */
+  let failed: ReconcileStop | null = null
   for (const meeting of recordings) {
     if (stale()) {
       return stalled()
@@ -349,8 +352,13 @@ export async function reconcileRecordings(
       if (stale()) {
         return stalled()
       }
-      return { written, stopped: { reason: toAppError(cause).kind, message: errorMessage(cause) } }
+      // One recording that keeps failing (an offline archive folder, audio
+      // the model can't read) must not hold back every recording after it.
+      failed ??= { reason: toAppError(cause).kind, message: errorMessage(cause) }
     }
+  }
+  if (failed !== null) {
+    return { written, stopped: failed }
   }
   return {
     written,

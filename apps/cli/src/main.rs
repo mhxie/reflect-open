@@ -4,11 +4,13 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser, Subcommand};
 
 use reflect_cli::commands::search::SearchMode;
 use reflect_cli::error::CliError;
 use reflect_cli::{commands, graph};
+use reflect_index_schema::MAX_SEARCH_RESULTS;
 
 /// Read and discover notes in a Reflect graph.
 ///
@@ -44,8 +46,8 @@ enum Command {
     Search {
         /// Search terms (matched literally, ranked by relevance)
         query: String,
-        /// Maximum number of results
-        #[arg(long, default_value_t = 20)]
+        /// Maximum number of results (at most 100 for semantic and hybrid)
+        #[arg(long, default_value_t = 20, value_parser = parse_limit)]
         limit: usize,
         /// lexical reads the index; semantic and hybrid ask the running Reflect app
         #[arg(long, value_enum, default_value_t = SearchMode::Lexical)]
@@ -71,6 +73,34 @@ enum Command {
     },
 }
 
+/// `--limit`: a whole number of at least 1. Semantic and hybrid searches are
+/// further held to [`MAX_SEARCH_RESULTS`] ([`check_usage`]).
+fn parse_limit(value: &str) -> Result<usize, String> {
+    match value.parse::<usize>() {
+        Ok(limit) if limit >= 1 => Ok(limit),
+        _ => Err(format!("{value:?} is not a whole number of at least 1")),
+    }
+}
+
+/// Usage rules clap can't express per argument: the app's socket answers at
+/// most [`MAX_SEARCH_RESULTS`] results, so semantic and hybrid searches
+/// refuse a larger `--limit` up front (a usage error, exit 2) rather than
+/// failing at the app. Lexical search reads the index and has no such bound.
+fn check_usage(cli: &Cli) {
+    if let Command::Search { limit, mode, .. } = &cli.command {
+        if *mode != SearchMode::Lexical && *limit > MAX_SEARCH_RESULTS {
+            Cli::command()
+                .error(
+                    ErrorKind::ValueValidation,
+                    format!(
+                        "--limit must be at most {MAX_SEARCH_RESULTS} for semantic and hybrid search"
+                    ),
+                )
+                .exit();
+        }
+    }
+}
+
 fn run(cli: &Cli) -> Result<(), CliError> {
     let graph = graph::resolve(cli.graph.as_deref())?;
     match &cli.command {
@@ -85,7 +115,9 @@ fn run(cli: &Cli) -> Result<(), CliError> {
 }
 
 fn main() -> ExitCode {
-    match run(&Cli::parse()) {
+    let cli = Cli::parse();
+    check_usage(&cli);
+    match run(&cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("reflect: {err}");

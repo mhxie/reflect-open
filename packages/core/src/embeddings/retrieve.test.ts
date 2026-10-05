@@ -337,12 +337,13 @@ describe('retrieve', () => {
     expect(hits.map((hit) => hit.path)).toEqual(['notes/near.md'])
   })
 
-  it('embeds the semantic query as a query, not a passage', async () => {
+  it('embeds the semantic query as a query, with the model the status named', async () => {
     const calls = fakeIndex({ everyTerm: [], anyTerm: [] })
     await retrieve('where did we land on pricing', { mode: 'semantic' })
     expect(calls.find(([command]) => command === 'embed_texts')?.[1]).toEqual({
       texts: ['where did we land on pricing'],
       role: 'query',
+      model: 'all-MiniLM-L6-v2',
     })
   })
 

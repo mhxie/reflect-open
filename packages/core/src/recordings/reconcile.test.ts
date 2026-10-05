@@ -338,4 +338,26 @@ describe('reconcileRecordings', () => {
     expect(outcome.stopped).toEqual({ reason: 'io', message: 'the model failed to load' })
     expect(archiveMock).not.toHaveBeenCalled()
   })
+
+  it('a recording that keeps failing never holds back the ones after it', async () => {
+    const later = new Date(2026, 9, 1, 16, 0, 0).getTime()
+    finishedMock.mockResolvedValue([
+      MEETING,
+      { ...MEETING, id: `session-${later}`, startedAtMs: later, endedAtMs: later + 30_000 },
+    ])
+    // The archive folder is offline: the first archive fails, the second lands.
+    archiveMock
+      .mockRejectedValueOnce({ kind: 'io', message: 'the archive folder is offline' })
+      .mockResolvedValueOnce(undefined)
+
+    const outcome = await reconcileRecordings(input())
+
+    expect(outcome.stopped).toEqual({ reason: 'io', message: 'the archive folder is offline' })
+    expect(outcome.written).toEqual([
+      `inbox/recordings/${BASE}.md`,
+      'inbox/recordings/recording-2026-10-01-160000.md',
+    ])
+    expect(archiveMock).toHaveBeenCalledTimes(2)
+    expect(archiveMock).toHaveBeenLastCalledWith(`session-${later}`, expect.any(String))
+  })
 })

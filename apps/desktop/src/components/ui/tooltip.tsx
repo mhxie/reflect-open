@@ -6,11 +6,11 @@ function TooltipProvider({ delay = 400, ...props }: TooltipPrimitive.Provider.Pr
   return <TooltipPrimitive.Provider data-slot="tooltip-provider" delay={delay} {...props} />
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
+function Tooltip<Payload>({ ...props }: TooltipPrimitive.Root.Props<Payload>) {
   return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
 }
 
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
+function TooltipTrigger<Payload>({ ...props }: TooltipPrimitive.Trigger.Props<Payload>) {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
@@ -50,4 +50,7 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+/** A handle that lets many detached triggers share one tooltip, each with its own payload. */
+const createTooltipHandle = TooltipPrimitive.createHandle
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, createTooltipHandle }

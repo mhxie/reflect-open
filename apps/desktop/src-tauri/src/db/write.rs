@@ -494,6 +494,22 @@ pub(super) fn mark_local_only_private(
     Ok(marked)
 }
 
+/// The raw stored local-only record ([`LOCAL_ONLY_FOLDERS_KEY`]), or `None`
+/// when there is none: compared before and after an open records the
+/// folders, to tell whether they changed.
+pub(super) fn local_only_record(conn: &Connection) -> AppResult<Option<String>> {
+    match conn.query_row(
+        "SELECT value FROM index_meta WHERE key = ?1",
+        [LOCAL_ONLY_FOLDERS_KEY],
+        |row| row.get::<_, rusqlite::types::Value>(0),
+    ) {
+        Ok(rusqlite::types::Value::Text(text)) => Ok(Some(text)),
+        Ok(other) => Ok(Some(format!("{other:?}"))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// Record the graph's local-only folder names for read-only consumers (the
 /// CLI) under [`LOCAL_ONLY_FOLDERS_KEY`], or clear the key when none are
 /// configured. Unless `replace`, the record only grows: the names already

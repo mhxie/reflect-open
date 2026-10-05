@@ -204,6 +204,7 @@ export {
   buildAttachmentLibrary,
   listAttachmentNoteTags,
   listAttachmentReferences,
+  firstExistingAttachment,
   listAttachmentPreviews,
   listNotes,
   sortNoteListRows,

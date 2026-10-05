@@ -92,18 +92,19 @@ export async function installLocalModelUpdate(): Promise<void> {
   }
   setPending(null)
   const operation = startOperation('Updating the transcription model', { background: true })
-  const unlisten = await subscribeLocalModelStatus((model, status) => {
-    if (model === update.model && status.status === 'downloading' && status.progress) {
-      operation.progress(status.progress.downloaded, status.progress.total)
-    }
-  })
+  let unlisten: (() => void) | null = null
   try {
+    unlisten = await subscribeLocalModelStatus((model, status) => {
+      if (model === update.model && status.status === 'downloading' && status.progress) {
+        operation.progress(status.progress.downloaded, status.progress.total)
+      }
+    })
     await downloadLocalModel(update.model)
     operation.done()
   } catch (cause) {
     operation.fail(errorMessage(cause))
   } finally {
-    unlisten()
+    unlisten?.()
   }
 }
 

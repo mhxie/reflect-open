@@ -2,6 +2,7 @@ import {
   createContext,
   use,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ReactElement,
@@ -9,9 +10,10 @@ import {
 } from 'react'
 import { openSession } from '@/editor/open-documents.ts'
 import { useNoteLinkNavigation, type NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
+import { onNoteMoved } from '@/lib/note-moves.ts'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { notePathForRoute, type NoteRoute } from '@/routing/route.ts'
+import { notePathForRoute, routeForPath, type NoteRoute } from '@/routing/route.ts'
 
 /** A note shown in the peek panel, with the route its "Open" button takes. */
 export interface NotePeekTarget {
@@ -35,6 +37,11 @@ export type PeekTarget = NotePeekTarget | { readonly kind: 'pdf'; readonly path:
 
 interface PeekContextValue {
   readonly target: PeekTarget | null
+  /**
+   * Identifies the peek being shown: it changes when another note or PDF is
+   * peeked, and holds while the same peek follows its note through a rename.
+   */
+  readonly targetKey: number
   readonly openPeek: (target: PeekTarget) => void
   readonly closePeek: () => void
 }
@@ -46,17 +53,54 @@ const PeekContext = createContext<PeekContextValue | null>(null)
  * opened from a note, floats over the editor instead of replacing it, so the
  * user keeps their place.
  */
-export function PeekProvider({
-  enabled = true,
-  children,
-}: {
+export interface PeekProviderProps {
   /** False where no panel renders (note windows), so links navigate instead. */
   enabled?: boolean
   children: ReactNode
-}): ReactElement {
-  const [target, setTarget] = useState<PeekTarget | null>(null)
-  const closePeek = useCallback(() => setTarget(null), [])
-  const value = useMemo(() => ({ target, openPeek: setTarget, closePeek }), [target, closePeek])
+}
+
+interface PeekState {
+  readonly target: PeekTarget | null
+  readonly key: number
+}
+
+/** `target` peeked after `current`: the same note or PDF keeps its key. */
+function peekState(current: PeekState, target: PeekTarget | null): PeekState {
+  const same =
+    target !== null &&
+    current.target !== null &&
+    current.target.kind === target.kind &&
+    current.target.path === target.path
+  return { target, key: same ? current.key : current.key + 1 }
+}
+
+export function PeekProvider({ enabled = true, children }: PeekProviderProps): ReactElement {
+  const [state, setState] = useState<PeekState>({ target: null, key: 0 })
+  const openPeek = useCallback(
+    (target: PeekTarget) => setState((current) => peekState(current, target)),
+    [],
+  )
+  const closePeek = useCallback(() => setState((current) => peekState(current, null)), [])
+
+  // A peeked note renamed while open (its title edited here) follows its file,
+  // as the router's routes do — "Open" and note commands must not act on the
+  // path it left behind.
+  useEffect(
+    () =>
+      onNoteMoved((from, to) => {
+        setState((current) =>
+          current.target?.kind === 'note' && current.target.path === from
+            ? { ...current, target: { ...current.target, path: to, route: routeForPath(to) } }
+            : current,
+        )
+      }),
+    [],
+  )
+
+  const value = useMemo(
+    () => ({ target: state.target, targetKey: state.key, openPeek, closePeek }),
+    [state, openPeek, closePeek],
+  )
   return <PeekContext value={enabled ? value : null}>{children}</PeekContext>
 }
 

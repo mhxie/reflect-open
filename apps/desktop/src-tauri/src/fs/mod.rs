@@ -1224,7 +1224,11 @@ pub(crate) fn move_note_file(
         NoteMove::LocalOnly {
             from_entry,
             to_entry,
-        } => local_only_edit::move_note(&from_entry, &to_entry, to)?,
+        } => {
+            local_only_edit::move_note(&from_entry, &to_entry, to)?;
+            // The kept unsaved text follows the note to its new path.
+            local_only_edit::carry_recovery(&from_entry.graph_root, from, to);
+        }
     }
     // Carry the note's sync ancestor across the rename (Plan 21) — a missed
     // move only degrades one future merge, never blocks the rename.
@@ -1279,19 +1283,27 @@ pub(crate) fn resolve_note_move(
 /// `.reflect/trash/` instead (Plan 19), the same recoverability promise, and
 /// `.reflect/` is already excluded from sync and indexing.
 ///
-/// A note in an editable local-only folder first moves into a fresh
-/// `.reflect/trash/<random>/` directory through directory descriptors, so
-/// the path-based OS-trash call can only ever reach the file staged there;
-/// when the OS trash refuses it, the note stays there and the outcome says
-/// so ([`Trashed::Graph`]).
+/// A note in an editable local-only folder is first staged through directory
+/// descriptors in a fresh random directory (`.reflect/trash/<random>/`, or a
+/// hidden one beside the note when its folder is on another volume), so the
+/// path-based OS-trash call can only ever reach the file staged there. When
+/// the OS trash refuses it, a note staged in `.reflect/trash/` stays there
+/// and the outcome says so ([`Trashed::Graph`]); one staged beside goes back
+/// under its name and the delete fails. A trashed local-only note's kept
+/// unsaved text goes with it.
+///
+/// Runs on the blocking pool: the local-only staging waits on the note
+/// write guard, which a Git pull holds through its checkout.
 #[tauri::command]
-pub fn note_delete(
+pub async fn note_delete(
     path: String,
     generation: u64,
-    state: State<GraphState>,
+    state: State<'_, GraphState>,
 ) -> AppResult<NoteDeleteOutcome> {
     let (root, local_only) = graph_for(&state, Some(generation))?;
-    let trashed = match resolve_note_edit(&root, &path, local_only.as_deref(), TargetKind::Note)? {
+    let target = resolve_note_edit(&root, &path, local_only.as_deref(), TargetKind::Note)?;
+    let (trash_root, trash_path) = (root.clone(), path.clone());
+    let trashed = off_main(move || match target {
         EditTarget::Graph(abs) => {
             // An iCloud-evicted note exists only as its `.name.md.icloud`
             // stub — trashing the logical path would fail and the note would
@@ -1304,22 +1316,33 @@ pub fn note_delete(
                     .filter(|stub| stub.exists())
                     .unwrap_or(abs)
             };
-            trash_graph_file(&root, &target)?
+            trash_graph_file(&trash_root, &target)
         }
-        EditTarget::LocalOnly(entry) => {
-            let staged = {
-                let _guard = NOTE_WRITE_LOCK
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                local_only_edit::trash_note(&entry)?
-            };
-            hand_to_os_trash(&staged)
-        }
-    };
+        EditTarget::LocalOnly(entry) => trash_local_only(&entry, &trash_path),
+    })
+    .await?;
     // A deleted note's sync ancestor is meaningless — drop it (Plan 21).
     crate::conflict::shadow::ShadowStore::new(&root).forget(&path);
     invalidate_file_catalog(&state, &root);
     Ok(NoteDeleteOutcome { trashed })
+}
+
+/// Run a command's filesystem work off the main thread, on the blocking
+/// pool. Tests run it on their own thread instead, where the thread-local
+/// seams (`os_trash_seam`, `beneath`'s) they install are in effect.
+async fn off_main<T, F>(task: F) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+{
+    #[cfg(test)]
+    {
+        task()
+    }
+    #[cfg(not(test))]
+    {
+        crate::blocking::run_blocking(task).await
+    }
 }
 
 /// Trash an ordinary graph file: into the system Trash on desktop, into the
@@ -1338,22 +1361,47 @@ fn trash_graph_file(root: &Path, target: &Path) -> AppResult<Trashed> {
     }
 }
 
-/// Hand a note staged in `.reflect/trash/<random>/` to the OS trash, best
-/// effort: when the OS trash refuses (or there is none), the note stays
-/// staged in the graph's own trash.
-fn hand_to_os_trash(staged: &Path) -> Trashed {
+/// Trash the editable local-only note `entry` (requested as `path`): stage
+/// it under the note write guard, hand it to the OS trash, and drop its kept
+/// unsaved text once it is gone from its folder.
+fn trash_local_only(entry: &resolve::LocalOnlyEntry, path: &str) -> AppResult<Trashed> {
+    let stage = {
+        let _guard = note_write_guard();
+        local_only_edit::trash_note(entry)?
+    };
+    let trashed = hand_to_os_trash(stage)?;
+    let _guard = note_write_guard();
+    local_only_edit::forget_recovery(&entry.graph_root, path);
+    Ok(trashed)
+}
+
+/// Hand a staged local-only note to the OS trash. When the OS trash refuses
+/// (or there is none), a note staged in `.reflect/trash/` stays there
+/// ([`Trashed::Graph`]); one staged beside its folder moves back under its
+/// name, and the refusal is the delete's error.
+fn hand_to_os_trash(stage: local_only_edit::TrashStage) -> AppResult<Trashed> {
     #[cfg(desktop)]
-    match os_trash_delete(staged) {
-        Ok(()) => return Trashed::System,
-        Err(err) => tracing::warn!(
-            ?err,
-            path = %staged.display(),
-            "the system Trash refused a local-only note; it stays in the graph's .reflect/trash"
-        ),
-    }
+    let refusal = match os_trash_delete(&stage.path()) {
+        Ok(()) => {
+            stage.trashed();
+            return Ok(Trashed::System);
+        }
+        Err(err) => err,
+    };
     #[cfg(mobile)]
-    let _ = staged;
-    Trashed::Graph
+    let refusal = AppError::io("there is no system Trash on this platform");
+    let kept = {
+        let _guard = note_write_guard();
+        stage.refused()?
+    };
+    if !kept {
+        return Err(refusal);
+    }
+    tracing::warn!(
+        err = ?refusal,
+        "the system Trash refused a local-only note; it stays in the graph's .reflect/trash"
+    );
+    Ok(Trashed::Graph)
 }
 
 /// Move the open graph's **entire directory** to the OS trash (recoverable)
@@ -2537,7 +2585,12 @@ mod local_only_command_tests {
 
         // The system Trash refuses: the note stays in the graph's trash.
         let refusing = os_trash_seam::install(|_| Err(AppError::io("Trash refused")));
-        let outcome = note_delete("finance/secure/bank.md".into(), 1, state()).unwrap();
+        let outcome = tauri::async_runtime::block_on(note_delete(
+            "finance/secure/bank.md".into(),
+            1,
+            state(),
+        ))
+        .unwrap();
         assert_eq!(outcome.trashed, Trashed::Graph);
         assert_eq!(
             serde_json::to_value(&outcome).unwrap(),
@@ -2560,13 +2613,100 @@ mod local_only_command_tests {
 
         // The system Trash takes it: the staged copy leaves the graph.
         let _accepting = os_trash_seam::install(|path| Ok(fs::remove_file(path)?));
-        let outcome = note_delete("finance/secure/old.md".into(), 1, state()).unwrap();
+        let outcome =
+            tauri::async_runtime::block_on(note_delete("finance/secure/old.md".into(), 1, state()))
+                .unwrap();
         assert_eq!(outcome.trashed, Trashed::System);
         assert!(!session.raw.join("finance/secure/old.md").exists());
         let called = os_trash_seam::calls();
         assert_eq!(called.len(), 1);
         assert!(called[0].starts_with(session.root.join(".reflect/trash")));
         assert!(called[0].ends_with("old.md"));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn a_delete_from_another_volume_stages_beside_the_note_and_drops_its_recovery() {
+        let session = editable_session();
+        let state = || session.app.state::<GraphState>();
+        let delete =
+            |path: &str| tauri::async_runtime::block_on(note_delete(path.into(), 1, state()));
+        let keep = |path: &str| {
+            tauri::async_runtime::block_on(recovery::note_recovery_write(
+                path.into(),
+                "unsaved".into(),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                None,
+                1,
+                state(),
+            ))
+            .unwrap();
+        };
+        let kept = |path: &str| {
+            tauri::async_runtime::block_on(recovery::note_recovery_read(path.into(), 1, state()))
+                .unwrap()
+        };
+        let folder = session.raw.join("finance/secure");
+        let _elsewhere = beneath::PretendTrashElsewhere::engage();
+        keep("finance/secure/bank.md");
+
+        // Refused: the note goes back under its name, its text stays kept,
+        // and nothing is left staged anywhere.
+        let refusing = os_trash_seam::install(|_| Err(AppError::io("Trash refused")));
+        assert!(delete("finance/secure/bank.md").is_err());
+        let called = os_trash_seam::calls();
+        assert_eq!(called.len(), 1);
+        assert_eq!(called[0].parent().unwrap().parent().unwrap(), folder);
+        assert_eq!(read(&folder.join("bank.md")), "# Bank");
+        assert!(kept("finance/secure/bank.md").is_some());
+        drop(refusing);
+
+        let _accepting = os_trash_seam::install(|path| Ok(fs::remove_file(path)?));
+        let outcome = delete("finance/secure/bank.md").unwrap();
+        assert_eq!(outcome.trashed, Trashed::System);
+        assert!(!folder.join("bank.md").exists());
+        assert_eq!(kept("finance/secure/bank.md"), None);
+        assert_eq!(trashed(&session), Vec::<String>::new());
+        let hidden: Vec<_> = fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().starts_with('.'))
+            .collect();
+        assert!(hidden.is_empty(), "{hidden:?}");
+    }
+
+    #[test]
+    fn a_moved_editable_note_carries_its_kept_text() {
+        let session = editable_session();
+        let state = || session.app.state::<GraphState>();
+        let (from, to) = ("finance/secure/bank.md", "finance/secure/2026/bank.md");
+        tauri::async_runtime::block_on(recovery::note_recovery_write(
+            from.into(),
+            "unsaved".into(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            None,
+            1,
+            state(),
+        ))
+        .unwrap();
+        move_note_file(
+            &note_write_guard(),
+            &session.root,
+            from,
+            to,
+            Some(&editable_folders(&session)),
+        )
+        .unwrap();
+        let read = |path: &str| {
+            tauri::async_runtime::block_on(recovery::note_recovery_read(path.into(), 1, state()))
+                .unwrap()
+        };
+        assert_eq!(read(from), None);
+        let carried = read(to).expect("carried");
+        assert_eq!(
+            (carried.contents.as_str(), carried.source_revision),
+            ("unsaved", None)
+        );
     }
 
     #[cfg(desktop)]
@@ -2580,11 +2720,21 @@ mod local_only_command_tests {
             session.raw.join("finance/secure/link.md"),
         )
         .unwrap();
-        assert!(note_delete("finance/secure/link.md".into(), 1, state()).is_err());
+        assert!(tauri::async_runtime::block_on(note_delete(
+            "finance/secure/link.md".into(),
+            1,
+            state()
+        ))
+        .is_err());
         assert!(fs::symlink_metadata(session.raw.join("finance/secure/link.md")).is_ok());
 
         let dataless = beneath::PretendDataless::engage();
-        assert!(note_delete("finance/secure/bank.md".into(), 1, state()).is_err());
+        assert!(tauri::async_runtime::block_on(note_delete(
+            "finance/secure/bank.md".into(),
+            1,
+            state()
+        ))
+        .is_err());
         assert!(move_note_file(
             &note_write_guard(),
             &session.root,
@@ -2688,8 +2838,18 @@ mod local_only_command_tests {
             );
         }
         assert!(create_note(&session, "finance/secure/new.md", "x").is_err());
-        assert!(note_delete("finance/secure/bank.md".into(), 1, state()).is_err());
-        assert!(note_delete("people/secure/visa.md".into(), 1, state()).is_err());
+        assert!(tauri::async_runtime::block_on(note_delete(
+            "finance/secure/bank.md".into(),
+            1,
+            state()
+        ))
+        .is_err());
+        assert!(tauri::async_runtime::block_on(note_delete(
+            "people/secure/visa.md".into(),
+            1,
+            state()
+        ))
+        .is_err());
         assert!(move_note_file(
             &note_write_guard(),
             &session.root,
@@ -2716,14 +2876,14 @@ mod local_only_command_tests {
     fn upload(session: &Session, bytes: &[u8], name: &str, note: &str) -> AppResult<String> {
         let id = assets::asset_upload_begin(1, session.app.state(), session.app.state()).unwrap();
         assets::append_chunk(&session.app.state::<assets::AssetUploads>(), &id, bytes).unwrap();
-        assets::asset_upload_commit(
+        tauri::async_runtime::block_on(assets::asset_upload_commit(
             id,
             name.into(),
             note.into(),
             1,
             session.app.state(),
             session.app.state(),
-        )
+        ))
     }
 
     fn import(session: &Session, source: &Path, name: &str, note: &str) -> AppResult<String> {
@@ -2935,7 +3095,10 @@ mod local_only_command_tests {
                 tauri::async_runtime::block_on(note_create(created, "x".into(), 1, state()))
                     .is_err()
             );
-            assert!(note_delete(FOLDED.to_string(), 1, state()).is_err());
+            assert!(
+                tauri::async_runtime::block_on(note_delete(FOLDED.to_string(), 1, state()))
+                    .is_err()
+            );
             let folders = LocalOnlyFolders::new(["secure"], None);
             assert!(move_note_file(
                 &note_write_guard(),

@@ -17,7 +17,7 @@ use rusqlite::{params_from_iter, Connection};
 use unicode_normalization::char::is_combining_mark;
 
 use crate::error::CliError;
-use crate::keys::contains_unsegmented_script;
+use crate::keys::{contains_unsegmented_script, fold_key};
 
 const HIGHLIGHT_START: char = '\u{1}';
 const HIGHLIGHT_END: char = '\u{2}';
@@ -175,6 +175,41 @@ fn cjk_run_match(run: &str) -> String {
     }
 }
 
+/// Characters of body text kept on each side of a CJK fallback snippet's match.
+const CJK_SNIPPET_CONTEXT_CHARS: usize = 20;
+
+/// The run a CJK fallback snippet centers on: the longest run of an
+/// unsegmented script in `query` (the first of equal length), or `""` when
+/// there is none. The twin of `cjkSnippetNeedle` (`search-query.ts`).
+pub fn cjk_snippet_needle(query: &str) -> &str {
+    let mut needle = "";
+    for run in unsegmented_runs(query) {
+        if run.chars().count() > needle.chars().count() {
+            needle = run;
+        }
+    }
+    needle
+}
+
+/// A marked body fragment for a hit the `cjk` column matched, whose FTS5
+/// `snippet()` (body only) has no highlight: the first occurrence of the
+/// needle bound at `param` with a little context, or `NULL` when the body
+/// doesn't hold it. The twin of `cjkSnippetSql` (`search-query.ts`).
+fn cjk_snippet_sql(param: &str) -> String {
+    let context = CJK_SNIPPET_CONTEXT_CHARS;
+    let at = format!("instr(search_fts.body, {param})");
+    let after = format!("{at} + length({param})");
+    format!(
+        "CASE WHEN {at} = 0 THEN NULL ELSE
+           (CASE WHEN {at} > {context} + 1 THEN '…' ELSE '' END)
+           || substr(search_fts.body, max(1, {at} - {context}), min({at} - 1, {context}))
+           || char(1) || {param} || char(2)
+           || substr(search_fts.body, {after}, {context})
+           || (CASE WHEN {after} + {context} <= length(search_fts.body) THEN '…' ELSE '' END)
+         END"
+    )
+}
+
 /// One search result row.
 #[derive(Debug)]
 pub struct SearchHit {
@@ -217,15 +252,18 @@ const RANK_EXPR: &str = "bm25(search_fts, 0, 10.0, 1.0, 1.0)";
 /// OR and otherwise flattens a derived FTS join into one scan per note. The
 /// LEFT JOIN admits title-recall-only rows. Matches already covered by title
 /// recall keep an empty snippet and score `0`, while tokenizer-normalized title
-/// matches retain their lexical rank. The caller re-checks each hit's file
-/// frontmatter (the index row may lag a just-flagged note).
+/// matches retain their lexical rank. A CJK run matched through the `cjk`
+/// column gets a marked body fragment ([`cjk_snippet_sql`]). The caller
+/// re-checks each hit's file frontmatter (the index row may lag a
+/// just-flagged note).
 pub fn search_index(
     conn: &Connection,
     match_expr: &str,
-    title_key: &str,
+    query: &str,
     limit: usize,
 ) -> Result<Vec<SearchHit>, CliError> {
-    let needles = title_recall_needles(title_key);
+    let title_key = fold_key(query);
+    let needles = title_recall_needles(&title_key);
     if needles.is_empty() {
         return Ok(Vec::new());
     }
@@ -236,11 +274,17 @@ pub fn search_index(
         .collect::<Vec<String>>()
         .join(" AND ");
     let limit_parameter = needles.len() + 3;
+    let snippet_needle = cjk_snippet_needle(query);
+    let cjk_snippet = if snippet_needle.is_empty() {
+        "NULL".to_owned()
+    } else {
+        cjk_snippet_sql(&format!("?{}", limit_parameter + 1))
+    };
     let public_predicate = public_note_predicate(conn)?;
     let mut statement = conn.prepare(&format!(
         "WITH lexical AS MATERIALIZED (
            SELECT path, snippet(search_fts, 2, char(1), char(2), '…', 12) AS snippet,
-                  {RANK_EXPR} AS rank
+                  {cjk_snippet} AS cjk_snippet, {RANK_EXPR} AS rank
            FROM search_fts
            WHERE search_fts MATCH ?1
          )
@@ -250,7 +294,8 @@ pub fn search_index(
                     OR NOT ({title_term_predicate})
                     THEN coalesce(lexical.rank, 0)
                   ELSE 0
-                END AS effective_rank
+                END AS effective_rank,
+                lexical.cjk_snippet
          FROM notes
          LEFT JOIN lexical ON lexical.path = notes.path
          WHERE (lexical.path IS NOT NULL OR ({title_term_predicate}))
@@ -267,19 +312,23 @@ pub fn search_index(
                   notes.path ASC
          LIMIT ?{limit_parameter}",
     ))?;
-    let mut parameters = vec![
-        Value::Text(match_expr.to_owned()),
-        Value::Text(title_key.to_owned()),
-    ];
+    let mut parameters = vec![Value::Text(match_expr.to_owned()), Value::Text(title_key)];
     parameters.extend(needles.into_iter().map(Value::Text));
     parameters.push(Value::Integer(limit as i64));
+    if !snippet_needle.is_empty() {
+        parameters.push(Value::Text(snippet_needle.to_owned()));
+    }
     let rows = statement.query_map(params_from_iter(parameters), |row| {
         let marked_snippet: String = row.get(2)?;
-        let has_body_match = marked_snippet.contains(HIGHLIGHT_START);
-        let snippet = if has_body_match {
+        let cjk_snippet: Option<String> = row.get(4)?;
+        // A body fragment without a highlight is not a match; a CJK run the
+        // body holds gets its own marked fragment instead.
+        let snippet = if marked_snippet.contains(HIGHLIGHT_START) {
             marked_snippet.replace([HIGHLIGHT_START, HIGHLIGHT_END], "")
         } else {
-            String::new()
+            cjk_snippet
+                .map(|fragment| fragment.replace([HIGHLIGHT_START, HIGHLIGHT_END], ""))
+                .unwrap_or_default()
         };
         Ok(SearchHit {
             path: row.get(0)?,
@@ -439,7 +488,7 @@ pub fn any_term_index(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_fts_match, title_recall_needles};
+    use super::{build_fts_match, cjk_snippet_needle, title_recall_needles};
 
     /// Parity with `titleRecallNeedles` (`search-query.ts`): space-delimited
     /// terms anchor at word starts (leading space); unsegmented-script terms
@@ -505,6 +554,17 @@ mod tests {
             build_fts_match(". -", true),
             Some("\".\" \"-\"".to_string())
         );
+    }
+
+    /// Parity with `cjkSnippetNeedle` (`search-query.test.ts`): the first of
+    /// the longest unsegmented runs, or nothing.
+    #[test]
+    fn snippet_needles_match_the_ts_builder() {
+        assert_eq!(cjk_snippet_needle("東京 trip"), "東京");
+        assert_eq!(cjk_snippet_needle("吃饭 小王一起"), "小王一起");
+        assert_eq!(cjk_snippet_needle("周记 吃饭"), "周记");
+        assert_eq!(cjk_snippet_needle("用Python写脚本"), "写脚本");
+        assert_eq!(cjk_snippet_needle("plain words"), "");
     }
 
     /// An index the app hasn't migrated to the `cjk` column yet must not be

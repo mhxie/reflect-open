@@ -1643,11 +1643,66 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     reopened.session.restoreRecovery()
     await reopened.session.flush()
     expect(reopened.snapshots.at(-1)?.recovery?.contents).toBe('# A\n')
+    // A was kept against the note B has since replaced: restoring it must
+    // not silently drop B, so the choice goes to the conflict prompt.
     reopened.session.restoreRecovery()
+    await reopened.session.flush()
+    expect(reopened.writes.map((write) => write.contents)).toEqual(['# B\n'])
+    expect(reopened.snapshots.at(-1)).toMatchObject({ conflict: '# B\n', dirty: true })
+    reopened.session.keepMine()
     await reopened.session.flush()
     expect(reopened.writes.map((write) => write.contents)).toEqual(['# B\n', '# A\n'])
     expect(recovery.copies.size).toBe(0)
-    expect(reopened.snapshots.at(-1)?.recovery).toBeNull()
+    expect(reopened.snapshots.at(-1)).toMatchObject({ recovery: null, conflict: null })
+  })
+
+  it('restoring a copy kept against an older revision parks the newer note as a conflict', async () => {
+    const kept = recoveryCopy('# Hello\n\nkept\n')
+    const recovery = recoveryFake(kept)
+    const { session, snapshots, applied, writes } = harness({
+      recovery: recovery.io,
+      disk: '# Hello\n\nchanged since\n',
+    })
+    session.load()
+    await settled()
+    expect(snapshots.at(-1)?.recovery).toEqual(kept)
+
+    session.restoreRecovery()
+    await settled()
+
+    expect(writes).toEqual([])
+    expect(applied).toEqual(['# Hello\n\nkept\n'])
+    expect(snapshots.at(-1)).toMatchObject({
+      conflict: '# Hello\n\nchanged since\n',
+      dirty: true,
+      recovery: null,
+    })
+
+    session.loadTheirs()
+    await settled()
+    expect(writes).toEqual([])
+    expect(applied.at(-1)).toBe('# Hello\n\nchanged since\n')
+    // Choosing theirs resolves the restored copy too.
+    expect(recovery.copies.size).toBe(0)
+    expect(snapshots.at(-1)).toMatchObject({ conflict: null, dirty: false, recovery: null })
+  })
+
+  it('loading theirs drops the copy kept for the discarded text', async () => {
+    const recovery = recoveryFake()
+    const { session, snapshots, setDisk } = harness({ recovery: recovery.io })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    session.load()
+    await settled()
+    session.editorChanged('# Mine\n')
+    setDisk('# Theirs\n')
+    await settled()
+    expect(recovery.slot?.contents).toBe('# Mine\n')
+
+    session.loadTheirs()
+    await session.flush()
+
+    expect(recovery.slot).toBeNull()
+    expect(snapshots.at(-1)).toMatchObject({ conflict: null, dirty: false, recovery: null })
   })
 
   it('a successful save clears only its own draft and offers another window’s copy', async () => {

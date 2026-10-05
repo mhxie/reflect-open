@@ -23,10 +23,13 @@
 //!   the entry's on-disk spelling (the index folds case under
 //!   `core.ignorecase`), so a name the volume folds or normalizes onto
 //!   another is the same file.
-//! - **Hidden entries never move.** A hidden plain file at the path written
-//!   is replaced, as Git always did (Finder junk); any other hidden entry in
-//!   the way of an added file pauses sync, since libgit2 replaces it only
-//!   where it folds case and would otherwise write through a link.
+//! - **Untracked hidden entries never move.** An untracked hidden plain file
+//!   at the path written is replaced, as Git always did (Finder junk); any
+//!   other untracked hidden entry in the way of an added file pauses sync,
+//!   since libgit2 replaces it only where it folds case and would otherwise
+//!   write through a link. A tracked hidden entry whose bytes the commit held
+//!   back (an oversized edit, a locked note) moves like a visible one: Git
+//!   has no copy of those bytes.
 //! - **Identical bytes.** An entry already equal to the incoming file is
 //!   parked under `.reflect/tmp/` and discarded once the pull lands: no copy
 //!   is made, and nothing is lost if the pull fails.
@@ -455,8 +458,8 @@ mod walk {
     enum Verdict {
         /// Nothing: committed.
         Keep,
-        /// Nothing moves: a hidden entry, which the checkout may replace
-        /// where that is safe (see [`Walk::plan_path`]).
+        /// Nothing moves: an untracked hidden entry, which the checkout may
+        /// replace where that is safe (see [`Walk::plan_path`]).
         Hidden,
         /// A save raced the cycle's commit.
         Defer,
@@ -621,9 +624,12 @@ mod walk {
                 Some(path) => self.incoming_blob(path)?,
                 None => None,
             };
-            let visible = is_safe_visible(path);
+            // A tracked entry that got here holds bytes no commit has, so it
+            // moves even when hidden; only untracked hidden entries are left
+            // for the checkout (Finder junk).
+            let movable = tracked.is_some() || is_safe_visible(path);
             if let (Some((mode, blob)), Some(bytes)) = (&incoming, &contents) {
-                if visible && same_kind(*mode, stat.kind) && blob.content() == bytes.as_slice() {
+                if movable && same_kind(*mode, stat.kind) && blob.content() == bytes.as_slice() {
                     return Ok(Verdict::Move {
                         park: true,
                         kept_out: false,
@@ -639,7 +645,7 @@ mod walk {
             if tracked.is_some() && public && stat.size < self.max_file_bytes {
                 return Ok(Verdict::Defer);
             }
-            if !visible {
+            if !movable {
                 return Ok(Verdict::Hidden);
             }
             let different_note = match (&incoming, &contents) {

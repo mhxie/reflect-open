@@ -1,7 +1,8 @@
 //! The five commands. Shared rules live here: stdout carries only data,
 //! warnings go to stderr, and `show`/`path`/`open` degrade to a file scan
 //! when the index is missing (`search` is the one command that requires
-//! it). An index that exists but cannot be read refuses them instead.
+//! it), taking the local-only folders from the desktop's settings then. An
+//! index that exists but cannot be read refuses them instead.
 
 pub mod open;
 pub mod path;
@@ -18,16 +19,25 @@ use reflect_graph_paths::LocalOnlyFolders;
 
 use crate::error::CliError;
 use crate::index::{local_only_folders, open_read_only, IndexOpen, OpenIndex};
+use crate::local_only_settings::configured_local_only_folders;
 
 fn warn(message: impl Display) {
     eprintln!("reflect: warning: {message}");
 }
 
-/// The local-only folders an opened index records (none without an index:
-/// the CLI then cannot see inside a symlinked folder anyway). An unreadable
-/// record refuses (exit 3).
-fn local_only_of(index: Option<&OpenIndex>) -> Result<Option<LocalOnlyFolders>, CliError> {
-    index.map_or(Ok(None), |open| local_only_folders(&open.conn))
+/// The local-only folders an opened index records. Without an index there is
+/// no record, so the desktop's settings answer instead: a symlinked folder is
+/// invisible to this CLI anyway, but a real directory configured as
+/// local-only would otherwise read like any other. An unreadable record or
+/// settings document refuses (exit 3).
+fn local_only_of(
+    root: &Path,
+    index: Option<&OpenIndex>,
+) -> Result<Option<LocalOnlyFolders>, CliError> {
+    match index {
+        Some(open) => local_only_folders(&open.conn),
+        None => configured_local_only_folders(root),
+    }
 }
 
 /// Open the index for `show`/`path`/`open` resolution. A missing index is

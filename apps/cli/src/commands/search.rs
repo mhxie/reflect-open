@@ -15,7 +15,6 @@ use crate::commands::warn;
 use crate::error::CliError;
 use crate::graph::Graph;
 use crate::index::{detect_staleness, local_only_folders, open_read_only, IndexOpen, OpenIndex};
-use crate::keys::fold_key;
 use crate::note_file::{read_note, subject_display_title};
 use crate::search::{
     any_term_index, build_fts_any_match, build_fts_match, is_sentence_like, search_index, SearchHit,
@@ -68,7 +67,7 @@ fn lexical_hits(
     }
 
     let mut hits: Vec<SearchHit> = match build_fts_match(query, opened.cjk_column) {
-        Some(match_expr) => search_index(&opened.conn, &match_expr, &fold_key(query), limit)?,
+        Some(match_expr) => search_index(&opened.conn, &match_expr, query, limit)?,
         None => Vec::new(),
     };
     // A sentence rarely has every word in one note: top it up with the notes

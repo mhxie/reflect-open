@@ -201,9 +201,12 @@ export interface NoteSession {
   loadTheirs: () => void
   /**
    * Put the offered {@link NoteSessionSnapshot.recovery} into the buffer as an
-   * edit and save it now, checked against what disk holds like any save. A
-   * no-op without an offer, before the note has loaded, while protected, or
-   * while a conflict is parked (resolve that first).
+   * edit and save it now, checked against what disk holds like any save —
+   * when disk still holds the revision the copy was kept against (or the
+   * note is gone). When the note changed since, nothing is written: the
+   * current file is parked as the conflict, so Keep mine / Load theirs
+   * decides. A no-op without an offer, before the note has loaded, while
+   * protected, or while a conflict is parked (resolve that first).
    */
   restoreRecovery: () => void
   /** Drop the offered {@link NoteSessionSnapshot.recovery} and its kept copy. */

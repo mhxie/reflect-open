@@ -92,4 +92,15 @@ describe('ensureEmbeddingsVisibly', () => {
     const status = await ensureEmbeddingsVisibly('all-MiniLM-L6-v2')
     expect(status).toEqual({ status: 'failed', message: 'no disk space' })
   })
+
+  it('settles as failed when the status subscription cannot be made', async () => {
+    setBridge({
+      invoke: async (command) => (command === 'embed_ensure' ? { status: 'loading' } : null),
+      listen: async () => {
+        throw new Error('no event channel')
+      },
+    })
+    const status = await ensureEmbeddingsVisibly('all-MiniLM-L6-v2')
+    expect(status).toEqual({ status: 'failed', message: 'no event channel' })
+  })
 })

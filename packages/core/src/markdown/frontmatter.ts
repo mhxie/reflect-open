@@ -13,6 +13,8 @@ import { frontmatterSchema, type Frontmatter } from './model.ts'
  */
 
 const BYTE_ORDER_MARK = '\u{FEFF}'
+/** A document whose first line ends in CRLF writes its block with CRLF too. */
+const CRLF_FIRST_LINE = /^[^\n]*\r\n/
 
 /** Result of carving a leading `---` block off the source. */
 export interface FrontmatterSplit {
@@ -113,8 +115,10 @@ export function frontmatterPrivacy(source: string): FrontmatterPrivacy {
  * exists (and the patch sets something), and removes the block entirely when
  * deleting its last key — a note whose only metadata was a toggled flag returns
  * to having no frontmatter at all, not an empty `---` husk. A written block
- * uses the document's line ending and always ends with its blank separator
- * line, so a body that opens with a blank line keeps it.
+ * uses the document's line ending (CRLF when its first line ends in one) and
+ * always ends with its blank separator line, so a body that opens with a
+ * blank line keeps it. A block hidden behind a leading byte-order mark is
+ * patched in place and the mark dropped, so the app can read the block again.
  */
 export function upsertFrontmatter(source: string, patch: Record<string, unknown>): string {
   // An empty patch is a no-op — never re-serialize (which could disturb comments,
@@ -125,10 +129,13 @@ export function upsertFrontmatter(source: string, patch: Record<string, unknown>
 
   // A block behind a leading byte-order mark is invisible to the split: a new
   // block in front of it would leave the old one, `private` and all, as body.
-  if (source.startsWith(BYTE_ORDER_MARK) && splitFrontmatter(source.slice(1)).raw !== null) {
-    throw new Error('refusing to update frontmatter behind a byte-order mark')
-  }
-  const { raw, body } = splitFrontmatter(source)
+  // Drop the mark so the patch lands in that block.
+  const text =
+    source.startsWith(BYTE_ORDER_MARK) &&
+    splitFrontmatter(source.slice(BYTE_ORDER_MARK.length)).raw !== null
+      ? source.slice(BYTE_ORDER_MARK.length)
+      : source
+  const { raw, body } = splitFrontmatter(text)
   const doc = parseDocument(raw ?? '')
   // Reading tolerates malformed YAML (it degrades to a warning), but *writing*
   // must not: re-serializing a partial parse would drop the bytes the parser
@@ -147,7 +154,7 @@ export function upsertFrontmatter(source: string, patch: Record<string, unknown>
     return body
   }
   const block = `---\n${ensureTrailingNewline(String(doc))}---\n\n`
-  return block + body
+  return (CRLF_FIRST_LINE.test(text) ? block.replaceAll('\n', '\r\n') : block) + body
 }
 
 /**

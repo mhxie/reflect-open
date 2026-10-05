@@ -1,7 +1,8 @@
 //! Image thumbnails for the `reflect-asset://` protocol
 //! (`?reflect-preview=thumb&width=W`): a raster attachment decoded, turned
-//! upright per its EXIF orientation, downscaled to a width bucket, and encoded
-//! as JPEG — PNG when any pixel is translucent. Thumbnails cache under
+//! upright per its EXIF orientation, downscaled to a width bucket, cropped to
+//! the tallest shape a card shows, and encoded as JPEG — PNG when any pixel is
+//! translucent. Thumbnails cache under
 //! `.reflect/cache/thumbnails/<key>/<width>.thumb` (see `preview_cache`), so
 //! only a file's first preview pays for the decode.
 //!
@@ -67,26 +68,35 @@ const THUMBNAIL_FORMATS: [ImageFormat; 4] = [
     ImageFormat::WebP,
 ];
 
-/// The largest side a decoder may report.
-const MAX_IMAGE_SIDE: u32 = 16_384;
+/// The largest side a decoder may report: JPEG's own maximum. The pixel count
+/// is held by [`MAX_DECODED_BYTES`], so a long, narrow full-page screenshot
+/// (1440×18000) thumbnails like any photo of the same size.
+const MAX_IMAGE_SIDE: u32 = 65_535;
 
 /// The largest file thumbnailed (64 MiB; 32 MiB on iOS). Larger files answer
-/// `413` and the card falls back to the webview's decode.
+/// `413`, and the passive raster fallback refuses them too
+/// ([`passive_fallback_allowed`]).
 #[cfg(not(target_os = "ios"))]
-const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(target_os = "ios")]
-const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// The largest decoded image, in bytes: 160 MiB, which admits a 50-megapixel
 /// photo (RGB), and 96 MiB on iOS, a 24-megapixel one with room to spare.
-/// Reserved from the header before the buffer is allocated; a larger image
-/// falls back to the webview's decode.
+/// Reserved from the header before the buffer is allocated; a larger image is
+/// refused here and by the passive raster fallback alike.
 #[cfg(not(target_os = "ios"))]
 const MAX_DECODED_BYTES: u64 = 160 * 1024 * 1024;
 #[cfg(target_os = "ios")]
 const MAX_DECODED_BYTES: u64 = 96 * 1024 * 1024;
 
 const JPEG_QUALITY: u8 = 82;
+
+/// The tallest shape a thumbnail keeps, as height over width: a card clamps
+/// its preview to this ratio and crops the rest (`MAX_RATIO` in the
+/// frontend's `attachments/attachment-media.ts`), so a longer image is
+/// cropped to its middle, where a card shows it.
+const MAX_HEIGHT_RATIO: f64 = 1.8;
 
 /// Thumbnail renders running at once, across every window and graph. With a
 /// decode's peak at up to ~5× [`MAX_DECODED_BYTES`] (a multi-scan CMYK JPEG
@@ -230,10 +240,13 @@ pub(crate) enum ThumbnailLookup {
     Render(ThumbnailRender),
 }
 
-/// A thumbnail render, holding the image opened (and checked) by the lookup.
+/// A thumbnail render: where the image is and the version the lookup saw.
+/// The file is opened again only once a render slot is free, so a queue of
+/// renders waiting for one holds no file handles.
 pub(crate) struct ThumbnailRender {
-    file: File,
+    target: ReadTarget,
     len: u64,
+    modified_ms: Option<u64>,
     request: ThumbnailRequest,
     /// Where to cache the thumbnail; `None` when the cache is unavailable.
     cache: Option<CacheEntry>,
@@ -289,11 +302,13 @@ pub(crate) fn lookup_thumbnail(
     root: &Path,
     local_only: Option<&LocalOnlyFolders>,
     rel: &str,
-    target: &ReadTarget,
+    target: ReadTarget,
     request: ThumbnailRequest,
 ) -> Result<ThumbnailLookup, ThumbnailError> {
-    let (file, metadata) = open_image(target)?;
-    let cache = super::modified_ms(&metadata).and_then(|modified_ms| {
+    let (file, metadata) = open_image(&target)?;
+    drop(file);
+    let modified_ms = super::modified_ms(&metadata);
+    let cache = modified_ms.and_then(|modified_ms| {
         let entry = cache_rel_path(rel, metadata.len(), modified_ms, request);
         match resolve_write(root, &entry, local_only) {
             Ok(path) => Some(CacheEntry {
@@ -317,8 +332,9 @@ pub(crate) fn lookup_thumbnail(
     }
     tracing::debug!(path = rel, bucket = request.bucket, "thumbnail cache miss");
     Ok(ThumbnailLookup::Render(ThumbnailRender {
-        file,
+        target,
         len: metadata.len(),
+        modified_ms,
         request,
         cache,
     }))
@@ -339,16 +355,31 @@ impl ThumbnailRender {
 
     fn render(self) -> Result<Thumbnail, ThumbnailError> {
         let started = Instant::now();
-        let bytes = read_image(self.file, self.len)?;
+        // A request for the same thumbnail that waited ahead of this one (a
+        // card scrolled away and back) may have cached it meanwhile.
+        if let Some(entry) = &self.cache {
+            if let Some(bytes) = preview_cache::read_cached(&entry.path, is_thumbnail) {
+                if let Some(mime) = thumbnail_mime(&bytes) {
+                    return Ok(Thumbnail { bytes, mime });
+                }
+            }
+        }
+        let (file, metadata) = open_image(&self.target)?;
+        // A file rewritten while the render waited is rendered as it is now,
+        // but never cached under the key of the version the lookup saw.
+        let unchanged =
+            metadata.len() == self.len && super::modified_ms(&metadata) == self.modified_ms;
+        let cache = if unchanged { self.cache } else { None };
+        let bytes = read_image(file, metadata.len())?;
         let thumbnail = render_thumbnail(&bytes, self.request.bucket)?;
         tracing::debug!(
             bucket = self.request.bucket,
-            image_bytes = self.len,
+            image_bytes = metadata.len(),
             thumbnail_bytes = thumbnail.bytes.len(),
             elapsed_ms = started.elapsed().as_millis() as u64,
             "rendered a thumbnail"
         );
-        if let Some(entry) = self.cache {
+        if let Some(entry) = cache {
             if let Err(err) =
                 super::io::atomic_write_bytes(&entry.root, &entry.path, &thumbnail.bytes)
             {
@@ -359,10 +390,10 @@ impl ThumbnailRender {
     }
 }
 
-/// Decode `bytes`, scale the image down to `bucket` pixels wide as displayed
-/// (never up), turn it upright, and encode it. Downscaling before orienting
-/// keeps the orientation's copy thumbnail-sized.
-fn render_thumbnail(bytes: &[u8], bucket: u32) -> Result<Thumbnail, ThumbnailError> {
+/// A decoder for `bytes` held to the thumbnail formats and decode budget:
+/// `OverBudget` when the header declares an image past
+/// [`MAX_IMAGE_SIDE`] or [`MAX_DECODED_BYTES`], before anything is decoded.
+fn budgeted_decoder(bytes: &[u8]) -> Result<impl ImageDecoder + '_, ThumbnailError> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     if !reader
         .format()
@@ -383,28 +414,76 @@ fn render_thumbnail(bytes: &[u8], bucket: u32) -> Result<Thumbnail, ThumbnailErr
     // the GIF codec holds its frame buffer to (the others do not count theirs).
     limits.reserve(decoder.total_bytes())?;
     decoder.set_limits(limits)?;
+    Ok(decoder)
+}
+
+/// Whether the passive raster fallback (`?reflect-preview=raster&budget=thumb`,
+/// requested when a thumbnail fails) may hand `bytes` to the webview: never
+/// past the size ([`MAX_IMAGE_BYTES`]) or decode budget a thumbnail is held
+/// to, so an image refused a thumbnail for its size is not decoded in full by
+/// the webview instead. Bytes the thumbnail codecs cannot read pass: the
+/// webview may still decode them.
+pub(crate) fn passive_fallback_allowed(bytes: &[u8]) -> bool {
+    bytes.len() as u64 <= MAX_IMAGE_BYTES
+        && !matches!(budgeted_decoder(bytes), Err(ThumbnailError::OverBudget(_)))
+}
+
+/// Decode `bytes`, scale the image down to `bucket` pixels wide as displayed
+/// (never up), crop it to the tallest shape a card shows, turn it upright,
+/// and encode it. Downscaling and cropping before orienting keep the
+/// orientation's copy thumbnail-sized.
+fn render_thumbnail(bytes: &[u8], bucket: u32) -> Result<Thumbnail, ThumbnailError> {
+    let mut decoder = budgeted_decoder(bytes)?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
-    let mut image = downscale(DynamicImage::from_decoder(decoder)?, bucket, orientation);
+    let image = downscale(DynamicImage::from_decoder(decoder)?, bucket, orientation);
+    let mut image = crop_tall(image, orientation);
     image.apply_orientation(orientation);
     encode(&image)
 }
 
-/// Scale `image` so that, once `orientation` is applied, it is at most
-/// `bucket` pixels wide: after a quarter turn, today's height is the width.
-fn downscale(image: DynamicImage, bucket: u32, orientation: Orientation) -> DynamicImage {
-    let quarter_turned = matches!(
+/// Whether `orientation` swaps the stored width and height.
+fn is_quarter_turned(orientation: Orientation) -> bool {
+    matches!(
         orientation,
         Orientation::Rotate90
             | Orientation::Rotate270
             | Orientation::Rotate90FlipH
             | Orientation::Rotate270FlipH
-    );
+    )
+}
+
+/// Scale `image` so that, once `orientation` is applied, it is at most
+/// `bucket` pixels wide: after a quarter turn, today's height is the width.
+fn downscale(image: DynamicImage, bucket: u32, orientation: Orientation) -> DynamicImage {
+    let quarter_turned = is_quarter_turned(orientation);
     if quarter_turned && image.height() > bucket {
         image.thumbnail(u32::MAX, bucket)
     } else if !quarter_turned && image.width() > bucket {
         image.thumbnail(bucket, u32::MAX)
     } else {
         image
+    }
+}
+
+/// Crop `image` to its middle so that, once `orientation` is applied, it is at
+/// most [`MAX_HEIGHT_RATIO`] times as tall as it is wide. A centered crop
+/// commutes with every orientation, so it can run before the turn.
+fn crop_tall(image: DynamicImage, orientation: Orientation) -> DynamicImage {
+    let quarter_turned = is_quarter_turned(orientation);
+    let (displayed_width, displayed_height) = if quarter_turned {
+        (image.height(), image.width())
+    } else {
+        (image.width(), image.height())
+    };
+    let max_height = (f64::from(displayed_width) * MAX_HEIGHT_RATIO).ceil() as u32;
+    if displayed_height <= max_height {
+        return image;
+    }
+    let offset = (displayed_height - max_height) / 2;
+    if quarter_turned {
+        image.crop_imm(offset, 0, max_height, image.height())
+    } else {
+        image.crop_imm(0, offset, image.width(), max_height)
     }
 }
 
@@ -546,9 +625,8 @@ mod tests {
 
     #[test]
     fn refuses_images_past_the_decode_budget_from_the_header() {
-        // 8000² and 16000² RGBA (~244 MiB, ~1 GiB) are inside the side limit
-        // but past the byte budget; 20000² is past the side limit itself.
-        // None may reach allocation.
+        // 8000², 16000², and 20000² RGBA (~244 MiB to ~1.5 GiB) are inside
+        // the side limit but past the byte budget. None may reach allocation.
         for (width, height) in [(8_000, 8_000), (16_000, 16_000), (20_000, 20_000)] {
             let err = render_thumbnail(&gif_header(width, height), 320).unwrap_err();
             assert!(
@@ -565,6 +643,53 @@ mod tests {
         // target; this header carries no pixels, so the decode itself fails.
         let err = render_thumbnail(&gif_header(6_000, 4_000), 320).unwrap_err();
         assert!(matches!(err, ThumbnailError::Invalid(_)), "{err}");
+    }
+
+    /// A long full-page screenshot is past the old 16384 px side limit but
+    /// within the byte budget (~99 MiB as RGBA): it thumbnails like a photo.
+    #[cfg(not(target_os = "ios"))]
+    #[test]
+    fn admits_a_long_screenshot_within_the_budget() {
+        let header = gif_header(1_440, 18_000);
+        let err = render_thumbnail(&header, 320).unwrap_err();
+        assert!(matches!(err, ThumbnailError::Invalid(_)), "{err}");
+        assert!(passive_fallback_allowed(&header));
+    }
+
+    #[test]
+    fn the_passive_fallback_refuses_what_thumbnails_refuse_for_size() {
+        assert!(!passive_fallback_allowed(&gif_header(16_000, 16_000)));
+        // Unreadable to the thumbnail codecs: the webview may still decode it.
+        assert!(passive_fallback_allowed(b"not an image"));
+        let source = DynamicImage::ImageRgb8(RgbImage::new(10, 10));
+        assert!(passive_fallback_allowed(&png(&source)));
+    }
+
+    #[test]
+    fn crops_a_tall_image_to_its_middle_at_the_card_ratio() {
+        let mut source = RgbImage::from_pixel(100, 1000, Rgb([0, 0, 0]));
+        // A white middle band: the crop keeps the middle.
+        for x in 0..100 {
+            for y in 495..505 {
+                source.put_pixel(x, y, Rgb([255, 255, 255]));
+            }
+        }
+        let thumbnail = render_thumbnail(&png(&DynamicImage::ImageRgb8(source)), 320).unwrap();
+        let decoded = image::load_from_memory(&thumbnail.bytes).unwrap().to_rgb8();
+        assert_eq!(decoded.dimensions(), (100, 180));
+        assert!(decoded.get_pixel(50, 90).0[0] > 200);
+
+        // After a quarter turn the stored width is the displayed height.
+        let wide = DynamicImage::ImageRgb8(RgbImage::new(1000, 100));
+        let mut cropped = crop_tall(wide, Orientation::Rotate90);
+        cropped.apply_orientation(Orientation::Rotate90);
+        assert_eq!((cropped.width(), cropped.height()), (100, 180));
+        // Wide and ordinary shapes are untouched.
+        let photo = crop_tall(
+            DynamicImage::ImageRgb8(RgbImage::new(400, 300)),
+            Orientation::NoTransforms,
+        );
+        assert_eq!((photo.width(), photo.height()), (400, 300));
     }
 
     /// The desktop budget admits a 50-megapixel RGB photo, checked at compile time.
@@ -642,7 +767,7 @@ mod tests {
 
         let lookup = || {
             let target = resolve_read(root, "assets/photo.png", None).unwrap();
-            lookup_thumbnail(root, None, "assets/photo.png", &target, request(500)).unwrap()
+            lookup_thumbnail(root, None, "assets/photo.png", target, request(500)).unwrap()
         };
         let ThumbnailLookup::Render(render) = lookup() else {
             panic!("a first request renders");
@@ -653,6 +778,41 @@ mod tests {
         };
         assert_eq!(cached.bytes, rendered.bytes);
         assert_eq!(cached.mime, "image/jpeg");
+    }
+
+    #[test]
+    fn a_file_rewritten_while_queued_renders_fresh_and_is_not_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("assets")).unwrap();
+        fs::create_dir_all(root.join(".reflect")).unwrap();
+        let first = DynamicImage::ImageRgb8(RgbImage::from_pixel(100, 50, Rgb([10, 20, 30])));
+        fs::write(root.join("assets/photo.png"), png(&first)).unwrap();
+        let target = resolve_read(root, "assets/photo.png", None).unwrap();
+        let ThumbnailLookup::Render(render) =
+            lookup_thumbnail(root, None, "assets/photo.png", target, request(320)).unwrap()
+        else {
+            panic!("a first request renders");
+        };
+        // Rewritten at another size before the render slot frees up.
+        let second = DynamicImage::ImageRgb8(RgbImage::from_fn(80, 40, |column, row| {
+            Rgb([(column * 3) as u8, (row * 6) as u8, 7])
+        }));
+        assert_ne!(png(&first).len(), png(&second).len());
+        fs::write(root.join("assets/photo.png"), png(&second)).unwrap();
+
+        let rendered = render.render().unwrap();
+        let decoded = image::load_from_memory(&rendered.bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (80, 40));
+        let cache = root.join(CACHE_DIR);
+        let cached = fs::read_dir(&cache)
+            .map(|keys| {
+                keys.flatten()
+                    .flat_map(|key| fs::read_dir(key.path()).into_iter().flatten().flatten())
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(cached, 0, "the stale key must not be filled");
     }
 
     #[test]

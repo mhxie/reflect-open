@@ -123,7 +123,7 @@ async function semanticHits(
   if (status.status !== 'ready') {
     throw new ReflectError('io', 'embedding model is not loaded')
   }
-  const [vector] = await embedTexts([query], 'query')
+  const [vector] = await embedTexts([query], 'query', status.model)
   const result = await sql<ChunkHitRow>`
     SELECT c.note_path AS path, n.title, c.heading, c.text,
            (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance

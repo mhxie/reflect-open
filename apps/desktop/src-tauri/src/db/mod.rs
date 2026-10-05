@@ -185,6 +185,13 @@ pub fn index_open(
 /// CLI keeps refusing what it last knew as local-only, and a folder listed
 /// during the pause is remembered even if it is dropped before the pause
 /// lifts.
+///
+/// When the record changes (a folder added or released), the projection
+/// stamp is cleared so the open's `syncIndex` rebuilds every row: privacy
+/// and folded attachment text derive from the folders, and the content-hash
+/// reconcile would never re-derive an unchanged note (a released note would
+/// stay private, a public note would keep text folded from a newly
+/// local-only description).
 fn sync_local_only(
     conn: &mut Connection,
     local_only: Option<&LocalOnlyFolders>,
@@ -197,7 +204,15 @@ fn sync_local_only(
             tracing::info!(marked, "marked local-only index rows private");
         }
     }
+    let before = write::local_only_record(&tx)?;
     write::record_local_only_folders(&tx, local_only, record)?;
+    if write::local_only_record(&tx)? != before {
+        tracing::info!("local-only folders changed; the index will be rebuilt");
+        tx.execute(
+            "DELETE FROM index_meta WHERE key = ?1",
+            [reflect_index_schema::PROJECTION_VERSION_KEY],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -375,22 +390,33 @@ pub struct NoteMoveRequest {
     from_address: write::MovedNoteAddress,
 }
 
-/// Stays a synchronous, main-thread command like the other index writes:
-/// the rename protocol relies on its order against the retargeted session's
-/// next save (`moveNoteCarryingSession`). It runs under the note write
-/// guard, which a Git pull holds through its checkout, so a rename issued
-/// mid-pull waits for the pull; the guard is taken before the index lock,
-/// so the index is never held meanwhile (lock order: the guard, then the
-/// index; a pull never takes the index lock).
+/// Runs on the blocking pool, never the main thread: it takes the note write
+/// guard, which a Git pull holds through its checkout (seconds for large
+/// attachments), so a rename issued mid-pull waits for the pull without
+/// freezing the app. The guard is taken before the index lock, so the index
+/// is never held meanwhile (lock order: the guard, then the index; a pull
+/// never takes the index lock). The retargeted session's next save
+/// (`moveNoteCarryingSession`) is a checked write behind the same guard: one
+/// that overtakes the move finds no file at the destination and is refused,
+/// never written over.
 #[tauri::command]
-pub fn note_move_indexed<R: tauri::Runtime>(
+pub async fn note_move_indexed<R: tauri::Runtime>(
     request: NoteMoveRequest,
     generation: u64,
     app: tauri::AppHandle<R>,
-    graph: State<GraphState>,
-    index: State<IndexState>,
-    background_tasks: State<BackgroundTaskState>,
 ) -> AppResult<()> {
+    crate::blocking::run_blocking(move || move_note_indexed(request, generation, &app)).await
+}
+
+/// The body of [`note_move_indexed`], on the blocking pool.
+fn move_note_indexed<R: tauri::Runtime>(
+    request: NoteMoveRequest,
+    generation: u64,
+    app: &tauri::AppHandle<R>,
+) -> AppResult<()> {
+    let graph = app.state::<GraphState>();
+    let index = app.state::<IndexState>();
+    let background_tasks = app.state::<BackgroundTaskState>();
     let _background_task = background_task::scoped(&background_tasks, "Reflect note move");
     let (root, local_only) = crate::fs::graph_for(&graph, Some(generation))?;
     // A move into or out of a local-only folder, or within a read-only one,
@@ -430,8 +456,8 @@ pub fn note_move_indexed<R: tauri::Runtime>(
         }
     }
     crate::fs::invalidate_file_catalog(&graph, &root);
-    emit_index_written(&app);
-    emit_note_moved(&app, &request.from, &request.to);
+    emit_index_written(app);
+    emit_note_moved(app, &request.from, &request.to);
     Ok(())
 }
 
@@ -555,7 +581,17 @@ pub async fn index_reconcile_scan<R: tauri::Runtime>(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as u64)
             .unwrap_or(0);
-        let scan = scan::scan_reconcile(conn, &files, now_ms)?;
+        // A note behind a link the walk could not follow (an unmounted raw
+        // store) is unlisted, not deleted: its row stays.
+        let scan = match local_only.as_deref() {
+            Some(folders) => scan::scan_reconcile(
+                conn,
+                &files,
+                now_ms,
+                scan::behind_unfollowed_link(&root, folders),
+            )?,
+            None => scan::scan_reconcile(conn, &files, now_ms, |_| false)?,
+        };
         tracing::info!(
             files = scan.total,
             candidates = scan.candidates.len(),

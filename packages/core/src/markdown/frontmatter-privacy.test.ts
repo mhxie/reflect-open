@@ -32,6 +32,7 @@ const expectationSchema = z.object({
       'aliasBudget',
       'tooLarge',
       'unrecognizedValue',
+      'privateKeyVariant',
       'bomBeforeFence',
     ])
     .optional(),

@@ -23,7 +23,8 @@ export const graphInfoSchema = z.object({
    * The local-only folder names whose notes the user may edit in place, each
    * also in `localOnlyFolders` (empty when every folder is read-only). Rust
    * grants them only while the configuration is known, on desktop, and for a
-   * `rawRoot` below `~/Library`; a build that predates the key sends none.
+   * `rawRoot` that does not contain `~/Library` (one on another volume is
+   * fine); a build that predates the key sends none.
    */
   localOnlyEditableFolders: z.array(z.string()).default([]),
   /**

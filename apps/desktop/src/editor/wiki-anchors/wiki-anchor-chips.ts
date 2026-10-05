@@ -231,9 +231,12 @@ function blockBefore($cursor: ResolvedPos): { node: ProseMirrorNode; pos: number
 /**
  * At a block's edge beside a folded `anchors` block, the caret moves into
  * that block, unfolding it: arrows would otherwise skip the hidden lines, and
- * Delete or Backspace would join them with the text.
+ * Delete or Backspace (`deleting`) would join them with the text. Deleting
+ * from an empty top-level line removes the line and lands in the block
+ * (left alone, Delete would pull the evidence up into a plain paragraph), and
+ * Backspace from a nested block (a list item, a quote) keeps its usual lift.
  */
-function enterFoldedBlock(direction: 'forward' | 'backward'): Command {
+function enterFoldedBlock(direction: 'forward' | 'backward', deleting: boolean): Command {
   return (state, dispatch) => {
     const { selection } = state
     const $cursor = selection instanceof TextSelection ? selection.$cursor : null
@@ -241,12 +244,23 @@ function enterFoldedBlock(direction: 'forward' | 'backward'): Command {
       return false
     }
     const forward = direction === 'forward'
+    const topLevel = $cursor.depth === 1
+    if (deleting && !forward && !topLevel) {
+      return false
+    }
     const atEdge = forward
       ? $cursor.parentOffset === $cursor.parent.content.size
       : $cursor.parentOffset === 0
     const neighbor = !atEdge ? null : forward ? blockAfter($cursor) : blockBefore($cursor)
     if (neighbor === null || !isAnchorsBlock(neighbor.node)) {
       return false
+    }
+    if (deleting && topLevel && $cursor.parent.content.size === 0) {
+      const line = $cursor.parent.nodeSize
+      const target = forward ? neighbor.pos - line + 1 : neighbor.pos + neighbor.node.nodeSize - 1
+      const tr = state.tr.delete($cursor.before(), $cursor.after())
+      dispatch?.(tr.setSelection(TextSelection.create(tr.doc, target)).scrollIntoView())
+      return true
     }
     const target = forward ? neighbor.pos + 1 : neighbor.pos + neighbor.node.nodeSize - 1
     dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView())
@@ -256,10 +270,10 @@ function enterFoldedBlock(direction: 'forward' | 'backward'): Command {
 
 /** Keys that would skip or join a folded `anchors` block; bind ahead of the base keymap. */
 export const WIKI_ANCHORS_KEYMAP: Readonly<Record<string, Command>> = {
-  ArrowRight: enterFoldedBlock('forward'),
-  Delete: enterFoldedBlock('forward'),
-  ArrowLeft: enterFoldedBlock('backward'),
-  Backspace: enterFoldedBlock('backward'),
+  ArrowRight: enterFoldedBlock('forward', false),
+  Delete: enterFoldedBlock('forward', true),
+  ArrowLeft: enterFoldedBlock('backward', false),
+  Backspace: enterFoldedBlock('backward', true),
 }
 
 interface ChipsState {

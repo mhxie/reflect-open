@@ -10,8 +10,6 @@ function shelf(...orders: (number | null)[]): PinnedNote[] {
     path: `${index}.md`,
     title: String(index),
     dailyDate: null,
-    isPrivate: false,
-    hasConflict: false,
     pinnedOrder,
   }))
 }

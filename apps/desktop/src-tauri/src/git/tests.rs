@@ -405,6 +405,92 @@ fn oversized_files_are_skipped_and_reported() {
     assert!(!paths.contains(&"assets/huge.bin".to_string()));
 }
 
+/// The guardrail measures a link, never what it points at: Git records a
+/// symlink as its target path, so a link to a large file is backed up (and
+/// retargeted) like any other, and never reported as withheld.
+#[cfg(unix)]
+#[test]
+fn a_link_to_a_large_file_is_never_withheld() {
+    let fixture = fixture();
+    let root = &fixture.graph_a;
+    commit_all(root, "scaffold", MAX_FILE_BYTES, None).unwrap();
+    let outside = fixture._dir.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("huge.bin"), "0123456789abcdef").unwrap();
+    fs::write(outside.join("other.bin"), "0123456789abcdef").unwrap();
+    std::os::unix::fs::symlink(outside.join("huge.bin"), root.join("assets/link.bin")).unwrap();
+
+    let outcome = commit_all(root, "link", 10, None).unwrap();
+    assert!(outcome.committed);
+    assert!(outcome.skipped_large_files.is_empty(), "{outcome:?}");
+    assert!(head_tree_paths(root).contains(&"assets/link.bin".to_string()));
+
+    fs::remove_file(root.join("assets/link.bin")).unwrap();
+    std::os::unix::fs::symlink(outside.join("other.bin"), root.join("assets/link.bin")).unwrap();
+    let outcome = commit_all(root, "retarget", 10, None).unwrap();
+    assert!(outcome.committed, "a retargeted link must be backed up");
+    assert!(outcome.skipped_large_files.is_empty(), "{outcome:?}");
+}
+
+/// A text conflict whose marked-up file reaches the size limit is never
+/// committed: the merge keeps this device's version in history, the markers
+/// stay on disk for review, and the next commit withholds and reports them.
+#[test]
+fn an_oversized_conflict_marker_file_is_withheld() {
+    const LIMIT: u64 = 48;
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    commit_all(root_a, "scaffold", MAX_FILE_BYTES, None).unwrap();
+    write(root_a, "notes/shared.md", "base line\n");
+    commit_all(root_a, "base", LIMIT, None).unwrap();
+    push(root_a, None, &[]).unwrap();
+
+    let root_b = second_device(&fixture);
+    write(&root_b, "notes/shared.md", "edited on the phone\n");
+    commit_all(&root_b, "b edit", LIMIT, None).unwrap();
+    push(&root_b, None, &[]).unwrap();
+
+    write(root_a, "notes/shared.md", "edited on the mac\n");
+    commit_all(root_a, "a edit", LIMIT, None).unwrap();
+    fetch(root_a, None).unwrap();
+    let merged = pull(root_a, None, &[], LIMIT).0.unwrap();
+    assert!(
+        matches!(merged.kind, MergeKind::MergedWithConflicts),
+        "{merged:?}"
+    );
+    assert_eq!(merged.conflicted_paths, vec!["notes/shared.md".to_string()]);
+    assert!(
+        merged
+            .changed_files
+            .iter()
+            .any(|change| change.path == "notes/shared.md"),
+        "{merged:?}"
+    );
+    let content = read(root_a, "notes/shared.md");
+    assert!(content.len() as u64 >= LIMIT, "{content}");
+    assert!(content.contains("<<<<<<< this device"), "{content}");
+
+    let repo = Repository::open(root_a).unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2);
+    let blob = head
+        .tree()
+        .unwrap()
+        .get_path(Path::new("notes/shared.md"))
+        .unwrap()
+        .to_object(&repo)
+        .unwrap()
+        .peel_to_blob()
+        .unwrap();
+    assert_eq!(blob.content(), b"edited on the mac\n");
+
+    let outcome = commit_all(root_a, "Update notes", LIMIT, None).unwrap();
+    assert!(!outcome.committed, "{outcome:?}");
+    assert_eq!(outcome.skipped_large_files.len(), 1, "{outcome:?}");
+    assert_eq!(outcome.skipped_large_files[0].path, "notes/shared.md");
+}
+
 #[test]
 fn push_and_fetch_round_trip() {
     let fixture = fixture();

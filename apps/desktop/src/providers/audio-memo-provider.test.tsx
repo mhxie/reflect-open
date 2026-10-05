@@ -76,6 +76,13 @@ const recorderControls = vi.hoisted(() => ({
 
 const sidebarState = vi.hoisted(() => ({ collapsed: false }))
 
+/** The native recorder's state as `useRecorder` reports it. */
+const nativeControls = vi.hoisted(() => ({
+  supported: false,
+  recordingSince: null as number | null,
+  toggle: vi.fn(),
+}))
+
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   captureAudioMemoPart,
@@ -136,20 +143,22 @@ const SETTINGS = vi.hoisted(() => ({
     defaultAiProviderId: 'cfg-openai',
     transcriptionFormat: true,
     transcriptionPrompt: '',
+    recordingMenuBar: false,
   },
 }))
 
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({ settings: SETTINGS.current as unknown as Settings }),
 }))
-// The webview recorder path: the native recorder (macOS 14.2+) is absent.
+// The webview recorder path by default: the native recorder (macOS 14.2+)
+// is absent unless a test turns it on.
 vi.mock('@/providers/recorder-provider.tsx', () => ({
   useRecorder: () => ({
-    supported: false,
-    recordingSince: null,
+    supported: nativeControls.supported,
+    recordingSince: nativeControls.recordingSince,
     transcribing: false,
     defaultRecordingsFolder: '',
-    toggle: () => {},
+    toggle: nativeControls.toggle,
     cancel: () => {},
     subscribeLevel: () => () => {},
   }),
@@ -210,7 +219,10 @@ beforeEach(() => {
     defaultAiProviderId: 'cfg-openai',
     transcriptionFormat: true,
     transcriptionPrompt: '',
+    recordingMenuBar: false,
   }
+  nativeControls.supported = false
+  nativeControls.recordingSince = null
   captureAudioMemoPart.mockResolvedValue({ ok: true, memo: MEMO })
   reconcilerControls.fake.getTranscribing.mockReturnValue(false)
   reconcilerControls.listeners.clear()
@@ -284,6 +296,7 @@ describe('AudioMemoProvider', () => {
 
   it('adding the first transcription-capable model kicks the pass the gate was suppressing', async () => {
     SETTINGS.current = {
+      ...SETTINGS.current,
       aiProviders: [
         { id: 'claude', provider: 'anthropic', model: 'claude-fable-5', keyHint: 'wxyz1' },
       ],
@@ -295,6 +308,7 @@ describe('AudioMemoProvider', () => {
     expect(reconcilerControls.fake.schedule).not.toHaveBeenCalled()
 
     SETTINGS.current = {
+      ...SETTINGS.current,
       aiProviders: [{ id: 'cfg-openai', provider: 'openai', model: 'gpt-5.1', keyHint: 'wxyz1' }],
       defaultAiProviderId: 'cfg-openai',
       transcriptionFormat: true,
@@ -614,6 +628,46 @@ describe('AudioMemoProvider', () => {
     }
   })
 
+  it('collapsing the sidebar ends a native recording that has no menu bar item', async () => {
+    nativeControls.supported = true
+    nativeControls.recordingSince = Date.now()
+    const { rerender } = await renderHook(() => useAudioMemo(), { wrapper })
+
+    sidebarState.collapsed = true
+    await rerender()
+    expect(nativeControls.toggle).toHaveBeenCalledTimes(1)
+
+    // Later renders while still collapsed (a status tick) never toggle again.
+    await rerender()
+    expect(nativeControls.toggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('a native recording started while collapsed is shown, never stopped', async () => {
+    nativeControls.supported = true
+    sidebarState.collapsed = true
+    const { rerender } = await renderHook(() => useAudioMemo(), { wrapper })
+
+    // The global shortcut starts a recording from another app.
+    nativeControls.recordingSince = Date.now()
+    await rerender()
+
+    expect(nativeControls.toggle).not.toHaveBeenCalled()
+    expect(toggleSidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it('a native recording with a menu bar item survives the collapse', async () => {
+    SETTINGS.current = { ...SETTINGS.current, recordingMenuBar: true }
+    nativeControls.supported = true
+    nativeControls.recordingSince = Date.now()
+    const { rerender } = await renderHook(() => useAudioMemo(), { wrapper })
+
+    sidebarState.collapsed = true
+    await rerender()
+
+    expect(nativeControls.toggle).not.toHaveBeenCalled()
+    expect(toggleSidebar).not.toHaveBeenCalled()
+  })
+
   it('collapsing the sidebar during the permission prompt abandons the request', async () => {
     recorderControls.holdStart = true
     const { result, act, rerender } = await renderHook(() => useAudioMemo(), { wrapper })
@@ -693,6 +747,7 @@ describe('AudioMemoProvider', () => {
 
   it('is unavailable without an OpenAI or Gemini model, and nothing runs', async () => {
     SETTINGS.current = {
+      ...SETTINGS.current,
       aiProviders: [
         { id: 'claude', provider: 'anthropic', model: 'claude-fable-5', keyHint: 'wxyz1' },
       ],

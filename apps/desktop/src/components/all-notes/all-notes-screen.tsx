@@ -232,6 +232,7 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
             notes={sortedNotes}
             selection={selection}
             onOpen={openNote}
+            registerScrollToIndex={registerScrollToIndex}
           />
         ) : (
           <AllNotesTable

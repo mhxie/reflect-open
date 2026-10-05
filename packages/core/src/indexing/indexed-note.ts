@@ -124,8 +124,11 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * so existing file hashes and Markdown-derived rows must be rebuilt.
  * 28 - attachment text records device-only provenance and its source hash,
  * so existing notes and embedding chunks must be rebuilt.
+ * 29 - `notes.is_private` withholds a set key spelled like `private`
+ * (`Private: true`), and a block that doesn't load when it mentions `private`
+ * in any case.
  */
-export const PROJECTION_VERSION = 28
+export const PROJECTION_VERSION = 29
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the

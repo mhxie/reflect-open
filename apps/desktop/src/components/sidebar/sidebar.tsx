@@ -72,7 +72,8 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
         }
       }}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        const next = event.relatedTarget
+        if (!(next instanceof Node && event.currentTarget.contains(next))) {
           setDropping(false)
         }
       }}
@@ -84,7 +85,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
         setDropping(false)
         const files = [...event.dataTransfer.files]
         if (files.length > 0) {
-          void createNoteFromFiles(files, generation, context.navigate)
+          void createNoteFromFiles(files, generation, context)
         }
       }}
       className={cn(

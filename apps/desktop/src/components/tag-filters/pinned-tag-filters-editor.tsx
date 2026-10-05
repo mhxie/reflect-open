@@ -67,9 +67,15 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
     }
   }, [tags, findFocusTarget])
 
-  const requestFocus = (target: TagFocusTarget | 'input'): void => {
+  // Focus moves once the edited list renders. An edit that changes nothing
+  // yet (queued before settings load, or already applied elsewhere) renders
+  // no new list, so its request is dropped instead of firing on a later one.
+  const editWithFocus = (target: TagFocusTarget | 'input', edit: () => boolean): void => {
     pendingFocus.current = target
     finalFocusTarget.current = target
+    if (!edit() && pendingFocus.current === target) {
+      pendingFocus.current = null
+    }
   }
 
   const add = (input: string): void => {
@@ -77,8 +83,7 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
     if (tag === null || tags.includes(tag)) {
       return
     }
-    requestFocus('input')
-    pinTag(tag)
+    editWithFocus('input', () => pinTag(tag))
     setQuery('')
     setAnnouncement(`Pinned #${tag}.`)
   }
@@ -88,16 +93,16 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
     if (pinnedTagOrdersEqual(tags, next)) {
       return
     }
-    requestFocus({ tag, control: 'menu' })
-    moveTag(tag, direction)
+    editWithFocus({ tag, control: 'menu' }, () => moveTag(tag, direction))
     setAnnouncement(`#${tag} moved to position ${next.indexOf(tag) + 1} of ${next.length}.`)
   }
 
   const unpin = (tag: string): void => {
     const index = tags.indexOf(tag)
     const nextTag = tags[index + 1] ?? tags[index - 1]
-    requestFocus(nextTag === undefined ? 'input' : { tag: nextTag, control: 'menu' })
-    unpinTag(tag)
+    editWithFocus(nextTag === undefined ? 'input' : { tag: nextTag, control: 'menu' }, () =>
+      unpinTag(tag),
+    )
     setAnnouncement(`Unpinned #${tag}.`)
   }
 
@@ -111,8 +116,7 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
           tags={tags}
           onReorder={(original, next, tag) => {
             if (!pinnedTagOrdersEqual(original, next)) {
-              requestFocus({ tag, control: 'handle' })
-              reorderTags(original, next)
+              editWithFocus({ tag, control: 'handle' }, () => reorderTags(original, next))
             }
           }}
           onMove={move}

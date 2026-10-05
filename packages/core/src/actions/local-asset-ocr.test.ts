@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.mocked(readAssetForDevice).mockResolvedValue(new Uint8Array([1, 2, 3]))
   vi.mocked(readAssetOcrCache).mockRejectedValue({ kind: 'notFound', message: 'No OCR' })
   vi.mocked(readNoteForDevice).mockRejectedValue({ kind: 'notFound', message: 'No sidecar' })
-  vi.mocked(localOcrSupported).mockResolvedValue(true)
+  vi.mocked(localOcrSupported).mockResolvedValue({ cache: true, pdf: true })
   vi.mocked(pdfInfoForDevice).mockResolvedValue({
     pages: [
       { width: 100, height: 200 },
@@ -107,7 +107,7 @@ function run(provider = config) {
 
 describe('local OCR', () => {
   it('refuses an unsupported cache platform before reading private attachment bytes', async () => {
-    vi.mocked(localOcrSupported).mockResolvedValue(false)
+    vi.mocked(localOcrSupported).mockResolvedValue({ cache: false, pdf: false })
     expect((await run()).stopped?.reason).toBe('unsupported')
     expect(readAssetForDevice).not.toHaveBeenCalled()
     expect(describeAsset).not.toHaveBeenCalled()
@@ -178,5 +178,68 @@ describe('local OCR', () => {
     vi.mocked(readNoteForDevice).mockResolvedValue({ content: 'User caption', localOnly: false })
     expect((await run()).skippedUserAuthored).toBe(1)
     expect(readAssetForDevice).not.toHaveBeenCalled()
+  })
+
+  it('records the listed mtime so wake scans can skip re-hashing an untouched source', async () => {
+    vi.mocked(listAttachments).mockResolvedValue([
+      { path: 'assets/scan.pdf', size: 3, modifiedMs: 1234 },
+    ])
+    await run()
+    const stored = assetOcrCacheSchema.parse(
+      JSON.parse(String(vi.mocked(writeAssetOcrCache).mock.calls[0]?.[1])),
+    )
+    expect(stored.sourceModifiedMs).toBe(1234)
+  })
+
+  describe('a failure confined to one attachment', () => {
+    beforeEach(() => {
+      database
+        .prepare('INSERT INTO assets(note_path, asset_path) VALUES (?, ?)')
+        .run('notes/private.md', 'assets/photo.png')
+    })
+
+    it('skips an oversize source and still recognizes the next attachment', async () => {
+      vi.mocked(readAssetForDevice).mockImplementation(async (path) => {
+        if (path === 'assets/scan.pdf') {
+          throw { kind: 'unsupported', message: 'source exceeds 20971520 bytes' }
+        }
+        return new Uint8Array([9])
+      })
+      const outcome = await run()
+      expect(outcome.stopped).toBeNull()
+      expect(outcome.skippedOversize).toBe(1)
+      expect(outcome.describedAssetPaths).toEqual(['assets/photo.png'])
+    })
+
+    it('skips an offline source and a blank page instead of stopping the pass', async () => {
+      vi.mocked(readAssetForDevice).mockImplementation(async (path) => {
+        if (path === 'assets/photo.png') {
+          throw { kind: 'io', message: 'the file is not available offline' }
+        }
+        return new Uint8Array([1])
+      })
+      vi.mocked(describeAsset).mockResolvedValue('   ')
+      const outcome = await run()
+      expect(outcome.stopped).toBeNull()
+      expect(outcome.refused).toBe(2)
+      expect(writeAssetOcrCache).not.toHaveBeenCalled()
+    })
+
+    it('skips PDFs where pages cannot render, without reading their bytes', async () => {
+      vi.mocked(localOcrSupported).mockResolvedValue({ cache: true, pdf: false })
+      const outcome = await run()
+      expect(outcome.stopped).toBeNull()
+      expect(outcome.skippedOversize).toBe(1)
+      expect(readAssetForDevice).not.toHaveBeenCalledWith('assets/scan.pdf', 7)
+      expect(pdfInfoForDevice).not.toHaveBeenCalled()
+      expect(outcome.describedAssetPaths).toEqual(['assets/photo.png'])
+    })
+
+    it('still stops the whole pass when the local server is unavailable', async () => {
+      vi.mocked(describeAsset).mockRejectedValue({ kind: 'network', message: 'Server down' })
+      const outcome = await run()
+      expect(outcome.stopped).toMatchObject({ reason: 'network', message: 'Server down' })
+      expect(describeAsset).toHaveBeenCalledTimes(1)
+    })
   })
 })

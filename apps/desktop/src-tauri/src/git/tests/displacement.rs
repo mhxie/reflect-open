@@ -1170,6 +1170,78 @@ fn ff_without_local_only_folders_keeps_untouched_oversized_edits() {
     );
 }
 
+/// A fast-forward records the stat of every file it checks out, as a full
+/// checkout would: left zero, each later commit would re-read and re-hash
+/// every pulled file, attachments included.
+#[test]
+fn a_fast_forward_records_the_stat_of_what_it_checks_out() {
+    use std::os::unix::fs::MetadataExt;
+    let device = Device::new(false);
+    let root = device.root();
+    push_from_b(
+        &device,
+        &[("notes/b.md", "# B\n"), ("assets/pic.bin", "pixels")],
+    );
+    let merged = device.pull();
+    assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+    let index = Repository::open(root).unwrap().index().unwrap();
+    for path in ["notes/b.md", "assets/pic.bin"] {
+        let entry = index.get_path(Path::new(path), 0).unwrap();
+        let meta = fs::symlink_metadata(root.join(path)).unwrap();
+        assert_eq!(u64::from(entry.file_size), meta.len(), "{path}");
+        assert_eq!(i64::from(entry.mtime.seconds()), meta.mtime(), "{path}");
+        assert_eq!(
+            u64::from(entry.ino),
+            meta.ino() & u64::from(u32::MAX),
+            "{path}"
+        );
+    }
+    assert_eq!(index_tree(root), head_tree(root));
+    assert!(!device.commit());
+}
+
+/// A hidden path is no exception for bytes Git never got: a tracked hidden
+/// file whose oversized edit the commit withheld moves aside when the other
+/// device edits or deletes it, instead of the checkout replacing it.
+#[test]
+fn a_tracked_hidden_files_withheld_edit_moves_aside() {
+    const LIMIT: u64 = 16;
+    const CLIP: &str = ".attachments/clip.bin";
+    const CLIP_COPY: &str = ".attachments/clip (this device).bin";
+    const LOCAL: &str = "grown well past the size limit here";
+    let edited: &[u8] = b"the phone's version";
+    for remote in [Some(edited), None] {
+        let device = Device::new(false);
+        let root = device.root();
+        write(root, CLIP, "small at first");
+        assert!(device.commit());
+        push(root, None, &[]).unwrap();
+        write(root, CLIP, LOCAL);
+        let skipped = commit_all(root, "Update notes", LIMIT, None).unwrap();
+        assert_eq!(skipped.skipped_large_files.len(), 1, "{skipped:?}");
+
+        let root_b = second_device(&device.fixture);
+        commit_index_edits(&root_b, &[(CLIP, remote.map(|bytes| (bytes, FILE)))]);
+        push(&root_b, None, &[]).unwrap();
+        fetch(root, None).unwrap();
+        let (merged, _) = pull(root, None, &[], LIMIT);
+        let merged = merged.unwrap();
+        assert!(matches!(merged.kind, MergeKind::FastForward), "{merged:?}");
+        assert_eq!(read(root, CLIP_COPY), LOCAL);
+        match remote {
+            Some(bytes) => assert_eq!(fs::read(root.join(CLIP)).unwrap(), bytes),
+            None => assert!(!root.join(CLIP).exists()),
+        }
+        assert_eq!(
+            merged.displaced,
+            vec![DisplacedFile {
+                tracked: true,
+                ..displaced(CLIP, CLIP_COPY)
+            }]
+        );
+    }
+}
+
 /// The ref moves only after the working tree and the index: a failed index
 /// write leaves HEAD where it was, the copy reported, and the retry clean.
 #[test]

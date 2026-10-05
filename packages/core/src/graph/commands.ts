@@ -169,7 +169,8 @@ const localNoteReadSchema = z.discriminatedUnion('kind', [
     kind: z.literal('content'),
     content: z.string(),
     // Rust's verdict from the entry the path resolves to, not the spelling.
-    localOnly: z.boolean().default(false),
+    // Required: a privacy flag must never default to "shareable".
+    localOnly: z.boolean(),
   }),
   z.object({ kind: z.literal('evicted') }),
 ])
@@ -348,9 +349,19 @@ export async function pdfInfoForDevice(
   return await call('pdf_info_for_device', { path, generation, sourceHash }, pdfInfoSchema)
 }
 
-/** Whether safe device-only OCR cache writes are supported by this native platform. */
-export async function localOcrSupported(generation: number): Promise<boolean> {
-  return await call('asset_ocr_supported', { generation }, z.boolean())
+const localOcrSupportSchema = z.object({
+  /** Safe device-only OCR cache writes (macOS and Linux). */
+  cache: z.boolean(),
+  /** PDF page rendering for OCR (macOS only). */
+  pdf: z.boolean(),
+})
+
+/** What local OCR this native platform supports. */
+export type LocalOcrSupport = z.infer<typeof localOcrSupportSchema>
+
+/** What local OCR this native platform supports: cache writes, and PDF rendering. */
+export async function localOcrSupported(generation: number): Promise<LocalOcrSupport> {
+  return await call('asset_ocr_supported', { generation }, localOcrSupportSchema)
 }
 
 /** Read a derived OCR cache entry; missing entries throw `notFound`. */

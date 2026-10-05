@@ -2,6 +2,7 @@ import {
   backfillEmbeddings,
   embedEnsure,
   embedStatus,
+  errorMessage,
   subscribeEmbedStatus,
   type EmbedStatus,
 } from '@reflect/core'
@@ -53,15 +54,26 @@ async function awaitTerminalStatus(initial: EmbedStatus): Promise<EmbedStatus> {
         resolve(status)
       }
     }
-    void subscribeEmbedStatus(settle).then((fn) => {
-      if (settled) {
-        fn()
-        return
+    // Without a subscription no terminal event can arrive: settle now.
+    const fail = (cause: unknown): void => {
+      if (!settled) {
+        settled = true
+        unlisten?.()
+        resolve({ status: 'failed', message: errorMessage(cause) })
       }
-      unlisten = fn
-      // The terminal event may have fired before the subscription landed.
-      void embedStatus().then(settle)
-    })
+    }
+    subscribeEmbedStatus(settle)
+      .then((fn) => {
+        if (settled) {
+          fn()
+          return
+        }
+        unlisten = fn
+        // The terminal event may have fired before the subscription landed.
+        // A failed poll changes nothing: the live subscription still reports.
+        embedStatus().then(settle, () => {})
+      })
+      .catch(fail)
   })
 }
 

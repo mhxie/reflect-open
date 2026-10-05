@@ -69,8 +69,6 @@ export interface PinnedNote {
   title: string
   dailyDate: string | null
   pinnedOrder?: number | null
-  isPrivate: boolean
-  hasConflict: boolean
 }
 
 /**
@@ -80,21 +78,16 @@ export interface PinnedNote {
  * the point of pinning: the list must not reshuffle as notes are edited.
  */
 export async function getPinnedNotes(): Promise<PinnedNote[]> {
-  const rows = await db
+  return await db
     .selectFrom('notes')
     .where('isPinned', '=', 1)
     .where('kind', '!=', 'template')
-    .select(['path', 'title', 'dailyDate', 'pinnedOrder', 'isPrivate', 'hasConflict'])
+    .select(['path', 'title', 'dailyDate', 'pinnedOrder'])
     .orderBy(sql`pinned_order IS NULL`)
     .orderBy('pinnedOrder')
     .orderBy('titleKey')
     .orderBy('path')
     .execute()
-  return rows.map((row) => ({
-    ...row,
-    isPrivate: row.isPrivate !== 0,
-    hasConflict: row.hasConflict !== 0,
-  }))
 }
 
 /** Core fields of one note row: identity path, title, daily date, privacy flag. */

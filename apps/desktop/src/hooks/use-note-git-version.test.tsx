@@ -59,7 +59,7 @@ describe('useNoteGitVersion', () => {
     expect(gitNoteVersion).toHaveBeenCalledWith('notes/a.md', 11)
   })
 
-  it('fetches afresh on reopening and polls only while details remain open', async () => {
+  it('fetches afresh on reopening without polling while details remain open', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     let open = true
     const hook = await renderHook(
@@ -78,23 +78,17 @@ describe('useNoteGitVersion', () => {
 
     gitNoteVersion.mockResolvedValue('def456abc9')
     await hook.act(async () => {
-      await vi.advanceTimersByTimeAsync(15_001)
+      await vi.advanceTimersByTimeAsync(45_000)
     })
-    await vi.waitFor(() => expect(hook.result.current.version).toBe('def456abc9'))
-    expect(gitNoteVersion).toHaveBeenCalledTimes(2)
+    expect(gitNoteVersion).toHaveBeenCalledTimes(1)
+    expect(hook.result.current.version).toBe('abc123def4')
 
     open = false
     await hook.rerender()
-    await hook.act(async () => {
-      await vi.advanceTimersByTimeAsync(45_000)
-    })
-    expect(gitNoteVersion).toHaveBeenCalledTimes(2)
-
     open = true
-    gitNoteVersion.mockResolvedValue('fed987cba0')
     await hook.rerender()
-    await vi.waitFor(() => expect(hook.result.current.version).toBe('fed987cba0'))
-    expect(gitNoteVersion).toHaveBeenCalledTimes(3)
+    await vi.waitFor(() => expect(hook.result.current.version).toBe('def456abc9'))
+    expect(gitNoteVersion).toHaveBeenCalledTimes(2)
   })
 
   it('discards a late version from another graph with the same note path', async () => {

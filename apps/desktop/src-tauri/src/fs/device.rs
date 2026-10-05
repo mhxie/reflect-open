@@ -46,11 +46,27 @@ pub(super) fn read_source_for_device(target: &super::resolve::ReadTarget) -> App
     }
 }
 
-/// Whether this platform has the no-follow directory writes required for local OCR.
+/// What local OCR can do on this platform.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalOcrSupport {
+    /// The no-follow directory writes the OCR cache requires.
+    pub cache: bool,
+    /// PDF page rendering, which only the macOS engine in `pdf_render` has.
+    pub pdf: bool,
+}
+
+/// What local OCR this platform supports, so callers skip PDFs it can't render.
 #[tauri::command]
-pub async fn asset_ocr_supported(generation: u64, state: State<'_, GraphState>) -> AppResult<bool> {
+pub async fn asset_ocr_supported(
+    generation: u64,
+    state: State<'_, GraphState>,
+) -> AppResult<LocalOcrSupport> {
     graph_for(&state, Some(generation))?;
-    Ok(cfg!(unix))
+    Ok(LocalOcrSupport {
+        cache: cfg!(unix),
+        pdf: cfg!(target_os = "macos"),
+    })
 }
 
 /// A model-facing Markdown read, with local-only status decided by Rust.
@@ -446,11 +462,30 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn reports_pdf_support_only_where_pages_can_render() {
+        let (app, _directory) = open_graph();
+        let support = tauri::async_runtime::block_on(asset_ocr_supported(7, app.state())).unwrap();
+        assert_eq!(
+            support,
+            LocalOcrSupport {
+                cache: true,
+                pdf: cfg!(target_os = "macos"),
+            }
+        );
+        assert!(tauri::async_runtime::block_on(asset_ocr_supported(6, app.state())).is_err());
+    }
+
     #[cfg(not(unix))]
     #[test]
     fn refuses_unsupported_runtime_writes_without_creating_a_cache() {
         let (app, directory) = open_graph();
-        assert!(!tauri::async_runtime::block_on(asset_ocr_supported(7, app.state())).unwrap());
+        assert!(
+            !tauri::async_runtime::block_on(asset_ocr_supported(7, app.state()))
+                .unwrap()
+                .cache
+        );
         assert!(tauri::async_runtime::block_on(asset_ocr_cache_write(
             "a".repeat(64),
             "Private OCR".into(),

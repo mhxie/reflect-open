@@ -32,8 +32,6 @@ export function pinnedNoteFor(path: string, row: NoteRow | null): PinnedNote {
     title: row?.title ?? titleFromPath(path),
     dailyDate: row?.dailyDate ?? dateFromDailyPath(path),
     pinnedOrder: null,
-    isPrivate: row?.isPrivate ?? false,
-    hasConflict: row?.hasConflict ?? false,
   }
 }
 

@@ -25,6 +25,12 @@ export type UnreadableFrontmatterReason =
   /** `private` is set to something that is neither true nor false. */
   | 'unrecognizedValue'
   /**
+   * A key spelled like `private` but not exactly (`Private`, `PRIVATE`,
+   * `"private "`) is set to something other than false: the app reads only
+   * `private`, so it can't tell whether the note was meant to be locked.
+   */
+  | 'privateKeyVariant'
+  /**
    * A byte-order mark precedes the fence: the app sees no frontmatter, while
    * the block behind it locks the note.
    */
@@ -58,9 +64,12 @@ const PRIVATE_KEYS = ['private', '"private"', "'private'"] as const
  *   `private`, whether or not the block loads.
  * - **Loaded block:** the root `private` value (tags unwrapped, aliases
  *   resolved): true/1/1.0/yes/on is `private`; false/0/null/no/off/empty or no
- *   key is `public`; anything else is `unreadable` (`unrecognizedValue`).
- * - **Block not loaded:** `unreadable` when it contains `private` or a
- *   backslash (a YAML escape can spell the key), else `public`.
+ *   key is `public`; anything else is `unreadable` (`unrecognizedValue`). A
+ *   root key that is `private` only once ASCII-trimmed and case-folded
+ *   (`Private`, `PRIVATE`) is `unreadable` (`privateKeyVariant`) unless its
+ *   value is falsy.
+ * - **Block not loaded:** `unreadable` when it contains `private` in any ASCII
+ *   case or a backslash (a YAML escape can spell the key), else `public`.
  *
  * The byte-order-mark rule needs the whole source; see `frontmatterPrivacy`.
  */
@@ -72,7 +81,7 @@ export function classifyFrontmatterBlock(
     return PRIVATE
   }
   if (!load.loaded) {
-    return raw.includes('private') || raw.includes('\\')
+    return asciiLowercase(raw).includes('private') || raw.includes('\\')
       ? { kind: 'unreadable', reason: load.reason }
       : PUBLIC
   }
@@ -82,20 +91,25 @@ export function classifyFrontmatterBlock(
 /**
  * The root mapping's `private` value. Alias keys can repeat the key without
  * a duplicate-key error, so every `private` key counts, most restrictive
- * first.
+ * first. A key that only folds to `private` never locks the note, but any
+ * value other than a falsy one makes it unreadable.
  */
 function rootPrivacy(pairs: readonly RootPair[]): FrontmatterPrivacy {
   let privacy = PUBLIC
   for (const { key, value } of pairs) {
-    if (!isScalar(key) || key.source !== 'private') {
+    if (!isScalar(key) || key.source === undefined) {
+      continue
+    }
+    const exact = key.source === 'private'
+    if (!exact && asciiFold(key.source) !== 'private') {
       continue
     }
     const valueClass = classifyValue(value)
-    if (valueClass === 'private') {
+    if (exact && valueClass === 'private') {
       return PRIVATE
     }
-    if (valueClass === 'unrecognized') {
-      privacy = { kind: 'unreadable', reason: 'unrecognizedValue' }
+    if (valueClass !== 'public') {
+      privacy = { kind: 'unreadable', reason: exact ? 'unrecognizedValue' : 'privateKeyVariant' }
     }
   }
   return privacy
@@ -154,9 +168,7 @@ function classOf(value: CoreValue): ValueClass {
  * rather than public.
  */
 function wordClass(text: string): ValueClass {
-  const word = text
-    .replaceAll(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '')
-    .replaceAll(/[A-Z]+/g, (letters) => letters.toLowerCase())
+  const word = asciiFold(text)
   if (word === 'true' || word === 'yes' || word === 'on' || word === '1') {
     return 'private'
   }
@@ -164,6 +176,16 @@ function wordClass(text: string): ValueClass {
     return 'public'
   }
   return 'unrecognized'
+}
+
+/** `text` without leading or trailing ASCII whitespace, ASCII-lowercased. */
+function asciiFold(text: string): string {
+  return asciiLowercase(text.replaceAll(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, ''))
+}
+
+/** `text` with only its ASCII letters lowercased, as Rust's `to_ascii_lowercase`. */
+function asciiLowercase(text: string): string {
+  return text.replaceAll(/[A-Z]+/g, (letters) => letters.toLowerCase())
 }
 
 function resolvePlain(text: string): CoreValue {

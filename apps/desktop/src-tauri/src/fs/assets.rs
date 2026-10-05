@@ -292,14 +292,17 @@ pub(crate) fn append_chunk(uploads: &AssetUploads, id: &str, bytes: &[u8]) -> Ap
 /// `-2`-suffixed variant). Returns the final graph-relative path:
 /// `assets/…`, or `<folder>/assets/…` for a note in an editable local-only
 /// folder.
+///
+/// The landing runs on the blocking pool: into a local-only folder on
+/// another volume it copies the whole file.
 #[tauri::command]
-pub fn asset_upload_commit(
+pub async fn asset_upload_commit(
     id: String,
     desired_name: String,
     note_path: String,
     generation: u64,
-    state: State<GraphState>,
-    uploads: State<AssetUploads>,
+    state: State<'_, GraphState>,
+    uploads: State<'_, AssetUploads>,
 ) -> AppResult<String> {
     let upload = lock_uploads(&uploads)?
         .remove(&id)
@@ -313,7 +316,8 @@ pub fn asset_upload_commit(
     // lookup would otherwise skip invalidation and strand a stale catalog.
     let root = root_for_generation(&state, generation)?;
     let destination = attachment_destination(&state, generation, &note_path, &desired_name)?;
-    let path = land(upload.file, destination, &desired_name)?;
+    let path = crate::blocking::run_blocking(move || land(upload.file, destination, &desired_name))
+        .await?;
     super::invalidate_file_catalog(&state, &root);
     Ok(path)
 }
