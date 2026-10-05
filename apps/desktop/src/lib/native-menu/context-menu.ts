@@ -1,16 +1,31 @@
 import { isTauri } from '@tauri-apps/api/core'
-import { Menu, MenuItem } from '@tauri-apps/api/menu'
+import { Menu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu'
 
-export interface NativeContextMenuItem {
+/** A selectable row in a native context menu. */
+export interface NativeContextMenuAction {
   /** Visible native menu item label. */
-  text: string
+  readonly text: string
   /** Invoked when the native menu item is selected. */
-  action: () => void
+  readonly action: () => void
 }
+
+/** A divider between groups of native context menu rows. */
+export interface NativeContextMenuSeparator {
+  readonly separator: true
+}
+
+export type NativeContextMenuItem = NativeContextMenuAction | NativeContextMenuSeparator
 
 export interface NativeContextMenuOptions {
   /** Menu items to render in order. */
   items: readonly NativeContextMenuItem[]
+}
+
+/** The divider entry, shared so call sites read as a list of rows. */
+export const NATIVE_MENU_SEPARATOR: NativeContextMenuSeparator = { separator: true }
+
+function isSeparator(item: NativeContextMenuItem): item is NativeContextMenuSeparator {
+  return 'separator' in item
 }
 
 /**
@@ -23,7 +38,11 @@ export async function openNativeContextMenu(options: NativeContextMenuOptions): 
   }
 
   const items = await Promise.all(
-    options.items.map((item) => MenuItem.new({ text: item.text, action: item.action })),
+    options.items.map((item) =>
+      isSeparator(item)
+        ? PredefinedMenuItem.new({ item: 'Separator' })
+        : MenuItem.new({ text: item.text, action: item.action }),
+    ),
   )
   const menu = await Menu.new({ items })
   await menu.popup()

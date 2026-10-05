@@ -6,6 +6,8 @@ interface AppShellProps {
   sidebar?: ReactNode
   /** Resize affordance for the workspace aside's inner edge (a separator). */
   sidebarEdge?: ReactNode
+  /** Rendered in the sidebar's place while it is hidden (the hover reveal). */
+  hiddenSidebar?: ReactNode
   /** Right context panel (the AI copilot lands here in Plan 10). */
   context?: ReactNode
   /** Resize affordance for the context aside's inner edge (a separator). */
@@ -32,6 +34,7 @@ interface AppShellProps {
 export function AppShell({
   sidebar,
   sidebarEdge,
+  hiddenSidebar,
   context,
   contextEdge,
   children,
@@ -50,7 +53,9 @@ export function AppShell({
           {sidebar}
           {sidebarEdge}
         </aside>
-      ) : null}
+      ) : (
+        hiddenSidebar
+      )}
 
       <main className="min-w-0 flex-1 overflow-hidden bg-surface">{children}</main>
 

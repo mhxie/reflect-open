@@ -11,6 +11,7 @@ import {
 } from '@reflect/core'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import type { NoteRoute, Route } from '@/routing/route.ts'
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { UpdateProvider } from '@/providers/update-provider.tsx'
 import { RouterProvider } from '@/routing/router.tsx'
@@ -24,20 +25,29 @@ const openRouteInNewWindow = vi.hoisted(() => vi.fn<(route: NoteRoute) => Promis
 const openRecent = vi.hoisted(() => vi.fn())
 const pickAndOpen = vi.hoisted(() => vi.fn())
 const chooseGraph = vi.hoisted(() => vi.fn())
-interface NativeContextMenuItemForTest {
-  text: string
-  action: () => void
-}
+type NativeContextMenuItemForTest = { text: string; action: () => void } | { separator: true }
 
 interface NativeContextMenuOptionsForTest {
   items: NativeContextMenuItemForTest[]
 }
 
+/** The native menu row the mocked menu "selects" when it opens. */
+const menuChoice = vi.hoisted(() => ({ text: 'Unpin Note' }))
 const openNativeContextMenu = vi.hoisted(() =>
   vi.fn(async (options: NativeContextMenuOptionsForTest) => {
-    options.items[0]?.action()
+    for (const item of options.items) {
+      if ('text' in item && item.text === menuChoice.text) {
+        item.action()
+      }
+    }
   }),
 )
+
+/** The menu's rows as labels, with separators as `null`. */
+function menuLabels(): (string | null)[] {
+  const items = openNativeContextMenu.mock.calls[0]?.[0].items ?? []
+  return items.map((item) => ('text' in item ? item.text : null))
+}
 const operationFail = vi.hoisted(() => vi.fn())
 const startOperation = vi.hoisted(() => vi.fn(() => ({ fail: operationFail })))
 vi.mock('@/lib/operations.ts', async (importOriginal) => ({
@@ -60,11 +70,19 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   hasWikiEntries,
 }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir, openUrl }))
+vi.mock('@tauri-apps/api/path', () => ({
+  join: async (...parts: string[]) => parts.join('/'),
+}))
+const runCopyDeepLink = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('@/lib/note-deep-link.ts', () => ({ runCopyDeepLink }))
 vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
   openRouteInNewWindow,
 }))
-vi.mock('@/lib/native-menu/context-menu.ts', () => ({ openNativeContextMenu }))
+vi.mock('@/lib/native-menu/context-menu.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/native-menu/context-menu.ts')>()),
+  openNativeContextMenu,
+}))
 
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({
@@ -132,6 +150,14 @@ const GRAPH: GraphInfo = {
   localOnlyEditableFolders: [],
 }
 
+const RUST_PIN: PinnedNote = {
+  isPrivate: false,
+  hasConflict: false,
+  path: 'notes/rust.md',
+  title: 'Rust',
+  dailyDate: null,
+}
+
 // Import after the core mock so the command registry sees the mocked module.
 const { Sidebar } = await import('./sidebar.tsx')
 const { registerAppCommands } = await import('@/lib/commands/app-commands.ts')
@@ -153,12 +179,24 @@ beforeEach(() => {
   chooseGraph.mockClear()
   updateSettingsWith.mockClear()
   openNativeContextMenu.mockClear()
+  menuChoice.text = 'Unpin Note'
+  runCopyDeepLink.mockClear()
   operationFail.mockClear()
   startOperation.mockClear()
   commitNoteFrontmatter.mockClear()
 })
 
-async function renderSidebar(overrides?: Partial<CommandContext>, initialRoute?: Route) {
+/** Shows the peeked note's path, standing in for the peek panel. */
+function PeekProbe() {
+  const target = usePeek()?.target
+  return <output aria-label="Peeked note">{target?.path ?? ''}</output>
+}
+
+async function renderSidebar(
+  overrides?: Partial<CommandContext>,
+  initialRoute?: Route,
+  { peek = false }: { peek?: boolean } = {},
+) {
   const navigate = vi.fn()
   const openPalette = vi.fn()
   const context: CommandContext = {
@@ -200,7 +238,10 @@ async function renderSidebar(overrides?: Partial<CommandContext>, initialRoute?:
         <QueryClientProvider client={client}>
           <UpdateProvider autoCheck={false}>
             <RouterProvider initialRoute={initialRoute}>
-              <Sidebar graph={GRAPH} context={context} />
+              <PeekProvider enabled={peek}>
+                <Sidebar graph={GRAPH} context={context} />
+                <PeekProbe />
+              </PeekProvider>
             </RouterProvider>
           </UpdateProvider>
         </QueryClientProvider>
@@ -507,17 +548,103 @@ describe('Sidebar', () => {
 
     await rust.click({ button: 'right' })
 
-    await vi.waitFor(() =>
-      expect(openNativeContextMenu).toHaveBeenCalledWith({
-        items: [
-          expect.objectContaining({
-            text: 'Unpin Note',
-          }),
-        ],
-      }),
-    )
+    await vi.waitFor(() => expect(openNativeContextMenu).toHaveBeenCalledOnce())
+    expect(menuLabels().at(-1)).toBe('Unpin Note')
     await expectLocatorToHaveCount(view.getByRole('button', { name: 'Rust' }), 0)
     expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/rust.md', { pinned: false }, 1)
+  })
+
+  it('the pinned row menu groups opening, outward links, and Unpin', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar(undefined, undefined, { peek: true })
+    menuChoice.text = ''
+
+    await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
+
+    await vi.waitFor(() => expect(openNativeContextMenu).toHaveBeenCalledOnce())
+    expect(menuLabels()).toEqual([
+      'Open in Peek',
+      'Open in New Window',
+      null,
+      'Copy Deep Link',
+      'Reveal in Finder',
+      null,
+      'Unpin Note',
+    ])
+  })
+
+  it('leaves Open in Peek out of the menu where the window has no peek panel', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar()
+    menuChoice.text = ''
+
+    await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
+
+    await vi.waitFor(() => expect(openNativeContextMenu).toHaveBeenCalledOnce())
+    expect(menuLabels()).not.toContain('Open in Peek')
+  })
+
+  it('Open in Peek floats the pinned note over the editor without navigating', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar(undefined, undefined, { peek: true })
+    menuChoice.text = 'Open in Peek'
+
+    await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
+
+    await expect
+      .element(view.getByRole('status', { name: 'Peeked note' }))
+      .toHaveTextContent('notes/rust.md')
+    await expect
+      .element(view.getByRole('button', { name: 'Rust' }))
+      .not.toHaveAttribute('aria-current')
+  })
+
+  it('shift-click peeks a pinned note, matching the palette', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar(undefined, undefined, { peek: true })
+
+    await view.getByRole('button', { name: 'Rust' }).click({ modifiers: ['Shift'] })
+
+    await expect
+      .element(view.getByRole('status', { name: 'Peeked note' }))
+      .toHaveTextContent('notes/rust.md')
+    await expect
+      .element(view.getByRole('button', { name: 'Rust' }))
+      .not.toHaveAttribute('aria-current')
+  })
+
+  it('Open in New Window opens the pinned note in its own window', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar()
+    menuChoice.text = 'Open in New Window'
+
+    await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
+
+    await vi.waitFor(() =>
+      expect(openRouteInNewWindow).toHaveBeenCalledWith({ kind: 'note', path: 'notes/rust.md' }),
+    )
+  })
+
+  it('Copy Deep Link copies the pinned note address', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar()
+    menuChoice.text = 'Copy Deep Link'
+
+    await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
+
+    await vi.waitFor(() => expect(runCopyDeepLink).toHaveBeenCalledWith('notes/rust.md', 1))
+  })
+
+  it('Reveal in Finder shows the pinned note file in the system file manager', async () => {
+    getPinnedNotes.mockResolvedValue([RUST_PIN])
+    const { view } = await renderSidebar()
+    menuChoice.text = 'Reveal in Finder'
+
+    await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
+
+    await vi.waitFor(() =>
+      expect(revealItemInDir).toHaveBeenCalledExactlyOnceWith('/notes/notes/rust.md'),
+    )
   })
 
   it('restores an optimistically removed pinned row when unpin fails', async () => {

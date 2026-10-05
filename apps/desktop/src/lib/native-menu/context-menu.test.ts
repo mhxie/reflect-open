@@ -23,15 +23,21 @@ const menuNew = vi.hoisted(() =>
 
 vi.mock('@tauri-apps/api/core', () => ({ isTauri }))
 const menuItemNew = vi.hoisted(() => vi.fn(async (options: NativeMenuItemForTest) => options))
+const predefinedNew = vi.hoisted(() => vi.fn(async (options: { item: string }) => options))
 
-vi.mock('@tauri-apps/api/menu', () => ({ Menu: { new: menuNew }, MenuItem: { new: menuItemNew } }))
+vi.mock('@tauri-apps/api/menu', () => ({
+  Menu: { new: menuNew },
+  MenuItem: { new: menuItemNew },
+  PredefinedMenuItem: { new: predefinedNew },
+}))
 
-const { openNativeContextMenu } = await import('./context-menu.ts')
+const { NATIVE_MENU_SEPARATOR, openNativeContextMenu } = await import('./context-menu.ts')
 
 beforeEach(() => {
   isTauri.mockReset().mockReturnValue(true)
   popup.mockClear()
   menuItemNew.mockClear()
+  predefinedNew.mockClear()
   menuNew.mockResolvedValue({ popup })
 })
 
@@ -71,5 +77,24 @@ describe('openNativeContextMenu', () => {
     const item = firstMenuItem()
     item.action?.()
     expect(onSelect).toHaveBeenCalled()
+  })
+
+  it('renders separators as native dividers between rows', async () => {
+    await openNativeContextMenu({
+      items: [
+        { text: 'Open', action: vi.fn() },
+        NATIVE_MENU_SEPARATOR,
+        { text: 'Unpin Note', action: vi.fn() },
+      ],
+    })
+
+    expect(predefinedNew).toHaveBeenCalledExactlyOnceWith({ item: 'Separator' })
+    expect(menuNew).toHaveBeenCalledWith({
+      items: [
+        expect.objectContaining({ text: 'Open' }),
+        { item: 'Separator' },
+        expect.objectContaining({ text: 'Unpin Note' }),
+      ],
+    })
   })
 })
