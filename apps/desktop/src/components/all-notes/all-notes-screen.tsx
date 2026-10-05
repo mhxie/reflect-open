@@ -190,7 +190,7 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
     >
       <header className="flex flex-none flex-wrap items-center justify-between gap-3 border-b border-border py-4 pl-12 pr-7">
         <h1 className="text-[15px] font-semibold text-text">Notes</h1>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {trashableSelectedPaths.length > 0 ? (
             <Button
               type="button"
@@ -209,8 +209,10 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
               </span>
             </Button>
           ) : null}
-          <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
           <NewNoteButton />
+        </div>
+        <div className="w-full min-w-0">
+          <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
         </div>
       </header>
       <div

@@ -363,6 +363,17 @@ export {
 } from '../settings/schema.ts'
 export { loadSettings, saveSettings } from '../settings/commands.ts'
 export {
+  normalizePinnedTag,
+  normalizePinnedTags,
+  pinFilterTag,
+  unpinFilterTag,
+  movePinnedFilterTag,
+  orderPinnedFilterTags,
+  pinnedTagOrdersEqual,
+  reorderPinnedFilterTags,
+  type PinnedTagMove,
+} from '../settings/pinned-tag-filters.ts'
+export {
   contactsAuthorizationSchema,
   contactMatchSchema,
   contactsAuthorizationStatus,
