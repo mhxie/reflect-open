@@ -11,7 +11,8 @@ interface NoteGitVersionOptions {
   readonly isLocalOnly: boolean
 }
 
-interface NoteGitVersion {
+/** A note's last committed Git version and the state of its lookup. */
+export interface NoteGitVersion {
   readonly version: string | null
   readonly pending: boolean
   readonly unavailable: boolean

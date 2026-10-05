@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react'
 import { deriveNoteState } from '@reflect/core'
 import { useNoteStatus } from '@/editor/status/note-status-store.ts'
-import { noteStatePresentation } from '@/lib/note-state-presentation.ts'
+import { activeNoteStateKinds, noteStatePresentation } from '@/lib/note-state-presentation.ts'
 import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
@@ -13,7 +13,10 @@ interface NoteStateIndicatorProps {
   readonly className?: string
 }
 
-/** A single state glyph for a list row, with a one-word tooltip and accessible name. */
+/**
+ * A single state glyph for a list row, named by the note's primary state. The
+ * tooltip lists every state that applies with what each one means.
+ */
 export function NoteStateIndicator({
   path,
   isPrivate,
@@ -43,7 +46,19 @@ export function NoteStateIndicator({
           </span>
         }
       />
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent className="flex-col items-start gap-0.5">
+        {activeNoteStateKinds(state).map((kind) => {
+          const presentation = noteStatePresentation(kind)
+          return (
+            <span key={kind}>
+              <span className="font-medium">{presentation.label}</span>
+              {presentation.description === null ? null : (
+                <span className="opacity-70"> · {presentation.description}</span>
+              )}
+            </span>
+          )
+        })}
+      </TooltipContent>
     </Tooltip>
   )
 }

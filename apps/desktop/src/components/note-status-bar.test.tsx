@@ -1,6 +1,7 @@
 import { act, type ReactElement } from 'react'
 import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NoteState, NoteStateKind } from '@reflect/core'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
@@ -51,6 +52,15 @@ const gitVersion = vi.hoisted(() => {
   return { current, use: vi.fn<typeof useNoteGitVersion>(() => current.value) }
 })
 vi.mock('@/hooks/use-note-git-version.ts', () => ({ useNoteGitVersion: gitVersion.use }))
+const toggleNotePrivate = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('@/lib/note-private.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/note-private.ts')>()),
+  toggleNotePrivate,
+}))
+const unreadable = vi.hoisted(() => ({ value: false }))
+vi.mock('@/hooks/use-unreadable-frontmatter.ts', () => ({
+  useUnreadableFrontmatter: () => unreadable.value,
+}))
 
 const EDITABLE: NoteState = {
   kind: 'editable',
@@ -122,9 +132,19 @@ function renderBar(
   path?: string,
 ) {
   return render(
-    <RouterProvider initialRoute={initialRoute}>
-      <NoteStatusBar placement={placement} {...(path === undefined ? {} : { path })} />
-    </RouterProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider initialRoute={initialRoute}>
+        <NoteStatusBar placement={placement} {...(path === undefined ? {} : { path })} />
+      </RouterProvider>
+    </QueryClientProvider>,
+  )
+}
+
+/** The short value of each detail row, without the explanatory hints. */
+function detailValues(): (string | null)[] {
+  const dialog = page.getByRole('dialog', { name: 'Note details' })
+  return [...dialog.element().querySelectorAll('dd:not([data-testid="note-detail-hint"])')].map(
+    (node) => node.textContent,
   )
 }
 
@@ -140,6 +160,8 @@ afterEach(async () => {
   gitVersion.current.value = { version: 'abc123def4', pending: false, unavailable: false }
   gitVersion.use.mockClear()
   revealAsset.mockReset()
+  toggleNotePrivate.mockClear()
+  unreadable.value = false
   setPlatformSurface({ mobileApp: false })
 })
 
@@ -191,7 +213,7 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'save-blocked', message: 'Folder is unavailable', retrySave },
     })
     await renderBar({ kind: 'note', path: 'notes/local.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await page.getByRole('button', { name: 'Note state: Protected, Local-only' }).click()
 
     await expect.element(page.getByText('Folder is unavailable', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Try again', exact: true }).click()
@@ -216,7 +238,7 @@ describe('NoteStatusBar', () => {
       },
     })
     await renderBar({ kind: 'note', path: 'notes/local.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await page.getByRole('button', { name: 'Note state: Protected, Local-only' }).click()
 
     await expect.element(page.getByText('External change', { exact: true })).toBeVisible()
     expect(page.getByRole('button', { name: 'Try again', exact: true }).query()).toBeNull()
@@ -368,18 +390,40 @@ describe('NoteStatusBar', () => {
   })
 
   it.each([
-    { state: states.editable, label: 'Editable' },
-    { state: states.private, label: 'Private' },
-    { state: states['local-only'], label: 'Local-only' },
-    { state: states['read-only'], label: 'Read-only' },
-    { state: states.protected, label: 'Protected' },
-  ])('shows one primary word for $label', async ({ state, label }) => {
+    { state: states.editable, labels: ['Editable'] },
+    { state: states.private, labels: ['Private'] },
+    { state: states['local-only'], labels: ['Local-only'] },
+    { state: states['read-only'], labels: ['Read-only', 'Local-only'] },
+    { state: states.protected, labels: ['Protected'] },
+    { state: { ...states.protected, isPrivate: true }, labels: ['Protected', 'Private'] },
+  ])('shows every state that applies: $labels', async ({ state, labels }) => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null, state })
     await renderBar({ kind: 'note', path: 'notes/a.md' })
 
-    const button = page.getByRole('button', { name: `Note state: ${label}` })
-    await expect.element(button).toHaveTextContent(label)
-    expect(button.element().textContent?.trim()).toBe(label)
+    const button = page.getByRole('button', { name: `Note state: ${labels.join(', ')}` })
+    await expect.element(button).toBeVisible()
+    const badges = [...button.element().querySelectorAll('[data-testid="note-state-badge"]')]
+    expect(badges.map((badge) => badge.textContent?.trim())).toEqual(labels)
+  })
+
+  it('keeps secondary states as icons when the footer is narrow', async () => {
+    publishStatus('notes/a.md', {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+      state: states['read-only'],
+    })
+    const view = await renderBar({ kind: 'note', path: 'notes/a.md' })
+    view.container.style.position = 'relative'
+    view.container.style.height = '60px'
+    view.container.style.width = '520px'
+    const button = page.getByRole('button', { name: 'Note state: Read-only, Local-only' })
+    await expect.element(button.getByText('Local-only')).toBeVisible()
+
+    view.container.style.width = '320px'
+    await expect.element(button.getByText('Read-only')).toBeVisible()
+    await expect.element(button.getByText('Local-only')).not.toBeVisible()
+    expect(button.element().querySelectorAll('svg')).toHaveLength(2)
   })
 
   it('opens full dimensions with the keyboard and restores focus after Escape', async () => {
@@ -406,9 +450,10 @@ describe('NoteStatusBar', () => {
 
     const dialog = page.getByRole('dialog', { name: 'Note details' })
     await expect.element(dialog).toBeVisible()
-    const values = [...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)
-    expect(values).toEqual(['Editable', 'Private', 'Blocked', 'Included', 'Idle', 'abc123def4'])
-    expect(values.every((value) => value !== null && !/\s/.test(value))).toBe(true)
+    expect(detailValues()).toEqual(['Editable', 'Private', 'Included', 'abc123def4'])
+    await expect
+      .element(dialog.getByText('Never sent to AI or other services. Backup still includes it.'))
+      .toBeVisible()
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md', open: true }),
     )
@@ -445,15 +490,7 @@ describe('NoteStatusBar', () => {
     })
 
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
-    expect([...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
-      'Read-only',
-      'Standard',
-      'Allowed',
-      'Included',
-      'Offline',
-      'abc123def4',
-    ])
+    expect(detailValues()).toEqual(['Paused', 'Standard', 'Offline', 'abc123def4'])
   })
 
   it('keeps one horizontal row and hides the time before a narrow footer wraps', async () => {
@@ -503,15 +540,9 @@ describe('NoteStatusBar', () => {
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ path: 'daily/2026-10-02.md', isLocalOnly: true }),
     )
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
-    expect([...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
-      'Editable',
-      'Private',
-      'Blocked',
-      'Excluded',
-      'Disconnected',
-      'Excluded',
-    ])
+    expect(detailValues()).toEqual(['Editable', 'Local-only', 'Excluded'])
+    expect(page.getByRole('button', { name: 'Mark as private' }).query()).toBeNull()
+    expect(page.getByRole('button', { name: 'Unmark as private' }).query()).toBeNull()
   })
 
   it('reads the same path only from its graph file generation', async () => {
@@ -530,14 +561,60 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
-    expect([...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
-      'Editable',
-      'Standard',
-      'Allowed',
-      'Unknown',
-      'Unknown',
-      'abc123def4',
-    ])
+    expect(detailValues()).toEqual(['Editable', 'Standard', 'Checking', 'abc123def4'])
+  })
+
+  it('toggles privacy from the details through the shared note action', async () => {
+    publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Editable' }).click()
+
+    await page.getByRole('button', { name: 'Mark as private' }).click()
+
+    expect(toggleNotePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md' }),
+    )
+    await act(async () => {
+      publishStatus('notes/a.md', {
+        characters: 10,
+        selectedCharacters: 0,
+        editedAt: null,
+        state: states.private,
+      })
+    })
+    await expect.element(page.getByRole('button', { name: 'Note state: Private' })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Unmark as private' })).toBeVisible()
+  })
+
+  it('keeps a locked note with unreadable frontmatter locked', async () => {
+    unreadable.value = true
+    publishStatus('notes/a.md', {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+      state: states.private,
+    })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Private' }).click()
+
+    await expect.element(page.getByRole('button', { name: 'Unmark as private' })).toBeDisabled()
+    await expect
+      .element(page.getByText("Fix this note's frontmatter to lock or unlock it."))
+      .toBeVisible()
+  })
+
+  it('offers no privacy toggle while the note is protected', async () => {
+    publishStatus('notes/a.md', {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+      state: states.protected,
+      protection: { kind: 'unsupported-markdown' },
+    })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+
+    await expect.element(page.getByText('Unsupported Markdown', { exact: true })).toBeVisible()
+    expect(page.getByRole('button', { name: 'Mark as private' }).query()).toBeNull()
   })
 })

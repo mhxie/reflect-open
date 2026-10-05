@@ -32,7 +32,7 @@ describe('NoteStateIndicator', () => {
     expect(view.container.querySelector('.lucide-file-text')).not.toBeNull()
   })
 
-  it('shows a one-word Private tooltip and accessible label', async () => {
+  it('explains Private in its tooltip behind a one-word accessible label', async () => {
     await render(
       <TooltipProvider delay={0}>
         <NoteStateIndicator path={path} isPrivate />
@@ -42,6 +42,23 @@ describe('NoteStateIndicator', () => {
     const indicator = page.getByRole('img', { name: 'Private', exact: true })
     await expect.element(indicator).toBeInTheDocument()
     await userEvent.hover(indicator)
+    await expect.element(page.getByText('Private', { exact: true })).toBeVisible()
+    await expect
+      .element(page.getByText('Never sent to AI or other services', { exact: false }))
+      .toBeVisible()
+  })
+
+  it('lists every state that applies in the tooltip of a single glyph', async () => {
+    const view = await render(
+      <TooltipProvider delay={0}>
+        <NoteStateIndicator path={path} isPrivate hasConflict />
+      </TooltipProvider>,
+    )
+
+    const indicator = page.getByRole('img', { name: 'Protected', exact: true })
+    expect(view.container.querySelectorAll('svg')).toHaveLength(1)
+    await userEvent.hover(indicator)
+    await expect.element(page.getByText('Protected', { exact: true })).toBeVisible()
     await expect.element(page.getByText('Private', { exact: true })).toBeVisible()
   })
 

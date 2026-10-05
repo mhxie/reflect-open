@@ -5,7 +5,8 @@ import { useNoteMtime } from '@/hooks/use-note-mtime.ts'
 import { useNow } from '@/hooks/use-now.ts'
 import { useTyping } from '@/hooks/use-typing.ts'
 import { formatEditedLabel } from '@/lib/dates.ts'
-import { noteStatePresentation } from '@/lib/note-state-presentation.ts'
+import { noteDetails } from '@/lib/note-details.ts'
+import { activeNoteStateKinds, noteStatePresentation } from '@/lib/note-state-presentation.ts'
 import { cn } from '@/lib/utils.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
@@ -15,6 +16,7 @@ import { useSyncContext } from '@/providers/sync-provider.tsx'
 import { focusedNotePathForRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
+import { NotePrivacyAction } from '@/components/note-privacy-action.tsx'
 import { NoteProtectionDetails } from '@/components/note-protection-details.tsx'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover.tsx'
 
@@ -79,46 +81,10 @@ export function NoteStatusBar({
   }
 
   const { state } = status
-  const backup = sync?.backup
-  const connected = backup?.phase === 'connected'
-  const presentation = noteStatePresentation(state.kind)
-  const Icon = presentation.icon
-  const graphStatus =
-    backup?.phase === 'connected'
-      ? { idle: 'Idle', syncing: 'Syncing', offline: 'Offline', error: 'Error' }[
-          backup.status.state
-        ]
-      : backup?.phase === 'loading'
-        ? 'Unknown'
-        : 'Disconnected'
-  const dimensions = [
-    { name: 'Edit', value: state.isReadOnly ? 'Read-only' : 'Editable' },
-    { name: 'Privacy', value: state.isPrivate ? 'Private' : 'Standard' },
-    { name: 'AI', value: state.isPrivate ? 'Blocked' : 'Allowed' },
-    {
-      name: 'Backup',
-      value: state.isLocalOnly
-        ? 'Excluded'
-        : connected
-          ? 'Included'
-          : backup?.phase === 'loading'
-            ? 'Unknown'
-            : 'Disconnected',
-    },
-    { name: 'Graph', value: graphStatus },
-    {
-      name: 'Version',
-      value: state.isLocalOnly
-        ? 'Excluded'
-        : version.unavailable
-          ? 'Unavailable'
-          : version.version !== null
-            ? version.version
-            : version.pending
-              ? 'Loading'
-              : 'Uncommitted',
-    },
-  ]
+  const kinds = activeNoteStateKinds(state)
+  const labels = kinds.map((kind) => noteStatePresentation(kind).label)
+  const rows = noteDetails({ state, backup: sync?.backup, version })
+  const canTogglePrivacy = scope !== null && !state.isLocalOnly && !state.isProtected
   const editedAt = Math.max(mtime ?? 0, status.editedAt ?? 0)
   const characters = numberFormat.format(status.characters)
   return (
@@ -137,17 +103,27 @@ export function NoteStatusBar({
       >
         <PopoverTrigger
           type="button"
-          aria-label={`Note state: ${presentation.label}`}
-          className={cn(
-            'pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1 rounded px-1 text-2xs hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none',
-            presentation.className,
-          )}
+          aria-label={`Note state: ${labels.join(', ')}`}
+          className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-2 rounded px-1 text-2xs hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
         >
-          {createElement(Icon, {
-            className: 'relative -top-px size-3 shrink-0',
-            'aria-hidden': true,
+          {kinds.map((kind, index) => {
+            const presentation = noteStatePresentation(kind)
+            return (
+              <span
+                key={kind}
+                data-testid="note-state-badge"
+                className={cn('inline-flex items-center gap-1', presentation.className)}
+              >
+                {createElement(presentation.icon, {
+                  className: 'relative -top-px size-3 shrink-0',
+                  'aria-hidden': true,
+                })}
+                <span className={index === 0 ? undefined : 'hidden @sm/note-status:inline'}>
+                  {presentation.label}
+                </span>
+              </span>
+            )
           })}
-          <span>{presentation.label}</span>
         </PopoverTrigger>
         <PopoverContent
           side="top"
@@ -155,7 +131,7 @@ export function NoteStatusBar({
           aria-label="Note details"
           className={cn(
             'pointer-events-auto max-h-(--available-height) max-w-[calc(100vw-2rem)] overflow-y-auto',
-            state.isProtected ? 'w-72' : 'w-60',
+            state.isProtected ? 'w-72' : 'w-64',
           )}
         >
           <PopoverTitle className="text-xs">Note details</PopoverTitle>
@@ -166,14 +142,27 @@ export function NoteStatusBar({
               protection={status.protection}
             />
           ) : null}
-          <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 text-xs">
-            {dimensions.map(({ name, value }) => (
-              <div key={name} className="contents">
+          <dl className="space-y-2 text-xs">
+            {rows.map(({ name, value, hint, monospace }) => (
+              <div key={name} className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-0.5">
                 <dt className="text-text-muted">{name}</dt>
-                <dd className="text-right">{value}</dd>
+                <dd className={cn('text-right', monospace && 'font-mono')}>{value}</dd>
+                {hint === null ? null : (
+                  <dd
+                    data-testid="note-detail-hint"
+                    className="col-span-2 text-2xs break-words whitespace-normal text-text-muted"
+                  >
+                    {hint}
+                  </dd>
+                )}
               </div>
             ))}
           </dl>
+          {canTogglePrivacy ? (
+            <div className="mt-3 border-t border-border pt-3">
+              <NotePrivacyAction path={scope.path} isPrivate={state.isPrivate} />
+            </div>
+          ) : null}
         </PopoverContent>
       </Popover>
       <div
