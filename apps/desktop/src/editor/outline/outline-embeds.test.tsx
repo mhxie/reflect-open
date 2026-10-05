@@ -5,6 +5,7 @@ import {
   readOutlineWithEmbeds,
   registerOutlineEmbed,
 } from './outline-embeds.ts'
+import { outlineHeadingsEqual } from './outline-headings.ts'
 
 function reader(id: string, target: string, body: string, offset: number) {
   const root = document.createElement('div')
@@ -83,5 +84,21 @@ describe('embedded outline collection', () => {
     expect(outline(parent.root).map((heading) => heading.text)).toEqual(['New'])
     remove()
     expect(outline(parent.root)).toEqual([])
+  })
+
+  it('reads stable rows that reveal through the current registration', () => {
+    const parent = reader('parent', 'Parent', '# Parent', 1)
+    const first = outline(parent.root)
+    expect(outlineHeadingsEqual(first, outline(parent.root))).toBe(true)
+    const reveal = vi.fn()
+    registerOutlineEmbed(parent.root, {
+      id: 'parent',
+      target: 'Parent',
+      blocks: readEmbeddedOutlineBlocks('# Parent', 1),
+      element: () => null,
+      reveal,
+    })
+    first[0]?.embedded?.reveal()
+    expect(reveal).toHaveBeenCalledWith(0)
   })
 })

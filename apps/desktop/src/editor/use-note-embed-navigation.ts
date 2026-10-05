@@ -21,6 +21,15 @@ interface NoteEmbedNavigationOptions {
   readonly reveal: (fragment: string) => void
 }
 
+/** A Markdown href's `#fragment` as heading text (`My%20Heading` → `My Heading`). */
+function hrefFragment(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment)
+  } catch {
+    return fragment
+  }
+}
+
 /** Source-aware link activation that only resolves existing notes, with no creation fallback. */
 export function useNoteEmbedNavigation({
   generation,
@@ -52,7 +61,7 @@ export function useNoteEmbedNavigation({
               kind === 'wiki'
                 ? splitWikiLinkTarget(target).fragment
                 : target.includes('#')
-                  ? target.slice(target.indexOf('#') + 1)
+                  ? hrefFragment(target.slice(target.indexOf('#') + 1))
                   : null
             openNote({
               target: routeForPath(result.path),
@@ -89,7 +98,7 @@ export function useNoteEmbedNavigation({
       event.preventDefault()
       if (href.startsWith('#') && !mod) {
         beginLinkIntent()
-        reveal(href.slice(1))
+        reveal(hrefFragment(href.slice(1)))
       } else if (markdownNoteReference(sourcePath, href) !== null) follow('markdown', href, mod)
       else {
         beginLinkIntent()

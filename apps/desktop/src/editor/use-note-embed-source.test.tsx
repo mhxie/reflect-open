@@ -186,6 +186,27 @@ describe('useNoteEmbedSource', () => {
     await view.unmount()
   })
 
+  it('keeps the last source while a refresh is in flight', async () => {
+    const view = await render(<Host options={OPTIONS} />)
+    await expectSource(view, {
+      kind: 'ready',
+      path: 'notes/Original.md',
+      source: '# Original\n\nBody',
+    })
+    const pending = deferred<string>()
+    mocks.read.mockReturnValueOnce(pending.promise)
+    for (const handler of mocks.ownWrites) handler('notes/Original.md')
+    await vi.waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2))
+    await expectSource(view, {
+      kind: 'ready',
+      path: 'notes/Original.md',
+      source: '# Original\n\nBody',
+    })
+    pending.resolve('# Refreshed')
+    await expectSource(view, { kind: 'ready', path: 'notes/Original.md', source: '# Refreshed' })
+    await view.unmount()
+  })
+
   it('turns a failed read into an unavailable state', async () => {
     mocks.read.mockRejectedValue(new Error('stale graph'))
     const view = await render(<Host options={OPTIONS} />)

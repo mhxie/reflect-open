@@ -61,8 +61,7 @@ export function outlineHeadingsEqual(
         heading.level === other.level &&
         heading.text === other.text &&
         heading.position === other.position &&
-        heading.embedded?.key === other.embedded?.key &&
-        heading.embedded?.reveal === other.embedded?.reveal
+        heading.embedded?.key === other.embedded?.key
       )
     })
   )

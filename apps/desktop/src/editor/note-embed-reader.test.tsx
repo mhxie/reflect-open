@@ -424,10 +424,10 @@ describe('NoteEmbedReader', () => {
     await view.unmount()
   })
 
-  it('follows wiki and Markdown links from the embedded source, preserves fragments, and uses the external opener for URLs', async () => {
+  it('follows wiki and Markdown links from the embedded source, preserves decoded fragments, and uses the external opener for URLs', async () => {
     mocks.sources.set(
       'notes/Original.md',
-      '# Original\n\n[[Other#Next|Other note]]\n\n[Sibling](./Sibling.md#Next)\n\n[Site](https://example.com)',
+      '# Original\n\n[[Other#Next|Other note]]\n\n[Sibling](./Sibling.md#Next%20steps)\n\n[Site](https://example.com)',
     )
     const view = await render(reader())
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
@@ -447,7 +447,7 @@ describe('NoteEmbedReader', () => {
     await view.getByRole('link', { name: /Sibling$/ }).click()
     await vi.waitFor(() =>
       expect(mocks.resolveMarkdown).toHaveBeenCalledWith(
-        './Sibling.md#Next',
+        './Sibling.md#Next%20steps',
         'notes/Original.md',
         7,
       ),
@@ -456,7 +456,7 @@ describe('NoteEmbedReader', () => {
       expect(mocks.navigate).toHaveBeenLastCalledWith({
         target: { kind: 'note', path: 'notes/Sibling.md' },
         openInNewWindow: false,
-        revealHeading: 'Next',
+        revealHeading: 'Next steps',
       }),
     )
     await view.getByRole('link', { name: /Site$/ }).click()

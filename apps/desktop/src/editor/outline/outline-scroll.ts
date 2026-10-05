@@ -69,32 +69,6 @@ export function alignToContainerTop(
   container.scrollTop = target
 }
 
-/**
- * The last of `count` elements in document order whose top is at or above
- * `line`, or null. Tops ascend, so this binary-searches; `topAt` returning
- * null (not rendered) counts as below the line.
- */
-export function lastIndexAtOrAbove(
-  count: number,
-  topAt: (index: number) => number | null,
-  line: number,
-): number | null {
-  let low = 0
-  let high = count - 1
-  let found: number | null = null
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2)
-    const top = topAt(middle)
-    if (top !== null && top <= line) {
-      found = middle
-      low = middle + 1
-    } else {
-      high = middle - 1
-    }
-  }
-  return found
-}
-
 /** Input that means the reader is steering again, ending a hold. */
 const READER_INPUT_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
 

@@ -5,13 +5,16 @@ import {
   type OutlineSourceDoc,
 } from './outline-headings.ts'
 
+/** Bubbling DOM event a reader dispatches when its outline entries change. */
 export const OUTLINE_EMBED_CHANGE = 'reflect-outline-embed-change'
 const ROOT_SELECTOR = '[data-note-embed-outline]'
 
-type SourceBlock =
+/** A source block the outline tracks: a heading, or a nested embed's paragraph. */
+export type SourceBlock =
   | { readonly kind: 'heading'; readonly heading: OutlineHeading; readonly ordinal: number }
   | { readonly kind: 'embed'; readonly target: string }
 
+/** A mounted reader's outline registration. */
 export interface OutlineEmbed {
   readonly id: string
   readonly target: string
@@ -23,10 +26,12 @@ export interface OutlineEmbed {
 // Entries belong to mounted DOM instances, including repeated embeds of the same note.
 const readers = new WeakMap<HTMLElement, OutlineEmbed>()
 
+/** Tell the host outline that `root`'s embedded headings may have changed. */
 export function notifyOutlineEmbed(root: HTMLElement): void {
   root.dispatchEvent(new Event(OUTLINE_EMBED_CHANGE, { bubbles: true }))
 }
 
+/** Register a mounted reader's outline entry; returns its unregister. */
 export function registerOutlineEmbed(root: HTMLElement, entry: OutlineEmbed): () => void {
   readers.set(root, entry)
   notifyOutlineEmbed(root)
@@ -65,6 +70,7 @@ export function readEmbeddedOutlineBlocks(body: string, headingOffset: number): 
   return blocks
 }
 
+/** The `ordinal`th rendered heading owned by `root`, not by a nested reader. */
 export function embeddedHeadingElement(root: HTMLElement, ordinal: number): HTMLElement | null {
   return (
     [...root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')].filter(
@@ -85,10 +91,12 @@ function embeddedHeadings(root: HTMLElement, position: number): OutlineHeading[]
       headings.push({
         ...block.heading,
         position,
+        // Look the reader up at call time, so a row stays valid across
+        // re-registrations of the same mounted reader.
         embedded: {
           key: `${reader.id}:${block.ordinal}`,
-          element: () => reader.element(block.ordinal),
-          reveal: () => reader.reveal(block.ordinal),
+          element: () => readers.get(root)?.element(block.ordinal) ?? null,
+          reveal: () => readers.get(root)?.reveal(block.ordinal),
         },
       })
     } else {

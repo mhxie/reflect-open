@@ -4,7 +4,6 @@ import {
   clearTailSpace,
   hasTailSpace,
   holdAtContainerTop,
-  lastIndexAtOrAbove,
   offsetFromContainerTop,
   verticalScrollContainer,
 } from './outline-scroll.ts'
@@ -76,27 +75,6 @@ describe('alignToContainerTop', () => {
       expect(offsetFromContainerTop(container, blocks[1]!)).toBeCloseTo(16, 0)
       container.remove()
     }
-  })
-})
-
-describe('lastIndexAtOrAbove', () => {
-  const tops = [-200, -10, 40, 300, 900]
-  const topAt = (index: number): number | null => tops[index] ?? null
-
-  it('returns the last index whose top is at or above the line', () => {
-    expect(lastIndexAtOrAbove(tops.length, topAt, 50)).toBe(2)
-    expect(lastIndexAtOrAbove(tops.length, topAt, 40)).toBe(2)
-    expect(lastIndexAtOrAbove(tops.length, topAt, 1000)).toBe(4)
-  })
-
-  it('returns null above the first element or with none', () => {
-    expect(lastIndexAtOrAbove(tops.length, topAt, -300)).toBeNull()
-    expect(lastIndexAtOrAbove(0, topAt, 50)).toBeNull()
-  })
-
-  it('treats an unrendered element as below the line', () => {
-    const sparse = (index: number): number | null => (index === 2 ? null : (tops[index] ?? null))
-    expect(lastIndexAtOrAbove(tops.length, sparse, 50)).toBe(1)
   })
 })
 

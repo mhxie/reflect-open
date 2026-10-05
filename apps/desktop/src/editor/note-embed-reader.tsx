@@ -26,7 +26,9 @@ import {
   registerOutlineEmbed,
 } from '@/editor/outline/outline-embeds.ts'
 
+/** What a host editor passes every embedded-note reader it mounts. */
 export interface NoteEmbedReaderOptions extends Omit<NoteEmbedSourceOptions, 'target' | 'enabled'> {
+  /** Whether expanded bodies may load remote media (false under any private ancestor). */
   readonly remoteEmbeds: boolean
 }
 
@@ -41,6 +43,11 @@ const FAILURE_LABELS = {
 }
 
 /** A passive excerpt blends into the note; selecting it reads the live full source in place. */
+/** Whether the reader's full body (not its preview) is in the DOM yet. */
+function renderedExpanded(root: HTMLElement): boolean {
+  return root.firstElementChild?.hasAttribute('data-expanded') === true
+}
+
 export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
   const { target, display, sourcePath, generation, graphKey, ancestors, remoteEmbeds } = props
   const [expanded, setExpanded] = useState(false)
@@ -103,7 +110,7 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
     revealed.current = true
     setExpanded(true)
     const root = rootRef.current
-    if (root?.firstElementChild?.getAttribute('data-testid') === 'note-embed-full') {
+    if (root !== null && renderedExpanded(root)) {
       const heading = embeddedHeadingElement(root, ordinal)
       if (heading !== null) {
         heading.tabIndex = -1
@@ -121,8 +128,9 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
       target,
       blocks: outlineBlocks,
       element: (ordinal) => {
-        const full = root.firstElementChild?.getAttribute('data-testid') === 'note-embed-full'
-        return full || ordinal === first?.ordinal ? embeddedHeadingElement(root, ordinal) : null
+        return renderedExpanded(root) || ordinal === first?.ordinal
+          ? embeddedHeadingElement(root, ordinal)
+          : null
       },
       reveal: requestOutlineReveal,
     })
@@ -162,6 +170,7 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
           !expanded && overflowing && 'reflect-note-embed-preview-overflowing',
         )}
         data-testid={expanded ? 'note-embed-full' : 'note-embed-preview'}
+        data-expanded={expanded ? '' : undefined}
       >
         {source.kind === 'ready' ? (
           body.trim() === '' ? (
