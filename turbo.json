@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["pnpm-workspace.yaml", "vendor/meowdown/*.tgz"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
