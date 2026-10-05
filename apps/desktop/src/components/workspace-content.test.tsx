@@ -2,6 +2,7 @@ import { render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GraphInfo } from '@reflect/core'
+import { hover } from '@/test-utils/mouse.ts'
 import type { ContextSidebarTarget } from '@/components/context-sidebar/sidebar-route.ts'
 
 interface WorkspaceState {
@@ -105,5 +106,23 @@ describe('WorkspaceContent', () => {
     workspaceState.collapsed = true
     await view.rerender(<WorkspaceContent graph={GRAPH} />)
     expect(view.getByRole('complementary', { name: 'Context' }).query()).toBeNull()
+  })
+
+  it('floats the hidden workspace sidebar back over the content from the window edge', async () => {
+    workspaceState.collapsed = true
+    const view = await render(<WorkspaceContent graph={GRAPH} />)
+    expect(view.getByRole('complementary', { name: 'Workspace' }).query()).toBeNull()
+
+    await hover(view.getByTestId('sidebar-reveal-edge'))
+
+    await expect.element(view.getByTestId('workspace-sidebar')).toBeInTheDocument()
+    await expect.element(view.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
+    expect(view.getByRole('complementary', { name: 'Context' }).query()).toBeNull()
+  })
+
+  it('offers no edge reveal while the sidebar is shown', async () => {
+    const view = await render(<WorkspaceContent graph={GRAPH} />)
+    await expect.element(view.getByRole('complementary', { name: 'Workspace' })).toBeInTheDocument()
+    expect(view.getByTestId('sidebar-reveal-edge').query()).toBeNull()
   })
 })

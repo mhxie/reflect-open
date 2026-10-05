@@ -15,6 +15,7 @@ import { HeadingPicker } from '@/components/outline/heading-picker.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { ShortcutsDialog } from '@/components/shortcuts-dialog.tsx'
 import { Sidebar } from '@/components/sidebar/sidebar.tsx'
+import { SidebarHoverReveal } from '@/components/sidebar/sidebar-hover-reveal.tsx'
 import { SidebarResizeHandle } from '@/components/sidebar-resize-handle.tsx'
 import { TemplateCreateDialog } from '@/components/templates/template-create-dialog.tsx'
 import { TemplatePicker } from '@/components/templates/template-picker.tsx'
@@ -41,7 +42,8 @@ function contextSidebarFor(target: ContextSidebarTarget | null): ReactElement | 
 
 /**
  * Everything inside the workspace's providers: the headerless shell — the
- * collapsible workspace and contextual sidebars beside the note pane — plus
+ * collapsible workspace and contextual sidebars beside the note pane, with
+ * the workspace one still a hover away while hidden — plus
  * the always-mounted global surfaces (operations status, ⌘K palette,
  * embeddings sync). Split
  * from {@link GraphWorkspace} because these hooks need the providers it
@@ -55,11 +57,13 @@ export function WorkspaceContent({ graph }: WorkspaceContentProps): ReactElement
   // In the daily stream the route stays put while focus moves between days, so
   // the panel follows the focused day and snaps back on navigation.
   const contextTarget = useDailyContextTarget()
+  const sidebar = <Sidebar graph={graph} context={commandContext} />
 
   return (
     <AppShell
-      sidebar={collapsed ? undefined : <Sidebar graph={graph} context={commandContext} />}
+      sidebar={collapsed ? undefined : sidebar}
       sidebarEdge={<SidebarResizeHandle panel="workspace" />}
+      hiddenSidebar={collapsed ? <SidebarHoverReveal>{sidebar}</SidebarHoverReveal> : undefined}
       context={collapsed ? undefined : contextSidebarFor(contextTarget)}
       contextEdge={<SidebarResizeHandle panel="context" />}
     >
