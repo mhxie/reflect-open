@@ -310,6 +310,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -383,6 +384,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -470,6 +472,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -564,6 +567,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -637,6 +641,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -703,6 +708,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -778,6 +784,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -850,6 +857,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -950,6 +958,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1034,6 +1043,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1077,6 +1087,21 @@ describe('SettingsScreen', () => {
     )
   })
 
+  it('summarizes on-device by default and persists the cloud fallback opt-in', async () => {
+    await renderScreen()
+    const trigger = page.getByRole('combobox', { name: 'AI summaries' })
+    await expect.element(trigger).toMatchTextContent('On-device model only')
+    await expect
+      .element(page.getByText('Add an on-device model in AI providers to start summarizing.'))
+      .toBeInTheDocument()
+
+    await trigger.click()
+    await page.getByRole('option', { name: 'On-device model, then AI provider' }).click()
+
+    await expect.element(trigger).toMatchTextContent('On-device model, then AI provider')
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ aiSummaries: 'local-and-cloud' }))
+  })
+
   it('adds an All Notes filter tag, normalized, and persists it', async () => {
     await renderScreen()
     const input = page.getByLabelText('Add filter tag')
@@ -1100,6 +1125,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1198,6 +1224,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1335,6 +1362,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: true,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1419,6 +1447,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1495,6 +1524,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: true,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1614,6 +1644,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1770,6 +1801,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1852,6 +1884,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1925,6 +1958,7 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
+          aiSummaries: 'local',
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',

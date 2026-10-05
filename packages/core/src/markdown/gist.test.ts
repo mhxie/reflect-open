@@ -1,22 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { gistBodyHash, gistFilename } from './gist.ts'
-
-describe('gistBodyHash', () => {
-  it('is deterministic and 16 hex chars', () => {
-    const hash = gistBodyHash('# Note\n\nbody\n')
-    expect(hash).toBe(gistBodyHash('# Note\n\nbody\n'))
-    expect(hash).toMatch(/^[0-9a-f]{16}$/)
-  })
-
-  it('changes when the body changes', () => {
-    expect(gistBodyHash('a')).not.toBe(gistBodyHash('b'))
-    expect(gistBodyHash('')).not.toBe(gistBodyHash(' '))
-  })
-
-  it('hashes by UTF-8 bytes, so multi-byte edits register', () => {
-    expect(gistBodyHash('café')).not.toBe(gistBodyHash('cafe'))
-  })
-})
+import { gistFilename } from './gist.ts'
 
 describe('gistFilename', () => {
   it('appends .md to the title (dailies are already their ISO date)', () => {

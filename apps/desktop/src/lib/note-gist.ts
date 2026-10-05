@@ -4,7 +4,7 @@ import {
   deleteGist,
   errorMessage,
   getGithubToken,
-  gistBodyHash,
+  noteBodyHash,
   gistFilename,
   isAppError,
   parseNote,
@@ -99,7 +99,7 @@ export async function publishNoteToGist(path: string, generation: number): Promi
     id: published.id,
     url: published.htmlUrl,
     file: filename,
-    hash: gistBodyHash(body),
+    hash: noteBodyHash(body),
   }
   try {
     await commitNoteFrontmatter(path, { gist }, generation)

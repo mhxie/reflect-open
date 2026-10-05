@@ -259,6 +259,27 @@ export async function writeNote(
 }
 
 /**
+ * {@link writeNote} for a change that is not an edit (the background AI
+ * summary's frontmatter block): the file keeps its modification time, so the
+ * note neither jumps to the top of the recency-sorted lists nor reads as
+ * "Updated just now". The note must exist and still hold `expectedContents`;
+ * a note in a local-only folder is refused (`unsupported`).
+ */
+export async function writeNoteKeepingModified(
+  path: string,
+  contents: string,
+  generation: number,
+  expectedContents: string,
+): Promise<void> {
+  const modifiedMs = await call(
+    'note_write_keep_modified',
+    { path, contents, generation, expectedContents },
+    z.number().nullable(),
+  )
+  echoLocalWrite({ path, kind: 'upsert', modifiedMs: modifiedMs ?? Date.now() })
+}
+
+/**
  * Atomically create a note only if `path` is still unoccupied. A collision is
  * returned as data and never overwrites the winner, closing the race between a
  * caller's availability check and a concurrent sync checkout or creator.

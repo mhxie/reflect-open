@@ -282,6 +282,20 @@ export const semanticModelSchema = z.enum(SEMANTIC_MODEL_IDS).catch(DEFAULT_SEMA
  */
 export const describeAssetsSchema = z.boolean().catch(true)
 
+/** Who may write a note's AI summary (see {@link aiSummariesSchema}). */
+export const AI_SUMMARY_MODES = ['off', 'local', 'local-and-cloud'] as const
+export type AiSummaryMode = (typeof AI_SUMMARY_MODES)[number]
+
+/**
+ * AI note summaries — the All Notes row preview of a long note, written into
+ * its `aiSummary` frontmatter. `local` (the default) summarizes only with an
+ * attested on-device model, so nothing leaves the Mac; `local-and-cloud` falls
+ * back to the default provider's small model for public notes when no
+ * on-device model answers (private notes stay on-device-only either way);
+ * `off` writes nothing and keeps the plain snippet.
+ */
+export const aiSummariesSchema = z.enum(AI_SUMMARY_MODES).catch('local')
+
 /**
  * Whether audio-memo transcripts receive a best-effort AI formatting pass
  * before they are written as Markdown. On by default, matching the original
@@ -721,6 +735,7 @@ export const settingsSchema = z.looseObject({
   semanticSearchEnabled: semanticSearchEnabledSchema,
   semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
+  aiSummaries: aiSummariesSchema,
   /** Explicit local vision provider; null retains public-attachment descriptions via the default provider. */
   localOcrProviderId: z.string().nullable().catch(null),
   transcriptionFormat: transcriptionFormatSchema,

@@ -1,11 +1,11 @@
 import { z } from 'zod'
 import {
-  audioMemoEnrichmentConfig,
   normalizedAudioMemoTitle,
   transcriptFallbackTitle,
   type AudioMemoEnrichmentCredentials,
 } from './audio-memo-title.ts'
 import { languageModel } from './language-model.ts'
+import { smallModelConfig } from './small-model.ts'
 
 const FORMAT_TIMEOUT_MS = 60_000
 const NUMBER_SIGNATURE_PATTERN =
@@ -88,7 +88,7 @@ export async function formatAudioMemoTranscript(
   request: FormatAudioMemoTranscriptRequest,
 ): Promise<FormattedAudioMemoTranscript> {
   const fallbackTitle = transcriptFallbackTitle(request.transcript, request.fallbackTitle)
-  const config = audioMemoEnrichmentConfig(request.credentials.config)
+  const config = smallModelConfig(request.credentials.config)
   if (request.transcript.trim() === '' || config === null) {
     return { title: fallbackTitle, body: request.transcript }
   }

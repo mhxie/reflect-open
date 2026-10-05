@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { setLocalOnlyFolders } from '../graph/local-only.ts'
-import { gistBodyHash, parseNote } from '../markdown/index.ts'
+import { noteBodyHash, parseNote } from '../markdown/index.ts'
 import {
   buildIndexedNote,
   CLAIM_TIER,
@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version for withheld private key variants', () => {
-    expect(PROJECTION_VERSION).toBe(29)
+  it('carries the projection version for AI summary previews', () => {
+    expect(PROJECTION_VERSION).toBe(30)
   })
 
   it('marks a note private when its frontmatter cannot be read', () => {
@@ -315,7 +315,7 @@ describe('buildIndexedNote', () => {
     const block = (hash: string): string =>
       `---\ngist:\n  id: g1\n  url: https://gist.github.com/alex/g1\n  file: N.md\n  hash: ${hash}\n---\n`
 
-    const fresh = block(gistBodyHash(body)) + body
+    const fresh = block(noteBodyHash(body)) + body
     const indexedFresh = buildIndexedNote(parseNote({ path: 'notes/n.md', source: fresh }), {
       fileHash: 'h',
       mtime: 0,
@@ -324,7 +324,7 @@ describe('buildIndexedNote', () => {
     expect(indexedFresh.gistUrl).toBe('https://gist.github.com/alex/g1')
     expect(indexedFresh.gistStale).toBe(false)
 
-    const edited = block(gistBodyHash(body)) + body + 'an edit'
+    const edited = block(noteBodyHash(body)) + body + 'an edit'
     const indexedEdited = buildIndexedNote(parseNote({ path: 'notes/n.md', source: edited }), {
       fileHash: 'h2',
       mtime: 1,
@@ -333,9 +333,33 @@ describe('buildIndexedNote', () => {
     expect(indexedEdited.gistStale).toBe(true)
   })
 
+  it('shows a fresh AI summary as the preview and falls back to the snippet once stale', () => {
+    const body = '# N\n\nThe opening line of a long note.\n'
+    const block = (hash: string): string =>
+      `---\naiSummary:\n  text: A short summary.\n  hash: ${hash}\n---\n`
+
+    const fresh = block(noteBodyHash(body)) + body
+    const indexedFresh = buildIndexedNote(parseNote({ path: 'notes/n.md', source: fresh }), {
+      fileHash: 'h',
+      mtime: 0,
+      source: fresh,
+    })
+    expect(indexedFresh.preview).toBe('A short summary.')
+    expect(indexedFresh.summaryFresh).toBe(true)
+
+    const edited = fresh + 'an edit'
+    const indexedEdited = buildIndexedNote(parseNote({ path: 'notes/n.md', source: edited }), {
+      fileHash: 'h2',
+      mtime: 1,
+      source: edited,
+    })
+    expect(indexedEdited.preview).toBe('The opening line of a long note. an edit')
+    expect(indexedEdited.summaryFresh).toBe(false)
+  })
+
   it('frontmatter-only changes never flag the gist stale (the hash covers the body alone)', () => {
     const body = '# N\n\npublished body\n'
-    const hash = gistBodyHash(body)
+    const hash = noteBodyHash(body)
     const source = `---\npinned: true\nprivate: true\ngist:\n  id: g1\n  url: u\n  file: N.md\n  hash: ${hash}\n---\n${body}`
     const indexed = buildIndexedNote(parseNote({ path: 'notes/n.md', source }), {
       fileHash: 'h',

@@ -51,7 +51,9 @@ export {
 export {
   frontmatterSchema,
   gistFrontmatterSchema,
-  gistBodyHash,
+  aiSummaryFrontmatterSchema,
+  type AiSummaryFrontmatter,
+  noteBodyHash,
   gistFilename,
   isPinned,
   pinnedOrder,
