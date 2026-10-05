@@ -633,7 +633,12 @@ describe('AllNotesScreen — pinned tag management', () => {
     expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
     await page.getByRole('option', { name: /#person/ }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'person' } })
+    await vi.waitFor(() =>
+      expect(probedRoute(view)).toEqual({
+        kind: 'allNotes',
+        filter: { kind: 'tag', tag: 'person' },
+      }),
+    )
     await expect.element(view.getByText('No notes tagged #person.')).toBeInTheDocument()
     await view.unmount()
   })
@@ -954,7 +959,12 @@ describe('AllNotesScreen — pinned tag management', () => {
     expect(strip?.scrollWidth).toBeGreaterThan(strip?.clientWidth ?? 0)
     await group.getByRole('button', { name: 'Custom' }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
+    await vi.waitFor(() =>
+      expect(probedRoute(view)).toEqual({
+        kind: 'allNotes',
+        filter: { kind: 'tag', tag: 'travel' },
+      }),
+    )
     await view.unmount()
   })
 })
