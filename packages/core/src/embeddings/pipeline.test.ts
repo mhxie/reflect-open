@@ -34,6 +34,7 @@ function fakePipelineBridge(options: {
   evictedSidecars?: string[]
 }) {
   const embedded: string[][] = []
+  const embeddedModels: unknown[] = []
   const applied: { path: string; chunks: AppliedChunk[] }[] = []
   setBridge({
     invoke: async (command, args) => {
@@ -63,6 +64,7 @@ function fakePipelineBridge(options: {
       if (command === 'embed_texts') {
         const texts = (args as { texts: string[] }).texts
         embedded.push(texts)
+        embeddedModels.push(args['model'])
         return texts.map(() => [0.5, 0.5])
       }
       if (command === 'embed_apply') {
@@ -78,7 +80,7 @@ function fakePipelineBridge(options: {
     },
     listen: async () => () => {},
   })
-  return { embedded, applied }
+  return { embedded, embeddedModels, applied }
 }
 
 const MODEL = 'all-MiniLM-L6-v2'
@@ -126,13 +128,15 @@ describe('embedNote', () => {
   })
 
   it('embeds everything for a brand-new note', async () => {
-    const { embedded, applied } = fakePipelineBridge({
+    const { embedded, embeddedModels, applied } = fakePipelineBridge({
       content: '# One\n\nAlpha text.\n\n# Two\n\nBeta text.\n',
       storedRows: [],
     })
     const count = await embedNote({ path: 'notes/a.md', generation: 1, modelId: MODEL })
     expect(count).toBe(2)
     expect(embedded).toHaveLength(1) // one batched embed_texts call
+    // The runtime refuses if another model loaded since `modelId` was read.
+    expect(embeddedModels).toEqual([MODEL])
     expect(applied[0]!.chunks.every((chunk) => chunk.vector !== null)).toBe(true)
   })
 

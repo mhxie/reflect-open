@@ -226,7 +226,7 @@ describe('NoteActionsSection for a local-only note', () => {
     await userEvent.click(view.getByRole('button', { name: 'Trash note' }))
     await expect
       .element(page.getByRole('dialog'))
-      .toMatchTextContent('by way of this graph’s .reflect/trash folder')
+      .toMatchTextContent('by way of a private holding folder')
     await userEvent.click(page.getByRole('dialog').getByRole('button', { name: 'Trash note' }))
 
     await vi.waitFor(() =>

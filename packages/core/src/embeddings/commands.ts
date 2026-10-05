@@ -47,13 +47,16 @@ export function embedEnsure(model?: string): Promise<EmbedStatus> {
 /**
  * Embed texts with the loaded model. `role` picks the prefix the model was
  * trained with: a search query and a stored passage embed differently.
- * Errors unless status is `ready`.
+ * Errors unless status is `ready` and, when `model` is given, the loaded
+ * model is that one: a caller that read the model id before a switch must
+ * not get another model's vectors (of another width) under that id.
  */
 export function embedTexts(
   texts: string[],
   role: 'query' | 'passage' = 'passage',
+  model?: string,
 ): Promise<number[][]> {
-  return call('embed_texts', { texts, role }, vectorsSchema)
+  return call('embed_texts', { texts, role, model: model ?? null }, vectorsSchema)
 }
 
 /**

@@ -8,6 +8,8 @@
 //!   shared with the TS classifier (`frontmatter-privacy.ts`) and both are
 //!   pinned by `fixtures/frontmatter-privacy.json`, so a note locked for the
 //!   AI gate is locked for every native gate too.
+//! - [`normalize_line_endings_keeping_privacy`] is how native readers hand a
+//!   note's text on: `\n` line endings, unless that would change its verdict.
 //!
 //! Every YAML block passes an event pre-scan (one document, bounded alias
 //! expansion, yaml's alias rule) before saphyr loads it, so a hostile note
@@ -15,10 +17,12 @@
 
 mod classify;
 mod fields;
+mod line_endings;
 mod scalar;
 mod scan;
 mod split;
 
 pub use classify::{backup_privacy, BackupPrivacy, UnreadableReason};
 pub use fields::{frontmatter_id, parse_frontmatter, Frontmatter};
+pub use line_endings::normalize_line_endings_keeping_privacy;
 pub use split::{split_frontmatter, FrontmatterSplit};

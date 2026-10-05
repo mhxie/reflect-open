@@ -430,11 +430,62 @@
     {
       "name": "key with a trailing space",
       "source": "---\n\"private \": true\n---\nbody\n",
-      "privacy": "public"
+      "privacy": "unreadable",
+      "reason": "privateKeyVariant"
     },
     {
       "name": "capitalized key",
       "source": "---\nPrivate: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "privateKeyVariant"
+    },
+    {
+      "name": "upper-case key",
+      "source": "---\nPRIVATE: yes\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "privateKeyVariant"
+    },
+    {
+      "name": "capitalized key with an unrecognized value",
+      "source": "---\nPrivate: maybe\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "privateKeyVariant"
+    },
+    {
+      "name": "capitalized key set false",
+      "source": "---\nPrivate: false\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "capitalized key left empty",
+      "source": "---\nPrivate:\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "capitalized key beside a lock",
+      "source": "---\nPrivate: maybe\nprivate: true\n---\nbody\n",
+      "privacy": "private"
+    },
+    {
+      "name": "capitalized key beside an unlock",
+      "source": "---\nprivate: false\nPrivate: true\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "privateKeyVariant"
+    },
+    {
+      "name": "capitalized key in YAML that doesn't load",
+      "source": "---\nPrivate: true\ntitle: [unclosed\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "parseFailed"
+    },
+    {
+      "name": "nested capitalized key",
+      "source": "---\nmeta: {Private: true}\n---\nbody\n",
+      "privacy": "public"
+    },
+    {
+      "name": "key with a non-breaking space",
+      "source": "---\n\"private\u00a0\": true\n---\nbody\n",
       "privacy": "public"
     },
     {
@@ -921,6 +972,50 @@
       },
       "divergence": "tsStricter",
       "why": "yaml applies an explicit !!merge tag and fails on a scalar merge source; saphyr reads a plain key"
+    },
+    {
+      "name": "text run on after a quoted explicit key",
+      "source": "---\n? \"private\"true\n---\nbody\n",
+      "privacy": "public",
+      "rust": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "rustStricter",
+      "why": "yaml drops the text after a quoted key without an error and reads `private: null`; saphyr rejects it, and the block mentions private"
+    },
+    {
+      "name": "escaped line break in a quoted value",
+      "source": "---\n'priv''ate': \"true\\\n\"\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml requires a quoted scalar's continuation line to be indented; saphyr folds the escaped line break. The backslash keeps TS withholding the block"
+    },
+    {
+      "name": "escaped line break after a capitalized key",
+      "source": "---\nPrivate: \"true\\\n\"\n---\nbody\n",
+      "privacy": "unreadable",
+      "reason": "privateKeyVariant",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "why": "yaml rejects the unindented continuation line, so TS withholds the block that mentions Private; saphyr reads `Private: true`"
+    },
+    {
+      "name": "tab-only line after an empty private value",
+      "source": "---\nprivate: \n\t\n---\nbody\n",
+      "privacy": "public",
+      "ts": {
+        "privacy": "unreadable",
+        "reason": "parseFailed"
+      },
+      "divergence": "tsStricter",
+      "why": "yaml rejects a line indented by a tab; saphyr reads `private:` as empty"
     }
   ]
 }

@@ -61,7 +61,11 @@ never be local-only). The same holds when `.reflect/index.sqlite` exists but
 cannot be read at all (for example a write-ahead log only the app can
 recover): `show`, `path`, and `open` refuse every note with exit `3` rather
 than scan the files, and `search` exits `4` as before. With no index file at
-all, they scan the files.
+all, they scan the files, and the local-only folders come from the desktop
+app's settings document instead (`<config dir>/reflect-open/settings.json`,
+this graph's `"localOnlyFolders"` entry): a real directory configured there
+is refused like any local-only folder. If that document cannot be read or
+its entry for this graph is malformed, they refuse every note with exit `3`.
 
 ## Output contract
 
@@ -75,7 +79,7 @@ all, they scan the files.
 | 0 | success |
 | 1 | runtime error (no graph, IO/SQL failure) |
 | 2 | usage error |
-| 3 | note not found, or note is private (every note, while the index or its local-only record is unreadable) |
+| 3 | note not found, or note is private (every note, while the index, its local-only record, or — with no index — the app's settings are unreadable) |
 | 4 | search index missing or unusable (`search` only) |
 | 5 | the Reflect app isn't serving this graph, or couldn't answer (`search --mode semantic\|hybrid` only) |
 
@@ -112,7 +116,9 @@ overlapping character pairs, and a term matches as the phrase of its pairs (a
 single character matches wherever it falls). A Latin word written against such
 a run (`Python` in `用Python写脚本`) is found too. A partial query such as
 `authent migr` finds `authentication migration`, and terms can match across the
-title and body; body matches include snippets. Every term must match, except
+title and body; body matches include snippets (for a run matched inside a CJK
+clause, the body around its first occurrence). `--limit` defaults to 20; semantic
+and hybrid searches allow at most 100. Every term must match, except
 that a query reading as a sentence (four words or more, two CJK characters
 counting as one) is topped up, after the notes holding all its words, with the
 notes holding the most and rarest of them, ranked by bm25. Terms are matched literally (FTS5 operators in the

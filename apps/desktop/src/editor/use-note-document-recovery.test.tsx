@@ -92,14 +92,19 @@ it('pins recovery ownership to the hook session and offers each closed window’
   reopened.result.current.restoreRecovery()
   await flushOpenDocuments()
   await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(first))
+  // A was kept against the note B has since replaced, so restoring it parks
+  // B as the conflict instead of silently overwriting it.
   reopened.result.current.restoreRecovery()
   await flushOpenDocuments()
-  await vi.waitFor(() => expect(reopened.result.current.recovery).toBeNull())
-  expect(disk).toBe('# A\n')
-  expect(copies.size).toBe(0)
-  expect(clear.mock.calls.map(([identity]) => identity)).toEqual([
-    { path: 'secure/note.md', ownerId: second?.ownerId, token: second?.token, generation: 1 },
-    { path: 'secure/note.md', ownerId: first?.ownerId, token: first?.token, generation: 1 },
-  ])
+  await vi.waitFor(() => expect(reopened.result.current.conflict).toBe('# B\n'))
+  expect(disk).toBe('# B\n')
+  reopened.result.current.keepMine()
+  await flushOpenDocuments()
+  await vi.waitFor(() => expect(disk).toBe('# A\n'))
+  await vi.waitFor(() => expect(copies.size).toBe(0))
+  expect(reopened.result.current.recovery).toBeNull()
+  const cleared = clear.mock.calls.map(([identity]) => identity.token)
+  expect(cleared[0]).toBe(second?.token)
+  expect(cleared.at(-1)).toBe(first?.token)
   await reopened.unmount()
 })

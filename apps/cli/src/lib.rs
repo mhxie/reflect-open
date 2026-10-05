@@ -25,6 +25,7 @@ pub mod graph;
 pub mod hash;
 pub mod index;
 pub mod keys;
+pub mod local_only_settings;
 pub mod note_file;
 pub mod paths;
 pub mod resolve;

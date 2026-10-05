@@ -207,6 +207,13 @@ export const queryKeys = {
       return [...this.all, 'authorization'] as const
     },
   },
+  git: {
+    all: ['git'] as const,
+    /** A note's last committed version, pinned to its graph's file generation. */
+    noteVersion(root: GraphRoot, generation: number | null, path: string | null) {
+      return [...this.all, root, 'note-version', generation, path] as const
+    },
+  },
   github: {
     all: ['github'] as const,
     get authentication() {

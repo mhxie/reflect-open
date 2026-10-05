@@ -168,6 +168,37 @@ describe('toggleNotePrivate', () => {
     expect(operationFail).toHaveBeenCalledOnce()
   })
 
+  it('locks an unopened note whose block sits behind a byte-order mark', async () => {
+    readNote.mockResolvedValue('\u{FEFF}---\ntitle: Diary\n---\n\nsecret\n')
+    await expect(toggleNotePrivate(input())).resolves.toBeUndefined()
+    expect(operationFail).not.toHaveBeenCalled()
+    expect(writeNote).toHaveBeenCalledWith(
+      'notes/a.md',
+      '---\ntitle: Diary\nprivate: true\n---\n\nsecret\n',
+      3,
+      '\u{FEFF}---\ntitle: Diary\n---\n\nsecret\n',
+    )
+  })
+
+  it('never leaves an open block behind a byte-order mark below a new one', async () => {
+    const source = '\u{FEFF}---\nprivate: true\n---\n\nsecret\n'
+    const session = createNoteSession({
+      path: 'notes/a.md',
+      io: { read: async () => source, write: async () => {} },
+      classify: () => 'exact',
+      applyContent: () => {},
+      onSnapshot: () => {},
+    })
+    try {
+      session.load()
+      await vi.waitFor(() => expect(session.liveContent()).toBe(source))
+      expect(() => session.updateFrontmatter({ pinned: true })).toThrow(/shows as body/)
+      expect(session.content()).toBe(source)
+    } finally {
+      session.dispose()
+    }
+  })
+
   it('reports non-notFound read failures through operations', async () => {
     openSession.mockReturnValue(null)
     readNote.mockRejectedValue({ kind: 'io', message: 'disk on fire' })

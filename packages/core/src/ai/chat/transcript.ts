@@ -72,7 +72,7 @@ export const NO_REPLY_NOTICE =
  * ({@link showsHistoryWithheld}), on the first turn that withheld any.
  */
 export const HISTORY_WITHHELD_NOTICE =
-  'Earlier messages that used notes now private are no longer sent to the AI provider.'
+  'Earlier messages, from the first that used a note now private, are no longer sent to the AI provider.'
 
 /**
  * Whether a transcript already carries the {@link HISTORY_WITHHELD_NOTICE}.

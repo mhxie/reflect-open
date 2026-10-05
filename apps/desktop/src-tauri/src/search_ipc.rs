@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use reflect_index_schema::search_socket_path;
+use reflect_index_schema::{search_socket_path, MAX_SEARCH_RESULTS};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
@@ -32,8 +32,6 @@ const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long the main window has to answer before the caller is told so.
 const ANSWER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-/// The most results one request may ask for.
-const MAX_LIMIT: usize = 100;
 /// Longer queries are refused rather than embedded.
 const MAX_QUERY_CHARS: usize = 4096;
 
@@ -62,8 +60,8 @@ pub fn parse_request(line: &str) -> Result<Request, String> {
             "the query must be 1 to {MAX_QUERY_CHARS} characters"
         ));
     }
-    if !(1..=MAX_LIMIT).contains(&request.limit) {
-        return Err(format!("the limit must be 1 to {MAX_LIMIT}"));
+    if !(1..=MAX_SEARCH_RESULTS).contains(&request.limit) {
+        return Err(format!("the limit must be 1 to {MAX_SEARCH_RESULTS}"));
     }
     Ok(request)
 }

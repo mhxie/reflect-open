@@ -9,7 +9,9 @@
 //! exactly the files that need work (typically none).
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
+use reflect_graph_paths::LocalOnlyFolders;
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -92,11 +94,13 @@ impl ReconcileScan {
 /// [`MTIME_TRUST_AGE_MS`] is skipped without a read; everything else — moved
 /// mtimes, too-fresh mtimes, and rowless arrivals — is a candidate the TS
 /// side reads and hashes (hashes stay the authority for "did content
-/// change"). Rows with no listed file are orphans.
+/// change"). Rows with no listed file are orphans, except those `unreachable`
+/// claims: present but out of the walk's reach ([`behind_unfollowed_link`]).
 pub(super) fn scan_reconcile(
     conn: &Connection,
     files: &[FileMeta],
     now_ms: u64,
+    mut unreachable: impl FnMut(&str) -> bool,
 ) -> AppResult<ReconcileScan> {
     let mut stored: HashMap<String, (i64, String)> = HashMap::new();
     let mut stmt = conn.prepare_cached("SELECT path, mtime, file_hash FROM notes")?;
@@ -141,7 +145,7 @@ pub(super) fn scan_reconcile(
 
     let mut orphans: Vec<ScanOrphan> = stored
         .into_iter()
-        .filter(|(path, _)| !on_disk.contains(path.as_str()))
+        .filter(|(path, _)| !on_disk.contains(path.as_str()) && !unreachable(path))
         .map(|(path, (stored_mtime, stored_hash))| ScanOrphan {
             path,
             stored_mtime,
@@ -158,4 +162,52 @@ pub(super) fn scan_reconcile(
         orphans,
         stale_placeholders,
     })
+}
+
+/// Whether a stored row lies behind a local-only link the walk could not
+/// follow: the first configured folder on its path that is a symlink has no
+/// allowed target ([`LocalOnlyFolders::link_target`]: the raw store is
+/// unmounted, the link dangles, or `rawRoot` is unusable). The listing says
+/// nothing about such a note, so its row is kept rather than orphaned —
+/// dropping it would lose the private references the asset privacy gate
+/// counts, and force a full re-index once the store is back. A real
+/// local-only directory, or a link the walk follows, is listed as usual and
+/// its vanished notes are ordinary orphans. Verdicts are cached per folder.
+pub(super) fn behind_unfollowed_link<'folders>(
+    root: &'folders Path,
+    folders: &'folders LocalOnlyFolders,
+) -> impl FnMut(&str) -> bool + 'folders {
+    // Per folder prefix: `None` for anything but a symlink (walked as
+    // usual), else whether the walk could not follow it.
+    let mut verdicts: HashMap<String, Option<bool>> = HashMap::new();
+    move |path: &str| {
+        if !folders.contains(path) {
+            return false;
+        }
+        let components: Vec<&str> = path
+            .split('/')
+            .filter(|component| !component.is_empty() && *component != ".")
+            .collect();
+        let directories = &components[..components.len().saturating_sub(1)];
+        let mut prefix = String::new();
+        for directory in directories {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(directory);
+            if !folders.is_folder_name(directory) {
+                continue;
+            }
+            let verdict = *verdicts.entry(prefix.clone()).or_insert_with(|| {
+                let is_link = std::fs::symlink_metadata(root.join(&prefix))
+                    .is_ok_and(|meta| meta.file_type().is_symlink());
+                is_link.then(|| folders.link_target(root, Path::new(&prefix)).is_none())
+            });
+            if let Some(unfollowed) = verdict {
+                // The walk follows at most one link per path: the first.
+                return unfollowed;
+            }
+        }
+        false
+    }
 }

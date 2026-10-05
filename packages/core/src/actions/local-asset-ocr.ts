@@ -1,4 +1,4 @@
-import { describeAsset } from '../ai/describe-asset.ts'
+import { describeAsset, isAssetDescriptionRejected } from '../ai/describe-asset.ts'
 import { languageModelFor } from '../ai/language-model.ts'
 import { aiApiKeyForConfig } from '../ai/secrets.ts'
 import { errorMessage, isAppError, ReflectError, toAppError } from '../errors.ts'
@@ -11,6 +11,7 @@ import {
   readPdfPageForDevice,
 } from '../graph/commands.ts'
 import { descriptionPathFor } from '../graph/paths.ts'
+import type { FileMeta } from '../graph/schemas.ts'
 import { db } from '../indexing/db.ts'
 import { hashBytes } from '../indexing/hash.ts'
 import { bytesToBase64 } from '../lib/base64.ts'
@@ -40,6 +41,56 @@ function emptyOutcome(): ReconcileAssetDescriptionsOutcome {
   }
 }
 
+/**
+ * The listed modification time of `path` for the cache, when the listing's
+ * size agrees with the bytes read (otherwise the file changed in between and
+ * the time can't vouch for those bytes).
+ */
+function sourceModifiedMs(
+  catalog: readonly FileMeta[],
+  path: string,
+  size: number,
+): { sourceModifiedMs?: number } {
+  const meta = catalog.find((file) => file.path === path)
+  return meta !== undefined && meta.placeholder !== true && meta.size === size
+    ? { sourceModifiedMs: meta.modifiedMs }
+    : {}
+}
+
+/** The outcome counters a failure confined to one asset is tallied under. */
+type AssetSkipTally = 'skippedOversize' | 'skippedUnreferenced' | 'refused'
+
+/**
+ * Where a failure confined to one asset is tallied, or `null` when it must
+ * stop the whole pass. An oversize, offline, unreadable or changed source, a
+ * PDF the engine can't open, and a model answer that is empty or refused all
+ * concern that one asset: the pass skips it and goes on. Credentials, the
+ * server (network), a stale graph and anything unrecognized stop the pass, so
+ * the next trigger retries the batch.
+ */
+function assetSkipTally(cause: unknown): AssetSkipTally | null {
+  if (isAssetDescriptionRejected(cause)) {
+    return 'refused'
+  }
+  if (!isAppError(cause)) {
+    return null
+  }
+  switch (cause.kind) {
+    case 'unsupported':
+      return 'skippedOversize'
+    case 'notFound':
+      return 'skippedUnreferenced'
+    case 'io':
+    case 'invalid':
+    case 'locked':
+    case 'parse':
+    case 'traversal':
+      return 'refused'
+    default:
+      return null
+  }
+}
+
 async function hasUserDescription(path: string, generation: number): Promise<boolean> {
   try {
     const source = await readNoteForDevice(descriptionPathFor(path), generation)
@@ -64,7 +115,8 @@ export async function reconcileLocalAssetOcr(
     }
   }
   try {
-    if (!(await localOcrSupported(input.generation))) {
+    const support = await localOcrSupported(input.generation)
+    if (!support.cache) {
       outcome.stopped = {
         reason: 'unsupported',
         message: 'Local OCR is currently supported on macOS and Linux.',
@@ -129,16 +181,11 @@ export async function reconcileLocalAssetOcr(
         if (type === null) {
           continue
         }
-        let bytes: Uint8Array<ArrayBuffer>
-        try {
-          bytes = await readAssetForDevice(path, input.generation)
-        } catch (cause) {
-          if (isAppError(cause) && cause.kind === 'notFound') {
-            outcome.skippedUnreferenced += 1
-            continue
-          }
-          throw cause
+        if (type.kind === 'pdf' && !support.pdf) {
+          outcome.skippedOversize += 1
+          continue
         }
+        const bytes = await readAssetForDevice(path, input.generation)
         const sourceHash = await hashBytes(bytes)
         const cached = await readLocalAssetOcr(path, input.generation)
         if (
@@ -179,6 +226,7 @@ export async function reconcileLocalAssetOcr(
             filename: `${path.split('/').at(-1) ?? path}${type.kind === 'pdf' ? ` — page ${page}` : ''}`,
           })
           if (body.trim() === '') {
+            // A blank page or image: no complete result to cache.
             throw new ReflectError('invalid', 'The local vision model returned empty OCR text.')
           }
           const section = type.kind === 'pdf' ? `## Page ${page}\n\n${body}` : body
@@ -206,6 +254,7 @@ export async function reconcileLocalAssetOcr(
             assetPath: path,
             sourceHash,
             sourceSize: bytes.length,
+            ...sourceModifiedMs(catalog, path, bytes.length),
             providerId: config.id,
             model: config.model,
             baseUrl: config.baseUrl,
@@ -218,6 +267,12 @@ export async function reconcileLocalAssetOcr(
         stale()
         outcome.described += 1
         outcome.describedAssetPaths.push(path)
+      } catch (cause) {
+        const tally = input.isStale?.() === true ? null : assetSkipTally(cause)
+        if (tally === null) {
+          throw cause
+        }
+        outcome[tally] += 1
       } finally {
         if (input.isStale?.() !== true) input.onProgress?.(index + 1, candidates.length)
       }

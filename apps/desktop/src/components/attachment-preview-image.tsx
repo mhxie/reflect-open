@@ -63,7 +63,9 @@ export function AttachmentPreviewImage({
     kind === 'pdf'
       ? pdfPageUrl(generation, path, 1, pdfPageWidthBucket(pixels))
       : stage === 'raster'
-        ? `${attachmentUrl(generation, path)}?reflect-preview=raster`
+        ? // Held to the thumbnail budget: an image refused a thumbnail for its
+          // size is refused here too, never decoded in full for a card.
+          `${attachmentUrl(generation, path)}?reflect-preview=raster&budget=thumb`
         : imageThumbnailUrl(generation, path, imageThumbnailWidthBucket(pixels))
   return (
     <img

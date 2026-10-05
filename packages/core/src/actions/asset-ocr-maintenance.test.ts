@@ -94,4 +94,65 @@ describe('local OCR maintenance', () => {
     )
     expect(await reconcileCachedAssetOcr(7, undefined, { reindexCached: false })).toEqual([])
   })
+
+  describe('wake scans', () => {
+    const NOW = 1_000_000
+
+    beforeEach(async () => {
+      vi.mocked(listAttachments).mockResolvedValue([
+        { path: PATH, size: 2, modifiedMs: NOW - 60_000 },
+      ])
+      const cache = JSON.parse(await vi.mocked(readAssetOcrCache)('key', 7))
+      vi.mocked(readAssetOcrCache).mockResolvedValue(
+        JSON.stringify({ ...cache, sourceModifiedMs: NOW - 60_000 }),
+      )
+    })
+
+    it('skips re-reading a source whose recorded size and mtime still match', async () => {
+      const options = { reindexCached: false, trustUnchangedStat: true, now: () => NOW }
+      expect(await reconcileCachedAssetOcr(7, undefined, options)).toEqual([])
+      expect(readAssetForDevice).not.toHaveBeenCalled()
+    })
+
+    it('re-hashes a source whose mtime moved', async () => {
+      vi.mocked(listAttachments).mockResolvedValue([
+        { path: PATH, size: 2, modifiedMs: NOW - 1_000_000 },
+      ])
+      vi.mocked(readAssetForDevice).mockResolvedValue(new Uint8Array([3, 4]))
+      const options = { reindexCached: false, trustUnchangedStat: true, now: () => NOW }
+      expect(await reconcileCachedAssetOcr(7, undefined, options)).toEqual([PATH])
+      expect(writeAssetOcrCache).toHaveBeenCalledTimes(1)
+    })
+
+    it('still re-hashes reported changes even when the metadata matches', async () => {
+      vi.mocked(readAssetForDevice).mockResolvedValue(new Uint8Array([3, 4]))
+      expect(await reconcileCachedAssetOcr(7, [PATH], { now: () => NOW })).toEqual([PATH])
+    })
+  })
+
+  it('keeps OCR for an evicted source without reading it', async () => {
+    vi.mocked(listAttachments).mockResolvedValue([
+      { path: PATH, size: 2, modifiedMs: 1, placeholder: true },
+    ])
+    expect(await reconcileCachedAssetOcr(7, undefined, { reindexCached: false })).toEqual([])
+    expect(readAssetForDevice).not.toHaveBeenCalled()
+    expect(writeAssetOcrCache).not.toHaveBeenCalled()
+  })
+
+  it('skips an unreadable source and goes on with the rest of the scan', async () => {
+    const other = 'secure/other.png'
+    vi.mocked(listAssetOcrCacheKeys).mockResolvedValue([
+      await hashContent(PATH),
+      await hashContent(other),
+    ])
+    const cache = JSON.parse(await vi.mocked(readAssetOcrCache)('key', 7))
+    vi.mocked(readAssetOcrCache).mockImplementation(async (key) =>
+      JSON.stringify(key === (await hashContent(other)) ? { ...cache, assetPath: other } : cache),
+    )
+    vi.mocked(readAssetForDevice).mockImplementation(async (path) => {
+      if (path === PATH) throw { kind: 'io', message: 'the file is not available offline' }
+      return new Uint8Array([3, 4])
+    })
+    expect(await reconcileCachedAssetOcr(7, undefined, { reindexCached: false })).toEqual([other])
+  })
 })

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
+import { cjkColumnText } from './cjk.ts'
+import { applyProjection, connectIndex, openMigratedIndex, project } from './flow-test-harness.ts'
 import { parseSearchQuery } from './filter-query.ts'
 import { searchWithFilters } from './filtered-search.ts'
 
@@ -483,5 +485,46 @@ describe('searchWithFilters', () => {
     const sql = String(args['sql'])
     expect(sql).toContain('"notes"."daily_date" is not null')
     expect(sql).not.toContain('"notes"."kind" = ?')
+  })
+})
+
+describe('searchWithFilters over a CJK clause', () => {
+  const body = '我们下周去東京旅行，今天看了Transformer的论文。还有我和小王一起吃饭，然后回家写周记'
+
+  beforeEach(() => {
+    const database = openMigratedIndex()
+    const notes = [
+      { path: 'notes/week.md', title: '周记', body },
+      { path: 'notes/kyoto.md', title: '京都', body: 'plain english body' },
+    ]
+    for (const note of notes) {
+      applyProjection(database, project(note.path, `# ${note.title}\n${note.body}\n`, 1))
+      database
+        .prepare('INSERT INTO search_fts(path, title, body, cjk) VALUES (?, ?, ?, ?)')
+        .run(
+          note.path,
+          note.title,
+          note.body,
+          `${cjkColumnText(note.title)} ${cjkColumnText(note.body)}`,
+        )
+    }
+    connectIndex(database)
+  })
+
+  it('marks the run in the body when only the cjk column matched', async () => {
+    const [hit] = await searchWithFilters(parseSearchQuery('東京'))
+    expect(hit?.snippet).toBe('我们下周去\u{1}東京\u{2}旅行，今天看了Transformer的论…')
+  })
+
+  it('marks the first of the longest runs with context on both sides', async () => {
+    const [hit] = await searchWithFilters(parseSearchQuery('吃饭 小王一起'))
+    expect(hit?.snippet).toBe(
+      '…了Transformer的论文。还有我和\u{1}小王一起\u{2}吃饭，然后回家写周记',
+    )
+  })
+
+  it('keeps no snippet when the run sits only in the title', async () => {
+    const [hit] = await searchWithFilters(parseSearchQuery('京都'))
+    expect(hit).toMatchObject({ path: 'notes/kyoto.md', snippet: null })
   })
 })

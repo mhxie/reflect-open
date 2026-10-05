@@ -41,4 +41,10 @@ describe('listDailyActivity', () => {
     expect(query).toContain("'localtime'")
     expect(query).toContain('union')
   })
+
+  it('rejects an edit-count row that is not a date and a count', async () => {
+    mockInvoke.mockResolvedValue([{ date: '2026-10-02', notes: 'three' }])
+
+    await expect(listDailyEditCounts()).rejects.toThrow()
+  })
 })

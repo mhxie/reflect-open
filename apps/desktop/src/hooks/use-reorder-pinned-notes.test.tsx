@@ -18,24 +18,18 @@ const graphState: {
 vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => graphState }))
 
 const NOTE_A = {
-  isPrivate: false,
-  hasConflict: false,
   dailyDate: null,
   path: 'a.md',
   title: 'A',
   pinnedOrder: 1024,
 } satisfies PinnedNote
 const NOTE_B = {
-  isPrivate: false,
-  hasConflict: false,
   dailyDate: null,
   path: 'b.md',
   title: 'B',
   pinnedOrder: 2048,
 } satisfies PinnedNote
 const NOTE_C = {
-  isPrivate: false,
-  hasConflict: false,
   dailyDate: null,
   path: 'c.md',
   title: 'C',
@@ -143,8 +137,8 @@ describe('useReorderPinnedNotes', () => {
 
   it('renumbers the whole shelf when a neighbour carries no order', async () => {
     const bare = [
-      { isPrivate: false, hasConflict: false, dailyDate: null, path: 'a.md', title: 'A' },
-      { isPrivate: false, hasConflict: false, dailyDate: null, path: 'b.md', title: 'B' },
+      { dailyDate: null, path: 'a.md', title: 'A' },
+      { dailyDate: null, path: 'b.md', title: 'B' },
     ] satisfies PinnedNote[]
     queryClient.setQueryData(queryKeys.index.pinnedNotes('/graphs/personal'), bare)
     const hook = await renderReorder(bare)

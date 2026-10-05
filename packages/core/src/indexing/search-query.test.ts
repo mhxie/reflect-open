@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildFtsAnyMatch,
   buildFtsMatch,
+  cjkSnippetNeedle,
   containsUnsegmentedScript,
   isSentenceLike,
   titleRecallNeedles,
@@ -169,5 +170,18 @@ describe('buildFtsAnyMatch', () => {
   it('returns null when nothing is searchable', () => {
     expect(buildFtsAnyMatch('')).toBeNull()
     expect(buildFtsAnyMatch('the - a')).toBeNull()
+  })
+})
+
+describe('cjkSnippetNeedle', () => {
+  // Parity with `cjk_snippet_needle` (`apps/cli/src/search.rs`).
+  it.each([
+    ['東京 trip', '東京'],
+    ['吃饭 小王一起', '小王一起'],
+    ['周记 吃饭', '周记'],
+    ['用Python写脚本', '写脚本'],
+    ['plain words', ''],
+  ])('picks the first of the longest runs in %j', (query, needle) => {
+    expect(cjkSnippetNeedle(query)).toBe(needle)
   })
 })

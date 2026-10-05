@@ -12,29 +12,35 @@ import { isAppError, ReflectError } from '../../errors.ts'
 import { readAssetOcrState } from '../../actions/asset-ocr-cache.ts'
 import { isXArchiveAssetPath } from '../../x-archive.ts'
 import { splitIntoTurnSegments } from './context-window.ts'
-import { toolResultSources, type ToolResultSources } from './tools.ts'
+import { toolResultSources, type SearchSnapshot, type ToolResultSources } from './tools.ts'
 import { hasRestrictedSearchSources, snapshotHasAttachmentText } from './search-privacy.ts'
 
 /**
  * Chat history privacy at resend. Every turn resends the earlier exchanges,
  * tool results included (`buildHistory`), so a note that was public when the
  * model read it and is private now would keep reaching the provider. Before a
- * cloud turn, every note and asset an earlier exchange read is re-checked, and
- * each exchange that read one that is private now is left out whole: the user
- * message, the tool calls and results, and the answer, which can paraphrase
- * what it read. Exchanges are the context window's turn segments, so role
- * alternation survives. The stored turns are untouched; only what this turn
- * sends changes. An on-device target receives the full history once its
- * server passes verification. A conversation containing marked private local
- * context is refused outright when a cloud target is selected.
+ * cloud turn, every note and asset an earlier exchange read is re-checked.
+ * The first exchange that read one that is private now is left out, and so is
+ * every exchange after it: a later answer can repeat what the withheld one
+ * read ("translate that summary") without reading anything itself. Exchanges
+ * are the context window's turn segments, so role alternation survives; the
+ * turn's new user message is always sent. The stored turns are untouched;
+ * only what this turn sends changes. An on-device target receives the full
+ * history once its server passes verification. A conversation containing
+ * marked private local context is refused outright when a cloud target is
+ * selected.
  *
  * Private now means a note in a local-only folder or whose index row is
  * private or missing (moved, deleted, not indexed), or an asset in a
  * local-only folder or the X archive folder, referenced by no indexed note,
  * or referenced by a note that is private now. A tool result whose sources
  * can't be read fails closed. Index flags and live note/sidecar sources are
- * both checked, including changes that have not reached the index yet.
+ * both checked, including changes that have not reached the index yet; each
+ * live source is read once per turn, a few at a time.
  */
+
+/** How many live note, sidecar, or asset checks run at once. */
+const READ_CONCURRENCY = 4
 
 /** The history one turn sends, from {@link historyForTarget}. */
 export interface TargetHistory {
@@ -46,10 +52,11 @@ export interface TargetHistory {
 
 /**
  * The model-facing history `target` may receive, given everything a turn
- * would resend (`buildHistory` plus the new user message). An on-device
- * target whose server {@link verifyOnDeviceServer} accepts receives all of
- * it; a cloud target gets filtered public history or a refusal when marked
- * private local context occurs anywhere in the conversation.
+ * would resend (`buildHistory` plus the new user message, which is always
+ * the last segment and always sent). An on-device target whose server
+ * {@link verifyOnDeviceServer} accepts receives all of it; a cloud target
+ * gets the public prefix of the history, or a refusal when marked private
+ * local context occurs anywhere in the conversation.
  */
 export async function historyForTarget(
   messages: ModelMessage[],
@@ -61,23 +68,35 @@ export async function historyForTarget(
   }
   refuseCloudPrivateContext(messages)
   const segments = splitIntoTurnSegments(messages)
-  const checked = segments.map((segment) => ({ segment, sources: segmentSources(segment) }))
-  const privateNow = await privateNowPaths(
-    checked.flatMap(({ sources }) => (sources === null ? [] : [sources])),
-    generation,
-  )
+  const current = segments.at(-1)
+  if (current === undefined) {
+    return { messages, withheldTurns: 0 }
+  }
+  const earlier = segments.slice(0, -1)
+  // Exchanges from the first one whose sources can't be read are left out
+  // whatever they name, so nothing past it is checked.
+  const parsed: ToolResultSources[] = []
+  for (const segment of earlier) {
+    const sources = segmentSources(segment)
+    if (sources === null) {
+      break
+    }
+    parsed.push(sources)
+  }
+  const reader = cachedReader(generation)
+  const privateNow = await privateNowPaths(parsed, reader, generation)
+  const firstPrivate = parsed.findIndex((sources) => namesPrivatePath(sources, privateNow))
+  const keptCount = firstPrivate === -1 ? parsed.length : firstPrivate
   await refuseCloudRestrictedSearchSnapshots(
-    checked.flatMap(({ sources }) => sources?.searchSnapshots ?? []),
+    parsed.slice(0, keptCount).flatMap((sources) => sources.searchSnapshots ?? []),
     privateNow,
+    reader,
     generation,
   )
-  const kept = checked.filter(
-    ({ sources }) => sources !== null && !namesPrivatePath(sources, privateNow),
-  )
-  const withheldTurns = segments.length - kept.length
+  const withheldTurns = earlier.length - keptCount
   return withheldTurns === 0
     ? { messages, withheldTurns }
-    : { messages: kept.flatMap(({ segment }) => segment), withheldTurns }
+    : { messages: [...earlier.slice(0, keptCount).flat(), ...current], withheldTurns }
 }
 
 /**
@@ -170,13 +189,27 @@ interface PrivatePaths {
   liveSources: ReadonlyMap<string, string>
 }
 
+/** A live-source reader that reads each path at most once per turn. */
+type CachedReader = (path: string) => Promise<string>
+
+/**
+ * Refuse the turn when a kept exchange's search snippet carried attachment
+ * text whose sources can no longer be cleared. Exchanges already left out
+ * are not checked: nothing they hold is sent.
+ */
 async function refuseCloudRestrictedSearchSnapshots(
-  snapshots: NonNullable<ToolResultSources['searchSnapshots']>,
+  snapshots: readonly SearchSnapshot[],
   privateNow: PrivatePaths,
+  reader: CachedReader,
   generation?: number,
 ): Promise<void> {
-  for (const snapshot of snapshots) {
-    if (!(await snapshotHasAttachmentText(snapshot.assetTextHash))) continue
+  const unique = [
+    ...new Map(
+      snapshots.map((snapshot) => [`${snapshot.path}\n${snapshot.assetTextHash}`, snapshot]),
+    ).values(),
+  ]
+  await mapConcurrently(unique, async (snapshot) => {
+    if (!(await snapshotHasAttachmentText(snapshot.assetTextHash))) return
     const source = privateNow.liveSources.get(snapshot.path)
     if (
       snapshot.assetTextHash === undefined ||
@@ -185,7 +218,7 @@ async function refuseCloudRestrictedSearchSnapshots(
       (await hasRestrictedSearchSources(
         snapshot.path,
         source,
-        (path) => readPublicNote(path, generation),
+        reader,
         generation,
         snapshot.assetTextHash,
       ))
@@ -195,7 +228,7 @@ async function refuseCloudRestrictedSearchSnapshots(
         'This conversation contains attachment search text whose original source cannot be cleared for cloud use. Continue with a verified on-device model or start a new cloud conversation.',
       )
     }
-  }
+  })
 }
 
 function namesPrivatePath(sources: ToolResultSources, privateNow: PrivatePaths): boolean {
@@ -208,6 +241,7 @@ function namesPrivatePath(sources: ToolResultSources, privateNow: PrivatePaths):
 /** Which of the named notes and assets are private now (see the module doc). */
 async function privateNowPaths(
   named: readonly ToolResultSources[],
+  reader: CachedReader,
   generation?: number,
 ): Promise<PrivatePaths> {
   const notes = [...new Set(named.flatMap((sources) => sources.notes))]
@@ -228,13 +262,13 @@ async function privateNowPaths(
   const publicNotes = new Set(
     rows.filter((row) => row.source === 'note' && row.isPrivate === 0).map((row) => row.notePath),
   )
-  for (const path of notePaths) {
+  await mapConcurrently(notePaths, async (path) => {
     if (!publicNotes.has(path)) {
       privateNotes.add(path)
-      continue
+      return
     }
     try {
-      const source = await readPublicNote(path, generation)
+      const source = await reader(path)
       liveSources.set(path, source)
       if (notePrivate(source)) {
         privateNotes.add(path)
@@ -242,47 +276,95 @@ async function privateNowPaths(
     } catch {
       privateNotes.add(path)
     }
-  }
+  })
   const referenceRows = rows.filter((row) => row.source === 'asset')
-  for (const path of assetPaths) {
-    if ((await readAssetOcrState(path, generation)) !== null) {
+  await mapConcurrently(assetPaths, async (path) => {
+    if (await assetPrivateNow(path, referenceRows, reader, generation)) {
       privateAssets.add(path)
-      continue
     }
-    try {
-      if (notePrivate(await readPublicNote(descriptionPathFor(path), generation))) {
-        privateAssets.add(path)
-        continue
-      }
-    } catch (cause) {
-      if (!isAppError(cause) || cause.kind !== 'notFound') {
-        privateAssets.add(path)
-        continue
-      }
+  })
+  return { notes: privateNotes, assets: privateAssets, liveSources }
+}
+
+/** Whether one asset is private now: device-only text, a private sidecar, or a private referrer. */
+async function assetPrivateNow(
+  path: string,
+  referenceRows: readonly PrivacyRow[],
+  reader: CachedReader,
+  generation?: number,
+): Promise<boolean> {
+  if ((await readAssetOcrState(path, generation)) !== null) {
+    return true
+  }
+  try {
+    if (notePrivate(await reader(descriptionPathFor(path)))) {
+      return true
     }
-    const referencing = referenceRows.filter((row) => assetReferenceMatches(row.reference, path))
-    if (
-      referencing.length === 0 ||
-      referencing.some((row) => row.isPrivate !== 0 || isLocalOnlyPath(row.notePath))
-    ) {
-      privateAssets.add(path)
-      continue
-    }
-    for (const row of referencing) {
-      try {
-        if (notePrivate(await readPublicNote(row.notePath, generation))) privateAssets.add(path)
-      } catch {
-        privateAssets.add(path)
-      }
+  } catch (cause) {
+    if (!isAppError(cause) || cause.kind !== 'notFound') {
+      return true
     }
   }
-  return { notes: privateNotes, assets: privateAssets, liveSources }
+  const referencing = referenceRows.filter((row) => assetReferenceMatches(row.reference, path))
+  if (
+    referencing.length === 0 ||
+    referencing.some((row) => row.isPrivate !== 0 || isLocalOnlyPath(row.notePath))
+  ) {
+    return true
+  }
+  for (const row of referencing) {
+    try {
+      if (notePrivate(await reader(row.notePath))) {
+        return true
+      }
+    } catch {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * A reader of live note and sidecar sources that reads each path once: the
+ * same note is often named by many exchanges, by an asset's referrers, and by
+ * the snapshot check.
+ */
+function cachedReader(generation?: number): CachedReader {
+  const reads = new Map<string, Promise<string>>()
+  return (path) => {
+    let read = reads.get(path)
+    if (read === undefined) {
+      read = readPublicNote(path, generation)
+      reads.set(path, read)
+    }
+    return read
+  }
 }
 
 async function readPublicNote(path: string, generation?: number): Promise<string> {
   const read = await readNoteShareable(path, generation)
   if (read.kind === 'localOnly') throw new ReflectError('auth', 'History source is local-only.')
   return read.content
+}
+
+/**
+ * Run `task` over `items` with at most {@link READ_CONCURRENCY} in flight.
+ * Rejects with the first failure.
+ */
+async function mapConcurrently<T>(
+  items: readonly T[],
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  // One iterator shared by every worker hands each item out exactly once.
+  const pending = items.values()
+  const worker = async (): Promise<void> => {
+    for (const item of pending) {
+      await task(item)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(READ_CONCURRENCY, items.length) }, () => worker()),
+  )
 }
 
 type PrivacyRowSource = 'note' | 'asset'

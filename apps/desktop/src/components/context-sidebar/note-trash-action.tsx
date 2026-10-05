@@ -22,9 +22,10 @@ interface NoteTrashActionProps {
 
 /**
  * Moves a regular note to the system Trash after confirmation. A note from an
- * editable local-only folder gets there by way of the graph's
- * `.reflect/trash/`, and stays there when the system Trash refuses it, which
- * the status line then says. Daily notes return `null` here as a second
+ * editable local-only folder gets there by way of a private holding folder:
+ * the graph's `.reflect/trash/`, or a hidden folder beside the note when its
+ * raw store sits on another volume. When the system Trash refuses it, a note
+ * held in `.reflect/trash/` stays there, which the status line then says. Daily notes return `null` here as a second
  * UI-layer guard; the shared delete helper enforces the same rule before
  * touching disk.
  */
@@ -88,7 +89,7 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
           <DialogTitle>Trash this note?</DialogTitle>
           <DialogDescription>
             {isLocalOnlyPath(path)
-              ? 'It moves to your system Trash by way of this graph’s .reflect/trash folder. Put Back returns it to that folder, not here.'
+              ? 'It moves to your system Trash by way of a private holding folder. Put Back returns it to that folder, not here.'
               : 'It moves to your system Trash, where you can restore it.'}
           </DialogDescription>
           {error !== null ? <p className="text-sm text-destructive">{error}</p> : null}

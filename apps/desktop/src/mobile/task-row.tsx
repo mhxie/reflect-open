@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { ArrowRight, Circle, CircleCheck, Trash2 } from 'lucide-react'
-import type { OpenTask } from '@reflect/core'
+import { isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
 import { getIsComposing } from '@meowdown/core'
 import { TaskText } from '@/components/tasks/task-text.tsx'
 import { formatShortDate } from '@/lib/dates.ts'
@@ -14,6 +14,8 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 
 /** Total width of the two actions (open note, delete) under every task row. */
 const ACTION_WIDTH = SWIPE_ACTION_WIDTH * 2
+/** A read-only row offers only the open-note action. */
+const READ_ONLY_ACTION_WIDTH = SWIPE_ACTION_WIDTH
 
 interface MobileTaskRowProps {
   task: OpenTask
@@ -40,6 +42,10 @@ interface MobileTaskRowProps {
  * quick-edit sheet instead of desktop's multi-select; there is no inline editor
  * on touch. Swiping the row left reveals the note list's gesture on tasks: an
  * open-note action and a delete action ({@link useRowSwipe} owns the physics).
+ *
+ * A task in a read-only local-only note can't be written: its checkbox stays
+ * inert, a tap opens the note instead of the quick-edit sheet, and the swipe
+ * offers only the open-note action.
  */
 export function MobileTaskRow({
   task,
@@ -55,9 +61,11 @@ export function MobileTaskRow({
   const { settings } = useSettings()
   const { toggle, isPending } = useTaskCheckboxToggle(task)
   const label = task.text || 'Empty task'
-  const edit = (): void => onEdit(task)
+  const readOnly = isLocalOnlyReadOnlyPath(task.notePath)
+  const actionWidth = readOnly ? READ_ONLY_ACTION_WIDTH : ACTION_WIDTH
+  const edit = (): void => (readOnly ? onOpenNote() : onEdit(task))
   const swipe = useRowSwipe({
-    actionWidth: ACTION_WIDTH,
+    actionWidth,
     revealed,
     onReveal,
     onClose,
@@ -71,7 +79,7 @@ export function MobileTaskRow({
     >
       <div
         className="absolute inset-y-0 right-0 flex"
-        style={{ width: ACTION_WIDTH }}
+        style={{ width: actionWidth }}
         aria-hidden={!revealed || undefined}
         inert={!revealed}
       >
@@ -87,18 +95,20 @@ export function MobileTaskRow({
             onOpenNote()
           }}
         />
-        <SwipeActionButton
-          icon={<Trash2 className="size-4" />}
-          label="Delete"
-          ariaLabel={`Delete: ${label}`}
-          revealed={revealed}
-          className="bg-destructive"
-          onClick={() => {
-            hapticImpactLight()
-            onClose()
-            onDelete()
-          }}
-        />
+        {readOnly ? null : (
+          <SwipeActionButton
+            icon={<Trash2 className="size-4" />}
+            label="Delete"
+            ariaLabel={`Delete: ${label}`}
+            revealed={revealed}
+            className="bg-destructive"
+            onClick={() => {
+              hapticImpactLight()
+              onClose()
+              onDelete()
+            }}
+          />
+        )}
       </div>
       <div
         ref={swipe.ref}
@@ -123,7 +133,7 @@ export function MobileTaskRow({
         <button
           type="button"
           aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
-          disabled={isPending}
+          disabled={isPending || readOnly}
           onClick={() => {
             hapticImpactLight()
             toggle()
@@ -145,7 +155,7 @@ export function MobileTaskRow({
         <div
           role="button"
           tabIndex={0}
-          aria-label={`Edit: ${label}`}
+          aria-label={readOnly ? `View note: ${label}` : `Edit: ${label}`}
           onClick={edit}
           onKeyDown={(event) => {
             if (getIsComposing()) {

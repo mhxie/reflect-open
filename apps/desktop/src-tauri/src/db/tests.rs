@@ -736,7 +736,7 @@ fn reconcile_scan_classifies_candidates_orphans_and_skips() {
         meta("notes/evicted-new.md", 4_000, true), // placeholder, no row → download request
     ];
 
-    let scan = scan_reconcile(&conn, &files, now).unwrap();
+    let scan = scan_reconcile(&conn, &files, now, |_| false).unwrap();
 
     assert_eq!(scan.total, 7);
     let paths: Vec<&str> = scan
@@ -769,6 +769,53 @@ fn reconcile_scan_classifies_candidates_orphans_and_skips() {
         scan.stale_placeholders,
         ["notes/evicted.md", "notes/evicted-new.md"]
     );
+}
+
+/// An unmounted raw store hides its notes from the walk without deleting
+/// them: their rows stay. A real local-only folder's vanished note, and one
+/// behind a link the walk did follow, are ordinary orphans.
+#[cfg(unix)]
+#[test]
+fn reconcile_scan_keeps_rows_behind_an_unfollowed_local_only_link() {
+    use super::scan::behind_unfollowed_link;
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let (root, raw) = (base.join("graph"), base.join("raw"));
+    std::fs::create_dir_all(root.join("finance")).unwrap();
+    std::fs::create_dir_all(root.join("people/secure")).unwrap();
+    std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
+    std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
+    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
+    let conn = migrated();
+    for path in [
+        "finance/secure/bank.md",
+        "people/secure/visa.md",
+        "notes/gone.md",
+    ] {
+        apply_note(&conn, &note(path, "T", vec![])).unwrap();
+    }
+    let orphans = |conn: &Connection| -> Vec<String> {
+        scan_reconcile(conn, &[], 100_000, behind_unfollowed_link(&root, &folders))
+            .unwrap()
+            .orphans
+            .into_iter()
+            .map(|orphan| orphan.path)
+            .collect()
+    };
+
+    // Mounted: the walk follows the link, so a note missing there is gone.
+    assert_eq!(
+        orphans(&conn),
+        [
+            "finance/secure/bank.md",
+            "notes/gone.md",
+            "people/secure/visa.md"
+        ]
+    );
+
+    // Unmounted: the link dangles, and its row is kept.
+    std::fs::remove_dir_all(&raw).unwrap();
+    assert_eq!(orphans(&conn), ["notes/gone.md", "people/secure/visa.md"]);
 }
 
 #[test]
@@ -2408,6 +2455,45 @@ fn local_only_folder_names_are_recorded_for_the_cli() {
     assert_eq!(stored(&conn), None);
 }
 
+/// Adding or releasing a folder clears the projection stamp, so the open's
+/// sync rebuilds every row (a released note's privacy, a public note's folded
+/// attachment text); an unchanged configuration keeps it.
+#[test]
+fn a_changed_local_only_record_requests_a_rebuild() {
+    use reflect_index_schema::PROJECTION_VERSION_KEY;
+    let mut conn = migrated();
+    let stamp = |conn: &Connection| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            [PROJECTION_VERSION_KEY],
+            |row| row.get(0),
+        )
+        .ok()
+    };
+    let set_stamp = |conn: &Connection| {
+        conn.execute(
+            "INSERT OR REPLACE INTO index_meta(key, value) VALUES(?1, '7')",
+            [PROJECTION_VERSION_KEY],
+        )
+        .unwrap();
+    };
+
+    set_stamp(&conn);
+    super::sync_local_only(&mut conn, Some(&secure_folders()), true).unwrap();
+    assert_eq!(stamp(&conn), None, "a folder added");
+
+    set_stamp(&conn);
+    super::sync_local_only(&mut conn, Some(&secure_folders()), true).unwrap();
+    assert_eq!(stamp(&conn).as_deref(), Some("7"), "unchanged");
+
+    super::sync_local_only(&mut conn, None, true).unwrap();
+    assert_eq!(stamp(&conn), None, "a folder released");
+
+    set_stamp(&conn);
+    super::sync_local_only(&mut conn, None, true).unwrap();
+    assert_eq!(stamp(&conn).as_deref(), Some("7"), "still none");
+}
+
 /// A mock app with one graph open at `root`, carrying `folders`.
 fn local_only_app(
     root: &std::path::Path,
@@ -2523,14 +2609,8 @@ fn a_refused_move_into_a_local_only_folder_leaves_the_row_as_it_was() {
         to_address: moved_address("people/secure/plan.md"),
         from_address: moved_address("notes/plan.md"),
     };
-    let moved = super::note_move_indexed(
-        request,
-        1,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-        app.state(),
-    );
+    let moved =
+        tauri::async_runtime::block_on(super::note_move_indexed(request, 1, app.handle().clone()));
     assert!(moved.is_err());
     assert_eq!(row_private_flag(&app, "notes/plan.md"), Some(false));
     assert_eq!(row_private_flag(&app, "people/secure/plan.md"), None);
@@ -2632,14 +2712,11 @@ fn a_move_across_an_editable_folder_boundary_is_refused_before_any_row_moves() {
         .unwrap();
     }
     let move_note = |from: &str, to: &str| {
-        super::note_move_indexed(
+        tauri::async_runtime::block_on(super::note_move_indexed(
             move_request(from, to),
             1,
             app.handle().clone(),
-            app.state(),
-            app.state(),
-            app.state(),
-        )
+        ))
     };
 
     for (from, to) in [
@@ -2750,14 +2827,11 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
     )
     .unwrap();
 
-    super::note_move_indexed(
+    tauri::async_runtime::block_on(super::note_move_indexed(
         move_request(path, moved),
         1,
         app.handle().clone(),
-        app.state(),
-        app.state(),
-        app.state(),
-    )
+    ))
     .unwrap();
     assert_eq!(row_private_flag(app, path), None);
     assert_eq!(row_private_flag(app, moved), Some(true));
@@ -2769,14 +2843,14 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
         secret.as_bytes(),
     )
     .unwrap();
-    let asset = crate::fs::assets::asset_upload_commit(
+    let asset = tauri::async_runtime::block_on(crate::fs::assets::asset_upload_commit(
         upload,
         "statement.png".into(),
         moved.into(),
         1,
         app.state(),
         app.state(),
-    )
+    ))
     .unwrap();
     assert_eq!(asset, "finance/secure/assets/statement.png");
 
@@ -2830,7 +2904,9 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
         .collect();
     assert!(leaked.is_empty(), "{leaked:?}");
 
-    let deleted = crate::fs::note_delete(moved.into(), 1, app.state()).unwrap();
+    let deleted =
+        tauri::async_runtime::block_on(crate::fs::note_delete(moved.into(), 1, app.state()))
+            .unwrap();
     assert_eq!(deleted.trashed, crate::fs::Trashed::System);
     assert!(!raw.join("finance/secure/2026/bank.md").exists());
 

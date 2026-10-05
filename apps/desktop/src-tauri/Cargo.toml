@@ -192,7 +192,7 @@ objc2-image-io = { version = "0.3.2", default-features = false, features = [
   "CGImageDestination",
   "objc2-core-graphics",
 ] }
-# Meeting capture (`src/meeting_capture/`): a Core Audio process tap and
+# The recorder (`src/recorder/`): a Core Audio process tap and
 # private aggregate device record the microphone and system audio on one
 # clock (macOS 14.2+); rtrb carries frames off the realtime IO thread;
 # realfft runs the echo suppressor's STFT; the global

@@ -141,7 +141,7 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
   // One call per few chunks: the model serves one call at a time, so a search
   // typed during a long note's re-embed waits for a batch, not the whole note.
   for (let at = 0; at < toEmbed.length; at += EMBED_CALL_SIZE) {
-    vectors.push(...(await embedTexts(toEmbed.slice(at, at + EMBED_CALL_SIZE), 'passage')))
+    vectors.push(...(await embedTexts(toEmbed.slice(at, at + EMBED_CALL_SIZE), 'passage', modelId)))
   }
   let vectorAt = 0
   const sourceHash = await hashContent(content)

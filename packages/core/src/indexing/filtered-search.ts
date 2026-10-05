@@ -4,7 +4,7 @@ import { db } from './db.ts'
 import { literalSearchQuery, type ParsedSearchQuery } from './filter-query.ts'
 import { resolveWikiTarget } from './queries.ts'
 import { HIGHLIGHT_END, HIGHLIGHT_START } from './search.ts'
-import { buildFtsMatch, buildTitleMatchSql } from './search-query.ts'
+import { buildFtsMatch, buildTitleMatchSql, cjkSnippetSql } from './search-query.ts'
 import { displayNoteTitle } from '../markdown/note-title.ts'
 import { highlightTitle } from './title-highlight.ts'
 
@@ -307,6 +307,7 @@ export async function searchWithFilters(
           sql<string>`snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10)`.as(
             'snippet',
           ),
+          cjkSnippetSql(parsed.text, HIGHLIGHT_START, HIGHLIGHT_END).as('cjkSnippet'),
           sql<number>`bm25(search_fts, 0, 10.0, 1.0, 1.0)`.as('rank'),
         ])
         .where(sql<boolean>`search_fts MATCH ${match}`),
@@ -330,6 +331,7 @@ export async function searchWithFilters(
       'filteredNotes.hasConflict',
       'lexical.ftsHighlightedTitle',
       'lexical.snippet',
+      'lexical.cjkSnippet',
     ])
     .where(sql<boolean>`("lexical"."path" is not null or ${titleMatch.containsAllTerms})`)
     .orderBy(titleMatch.rank)
@@ -351,11 +353,12 @@ export async function searchWithFilters(
     rankedQuery = rankedQuery.limit(limit)
   }
   const rows = await rankedQuery.execute()
-  return rows.map(({ ftsHighlightedTitle, snippet, ...row }) => ({
+  return rows.map(({ ftsHighlightedTitle, snippet, cjkSnippet, ...row }) => ({
     ...row,
-    // SQLite returns an unmarked body fragment when only the title matched.
-    // That is not a search snippet and would be misleading in the result row.
-    snippet: snippet?.includes(HIGHLIGHT_START) === true ? snippet : null,
+    // SQLite returns an unmarked body fragment when only the title or the
+    // `cjk` column matched. That is not a search snippet; a CJK run found in
+    // the body gets its own marked fragment instead.
+    snippet: snippet?.includes(HIGHLIGHT_START) === true ? snippet : cjkSnippet,
     // The FTS markers describe the complete title; the same display
     // derivation keeps them aligned with the shortened title they highlight.
     highlightedTitle: highlightTitle(

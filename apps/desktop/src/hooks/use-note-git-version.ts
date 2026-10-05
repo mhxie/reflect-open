@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { gitNoteVersion } from '@reflect/core'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import { queryKeys } from '@/lib/query-client.ts'
 
 interface NoteGitVersionOptions {
   readonly root: string | null
@@ -18,8 +19,9 @@ interface NoteGitVersion {
 
 /**
  * The last committed version of this note, never an upload acknowledgment.
- * Refresh on each detail view and poll while open; Local-only notes stay out
- * of Git queries. Each request remains in its graph's file generation.
+ * Refresh each time the detail view opens or the window regains focus;
+ * Local-only notes stay out of Git queries. Each request remains in its
+ * graph's file generation.
  */
 export function useNoteGitVersion({
   root,
@@ -32,7 +34,7 @@ export function useNoteGitVersion({
   const enabled =
     open && !isLocalOnly && bridgeReady && root !== null && generation !== null && path !== null
   const query = useQuery({
-    queryKey: ['note-git-version', root, generation, path],
+    queryKey: queryKeys.git.noteVersion(root ?? undefined, generation, path),
     queryFn: async () =>
       generation === null || path === null ? null : await gitNoteVersion(path, generation),
     enabled,
@@ -41,7 +43,6 @@ export function useNoteGitVersion({
     retry: false,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
-    refetchInterval: enabled ? 15_000 : false,
   })
   return {
     version: query.data ?? null,

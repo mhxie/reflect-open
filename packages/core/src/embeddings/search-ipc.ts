@@ -34,6 +34,13 @@ export type SearchIpcAnswer =
   | { readonly mode: SearchIpcRequest['mode']; readonly results: SearchIpcResult[] }
   | { readonly error: string }
 
+/**
+ * Hits fetched per requested result: private hits are dropped after ranking,
+ * so fetching only `limit` would hand the CLI short pages in a graph with many
+ * private notes.
+ */
+const PRIVATE_OVERFETCH = 2
+
 /** Serve the open graph's search on its socket (a no-op while already serving it). */
 export async function startSearchIpc(): Promise<void> {
   await call('search_ipc_start', {}, z.null())
@@ -66,7 +73,8 @@ export function subscribeSearchIpcRequests(
  * Answer one CLI request. Semantic modes need semantic search on and its model
  * loaded; otherwise the answer is lexical and says so, so a caller labels its
  * results honestly. Private notes are invisible through the CLI, so they are
- * dropped outright, not just stripped of content.
+ * dropped outright, not just stripped of content; the ranking over-fetches so
+ * the drop still leaves up to `limit` results.
  */
 export async function answerSearchIpcRequest(
   request: SearchIpcRequest,
@@ -77,13 +85,14 @@ export async function answerSearchIpcRequest(
     const mode = semanticReady ? request.mode : 'lexical'
     const hits = await retrieve(request.query, {
       mode,
-      limit: request.limit,
+      limit: request.limit * PRIVATE_OVERFETCH,
       excludePrivateContent: true,
     })
     return {
       mode,
       results: hits
         .filter((hit) => !hit.isPrivate && hit.hasDeviceOnlyContent !== true)
+        .slice(0, request.limit)
         .map((hit) => ({
           path: hit.path,
           title: hit.title,

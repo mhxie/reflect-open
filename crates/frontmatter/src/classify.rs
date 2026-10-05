@@ -45,6 +45,11 @@ pub enum UnreadableReason {
     TooLarge,
     /// `private` is set to something that is neither true nor false.
     UnrecognizedValue,
+    /// A key spelled like `private` but not exactly (`Private`, `PRIVATE`,
+    /// `"private "`) is set to something other than false: the app reads
+    /// only `private`, so it can't tell whether the note was meant to be
+    /// locked.
+    PrivateKeyVariant,
     /// A byte-order mark precedes the fence, so the app sees no frontmatter
     /// while the block behind it locks the note.
     BomBeforeFence,
@@ -60,6 +65,7 @@ impl UnreadableReason {
             Self::AliasBudget => "aliasBudget",
             Self::TooLarge => "tooLarge",
             Self::UnrecognizedValue => "unrecognizedValue",
+            Self::PrivateKeyVariant => "privateKeyVariant",
             Self::BomBeforeFence => "bomBeforeFence",
         }
     }
@@ -74,6 +80,7 @@ impl fmt::Display for UnreadableReason {
             Self::AliasBudget => "its aliases expand too far",
             Self::TooLarge => "it is larger than 256 KiB",
             Self::UnrecognizedValue => "its private value is neither true nor false",
+            Self::PrivateKeyVariant => "a key spelled like private (such as Private) is set",
             Self::BomBeforeFence => "a byte-order mark precedes it",
         })
     }
@@ -89,11 +96,15 @@ impl fmt::Display for UnreadableReason {
 ///   `Private`, whether or not the block loads.
 /// - **Loaded block:** the root `private` value (tags unwrapped, aliases
 ///   resolved): true/1/1.0/yes/on is `Private`; false/0/null/no/off/empty or
-///   no key is `Public`; anything else is `Unreadable(UnrecognizedValue)`.
+///   no key is `Public`; anything else is `Unreadable(UnrecognizedValue)`. A
+///   root key that is `private` only once ASCII-trimmed and case-folded
+///   (`Private`, `PRIVATE`) is `Unreadable(PrivateKeyVariant)` unless its
+///   value is falsy.
 /// - **Block not loaded** (see the pre-scan; this includes a block holding a
 ///   NUL, a byte-order mark, a CR outside a CRLF, or another character outside
-///   YAML's printable set): `Unreadable` when it contains `private` or a
-///   backslash (a YAML escape can spell the key), else `Public`.
+///   YAML's printable set): `Unreadable` when it contains `private` in any
+///   ASCII case or a backslash (a YAML escape can spell the key), else
+///   `Public`.
 pub fn backup_privacy(bytes: &[u8]) -> BackupPrivacy {
     let (bom, source) = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
         Some(rest) => (true, rest),
@@ -127,7 +138,7 @@ fn classify_block(raw: &[u8]) -> BackupPrivacy {
 fn not_loaded(text: &str, reason: UnreadableReason) -> BackupPrivacy {
     if line_scan_private(text) {
         BackupPrivacy::Private
-    } else if text.contains("private") || text.contains('\\') {
+    } else if text.to_ascii_lowercase().contains("private") || text.contains('\\') {
         BackupPrivacy::Unreadable(reason)
     } else {
         BackupPrivacy::Public
@@ -136,11 +147,16 @@ fn not_loaded(text: &str, reason: UnreadableReason) -> BackupPrivacy {
 
 /// The root mapping's `private` value. Alias keys can repeat the key without
 /// a duplicate-key error, so every `private` key counts, most restrictive
-/// first.
+/// first. A key that only folds to `private` never locks the note, but any
+/// value other than a falsy one makes it unreadable.
 fn root_privacy(tree: &Tree) -> BackupPrivacy {
     let mut privacy = BackupPrivacy::Public;
     for (key, value) in tree.root_pairs() {
-        if !matches!(tree.resolve(key), NodeKind::Scalar(scalar) if scalar.text == "private") {
+        let NodeKind::Scalar(key) = tree.resolve(key) else {
+            continue;
+        };
+        let exact = key.text == "private";
+        if !exact && !is_private_key_variant(&key.text) {
             continue;
         }
         let class = match tree.resolve(value) {
@@ -148,14 +164,24 @@ fn root_privacy(tree: &Tree) -> BackupPrivacy {
             _ => ValueClass::Unrecognized,
         };
         match class {
-            ValueClass::Private => return BackupPrivacy::Private,
-            ValueClass::Unrecognized => {
-                privacy = BackupPrivacy::Unreadable(UnreadableReason::UnrecognizedValue);
-            }
+            ValueClass::Private if exact => return BackupPrivacy::Private,
             ValueClass::Public => {}
+            ValueClass::Private | ValueClass::Unrecognized => {
+                privacy = BackupPrivacy::Unreadable(if exact {
+                    UnreadableReason::UnrecognizedValue
+                } else {
+                    UnreadableReason::PrivateKeyVariant
+                });
+            }
         }
     }
     privacy
+}
+
+/// Whether `text` is `private` once ASCII-trimmed and ASCII-case-folded.
+fn is_private_key_variant(text: &str) -> bool {
+    text.trim_matches(|character: char| character.is_ascii_whitespace())
+        .eq_ignore_ascii_case("private")
 }
 
 #[cfg(test)]

@@ -12,8 +12,10 @@ has its content sent to any external service.** This is enforced in code at ever
 call site (the `CloudSafe` type brand in `packages/core/src/ai/` — content for a
 cloud provider cannot even be constructed from a private note, and the flag is re-read from
 disk at call time), and it is covered by tests. The rule fails closed: frontmatter Reflect
-can't read with certainty — YAML that doesn't parse but mentions `private`, a `private`
-value that is neither true nor false, a block hidden behind a byte-order mark — counts
+can't read with certainty — YAML that doesn't parse but mentions `private` (in any
+case), a `private` value that is neither true nor false, a key spelled like `private`
+but not exactly (`Private: true`) set to anything but false, a block hidden behind a
+byte-order mark — counts
 as private too, and the Lock control says "Frontmatter can't be read — treated as
 locked" until the YAML is fixed.
 
@@ -27,16 +29,16 @@ locked" until the YAML is fixed.
   every chat turn. Cloud tools drop private notes and device-only attachment text.
   A verified on-device model can search and read private and local-only notes.
   Each turn resends the
-  conversation so far, except earlier exchanges that read a note or attachment that has
-  since become private or local-only, or that can no longer be confirmed public, such as
-  a note since renamed or deleted (a verified on-device model still receives those);
-  the transcript keeps them and notes once that they are no longer sent. If any
+  conversation so far, up to the first earlier exchange that read a note or attachment
+  that has since become private or local-only, or that can no longer be confirmed
+  public, such as a note since renamed or deleted. That exchange and every exchange
+  after it are no longer sent to a cloud model, since a later answer can repeat what
+  it read (a verified on-device model still receives them all); the transcript keeps
+  them and notes once that they are no longer sent. If any
   stored local tool result contains private or device-only context, the entire
   conversation is blocked from switching to a cloud model, including later answers.
   Continue locally or start a new conversation. That protection cannot identify
-  note content you manually paste into a message
-  or the configured prompt, nor a later answer that repeats what a withheld exchange
-  read.
+  note content you manually paste into a message or the configured prompt.
 - **When:** only while you use chat (⌘J). No background calls.
 
 On-device models require consent for one exact loopback URL and model. Requests use

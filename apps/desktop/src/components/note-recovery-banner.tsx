@@ -14,9 +14,11 @@ interface NoteRecoveryBannerProps {
 /**
  * The unsaved-text offer on a local-only note: an earlier session couldn't
  * save, kept its text, and nothing is written until the user picks. Restore
- * goes through the normal checked save, so text that changed on disk
- * meanwhile is never overwritten. The two actions map 1:1 onto the note
- * session's `restoreRecovery`/`discardRecovery`.
+ * saves the kept text only while the note still holds the version it was
+ * kept against; when the note changed since, Restore opens the conflict
+ * prompt instead (Keep mine / Load theirs), so that newer version is never
+ * silently replaced. The two actions map 1:1 onto the note session's
+ * `restoreRecovery`/`discardRecovery`.
  */
 export function NoteRecoveryBanner({
   keptAt,

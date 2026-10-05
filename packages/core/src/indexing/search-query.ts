@@ -112,6 +112,57 @@ function cjkRunMatch(run: string): string {
     : `cjk : ${quoteFtsLiteral(runBigrams(run).join(' '))}`
 }
 
+/** Characters of body text kept on each side of a CJK fallback snippet's match. */
+const CJK_SNIPPET_CONTEXT_CHARS = 20
+
+/**
+ * The run a CJK fallback snippet centers on: the longest run of an
+ * unsegmented script in `query` (the first of equal length), or `''` when
+ * there is none. The twin of `cjk_snippet_needle` (`apps/cli/src/search.rs`).
+ */
+export function cjkSnippetNeedle(query: string): string {
+  let needle = ''
+  for (const run of unsegmentedRuns(query)) {
+    if ([...run].length > [...needle].length) {
+      needle = run
+    }
+  }
+  return needle
+}
+
+/**
+ * A body snippet for a hit the `cjk` column matched. FTS5's `snippet()` only
+ * marks tokens of the column it reads, and a CJK run inside a clause matches
+ * through the `cjk` column alone, so the body snippet would come back with no
+ * highlight. This SQL marks the first occurrence of {@link cjkSnippetNeedle}
+ * in `search_fts.body` with a little context on each side, or yields `NULL`
+ * when the query has no run or the body doesn't hold it (a title-only match).
+ * Callers prefer the FTS snippet whenever it carries a highlight. SQLite
+ * counts characters, not UTF-16 units, so no surrogate pair is split. The
+ * CLI builds the same expression (`cjk_snippet_sql` in
+ * `apps/cli/src/search.rs`).
+ */
+export function cjkSnippetSql(
+  query: string,
+  highlightStart: string,
+  highlightEnd: string,
+): RawBuilder<string | null> {
+  const needle = cjkSnippetNeedle(query)
+  if (needle === '') {
+    return sql<null>`null`
+  }
+  const context = sql.lit(CJK_SNIPPET_CONTEXT_CHARS)
+  const at = sql`instr(search_fts.body, ${needle})`
+  const after = sql`${at} + length(${needle})`
+  return sql<string | null>`case when ${at} = 0 then null else
+    (case when ${at} > ${context} + 1 then '…' else '' end)
+    || substr(search_fts.body, max(1, ${at} - ${context}), min(${at} - 1, ${context}))
+    || ${highlightStart} || ${needle} || ${highlightEnd}
+    || substr(search_fts.body, ${after}, ${context})
+    || (case when ${after} + ${context} <= length(search_fts.body) then '…' else '' end)
+  end`
+}
+
 /** True when `value` contains a character from a script written without spaces. */
 export function containsUnsegmentedScript(value: string): boolean {
   for (const char of value) {

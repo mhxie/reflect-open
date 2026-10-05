@@ -12,7 +12,7 @@ use crate::resolve::{resolve_note, ResolvedNote};
 
 pub fn run(graph: &Graph, json: bool, note_arg: &str) -> Result<(), CliError> {
     let index = open_index_for_resolution(&graph.root)?;
-    let local_only = local_only_of(index.as_ref())?;
+    let local_only = local_only_of(&graph.root, index.as_ref())?;
     let resolved = resolve_note(note_arg, &graph.root, index.as_ref().map(|open| &open.conn))?;
 
     let rel_path = resolved.rel_path();

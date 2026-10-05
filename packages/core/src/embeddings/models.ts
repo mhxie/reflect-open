@@ -1,8 +1,10 @@
 /**
  * The embedding models the desktop runtime can load (`MODELS` in
  * `apps/desktop/src-tauri/src/embed.rs`; the ids must match). The first is
- * the default: the original model, so an existing index keeps its vectors.
- * Choosing another re-embeds the graph into a vector table of its width.
+ * the default: the original model, so an existing index keeps its vector
+ * table's width. Its vectors still re-embed once when the chunking or
+ * `PASSAGE_VERSION` (`pipeline.ts`) changes what a chunk is embedded as.
+ * Choosing another model re-embeds the graph into a vector table of its width.
  */
 export const SEMANTIC_MODEL_IDS = ['all-MiniLM-L6-v2', 'embeddinggemma-300m'] as const
 

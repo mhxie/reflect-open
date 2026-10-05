@@ -393,6 +393,53 @@ fn search_finds_words_inside_cjk_clauses_through_the_cjk_column() {
     }
 }
 
+/// The app's socket answers at most 100 results, so semantic and hybrid
+/// searches refuse a larger `--limit` as a usage error (exit 2) before
+/// reaching for the app; lexical search has no upper bound. Zero is refused
+/// in every mode.
+#[test]
+fn search_limit_bounds_depend_on_the_mode() {
+    let fixture = graph();
+    fixture.write_note("notes/a.md", "# A\nwombat\n");
+    fixture.build_index();
+    for mode in ["semantic", "hybrid"] {
+        for limit in ["0", "101", "-1"] {
+            let output = reflect(
+                &fixture,
+                &["search", "wombat", "--mode", mode, "--limit", limit],
+            );
+            assert_eq!(output.status.code(), Some(2), "{mode} --limit {limit}");
+        }
+    }
+    let zero = reflect(&fixture, &["search", "wombat", "--limit", "0"]);
+    assert_eq!(zero.status.code(), Some(2));
+    let value = json(&reflect(
+        &fixture,
+        &["search", "wombat", "--limit", "500", "--json"],
+    ));
+    assert_eq!(value["results"][0]["path"], "notes/a.md");
+}
+
+/// FTS5's `snippet()` only marks body tokens, and a word inside a CJK clause
+/// matches through the `cjk` column alone, so such a hit gets a fragment
+/// around the run instead of an empty snippet (`cjkSnippetSql` is the TS twin).
+#[test]
+fn search_shows_the_body_around_a_cjk_run_matched_through_the_cjk_column() {
+    let fixture = graph();
+    fixture.write_note(
+        "notes/clause.md",
+        "# 周记\n我们下周去東京旅行，今天看了Transformer的论文。还有我和小王\n",
+    );
+    fixture.build_index();
+
+    let value = json(&reflect(&fixture, &["search", "東京", "--json"]));
+    assert_eq!(value["results"][0]["path"], "notes/clause.md");
+    assert_eq!(
+        value["results"][0]["snippet"],
+        "# 周记\n我们下周去東京旅行，今天看了Transformer的论…"
+    );
+}
+
 /// A sentence rarely has every word in one note, so it is topped up with the
 /// notes sharing the most, and rarest, of its words, after any note that holds
 /// them all; a few keywords stay strict. Private notes never surface.
@@ -1408,4 +1455,71 @@ fn an_index_that_cannot_be_read_refuses_every_note_read() {
         let output = reflect(&fixture, args);
         assert!(output.status.success(), "{args:?}: {}", stderr(&output));
     }
+}
+
+/// `reflect` run with `home` as the user's home, so it reads the desktop
+/// settings document written there ([`settings_in`]).
+#[cfg(unix)]
+fn reflect_with_home(fixture: &Fixture, home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_reflect"))
+        .args(args)
+        .current_dir(fixture.root())
+        .env_remove("REFLECT_GRAPH")
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .output()
+        .unwrap()
+}
+
+/// Write the desktop settings document under `home`, where `dirs::config_dir`
+/// finds it on this platform.
+#[cfg(unix)]
+fn settings_in(home: &Path, contents: &str) {
+    let config = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        home.join(".config")
+    };
+    fs::create_dir_all(config.join("reflect-open")).unwrap();
+    fs::write(config.join("reflect-open/settings.json"), contents).unwrap();
+}
+
+/// With no index there is no record of the local-only folders, so the
+/// desktop's settings decide: a real directory configured as local-only is
+/// refused like a private note, and an unreadable settings document refuses
+/// every note.
+#[cfg(unix)]
+#[test]
+fn without_an_index_the_settings_name_the_local_only_folders() {
+    let fixture = graph();
+    fixture.write_note("people/secure/visa.md", "# Visa\npassport 5678\n");
+    fixture.write_note("notes/public.md", "# Public\n");
+    let home = TempDir::new().unwrap();
+
+    // Control: no settings file, so nothing is local-only.
+    let output = reflect_with_home(&fixture, home.path(), &["show", "people/secure/visa.md"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let root = fixture.root().canonicalize().unwrap();
+    let key = root.to_string_lossy().into_owned();
+    settings_in(
+        home.path(),
+        &serde_json::json!({ "localOnlyFolders": { key: { "folders": ["secure"] } } }).to_string(),
+    );
+    for command in ["show", "path", "open"] {
+        let output = reflect_with_home(
+            &fixture,
+            home.path(),
+            &[command, "people/secure/visa.md", "--json"],
+        );
+        assert_eq!(output.status.code(), Some(3), "{command}");
+        assert!(!stdout(&output).contains("5678"), "{command}");
+    }
+    let output = reflect_with_home(&fixture, home.path(), &["show", "notes/public.md"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    settings_in(home.path(), "{ not json");
+    let output = reflect_with_home(&fixture, home.path(), &["show", "notes/public.md"]);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(stderr(&output).contains("settings"), "{}", stderr(&output));
 }

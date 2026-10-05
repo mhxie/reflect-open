@@ -31,6 +31,8 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   getOpenTasks,
   getCompletedTasks,
   resolveOrCreateNoteWithTitle,
+  // `vault/` stands in for a read-only local-only folder.
+  isLocalOnlyReadOnlyPath: (path: string) => path.startsWith('vault/'),
 }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
@@ -598,6 +600,25 @@ describe('MobileTasks', () => {
     // The open groups render; the pending completed query must not blank them.
     await view.findByText('still open')
     expect(view.queryByLabelText('Loading tasks')).toBeNull()
+    await view.unmount()
+  })
+
+  it('keeps a task in a read-only local-only note read-only', async () => {
+    getOpenTasks.mockResolvedValue([
+      task({ text: 'sealed', notePath: 'vault/secret.md', noteTitle: 'Secret' }),
+    ])
+    const user = userEvent
+    const view = await renderScreen()
+
+    // No add into the note, and an inert checkbox.
+    await view.findByRole('button', { name: 'Secret' })
+    expect(view.queryByRole('button', { name: 'Add a task to Secret' })).toBeNull()
+    await expect.element(view.getByRole('button', { name: 'Complete: sealed' })).toBeDisabled()
+    // A tap opens the note instead of the quick-edit sheet.
+    await user.click(view.getByRole('button', { name: 'View note: sealed' }))
+    expect(view.getByTestId('route').element().textContent).toContain('vault/secret.md')
+    expect(view.queryByRole('textbox', { name: 'Task text' })).toBeNull()
+    expect(toggleTask).not.toHaveBeenCalled()
     await view.unmount()
   })
 

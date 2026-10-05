@@ -127,11 +127,31 @@ impl From<git2::Error> for AppError {
     }
 }
 
+/// Whether `err` is ELOOP: a symlink the open refused to follow
+/// (`O_NOFOLLOW_ANY` on Apple platforms, `O_NOFOLLOW` and the directory-fd
+/// walks everywhere) or a link cycle. Either way the path resolves through a
+/// symlink, which the graph's guards treat as a traversal.
+fn is_symlink_refusal(err: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        err.raw_os_error() == Some(libc::ELOOP)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = err;
+        false
+    }
+}
+
 impl From<std::io::Error> for AppError {
     fn from(err: std::io::Error) -> Self {
         if err.kind() == std::io::ErrorKind::NotFound {
             Self::NotFound {
                 message: err.to_string(),
+            }
+        } else if is_symlink_refusal(&err) {
+            Self::Traversal {
+                message: format!("path resolves through a symlink: {err}"),
             }
         } else {
             Self::Io {
@@ -248,5 +268,29 @@ mod tests {
             "object 403fa1b2 not found",
         );
         assert!(matches!(error, AppError::Io { .. }), "{error:?}");
+    }
+
+    /// A no-follow open refused at a symlink reports ELOOP; callers that skip
+    /// unreadable paths (asset descriptions, OCR) must see a traversal, not a
+    /// failure that aborts their whole pass.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_symlink_classifies_as_traversal() {
+        use std::os::unix::fs::{symlink, OpenOptionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("real.md"), "# Real").unwrap();
+        symlink(dir.path().join("real.md"), dir.path().join("link.md")).unwrap();
+        let refused = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(dir.path().join("link.md"))
+            .unwrap_err();
+        let error = AppError::from(refused);
+        assert!(matches!(error, AppError::Traversal { .. }), "{error:?}");
+
+        let missing = std::fs::File::open(dir.path().join("missing.md")).unwrap_err();
+        assert!(matches!(AppError::from(missing), AppError::NotFound { .. }));
+        let other = std::io::Error::from_raw_os_error(libc::EACCES);
+        assert!(matches!(AppError::from(other), AppError::Io { .. }));
     }
 }

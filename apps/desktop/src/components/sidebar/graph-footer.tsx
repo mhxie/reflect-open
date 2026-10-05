@@ -30,11 +30,6 @@ import { useRouter } from '@/routing/router.tsx'
 const MENU_ITEM_CLASS = 'h-8 gap-2 px-2 py-0 text-[13px] text-text-secondary'
 const SETTINGS_BINDING = keybindingFor('settings.open')
 
-function graphSwitchBindingFor(index: number): string | null {
-  // Recent rows are zero-based; `graph.switchN` commands and keycaps are one-based.
-  return keybindingFor(`graph.switch${index + 1}`)
-}
-
 /**
  * The quiet backup indicator: nothing when backed up (or not set up), a
  * pulsing accent dot while backing up, amber when offline with queued
@@ -122,12 +117,11 @@ export function GraphFooter({ graph, context }: GraphFooterProps): ReactElement 
           <TooltipContent>{graph.root}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent aria-label="Switch graph" side="top" sideOffset={6}>
-          {recents.map((recent, index) => (
+          {recents.map((recent) => (
             <GraphMenuItem
               key={recent.root}
               graph={recent}
               current={recent.root === graph.root}
-              binding={graphSwitchBindingFor(index)}
               onSelect={() => {
                 if (recent.root !== graph.root) {
                   void openRecent(recent.root)

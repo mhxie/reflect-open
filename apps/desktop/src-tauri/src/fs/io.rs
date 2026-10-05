@@ -13,10 +13,9 @@ use std::os::raw::c_int;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use reflect_frontmatter::backup_privacy;
+use reflect_frontmatter::normalize_line_endings_keeping_privacy;
 use reflect_graph_paths::{
-    evicted_logical_path, eviction_placeholder, is_dataless, normalize_line_endings,
-    LocalOnlyFolders,
+    evicted_logical_path, eviction_placeholder, is_dataless, LocalOnlyFolders,
 };
 
 use crate::error::{AppError, AppResult};
@@ -166,14 +165,7 @@ pub(super) fn read_note_no_follow(base: &Path, rest: &Path) -> std::io::Result<S
 
 /// Normalize line endings only when doing so preserves the file's privacy verdict.
 pub(super) fn normalize_note_text(contents: String) -> String {
-    if !contents.contains('\r') {
-        return contents;
-    }
-    let normalized = normalize_line_endings(contents.clone());
-    if backup_privacy(contents.as_bytes()) != backup_privacy(normalized.as_bytes()) {
-        return contents;
-    }
-    normalized
+    normalize_line_endings_keeping_privacy(contents)
 }
 
 /// Open `base.join(rest)` for reading with every component policed by
@@ -577,6 +569,7 @@ fn file_meta_from(entry: reflect_graph_paths::FileEntry) -> FileMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reflect_frontmatter::backup_privacy;
     use tempfile::tempdir;
 
     #[test]

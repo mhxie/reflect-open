@@ -211,7 +211,9 @@ beforeEach(() => {
         throw { kind: 'io', message: 'stream did not contain valid UTF-8' }
       }
       const content = fixture.files[String(args['path'])]
-      return content === undefined ? { kind: 'evicted' } : { kind: 'content', content }
+      return content === undefined
+        ? { kind: 'evicted' }
+        : { kind: 'content', content, localOnly: false }
     }
     if (command !== 'db_query') {
       return null
@@ -459,6 +461,29 @@ describe('WikiScreen', () => {
     expect(rowTitles(view)).toEqual(['Zeigarnik Effect'])
     // No entry carries a tag, so there is no Tag menu to offer.
     expect(view.getByRole('button', { name: 'Tag' }).query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('reads a missing-translation filter for a removed language as no filter', async () => {
+    const view = await renderScreen()
+    const header = view.getByRole('banner')
+    await header.getByRole('button', { name: 'Missing 简体中文 2' }).click()
+    await vi.waitFor(() =>
+      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Zeigarnik Effect']),
+    )
+
+    settingsStore.set({
+      wikiLanguages: normalizeWikiLanguages([{ label: 'English', folder: 'wiki' }]),
+    })
+
+    await vi.waitFor(() =>
+      expect(rowTitles(view)).toEqual([
+        'Retrieval Practice',
+        'Spacing Effect',
+        'Wiki Index',
+        'Zeigarnik Effect',
+      ]),
+    )
     await view.unmount()
   })
 

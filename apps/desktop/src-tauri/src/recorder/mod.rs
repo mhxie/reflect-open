@@ -451,15 +451,25 @@ pub fn shutdown(app: &AppHandle) {
     let _ = stop_recording(app, &mut inner);
 }
 
+// The commands below are async so they run off the main thread: the
+// watchdog holds the recorder lock while it rebuilds a capture, and a sync
+// command waiting on that lock would freeze every window meanwhile.
+
 /// Command: whether capture is available and what is recording.
 #[tauri::command]
-pub fn recorder_status(app: AppHandle, state: State<'_, RecorderState>) -> CaptureStatus {
-    status_of(&app, &state.lock())
+pub async fn recorder_status(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+) -> AppResult<CaptureStatus> {
+    Ok(status_of(&app, &state.lock()))
 }
 
 /// Command: start recording (a no-op while one runs).
 #[tauri::command]
-pub fn recorder_start(app: AppHandle, state: State<'_, RecorderState>) -> AppResult<CaptureStatus> {
+pub async fn recorder_start(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+) -> AppResult<CaptureStatus> {
     let mut inner = state.lock();
     start_recording(&app, &mut inner)?;
     Ok(status_of(&app, &inner))
@@ -467,7 +477,10 @@ pub fn recorder_start(app: AppHandle, state: State<'_, RecorderState>) -> AppRes
 
 /// Command: stop recording; the recording waits in staging for transcription.
 #[tauri::command]
-pub fn recorder_stop(app: AppHandle, state: State<'_, RecorderState>) -> AppResult<CaptureStatus> {
+pub async fn recorder_stop(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+) -> AppResult<CaptureStatus> {
     let mut inner = state.lock();
     stop_recording(&app, &mut inner)?;
     Ok(status_of(&app, &inner))
@@ -475,7 +488,7 @@ pub fn recorder_stop(app: AppHandle, state: State<'_, RecorderState>) -> AppResu
 
 /// Command: stop and discard the recording without transcribing it.
 #[tauri::command]
-pub fn recorder_cancel(
+pub async fn recorder_cancel(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> AppResult<CaptureStatus> {
@@ -486,16 +499,18 @@ pub fn recorder_cancel(
 
 /// Command: finished recordings still in staging, oldest first.
 #[tauri::command]
-pub fn recorder_sessions(
+pub async fn recorder_sessions(
     app: AppHandle,
     state: State<'_, RecorderState>,
 ) -> AppResult<Vec<FinishedSession>> {
-    let active = state
-        .lock()
+    // Held while listing: a recording starting meanwhile must not be read
+    // as one a crash interrupted and closed.
+    let inner = state.lock();
+    let active = inner
         .active
         .as_ref()
-        .map(|active| active.manifest.id.clone());
-    Ok(store(&app)?.finished(active.as_deref()))
+        .map(|active| active.manifest.id.as_str());
+    Ok(store(&app)?.finished(active))
 }
 
 #[derive(Deserialize)]
@@ -653,8 +668,10 @@ fn archive(store: &Store, id: &str, destination: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(&partial);
         format!("copying to {}: {err}", destination.display())
     })?;
-    std::fs::rename(&partial, destination)
-        .map_err(|err| format!("moving into {}: {err}", destination.display()))?;
+    std::fs::rename(&partial, destination).map_err(|err| {
+        let _ = std::fs::remove_file(&partial);
+        format!("moving into {}: {err}", destination.display())
+    })?;
     store.remove(id)
 }
 

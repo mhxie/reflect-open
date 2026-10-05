@@ -49,7 +49,9 @@ export function SearchIpcResponder(): null {
       })
     return () => {
       active = false
-      void unlisten.then((stop) => stop())
+      // A subscription that failed has nothing to stop (its failure was
+      // already reported above).
+      void unlisten.then((stop) => stop()).catch(() => {})
       void stopSearchIpc().catch(() => {})
     }
   }, [root])

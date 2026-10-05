@@ -634,8 +634,9 @@ describe('AllNotesScreen', () => {
     await input.fill('travel')
     expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
 
-    // A leading `#` is accepted, and the tag need not exist in the index.
-    await input.fill('#zettel')
+    // Leading `#`s are accepted as in the pinned-filter editor, and the tag
+    // need not exist in the index.
+    await input.fill('## zettel')
     await page.getByRole('option', { name: 'Filter by #zettel' }).click()
 
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'zettel' } })

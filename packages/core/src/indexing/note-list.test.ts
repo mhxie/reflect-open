@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
-import { listAttachmentPreviews, listNotes, listNoteTags, listRecentNotes } from './note-list.ts'
+import {
+  firstExistingAttachment,
+  listAttachmentPreviews,
+  listNotes,
+  listNoteTags,
+  listRecentNotes,
+} from './note-list.ts'
 
 // A fake bridge resolves `db_query` so the tests exercise the real compiled
 // SQL (snake_case columns, parameters) — the same harness queries.test uses.
@@ -347,25 +353,49 @@ describe('listNoteTags', () => {
 })
 
 describe('listAttachmentPreviews', () => {
-  it('maps each note to its first attachment of the type', async () => {
+  it('maps each note to its attachments of the type, in document order', async () => {
     mockInvoke.mockResolvedValueOnce([
-      { note_path: 'papers/socc.md', asset_path: 'papers/assets/a.pdf' },
+      { note_path: 'papers/socc.md', asset_path: 'papers/z.pdf' },
+      { note_path: 'papers/socc.md', asset_path: 'z.pdf' },
       { note_path: 'notes/trip.md', asset_path: 'assets/map.pdf' },
+      { note_path: 'papers/socc.md', asset_path: 'papers/assets/a.pdf' },
     ])
 
     const previews = await listAttachmentPreviews('pdf')
 
     expect(previews).toEqual(
       new Map([
-        ['papers/socc.md', 'papers/assets/a.pdf'],
-        ['notes/trip.md', 'assets/map.pdf'],
+        ['papers/socc.md', ['papers/z.pdf', 'z.pdf', 'papers/assets/a.pdf']],
+        ['notes/trip.md', ['assets/map.pdf']],
       ]),
     )
     const [command, args] = mockInvoke.mock.calls[0]!
     expect(command).toBe('db_query')
     const statement = String(args['sql'])
-    expect(statement).toContain('min("assets"."asset_path")')
-    expect(statement).toContain('group by "assets"."note_path"')
+    expect(statement).toContain('order by "assets"."rowid"')
+    expect(statement).not.toContain('min(')
     expect(args['params']).toEqual(['%.pdf'])
+  })
+})
+
+describe('firstExistingAttachment', () => {
+  const catalog = (paths: readonly string[]) => ({ has: (path: string) => paths.includes(path) })
+
+  it('skips a candidate spelling that does not exist on disk', () => {
+    // `projects/plan.md` linking `diagram.png` may mean either; only one exists.
+    expect(
+      firstExistingAttachment(['projects/diagram.png', 'diagram.png'], catalog(['diagram.png'])),
+    ).toBe('diagram.png')
+    expect(
+      firstExistingAttachment(
+        ['projects/diagram.png', 'diagram.png'],
+        catalog(['projects/diagram.png', 'diagram.png']),
+      ),
+    ).toBe('projects/diagram.png')
+  })
+
+  it('finds nothing when no candidate exists, and the first before the catalog loads', () => {
+    expect(firstExistingAttachment(['a.png', 'b.png'], catalog([]))).toBeUndefined()
+    expect(firstExistingAttachment(['a.png', 'b.png'], null)).toBe('a.png')
   })
 })

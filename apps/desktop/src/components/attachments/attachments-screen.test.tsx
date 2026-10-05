@@ -259,6 +259,26 @@ describe('AttachmentsScreen', () => {
       .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/later.md' }))
   })
 
+  it('lists every linking note from the "+N" menu, from the keyboard too', async () => {
+    renderScreen()
+    const more = page.getByRole('button', { name: '1 more note links to photo.png' })
+    await expect.element(more).toBeVisible()
+
+    const trigger = more.element()
+    if (trigger instanceof HTMLElement) {
+      trigger.focus()
+    }
+    await userEvent.keyboard('{Enter}')
+    const menu = page.getByRole('menu', { name: '1 more note links to photo.png' })
+    await expect.element(menu.getByRole('menuitem', { name: 'Later' })).toBeVisible()
+    await expect.element(menu.getByRole('menuitem', { name: 'Trip' })).toBeVisible()
+
+    await menu.getByRole('menuitem', { name: 'Trip' }).click()
+    await expect
+      .element(page.getByTestId('route'))
+      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/trip.md' }))
+  })
+
   it('previews images in the lightbox, PDFs in Peek, and opens video in its default app', async () => {
     renderScreen()
 

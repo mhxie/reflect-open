@@ -182,16 +182,12 @@ describe('reorderPinnedNotes', () => {
     await reorderPinnedNotes(
       [
         {
-          isPrivate: false,
-          hasConflict: false,
           path: 'notes/c.md',
           title: 'C',
           dailyDate: null,
           pinnedOrder: 1024,
         },
         {
-          isPrivate: false,
-          hasConflict: false,
           path: 'notes/a.md',
           title: 'A',
           dailyDate: null,
@@ -222,8 +218,6 @@ describe('reorderPinnedNotes', () => {
     await reorderPinnedNotes(
       [
         {
-          isPrivate: false,
-          hasConflict: false,
           path: 'notes/a.md',
           title: 'A',
           dailyDate: null,

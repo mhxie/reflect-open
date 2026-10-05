@@ -5,6 +5,7 @@ import {
 } from '@/editor/editor-handle-registry.ts'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { getOperations, resetOperations } from '@/lib/operations.ts'
+import type { Route } from '@/routing/route.ts'
 
 const createAsset = vi.hoisted(() => vi.fn())
 vi.mock('@reflect/core', async (importOriginal) => ({
@@ -14,6 +15,8 @@ vi.mock('@reflect/core', async (importOriginal) => ({
 }))
 
 const { createNoteFromFiles, noteMarkdownForFiles } = await import('./create-note-from-files.ts')
+
+const TODAY: Route = { kind: 'today' }
 
 const handle = { insertMarkdown: vi.fn() } as unknown as NoteEditorHandle & {
   insertMarkdown: ReturnType<typeof vi.fn>
@@ -57,7 +60,7 @@ describe('createNoteFromFiles', () => {
     await createNoteFromFiles(
       [new File(['x'], 'Quarterly Report.pdf', { type: 'application/pdf' })],
       4,
-      navigate,
+      { navigate, route: () => TODAY },
     )
 
     // The attachment is for the note about to open, named before the upload.
@@ -77,9 +80,44 @@ describe('createNoteFromFiles', () => {
     createAsset.mockRejectedValue(new Error('disk full'))
     const navigate = vi.fn()
 
-    await createNoteFromFiles([new File(['x'], 'a.pdf')], 4, navigate)
+    await createNoteFromFiles([new File(['x'], 'a.pdf')], 4, { navigate, route: () => TODAY })
 
     expect(navigate).not.toHaveBeenCalled()
     expect(getOperations().at(-1)).toMatchObject({ status: 'failed' })
+  })
+
+  it('leaves the user where they went while the files copied', async () => {
+    let route: Route = TODAY
+    createAsset.mockImplementation(async () => {
+      route = { kind: 'tasks' }
+      return 'assets/a.pdf'
+    })
+    const navigate = vi.fn()
+
+    await createNoteFromFiles([new File(['x'], 'a.pdf')], 4, { navigate, route: () => route })
+
+    expect(navigate).not.toHaveBeenCalled()
+    expect(getOperations().at(-1)).toMatchObject({ status: 'warning' })
+  })
+
+  it('gives up on an editor that never mounts, even without animation frames', async () => {
+    vi.useFakeTimers()
+    try {
+      createAsset.mockResolvedValue('assets/a.pdf')
+      const navigate = vi.fn()
+
+      const created = createNoteFromFiles([new File(['x'], 'a.pdf')], 4, {
+        navigate,
+        route: () => TODAY,
+      })
+      await vi.advanceTimersByTimeAsync(3100)
+      await created
+
+      expect(navigate).toHaveBeenCalled()
+      expect(handle.insertMarkdown).not.toHaveBeenCalled()
+      expect(getOperations().at(-1)).toMatchObject({ status: 'failed' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

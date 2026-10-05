@@ -304,15 +304,7 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
   // abandon a pending permission request — a grant arriving after the
   // collapse would otherwise start a recording with no UI mounted.
   useEffect(() => {
-    if (!collapsed) {
-      return
-    }
-    if (nativeRecorder) {
-      // A native recording stays visible in the menu bar; without that item
-      // it would be invisible, so it ends like a webview one.
-      if (native.recordingSince !== null && !settings.recordingMenuBar) {
-        native.toggle()
-      }
+    if (!collapsed || nativeRecorder) {
       return
     }
     if (recorder.status === 'recording') {
@@ -320,15 +312,43 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
     } else if (recorder.status === 'requesting') {
       cancelRecorder()
     }
-  }, [
-    collapsed,
-    nativeRecorder,
-    native,
-    settings.recordingMenuBar,
-    recorder.status,
-    cancelRecorder,
-    stopAndSave,
-  ])
+  }, [collapsed, nativeRecorder, recorder.status, cancelRecorder, stopAndSave])
+
+  // Native recordings are read through refs: only the sidebar's own changes
+  // (and a recording's start) drive the effects below, never a status tick.
+  const nativeRef = useRef(native)
+  const recordingMenuBarRef = useRef(settings.recordingMenuBar)
+  useEffect(() => {
+    nativeRef.current = native
+    recordingMenuBarRef.current = settings.recordingMenuBar
+  })
+
+  // A native recording stays visible in the menu bar; without that item,
+  // collapsing the sidebar would hide it, so the collapse ends it like a
+  // webview one. Only the collapse itself does: a recording started while
+  // collapsed (the global shortcut) is shown instead, below.
+  const previousCollapsedRef = useRef(collapsed)
+  useEffect(() => {
+    const wasCollapsed = previousCollapsedRef.current
+    previousCollapsedRef.current = collapsed
+    const current = nativeRef.current
+    if (!collapsed || wasCollapsed || !current.supported) {
+      return
+    }
+    if (current.recordingSince !== null && !recordingMenuBarRef.current) {
+      current.toggle()
+    }
+  }, [collapsed])
+
+  // A native recording started elsewhere while collapsed, with no menu bar
+  // item to show it: expand the sidebar, as the mic button does on a start.
+  const nativeRecordingSince = native.recordingSince
+  useEffect(() => {
+    if (nativeRecordingSince === null || !collapsedRef.current || recordingMenuBarRef.current) {
+      return
+    }
+    toggleSidebar()
+  }, [nativeRecordingSince, toggleSidebar])
 
   const nativeElapsedMs = useNativeElapsed(native.recordingSince)
 

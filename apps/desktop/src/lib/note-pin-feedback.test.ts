@@ -29,8 +29,6 @@ function setup() {
   const desktopKey = queryKeys.index.allNotesWithTag('/g', null)
   const mobileKey = queryKeys.index.mobileAllNotesWithSearch('/g', { text: '' })
   const note: PinnedNote = {
-    isPrivate: false,
-    hasConflict: false,
     path: input.path,
     title: 'a',
     dailyDate: null,
@@ -69,23 +67,19 @@ function setup() {
 }
 
 describe('pin feedback', () => {
-  it('shows Private and conflict metadata from the existing read before the first pin is persisted', async () => {
+  it('shows the pin before the note file has been read', async () => {
     const { input, queryClient, shelfKey } = setup()
-    readNoteSource.mockResolvedValueOnce(
-      '---\nprivate: true\n---\n# A\n\n<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n',
-    )
-    const write = Promise.withResolvers<void>()
-    commitNoteFrontmatter.mockReturnValueOnce(write.promise)
+    const read = Promise.withResolvers<string>()
+    readNoteSource.mockReturnValueOnce(read.promise)
     const action = toggleNotePinned(input)
-    await vi.waitFor(() => expect(commitNoteFrontmatter).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(readNoteSource).toHaveBeenCalledTimes(1))
     expect(queryClient.getQueryData<PinnedNote[]>(shelfKey)?.[0]).toMatchObject({
       path: input.path,
-      isPrivate: true,
-      hasConflict: true,
     })
-    expect(readNoteSource).toHaveBeenCalledTimes(1)
-    write.resolve()
+    expect(commitNoteFrontmatter).not.toHaveBeenCalled()
+    read.resolve('# A\n')
     await action
+    expect(commitNoteFrontmatter).toHaveBeenCalledTimes(1)
   })
 
   it('updates the shelf and existing list markers before persistence resolves', async () => {

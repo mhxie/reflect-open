@@ -1,5 +1,6 @@
 import { sql } from 'kysely'
 import { isNotNullish } from '@ocavue/utils'
+import { z } from 'zod'
 import { db } from './db.ts'
 
 /** How much was written in one day's daily note. */
@@ -38,13 +39,20 @@ export interface DailyEditCount {
   notes: number
 }
 
+/** A raw `listDailyEditCounts` row, as the SQL names its columns. */
+const dailyEditCountRowSchema = z.object({
+  date: z.string(),
+  notes: z.number().int().nonnegative(),
+})
+
 /**
  * Per-day note counts matching All Notes' edit-day filter: each note counts on
  * the local day of its last edit, and a daily note also on its own date. The
  * union drops the double count when the two coincide.
  */
 export async function listDailyEditCounts(): Promise<DailyEditCount[]> {
-  const { rows } = await sql<{ date: string; notes: number }>`
+  // Raw SQL bypasses Kysely's typing, so the rows are parsed at the boundary.
+  const { rows } = await sql<unknown>`
     select day as date, count(*) as notes from (
       select path, date(mtime / 1000, 'unixepoch', 'localtime') as day
         from notes where kind in ('note', 'daily')
@@ -54,5 +62,5 @@ export async function listDailyEditCounts(): Promise<DailyEditCount[]> {
     group by day
     order by day
   `.execute(db)
-  return rows.map((row) => ({ date: row.date, notes: row.notes }))
+  return z.array(dailyEditCountRowSchema).parse(rows)
 }

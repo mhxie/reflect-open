@@ -322,8 +322,8 @@ describe('streamChat history privacy', () => {
   }
 
   const HISTORY: ModelMessage[] = [
-    ...readExchange(PRIVATE_QUESTION, PRIVATE_PATH, PRIVATE_TITLE, PRIVATE_BODY),
     ...readExchange('and atlas?', 'notes/atlas.md', 'Atlas Launch Plan', 'launch plan'),
+    ...readExchange(PRIVATE_QUESTION, PRIVATE_PATH, PRIVATE_TITLE, PRIVATE_BODY),
     { role: 'user', content: 'anything else?' },
   ]
 

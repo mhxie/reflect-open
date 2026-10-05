@@ -1,6 +1,11 @@
 import { Fragment, type Dispatch, type ReactElement, type SetStateAction } from 'react'
 import { Plus } from 'lucide-react'
-import { groupTaskContexts, type OpenTask, type TaskGroup } from '@reflect/core'
+import {
+  groupTaskContexts,
+  isLocalOnlyReadOnlyPath,
+  type OpenTask,
+  type TaskGroup,
+} from '@reflect/core'
 import { TaskBreadcrumbs } from '@/components/tasks/task-breadcrumbs.tsx'
 import { addTargetForGroup, taskGroupHeaderStyle } from '@/lib/tasks/task-group-presentation.tsx'
 import { getTaskKey } from '@/lib/tasks/task-identity.ts'
@@ -47,7 +52,9 @@ export function MobileTaskGroup({
   const showSource = group.kind !== 'note'
   const { notePath } = group
   const { icon, colorClass } = taskGroupHeaderStyle(group)
-  const addTarget = addTargetForGroup(group, today)
+  // A read-only local-only note takes no new tasks.
+  const addTarget =
+    notePath !== null && isLocalOnlyReadOnlyPath(notePath) ? null : addTargetForGroup(group, today)
   const contexts = groupTaskContexts(group.tasks)
 
   return (

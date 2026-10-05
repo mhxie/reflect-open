@@ -2,7 +2,6 @@ import type { ReactElement } from 'react'
 import type { RecentGraph } from '@reflect/core'
 import { Check } from 'lucide-react'
 import { GraphSwatch } from '@/components/graph-swatch.tsx'
-import { ShortcutKeys } from '@/components/shortcut-keys.tsx'
 import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
@@ -18,17 +17,11 @@ import { DEFAULT_GRAPH_COLOR, GRAPH_COLOR_OPTIONS } from '@/lib/graph-colors.ts'
 interface GraphMenuItemProps {
   graph: RecentGraph
   current: boolean
-  binding: string | null
   onSelect: () => void
 }
 
 /** A recent graph with separate color and switch actions in the same row. */
-export function GraphMenuItem({
-  graph,
-  current,
-  binding,
-  onSelect,
-}: GraphMenuItemProps): ReactElement {
+export function GraphMenuItem({ graph, current, onSelect }: GraphMenuItemProps): ReactElement {
   const { colorFor, setColor } = useGraphColors()
   const color = colorFor(graph.root) ?? DEFAULT_GRAPH_COLOR
 
@@ -70,11 +63,7 @@ export function GraphMenuItem({
               className="min-w-0 flex-1 gap-2 py-0 pr-2 pl-0 text-[13px] text-text-secondary"
             >
               <span className="min-w-0 flex-1 truncate">{graph.name}</span>
-              {current ? (
-                <Check aria-hidden className="size-3.5 shrink-0 text-accent" />
-              ) : binding !== null ? (
-                <ShortcutKeys binding={binding} className="text-[10px]" />
-              ) : null}
+              {current ? <Check aria-hidden className="size-3.5 shrink-0 text-accent" /> : null}
             </DropdownMenuItem>
           }
         />

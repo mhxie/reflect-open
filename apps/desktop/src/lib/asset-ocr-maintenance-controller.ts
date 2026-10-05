@@ -9,6 +9,12 @@ import {
 import { createBackgroundReconciler } from './background-reconciler.ts'
 import { invalidateIndexQueries } from './query-client.ts'
 
+/**
+ * The least time between wake-triggered full scans: focus fires on every
+ * switch back to the app, and a scan reads every cache entry.
+ */
+const WAKE_SCAN_INTERVAL_MS = 5 * 60 * 1000
+
 /** Maintain existing local OCR on open/wake and source changes, even when automatic OCR is off. */
 export function startAssetOcrMaintenance(generation: number): () => void {
   if (!hasBridge()) return () => {}
@@ -17,18 +23,24 @@ export function startAssetOcrMaintenance(generation: number): () => void {
   // Open (and a retry after a failed reindex) reindexes every cached source;
   // a wake scan reindexes only what it invalidates.
   let reindexCached = true
+  // Wake scans trust an unchanged size and mtime; open and retries re-hash.
+  let trustUnchangedStat = false
+  let lastWakeScan = -Infinity
   let loggedError: string | null = null
   const loop = createBackgroundReconciler({
     pass: async (isStale) => {
       const batch = [...changed]
       const scanAll = fullScan
       const reindexAll = reindexCached
+      const trustStat = trustUnchangedStat
       fullScan = false
       reindexCached = false
+      trustUnchangedStat = false
       for (const path of batch) changed.delete(path)
       try {
         const invalidated = await reconcileCachedAssetOcr(generation, scanAll ? undefined : batch, {
           reindexCached: scanAll && reindexAll,
+          trustUnchangedStat: scanAll && trustStat,
         })
         if (isStale()) return
         const affected = [...new Set([...batch, ...invalidated])]
@@ -60,6 +72,13 @@ export function startAssetOcrMaintenance(generation: number): () => void {
     }),
   )
   const wake = (): void => {
+    const now = Date.now()
+    // A failed pass (`fullScan` still set) retries on the next wake regardless.
+    if (!fullScan) {
+      if (now - lastWakeScan < WAKE_SCAN_INTERVAL_MS) return
+      trustUnchangedStat = true
+    }
+    lastWakeScan = now
     fullScan = true
     loop.schedule()
   }

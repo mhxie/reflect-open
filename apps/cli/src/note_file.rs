@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag};
 use reflect_frontmatter::{
-    backup_privacy, parse_frontmatter, split_frontmatter, BackupPrivacy, Frontmatter,
+    backup_privacy, normalize_line_endings_keeping_privacy, parse_frontmatter, split_frontmatter,
+    BackupPrivacy, Frontmatter,
 };
-use reflect_graph_paths::{eviction_placeholder, normalize_line_endings, LocalOnlyFolders};
+use reflect_graph_paths::{eviction_placeholder, LocalOnlyFolders};
 
 use crate::error::CliError;
 use crate::keys::fold_key;
@@ -383,15 +384,7 @@ fn in_local_only_folder(root: &Path, rel_path: &str, folders: &LocalOnlyFolders)
 /// Read a note with normalized line endings unless normalization changes its
 /// frontmatter privacy verdict.
 pub fn read_note_text(path: &Path) -> std::io::Result<String> {
-    let content = fs::read_to_string(path)?;
-    if !content.contains('\r') {
-        return Ok(content);
-    }
-    let normalized = normalize_line_endings(content.clone());
-    if backup_privacy(content.as_bytes()) != backup_privacy(normalized.as_bytes()) {
-        return Ok(content);
-    }
-    Ok(normalized)
+    fs::read_to_string(path).map(normalize_line_endings_keeping_privacy)
 }
 
 /// Read a note and enforce the privacy contract: a `private: true` note, or

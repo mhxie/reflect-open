@@ -69,8 +69,8 @@ export function CustomFilterMenu({
   }
 
   // Accept "#book" as readily as "book" — the UI renders tags hash-prefixed,
-  // so people type them that way too.
-  const typed = query.trim().replace(/^#/, '')
+  // so people type them that way too. Same parsing as the pinned-filter editor.
+  const typed = query.trim().replace(/^#+/, '').trim()
   const typedKey = foldTag(typed)
   const listed = facets.some((facet) => foldTag(facet.tag) === typedKey)
   const offerTyped = typed !== '' && !listed && isTagName(typed)

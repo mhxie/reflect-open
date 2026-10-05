@@ -180,3 +180,30 @@ it('unfolds the block on Delete or Backspace beside it instead of joining it', a
   await expect.element(page.getByText('After the evidence.', { exact: true })).toBeVisible()
   await view.unmount()
 })
+
+it('deletes an empty line beside the block instead of entering it', async () => {
+  const view = await renderEntry()
+  const paragraphs = (): number => view.container.querySelectorAll('.ProseMirror p').length
+  const evidence = '@pass: reviewer | status: verified | at: 2020-01-03'
+
+  // An empty line after the block: Backspace removes the line, not evidence.
+  await page.getByText('After the evidence.').click({ position: { x: 1, y: 8 } })
+  await userEvent.keyboard('{Enter}')
+  const withEmptyLine = paragraphs()
+  await userEvent.keyboard('{ArrowUp}{Backspace}')
+  await vi.waitFor(() => expect(paragraphs()).toBe(withEmptyLine - 1))
+  const fence = (): string =>
+    view.container.querySelector('pre[data-language="anchors"]')?.textContent ?? ''
+  expect(fence()).toContain(evidence)
+
+  // An empty line before the block: Delete removes the line and leaves the
+  // evidence its own block (not pulled up into a paragraph).
+  // The click lands past the line's end, where the caret stays.
+  await page.getByText('Body of the first claim.').click()
+  await userEvent.keyboard('{Enter}')
+  const beforeBlock = paragraphs()
+  await userEvent.keyboard('{Delete}')
+  await vi.waitFor(() => expect(paragraphs()).toBe(beforeBlock - 1))
+  expect(fence()).toContain('@anchor: arxiv:2501.13956 | valid_at: 2020-01-02')
+  await view.unmount()
+})

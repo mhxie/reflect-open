@@ -5,6 +5,7 @@ description = "Shared, fail-closed frontmatter parsing and privacy classificatio
 edition = "2021"
 
 [dependencies]
+reflect-graph-paths = { workspace = true }
 saphyr = "0.0.12"
 saphyr-parser = "0.0.12"
 

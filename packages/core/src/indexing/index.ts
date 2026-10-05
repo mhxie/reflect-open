@@ -152,6 +152,7 @@ export {
   type AttachmentReferenceRow,
 } from './attachment-library.ts'
 export {
+  firstExistingAttachment,
   listAttachmentPreviews,
   listNotes,
   listNoteTags,

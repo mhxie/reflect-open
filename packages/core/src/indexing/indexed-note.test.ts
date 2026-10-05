@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version for device-only attachment provenance', () => {
-    expect(PROJECTION_VERSION).toBe(28)
+  it('carries the projection version for withheld private key variants', () => {
+    expect(PROJECTION_VERSION).toBe(29)
   })
 
   it('marks a note private when its frontmatter cannot be read', () => {

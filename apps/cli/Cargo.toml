@@ -16,6 +16,9 @@ reflect-index-schema = { path = "../../crates/index-schema", default-features = 
 reflect-graph-paths = { workspace = true }
 reflect-frontmatter = { workspace = true }
 clap = { version = "4.6.6", features = ["derive"] }
+# The desktop settings document's location, for local-only folders when a
+# graph has no index (`local_only_settings`).
+dirs = "7.0.0"
 jiff = "0.2.37"
 sha2 = { workspace = true }
 pulldown-cmark = "0.13.4"

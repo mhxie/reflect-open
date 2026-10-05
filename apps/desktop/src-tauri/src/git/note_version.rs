@@ -1,12 +1,25 @@
 //! Read the last commit for one literal note path without inspecting working bytes.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use git2::{Commit, ErrorCode, Oid};
 
 use crate::error::{AppError, AppResult};
 
 use super::repo;
+
+/// Versions already resolved against one graph's HEAD. History walks can be
+/// long for an old note, and nothing they read changes until HEAD moves, so a
+/// new HEAD (or another graph) replaces the whole set.
+struct ResolvedVersions {
+    root: PathBuf,
+    head: Oid,
+    versions: HashMap<String, Option<String>>,
+}
+
+static RESOLVED: Mutex<Option<ResolvedVersions>> = Mutex::new(None);
 
 fn note_entry(commit: &Commit<'_>, path: &Path) -> AppResult<Option<(Oid, i32)>> {
     match commit.tree()?.get_path(path) {
@@ -16,38 +29,39 @@ fn note_entry(commit: &Commit<'_>, path: &Path) -> AppResult<Option<(Oid, i32)>>
     }
 }
 
-/// Return the last path-changing commit for a note present in HEAD's tree.
-///
-/// Tree lookup treats glob punctuation and Git pathspec prefixes literally.
-/// When a merge retains a parent's note entry, follow that parent rather than
-/// assigning the unrelated merge commit or a discarded branch's version.
-pub(super) fn note_version(root: &Path, path: &str) -> AppResult<Option<String>> {
-    if !reflect_graph_paths::is_note(path) {
-        return Err(AppError::traversal(format!(
-            "expected a canonical graph-relative note path: {path:?}"
-        )));
-    }
-    if !root.join(".git").exists() {
-        return Ok(None);
-    }
-    let repository = repo::open_existing(root)?;
-    let mut commit = match repository.head() {
-        Ok(head) => head.peel_to_commit()?,
-        Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
-            return Ok(None)
-        }
-        Err(error) => return Err(error.into()),
+fn cached_version(root: &Path, head: Oid, path: &str) -> Option<Option<String>> {
+    let resolved = RESOLVED.lock().unwrap_or_else(PoisonError::into_inner);
+    resolved
+        .as_ref()
+        .filter(|resolved| resolved.head == head && resolved.root == root)
+        .and_then(|resolved| resolved.versions.get(path).cloned())
+}
+
+fn remember_version(root: &Path, head: Oid, path: &str, version: Option<String>) {
+    let mut resolved = RESOLVED.lock().unwrap_or_else(PoisonError::into_inner);
+    let current = match resolved.take() {
+        Some(current) if current.head == head && current.root == root => current,
+        _ => ResolvedVersions {
+            root: root.to_path_buf(),
+            head,
+            versions: HashMap::new(),
+        },
     };
-    let path = Path::new(path);
-    if note_entry(&commit, path)?.is_none() {
+    let current = resolved.insert(current);
+    current.versions.insert(path.to_string(), version);
+}
+
+/// Walk back from `commit` while some parent holds the same note entry. The
+/// entry is fixed along the walk, so each step reads only the parents' trees.
+fn last_change(mut commit: Commit<'_>, path: &Path) -> AppResult<Option<String>> {
+    let Some(entry) = note_entry(&commit, path)? else {
         return Ok(None);
-    }
+    };
     loop {
-        let entry = note_entry(&commit, path)?;
         let mut unchanged_parent = None;
         for index in 0..commit.parent_count() {
             let parent = commit.parent(index)?;
-            if note_entry(&parent, path)? == entry {
+            if note_entry(&parent, path)? == Some(entry) {
                 unchanged_parent = Some(parent);
                 break;
             }
@@ -62,6 +76,38 @@ pub(super) fn note_version(root: &Path, path: &str) -> AppResult<Option<String>>
             .map_err(|_| AppError::parse("Git returned an invalid abbreviated commit id"))?;
         return Ok(Some(sha.to_string()));
     }
+}
+
+/// Return the last path-changing commit for a note present in HEAD's tree.
+///
+/// Tree lookup treats glob punctuation and Git pathspec prefixes literally.
+/// When a merge retains a parent's note entry, follow that parent rather than
+/// assigning the unrelated merge commit or a discarded branch's version.
+/// Results are reused until HEAD moves.
+pub(super) fn note_version(root: &Path, path: &str) -> AppResult<Option<String>> {
+    if !reflect_graph_paths::is_note(path) {
+        return Err(AppError::traversal(format!(
+            "expected a canonical graph-relative note path: {path:?}"
+        )));
+    }
+    if !root.join(".git").exists() {
+        return Ok(None);
+    }
+    let repository = repo::open_existing(root)?;
+    let commit = match repository.head() {
+        Ok(head) => head.peel_to_commit()?,
+        Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
+            return Ok(None)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let head = commit.id();
+    if let Some(version) = cached_version(root, head, path) {
+        return Ok(version);
+    }
+    let version = last_change(commit, Path::new(path))?;
+    remember_version(root, head, path, version.clone());
+    Ok(version)
 }
 
 #[cfg(test)]
@@ -324,6 +370,27 @@ mod tests {
         assert_eq!(
             note_version(graph.path(), "notes/note.md").unwrap(),
             Some(short_sha(&repository, merged))
+        );
+    }
+
+    #[test]
+    fn a_moved_head_resolves_again_instead_of_reusing_the_previous_version() {
+        let graph = tempdir().unwrap();
+        let repository = Repository::init(graph.path()).unwrap();
+        let first = commit_note(&repository, "notes/note.md", "first version");
+        let second = commit_note(&repository, "notes/note.md", "second version");
+        assert_eq!(
+            note_version(graph.path(), "notes/note.md").unwrap(),
+            Some(short_sha(&repository, second))
+        );
+        assert_eq!(
+            note_version(graph.path(), "notes/note.md").unwrap(),
+            Some(short_sha(&repository, second))
+        );
+        repository.set_head_detached(first).unwrap();
+        assert_eq!(
+            note_version(graph.path(), "notes/note.md").unwrap(),
+            Some(short_sha(&repository, first))
         );
     }
 }

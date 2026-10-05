@@ -45,7 +45,7 @@ interface WikiScreenProps {
  * route; order, grouping, and folded topics are settings. Keyboard follows
  * All Notes, without trash: wiki entries are maintained by their own pipeline.
  */
-export function WikiScreen({ filter, language }: WikiScreenProps): ReactElement {
+export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): ReactElement {
   const { graph } = useGraph()
   const { settings, updateSettingsWith } = useSettings()
   const { navigate } = useRouter()
@@ -62,6 +62,13 @@ export function WikiScreen({ filter, language }: WikiScreenProps): ReactElement 
   const translation =
     languages.find((candidate) => candidate !== source && candidate.folder === language) ?? null
   const openLanguage = translation?.folder ?? null
+  // Likewise, a "Missing" filter for a removed language reads as no filter:
+  // no entry has a copy there any more, so it would match them all.
+  const filter =
+    routeFilter?.kind === 'untranslated' &&
+    !languages.some((candidate) => candidate !== source && candidate.folder === routeFilter.folder)
+      ? null
+      : routeFilter
 
   const bridgeReady = useBridgeReady()
   const { data: entries, error } = useQuery({

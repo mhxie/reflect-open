@@ -17,8 +17,9 @@
 //! ([`Identity`]), a create only while the name is free. An upload already
 //! staged in `.reflect/tmp/` lands the same way, under the first free name.
 //! A delete first moves the file into a fresh random directory under
-//! `.reflect/trash/`, so the path-based OS-trash call that follows names a
-//! place nothing else can occupy. `.reflect/recovery/` keeps one unsaved
+//! `.reflect/trash/` (or, for a file on another volume, a fresh hidden one
+//! beside it), so the path-based OS-trash call that follows names a place
+//! nothing else can occupy. `.reflect/recovery/` keeps one unsaved
 //! buffer per note and editor session.
 //!
 //! Git sync's pull walks the graph the same way before it moves an entry
@@ -927,30 +928,140 @@ fn land_under_a_free_name(
     Ok(None)
 }
 
+/// Where [`trash_beneath`] staged a note for the path-based OS-trash call.
+#[derive(Debug)]
+pub(crate) enum TrashStage {
+    /// In a fresh `.reflect/trash/<random>/`, on the graph's volume. The
+    /// note stays there when the OS trash refuses it.
+    Graph(PathBuf),
+    /// In a fresh hidden directory beside the note, on the note's own volume
+    /// (its folder is not on the graph's). The note goes back under its name
+    /// when the OS trash refuses it.
+    Beside(BesideStage),
+}
+
+impl TrashStage {
+    /// The staged note's path, for the OS-trash call.
+    pub(crate) fn path(&self) -> PathBuf {
+        match self {
+            Self::Graph(path) => path.clone(),
+            Self::Beside(stage) => stage.slot_dir.path.join(&stage.name),
+        }
+    }
+
+    /// The OS trash took the note: drop the emptied hidden directory (best
+    /// effort; a staged `.reflect/trash/` slot stays like any other).
+    pub(crate) fn trashed(self) {
+        if let Self::Beside(stage) = self {
+            let _ = rustix::fs::unlinkat(&stage.dir.file, stage.slot.as_str(), AtFlags::REMOVEDIR);
+        }
+    }
+
+    /// The OS trash refused the note. Staged in the graph's trash it stays
+    /// there (`Ok(true)`); staged beside, it moves back under its name, never
+    /// replacing whatever took that name meanwhile (`Ok(false)`).
+    pub(crate) fn refused(self) -> BeneathResult<bool> {
+        let stage = match self {
+            Self::Graph(_) => return Ok(true),
+            Self::Beside(stage) => stage,
+        };
+        rustix::fs::renameat_with(
+            &stage.slot_dir.file,
+            stage.name.as_os_str(),
+            &stage.dir.file,
+            stage.name.as_os_str(),
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(rename_error)?;
+        sync_dir(&stage.dir);
+        let _ = rustix::fs::unlinkat(&stage.dir.file, stage.slot.as_str(), AtFlags::REMOVEDIR);
+        Ok(false)
+    }
+}
+
+/// A note staged in a hidden directory beside it ([`TrashStage::Beside`]).
+#[derive(Debug)]
+pub(crate) struct BesideStage {
+    /// The note's own directory.
+    dir: BeneathDir,
+    /// The hidden directory's name in `dir`.
+    slot: String,
+    slot_dir: BeneathDir,
+    name: std::ffi::OsString,
+}
+
 /// Move `name` out of `dir` into a fresh `.reflect/trash/<128-bit random>/`
 /// directory (`0o700`, walked from `graph_root`) and return its path there
 /// for the OS trash: that call only takes a path, and this one names a
-/// directory nothing else can occupy. The move never replaces an entry or
-/// follows a symlink, and must stay on the note's volume (else
-/// [`BeneathError::CrossDevice`]). On failure the note stays where it was.
+/// directory nothing else can occupy. When `dir` is on another volume than
+/// the graph, the note moves instead into a fresh hidden
+/// `.reflect-trash-<128-bit random>/` directory (`0o700`) beside it, so its
+/// bytes never leave their volume. The move never replaces an entry or
+/// follows a symlink. On failure the note stays where it was.
 pub(crate) fn trash_beneath(
     graph_root: &BeneathDir,
     dir: &BeneathDir,
     name: impl AsRef<OsStr>,
-) -> BeneathResult<PathBuf> {
+) -> BeneathResult<TrashStage> {
     let name = plain_name(name.as_ref())?;
     let trash = walk(
         graph_root,
         &[REFLECT_DIR, TRASH_DIR],
         Some(PRIVATE_DIR_MODE),
     )?;
+    if !on_graph_volume(&trash, dir)? {
+        return Ok(TrashStage::Beside(stage_beside(dir, name)?));
+    }
     let slot = random_hex()?;
     rustix::fs::mkdirat(&trash.file, slot.as_str(), PRIVATE_DIR_MODE)?;
     let moved = move_into_slot(&trash, &slot, dir, name);
     if moved.is_err() {
         let _ = rustix::fs::unlinkat(&trash.file, slot.as_str(), AtFlags::REMOVEDIR);
     }
-    moved
+    moved.map(TrashStage::Graph)
+}
+
+/// Whether `dir` shares the graph trash's volume.
+fn on_graph_volume(trash: &BeneathDir, dir: &BeneathDir) -> BeneathResult<bool> {
+    #[cfg(test)]
+    if seam::TRASH_ELSEWHERE.get() {
+        return Ok(false);
+    }
+    same_volume(trash, dir)
+}
+
+/// Move `name` into a fresh hidden directory in `dir` itself.
+fn stage_beside(dir: &BeneathDir, name: &OsStr) -> BeneathResult<BesideStage> {
+    let owned = BeneathDir {
+        file: dir.file.try_clone()?,
+        path: dir.path.clone(),
+    };
+    let slot = format!(".reflect-trash-{}", random_hex()?);
+    rustix::fs::mkdirat(&dir.file, slot.as_str(), PRIVATE_DIR_MODE)?;
+    let staged = descend(dir, OsStr::new(&slot), None).and_then(|slot_dir| {
+        rustix::fs::renameat_with(
+            &dir.file,
+            name,
+            &slot_dir.file,
+            name,
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(rename_error)?;
+        sync_dir(dir);
+        Ok(slot_dir)
+    });
+    match staged {
+        Ok(slot_dir) => Ok(BesideStage {
+            dir: owned,
+            slot,
+            slot_dir,
+            name: name.to_owned(),
+        }),
+        Err(err) => {
+            let _ = rustix::fs::unlinkat(&dir.file, slot.as_str(), AtFlags::REMOVEDIR);
+            Err(err)
+        }
+    }
 }
 
 fn move_into_slot(
@@ -998,35 +1109,50 @@ pub(crate) fn write_recovery(
     source_revision: Option<&str>,
     contents: &str,
 ) -> BeneathResult<RecoveryCopy> {
-    let name = recovery_name(owner_id)?;
+    recovery_name(owner_id)?;
     let slot = recovery_slot(path);
     let dir = walk(
         graph_root,
         &[REFLECT_DIR, RECOVERY_DIR, &slot],
         Some(PRIVATE_DIR_MODE),
     )?;
-    let sequence = recovery_copies(&dir, path)?
-        .into_iter()
-        .map(|copy| copy.sequence)
-        .max()
-        .unwrap_or(0)
-        .checked_add(1)
-        .ok_or_else(|| std::io::Error::other("recovery sequence exhausted"))?;
     let copy = RecoveryCopy {
         path: path.to_owned(),
         owner_id: owner_id.to_owned(),
         token: random_hex()?,
         source_revision: source_revision.map(str::to_owned),
-        sequence,
+        sequence: next_recovery_sequence(&dir, path)?,
         saved_at_ms: now_ms(),
         contents: contents.to_owned(),
     };
-    let json = serde_json::to_vec(&copy).map_err(std::io::Error::other)?;
-    let staged = Staged::write(graph_root, &dir, &json, None)?;
-    rustix::fs::renameat(staged.dir(), staged.name.as_str(), &dir.file, name.as_str())?;
-    staged.landed();
+    land_recovery_copy(graph_root, &dir, &copy)?;
     sync_dir(&dir);
     Ok(copy)
+}
+
+/// One past the highest sequence among the copies in `dir`.
+fn next_recovery_sequence(dir: &BeneathDir, path: &str) -> BeneathResult<u64> {
+    Ok(recovery_copies(dir, path)?
+        .into_iter()
+        .map(|copy| copy.sequence)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| std::io::Error::other("recovery sequence exhausted"))?)
+}
+
+/// Atomically put `copy` in `dir` as its owner's file, replacing that owner's earlier one.
+fn land_recovery_copy(
+    graph_root: &BeneathDir,
+    dir: &BeneathDir,
+    copy: &RecoveryCopy,
+) -> BeneathResult<()> {
+    let name = recovery_name(&copy.owner_id)?;
+    let json = serde_json::to_vec(copy).map_err(std::io::Error::other)?;
+    let staged = Staged::write(graph_root, dir, &json, None)?;
+    rustix::fs::renameat(staged.dir(), staged.name.as_str(), &dir.file, name.as_str())?;
+    staged.landed();
+    Ok(())
 }
 
 /// The newest unresolved session copy, ordered independently of wall-clock time.
@@ -1066,9 +1192,10 @@ pub(crate) fn clear_recovery(
     let Some(read) = missing_as_none(read_beneath(&dir, &name))? else {
         return Ok(());
     };
-    let copy: RecoveryCopy = serde_json::from_slice(&read.bytes)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
-    if copy.path != path || copy.owner_id != owner_id || copy.token != token {
+    let Some(copy) = parse_recovery_copy(&dir, &name, &read.bytes, owner_id, path) else {
+        return Ok(()); // not a version anyone holds a token for
+    };
+    if copy.token != token {
         return Ok(());
     }
     rustix::fs::unlinkat(&dir.file, name.as_str(), AtFlags::empty())?;
@@ -1076,6 +1203,71 @@ pub(crate) fn clear_recovery(
     Ok(())
 }
 
+/// Drop every session's copy for the note at `path`, slot and all: the note
+/// was deleted. Callers hold `NOTE_WRITE_LOCK`.
+pub(crate) fn drop_recovery(graph_root: &BeneathDir, path: &str) -> BeneathResult<()> {
+    let Some(recovery) = missing_as_none(walk(graph_root, &[REFLECT_DIR, RECOVERY_DIR], None))?
+    else {
+        return Ok(());
+    };
+    let slot = recovery_slot(path);
+    let Some(dir) = missing_as_none(descend(&recovery, OsStr::new(&slot), None))? else {
+        return Ok(());
+    };
+    for entry in rustix::fs::Dir::read_from(&dir.file)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+        // Never follows: a link is removed as itself, and a directory refuses.
+        rustix::fs::unlinkat(&dir.file, name, AtFlags::empty())?;
+    }
+    rustix::fs::unlinkat(&recovery.file, slot.as_str(), AtFlags::REMOVEDIR)?;
+    sync_dir(&recovery);
+    Ok(())
+}
+
+/// Carry every session's copy for the note at `from` over to `to`, where the
+/// note moved, rewritten for its new path and ordered after any copy already
+/// there. Callers hold `NOTE_WRITE_LOCK`.
+pub(crate) fn move_recovery(graph_root: &BeneathDir, from: &str, to: &str) -> BeneathResult<()> {
+    let from_slot = recovery_slot(from);
+    let Some(from_dir) = missing_as_none(walk(
+        graph_root,
+        &[REFLECT_DIR, RECOVERY_DIR, &from_slot],
+        None,
+    ))?
+    else {
+        return Ok(());
+    };
+    let mut copies = recovery_copies(&from_dir, from)?;
+    if !copies.is_empty() {
+        copies.sort_by_key(|copy| copy.sequence);
+        let to_slot = recovery_slot(to);
+        let to_dir = walk(
+            graph_root,
+            &[REFLECT_DIR, RECOVERY_DIR, &to_slot],
+            Some(PRIVATE_DIR_MODE),
+        )?;
+        let after = next_recovery_sequence(&to_dir, to)?;
+        for mut copy in copies {
+            copy.path = to.to_owned();
+            copy.sequence = copy
+                .sequence
+                .checked_add(after)
+                .ok_or_else(|| std::io::Error::other("recovery sequence exhausted"))?;
+            land_recovery_copy(graph_root, &to_dir, &copy)?;
+        }
+        sync_dir(&to_dir);
+    }
+    drop_recovery(graph_root, from)
+}
+
+/// Every usable copy in `dir`. An entry that is not a copy for this slot
+/// (unparsable, or naming another owner, path, or token) is skipped with a
+/// warning, so one damaged file never stops the others from being kept or
+/// offered. A read the walk refuses (a symlink) still fails.
 fn recovery_copies(dir: &BeneathDir, path: &str) -> BeneathResult<Vec<RecoveryCopy>> {
     let mut copies = Vec::new();
     for entry in rustix::fs::Dir::read_from(&dir.file)? {
@@ -1090,17 +1282,44 @@ fn recovery_copies(dir: &BeneathDir, path: &str) -> BeneathResult<Vec<RecoveryCo
             continue;
         }
         let read = read_beneath(dir, name)?;
-        let copy: RecoveryCopy = serde_json::from_slice(&read.bytes)
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
-        if copy.owner_id != owner_id || copy.path != path {
-            return Err(BeneathError::Traversal(
-                "recovery copy does not match its slot".into(),
-            ));
+        if let Some(copy) = parse_recovery_copy(dir, name, &read.bytes, owner_id, path) {
+            copies.push(copy);
         }
-        recovery_name(&copy.token)?;
-        copies.push(copy);
     }
     Ok(copies)
+}
+
+/// `bytes` as `owner_id`'s copy for `path`, or `None` (logged) when they are not one.
+fn parse_recovery_copy(
+    dir: &BeneathDir,
+    name: &str,
+    bytes: &[u8],
+    owner_id: &str,
+    path: &str,
+) -> Option<RecoveryCopy> {
+    let parsed = serde_json::from_slice::<RecoveryCopy>(bytes)
+        .map_err(|err| err.to_string())
+        .and_then(|copy| {
+            if copy.owner_id != owner_id || copy.path != path {
+                Err("it does not match its slot".to_owned())
+            } else if recovery_name(&copy.token).is_err() {
+                Err("its token is invalid".to_owned())
+            } else {
+                Ok(copy)
+            }
+        });
+    match parsed {
+        Ok(copy) => Some(copy),
+        Err(reason) => {
+            tracing::warn!(
+                dir = %dir.path.display(),
+                name,
+                %reason,
+                "skipping an unusable recovery copy"
+            );
+            None
+        }
+    }
 }
 
 fn recovery_name(identity: &str) -> BeneathResult<String> {
@@ -1165,6 +1384,9 @@ mod seam {
         /// Report every opened file as dataless: userland cannot set
         /// `SF_DATALESS`, so no fixture can be made.
         pub(super) static DATALESS: Cell<bool> = const { Cell::new(false) };
+        /// Report every note's directory as on another volume than the
+        /// graph's trash.
+        pub(super) static TRASH_ELSEWHERE: Cell<bool> = const { Cell::new(false) };
     }
 
     pub(super) fn before_commit() -> std::io::Result<()> {
@@ -1175,6 +1397,7 @@ mod seam {
         BEFORE_COMMIT.set(None);
         STAGING_ELSEWHERE.set(false);
         DATALESS.set(false);
+        TRASH_ELSEWHERE.set(false);
     }
 }
 
@@ -1196,6 +1419,27 @@ impl PretendDataless {
 impl Drop for PretendDataless {
     fn drop(&mut self) {
         seam::DATALESS.set(false);
+    }
+}
+
+/// Test-only, for the commands built on this module: every note directory
+/// this thread trashes from reads as on another volume than the graph
+/// until the guard drops (a second filesystem can't be mounted in tests).
+#[cfg(test)]
+pub(crate) struct PretendTrashElsewhere;
+
+#[cfg(test)]
+impl PretendTrashElsewhere {
+    pub(crate) fn engage() -> Self {
+        seam::TRASH_ELSEWHERE.set(true);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for PretendTrashElsewhere {
+    fn drop(&mut self) {
+        seam::TRASH_ELSEWHERE.set(false);
     }
 }
 
@@ -1832,7 +2076,9 @@ mod tests {
         let (root, dir) = (fixture.root(), fixture.raw_dir(""));
         fs::write(fixture.raw.join("note.md"), "# Note\n").unwrap();
 
-        let staged = trash_beneath(&root, &dir, "note.md").unwrap();
+        let TrashStage::Graph(staged) = trash_beneath(&root, &dir, "note.md").unwrap() else {
+            panic!("a note on the graph's volume stages in .reflect/trash");
+        };
         let slot = staged
             .parent()
             .and_then(Path::file_name)
@@ -1860,6 +2106,69 @@ mod tests {
             fs::read_to_string(real.join("trash").join(&slot).join("note.md")).unwrap(),
             "# Note\n"
         );
+    }
+
+    /// A note on another volume than the graph stages beside itself, in a
+    /// fresh private hidden directory: its bytes never cross volumes. A
+    /// refusal puts it back; a landed trash leaves no directory behind.
+    #[test]
+    fn a_note_on_another_volume_stages_beside_itself() {
+        let fixture = Fixture::new();
+        let _seams = Seams;
+        let (root, dir) = (fixture.root(), fixture.raw_dir(""));
+        seam::TRASH_ELSEWHERE.set(true);
+        for refuse in [true, false] {
+            fs::write(fixture.raw.join("note.md"), "# Note\n").unwrap();
+            let stage = trash_beneath(&root, &dir, "note.md").unwrap();
+            assert!(matches!(stage, TrashStage::Beside(_)));
+            let staged = stage.path();
+            let slot = staged.parent().unwrap().to_path_buf();
+            assert_eq!(slot.parent().unwrap(), fixture.raw);
+            let slot_name = slot.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(slot_name.starts_with(".reflect-trash-"), "{slot_name}");
+            assert_eq!(
+                fs::metadata(&slot).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(fs::read_to_string(&staged).unwrap(), "# Note\n");
+            assert!(!fixture.raw.join("note.md").exists());
+            assert_eq!(
+                entries(&fixture.graph.join(".reflect/trash")),
+                Vec::<String>::new()
+            );
+            if refuse {
+                assert!(!stage.refused().unwrap());
+                assert_eq!(
+                    fs::read_to_string(fixture.raw.join("note.md")).unwrap(),
+                    "# Note\n"
+                );
+            } else {
+                fs::remove_file(&staged).unwrap(); // the OS trash took it
+                stage.trashed();
+                assert!(!fixture.raw.join("note.md").exists());
+            }
+            assert!(!slot.exists());
+        }
+    }
+
+    /// A refused note whose name was taken meanwhile is never put back over
+    /// the newcomer: it stays staged and the refusal says so.
+    #[test]
+    fn a_refused_note_never_replaces_what_took_its_name() {
+        let fixture = Fixture::new();
+        let _seams = Seams;
+        let (root, dir) = (fixture.root(), fixture.raw_dir(""));
+        seam::TRASH_ELSEWHERE.set(true);
+        fs::write(fixture.raw.join("note.md"), "# Note\n").unwrap();
+        let stage = trash_beneath(&root, &dir, "note.md").unwrap();
+        let staged = stage.path();
+        fs::write(fixture.raw.join("note.md"), "# Newcomer\n").unwrap();
+        assert!(stage.refused().is_err());
+        assert_eq!(
+            fs::read_to_string(fixture.raw.join("note.md")).unwrap(),
+            "# Newcomer\n"
+        );
+        assert_eq!(fs::read_to_string(staged).unwrap(), "# Note\n");
     }
 
     #[test]
@@ -2078,6 +2387,80 @@ mod tests {
         assert_eq!(read_recovery(&root, path).unwrap(), Some(first.clone()));
         clear_recovery(&root, path, owner_a, &first.token).unwrap();
         assert_eq!(read_recovery(&root, path).unwrap(), None);
+    }
+
+    #[test]
+    fn an_unusable_recovery_entry_is_skipped_without_losing_the_others() {
+        let fixture = Fixture::new();
+        let root = fixture.root();
+        let path = "secure/note.md";
+        let owner_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let owner_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let owner_c = "cccccccccccccccccccccccccccccccc";
+        let kept = write_recovery(&root, path, owner_a, None, "A").unwrap();
+        let dir = fixture
+            .graph
+            .join(".reflect/recovery")
+            .join(recovery_slot(path));
+        fs::write(dir.join(format!("{owner_b}.json")), b"{ truncated").unwrap();
+        let elsewhere = RecoveryCopy {
+            path: "secure/other.md".into(),
+            ..kept.clone()
+        };
+        fs::write(
+            dir.join(format!("{owner_c}.json")),
+            serde_json::to_vec(&RecoveryCopy {
+                owner_id: owner_c.into(),
+                ..elsewhere
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(read_recovery(&root, path).unwrap(), Some(kept.clone()));
+        // Writing still works, the damaged owner's slot included.
+        let replaced = write_recovery(&root, path, owner_b, None, "B").unwrap();
+        assert_eq!(read_recovery(&root, path).unwrap(), Some(replaced.clone()));
+        clear_recovery(&root, path, owner_c, &kept.token).unwrap();
+        clear_recovery(&root, path, owner_b, &replaced.token).unwrap();
+        assert_eq!(read_recovery(&root, path).unwrap(), Some(kept));
+    }
+
+    #[test]
+    fn a_deleted_notes_copies_go_and_a_moved_notes_copies_follow_it() {
+        let fixture = Fixture::new();
+        let root = fixture.root();
+        let (from, to) = ("secure/note.md", "secure/2026/note.md");
+        let owner_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let owner_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let recovery = fixture.graph.join(".reflect/recovery");
+        // Nothing kept: both are no-ops.
+        drop_recovery(&root, from).unwrap();
+        move_recovery(&root, from, to).unwrap();
+        assert_eq!(entries(&recovery), Vec::<String>::new());
+
+        let waiting = write_recovery(&root, to, owner_b, None, "already at to").unwrap();
+        write_recovery(&root, from, owner_a, Some("disk"), "first").unwrap();
+        let newest = write_recovery(&root, from, owner_b, None, "newest").unwrap();
+        move_recovery(&root, from, to).unwrap();
+        assert_eq!(read_recovery(&root, from).unwrap(), None);
+        assert_eq!(entries(&recovery), vec![recovery_slot(to)]);
+        let carried = read_recovery(&root, to).unwrap().unwrap();
+        assert_eq!(
+            (carried.path.as_str(), carried.contents.as_str()),
+            (to, "newest")
+        );
+        assert_eq!(carried.token, newest.token);
+        assert_ne!(carried.token, waiting.token);
+        // The carried copies resolve by their tokens at the new path.
+        clear_recovery(&root, to, owner_b, &newest.token).unwrap();
+        let first = read_recovery(&root, to).unwrap().unwrap();
+        assert_eq!(first.contents, "first");
+        assert_eq!(first.source_revision.as_deref(), Some("disk"));
+
+        drop_recovery(&root, to).unwrap();
+        assert_eq!(read_recovery(&root, to).unwrap(), None);
+        assert_eq!(entries(&recovery), Vec::<String>::new());
     }
 
     #[test]

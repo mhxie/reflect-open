@@ -192,6 +192,7 @@ describe('ActivitySection', () => {
     await userEvent.keyboard('{ArrowUp}')
     await userEvent.keyboard('{ArrowLeft}')
     await expect.element(page.getByRole('gridcell', { name: /^2026-09-25/ })).toHaveFocus()
+    await expect.element(page.getByText('09-25 · No notes')).toBeVisible()
     await userEvent.keyboard('{Enter}')
 
     await expect.element(page.getByTestId('route')).toHaveTextContent(editedOn('2026-09-25'))

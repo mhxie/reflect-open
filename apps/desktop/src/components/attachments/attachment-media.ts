@@ -20,7 +20,11 @@ export const CARD_FOOTER_HEIGHT = 52
 /** Extensions the raster preview filter can serve. */
 const RASTER_THUMBNAIL_EXTENSIONS = new Set(['gif', 'jpeg', 'jpg', 'png', 'webp'])
 
-/** A card preview's height-to-width ratio is held to this range; the media is cropped to fit. */
+/**
+ * A card preview's height-to-width ratio is held to this range; the media is
+ * cropped to fit. The shell crops image thumbnails to `MAX_RATIO` as well
+ * (`MAX_HEIGHT_RATIO` in `fs/image_thumbnail.rs`); keep the two in step.
+ */
 const MIN_RATIO = 0.4
 const MAX_RATIO = 1.8
 
