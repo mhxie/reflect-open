@@ -6,6 +6,8 @@ import {
   type TaskSnapshot,
 } from '@reflect/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createInsertedTaskRow } from '@/lib/tasks/task-insert-target.ts'
+import { todaysDailyTarget } from '@/lib/tasks/task-navigation.ts'
 import {
   continueTaskInContext,
   convertTaskToBullet,
@@ -402,6 +404,48 @@ describe('editAndConvertTaskToBullet', () => {
 })
 
 describe('insertTask', () => {
+  it.each(['disk', 'session'])(
+    'uses the existing Private daily source on the %s path before caching a Current task',
+    async (owner) => {
+      const source = '---\nprivate: true\n---\n\n# Today\n'
+      const target = todaysDailyTarget('2026-06-14')
+      openSession.mockReturnValue(owner === 'session' ? sessionOver(source) : null)
+      readNote.mockResolvedValue(source)
+      writeNote.mockResolvedValue(undefined)
+      const created = await insertTask(target.notePath, 7)
+      const row = createInsertedTaskRow(target, created)
+      expect(row).toMatchObject({
+        notePath: 'daily/2026-06-14.md',
+        isPrivate: true,
+        hasConflict: false,
+      })
+      expect(readNote).toHaveBeenCalledTimes(owner === 'disk' ? 1 : 0)
+    },
+  )
+
+  it('takes metadata from the final source after a concurrent private change', async () => {
+    openSession.mockReturnValue(null)
+    readNote
+      .mockResolvedValueOnce('# Today\n')
+      .mockResolvedValue('---\nprivate: true\n---\n\n# Today\n')
+    writeNote.mockRejectedValueOnce(CHANGED_ON_DISK).mockResolvedValue(undefined)
+    const created = await insertTask('daily/2026-06-14.md', 7)
+    expect(created).toMatchObject({ isPrivate: true, hasConflict: false })
+    expect(readNote).toHaveBeenCalledTimes(2)
+    expect(writeNote).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an editable Local-only inserted task private', async () => {
+    openSession.mockReturnValue(null)
+    readNote.mockResolvedValue('# Ledger\n')
+    writeNote.mockResolvedValue(undefined)
+    await expect(insertTask('finance/secure/ledger.md', 7)).resolves.toMatchObject({
+      isPrivate: true,
+      hasConflict: false,
+    })
+    expect(readNote).toHaveBeenCalledTimes(1)
+  })
+
   it('writes round task syntax to an empty note', async () => {
     openSession.mockReturnValue(null)
     readNote.mockResolvedValue('')
@@ -412,6 +456,8 @@ describe('insertTask', () => {
       markdown: '',
       breadcrumbs: [],
       checked: false,
+      isPrivate: false,
+      hasConflict: false,
     })
     expect(writeNote).toHaveBeenCalledWith('notes/a.md', '+ [ ] \n', 7, '')
   })
@@ -435,7 +481,10 @@ describe('insertTask', () => {
     readNote.mockRejectedValue(Object.assign(new Error('missing'), { kind: 'notFound' }))
     writeNote.mockResolvedValue(undefined)
 
-    await insertTask('daily/2026-06-14.md', 7)
+    await expect(insertTask('daily/2026-06-14.md', 7)).resolves.toMatchObject({
+      isPrivate: false,
+      hasConflict: false,
+    })
     // Created only while still missing: the write names no prior contents.
     expect(writeNote).toHaveBeenCalledWith('daily/2026-06-14.md', '+ [ ] \n', 7, null)
   })
@@ -480,6 +529,8 @@ describe('continueTaskInContext', () => {
       markdown: '',
       breadcrumbs: ['StartupToolbox', 'Reflections'],
       checked: false,
+      isPrivate: false,
+      hasConflict: false,
     })
     expect(projectTasks(written)[1]?.breadcrumbs).toEqual(['StartupToolbox', 'Reflections'])
     expect(movedFrom(result, [0, 1, 1])).toMatchObject({
@@ -504,6 +555,8 @@ describe('continueTaskInContext', () => {
       markdown: '',
       breadcrumbs: ['Group'],
       checked: false,
+      isPrivate: false,
+      hasConflict: false,
     })
     expect(movedFrom(result, [0, 1])).toBeNull()
     expect(movedFrom(result, [0, 2])).toMatchObject({ astPath: [0, 1], markdown: 'peer' })

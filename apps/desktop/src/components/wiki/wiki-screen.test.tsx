@@ -224,7 +224,7 @@ beforeEach(() => {
       return []
     }
     if (query.includes('"file_hash"')) {
-      return fixture.notes
+      return fixture.notes.map((note) => ({ is_private: 0, has_conflict: 0, ...note }))
     }
     return []
   })

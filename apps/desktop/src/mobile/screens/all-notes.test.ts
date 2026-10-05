@@ -12,11 +12,19 @@ function hit(overrides: Partial<FilteredSearchHit>): FilteredSearchHit {
     preview: '',
     mtime: 0,
     isPinned: false,
+    isPrivate: false,
+    hasConflict: false,
     ...overrides,
   }
 }
 
 describe('rowForHit', () => {
+  it('preserves note privacy and conflict metadata for the state indicator', () => {
+    const row = rowForHit(hit({ isPrivate: true, hasConflict: true }))
+    expect(row.isPrivate).toBe(true)
+    expect(row.hasConflict).toBe(true)
+  })
+
   it('renders an FTS snippet as highlighted segments', () => {
     // \u0001/\u0002 are the index's highlight markers (core's search.ts).
     const row = rowForHit(hit({ snippet: 'a \u{1}match\u{2} here' }))

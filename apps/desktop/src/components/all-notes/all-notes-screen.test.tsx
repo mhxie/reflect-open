@@ -97,12 +97,16 @@ const TOKYO_MTIME = new Date(2020, 0, 10, 12, 0).getTime()
 
 const noteRows = [
   {
+    is_private: 0,
+    has_conflict: 0,
     path: 'notes/health.md',
     title: 'Health Stacked',
     mtime: HEALTH_MTIME,
     preview: 'Shop your health goals.',
   },
   {
+    is_private: 0,
+    has_conflict: 0,
     path: 'notes/tokyo.md',
     title: 'Tokyo Gâteau',
     mtime: TOKYO_MTIME,
@@ -110,6 +114,8 @@ const noteRows = [
   },
 ]
 const taggedDailyRow = {
+  is_private: 0,
+  has_conflict: 0,
   path: 'daily/2026-06-09.md',
   title: 'June 9, 2026',
   mtime: TOKYO_MTIME,
@@ -130,6 +136,8 @@ const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Pro
 setBridge({ invoke: mockInvoke, listen: async () => () => {} })
 
 const manyNoteRows = Array.from({ length: 1000 }, (_, index) => ({
+  is_private: 0,
+  has_conflict: 0,
   path: `notes/n${index}.md`,
   title: `Note ${index}`,
   mtime: 1_000_000 - index,
@@ -290,6 +298,35 @@ async function movePinnedTagUpWithKeyboard(tag: string): Promise<void> {
 }
 
 describe('AllNotesScreen', () => {
+  it('shows indexed Private and conflict flags and keeps keyboard subject navigation', async () => {
+    mockInvoke.mockImplementation(async (command, args) => {
+      if (command !== 'db_query') return null
+      const sql = String(args['sql'])
+      if (sql.includes('"preview"'))
+        return [
+          { ...noteRows[0], is_private: 1, has_conflict: 0 },
+          { ...noteRows[1], is_private: 0, has_conflict: 1 },
+        ]
+      return sql.includes('from "tags"') ? tagRows : []
+    })
+    const view = await renderScreen()
+    const privateNote = view.getByRole('button', { name: 'Private Health Stacked', exact: true })
+    const protectedNote = view.getByRole('button', { name: 'Protected Tokyo Gâteau', exact: true })
+    await expect
+      .element(privateNote.getByRole('img', { name: 'Private', exact: true }))
+      .toBeVisible()
+    await expect
+      .element(protectedNote.getByRole('img', { name: 'Protected', exact: true }))
+      .toBeVisible()
+    expect(privateNote.element().querySelector('button')).toBeNull()
+    privateNote.element().focus()
+    await userEvent.keyboard('{Enter}')
+    await expect
+      .element(view.getByTestId('route'))
+      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/health.md' }))
+    await view.unmount()
+  })
+
   it('lists non-daily notes with subject, snippet, tags, and updated columns', async () => {
     const view = await renderScreen()
 
@@ -324,7 +361,16 @@ describe('AllNotesScreen', () => {
         return facetRows
       }
       if (sql.includes('"preview"')) {
-        return [{ path: 'notes/legacy.md', title: 'Legacy Note', mtime: 0, preview: '' }]
+        return [
+          {
+            is_private: 0,
+            has_conflict: 0,
+            path: 'notes/legacy.md',
+            title: 'Legacy Note',
+            mtime: 0,
+            preview: '',
+          },
+        ]
       }
       return []
     })
@@ -346,7 +392,14 @@ describe('AllNotesScreen', () => {
       }
       if (sql.includes('"preview"')) {
         return [
-          { path: 'notes/tim-maccaw-dad.md', title: 'Tim MacCaw // Dad', mtime: 0, preview: '' },
+          {
+            is_private: 0,
+            has_conflict: 0,
+            path: 'notes/tim-maccaw-dad.md',
+            title: 'Tim MacCaw // Dad',
+            mtime: 0,
+            preview: '',
+          },
         ]
       }
       return []
@@ -985,7 +1038,20 @@ describe('AllNotesScreen — pinned tag management', () => {
       ['auto', 'scroll'].includes(getComputedStyle(element).overflowX),
     )
     expect(strip).toBeDefined()
+    expect(strip?.clientWidth).toBeGreaterThan(0)
     expect(strip?.scrollWidth).toBeGreaterThan(strip?.clientWidth ?? 0)
+    await userEvent.keyboard('{ArrowDown}')
+    await expect.element(view.getByRole('button', { name: /Trash \(1\)/ })).toBeVisible()
+    expect(strip?.clientWidth).toBeGreaterThan(0)
+    const selectedCustom = group
+      .getByRole('button', { name: 'Custom' })
+      .element()
+      .getBoundingClientRect()
+    const newNote = view
+      .getByRole('button', { name: 'New note', exact: true })
+      .element()
+      .getBoundingClientRect()
+    expect(selectedCustom.right).toBeLessThanOrEqual(newNote.left)
     await group.getByRole('button', { name: 'Custom' }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
     await vi.waitFor(() =>
@@ -1024,9 +1090,30 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
   it('range-selects rows with Shift-click', async () => {
     const rows = [
-      { path: 'notes/a.md', title: 'Note A', mtime: 3, preview: 'alpha' },
-      { path: 'notes/b.md', title: 'Note B', mtime: 2, preview: 'bravo' },
-      { path: 'notes/c.md', title: 'Note C', mtime: 1, preview: 'charlie' },
+      {
+        is_private: 0,
+        has_conflict: 0,
+        path: 'notes/a.md',
+        title: 'Note A',
+        mtime: 3,
+        preview: 'alpha',
+      },
+      {
+        is_private: 0,
+        has_conflict: 0,
+        path: 'notes/b.md',
+        title: 'Note B',
+        mtime: 2,
+        preview: 'bravo',
+      },
+      {
+        is_private: 0,
+        has_conflict: 0,
+        path: 'notes/c.md',
+        title: 'Note C',
+        mtime: 1,
+        preview: 'charlie',
+      },
     ]
     mockInvoke.mockImplementation(async (command, args) => {
       if (command !== 'db_query') {

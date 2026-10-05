@@ -65,6 +65,65 @@ beforeEach(() => {
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
 })
 
+it.each(['title', 'body', 'related'])(
+  'shows Private metadata on %s palette results and preserves navigation',
+  async (source) => {
+    suggestWikiTargets.mockResolvedValue(
+      source === 'title'
+        ? [
+            {
+              target: 'Private note',
+              path: 'notes/private.md',
+              title: 'Private note',
+              alias: null,
+              date: null,
+              isPrivate: true,
+              hasConflict: false,
+            },
+          ]
+        : [],
+    )
+    searchWithFilters.mockResolvedValue(
+      source === 'body'
+        ? [
+            {
+              path: 'notes/private.md',
+              title: 'Private note',
+              snippet: null,
+              dailyDate: null,
+              isPrivate: true,
+              hasConflict: false,
+            },
+          ]
+        : [],
+    )
+    retrieve.mockResolvedValue(
+      source === 'related'
+        ? [
+            {
+              path: 'notes/private.md',
+              title: 'Private note',
+              score: 1,
+              heading: null,
+              snippet: 'related',
+              isPrivate: true,
+              hasConflict: false,
+              matchedBy: 'semantic',
+            },
+          ]
+        : [],
+    )
+    embedReady.value = source === 'related'
+    semanticSetting.enabled = source === 'related'
+    const { view } = await renderPalette('private')
+    await expect.element(view.getByRole('img', { name: 'Private', exact: true })).toBeVisible()
+    await view.getByText('Private note', { exact: true }).click()
+    await expect
+      .element(view.getByTestId('route'))
+      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/private.md' }))
+  },
+)
+
 function OpenOnMount({ query }: { query: string }) {
   const { openPalette } = usePalette()
   useEffect(() => {
@@ -172,7 +231,15 @@ describe('CommandPalette', () => {
 
   it('empty query shows the recent-notes recall feed', async () => {
     suggestWikiTargets.mockResolvedValue([
-      { target: 'Recent One', path: 'notes/r1.md', title: 'Recent One', alias: null, date: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        target: 'Recent One',
+        path: 'notes/r1.md',
+        title: 'Recent One',
+        alias: null,
+        date: null,
+      },
     ])
     const { view } = await renderPalette('')
     await expect.element(view.getByText('Recent One')).toBeInTheDocument()
@@ -184,6 +251,8 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
       {
+        isPrivate: false,
+        hasConflict: false,
         path: 'notes/rust.md',
         title: 'Rust Notes',
         snippet: 'about rust things',
@@ -203,7 +272,14 @@ describe('CommandPalette', () => {
   it('Shift-Enter peeks the highlighted note instead of navigating', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust Notes',
+        snippet: null,
+        dailyDate: null,
+      },
     ])
     const { view } = await renderPalette('rust')
     await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
@@ -219,6 +295,8 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
       {
+        isPrivate: false,
+        hasConflict: false,
         path: 'notes/clear.md',
         title: 'James Clear',
         snippet: '# James Clear\n- Author of [[Atomic \u{1}Habits\u{2}]]',
@@ -235,7 +313,14 @@ describe('CommandPalette', () => {
   it('modifier-click opens one note window and closes the palette synchronously', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust Notes',
+        snippet: null,
+        dailyDate: null,
+      },
     ])
     let finishOpen: (opened: boolean) => void = () => {}
     openRouteInNewWindow.mockReturnValue(
@@ -261,7 +346,14 @@ describe('CommandPalette', () => {
   it('falls back in-window after a declined modifier-click even though the palette closed', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust Notes',
+        snippet: null,
+        dailyDate: null,
+      },
     ])
     openRouteInNewWindow.mockResolvedValue(false)
     const { view } = await renderPalette('rust')
@@ -276,7 +368,14 @@ describe('CommandPalette', () => {
   it('Mod+Enter opens the highlighted note in one note window', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust Notes',
+        snippet: null,
+        dailyDate: null,
+      },
     ])
     const { view } = await renderPalette('rust')
     await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
@@ -295,7 +394,14 @@ describe('CommandPalette', () => {
   it('falls back in-window after a declined Mod+Enter', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust Notes',
+        snippet: null,
+        dailyDate: null,
+      },
     ])
     openRouteInNewWindow.mockResolvedValue(false)
     const { view } = await renderPalette('rust')
@@ -331,8 +437,22 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockClear()
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'daily/2026-06-08.md', title: '2026-06-08', dailyDate: '2026-06-08', snippet: null },
-      { path: 'notes/w.md', title: 'Work log', dailyDate: null, snippet: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'daily/2026-06-08.md',
+        title: '2026-06-08',
+        dailyDate: '2026-06-08',
+        snippet: null,
+      },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/w.md',
+        title: 'Work log',
+        dailyDate: null,
+        snippet: null,
+      },
     ])
     const { view } = await renderPalette('#work is:daily')
     await expect.element(view.getByText('Work log')).toBeInTheDocument()
@@ -367,6 +487,7 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockResolvedValue([])
     retrieve.mockClear().mockResolvedValue([
       {
+        hasConflict: false,
         path: 'notes/rust.md',
         title: 'Rust Notes',
         score: 0.9,
@@ -383,8 +504,22 @@ describe('CommandPalette', () => {
   it('previews the highlighted note and follows arrow-key selection', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/first.md', title: 'First', dailyDate: null, snippet: null },
-      { path: 'notes/second.md', title: 'Second', dailyDate: null, snippet: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/first.md',
+        title: 'First',
+        dailyDate: null,
+        snippet: null,
+      },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/second.md',
+        title: 'Second',
+        dailyDate: null,
+        snippet: null,
+      },
     ])
     readNote.mockImplementation(async (path) =>
       path === 'notes/first.md' ? '# First\n\nfirst body\n' : '# Second\n\nsecond body\n',
@@ -405,7 +540,14 @@ describe('CommandPalette', () => {
   it('frontmatter never reaches the preview', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      { path: 'notes/pinned.md', title: 'Pinned', dailyDate: null, snippet: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/pinned.md',
+        title: 'Pinned',
+        dailyDate: null,
+        snippet: null,
+      },
     ])
     readNote.mockResolvedValue('---\npinned: true\n---\n# Pinned\n\nbody\n')
     const { view } = await renderPalette('pinned')
@@ -449,6 +591,8 @@ describe('CommandPalette', () => {
   it('a daily suggestion renders its day label and opens the daily route', async () => {
     suggestWikiTargets.mockResolvedValue([
       {
+        isPrivate: false,
+        hasConflict: false,
         target: '2026-06-09',
         path: 'daily/2026-06-09.md',
         title: '2026-06-09',
@@ -468,6 +612,8 @@ describe('CommandPalette', () => {
   it('shows a `//` note by its first segment and names the alias it matched through', async () => {
     suggestWikiTargets.mockResolvedValue([
       {
+        isPrivate: false,
+        hasConflict: false,
         target: 'Tim MacCaw // Dad',
         path: 'notes/tim-maccaw-dad.md',
         title: 'Tim MacCaw // Dad',

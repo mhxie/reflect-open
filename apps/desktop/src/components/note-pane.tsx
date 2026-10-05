@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
 import {
+  deriveNoteState,
   detectConflictMarkers,
   isDaily,
   isLocalOnlyPath,
@@ -42,6 +43,7 @@ import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useNoteDocument } from '@/editor/use-note-document.ts'
 import { useNoteStatusPublisher } from '@/editor/status/use-note-status-publisher.ts'
+import { noteProtection } from '@/editor/status/note-protection.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useTemplateSlashItems } from '@/editor/use-template-slash-items.ts'
 import { useMarkdownLinkNavigation } from '@/editor/use-markdown-link-navigation.ts'
@@ -366,7 +368,7 @@ export function NotePaneComponent({
   )
 
   // One verdict for the editor's network policy and the AI menu; it follows
-  // Lock toggles live, without remounting the editor.
+  // Privacy changes live, without remounting the editor.
   const { privateNote, pending: privacyPending } = usePrivateNoteState(path, {
     sessionEpoch: document.sessionEpoch,
     privateHeader: document.privateHeader,
@@ -394,7 +396,7 @@ export function NotePaneComponent({
   // The X preload only shapes the editor's first frame, so it runs before a
   // session's first mount only, and never for a private note (it would fetch
   // the posts and write their archive). Once a session's editor has shown,
-  // the pane never returns to loading: a Lock toggle must not remount it.
+  // the pane never returns to loading: a privacy change must not remount it.
   const [shownEpoch, setShownEpoch] = useState<number | null>(null)
   const editorShown = shownEpoch === document.sessionEpoch
   const xPostsReady = useXPostPreload(
@@ -407,10 +409,39 @@ export function NotePaneComponent({
   }
   // Read-only views (protected, local-only) are counted too, from the file they show.
   const getSelectedText = useCallback(() => aiEditorRef.current?.getSelectedText() ?? '', [])
+  const protection = useMemo(
+    () =>
+      noteProtection({
+        protected: document.protected,
+        saveBlocked: document.saveBlocked,
+        initialContent: document.initialContent,
+        error: document.error,
+        conflict: document.conflict,
+        keepMine: document.keepMine,
+        loadTheirs: document.loadTheirs,
+        retrySave: document.retrySave,
+      }),
+    [
+      document.protected,
+      document.saveBlocked,
+      document.initialContent,
+      document.error,
+      document.conflict,
+      document.keepMine,
+      document.loadTheirs,
+      document.retrySave,
+    ],
+  )
   const publishStatus = useNoteStatusPublisher(
-    path,
+    generation === null ? null : { generation, path },
     document.status === 'ready' ? document.initialContent : null,
-    { pane: paneRef, getSelectedText },
+    deriveNoteState({
+      path,
+      isPrivate: privateNote,
+      readOnly: readOnlyLocal,
+      protected: document.protected || document.saveBlocked,
+    }),
+    { selection: { pane: paneRef, getSelectedText }, protection },
   )
   const { onEditorChange } = document
   const handleEditorChange = useCallback(

@@ -41,6 +41,8 @@ export interface FilteredSearchHit {
   /** File modification time (epoch ms) — drives the row's recency label. */
   mtime: number
   isPinned: boolean
+  isPrivate: boolean
+  hasConflict: boolean
 }
 
 export interface FilteredSearchOptions {
@@ -72,6 +74,8 @@ const HIT_COLUMNS = [
   'notes.preview',
   'notes.mtime',
   'notes.isPinned',
+  'notes.isPrivate',
+  'notes.hasConflict',
 ] as const
 
 /**
@@ -196,6 +200,8 @@ export async function searchWithFilters(
       highlightedTitle: displayNoteTitle(row.title),
       snippet: null,
       isPinned: row.isPinned !== 0,
+      isPrivate: row.isPrivate !== 0,
+      hasConflict: row.hasConflict !== 0,
     }))
   }
 
@@ -267,6 +273,8 @@ export async function searchWithFilters(
       highlightedTitle: displayNoteTitle(row.title),
       snippet: null,
       isPinned: row.isPinned !== 0,
+      isPrivate: row.isPrivate !== 0,
+      hasConflict: row.hasConflict !== 0,
     }))
   }
 
@@ -306,6 +314,8 @@ export async function searchWithFilters(
       'filteredNotes.preview',
       'filteredNotes.mtime',
       'filteredNotes.isPinned',
+      'filteredNotes.isPrivate',
+      'filteredNotes.hasConflict',
       'lexical.ftsHighlightedTitle',
       'lexical.snippet',
     ])
@@ -342,6 +352,8 @@ export async function searchWithFilters(
       ftsHighlightedTitle === null ? null : displayNoteTitle(ftsHighlightedTitle),
     ),
     isPinned: row.isPinned !== 0,
+    isPrivate: row.isPrivate !== 0,
+    hasConflict: row.hasConflict !== 0,
   }))
 }
 

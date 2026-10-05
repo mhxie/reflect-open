@@ -17,6 +17,7 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 
 function context(sourcePath: string, snippet: string, posFrom: number): BacklinkContext {
   return {
+    sourceHasConflict: false,
     sourcePath,
     sourceTitle: sourcePath,
     sourcePrivate: false,
@@ -38,7 +39,7 @@ beforeEach(() => {
 })
 
 describe('useBacklinkSources', () => {
-  it('loads source pages, deduplicates overlapping contexts, and preserves the indexed count', async () => {
+  it('loads source pages, deduplicates overlapping contexts, and preserves indexed metadata', async () => {
     const nextCursor = { recencyMs: 100, sourcePath: 'notes/a.md' }
     let resolveNextPage: ((page: BacklinkContextPage) => void) | undefined
     const nextPage = new Promise<BacklinkContextPage>((resolve) => {
@@ -85,7 +86,11 @@ describe('useBacklinkSources', () => {
       resolveNextPage?.({
         contexts: [
           context('notes/a.md', 'shared context', 1),
-          context('notes/b.md', 'second-page context', 3),
+          {
+            ...context('notes/b.md', 'second-page context', 3),
+            sourcePrivate: true,
+            sourceHasConflict: true,
+          },
         ],
         nextCursor: null,
         indexedLinkCount: 99,
@@ -99,6 +104,7 @@ describe('useBacklinkSources', () => {
         path: 'notes/a.md',
         title: 'notes/a.md',
         isPrivate: false,
+        hasConflict: false,
         snippets: [
           { key: 'notes/a.md:1', text: 'shared context', tasks: [] },
           { key: 'notes/a.md:2', text: 'first-page context', tasks: [] },
@@ -107,7 +113,8 @@ describe('useBacklinkSources', () => {
       {
         path: 'notes/b.md',
         title: 'notes/b.md',
-        isPrivate: false,
+        isPrivate: true,
+        hasConflict: true,
         snippets: [{ key: 'notes/b.md:3', text: 'second-page context', tasks: [] }],
       },
     ])

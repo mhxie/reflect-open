@@ -94,6 +94,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
   }),
 }))
 vi.mock('@/providers/sync-provider.tsx', () => ({
+  useSyncContext: () => null,
   useSync: () => ({
     backup: { phase: 'disconnected' },
     connectNewRepo: async () => {},
@@ -357,7 +358,13 @@ describe('Sidebar', () => {
 
   it('pinned notes render their own section', async () => {
     getPinnedNotes.mockResolvedValue([
-      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/roadmap.md',
+        title: 'Roadmap',
+        dailyDate: null,
+      },
     ])
     const { view } = await renderSidebar()
 
@@ -375,12 +382,30 @@ describe('Sidebar', () => {
     expect(roadmapPreview?.getAttribute('class')).toContain('dark:text-accent')
   })
 
+  it.each([
+    { isPrivate: true, hasConflict: false, label: 'Private' },
+    { isPrivate: false, hasConflict: true, label: 'Protected' },
+  ])('keeps $label pinned notes title-only', async ({ isPrivate, hasConflict }) => {
+    getPinnedNotes.mockResolvedValue([
+      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null, isPrivate, hasConflict },
+    ])
+    const { view } = await renderSidebar()
+    const roadmap = view.getByRole('button', { name: 'Roadmap', exact: true })
+    await expect.element(roadmap).toBeVisible()
+    expect(roadmap.element().querySelector('[role="img"]')).toBeNull()
+    expect(roadmap.element().querySelector('button')).toBeNull()
+    await roadmap.click()
+    await expect.element(roadmap).toHaveAttribute('aria-current', 'page')
+  })
+
   it('assigns floating number hints to only the first ten pinned notes', async () => {
     getPinnedNotes.mockResolvedValue(
       Array.from({ length: 11 }, (_, index) => ({
         path: `notes/pin-${index + 1}.md`,
         title: `Pin ${index + 1}`,
         dailyDate: null,
+        isPrivate: false,
+        hasConflict: false,
       })),
     )
     const { view } = await renderSidebar()
@@ -389,18 +414,24 @@ describe('Sidebar', () => {
     for (const [index, digit] of digits.entries()) {
       const row = view.getByRole('button', { name: `Pin ${index + 1}`, exact: true })
       await expect.element(row).toBeInTheDocument()
-      const hint = row.element().querySelector('[aria-hidden="true"]')
+      const hint = row.element().querySelector('span[aria-hidden="true"]')
       expect(hint).not.toBeNull()
       expect(hint?.textContent).toMatch(new RegExp(`${digit}$`))
     }
     const last = view.getByRole('button', { name: 'Pin 11', exact: true })
     await expect.element(last).toBeInTheDocument()
-    expect(last.element().querySelector('[aria-hidden="true"]')).toBeNull()
+    expect(last.element().querySelector('span[aria-hidden="true"]')).toBeNull()
   })
 
   it('modifier-click opens a pinned note in a new window without changing routes', async () => {
     getPinnedNotes.mockResolvedValue([
-      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/roadmap.md',
+        title: 'Roadmap',
+        dailyDate: null,
+      },
     ])
     const { view } = await renderSidebar()
     const roadmap = view.getByRole('button', { name: 'Roadmap' })
@@ -419,7 +450,13 @@ describe('Sidebar', () => {
 
   it('renders wiki links in pinned note titles as display text', async () => {
     getPinnedNotes.mockResolvedValue([
-      { path: 'notes/meeting.md', title: 'Meeting with [[Ada Lovelace|Ada]]', dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/meeting.md',
+        title: 'Meeting with [[Ada Lovelace|Ada]]',
+        dailyDate: null,
+      },
     ])
     const { view } = await renderSidebar()
 
@@ -431,7 +468,13 @@ describe('Sidebar', () => {
 
   it('All notes is inactive while the active note is pinned', async () => {
     getPinnedNotes.mockResolvedValue([
-      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/roadmap.md',
+        title: 'Roadmap',
+        dailyDate: null,
+      },
     ])
     const { view } = await renderSidebar(undefined, { kind: 'note', path: 'notes/roadmap.md' })
 
@@ -450,7 +493,15 @@ describe('Sidebar', () => {
   })
 
   it('right-click unpins a pinned row through the native context menu', async () => {
-    getPinnedNotes.mockResolvedValue([{ path: 'notes/rust.md', title: 'Rust', dailyDate: null }])
+    getPinnedNotes.mockResolvedValue([
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust',
+        dailyDate: null,
+      },
+    ])
     const { view } = await renderSidebar()
     const rust = view.getByRole('button', { name: 'Rust' })
 
@@ -471,7 +522,15 @@ describe('Sidebar', () => {
 
   it('restores an optimistically removed pinned row when unpin fails', async () => {
     commitNoteFrontmatter.mockRejectedValueOnce(new Error('disk failed'))
-    getPinnedNotes.mockResolvedValue([{ path: 'notes/rust.md', title: 'Rust', dailyDate: null }])
+    getPinnedNotes.mockResolvedValue([
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust',
+        dailyDate: null,
+      },
+    ])
     const { view } = await renderSidebar()
     const rust = view.getByRole('button', { name: 'Rust' })
 
@@ -486,7 +545,15 @@ describe('Sidebar', () => {
   })
 
   it('history arrows walk the router stack and disable at its edges', async () => {
-    getPinnedNotes.mockResolvedValue([{ path: 'notes/rust.md', title: 'Rust', dailyDate: null }])
+    getPinnedNotes.mockResolvedValue([
+      {
+        isPrivate: false,
+        hasConflict: false,
+        path: 'notes/rust.md',
+        title: 'Rust',
+        dailyDate: null,
+      },
+    ])
     const { view } = await renderSidebar()
     const backButton = view.getByRole('button', { name: 'Go back' })
     const forwardButton = view.getByRole('button', { name: 'Go forward' })

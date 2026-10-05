@@ -261,10 +261,24 @@ beforeEach(() => {
   editTask.mockReset()
   editTask.mockResolvedValue(WRITTEN)
   insertTask.mockReset()
-  insertTask.mockResolvedValue({ astPath: [0], markdown: '', breadcrumbs: [], checked: false })
+  insertTask.mockResolvedValue({
+    isPrivate: false,
+    hasConflict: false,
+    astPath: [0],
+    markdown: '',
+    breadcrumbs: [],
+    checked: false,
+  })
   continueTaskInContext.mockReset()
   continueTaskInContext.mockResolvedValue({
-    created: { astPath: [0], markdown: '', breadcrumbs: [], checked: false },
+    created: {
+      isPrivate: false,
+      hasConflict: false,
+      astPath: [0],
+      markdown: '',
+      breadcrumbs: [],
+      checked: false,
+    },
     moved: [],
   })
   convertTaskToBullet.mockReset()
@@ -440,8 +454,8 @@ describe('TasksScreen', () => {
     ])
     const view = await renderScreen()
 
-    const sourceLink = await view.findByRole('button', { name: 'Project' })
-    expect(sourceLink.querySelector('svg')).toBeNull()
+    const sourceLink = await view.findByRole('button', { name: 'Editable Project' })
+    expect(sourceLink.querySelector('.lucide-arrow-up-right')).toBeNull()
     await userEvent.click(sourceLink)
     expect(view.getByTestId('route').element().textContent).toContain('notes/p.md')
     await view.unmount()
@@ -459,7 +473,7 @@ describe('TasksScreen', () => {
     ])
     const view = await renderScreen()
 
-    fireEvent.click(await view.findByRole('button', { name: 'Project' }), {
+    fireEvent.click(await view.findByRole('button', { name: 'Editable Project' }), {
       metaKey: true,
       ctrlKey: true,
     })
@@ -507,7 +521,7 @@ describe('TasksScreen', () => {
     ])
     const view = await renderScreen()
 
-    await userEvent.click(await view.findByRole('button', { name: 'Tue, June 9th, 2026' }))
+    await userEvent.click(await view.findByRole('button', { name: 'Editable Tue, June 9th, 2026' }))
 
     expect(view.getByTestId('route').element().textContent).toBe(
       '{"kind":"daily","date":"2026-06-09"}',
@@ -894,7 +908,14 @@ describe('TasksScreen', () => {
   })
 
   it('a note group’s "+ Add" button inserts into that note and opens the editor', async () => {
-    insertTask.mockResolvedValue({ astPath: [0], markdown: '', breadcrumbs: [], checked: false })
+    insertTask.mockResolvedValue({
+      isPrivate: false,
+      hasConflict: false,
+      astPath: [0],
+      markdown: '',
+      breadcrumbs: [],
+      checked: false,
+    })
     getOpenTasks.mockResolvedValue([
       task({
         notePath: 'notes/proj.md',
@@ -950,6 +971,40 @@ describe('TasksScreen', () => {
     await waitFor(() => expect(insertTask).toHaveBeenCalledWith('daily/2026-06-14.md', 1))
     // The optimistic empty row mounts its inline editor, ready to type into.
     await view.findByTestId('task-editor')
+    await view.unmount()
+  })
+
+  it('Current adds to an existing Private daily and keeps the new cached row Private without a mounted note pane', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    getOpenTasks.mockResolvedValue([
+      task({
+        notePath: 'daily/2026-06-14.md',
+        dailyDate: '2026-06-14',
+        isPrivate: true,
+        astPath: [1],
+        markdown: 'existing',
+        text: 'existing',
+      }),
+    ])
+    insertTask.mockResolvedValue({
+      astPath: [2],
+      markdown: '',
+      breadcrumbs: [],
+      checked: false,
+      isPrivate: true,
+      hasConflict: false,
+    })
+    const view = await renderScreen(client)
+    await view.findByText('existing')
+    await userEvent.click(await view.findByRole('button', { name: 'Add a task to today' }))
+    await view.findByTestId('task-editor')
+    expect(insertTask).toHaveBeenCalledWith('daily/2026-06-14.md', 1)
+    expect(
+      client
+        .getQueryData<OpenTask[]>(queryKeys.index.openTasks('/g'))
+        ?.find((row) => row.astPath[0] === 2),
+    ).toMatchObject({ notePath: 'daily/2026-06-14.md', isPrivate: true, hasConflict: false })
+    await expect.element(view.getByRole('img', { name: 'Private' }).last()).toBeVisible()
     await view.unmount()
   })
 
@@ -1045,7 +1100,14 @@ describe('TasksScreen', () => {
 
   it('Enter in the editor saves the row and opens the next task (continuous entry)', async () => {
     editTask.mockResolvedValue(WRITTEN)
-    insertTask.mockResolvedValue({ astPath: [7], markdown: '', breadcrumbs: [], checked: false })
+    insertTask.mockResolvedValue({
+      isPrivate: false,
+      hasConflict: false,
+      astPath: [7],
+      markdown: '',
+      breadcrumbs: [],
+      checked: false,
+    })
     getOpenTasks.mockResolvedValue([
       task({
         notePath: 'notes/a.md',
@@ -1070,6 +1132,8 @@ describe('TasksScreen', () => {
   it('Enter in a grouped task keeps the new row in that breadcrumb context', async () => {
     continueTaskInContext.mockResolvedValue({
       created: {
+        isPrivate: false,
+        hasConflict: false,
         astPath: [40],
         markdown: '',
         breadcrumbs: ['StartupToolbox', 'Reflections'],
@@ -1184,7 +1248,14 @@ describe('TasksScreen', () => {
 
   it('Enter on a cleared row deletes it instead of leaving a bare task (no ghost)', async () => {
     deleteTask.mockResolvedValue(WRITTEN)
-    insertTask.mockResolvedValue({ astPath: [0], markdown: '', breadcrumbs: [], checked: false })
+    insertTask.mockResolvedValue({
+      isPrivate: false,
+      hasConflict: false,
+      astPath: [0],
+      markdown: '',
+      breadcrumbs: [],
+      checked: false,
+    })
     getOpenTasks.mockResolvedValue([
       task({
         notePath: 'notes/a.md',

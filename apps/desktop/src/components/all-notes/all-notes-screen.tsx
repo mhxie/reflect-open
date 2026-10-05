@@ -186,21 +186,26 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
       ref={rootRef}
       tabIndex={-1}
       aria-label="All notes"
-      className="flex h-full min-h-0 flex-col outline-none"
+      className="flex h-full min-h-0 flex-col outline-none @container/all-notes"
     >
-      <header className="flex flex-none flex-wrap items-center justify-between gap-3 border-b border-border py-4 pl-12 pr-7">
-        <h1 className="text-[15px] font-semibold text-text">Notes</h1>
-        <div className="flex shrink-0 items-center gap-3">
+      <header className="flex min-w-0 flex-none flex-wrap items-center gap-2 border-b border-border px-3 py-4 @xs/all-notes:flex-nowrap @xl/all-notes:gap-3 @3xl/all-notes:pl-12 @3xl/all-notes:pr-7">
+        <h1 className="hidden shrink-0 text-[15px] font-semibold text-text @xl/all-notes:block">
+          Notes
+        </h1>
+        <div className="ml-auto w-full min-w-0 @xs/all-notes:w-auto">
+          <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2 @xs/all-notes:ml-0 @xl/all-notes:gap-3">
           {trashableSelectedPaths.length > 0 ? (
             <Button
               type="button"
               variant="outline"
               aria-label={`Trash (${trashableSelectedPaths.length})`}
               onClick={openTrashConfirm}
-              className="text-text-secondary hover:text-destructive"
+              className="px-2 text-text-secondary hover:text-destructive @3xl/all-notes:px-2.5"
             >
               <Trash2 aria-hidden className="size-3.5" />
-              <span>Trash</span>
+              <span className="hidden @3xl/all-notes:inline">Trash</span>
               <span
                 aria-hidden
                 className="flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive/10 px-1 text-[10px] font-semibold leading-none tabular-nums text-destructive"
@@ -210,9 +215,6 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
             </Button>
           ) : null}
           <NewNoteButton />
-        </div>
-        <div className="w-full min-w-0">
-          <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
         </div>
       </header>
       <div

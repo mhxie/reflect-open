@@ -13,7 +13,7 @@ import { formatDayLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { COMMAND_ICONS, FALLBACK_COMMAND_ICON } from './command-icons.ts'
 import type { NoteEntry } from './entries.ts'
 import { NotePreview } from './note-preview.tsx'
@@ -238,7 +238,14 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                                     ? formatDayLabel(entry.date, settings.dateFormat)
                                     : displayNoteTitle(entry.title)}
                               </span>
-                              <LocalOnlyMark path={entry.path} />
+                              {entry.isPrivate === undefined ||
+                              entry.hasConflict === undefined ? null : (
+                                <NoteStateIndicator
+                                  path={entry.path}
+                                  isPrivate={entry.isPrivate}
+                                  hasConflict={entry.hasConflict}
+                                />
+                              )}
                               {entry.related ? (
                                 <span className="shrink-0 rounded-sm bg-surface-active px-1 text-2xs text-text-muted">
                                   Related

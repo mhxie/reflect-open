@@ -27,6 +27,8 @@ export interface WikiEntryCopy {
   readonly title: string
   /** File modification time (epoch ms). */
   readonly mtime: number
+  readonly isPrivate: boolean
+  readonly hasConflict: boolean
   readonly state: WikiCopyState
   /** The copy's opening paragraph (see {@link WikiEntrySummary.preview}); null unless read. */
   readonly preview: string | null
@@ -84,6 +86,8 @@ interface WikiNoteRow {
   readonly title: string
   readonly mtime: number
   readonly fileHash: string
+  readonly isPrivate: number
+  readonly hasConflict: number
 }
 
 interface CopyRead {
@@ -121,6 +125,8 @@ function copyOf(row: WikiNoteRow, { state, summary }: CopyRead): WikiEntryCopy {
     path: row.path,
     title: row.title,
     mtime: row.mtime,
+    isPrivate: row.isPrivate !== 0,
+    hasConflict: row.hasConflict !== 0,
     state,
     preview: summary?.preview ?? null,
     revised: summary?.lastRevised ?? null,
@@ -223,7 +229,14 @@ export async function listWikiEntries(options: ListWikiEntriesOptions): Promise<
   const [rows, citedBy, tags] = await Promise.all([
     db
       .selectFrom('notes')
-      .select(['notes.path', 'notes.title', 'notes.mtime', 'notes.fileHash'])
+      .select([
+        'notes.path',
+        'notes.title',
+        'notes.mtime',
+        'notes.fileHash',
+        'notes.isPrivate',
+        'notes.hasConflict',
+      ])
       .where('notes.kind', '=', 'note')
       .where((eb) => eb.or(languages.map((language) => inFolder('notes.path', language.folder))))
       .orderBy('notes.path')

@@ -16,6 +16,12 @@ here as the fork grows; the [README](../README.md#this-fork) remains a short ove
 
 - **Editor aids:** a heading outline and quick jumps, plus live character and
   selection counts and the note's last edit time.
+- **Note state:** one subdued glyph in note lists (excluding pins) and one word
+  in the editor's single-row footer. Open it for editing, privacy, AI, Git
+  backup, graph sync, and the note's last committed short Git SHA. Private
+  notes still support Git backup; Local-only notes stay excluded.
+  Protected details explain the cause and offer conflict resolution, save retry,
+  or revealing unsupported Markdown in the desktop file manager.
 - **Pinned note shortcuts:** `⌘1`–`⌘9` and `⌘0` open the first ten pinned notes
   in sidebar order, with floating hints on hover and keyboard focus.
 - **Pinned tag filters:** use **Custom → Manage pinned filters…** in All Notes

@@ -36,7 +36,17 @@ vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
 }))
 
 function entry(path: string, title: string): NoteListEntry {
-  return { path, title, snippet: '', tags: [], mtime: 1, isPinned: false, pinnedOrder: null }
+  return {
+    isPrivate: false,
+    hasConflict: false,
+    path,
+    title,
+    snippet: '',
+    tags: [],
+    mtime: 1,
+    isPinned: false,
+    pinnedOrder: null,
+  }
 }
 
 const selection = {

@@ -49,7 +49,14 @@ const TRANSLATION = [
 ].join('\n')
 
 interface Fixture {
-  notes: { path: string; title: string; mtime: number; file_hash: string }[]
+  notes: {
+    path: string
+    title: string
+    mtime: number
+    file_hash: string
+    is_private?: number
+    has_conflict?: number
+  }[]
   citedBy: { target_path: string | null; cited_by: number }[]
   tags: { note_path: string; tag: string }[]
   files: Record<string, string>
@@ -84,7 +91,7 @@ function serve(): void {
       return fixture.tags
     }
     if (query.includes('"file_hash"')) {
-      return fixture.notes
+      return fixture.notes.map((note) => ({ is_private: 0, has_conflict: 0, ...note }))
     }
     if (query.includes('"notes"."path" in')) {
       return fixture.notes
@@ -114,6 +121,8 @@ beforeEach(() => {
         title: 'Spacing Effect (中文)',
         mtime: 3,
         file_hash: 'cn',
+        is_private: 1,
+        has_conflict: 1,
       },
       { path: 'wiki/index.md', title: 'Wiki Index', mtime: 1, file_hash: 'index' },
       { path: 'wiki/memory/Spacing Effect.md', title: 'Spacing Effect', mtime: 2, file_hash: 'h1' },
@@ -159,6 +168,8 @@ describe('listWikiEntries', () => {
     expect(spacing).toMatchObject({
       title: 'Spacing Effect',
       topic: 'memory',
+      isPrivate: false,
+      hasConflict: false,
       mtime: 2,
       state: 'local',
       preview: 'Spaced sessions beat cramming.',
@@ -169,6 +180,8 @@ describe('listWikiEntries', () => {
     expect(spacing?.translations.get('wiki-cn')).toEqual({
       path: 'wiki-cn/memory/Spacing Effect.md',
       title: 'Spacing Effect (中文)',
+      isPrivate: true,
+      hasConflict: true,
       mtime: 3,
       state: 'local',
       // Past the copy's note on its source.

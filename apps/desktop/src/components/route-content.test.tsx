@@ -302,9 +302,18 @@ describe('RouteContent', () => {
 
     await expect.element(page.getByText(/edited on a/)).toBeVisible()
     await expect.element(page.getByTestId('fake-editor')).not.toBeInTheDocument()
-    await expect.element(page.getByText('this device')).toBeVisible()
-    await expect.element(page.getByText('other device')).toBeVisible()
+    await expect.element(page.getByText('this device', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('other device', { exact: true })).toBeVisible()
     await expect.element(page.getByText(/edited on b/)).toBeVisible()
+    await expect
+      .element(page.getByRole('button', { name: 'Keep this device’s version', exact: true }))
+      .toBeVisible()
+    await expect
+      .element(page.getByRole('button', { name: 'Keep the other device’s', exact: true }))
+      .toBeVisible()
+    await expect.element(page.getByRole('button', { name: 'Keep both', exact: true })).toBeVisible()
+    await act(() => flushOpenDocuments())
+    expect(writes).toEqual([])
     await view.unmount()
   })
 

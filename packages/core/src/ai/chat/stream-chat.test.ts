@@ -122,6 +122,7 @@ const PUBLIC_HIT: RetrievalHit = {
   snippet: 'launch plan',
   heading: null,
   isPrivate: false,
+  hasConflict: false,
 }
 
 const PRIVATE_HIT: RetrievalHit = {
@@ -131,6 +132,7 @@ const PRIVATE_HIT: RetrievalHit = {
   snippet: '',
   heading: null,
   isPrivate: true,
+  hasConflict: false,
 }
 
 describe('streamChat', () => {

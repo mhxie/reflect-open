@@ -1,4 +1,5 @@
-import { renderInlineText, type OpenTask, type TaskSnapshot } from '@reflect/core'
+import { renderInlineText, type OpenTask } from '@reflect/core'
+import type { InsertedNoteTask } from '@/lib/note-task.ts'
 
 /**
  * The note a new task is added to (Return-to-add, V1): its path plus the context
@@ -13,7 +14,10 @@ export interface InsertTaskTarget {
 }
 
 /** Build the optimistic open row for a just-written task from its persisted address. */
-export function createInsertedTaskRow(target: InsertTaskTarget, created: TaskSnapshot): OpenTask {
+export function createInsertedTaskRow(
+  target: InsertTaskTarget,
+  created: InsertedNoteTask,
+): OpenTask {
   return {
     notePath: target.notePath,
     astPath: created.astPath,
@@ -25,6 +29,8 @@ export function createInsertedTaskRow(target: InsertTaskTarget, created: TaskSna
     dueDate: null,
     dailyDate: target.dailyDate,
     isPinned: target.isPinned,
+    isPrivate: created.isPrivate,
+    hasConflict: created.hasConflict,
     pinnedOrder: target.pinnedOrder,
     updatedAt: Date.now(),
   }

@@ -4,7 +4,7 @@ import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { ListRow } from './list-row.tsx'
 import { ListRowSubject } from './list-row-subject.tsx'
 
@@ -52,7 +52,12 @@ export const AllNotesRow = memo(function AllNotesRow({
         onOpen={onOpen}
         className={selected ? 'text-accent' : 'text-text'}
       >
-        <LocalOnlyMark path={note.path} className="mr-1" />
+        <NoteStateIndicator
+          path={note.path}
+          isPrivate={note.isPrivate}
+          hasConflict={note.hasConflict}
+          className="mr-1"
+        />
         {displayNoteTitle(note.title)}
       </ListRowSubject>
       <span

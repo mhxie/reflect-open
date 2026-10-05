@@ -134,6 +134,8 @@ it('counts a local-only note for the status corner', async () => {
   await renderNote('finance/secure/bank.md')
   await expect.element(page.getByText('Account notes.')).toBeVisible()
 
-  const status = await renderHook(() => useNoteStatus('finance/secure/bank.md'))
+  const status = await renderHook(() =>
+    useNoteStatus({ generation: 1, path: 'finance/secure/bank.md' }),
+  )
   expect(status.result.current?.characters).toBeGreaterThan(0)
 })

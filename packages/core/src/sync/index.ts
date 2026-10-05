@@ -5,6 +5,7 @@
  */
 export {
   gitStatus,
+  gitNoteVersion,
   gitSetup,
   gitDisconnect,
   gitClone,

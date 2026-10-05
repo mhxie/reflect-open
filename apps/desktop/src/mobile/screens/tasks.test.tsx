@@ -269,10 +269,24 @@ beforeEach(async () => {
   editTask.mockReset()
   editTask.mockResolvedValue(WRITTEN)
   insertTask.mockReset()
-  insertTask.mockResolvedValue({ astPath: [0], markdown: '', breadcrumbs: [], checked: false })
+  insertTask.mockResolvedValue({
+    isPrivate: false,
+    hasConflict: false,
+    astPath: [0],
+    markdown: '',
+    breadcrumbs: [],
+    checked: false,
+  })
   continueTaskInContext.mockReset()
   continueTaskInContext.mockResolvedValue({
-    created: { astPath: [0], markdown: '', breadcrumbs: [], checked: false },
+    created: {
+      isPrivate: false,
+      hasConflict: false,
+      astPath: [0],
+      markdown: '',
+      breadcrumbs: [],
+      checked: false,
+    },
     moved: [],
   })
   convertTaskToBullet.mockReset()

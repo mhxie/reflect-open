@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 
 interface AttachmentGalleryProps {
   type: PreviewableAttachmentType
@@ -101,7 +101,12 @@ export function AttachmentGallery({
                 }}
                 className="truncate text-left text-xs font-medium text-text hover:underline"
               >
-                <LocalOnlyMark path={note.path} className="mr-1" />
+                <NoteStateIndicator
+                  path={note.path}
+                  isPrivate={note.isPrivate}
+                  hasConflict={note.hasConflict}
+                  className="mr-1"
+                />
                 {title}
               </button>
               <span className="text-2xs text-text-muted">

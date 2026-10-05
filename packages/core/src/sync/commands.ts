@@ -19,6 +19,13 @@ export const gitStatusSchema = z.object({
 })
 export type GitStatus = z.infer<typeof gitStatusSchema>
 
+/** The tracked note's latest local Git commit, abbreviated uniquely, or no version. */
+export const gitNoteVersionSchema = z
+  .string()
+  .regex(/^[0-9a-f]{4,40}$/)
+  .nullable()
+export type GitNoteVersion = z.infer<typeof gitNoteVersionSchema>
+
 /** A file excluded from backup by the size guardrail (GitHub hard-fails >100 MB). */
 export const skippedFileSchema = z.object({
   path: z.string(),
@@ -111,6 +118,14 @@ export type PushOutcome = z.infer<typeof pushOutcomeSchema>
 /** Snapshot the backup repository (cheap, no network). */
 export async function gitStatus(generation: number): Promise<GitStatus> {
   return await call('git_status', { generation }, gitStatusSchema)
+}
+
+/**
+ * Read the latest commit for the note tracked at this literal graph-relative path. This is
+ * local history metadata; it does not report whether the note was uploaded.
+ */
+export async function gitNoteVersion(path: string, generation: number): Promise<GitNoteVersion> {
+  return await call('git_note_version', { path, generation }, gitNoteVersionSchema)
 }
 
 /**

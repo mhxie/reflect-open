@@ -3,7 +3,7 @@ import type { AttachmentLibraryEntry, AttachmentNoteRef } from '@reflect/core'
 import { attachmentTagFacets, filterAttachments } from './attachment-filters.ts'
 
 function note(path: string, tags: string[]): AttachmentNoteRef {
-  return { path, title: path, mtime: 1, tags }
+  return { isPrivate: false, hasConflict: false, path, title: path, mtime: 1, tags }
 }
 
 function entry(

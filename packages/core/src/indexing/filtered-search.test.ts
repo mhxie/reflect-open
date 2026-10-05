@@ -20,9 +20,38 @@ afterEach(() => {
 })
 
 describe('searchWithFilters', () => {
+  it.each(['#Work', '', 'work'])(
+    'preserves Private and conflict metadata for %j using one bulk query',
+    async (query) => {
+      mockInvoke.mockResolvedValueOnce([
+        {
+          path: 'notes/work.md',
+          title: 'Work',
+          daily_date: null,
+          preview: 'Weekly agenda.',
+          mtime: 2000,
+          is_pinned: 0,
+          is_private: 1,
+          has_conflict: 1,
+          fts_highlighted_title: 'Work',
+          snippet: null,
+        },
+      ])
+      const hits = await searchWithFilters(parseSearchQuery(query))
+      expect(hits).toHaveLength(1)
+      expect(hits[0]).toMatchObject({ path: 'notes/work.md', isPrivate: true, hasConflict: true })
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      const sql = String(mockInvoke.mock.calls[0]![1]['sql'])
+      expect(sql).toContain('"notes"."is_private"')
+      expect(sql).toContain('"notes"."has_conflict"')
+    },
+  )
+
   it('starts tag-only recall searches from the folded tag key', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'notes/work.md',
         title: 'Work',
         daily_date: null,
@@ -36,6 +65,8 @@ describe('searchWithFilters', () => {
 
     expect(hits).toEqual([
       {
+        isPrivate: false,
+        hasConflict: false,
         path: 'notes/work.md',
         title: 'Work',
         highlightedTitle: 'Work',
@@ -63,6 +94,8 @@ describe('searchWithFilters', () => {
   it('keeps additional tag filters as indexed existence checks', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'notes/work.md',
         title: 'Work',
         daily_date: null,
@@ -87,6 +120,8 @@ describe('searchWithFilters', () => {
   it('applies non-tag filters on the tag-first recall path', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'daily/2026-01-02.md',
         title: '2026-01-02',
         daily_date: '2026-01-02',
@@ -101,6 +136,8 @@ describe('searchWithFilters', () => {
 
     expect(hits).toEqual([
       {
+        isPrivate: false,
+        hasConflict: false,
         path: 'daily/2026-01-02.md',
         title: '2026-01-02',
         highlightedTitle: '2026-01-02',
@@ -124,6 +161,8 @@ describe('searchWithFilters', () => {
   it('promotes title matches, then bm25, pinned and recency on text search', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'notes/quokka.md',
         title: 'Quokka',
         daily_date: null,
@@ -139,6 +178,8 @@ describe('searchWithFilters', () => {
 
     expect(hits).toEqual([
       {
+        isPrivate: false,
+        hasConflict: false,
         path: 'notes/quokka.md',
         title: 'Quokka',
         highlightedTitle: '\u{1}Quokka\u{2}',
@@ -177,6 +218,8 @@ describe('searchWithFilters', () => {
 
   it('shows a `//` title by its first segment on the recall feeds', async () => {
     const row = {
+      is_private: 0,
+      has_conflict: 0,
       path: 'notes/tim-maccaw-dad.md',
       title: 'Tim MacCaw // Dad',
       daily_date: null,
@@ -197,6 +240,8 @@ describe('searchWithFilters', () => {
   it('highlights the first segment of a `//` title on text search', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'notes/tim-maccaw-dad.md',
         title: 'Tim MacCaw // Dad',
         daily_date: null,
@@ -219,6 +264,8 @@ describe('searchWithFilters', () => {
   it('shows a `//` title plain when only an alias segment matched', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'notes/tim-maccaw-dad.md',
         title: 'Tim MacCaw // Dad',
         daily_date: null,
@@ -238,6 +285,8 @@ describe('searchWithFilters', () => {
   it('keeps a tokenizer-only FTS highlight inside the first segment of a `//` title', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
+        is_private: 0,
+        has_conflict: 0,
         path: 'notes/cafe.md',
         title: 'Café // Alias',
         daily_date: null,

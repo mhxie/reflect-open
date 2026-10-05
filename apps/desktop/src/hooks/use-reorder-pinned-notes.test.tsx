@@ -17,9 +17,30 @@ const graphState: {
 } = vi.hoisted(() => ({ graph: { generation: 7, root: '/graphs/personal' } }))
 vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => graphState }))
 
-const NOTE_A = { dailyDate: null, path: 'a.md', title: 'A', pinnedOrder: 1024 } satisfies PinnedNote
-const NOTE_B = { dailyDate: null, path: 'b.md', title: 'B', pinnedOrder: 2048 } satisfies PinnedNote
-const NOTE_C = { dailyDate: null, path: 'c.md', title: 'C', pinnedOrder: 3072 } satisfies PinnedNote
+const NOTE_A = {
+  isPrivate: false,
+  hasConflict: false,
+  dailyDate: null,
+  path: 'a.md',
+  title: 'A',
+  pinnedOrder: 1024,
+} satisfies PinnedNote
+const NOTE_B = {
+  isPrivate: false,
+  hasConflict: false,
+  dailyDate: null,
+  path: 'b.md',
+  title: 'B',
+  pinnedOrder: 2048,
+} satisfies PinnedNote
+const NOTE_C = {
+  isPrivate: false,
+  hasConflict: false,
+  dailyDate: null,
+  path: 'c.md',
+  title: 'C',
+  pinnedOrder: 3072,
+} satisfies PinnedNote
 const NOTES = [NOTE_A, NOTE_B, NOTE_C] as const
 // A dropped between two neighbours takes the midpoint; dropped last it opens a
 // fresh gap past the note it landed behind.
@@ -122,8 +143,8 @@ describe('useReorderPinnedNotes', () => {
 
   it('renumbers the whole shelf when a neighbour carries no order', async () => {
     const bare = [
-      { dailyDate: null, path: 'a.md', title: 'A' },
-      { dailyDate: null, path: 'b.md', title: 'B' },
+      { isPrivate: false, hasConflict: false, dailyDate: null, path: 'a.md', title: 'A' },
+      { isPrivate: false, hasConflict: false, dailyDate: null, path: 'b.md', title: 'B' },
     ] satisfies PinnedNote[]
     queryClient.setQueryData(queryKeys.index.pinnedNotes('/graphs/personal'), bare)
     const hook = await renderReorder(bare)

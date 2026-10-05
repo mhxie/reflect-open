@@ -32,6 +32,8 @@ function row(overrides: Partial<NoteRowModel> = {}): NoteRowModel {
     titleSegments: [{ text: 'Alpha', highlighted: false }],
     mtime: new Date(2020, 0, 1).getTime(),
     isPinned: false,
+    isPrivate: false,
+    hasConflict: false,
     canDelete: true,
     snippet: [{ text: 'First line', highlighted: false }],
     ...overrides,
@@ -66,7 +68,13 @@ function CachedNoteList(): ReactElement {
   })
   return (
     <NoteRowList
-      rows={data.map((hit) => row({ isPinned: hit.isPinned }))}
+      rows={data.map((hit) =>
+        row({
+          isPinned: hit.isPinned,
+          isPrivate: hit.isPrivate,
+          hasConflict: hit.hasConflict,
+        }),
+      )}
       onOpen={onOpen}
       onDeleted={onDelete}
     />
@@ -81,6 +89,18 @@ beforeEach(() => {
 })
 
 describe('NoteRowList', () => {
+  it.each([
+    { label: 'Editable', overrides: {} },
+    { label: 'Private', overrides: { isPrivate: true } },
+    { label: 'Protected', overrides: { hasConflict: true } },
+  ])('shows $label in a note row without adding another button', async ({ label, overrides }) => {
+    const view = await render(<SwipeHarness note={row(overrides)} />)
+    await expect.element(view.getByRole('img', { name: label, exact: true })).toBeVisible()
+    expect(view.getByRole('button').elements()).toHaveLength(1)
+    await view.getByRole('button').click()
+    expect(onOpen).toHaveBeenCalledOnce()
+  })
+
   it('a swipe pin updates the cached row marker while persistence is pending', async () => {
     const client = new QueryClient()
     client.setQueryData<FilteredSearchHit[]>(mobileKey, [
@@ -93,6 +113,8 @@ describe('NoteRowList', () => {
         preview: '',
         mtime: 0,
         isPinned: false,
+        isPrivate: false,
+        hasConflict: false,
       },
     ])
     const write = Promise.withResolvers<void>()
@@ -134,6 +156,8 @@ describe('NoteRowList', () => {
       ],
       mtime: new Date(2020, 0, 1).getTime(),
       isPinned: false,
+      isPrivate: false,
+      hasConflict: false,
       canDelete: true,
       snippet: [],
     }

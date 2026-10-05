@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from 'react'
-import { Lock, LockOpen, MoreHorizontal, Pin, PinOff, Share, Trash2 } from 'lucide-react'
-import { errorMessage } from '@reflect/core'
+import { MoreHorizontal, Pin, PinOff, Share, Shield, ShieldOff, Trash2 } from 'lucide-react'
+import { errorMessage, isLocalOnlyPath } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer.tsx'
 import { useNoteRowState } from '@/hooks/use-note-row.ts'
@@ -21,8 +21,8 @@ interface NoteActionsMenuProps {
 }
 
 /**
- * The note screen's "⋯" action sheet (Plan 19): pin/unpin, lock/unlock from
- * external services, share, and delete-to-trash. Pin reflects the index's
+ * The note screen's "⋯" action sheet (Plan 19): pin/unpin, privacy,
+ * share, and delete-to-trash. Pin reflects the index's
  * pinned set; privacy reflects the note's indexed `private: true` flag,
  * both updated in the shared query cache while the index catches up (a note
  * whose frontmatter can't be read shows as locked, with the toggle
@@ -39,14 +39,15 @@ export function NoteActionsMenu({ path, onDeleted }: NoteActionsMenuProps): Reac
   const [actionsOpen, setActionsOpen] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const isPrivate = noteRow?.isPrivate ?? false
+  const localOnly = isLocalOnlyPath(path)
   const unreadable = useUnreadableFrontmatter(path, isPrivate)
   const privacyActionLabel = !privacyReady
     ? 'Loading privacy…'
     : unreadable
       ? UNREADABLE_FRONTMATTER_LABEL
       : isPrivate
-        ? 'Unlock note'
-        : 'Lock note'
+        ? 'Make this note standard'
+        : 'Make this note private'
 
   const pin = (): void => {
     if (graph !== null) {
@@ -94,23 +95,25 @@ export function NoteActionsMenu({ path, onDeleted }: NoteActionsMenuProps): Reac
               {isPinned ? <PinOff /> : <Pin />}
               {isPinned ? 'Unpin' : 'Pin'}
             </Button>
-            <Button
-              variant="ghost"
-              size="lg"
-              className="h-12 justify-start gap-3 text-base"
-              disabled={!privacyReady || unreadable}
-              onClick={() => {
-                void togglePrivate()
-                setActionsOpen(false)
-              }}
-            >
-              {privacyReady && isPrivate && !unreadable ? (
-                <LockOpen aria-hidden />
-              ) : (
-                <Lock aria-hidden />
-              )}
-              {privacyActionLabel}
-            </Button>
+            {localOnly ? null : (
+              <Button
+                variant="ghost"
+                size="lg"
+                className="h-12 justify-start gap-3 text-base"
+                disabled={!privacyReady || unreadable}
+                onClick={() => {
+                  void togglePrivate()
+                  setActionsOpen(false)
+                }}
+              >
+                {privacyReady && isPrivate && !unreadable ? (
+                  <ShieldOff aria-hidden />
+                ) : (
+                  <Shield aria-hidden />
+                )}
+                {privacyActionLabel}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="lg"

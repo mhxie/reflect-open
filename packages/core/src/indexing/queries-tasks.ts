@@ -24,6 +24,8 @@ export interface OpenTask extends TaskLocator {
   dailyDate: string | null
   /** Pin flag mapped to a real boolean at the read boundary. */
   isPinned: boolean
+  isPrivate: boolean
+  hasConflict: boolean
   pinnedOrder: number | null
   updatedAt: number
 }
@@ -43,6 +45,8 @@ function taskRowsQuery() {
       'notes.title as noteTitle',
       'notes.dailyDate',
       'notes.isPinned',
+      'notes.isPrivate',
+      'notes.hasConflict',
       'notes.pinnedOrder',
       'notes.updatedAt',
     ])
@@ -58,6 +62,8 @@ interface TaskRow {
   noteTitle: string
   dailyDate: string | null
   isPinned: number
+  isPrivate: number
+  hasConflict: number
   pinnedOrder: number | null
   updatedAt: number
 }
@@ -70,7 +76,8 @@ interface TaskRow {
 function toTaskRows(rows: readonly TaskRow[]): OpenTask[] {
   const tasks: OpenTask[] = []
   for (const row of rows) {
-    const { astPath, markdown, breadcrumbs, checked, isPinned, ...rest } = row
+    const { astPath, markdown, breadcrumbs, checked, isPinned, isPrivate, hasConflict, ...rest } =
+      row
     try {
       tasks.push({
         ...rest,
@@ -80,6 +87,8 @@ function toTaskRows(rows: readonly TaskRow[]): OpenTask[] {
         breadcrumbs: decodeTaskBreadcrumbs(breadcrumbs).map((label) => renderInlineText(label)),
         checked: checked !== 0,
         isPinned: isPinned !== 0,
+        isPrivate: isPrivate !== 0,
+        hasConflict: hasConflict !== 0,
       })
     } catch (cause) {
       console.error(`tasks: skipping an unreadable row in ${row.notePath} (${astPath})`, cause)

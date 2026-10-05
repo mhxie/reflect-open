@@ -1,5 +1,6 @@
 export {
   gitStatus,
+  gitNoteVersion,
   gitSetup,
   gitCommitAll,
   gitFetch,

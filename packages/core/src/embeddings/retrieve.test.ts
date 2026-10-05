@@ -18,6 +18,7 @@ function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
     snippet: `about ${path}`,
     heading: null,
     isPrivate: false,
+    hasConflict: false,
     ...overrides,
   }
 }
@@ -29,6 +30,7 @@ function row(path: string, distance: number, overrides?: Partial<ChunkHitRow>): 
     heading: null,
     text: ` about ${path} `,
     isPrivate: 0,
+    hasConflict: 0,
     modelId: 'all-MiniLM-L6-v2',
     distance,
     ...overrides,
@@ -93,9 +95,10 @@ describe('bestChunkPerNote', () => {
   })
 
   it('trims snippets and converts the private flag', () => {
-    const hits = bestChunkPerNote([row('notes/p.md', 0.1, { isPrivate: 1 })], 12)
+    const hits = bestChunkPerNote([row('notes/p.md', 0.1, { isPrivate: 1, hasConflict: 1 })], 12)
     expect(hits[0]!.snippet).toBe('about notes/p.md')
     expect(hits[0]!.isPrivate).toBe(true)
+    expect(hits[0]!.hasConflict).toBe(true)
   })
 })
 
@@ -153,8 +156,9 @@ describe('fuseRanked (reciprocal rank fusion)', () => {
   })
 
   it('keeps the private flag through fusion', () => {
-    const fused = fuseRanked([[hit('p', { isPrivate: true })]], 5)
+    const fused = fuseRanked([[hit('p', { isPrivate: true, hasConflict: true })]], 5)
     expect(fused[0]!.isPrivate).toBe(true)
+    expect(fused[0]!.hasConflict).toBe(true)
   })
 })
 
@@ -169,6 +173,7 @@ describe('retrieve', () => {
     anyTerm: object[]
     knn?: object[]
     loadedModel?: string
+    flags?: object[]
   }): Array<[string, unknown]> {
     const calls: Array<[string, unknown]> = []
     setBridge({
@@ -190,7 +195,7 @@ describe('retrieve', () => {
           return answers.anyTerm
         }
         if (sql.includes('"is_private"')) {
-          return [{ path: 'notes/exact.md', is_private: 0 }]
+          return answers.flags ?? [{ path: 'notes/exact.md', is_private: 0, has_conflict: 0 }]
         }
         if (sql.includes('embedding_vectors v')) {
           return answers.knn ?? []
@@ -209,6 +214,8 @@ describe('retrieve', () => {
     preview: '',
     mtime: 1,
     is_pinned: 0,
+    is_private: 0,
+    has_conflict: 0,
     fts_highlighted_title: 'Exact',
     snippet: 'every term',
   }
@@ -218,7 +225,13 @@ describe('retrieve', () => {
       everyTerm: [EXACT],
       anyTerm: [
         { path: 'notes/exact.md', title: 'Exact', snippet: '', isPrivate: 0 },
-        { path: 'notes/related.md', title: 'Related', snippet: 'some terms', isPrivate: 1 },
+        {
+          path: 'notes/related.md',
+          title: 'Related',
+          snippet: 'some terms',
+          isPrivate: 1,
+          hasConflict: 0,
+        },
       ],
     })
     const hits = await retrieve('a sentence about wombat formats and their storage', {
@@ -248,7 +261,15 @@ describe('retrieve', () => {
   it('keeps a few keywords strict: no partial matches fill the list', async () => {
     const calls = fakeIndex({
       everyTerm: [EXACT],
-      anyTerm: [{ path: 'notes/related.md', title: 'Related', snippet: 'some', isPrivate: 0 }],
+      anyTerm: [
+        {
+          path: 'notes/related.md',
+          title: 'Related',
+          snippet: 'some',
+          isPrivate: 0,
+          hasConflict: 0,
+        },
+      ],
     })
     const hits = await retrieve('wombat formats', { mode: 'lexical', limit: 3 })
     expect(hits.map((hit) => hit.path)).toEqual(['notes/exact.md'])
@@ -264,6 +285,7 @@ describe('retrieve', () => {
       heading: null,
       text: 'near',
       isPrivate: 0,
+      hasConflict: 0,
       distance: 0.1,
     }
     fakeIndex({
@@ -292,6 +314,32 @@ describe('retrieve', () => {
       role: 'query',
     })
   })
+
+  it('preserves Private and conflict metadata from both lexical legs', async () => {
+    fakeIndex({
+      everyTerm: [EXACT],
+      flags: [{ path: EXACT.path, is_private: 1, has_conflict: 1 }],
+      anyTerm: [
+        {
+          path: 'notes/related.md',
+          title: 'Related',
+          snippet: 'related terms',
+          isPrivate: 1,
+          hasConflict: 1,
+        },
+      ],
+    })
+    const hits = await retrieve('a sentence about wombat formats and their storage', {
+      mode: 'lexical',
+      limit: 3,
+    })
+    expect(
+      hits.map(({ path, isPrivate, hasConflict }) => ({ path, isPrivate, hasConflict })),
+    ).toEqual([
+      { path: EXACT.path, isPrivate: true, hasConflict: true },
+      { path: 'notes/related.md', isPrivate: true, hasConflict: true },
+    ])
+  })
 })
 
 describe('withMatchedBy', () => {
@@ -302,6 +350,7 @@ describe('withMatchedBy', () => {
     snippet: '',
     heading: null,
     isPrivate: false,
+    hasConflict: false,
   })
 
   it('tags each fused hit with the leg that found it', () => {

@@ -4,7 +4,7 @@ import type { WikiSuggestion } from '@reflect/core'
 import { buildPaletteSections, type PaletteHit } from './entries.ts'
 
 function suggestion(path: string, title: string, date: string | null = null): WikiSuggestion {
-  return { target: title, path, title, alias: null, date }
+  return { target: title, path, title, alias: null, date, isPrivate: false, hasConflict: false }
 }
 function hit(
   path: string,
@@ -12,7 +12,7 @@ function hit(
   snippet: string | null = '…body…',
   dailyDate: string | null = null,
 ): PaletteHit {
-  return { path, title, snippet, dailyDate }
+  return { isPrivate: false, hasConflict: false, path, title, snippet, dailyDate }
 }
 const COMMANDS: AppCommand[] = [
   { id: 'nav.today', title: 'Go to today', keywords: ['daily'], run: () => {} },
@@ -34,6 +34,35 @@ function sections(
 }
 
 describe('buildPaletteSections', () => {
+  it('preserves indexed flags through title and body-hit adapters', () => {
+    const indexed = {
+      ...suggestion('notes/private.md', 'Private'),
+      isPrivate: true,
+      hasConflict: true,
+    }
+    const recalled = sections({ query: '', suggestions: [indexed] })
+    expect(recalled.notes[0]).toMatchObject({
+      path: indexed.path,
+      isPrivate: true,
+      hasConflict: true,
+    })
+    for (const related of [false, true]) {
+      const searched = sections({
+        query: 'private',
+        filtered: true,
+        hits: [
+          { ...hit('notes/private.md', 'Private'), isPrivate: true, hasConflict: true, related },
+        ],
+      })
+      expect(searched.notes[0]).toMatchObject({
+        path: indexed.path,
+        isPrivate: true,
+        hasConflict: true,
+        related,
+      })
+    }
+  })
+
   it('appends generated date suggestions after real note matches', () => {
     const generated: WikiSuggestion = {
       target: '2020-01-06',
@@ -53,6 +82,10 @@ describe('buildPaletteSections', () => {
       'daily/2020-01-06.md',
     ])
     expect(result.notes.find((note) => note.date === '2020-01-06')?.phrase).toBe('This Monday')
+    expect(result.notes.find((note) => note.date === '2020-01-06')).toMatchObject({
+      isPrivate: undefined,
+      hasConflict: undefined,
+    })
   })
 
   it('an empty query is the recall feed: suggestions only, no commands', () => {
@@ -229,8 +262,23 @@ describe('buildPaletteSections', () => {
     const result = sections({
       query: 'habits',
       hits: [
-        { path: 'notes/a.md', title: 'A', dailyDate: null, snippet: 'x', related: true },
-        { path: 'notes/b.md', title: 'B', dailyDate: null, snippet: 'y' },
+        {
+          isPrivate: false,
+          hasConflict: false,
+          path: 'notes/a.md',
+          title: 'A',
+          dailyDate: null,
+          snippet: 'x',
+          related: true,
+        },
+        {
+          isPrivate: false,
+          hasConflict: false,
+          path: 'notes/b.md',
+          title: 'B',
+          dailyDate: null,
+          snippet: 'y',
+        },
       ],
     })
     expect(result.notes.map((entry) => [entry.path, entry.related])).toEqual([

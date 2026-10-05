@@ -127,12 +127,24 @@ export async function getWikiAddressForPath(path: string): Promise<WikiLinkSugge
     .selectFrom('notes')
     .where('path', '=', path)
     .where('kind', '!=', 'template')
-    .select(['path', 'title', 'titleKey', 'dailyDate', 'mtime'])
+    .select(['path', 'title', 'titleKey', 'dailyDate', 'mtime', 'isPrivate', 'hasConflict'])
     .executeTakeFirst()
   if (note === undefined) {
     return null
   }
-  const candidate = rankWikiSuggestions('', [{ ...note, linkCount: 0 }], [], 1)[0]
+  const candidate = rankWikiSuggestions(
+    '',
+    [
+      {
+        ...note,
+        linkCount: 0,
+        isPrivate: note.isPrivate !== 0,
+        hasConflict: note.hasConflict !== 0,
+      },
+    ],
+    [],
+    1,
+  )[0]
   if (candidate === undefined) {
     return null
   }
@@ -152,7 +164,16 @@ async function queryWikiTargetCandidates(
   let titleQuery = db
     .selectFrom('notes')
     .where('kind', '!=', 'template')
-    .select(['path', 'title', 'titleKey', 'dailyDate', 'mtime', selectLinkCount()])
+    .select([
+      'path',
+      'title',
+      'titleKey',
+      'dailyDate',
+      'mtime',
+      'isPrivate',
+      'hasConflict',
+      selectLinkCount(),
+    ])
     .orderBy(sql`title_key = ${key}`, 'desc')
     .orderBy(sql`link_count`, 'desc')
     .orderBy('mtime', 'desc')
@@ -163,11 +184,15 @@ async function queryWikiTargetCandidates(
   } else {
     titleQuery = titleQuery.where(sql<boolean>`title_key LIKE ${likeContains(key)} ESCAPE '\\'`)
   }
-  const titles: TitleCandidate[] = await titleQuery.execute()
+  const titles: TitleCandidate[] = (await titleQuery.execute()).map((row) => ({
+    ...row,
+    isPrivate: row.isPrivate !== 0,
+    hasConflict: row.hasConflict !== 0,
+  }))
 
   let aliases: AliasCandidate[] = []
   if (key !== '') {
-    aliases = await db
+    const aliasRows = await db
       .selectFrom('aliases')
       .innerJoin('notes', 'notes.path', 'aliases.notePath')
       .where('notes.kind', '!=', 'template')
@@ -178,6 +203,8 @@ async function queryWikiTargetCandidates(
         'notes.titleKey',
         'notes.dailyDate',
         'notes.mtime',
+        'notes.isPrivate',
+        'notes.hasConflict',
         'aliases.alias',
         'aliases.aliasKey',
         selectLinkCount(),
@@ -187,6 +214,11 @@ async function queryWikiTargetCandidates(
       .orderBy('notes.mtime', 'desc')
       .limit(WIKI_CANDIDATE_LIMIT)
       .execute()
+    aliases = aliasRows.map((row) => ({
+      ...row,
+      isPrivate: row.isPrivate !== 0,
+      hasConflict: row.hasConflict !== 0,
+    }))
   }
 
   // Rank the full bounded candidate set before address verification. Filtering
@@ -248,6 +280,8 @@ interface WikiAddressWinner {
   path: string
   dailyDate: string | null
   claimCount: number
+  isPrivate: boolean
+  hasConflict: boolean
 }
 
 function winnerAddressesPath(path: string, winner: WikiAddressWinner | undefined): boolean {
@@ -364,7 +398,14 @@ async function verifyWikiSuggestionAddresses(
       .selectFrom('noteKeys')
       .innerJoin('notes', 'notes.path', 'noteKeys.notePath')
       .where('key', 'in', chunk)
-      .select(['key', 'notePath', 'notes.dailyDate', 'noteKeys.claimCount'])
+      .select([
+        'key',
+        'notePath',
+        'notes.dailyDate',
+        'notes.isPrivate',
+        'notes.hasConflict',
+        'noteKeys.claimCount',
+      ])
       .execute()
     for (const row of rows) {
       if (row.key !== null && row.notePath !== null) {
@@ -372,6 +413,8 @@ async function verifyWikiSuggestionAddresses(
           path: row.notePath,
           dailyDate: row.dailyDate,
           claimCount: Number(row.claimCount),
+          isPrivate: row.isPrivate !== 0,
+          hasConflict: row.hasConflict !== 0,
         })
       }
     }
@@ -410,6 +453,8 @@ async function verifyWikiSuggestionAddresses(
           verified.push({
             ...candidate,
             path: canonicalWinner.path,
+            isPrivate: canonicalWinner.isPrivate,
+            hasConflict: canonicalWinner.hasConflict,
             insertText,
           })
         }

@@ -7,7 +7,10 @@ import type { FilteredSearchHit, WikiSuggestion } from '@reflect/core'
  * {@link FilteredSearchHit}, so the semantic-search adapter doesn't have to
  * fabricate list-only fields (preview, mtime) it has no values for.
  */
-export type PaletteHit = Pick<FilteredSearchHit, 'path' | 'title' | 'dailyDate' | 'snippet'> & {
+export type PaletteHit = Pick<
+  FilteredSearchHit,
+  'path' | 'title' | 'dailyDate' | 'snippet' | 'isPrivate' | 'hasConflict'
+> & {
   /** Found by meaning alone (hybrid search), not by its wording. */
   readonly related?: boolean
 }
@@ -32,6 +35,9 @@ export interface NoteEntry {
   alias: string | null
   /** A search hit found by meaning alone, labeled so its unrelated wording isn't puzzling. */
   related: boolean
+  /** Indexed flags; undefined for a generated daily whose file does not exist. */
+  isPrivate: boolean | undefined
+  hasConflict: boolean | undefined
 }
 
 export interface PaletteSections {
@@ -101,6 +107,8 @@ export function buildPaletteSections(options: {
         phrase: null,
         alias: null,
         related: hit.related === true,
+        isPrivate: hit.isPrivate,
+        hasConflict: hit.hasConflict,
       })),
       commands: [],
     }
@@ -133,6 +141,8 @@ export function buildPaletteSections(options: {
         phrase: suggestion.generated?.phrase ?? null,
         alias: aliasHint(suggestion),
         related: false,
+        isPrivate: suggestion.path === null ? undefined : suggestion.isPrivate,
+        hasConflict: suggestion.path === null ? undefined : suggestion.hasConflict,
       })
     }
   }
@@ -149,6 +159,8 @@ export function buildPaletteSections(options: {
         phrase: null,
         alias: null,
         related: hit.related === true,
+        isPrivate: hit.isPrivate,
+        hasConflict: hit.hasConflict,
       })
     }
   }

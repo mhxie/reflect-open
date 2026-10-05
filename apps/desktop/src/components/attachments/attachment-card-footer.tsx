@@ -1,6 +1,6 @@
 import type { MouseEvent, ReactElement } from 'react'
 import { displayNoteTitle, type AttachmentLibraryEntry } from '@reflect/core'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { attachmentFilename, CARD_FOOTER_HEIGHT } from './attachment-media.ts'
@@ -44,7 +44,12 @@ export function AttachmentCardFooter({
             onClick={(event) => onOpenNote(firstNote.path, event)}
             className="min-w-0 truncate text-left hover:text-text hover:underline"
           >
-            <LocalOnlyMark path={firstNote.path} className="mr-1" />
+            <NoteStateIndicator
+              path={firstNote.path}
+              isPrivate={firstNote.isPrivate}
+              hasConflict={firstNote.hasConflict}
+              className="mr-1"
+            />
             {noteLabel(firstNote.title)}
           </button>
         )}

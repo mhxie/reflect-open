@@ -29,6 +29,10 @@ vi.mock('@/components/note-pane.tsx', () => ({
   },
 }))
 
+vi.mock('@/components/note-status-bar.tsx', () => ({
+  NoteStatusBar: () => null,
+}))
+
 vi.mock('@/mobile/note-actions-menu.tsx', () => ({
   NoteActionsMenu: () => null,
 }))

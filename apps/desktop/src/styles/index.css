@@ -46,6 +46,10 @@ Cascade layer order, low to high priority.
   --color-text-on-brand: var(--text-on-brand);
   --color-text-on-inverse: var(--text-on-inverse);
 
+  --color-note-state-private: var(--note-state-private);
+  --color-note-state-local-only: var(--note-state-local-only);
+  --color-note-state-protected: var(--note-state-protected);
+
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-input-bg: var(--input-bg);
