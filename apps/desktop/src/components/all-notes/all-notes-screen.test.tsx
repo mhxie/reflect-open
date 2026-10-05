@@ -608,7 +608,9 @@ describe('AllNotesScreen', () => {
 
     await page.getByRole('option', { name: /#travel/ }).click()
 
-    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
+    await expect
+      .poll(() => probedRoute(view))
+      .toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('June 9, 2026')).toBeInTheDocument()
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
     expect(view.getByText('Health Stacked').query()).toBeNull()
@@ -617,7 +619,7 @@ describe('AllNotesScreen', () => {
       .element(view.getByRole('button', { name: /#travel/, expanded: false }))
       .toBeInTheDocument()
     await view.getByRole('button', { name: 'June 9, 2026' }).click()
-    expect(probedRoute(view)).toEqual({ kind: 'daily', date: '2026-06-09' })
+    await expect.poll(() => probedRoute(view)).toEqual({ kind: 'daily', date: '2026-06-09' })
     await view.unmount()
   })
 
