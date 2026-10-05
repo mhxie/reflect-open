@@ -5,7 +5,11 @@
 
 /** Lowercase hex SHA-256 of `content` (via Web Crypto, available in the WebView). */
 export async function hashContent(content: string): Promise<string> {
-  const bytes = new TextEncoder().encode(content)
+  return await hashBytes(new TextEncoder().encode(content))
+}
+
+/** Lowercase hex SHA-256 of the exact binary source bytes. */
+export async function hashBytes(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }

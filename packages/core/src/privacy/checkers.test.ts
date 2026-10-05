@@ -86,6 +86,7 @@ describe('cloudSafeSearchHits', () => {
     snippet: 'body',
     heading: null,
     isPrivate: false,
+    assetTextHash: 'a'.repeat(64),
     hasConflict: false,
   }
   const PRIVATE: RetrievalHit = {
@@ -95,6 +96,7 @@ describe('cloudSafeSearchHits', () => {
     snippet: '',
     heading: null,
     isPrivate: true,
+    assetTextHash: 'a'.repeat(64),
     hasConflict: false,
   }
 
@@ -105,7 +107,15 @@ describe('cloudSafeSearchHits', () => {
     const payload = JSON.stringify(safe)
     expect(payload).not.toContain(PRIVATE_TITLE)
     expect(payload).not.toContain(PRIVATE_PATH)
-    expect(safe).toEqual([{ path: 'notes/a.md', title: 'Public', snippet: 'body', heading: null }])
+    expect(safe).toEqual([
+      {
+        path: 'notes/a.md',
+        title: 'Public',
+        snippet: 'body',
+        heading: null,
+        assetTextHash: PUBLIC.assetTextHash,
+      },
+    ])
   })
 
   it('drops hits the live probe flags even when the index lags (TOCTOU)', async () => {
@@ -134,7 +144,19 @@ describe('cloudSafeSearchHits', () => {
 
   it('strips hits to the cloud-facing fields (no score, no flag)', async () => {
     const [hit] = await cloudSafeSearchHits([PUBLIC], neverPrivate)
-    expect(Object.keys(hit ?? {}).sort()).toEqual(['heading', 'path', 'snippet', 'title'])
+    expect(Object.keys(hit ?? {}).sort()).toEqual([
+      'assetTextHash',
+      'heading',
+      'path',
+      'snippet',
+      'title',
+    ])
+  })
+
+  it('withholds search snapshots that lack attachment-text identity', async () => {
+    const withoutHash = { ...PUBLIC }
+    delete withoutHash.assetTextHash
+    expect(await cloudSafeSearchHits([withoutHash], neverPrivate)).toEqual([])
   })
 })
 
@@ -265,6 +287,7 @@ describe('local-only folders', () => {
         snippet: 'body',
         heading: null,
         isPrivate: false,
+        assetTextHash: 'a'.repeat(64),
         hasConflict: false,
       },
       {

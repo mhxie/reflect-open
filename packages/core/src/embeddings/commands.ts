@@ -78,6 +78,11 @@ export interface EmbedChunkPayload {
   contentHash: string
   modelId: string
   vector: number[] | null
+  /** Privacy of the source snapshot, retained even if a later note projection is public. */
+  isPrivate: boolean
+  /** Exact Markdown and folded attachment snapshots this chunk came from. */
+  sourceHash: string
+  assetTextHash: string
 }
 
 /** Replace a note's chunk set (hash-diff applied in Rust; generation-pinned). */

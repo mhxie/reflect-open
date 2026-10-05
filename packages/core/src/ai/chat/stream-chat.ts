@@ -1,10 +1,14 @@
-import type { LanguageModel, ModelMessage } from '@reflect/modules/ai'
+import type { ModelMessage } from '@reflect/modules/ai'
 import { errorMessage } from '../../errors.ts'
-import { languageModel } from '../language-model.ts'
+import { languageModelFor, type TargetModel } from '../language-model.ts'
 import { modelContextWindow } from '../provider-catalog.ts'
 import type { AiProviderConfig } from '../../settings/schema.ts'
 import type { CloudGraphContext, CloudSafe } from '../../privacy/checkers.ts'
-import { modelTarget } from '../../privacy/on-device.ts'
+import {
+  modelTarget,
+  verifyModelTarget,
+  type VerifiedModelTarget,
+} from '../../privacy/on-device.ts'
 import { fitToContextWindow } from './context-window.ts'
 import { historyForTarget } from './history-privacy.ts'
 import { chatSystemPrompt } from './system-prompt.ts'
@@ -47,6 +51,8 @@ export interface StreamChatOptions {
   fetchFn: typeof fetch
   /** Full model-facing history including the new user message. */
   messages: ModelMessage[]
+  /** Pins all graph reads to the graph that owns this conversation. */
+  generation: number
   /** Local ISO date for the system prompt (daily-note key space). */
   today: string
   /** Whether note search can use embeddings for meaning-based recall. */
@@ -90,7 +96,12 @@ export type ChatStreamEvent =
 export async function* streamChat(options: StreamChatOptions): AsyncGenerator<ChatStreamEvent> {
   try {
     options.signal?.throwIfAborted()
-    const history = await historyForTarget(options.messages, modelTarget(options.config))
+    const target = await verifyModelTarget(
+      modelTarget(options.config),
+      options.apiKey,
+      options.signal,
+    )
+    const history = await historyForTarget(options.messages, target, options.generation)
     options.signal?.throwIfAborted()
     if (history.withheldTurns > 0) {
       yield { type: 'history-withheld' }
@@ -102,12 +113,14 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<Ch
         context: options.context,
         semanticSearchEnabled: options.semanticSearchEnabled,
         customSystemPrompt: options.customSystemPrompt,
+        onDevice: target.kind === 'on-device',
       }),
     })
-    const model = await languageModel(options.config, options.apiKey, options.fetchFn)
+    const model = await languageModelFor(target, options.apiKey, options.fetchFn)
     options.signal?.throwIfAborted()
     yield* streamChatTurn(model, {
       messages,
+      generation: options.generation,
       today: options.today,
       semanticSearchEnabled: options.semanticSearchEnabled,
       customSystemPrompt: options.customSystemPrompt,
@@ -125,6 +138,8 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<Ch
 export interface ChatTurnOptions {
   /** Full model-facing history including the new user message. */
   messages: ModelMessage[]
+  /** The graph generation, required for native device reads. */
+  generation?: number | undefined
   /** Local ISO date for the system prompt (daily-note key space). */
   today: string
   /** Whether note search can use embeddings for meaning-based recall. */
@@ -150,14 +165,9 @@ export interface ChatTurnOptions {
  * the next turn resends matches what stayed on screen.
  */
 export async function* streamChatTurn(
-  model: LanguageModel,
+  model: TargetModel<VerifiedModelTarget>,
   options: ChatTurnOptions,
 ): AsyncGenerator<ChatStreamEvent> {
-  const tools = buildNoteTools({
-    ...options.toolDeps,
-    semanticSearchEnabled: options.semanticSearchEnabled,
-  })
-
   // Messages for all *completed* steps (cumulative, assistant/tool pairs)…
   let stepMessages: ModelMessage[] = []
   // …and the text streamed so far in the step still in flight.
@@ -168,15 +178,22 @@ export async function* streamChatTurn(
       : [...stepMessages, { role: 'assistant', content: pendingText }]
 
   try {
+    const tools = buildNoteTools({
+      ...options.toolDeps,
+      semanticSearchEnabled: options.semanticSearchEnabled,
+      target: model.target,
+      generation: options.generation,
+    })
     const { isStepCount, streamText } = await import('@reflect/modules/ai')
     options.signal?.throwIfAborted()
     const result = streamText({
-      model,
+      model: model.model,
       instructions: chatSystemPrompt({
         today: options.today,
         context: options.context,
         semanticSearchEnabled: options.semanticSearchEnabled,
         customSystemPrompt: options.customSystemPrompt,
+        onDevice: model.target.kind === 'on-device',
       }),
       messages: options.messages,
       tools,

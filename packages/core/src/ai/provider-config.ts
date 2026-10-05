@@ -1,5 +1,9 @@
 import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
-import { MIN_CONTEXT_WINDOW, type AiProviderConfig } from '../settings/schema.ts'
+import {
+  MIN_CONTEXT_WINDOW,
+  type AiProviderConfig,
+  type OnDeviceServerKind,
+} from '../settings/schema.ts'
 
 /**
  * Pure transforms over the configured-AI-provider state (Plan 10). The
@@ -92,6 +96,7 @@ export function withAiProviderOnDevice(
   providers: AiProviderConfig[],
   id: string,
   attest: boolean,
+  server?: OnDeviceServerKind,
 ): AiProviderConfig[] {
   return withEntry(providers, id, (entry) => {
     if (entry.provider !== 'openai-compatible') {
@@ -101,7 +106,10 @@ export function withAiProviderOnDevice(
       return { ...entry, onDevice: null }
     }
     return isLoopbackHttpUrl(entry.baseUrl)
-      ? { ...entry, onDevice: { baseUrl: entry.baseUrl, model: entry.model } }
+      ? {
+          ...entry,
+          onDevice: { baseUrl: entry.baseUrl, model: entry.model, ...(server ? { server } : {}) },
+        }
       : entry
   })
 }

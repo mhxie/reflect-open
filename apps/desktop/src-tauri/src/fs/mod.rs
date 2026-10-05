@@ -10,6 +10,7 @@ pub mod asset_protocol;
 pub mod assets;
 #[cfg(unix)]
 mod beneath;
+pub mod device;
 mod image_thumbnail;
 mod import;
 mod import_assets;

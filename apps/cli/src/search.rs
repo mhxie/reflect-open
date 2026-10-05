@@ -22,6 +22,19 @@ use crate::keys::contains_unsegmented_script;
 const HIGHLIGHT_START: char = '\u{1}';
 const HIGHLIGHT_END: char = '\u{2}';
 
+fn public_note_predicate(conn: &Connection) -> Result<&'static str, CliError> {
+    let has_device_column: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('notes') WHERE name = 'has_device_only_content')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(if has_device_column {
+        "notes.is_private = 0 AND notes.has_device_only_content = 0"
+    } else {
+        "notes.is_private = 0"
+    })
+}
+
 /// Enclosed alphanumerics (`Ⓐ`, `🅰`): general category `So`, which `unicode61`
 /// separates on, but which `char::is_alphanumeric` accepts through the
 /// `Other_Alphabetic` property. Excluded so this file's token test matches
@@ -223,6 +236,7 @@ pub fn search_index(
         .collect::<Vec<String>>()
         .join(" AND ");
     let limit_parameter = needles.len() + 3;
+    let public_predicate = public_note_predicate(conn)?;
     let mut statement = conn.prepare(&format!(
         "WITH lexical AS MATERIALIZED (
            SELECT path, snippet(search_fts, 2, char(1), char(2), '…', 12) AS snippet,
@@ -240,7 +254,7 @@ pub fn search_index(
          FROM notes
          LEFT JOIN lexical ON lexical.path = notes.path
          WHERE (lexical.path IS NOT NULL OR ({title_term_predicate}))
-           AND notes.is_private = 0 AND notes.kind != 'template'
+           AND {public_predicate} AND notes.kind != 'template'
          ORDER BY CASE
                     WHEN notes.title_key = ?2 THEN 0
                     WHEN instr(notes.title_key, ?2) = 1 THEN 1
@@ -385,12 +399,13 @@ pub fn any_term_index(
     limit: usize,
     exclude: &HashSet<String>,
 ) -> Result<Vec<SearchHit>, CliError> {
+    let public_predicate = public_note_predicate(conn)?;
     let mut statement = conn.prepare(&format!(
         "SELECT search_fts.path, notes.title,
                 snippet(search_fts, 2, char(1), char(2), '…', 12), {RANK_EXPR}
          FROM search_fts
          JOIN notes ON notes.path = search_fts.path
-         WHERE search_fts MATCH ?1 AND notes.is_private = 0 AND notes.kind != 'template'
+         WHERE search_fts MATCH ?1 AND {public_predicate} AND notes.kind != 'template'
          ORDER BY {RANK_EXPR}
          LIMIT ?2",
     ))?;

@@ -22,11 +22,12 @@ let inFlight: { generation: number; promise: Promise<ReconcileAssetDescriptionsO
 export function backfillAssetDescriptionsVisibly(
   generation: number,
   providers: AiProvidersState,
+  localOcrProviderId: string | null = null,
 ): Promise<ReconcileAssetDescriptionsOutcome> {
   if (inFlight !== null && inFlight.generation === generation) {
     return inFlight.promise
   }
-  const promise = runBackfill(generation, providers).finally(() => {
+  const promise = runBackfill(generation, providers, localOcrProviderId).finally(() => {
     if (inFlight !== null && inFlight.promise === promise) {
       inFlight = null
     }
@@ -38,12 +39,14 @@ export function backfillAssetDescriptionsVisibly(
 async function runBackfill(
   generation: number,
   providers: AiProvidersState,
+  localOcrProviderId: string | null,
 ): Promise<ReconcileAssetDescriptionsOutcome> {
   const operation = startOperation('Describing assets', { background: true })
   let outcome: ReconcileAssetDescriptionsOutcome
   try {
     outcome = await reconcileAssetDescriptions({
       providers,
+      localOcrProviderId,
       generation,
       mode: 'backfill',
       fetchFn: providerFetch,

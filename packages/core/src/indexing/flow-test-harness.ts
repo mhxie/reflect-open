@@ -69,8 +69,8 @@ export function applyProjection(database: DatabaseSync, indexed: IndexedNote): v
     .prepare(
       `INSERT INTO notes(
         path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned,
-        pinned_order, mtime, file_hash, preview, has_conflict, gist_url, gist_stale
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pinned_order, mtime, file_hash, preview, has_conflict, gist_url, gist_stale, has_device_only_content
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       indexed.path,
@@ -89,6 +89,7 @@ export function applyProjection(database: DatabaseSync, indexed: IndexedNote): v
       Number(indexed.hasConflict),
       indexed.gistUrl,
       Number(indexed.gistStale),
+      Number(indexed.hasDeviceOnlyContent),
     )
 
   const insertAlias = database.prepare(
@@ -135,6 +136,10 @@ export function project(path: string, source: string, mtime: number): IndexedNot
 export function connectIndex(database: DatabaseSync): void {
   setBridge({
     invoke: (command, args) => {
+      if (command === 'asset_ocr_cache_read')
+        return Promise.reject({ kind: 'notFound', message: 'No local OCR cache' })
+      if (command === 'asset_ocr_cache_keys' || command === 'list_attachments')
+        return Promise.resolve([])
       // The projections exist only in the index. Disk probes see an empty
       // graph, so the writable resolvers exercise their indexed tiers.
       if (command === 'list_files') {

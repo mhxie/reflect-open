@@ -1,7 +1,8 @@
 import type { UserContent } from '@reflect/modules/ai'
 import { ReflectError } from '../errors.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
-import { languageModel } from './language-model.ts'
+import { languageModel, type TargetModel } from './language-model.ts'
+import type { VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
 
 /**
  * BYOK description + OCR for one asset (Plan 20): a single short multimodal
@@ -38,6 +39,8 @@ export interface DescribeAssetRequest {
   data: string
   /** The asset's filename, used only to ground the prompt. */
   filename: string
+  /** A verified, bound local model for private OCR; overrides provider wiring. */
+  localModel?: TargetModel<VerifiedOnDeviceTarget>
 }
 
 /**
@@ -127,7 +130,9 @@ export async function describeAsset(request: DescribeAssetRequest): Promise<stri
   }
   try {
     const result = await sdk.generateText({
-      model: await languageModel(request.config, request.apiKey, request.fetchFn ?? fetch),
+      model:
+        request.localModel?.model ??
+        (await languageModel(request.config, request.apiKey, request.fetchFn ?? fetch)),
       messages: [{ role: 'user', content }],
       abortSignal: AbortSignal.timeout(DESCRIBE_TIMEOUT_MS),
       maxRetries: 0,

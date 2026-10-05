@@ -18,6 +18,7 @@ import {
   type ManagedDescription,
 } from './asset-description-helpers.ts'
 import { classifyAsset } from './asset-privacy.ts'
+import { reconcileLocalAssetOcr } from './local-asset-ocr.ts'
 export {
   assetTypeFor,
   base64ByteLength,
@@ -52,6 +53,8 @@ export type AssetDescriptionMode = 'incremental' | 'backfill'
 export interface ReconcileAssetDescriptionsInput {
   /** The configured-providers state — decides the provider and keychain entry. */
   providers: AiProvidersState
+  /** Explicit on-device vision provider. A missing/invalid selection never falls back. */
+  localOcrProviderId?: string | null | undefined
   /** `GraphInfo.generation` — pins every read/write to the issuing graph. */
   generation: number
   /** `incremental` processes `changed`; `backfill` enumerates every asset. */
@@ -364,6 +367,9 @@ async function statMap(
 export async function reconcileAssetDescriptions(
   input: ReconcileAssetDescriptionsInput,
 ): Promise<ReconcileAssetDescriptionsOutcome> {
+  if (input.localOcrProviderId != null) {
+    return await reconcileLocalAssetOcr(input, input.localOcrProviderId)
+  }
   const tally: AssetTally = {
     described: 0,
     skippedUpToDate: 0,

@@ -70,6 +70,9 @@ export {
   pickOnDeviceProvider,
   resolveOnDeviceTarget,
   verifyOnDeviceServer,
+  verifyModelTarget,
+  type VerifiedModelTarget,
+  type VerifiedOnDeviceTarget,
   type CloudTarget,
   type ModelTarget,
   type OnDeviceServerRefusal,
@@ -77,6 +80,8 @@ export {
   type OnDeviceTarget,
 } from '../privacy/on-device.ts'
 export { languageModelFor, type TargetModel } from '../ai/language-model.ts'
+export { localOcrAssetTypeFor } from '../actions/asset-description-helpers.ts'
+export { reconcileCachedAssetOcr } from '../actions/asset-ocr-maintenance.ts'
 export {
   buildNoteTools,
   MAX_DAILY_NOTE_DAYS,

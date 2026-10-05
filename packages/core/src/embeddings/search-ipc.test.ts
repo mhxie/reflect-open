@@ -21,6 +21,8 @@ function fakeApp(options: { ready: boolean }): Array<[string, unknown]> {
         return [
           {
             path: 'notes/public.md',
+            is_private: 0,
+            has_device_only_content: 0,
             title: 'Public',
             daily_date: null,
             preview: '',
@@ -31,6 +33,8 @@ function fakeApp(options: { ready: boolean }): Array<[string, unknown]> {
           },
           {
             path: 'notes/secret.md',
+            is_private: 1,
+            has_device_only_content: 0,
             title: 'Secret',
             daily_date: null,
             preview: '',
@@ -39,12 +43,25 @@ function fakeApp(options: { ready: boolean }): Array<[string, unknown]> {
             fts_highlighted_title: 'Secret',
             snippet: 'secret wombat',
           },
+          {
+            path: 'notes/ocr.md',
+            is_private: 0,
+            has_device_only_content: 1,
+            title: 'OCR sentinel',
+            daily_date: null,
+            preview: '',
+            mtime: 1,
+            is_pinned: 0,
+            fts_highlighted_title: 'OCR sentinel',
+            snippet: 'private OCR wombat',
+          },
         ]
       }
       if (sql.includes('"is_private"')) {
         return [
-          { path: 'notes/public.md', is_private: 0 },
-          { path: 'notes/secret.md', is_private: 1 },
+          { path: 'notes/public.md', is_private: 0, has_device_only_content: 0 },
+          { path: 'notes/secret.md', is_private: 1, has_device_only_content: 0 },
+          { path: 'notes/ocr.md', is_private: 0, has_device_only_content: 1 },
         ]
       }
       return []

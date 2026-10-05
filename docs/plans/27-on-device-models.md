@@ -1,10 +1,10 @@
 # Plan 27 — On-device models
 
 **Goal:** let a model the user runs on this Mac (Ollama, LM Studio, any
-OpenAI-compatible server on a loopback host) eventually read private and local-only
-notes, while cloud models never can. This document covers phase **C1**: the hardened
-transport and the attestation. C1 grants no private access. That arrives with C2,
-behind the verification step V1 below.
+OpenAI-compatible server on a loopback host) search and read private and local-only
+notes, while cloud models never can. The implementation includes hardened transport,
+model-bound verification, private chat tools, conversation provenance, and local
+vision OCR for searchable image/PDF text.
 
 **Depends on:** BYOK providers and the cloud privacy gate (Plan 10,
 `packages/core/src/privacy/checkers.ts`), and OpenAI-compatible entries in
@@ -123,7 +123,8 @@ leaves the attestation inert. The settings row then asks the user to re-confirm.
 
 ### Settings UI
 
-Copy stays neutral until C2 makes private access real.
+The attestation explains private-note access, searchable local OCR, and the
+responsibility to configure a server that keeps requests on-device.
 
 - Add form, OpenAI-compatible: Ollama and LM Studio quick-fill buttons, a "Runs on
   this Mac" switch (enabled only for a loopback URL; otherwise the hint "Only for
@@ -141,47 +142,23 @@ what the server does next. Turn this on only if the server runs the model on thi
 Mac and does not forward requests (Ollama cloud models, LiteLLM, SSH tunnels and
 similar gateways do). The copy never claims "never".
 
-## V1: verify Ollama's API (pending)
+## V1: model-bound server verification
 
-`verifyOnDeviceServer(target)` is the hook C2 calls on every turn and run before
-content the cloud gate withholds reaches an on-device model. Until V1 is done it
-answers `'ok'`. **C2's private access does not ship until V1 is resolved:** either
-the probe below is implemented, or the user chooses attestation only (open
-decision 1 of the C plan).
+`privacy/on-device-verification.ts` probes each turn and OCR run through
+`onDeviceFetch` before graph content is read. `/api/version` must validate as
+Ollama metadata, then `/api/show` must validate for the exact selected model.
+`remote_host` or `remote_model` refuses the target, including cloud aliases.
+Explicit `:cloud` and `-cloud` tags are refused before `/api/show`: Ollama can
+forward that request for cloud models. A generic server is accepted only after
+explicit `server: 'openai-compatible'` consent and a 404 version response.
+Probe failures and malformed/oversize metadata never downgrade to generic consent.
 
-V1 is manual. It needs a machine with Ollama installed and network access to install
-it; the environment C1 was built in had neither.
-
-TODO, on a current Ollama release, check and record the findings and versions here:
-
-- [ ] (a) Whether /api/tags and /api/show report remote_host and remote_model (or
-  equivalent fields) for a cloud model such as gpt-oss:120b-cloud, and omit them for
-  a local model. Also check an alias made with ollama cp from a cloud model, and a
-  Modelfile FROM <x>-cloud. Inference, medium confidence.
-- [ ] (b) What /api/version returns.
-- [ ] (c) Whether there is a setting that disables cloud models. Inference, low
-  confidence.
-- [ ] (d) The default context lengths on Ollama's OpenAI-compatible endpoint and on LM
-  Studio. These feed ON_DEVICE_DEFAULT_CONTEXT.
-
-If (a) holds, implement `verifyOnDeviceServer` in `privacy/server-probe.ts` over
-`onDeviceFetch`:
-
-- GET `{origin}/api/version`. A JSON `{version}` answer identifies an Ollama server.
-- For an Ollama server, POST `{origin}/api/show` with `{model}`.
-- Refuse ("This model runs in Ollama's cloud") when the remote fields are present,
-  when the probe errors, or when the response does not parse. This fails closed.
-- A server that does not answer as Ollama gets `'ok'` and relies on the attestation
-  alone.
-- Nothing is cached across turns; each probe is a loopback call of a few
-  milliseconds.
-
-Tests, with a fake bridge: Ollama with a local model is ok; with a cloud model,
-refused; `/api/show` erroring, refused; a non-Ollama server (404 on `/api/version`),
-ok; malformed JSON from an Ollama server, refused; the provider fetch is never
-called.
-
-If (a) does not hold, follow the user's choice in open decision 1.
+The protocol was checked against
+[Ollama v0.35.1 source](https://github.com/ollama/ollama/blob/v0.35.1/server/routes.go)
+and [response types](https://github.com/ollama/ollama/blob/v0.35.1/api/types.go).
+Unit tests cover local metadata, remote aliases, cloud tags, bounded responses,
+and generic-server refusal paths. This verification uses source and
+simulated responses; a live model inference test remains separate.
 
 ## Rejected alternatives
 
@@ -190,14 +167,29 @@ If (a) does not hold, follow the user's choice in open decision 1.
   followed. Not provably local.
 - **A boolean "runs locally" flag:** consent would carry over to any model id the
   entry later uses, including the catalog's `local-model` placeholder.
-- **Refusing `-cloud` model names:** binds to nothing; `ollama cp` and
+- **Relying solely on cloud model names:** binds to nothing; `ollama cp` and
   `FROM <x>-cloud` produce aliases without the suffix.
 - **Answering `localhost` with both 127.0.0.1 and ::1:** a squatter bound only on the
   other family would receive the request.
 
-## Next: C2
+## Private tools and local OCR
 
-The LocalSafe brand and on-device mints, `note_read_for_device`, on-device chat tools
-built on the cloud path, conversation pinning, the AI menu on private notes, and
-on-device memo titling. The switch label gains "(can read private notes)" and
-`AGENTS.md`/`docs/privacy.md` gain the on-device clause in the same change.
+Verified targets build private-capable search, recent/daily listing, note read,
+and attachment read tools. Rust generation-pinned reads retain native local-only
+provenance. Private results carry a persisted `reflectPrivateContext` marker;
+cloud turns scan the complete conversation before context pruning and refuse it
+when marked content appears. Older public results are rechecked against live
+notes, sidecars, ownership, and OCR provenance before cloud resend.
+Search snippets persist their attachment-text snapshot hash; changed or missing
+provenance refuses the cloud conversation so later paraphrases stay on-device.
+
+An explicit local vision selection processes images on macOS/Linux and rendered
+PDF pages on macOS. Safe full-note and attachment reads are bounded at 20 MiB;
+Windows currently refuses full-note reads and local OCR. Complete output and source
+hashes live in `.reflect/asset-ocr/`; invalid
+entries retain device-only provenance. Maintenance runs independently of automatic
+generation. FTS and embedding snapshots retain device-only flags, and embedding
+writes and queries compare note and attachment-text hashes. Cloud tools and CLI
+search omit restricted results; user-authored captions are preserved.
+
+Private editor AI actions and on-device memo titling remain follow-up work.

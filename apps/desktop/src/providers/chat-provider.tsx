@@ -303,6 +303,7 @@ export function ChatProvider({ graph, children }: ChatProviderProps): ReactEleme
           apiKey,
           fetchFn: providerFetch,
           messages,
+          generation: graph.generation,
           today: todayIso(),
           semanticSearchEnabled: semanticSearchEnabledRef.current,
           customSystemPrompt,

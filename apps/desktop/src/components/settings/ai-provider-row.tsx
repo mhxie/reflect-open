@@ -8,6 +8,7 @@ import {
   resolveOnDeviceTarget,
   type AiProviderCapabilities,
   type AiProviderConfig,
+  type OnDeviceServerKind,
 } from '@reflect/core'
 import { Badge } from '@/components/ui/badge.tsx'
 import { Button } from '@/components/ui/button.tsx'
@@ -25,7 +26,7 @@ interface AiProviderRowProps {
   /** Change the default model used by this provider entry. */
   onSetDefaultModel: (id: string, model: string) => void
   /** Attest or withdraw that an OpenAI-compatible entry runs on this Mac. */
-  onSetOnDevice: (id: string, attest: boolean) => void
+  onSetOnDevice: (id: string, attest: boolean, server?: OnDeviceServerKind) => void
   /** Change what an OpenAI-compatible entry declares about its model. */
   onSetCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
   /** Remove the entry and its keychain secret; rejects on failure. */

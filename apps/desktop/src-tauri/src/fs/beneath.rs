@@ -303,7 +303,24 @@ pub(crate) struct FileBytes {
 /// and materialization stays off for the whole read ([`NoMaterialize`]), so
 /// an eviction racing the check (`EDEADLK`) is too, never a download.
 pub(crate) fn read_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> BeneathResult<FileBytes> {
-    let name = plain_name(name.as_ref())?;
+    read_beneath_with_limit(dir, name.as_ref(), None)
+}
+
+/// Read a regular file through the same no-follow boundary, enforcing a byte limit.
+pub(crate) fn read_bounded_beneath(
+    dir: &BeneathDir,
+    name: impl AsRef<OsStr>,
+    max_bytes: u64,
+) -> BeneathResult<FileBytes> {
+    read_beneath_with_limit(dir, name.as_ref(), Some(max_bytes))
+}
+
+fn read_beneath_with_limit(
+    dir: &BeneathDir,
+    name: &OsStr,
+    max_bytes: Option<u64>,
+) -> BeneathResult<FileBytes> {
+    let name = plain_name(name)?;
     let _no_materialize = NoMaterialize::engage();
     let (mut file, stat) = open_file(dir, name)?;
     if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
@@ -315,14 +332,32 @@ pub(crate) fn read_beneath(dir: &BeneathDir, name: impl AsRef<OsStr>) -> Beneath
     if dataless(&file)? {
         return Err(BeneathError::Offline);
     }
+    let oversized = || {
+        BeneathError::Io(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "file exceeds the permitted byte limit",
+        ))
+    };
+    if let Some(limit) = max_bytes {
+        if file.metadata()?.len() > limit {
+            return Err(oversized());
+        }
+    }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
+    let read = match max_bytes {
+        Some(limit) => file.take(limit.saturating_add(1)).read_to_end(&mut bytes),
+        None => file.read_to_end(&mut bytes),
+    };
+    read.map_err(|err| {
         if err.kind() == std::io::ErrorKind::Deadlock {
             BeneathError::Offline
         } else {
             err.into()
         }
     })?;
+    if max_bytes.is_some_and(|limit| bytes.len() as u64 > limit) {
+        return Err(oversized());
+    }
     Ok(FileBytes {
         bytes,
         identity: Identity::of(&stat),
@@ -552,6 +587,18 @@ fn identity_at(dir: &BeneathDir, name: &OsStr) -> BeneathResult<Option<Identity>
         Err(Errno::NOENT) => Ok(None),
         Err(errno) => Err(errno.into()),
     }
+}
+
+/// Atomically create or replace a regular file's current revision, refusing concurrent changes.
+pub(crate) fn write_current_beneath(
+    graph_root: &BeneathDir,
+    dir: &BeneathDir,
+    name: impl AsRef<OsStr>,
+    bytes: &[u8],
+) -> BeneathResult<Persisted> {
+    let name = plain_name(name.as_ref())?;
+    let persist = identity_at(dir, name)?.map_or(Persist::NoClobber, Persist::Replace);
+    persist_beneath(graph_root, dir, name, bytes, persist)
 }
 
 /// A flushed temp file holding new bytes, unlinked on drop unless it landed.

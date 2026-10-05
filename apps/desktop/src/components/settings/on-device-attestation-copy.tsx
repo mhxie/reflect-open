@@ -20,10 +20,11 @@ export function OnDeviceAttestationCopy({
   return (
     <>
       Reflect will treat <span className="font-medium text-text">{model}</span> at{' '}
-      <span className="font-mono text-text">{baseUrl}</span> as running on this Mac. Reflect
-      connects only to this Mac, with no proxy and no redirects, but cannot see what the server does
-      next. Turn this on only if the server runs the model on this Mac and does not forward requests
-      (Ollama cloud models, LiteLLM, SSH tunnels and similar gateways do).
+      <span className="font-mono text-text">{baseUrl}</span> as running on this Mac. Reflect can use
+      it to read private notes; vision models can also run local OCR. Reflect connects only to this
+      Mac, checks Ollama model provenance, with no proxy and no redirects, but cannot see what
+      another local server does next. Turn this on only if the server runs the model on this Mac and
+      does not forward requests (Ollama cloud models, LiteLLM, SSH tunnels and similar gateways do).
     </>
   )
 }

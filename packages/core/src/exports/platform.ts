@@ -364,6 +364,7 @@ export {
   type HostedAiProviderConfig,
   type OpenAiCompatibleProviderConfig,
   type OnDeviceAttestation,
+  type OnDeviceServerKind,
   type AiPrompt,
   type AiPromptMode,
 } from '../settings/schema.ts'

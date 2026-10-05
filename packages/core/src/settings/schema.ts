@@ -566,7 +566,12 @@ export type HostedAiProviderConfig = z.infer<typeof hostedAiProviderConfigSchema
 export const onDeviceAttestationSchema = z.object({
   baseUrl: openAiCompatibleBaseUrlSchema,
   model: z.string().min(1),
+  /** The server the user confirmed; older attestations must identify it before private access. */
+  server: z.enum(['ollama', 'openai-compatible']).optional(),
 })
+
+/** The local inference server explicitly confirmed by the user. */
+export type OnDeviceServerKind = NonNullable<z.infer<typeof onDeviceAttestationSchema>['server']>
 
 export type OnDeviceAttestation = z.infer<typeof onDeviceAttestationSchema>
 
@@ -715,6 +720,8 @@ export const settingsSchema = z.looseObject({
   semanticSearchEnabled: semanticSearchEnabledSchema,
   semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
+  /** Explicit local vision provider; null retains public-attachment descriptions via the default provider. */
+  localOcrProviderId: z.string().nullable().catch(null),
   transcriptionFormat: transcriptionFormatSchema,
   transcriptionPrompt: transcriptionPromptSchema,
   transcriptionEngine: transcriptionEngineSchema,

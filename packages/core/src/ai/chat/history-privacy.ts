@@ -2,12 +2,19 @@ import type { ModelMessage } from '@reflect/modules/ai'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { isLocalOnlyPath } from '../../graph/local-only.ts'
+import { readNoteShareable } from '../../graph/commands.ts'
+import { descriptionPathFor } from '../../graph/paths.ts'
+import { notePrivate } from '../../privacy/checkers.ts'
 import { assetReferenceMatches } from '../../indexing/asset-refs.ts'
+import { hashContent } from '../../indexing/hash.ts'
 import { db } from '../../indexing/db.ts'
-import { verifyOnDeviceServer, type ModelTarget } from '../../privacy/on-device.ts'
+import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
+import { isAppError, ReflectError } from '../../errors.ts'
+import { readAssetOcrState } from '../../actions/asset-ocr-cache.ts'
 import { isXArchiveAssetPath } from '../../x-archive.ts'
 import { splitIntoTurnSegments } from './context-window.ts'
 import { toolResultSources, type ToolResultSources } from './tools.ts'
+import { hasRestrictedSearchSources } from './search-privacy.ts'
 
 /**
  * Chat history privacy at resend. Every turn resends the earlier exchanges,
@@ -19,15 +26,15 @@ import { toolResultSources, type ToolResultSources } from './tools.ts'
  * what it read. Exchanges are the context window's turn segments, so role
  * alternation survives. The stored turns are untouched; only what this turn
  * sends changes. An on-device target receives the full history once its
- * server passes `verifyOnDeviceServer`; a refused one is filtered like a cloud
- * target.
+ * server passes verification. A conversation containing marked private local
+ * context is refused outright when a cloud target is selected.
  *
  * Private now means a note in a local-only folder or whose index row is
  * private or missing (moved, deleted, not indexed), or an asset in a
  * local-only folder or the X archive folder, referenced by no indexed note,
  * or referenced by a note that is private now. A tool result whose sources
- * can't be read fails closed. All paths are checked in one index query rather
- * than a disk read per path, so the gate is as fresh as the index.
+ * can't be read fails closed. Index flags and live note/sidecar sources are
+ * both checked, including changes that have not reached the index yet.
  */
 
 /** The history one turn sends, from {@link historyForTarget}. */
@@ -42,21 +49,28 @@ export interface TargetHistory {
  * The model-facing history `target` may receive, given everything a turn
  * would resend (`buildHistory` plus the new user message). An on-device
  * target whose server {@link verifyOnDeviceServer} accepts receives all of
- * it; any other target, a refused on-device one included, gets the filtered
- * history.
+ * it; a cloud target gets filtered public history or a refusal when marked
+ * private local context occurs anywhere in the conversation.
  */
 export async function historyForTarget(
   messages: ModelMessage[],
-  target: ModelTarget,
+  target: VerifiedModelTarget,
+  generation?: number,
 ): Promise<TargetHistory> {
-  if (target.kind === 'on-device' && (await verifyOnDeviceServer(target)) === 'ok') {
+  if (target.kind === 'on-device') {
     return { messages, withheldTurns: 0 }
   }
+  refuseCloudPrivateContext(messages)
   const segments = splitIntoTurnSegments(messages)
-  refuseCloudPrivateContext(segments)
   const checked = segments.map((segment) => ({ segment, sources: segmentSources(segment) }))
   const privateNow = await privateNowPaths(
     checked.flatMap(({ sources }) => (sources === null ? [] : [sources])),
+    generation,
+  )
+  await refuseCloudRestrictedSearchSnapshots(
+    checked.flatMap(({ sources }) => sources?.searchSnapshots ?? []),
+    privateNow,
+    generation,
   )
   const kept = checked.filter(
     ({ sources }) => sources !== null && !namesPrivatePath(sources, privateNow),
@@ -68,17 +82,27 @@ export async function historyForTarget(
 }
 
 /**
- * Sub-project C's rule for a target that gets the filtered history (cloud, or
- * an on-device target whose server was refused): a conversation that holds
- * content the cloud gate withheld (a tool output carrying the
- * `reflectPrivateContext` marker, which only on-device tools mint) is refused
- * outright instead of filtered, because its later answers can paraphrase that
- * content. `streamChat` reports a throw from here as the turn's error,
- * sending nothing.
+ * Refuse cloud turns for conversations containing device-only tool results:
+ * later answers can paraphrase that content even after history filtering.
+ * `streamChat` reports the refusal before sending a request.
  */
-function refuseCloudPrivateContext(_segments: readonly ModelMessage[][]): void {
-  // TODO(C2): throw the refusal when any segment carries the marker. No tool
-  // mints it yet (on-device tools arrive with C2), so nothing is refused today.
+function refuseCloudPrivateContext(messages: readonly ModelMessage[]): void {
+  if (containsPrivateContext(messages)) {
+    throw new ReflectError(
+      'auth',
+      'This conversation contains private local context. Continue with a verified on-device model or start a new conversation for a cloud model.',
+    )
+  }
+}
+
+function containsPrivateContext(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  if ('reflectPrivateContext' in value && value.reflectPrivateContext === true) {
+    return true
+  }
+  return Object.values(value).some(containsPrivateContext)
 }
 
 /**
@@ -107,6 +131,7 @@ function isToolResultPart(part: unknown): boolean {
 function segmentSources(segment: readonly ModelMessage[]): ToolResultSources | null {
   const notes: string[] = []
   const assets: string[] = []
+  const searchSnapshots: NonNullable<ToolResultSources['searchSnapshots']>[number][] = []
   for (const message of segment) {
     const content: unknown = message.content
     if (typeof content === 'string') {
@@ -133,15 +158,46 @@ function segmentSources(segment: readonly ModelMessage[]): ToolResultSources | n
       }
       notes.push(...sources.notes)
       assets.push(...sources.assets)
+      searchSnapshots.push(...(sources.searchSnapshots ?? []))
     }
   }
-  return { notes, assets }
+  return { notes, assets, searchSnapshots }
 }
 
 /** The checked paths that are private now, by kind. */
 interface PrivatePaths {
   notes: ReadonlySet<string>
   assets: ReadonlySet<string>
+  liveSources: ReadonlyMap<string, string>
+}
+
+async function refuseCloudRestrictedSearchSnapshots(
+  snapshots: NonNullable<ToolResultSources['searchSnapshots']>,
+  privateNow: PrivatePaths,
+  generation?: number,
+): Promise<void> {
+  const emptyHash = await hashContent('')
+  for (const snapshot of snapshots) {
+    if (snapshot.assetTextHash === emptyHash) continue
+    const source = privateNow.liveSources.get(snapshot.path)
+    if (
+      snapshot.assetTextHash === undefined ||
+      privateNow.notes.has(snapshot.path) ||
+      source === undefined ||
+      (await hasRestrictedSearchSources(
+        snapshot.path,
+        source,
+        (path) => readPublicNote(path, generation),
+        generation,
+        snapshot.assetTextHash,
+      ))
+    ) {
+      throw new ReflectError(
+        'auth',
+        'This conversation contains attachment search text whose original source cannot be cleared for cloud use. Continue with a verified on-device model or start a new cloud conversation.',
+      )
+    }
+  }
 }
 
 function namesPrivatePath(sources: ToolResultSources, privateNow: PrivatePaths): boolean {
@@ -152,7 +208,10 @@ function namesPrivatePath(sources: ToolResultSources, privateNow: PrivatePaths):
 }
 
 /** Which of the named notes and assets are private now (see the module doc). */
-async function privateNowPaths(named: readonly ToolResultSources[]): Promise<PrivatePaths> {
+async function privateNowPaths(
+  named: readonly ToolResultSources[],
+  generation?: number,
+): Promise<PrivatePaths> {
   const notes = [...new Set(named.flatMap((sources) => sources.notes))]
   const assets = [...new Set(named.flatMap((sources) => sources.assets))]
   const privateNotes = new Set(notes.filter((path) => isLocalOnlyPath(path)))
@@ -166,6 +225,7 @@ async function privateNowPaths(named: readonly ToolResultSources[]): Promise<Pri
   const notePaths = notes.filter((path) => !privateNotes.has(path))
   const assetPaths = assets.filter((path) => !privateAssets.has(path))
   const rows = await privacyRows(notePaths, assetPaths)
+  const liveSources = new Map<string, string>()
 
   const publicNotes = new Set(
     rows.filter((row) => row.source === 'note' && row.isPrivate === 0).map((row) => row.notePath),
@@ -173,19 +233,66 @@ async function privateNowPaths(named: readonly ToolResultSources[]): Promise<Pri
   for (const path of notePaths) {
     if (!publicNotes.has(path)) {
       privateNotes.add(path)
+      continue
+    }
+    try {
+      const source = await readPublicNote(path, generation)
+      liveSources.set(path, source)
+      if (
+        notePrivate(source) ||
+        (await hasRestrictedSearchSources(
+          path,
+          source,
+          (notePath) => readPublicNote(notePath, generation),
+          generation,
+        ))
+      ) {
+        privateNotes.add(path)
+      }
+    } catch {
+      privateNotes.add(path)
     }
   }
   const referenceRows = rows.filter((row) => row.source === 'asset')
   for (const path of assetPaths) {
+    if ((await readAssetOcrState(path, generation)) !== null) {
+      privateAssets.add(path)
+      continue
+    }
+    try {
+      if (notePrivate(await readPublicNote(descriptionPathFor(path), generation))) {
+        privateAssets.add(path)
+        continue
+      }
+    } catch (cause) {
+      if (!isAppError(cause) || cause.kind !== 'notFound') {
+        privateAssets.add(path)
+        continue
+      }
+    }
     const referencing = referenceRows.filter((row) => assetReferenceMatches(row.reference, path))
     if (
       referencing.length === 0 ||
       referencing.some((row) => row.isPrivate !== 0 || isLocalOnlyPath(row.notePath))
     ) {
       privateAssets.add(path)
+      continue
+    }
+    for (const row of referencing) {
+      try {
+        if (notePrivate(await readPublicNote(row.notePath, generation))) privateAssets.add(path)
+      } catch {
+        privateAssets.add(path)
+      }
     }
   }
-  return { notes: privateNotes, assets: privateAssets }
+  return { notes: privateNotes, assets: privateAssets, liveSources }
+}
+
+async function readPublicNote(path: string, generation?: number): Promise<string> {
+  const read = await readNoteShareable(path, generation)
+  if (read.kind === 'localOnly') throw new ReflectError('auth', 'History source is local-only.')
+  return read.content
 }
 
 type PrivacyRowSource = 'note' | 'asset'
@@ -216,7 +323,7 @@ async function privacyRows(
       sql.lit<PrivacyRowSource>('note').as('source'),
       'path as reference',
       'path as notePath',
-      'isPrivate',
+      sql<number>`is_private OR has_device_only_content`.as('isPrivate'),
     ])
   const references = [
     ...new Set(assetPaths.flatMap((path) => [path, path.split('/').at(-1) ?? path])),
@@ -229,7 +336,7 @@ async function privacyRows(
       sql.lit<PrivacyRowSource>('asset').as('source'),
       'assets.assetPath as reference',
       'notes.path as notePath',
-      'notes.isPrivate',
+      sql<number>`notes.is_private OR notes.has_device_only_content`.as('isPrivate'),
     ])
   if (assetPaths.length === 0) {
     return notePaths.length === 0 ? [] : await noteRows.execute()

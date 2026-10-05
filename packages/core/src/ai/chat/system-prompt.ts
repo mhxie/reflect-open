@@ -23,6 +23,8 @@ export interface SystemPromptInput {
    * it could not be loaded — the prompt then simply omits the overview.
    */
   context: CloudSafe<CloudGraphContext> | null
+  /** Whether this turn is bound to a verified on-device model. */
+  onDevice?: boolean
 }
 
 /** Build the system prompt for one chat session. */
@@ -31,6 +33,7 @@ export function chatSystemPrompt({
   context,
   semanticSearchEnabled,
   customSystemPrompt,
+  onDevice = false,
 }: SystemPromptInput): string {
   const customInstructions = normalizeChatSystemPrompt(customSystemPrompt)
   return [
@@ -46,7 +49,9 @@ export function chatSystemPrompt({
     '- For “what have I written or worked on lately?”, call list_recent_notes with no tag — pass a tag only when the user names one. Tool inputs are plain values; there is no wildcard or operator syntax (never pass “*”).',
     '- Ground answers in what the tools return. If the notes don’t cover something, say so plainly instead of guessing.',
     '- Cite every note you draw on with a wiki link of its exact title, e.g. [[Project Atlas]]. Do not invent titles that the tools did not return.',
-    '- Private notes are excluded from search and cannot be read. If a tool reports a note is private, tell the user that — never speculate about its contents.',
+    onDevice
+      ? '- This verified on-device model can search and read private notes and local-only folders. Keep answers grounded in the tool results.'
+      : '- Private notes and on-device OCR text are excluded from search and cannot be read. If a tool reports a note is unavailable, tell the user that — never speculate about its contents.',
     '',
     'Style: answer in concise markdown. Prefer short paragraphs and lists over headings.',
     ...(customInstructions === ''

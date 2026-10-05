@@ -41,8 +41,12 @@ export interface FilteredSearchHit {
   /** File modification time (epoch ms) — drives the row's recency label. */
   mtime: number
   isPinned: boolean
-  isPrivate: boolean
   hasConflict: boolean
+  /** Privacy flags from the same index snapshot as the snippet. */
+  isPrivate: boolean
+  hasDeviceOnlyContent: boolean
+  /** Identity of attachment text folded into this search snapshot. */
+  assetTextHash?: string
 }
 
 export interface FilteredSearchOptions {
@@ -70,6 +74,9 @@ export interface FilteredSearchOptions {
 const HIT_COLUMNS = [
   'notes.path',
   'notes.title',
+  'notes.isPrivate',
+  'notes.hasDeviceOnlyContent',
+  'notes.assetTextHash',
   'notes.dailyDate',
   'notes.preview',
   'notes.mtime',
@@ -201,6 +208,7 @@ export async function searchWithFilters(
       snippet: null,
       isPinned: row.isPinned !== 0,
       isPrivate: row.isPrivate !== 0,
+      hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
       hasConflict: row.hasConflict !== 0,
     }))
   }
@@ -274,6 +282,7 @@ export async function searchWithFilters(
       snippet: null,
       isPinned: row.isPinned !== 0,
       isPrivate: row.isPrivate !== 0,
+      hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
       hasConflict: row.hasConflict !== 0,
     }))
   }
@@ -310,6 +319,9 @@ export async function searchWithFilters(
     .select([
       'filteredNotes.path',
       'filteredNotes.title',
+      'filteredNotes.isPrivate',
+      'filteredNotes.hasDeviceOnlyContent',
+      'filteredNotes.assetTextHash',
       'filteredNotes.dailyDate',
       'filteredNotes.preview',
       'filteredNotes.mtime',
@@ -353,6 +365,7 @@ export async function searchWithFilters(
     ),
     isPinned: row.isPinned !== 0,
     isPrivate: row.isPrivate !== 0,
+    hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
     hasConflict: row.hasConflict !== 0,
   }))
 }

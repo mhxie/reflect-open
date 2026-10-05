@@ -1,7 +1,9 @@
 import { resolveChatModel, type ChatModelOption } from '../ai/chat/model-options.ts'
 import { defaultAiProvider, type AiProvidersState } from '../ai/provider-config.ts'
 import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
+import { ReflectError } from '../errors.ts'
 import { isLoopbackHttpUrl } from './loopback.ts'
+import { verifyOnDeviceServer } from './on-device-verification.ts'
 
 /**
  * Which tier a resolved model belongs to. A model counts as running on this
@@ -18,6 +20,7 @@ import { isLoopbackHttpUrl } from './loopback.ts'
  */
 
 export { isLoopbackHttpUrl } from './loopback.ts'
+export { verifyOnDeviceServer } from './on-device-verification.ts'
 
 declare const onDeviceTargetBrand: unique symbol
 
@@ -40,6 +43,32 @@ export interface CloudTarget {
 
 /** Where a resolved model runs, as far as Reflect can tell. */
 export type ModelTarget = OnDeviceTarget | CloudTarget
+
+declare const verifiedOnDeviceBrand: unique symbol
+
+/** An attested model whose server passed the private-content check for this turn or action. */
+export interface VerifiedOnDeviceTarget extends OnDeviceTarget {
+  readonly [verifiedOnDeviceBrand]: true
+}
+
+/** A cloud destination or an on-device destination verified before reading private content. */
+export type VerifiedModelTarget = CloudTarget | VerifiedOnDeviceTarget
+
+/** Verify a turn's destination before any private content is read; never fall back to cloud. */
+export async function verifyModelTarget(
+  target: ModelTarget,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<VerifiedModelTarget> {
+  if (target.kind === 'cloud') {
+    return target
+  }
+  const verdict = await verifyOnDeviceServer(target, { apiKey, signal })
+  if (verdict !== 'ok') {
+    throw new ReflectError('auth', verdict.reason)
+  }
+  return target as VerifiedOnDeviceTarget
+}
 
 function frozenOpenAiCompatible(
   config: OpenAiCompatibleProviderConfig,
@@ -97,6 +126,10 @@ export function resolveOnDeviceTarget(resolved: AiProviderConfig): OnDeviceTarge
  * The target for `resolved`: on-device when {@link resolveOnDeviceTarget}
  * allows it, cloud otherwise. The config is a frozen copy either way.
  */
+export function modelTarget(
+  resolved: AiProviderConfig & { provider: 'openai' | 'anthropic' | 'google' | 'openrouter' },
+): CloudTarget
+export function modelTarget(resolved: AiProviderConfig): ModelTarget
 export function modelTarget(resolved: AiProviderConfig): ModelTarget {
   const onDevice = resolveOnDeviceTarget(resolved)
   if (onDevice !== null) {
@@ -144,17 +177,3 @@ export interface OnDeviceServerRefusal {
 
 /** What {@link verifyOnDeviceServer} concluded about the server behind a target. */
 export type OnDeviceServerVerdict = 'ok' | OnDeviceServerRefusal
-
-/**
- * Check the server behind `target` before content the cloud gate withholds
- * reaches it. For now a placeholder that answers `'ok'`: verification step
- * V1 (`docs/plans/27-on-device-models.md`) decides whether Ollama reports
- * cloud models through its API. If it does, this becomes a probe over
- * `onDeviceFetch` that refuses Ollama cloud models and fails closed when the
- * probe errors. Callers run it on every turn and run and never cache it.
- */
-export async function verifyOnDeviceServer(
-  _target: OnDeviceTarget,
-): Promise<OnDeviceServerVerdict> {
-  return 'ok'
-}

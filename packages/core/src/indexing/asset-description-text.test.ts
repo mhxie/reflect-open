@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readNoteLocal } from '../graph/commands.ts'
+import { readNoteLocal, readAssetOcrCache, listAttachments } from '../graph/commands.ts'
 import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import {
   gatherAssetDescriptionBodies,
@@ -9,6 +9,8 @@ import {
 
 vi.mock('../graph/commands', () => ({
   readNoteLocal: vi.fn(),
+  readAssetOcrCache: vi.fn(),
+  listAttachments: vi.fn(),
 }))
 
 const readNoteMock = vi.mocked(readNoteLocal)
@@ -25,6 +27,8 @@ beforeEach(() => {
   resolvedLocalOnly.clear()
   setLocalOnlyFolders([])
   vi.clearAllMocks()
+  vi.mocked(readAssetOcrCache).mockRejectedValue(notFound())
+  vi.mocked(listAttachments).mockResolvedValue([])
   readNoteMock.mockImplementation(async (path: string) => {
     const value = files.get(path)
     if (value === undefined) {
@@ -35,24 +39,28 @@ beforeEach(() => {
 })
 
 describe('local-only assets', () => {
-  it('never folds a local-only asset description, and never reads it', async () => {
+  it('folds local-only attachment text while retaining device-only provenance', async () => {
     files.set('finance/secure/scan.png.reflect.md', 'Account number 1234.\n')
     files.set('assets/a.png.reflect.md', 'Public diagram.\n')
     setLocalOnlyFolders(['secure'])
 
     const text = await gatherAssetDescriptionText(['finance/secure/scan.png', 'assets/a.png'])
 
-    expect(text).toBe('Public diagram.')
-    expect(readNoteMock).not.toHaveBeenCalledWith('finance/secure/scan.png.reflect.md')
+    expect(text).toBe('Account number 1234.\n\nPublic diagram.')
+    expect(
+      (await gatherAssetDescriptionBodies(['finance/secure/scan.png'])).bodies[0]?.deviceOnly,
+    ).toBe(true)
   })
 
-  it('skips a sidecar Rust resolves into a local-only folder despite its spelling', async () => {
+  it('retains Rust local-only provenance despite a different path spelling', async () => {
     // e.g. a case-folded spelling the name check cannot see.
     files.set('people/\u{17F}ecure/scan.png.reflect.md', 'Passport scan.\n')
     resolvedLocalOnly.add('people/\u{17F}ecure/scan.png.reflect.md')
     setLocalOnlyFolders(['secure'])
 
-    expect(await gatherAssetDescriptionText(['people/\u{17F}ecure/scan.png'])).toBe('')
+    expect((await gatherAssetDescriptionBodies(['people/\u{17F}ecure/scan.png'])).bodies).toEqual([
+      { assetPath: 'people/\u{17F}ecure/scan.png', body: 'Passport scan.', deviceOnly: true },
+    ])
   })
 
   it('folds the same description when nothing is local-only (control)', async () => {
@@ -131,6 +139,55 @@ describe('gatherAssetDescriptionText', () => {
 })
 
 describe('gatherAssetDescriptionBodies', () => {
+  it('resolves a bare wiki attachment before folding device-only OCR', async () => {
+    vi.mocked(listAttachments).mockResolvedValue([
+      { path: 'media/scan.png', size: 2, modifiedMs: 1 },
+    ])
+    vi.mocked(readAssetOcrCache).mockResolvedValue(
+      JSON.stringify({
+        version: 1,
+        status: 'complete',
+        deviceOnly: true,
+        assetPath: 'media/scan.png',
+        sourceHash: 'a'.repeat(64),
+        sourceSize: 2,
+        providerId: 'local',
+        model: 'vision',
+        baseUrl: 'http://localhost:1234/v1',
+        pages: 1,
+        generatedAt: '2026-10-04T00:00:00.000Z',
+        body: 'OCR sentinel',
+      }),
+    )
+    expect((await gatherAssetDescriptionBodies(['scan.png'], 'notes/a.md')).bodies).toEqual([
+      { assetPath: 'media/scan.png', body: 'OCR sentinel', deviceOnly: true },
+    ])
+  })
+
+  it('blocks an old managed caption after local OCR invalidation', async () => {
+    vi.mocked(readAssetOcrCache).mockResolvedValue(
+      JSON.stringify({
+        version: 1,
+        status: 'invalid',
+        deviceOnly: true,
+        assetPath: 'assets/a.png',
+      }),
+    )
+    files.set('assets/a.png.reflect.md', '---\nreflectAsset: true\n---\nStale caption')
+    expect((await gatherAssetDescriptionBodies(['assets/a.png'])).bodies).toEqual([])
+    files.set('assets/a.png.reflect.md', 'My own current caption')
+    expect((await gatherAssetDescriptionBodies(['assets/a.png'])).bodies).toEqual([
+      { assetPath: 'assets/a.png', body: 'My own current caption' },
+    ])
+  })
+
+  it('retains private sidecar provenance when the referencing note is public', async () => {
+    files.set('assets/a.png.reflect.md', '---\nprivate: true\n---\nPrivate caption')
+    expect((await gatherAssetDescriptionBodies(['assets/a.png'])).bodies).toEqual([
+      { assetPath: 'assets/a.png', body: 'Private caption', deviceOnly: true },
+    ])
+  })
+
   it('returns per-asset bodies attributed to their asset paths', async () => {
     files.set('assets/a.png.reflect.md', '---\nreflectAsset: true\n---\n\nA flow diagram.\n')
     files.set('assets/b.pdf.reflect.md', '---\nreflectAsset: true\n---\n\nQ4 revenue report.\n')

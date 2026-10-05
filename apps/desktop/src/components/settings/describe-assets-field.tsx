@@ -1,5 +1,12 @@
 import { useState, type ReactElement } from 'react'
-import type { AiProvidersState } from '@reflect/core'
+import { resolveOnDeviceTarget, type AiProvidersState } from '@reflect/core'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
   Dialog,
@@ -29,6 +36,12 @@ export function DescribeAssetsField(): ReactElement {
   const [running, setRunning] = useState(false)
 
   const hasProvider = settings.aiProviders.length > 0
+  const localModels = settings.aiProviders.filter(
+    (config) =>
+      config.provider === 'openai-compatible' &&
+      config.supportsImages &&
+      resolveOnDeviceTarget(config) !== null,
+  )
   const generation = graph?.generation ?? null
 
   const runBackfill = async (): Promise<void> => {
@@ -42,7 +55,11 @@ export function DescribeAssetsField(): ReactElement {
     }
     setRunning(true)
     try {
-      await backfillAssetDescriptionsVisibly(generation, providers)
+      await backfillAssetDescriptionsVisibly(
+        generation,
+        providers,
+        settings.localOcrProviderId ?? null,
+      )
     } finally {
       setRunning(false)
     }
@@ -51,8 +68,38 @@ export function DescribeAssetsField(): ReactElement {
   return (
     <SettingsField
       legend="OCR assets"
-      description="Make text in images and PDFs searchable. Private notes are skipped."
+      description={
+        settings.localOcrProviderId
+          ? 'Recognize images and PDFs on this Mac, including private and local-only notes. OCR text stays on this device.'
+          : 'Make text in public images and PDFs searchable, or select a local vision model to include private notes.'
+      }
     >
+      <div className="mt-3">
+        <Select
+          value={settings.localOcrProviderId ?? 'default'}
+          onValueChange={(value) =>
+            updateSettings({ localOcrProviderId: value === 'default' ? null : value })
+          }
+        >
+          <SelectTrigger aria-label="OCR model">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">Default AI · public attachments only</SelectItem>
+            {localModels.map((config) => (
+              <SelectItem key={config.id} value={config.id}>
+                {config.model} · on this Mac
+              </SelectItem>
+            ))}
+            {settings.localOcrProviderId &&
+            !localModels.some((config) => config.id === settings.localOcrProviderId) ? (
+              <SelectItem value={settings.localOcrProviderId} disabled>
+                Selected local model unavailable
+              </SelectItem>
+            ) : null}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="mt-3 flex items-center gap-3">
         <Switch
           aria-label="OCR new assets automatically"
@@ -87,8 +134,10 @@ export function DescribeAssetsField(): ReactElement {
             <DialogHeader>
               <DialogTitle>Backfill assets?</DialogTitle>
               <DialogDescription>
-                Images and PDFs in non-private notes will be sent to your AI provider so their text
-                can appear in search. Assets that already have OCR are skipped.
+                {settings.localOcrProviderId
+                  ? 'Images and PDFs, including those in private notes, will be read by your selected local vision model. OCR text stays on this Mac. PDF OCR is supported on macOS.'
+                  : 'Images and PDFs in non-private notes will be sent to your AI provider so their text can appear in search.'}{' '}
+                Assets that already have matching OCR are skipped.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

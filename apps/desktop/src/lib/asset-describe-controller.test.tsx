@@ -89,6 +89,37 @@ function create(): AssetDescribeController {
   return controller
 }
 
+it('retries a source replaced while its OCR pass is in flight', async () => {
+  const pending = deferred<ReconcileAssetDescriptionsOutcome>()
+  reconcileAssetDescriptions.mockReturnValueOnce(pending.promise)
+  reconcileAssetDescriptions.mockResolvedValue(outcome({ described: 0 }))
+  create().start()
+  emitApplied([upsert('assets/scan.png')])
+  await vi.waitFor(() => expect(reconcileAssetDescriptions).toHaveBeenCalledTimes(1))
+  emitApplied([upsert('assets/scan.png')])
+  pending.resolve(outcome({ described: 0, skippedChanged: 1 }))
+  await vi.waitFor(() => expect(reconcileAssetDescriptions).toHaveBeenCalledTimes(2))
+  expect(reconcileAssetDescriptions.mock.calls[1]?.[0].changed).toEqual(['assets/scan.png'])
+})
+
+it('keeps a watcher follow-up when the in-flight pass stops', async () => {
+  const pending = deferred<ReconcileAssetDescriptionsOutcome>()
+  reconcileAssetDescriptions.mockReturnValueOnce(pending.promise)
+  reconcileAssetDescriptions.mockResolvedValue(outcome({ described: 0 }))
+  create().start()
+  emitApplied([upsert('assets/scan.png')])
+  await vi.waitFor(() => expect(reconcileAssetDescriptions).toHaveBeenCalledTimes(1))
+  emitApplied([upsert('assets/scan.png')])
+  pending.resolve(
+    outcome({
+      described: 0,
+      stopped: { reason: 'network', message: 'Retry the changed source' },
+    }),
+  )
+  await vi.waitFor(() => expect(reconcileAssetDescriptions).toHaveBeenCalledTimes(2))
+  expect(reconcileAssetDescriptions.mock.calls[1]?.[0].changed).toEqual(['assets/scan.png'])
+})
+
 /** Deliver a post-apply batch at the controller's generation (the common case). */
 function emitApplied(changes: FileChange[]): void {
   onApplied?.(changes, GEN)

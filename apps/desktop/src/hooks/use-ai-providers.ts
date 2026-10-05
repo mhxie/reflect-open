@@ -16,6 +16,7 @@ import {
   type AiProviderConfig,
   type AiProviderId,
   type AppError,
+  type OnDeviceServerKind,
 } from '@reflect/core'
 import { useSettings } from '@/providers/settings-provider.tsx'
 
@@ -38,6 +39,8 @@ export interface NewAiProvider {
    * this Mac. Honored only for a loopback base URL.
    */
   onDevice?: boolean | undefined
+  /** The local server confirmed alongside the model and endpoint. */
+  onDeviceServer?: OnDeviceServerKind | undefined
   /** OpenAI-compatible only: the model accepts image input. */
   supportsImages?: boolean | undefined
   /** OpenAI-compatible only: the server's context window, in tokens. */
@@ -95,7 +98,7 @@ interface UseAiProvidersValue {
    * exactly its current base URL and model, or withdraw that. Attesting an
    * entry whose base URL is not a loopback host changes nothing.
    */
-  setOnDevice: (id: string, attest: boolean) => void
+  setOnDevice: (id: string, attest: boolean, server?: OnDeviceServerKind) => void
   /** Change what an OpenAI-compatible entry declares about its model. */
   setCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
 }
@@ -142,7 +145,7 @@ export function useAiProviders(): UseAiProvidersValue {
         )
         let providers = withAiProviderCapabilities(next.providers, id, draftCapabilities(draft))
         if (draft.onDevice === true) {
-          providers = withAiProviderOnDevice(providers, id, true)
+          providers = withAiProviderOnDevice(providers, id, true, draft.onDeviceServer)
         }
         return { aiProviders: providers, defaultAiProviderId: next.defaultProviderId }
       })
@@ -191,9 +194,9 @@ export function useAiProviders(): UseAiProvidersValue {
   )
 
   const setOnDevice = useCallback(
-    (id: string, attest: boolean): void => {
+    (id: string, attest: boolean, server?: OnDeviceServerKind): void => {
       updateSettingsWith((current) => ({
-        aiProviders: withAiProviderOnDevice(current.aiProviders, id, attest),
+        aiProviders: withAiProviderOnDevice(current.aiProviders, id, attest, server),
       }))
     },
     [updateSettingsWith],

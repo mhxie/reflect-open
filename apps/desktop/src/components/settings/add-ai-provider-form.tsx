@@ -10,6 +10,7 @@ import {
   isLoopbackHttpUrl,
   isPlainHttpRemoteBaseUrl,
   type AiProviderId,
+  type OnDeviceServerKind,
 } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
@@ -43,6 +44,7 @@ export interface AddAiProviderValues {
   isDefault: boolean
   /** OpenAI-compatible only: attest the endpoint runs `model` on this Mac. */
   onDevice: boolean
+  onDeviceServer: OnDeviceServerKind
   /** OpenAI-compatible only: the model accepts image input. */
   supportsImages: boolean
   /** OpenAI-compatible only: the context length as typed; blank for the server's default. */
@@ -84,6 +86,7 @@ export function AddAiProviderForm({ onAdd, onClose }: AddAiProviderFormProps): R
       apiKey: '',
       isDefault: false,
       onDevice: false,
+      onDeviceServer: 'openai-compatible',
       supportsImages: false,
       contextWindow: '',
     },

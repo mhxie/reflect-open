@@ -1,5 +1,6 @@
 import type { Unlisten } from '../ipc/bridge.ts'
 import { isAssetPath, isNotePath } from '../graph/paths.ts'
+import { localOcrAssetTypeFor } from '../actions/asset-description-helpers.ts'
 import { readNote } from '../graph/commands.ts'
 import { moveIndexedRows, removeFromIndex } from './commands.ts'
 import { subscribeFileChanges, type FileChange } from './file-changes.ts'
@@ -304,7 +305,9 @@ export function subscribeIndexChanges(
       return
     }
     const notes = changes.filter((change) => isNotePath(change.path))
-    const touchesAssets = changes.some((change) => isAssetPath(change.path))
+    const touchesAssets = changes.some(
+      (change) => isAssetPath(change.path) || localOcrAssetTypeFor(change.path) !== null,
+    )
     if (notes.length === 0 && !touchesAssets) {
       return // e.g. a batch of audio-memo recordings — nothing the index tracks
     }

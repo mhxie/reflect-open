@@ -9,6 +9,7 @@ use reflect_index_schema::cjk::cjk_column_text;
 use reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
 use rusqlite::{params, Connection};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
 
@@ -35,6 +36,8 @@ pub struct IndexedNote {
     /// The file carries Git conflict markers (sync merge, Plan 12).
     pub(super) has_conflict: bool,
     pub(super) has_content: bool,
+    #[serde(default)]
+    pub(super) has_device_only_content: bool,
     /// Characters of display text — what the user wrote, sans Markdown syntax.
     pub(super) body_chars: i64,
     /// The published GitHub Gist's html url, when the note has one.
@@ -147,11 +150,26 @@ pub(super) struct IndexedTask {
 /// single source of truth for what belongs to a note, so new child tables (Plan
 /// 09 embeddings, etc.) need no change to this function.
 pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()> {
+    let search_body = if note.asset_text.is_empty() {
+        note.text.clone()
+    } else {
+        format!("{}\n{}", note.text, note.asset_text)
+    };
+    let restricted = note.is_private || note.has_device_only_content;
+    let restriction = "note_path = ?1 AND (?2 OR EXISTS (SELECT 1 FROM notes WHERE path = ?1 AND (is_private OR has_device_only_content))) AND (?2 != COALESCE((SELECT is_private OR has_device_only_content FROM notes WHERE path = ?1), 0) OR ?3 != COALESCE((SELECT body FROM search_fts WHERE path = ?1), ''))";
+    conn.execute(
+        &format!("DELETE FROM embedding_vectors WHERE rowid IN (SELECT id FROM embedding_chunks WHERE {restriction})"),
+        params![note.path, restricted, search_body],
+    )?;
+    conn.execute(
+        &format!("DELETE FROM embedding_chunks WHERE {restriction}"),
+        params![note.path, restricted, search_body],
+    )?;
     remove_note(conn, &note.path)?;
 
     conn.prepare_cached(
-        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18)",
+        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20)",
     )?
     .execute(params![
         note.path,
@@ -172,6 +190,11 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
         note.preview,
         i64::from(note.has_content),
         note.body_chars,
+        i64::from(note.has_device_only_content),
+        Sha256::digest(note.asset_text.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
     ])?;
     {
         let mut stmt = conn.prepare_cached(
@@ -250,11 +273,6 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
     // text (Plan 20), so a query matching a description surfaces the note. Only
     // the search index is enriched — `preview` and the AI-reachable text above
     // stay the note body alone.
-    let search_body = if note.asset_text.is_empty() {
-        note.text.clone()
-    } else {
-        format!("{}\n{}", note.text, note.asset_text)
-    };
     // CJK runs index once more as character pairs, so a word inside a clause
     // matches, along with the words glued to them (migration 0023).
     let cjk = format!(
@@ -365,6 +383,9 @@ pub(super) fn move_note(
 /// model takes far longer than re-indexing it. Chunks keyed by content hash
 /// stay valid; [`prune_orphan_embeddings`] drops those whose note is gone.
 pub(super) fn clear_index(conn: &Connection, keep_embeddings: bool) -> AppResult<()> {
+    if keep_embeddings {
+        conn.execute_batch("DELETE FROM embedding_vectors WHERE rowid IN (SELECT id FROM embedding_chunks WHERE note_path IN (SELECT path FROM notes WHERE is_private OR has_device_only_content)); DELETE FROM embedding_chunks WHERE note_path IN (SELECT path FROM notes WHERE is_private OR has_device_only_content);")?;
+    }
     conn.execute_batch("DELETE FROM notes; DELETE FROM search_fts;")?;
     if !keep_embeddings {
         conn.execute_batch("DELETE FROM embedding_vectors; DELETE FROM embedding_chunks;")?;

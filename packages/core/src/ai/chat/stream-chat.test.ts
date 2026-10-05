@@ -1,4 +1,4 @@
-import type { ModelMessage } from '@reflect/modules/ai'
+import type { ModelMessage, LanguageModel } from '@reflect/modules/ai'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { convertArrayToReadableStream, MockLanguageModelV3 } from '@reflect/modules/ai/test'
@@ -14,18 +14,37 @@ import {
   openMigratedIndex,
   project,
 } from '../../indexing/flow-test-harness.ts'
-import { setBridge } from '../../ipc/bridge.ts'
+import { getBridge, setBridge } from '../../ipc/bridge.ts'
 import { cloudSafeGraphContext } from '../../privacy/checkers.ts'
-import { verifyOnDeviceServer } from '../../privacy/on-device.ts'
+import {
+  modelTarget,
+  verifyOnDeviceServer,
+  type VerifiedModelTarget,
+} from '../../privacy/on-device.ts'
+import { testTargetModel } from '../../testing/target-model.ts'
 import type { AiProviderConfig } from '../../settings/schema.ts'
 import { languageModel } from '../language-model.ts'
 import { fitToContextWindow } from './context-window.ts'
-import { MAX_STEPS, streamChat, streamChatTurn, type ChatStreamEvent } from './stream-chat.ts'
+import {
+  MAX_STEPS,
+  streamChat as streamChatWithGeneration,
+  streamChatTurn as streamChatWithTarget,
+  type ChatStreamEvent,
+  type ChatTurnOptions,
+  type StreamChatOptions,
+} from './stream-chat.ts'
 import { buildHistory } from './transcript.ts'
 
-vi.mock('../language-model', () => ({
-  languageModel: vi.fn(),
-}))
+vi.mock('../language-model', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../language-model.ts')>()
+  const mockedModel = vi.fn<typeof original.languageModel>()
+  return {
+    ...original,
+    languageModel: mockedModel,
+    languageModelFor: async (target: VerifiedModelTarget, apiKey: string, fetchFn: typeof fetch) =>
+      testTargetModel(target, await mockedModel(target.config, apiKey, fetchFn)),
+  }
+})
 
 vi.mock('./context-window', async (importOriginal) => {
   const original = await importOriginal<typeof import('./context-window.ts')>()
@@ -35,8 +54,8 @@ vi.mock('./context-window', async (importOriginal) => {
   }
 })
 
-vi.mock('../../privacy/on-device', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../privacy/on-device.ts')>()
+vi.mock('../../privacy/on-device-verification', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../privacy/on-device-verification.ts')>()
   return {
     ...original,
     verifyOnDeviceServer: vi.fn(original.verifyOnDeviceServer),
@@ -46,6 +65,23 @@ vi.mock('../../privacy/on-device', async (importOriginal) => {
 const languageModelMock = vi.mocked(languageModel)
 const fitToContextWindowMock = vi.mocked(fitToContextWindow)
 const verifyOnDeviceServerMock = vi.mocked(verifyOnDeviceServer)
+
+function streamChat(
+  options: Omit<StreamChatOptions, 'generation'>,
+): AsyncGenerator<ChatStreamEvent> {
+  return streamChatWithGeneration({ ...options, generation: 1 })
+}
+
+function streamChatTurn(
+  model: LanguageModel,
+  options: ChatTurnOptions,
+): AsyncGenerator<ChatStreamEvent> {
+  const target = modelTarget({ id: 'mock', provider: 'openai', model: 'mock', keyHint: '' })
+  return streamChatWithTarget(testTargetModel(target, model), {
+    ...options,
+    toolDeps: { hasRestrictedSearchSourcesFn: async () => false, ...options.toolDeps },
+  })
+}
 
 const USAGE: LanguageModelV3Usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
@@ -122,6 +158,7 @@ const PUBLIC_HIT: RetrievalHit = {
   snippet: 'launch plan',
   heading: null,
   isPrivate: false,
+  assetTextHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   hasConflict: false,
 }
 
@@ -315,6 +352,20 @@ describe('streamChat history privacy', () => {
     const header = locked ? '---\nprivate: true\n---\n' : ''
     applyProjection(database, project(PRIVATE_PATH, `${header}# ${PRIVATE_TITLE}\n`, 2))
     connectIndex(database)
+    const bridge = getBridge()
+    setBridge({
+      ...bridge,
+      invoke: (command, args) =>
+        command === 'note_read_shareable'
+          ? Promise.resolve({
+              kind: 'content',
+              content:
+                args['path'] === PRIVATE_PATH
+                  ? `${header}# ${PRIVATE_TITLE}\n`
+                  : '# Atlas Launch Plan\n',
+            })
+          : bridge.invoke(command, args),
+    })
   }
 
   afterEach(() => {
@@ -322,6 +373,7 @@ describe('streamChat history privacy', () => {
     database?.close()
     database = null
     verifyOnDeviceServerMock.mockReset()
+    languageModelMock.mockReset()
   })
 
   function turn(config: AiProviderConfig, messages: ModelMessage[] = HISTORY) {
@@ -423,6 +475,7 @@ describe('streamChat history privacy', () => {
   it('sends a model on this Mac the full history once its server checks out', async () => {
     // No bridge installed: asking the index would fail the turn.
     const model = nextModel()
+    verifyOnDeviceServerMock.mockResolvedValueOnce('ok')
 
     const events = await collect(turn(ON_DEVICE))
 
@@ -433,7 +486,7 @@ describe('streamChat history privacy', () => {
     expect(outbound).toContain(PRIVATE_QUESTION)
   })
 
-  it('filters the history for a model on this Mac whose server is refused', async () => {
+  it('refuses the turn when an on-device server cannot be verified', async () => {
     openIndex()
     verifyOnDeviceServerMock.mockResolvedValueOnce({
       kind: 'refused',
@@ -443,9 +496,10 @@ describe('streamChat history privacy', () => {
 
     const events = await collect(turn(ON_DEVICE))
 
-    expect(events[0]).toEqual({ type: 'history-withheld' })
-    expect(events.at(-1)?.type).toBe('complete')
-    expectNoSentinels(model)
+    expect(events).toEqual([
+      { type: 'error', message: 'This model runs in Ollama’s cloud.', messages: [] },
+    ])
+    expect(model.doStreamCalls).toHaveLength(0)
   })
 
   it('fails a cloud turn before loading the model when the index cannot be read', async () => {

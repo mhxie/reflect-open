@@ -5,6 +5,7 @@
 use reflect_index_schema::LATEST_SCHEMA_VERSION;
 use rusqlite::Connection;
 use serde_json::Value;
+use sha2::Digest;
 
 use super::chat_write::{delete_conversation, save_message, ChatConversation, ChatMessageRow};
 use super::embed_write::{apply_chunks, prepare_vectors, remove_chunks, EmbeddedChunk};
@@ -60,6 +61,7 @@ fn note(path: &str, title: &str, links: Vec<IndexedLink>) -> IndexedNote {
         has_conflict: false,
         has_content: true,
         body_chars: 0,
+        has_device_only_content: false,
         gist_url: None,
         gist_stale: false,
         file_hash: "h".to_string(),
@@ -1349,6 +1351,12 @@ fn chunk(hash: &str, vector: Option<Vec<f32>>) -> EmbeddedChunk {
         content_hash: hash.to_string(),
         model_id: "all-MiniLM-L6-v2".to_string(),
         vector,
+        is_private: false,
+        source_hash: "h".to_string(),
+        asset_text_hash: sha2::Sha256::digest(b"")
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
     }
 }
 
@@ -1459,6 +1467,56 @@ fn clear_index_wipes_embeddings_too() {
     apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
     clear_index(&conn, false).unwrap();
     assert_eq!(chunk_rows(&conn), vec![]);
+    assert_eq!(vector_count(&conn), 0);
+}
+
+#[test]
+fn retained_rebuild_drops_restricted_chunks_before_the_note_flags_disappear() {
+    let conn = migrated();
+    let mut private = note("notes/private.md", "Private", vec![]);
+    private.has_device_only_content = true;
+    apply_note(&conn, &private).unwrap();
+    index_note(&conn, "notes/public.md");
+    apply_chunks(
+        &conn,
+        "notes/private.md",
+        &[chunk("secret", Some(vec384(0.1)))],
+    )
+    .unwrap();
+    apply_chunks(
+        &conn,
+        "notes/public.md",
+        &[chunk("public", Some(vec384(0.2)))],
+    )
+    .unwrap();
+    clear_index(&conn, true).unwrap();
+    assert_eq!(
+        chunk_rows(&conn),
+        vec![("notes/public.md".to_string(), "public".to_string())]
+    );
+    assert_eq!(vector_count(&conn), 1);
+}
+
+#[test]
+fn late_private_embedding_retains_its_source_privacy_after_a_public_projection() {
+    let conn = migrated();
+    let mut old = chunk("private-snapshot", Some(vec384(0.1)));
+    old.is_private = true;
+    index_note(&conn, "notes/a.md");
+    apply_chunks(&conn, "notes/a.md", &[old]).unwrap();
+    let restricted: bool = conn.query_row("SELECT notes.is_private OR embedding_chunks.is_private FROM notes JOIN embedding_chunks ON notes.path = embedding_chunks.note_path", [], |row| row.get(0)).unwrap();
+    assert!(restricted);
+}
+
+#[test]
+fn late_embeddings_do_not_replace_the_current_note_snapshot() {
+    let conn = migrated();
+    let old = chunk("old", Some(vec384(0.1)));
+    let mut current = note("notes/a.md", "Public", vec![]);
+    current.file_hash = "new-source".to_string();
+    apply_note(&conn, &current).unwrap();
+    apply_chunks(&conn, "notes/a.md", &[old]).unwrap();
+    assert!(chunk_rows(&conn).is_empty());
     assert_eq!(vector_count(&conn), 0);
 }
 
@@ -1620,7 +1678,16 @@ fn cosine_migration_preserves_stored_vectors() {
          VALUES('notes/a.md', 'A', 'a', 'h', 0, 0);",
     )
     .expect("stage v2 note");
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.25)))]).unwrap();
+    conn.execute_batch(
+        "INSERT INTO embedding_chunks(note_path, heading, pos_from, pos_to, text, content_hash, model_id) \
+         VALUES('notes/a.md', NULL, 0, 5, 'hello', 'a1', 'all-MiniLM-L6-v2');",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO embedding_vectors(rowid, embedding) VALUES(1, ?1)",
+        rusqlite::params![serde_json::to_string(&vec384(0.25)).unwrap()],
+    )
+    .unwrap();
     assert_eq!(vector_count(&conn), 1);
 
     migrate(&mut conn).expect("migrate to latest");

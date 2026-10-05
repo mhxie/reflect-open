@@ -1,6 +1,10 @@
 import { readNoteLocal } from '../graph/commands.ts'
 import { isTemplatePath } from '../graph/paths.ts'
-import { gatherAssetDescriptionBodies } from '../indexing/asset-description-text.ts'
+import { isLocalOnlyPath } from '../graph/local-only.ts'
+import {
+  gatherAssetDescriptionBodies,
+  foldAssetDescriptionBodies,
+} from '../indexing/asset-description-text.ts'
 import { db } from '../indexing/db.ts'
 import { hashContent } from '../indexing/hash.ts'
 import { parseNote } from '../markdown/index.ts'
@@ -57,6 +61,7 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     return 0 // templates are boilerplate — never embedded, never retrieved
   }
   let content = options.content
+  let sourceLocalOnly = false
   if (content === undefined) {
     let read: Awaited<ReturnType<typeof readNoteLocal>>
     try {
@@ -74,10 +79,14 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
       return 0
     }
     content = read.content
+    sourceLocalOnly = read.localOnly
   }
 
   const parsed = parseNote({ path, source: content })
-  const gathered = await gatherAssetDescriptionBodies(parsed.assets.map((asset) => asset.path))
+  const gathered = await gatherAssetDescriptionBodies(
+    parsed.assets.map((asset) => asset.path),
+    path,
+  )
   if (gathered.evicted.length > 0) {
     // A referenced sidecar is iCloud-evicted. `embedApply` replaces the
     // note's *entire* chunk set, so applying without that sidecar's body
@@ -135,6 +144,8 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     vectors.push(...(await embedTexts(toEmbed.slice(at, at + EMBED_CALL_SIZE), 'passage')))
   }
   let vectorAt = 0
+  const sourceHash = await hashContent(content)
+  const assetTextHash = await hashContent(foldAssetDescriptionBodies(gathered.bodies))
 
   const payload: EmbedChunkPayload[] = chunks.map((chunk, i) => ({
     heading: chunk.heading,
@@ -143,6 +154,13 @@ export async function embedNote(options: EmbedNoteOptions): Promise<number> {
     text: chunk.text,
     contentHash: passageHashes[i]!,
     modelId,
+    sourceHash,
+    assetTextHash,
+    isPrivate:
+      sourceLocalOnly ||
+      parsed.frontmatter.private ||
+      isLocalOnlyPath(path) ||
+      gathered.bodies.some((entry) => entry.deviceOnly === true),
     // A non-skipped chunk always has a freshly-embedded vector: `vectors` is
     // exactly as long as the non-skipped chunks, consumed in order here.
     vector: skip[i] ? null : vectors[vectorAt++]!,

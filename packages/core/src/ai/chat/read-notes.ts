@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { isAppError } from '../../errors.ts'
-import { readNoteShareable } from '../../graph/commands.ts'
+import { readNoteForDevice, readNoteShareable, type DeviceNoteRead } from '../../graph/commands.ts'
 import { isLocalOnlyPath } from '../../graph/local-only.ts'
 import { isNotePath } from '../../graph/paths.ts'
 import { parseNote } from '../../markdown/extract.ts'
@@ -11,7 +11,10 @@ import {
   PrivateNoteError,
   type CloudNoteContent,
   type CloudSafe,
+  notePrivate,
 } from '../../privacy/checkers.ts'
+import { localSafeNoteContent, type LocalSafe } from '../../privacy/local-checkers.ts'
+import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
 
 /**
  * The read_notes tool's executor (Plan 10): resolve a graph-relative note
@@ -43,7 +46,7 @@ export const MAX_READ_NOTES = 10
 
 /** One note in a {@link ReadNotesOutput}: its content, or a structured refusal/miss. */
 export type ReadNoteResult =
-  | { ok: true; note: CloudSafe<CloudNoteContent> }
+  | { ok: true; note: CloudSafe<CloudNoteContent> | LocalSafe<CloudNoteContent> }
   | { ok: false; path: string; error: string }
 
 /** The read_notes output: one {@link ReadNoteResult} per requested path, in order. */
@@ -78,6 +81,9 @@ export async function readShareableNote(path: string): Promise<string> {
 /** The effects {@link buildReadOneNote} needs, already defaulted by the caller. */
 export interface ReadNoteDeps {
   readNoteFn: (path: string) => Promise<string>
+  readDeviceNoteFn?: (path: string, generation?: number) => Promise<DeviceNoteRead>
+  target?: VerifiedModelTarget | undefined
+  generation?: number | undefined
 }
 
 /**
@@ -97,12 +103,19 @@ export function buildReadOneNote(deps: ReadNoteDeps) {
     if (!isNotePath(path)) {
       return { ok: false, path, error: NOT_A_NOTE_REFUSAL }
     }
-    if (isLocalOnlyPath(path)) {
+    if (deps.target?.kind !== 'on-device' && isLocalOnlyPath(path)) {
       return { ok: false, path, error: PRIVATE_NOTE_REFUSAL }
     }
     let source: string
+    let localOnly = false
     try {
-      source = await deps.readNoteFn(path)
+      if (deps.target?.kind === 'on-device') {
+        const read = await (deps.readDeviceNoteFn ?? readNoteForDevice)(path, deps.generation)
+        source = read.content
+        localOnly = read.localOnly
+      } else {
+        source = await deps.readNoteFn(path)
+      }
     } catch (cause) {
       if (isAppError(cause) && cause.kind === 'notFound') {
         return { ok: false, path, error: 'No note exists at this path.' }
@@ -115,16 +128,20 @@ export function buildReadOneNote(deps: ReadNoteDeps) {
     const parsed = parseNote({ path, source })
     const { body } = splitFrontmatter(source)
     const truncated = body.length > MAX_NOTE_CONTENT_CHARS
+    const content = {
+      path,
+      isPrivate: localOnly || notePrivate(source),
+      title: parsed.title,
+      content: truncated ? body.slice(0, MAX_NOTE_CONTENT_CHARS) : body,
+      truncated,
+    }
     try {
       return {
         ok: true,
-        note: cloudSafeNoteContent({
-          path,
-          isPrivate: parsed.frontmatter.private,
-          title: parsed.title,
-          content: truncated ? body.slice(0, MAX_NOTE_CONTENT_CHARS) : body,
-          truncated,
-        }),
+        note:
+          deps.target?.kind === 'on-device'
+            ? localSafeNoteContent(deps.target, content)
+            : cloudSafeNoteContent(content),
       }
     } catch (cause) {
       if (isPrivateNoteError(cause)) {

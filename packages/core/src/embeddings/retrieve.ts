@@ -26,6 +26,10 @@ export interface RetrievalHit {
   snippet: string
   heading: string | null
   isPrivate: boolean
+  /** Device-only attachment text in this note's indexed snapshot. */
+  hasDeviceOnlyContent?: boolean
+  /** Attachment-text identity from the same snapshot as the snippet. */
+  assetTextHash?: string
   hasConflict: boolean
   /** Hybrid only: which leg found the note — wording, meaning, or both. */
   matchedBy?: 'lexical' | 'semantic' | 'both'
@@ -60,6 +64,8 @@ export interface ChunkHitRow {
   heading: string | null
   text: string
   isPrivate: number
+  hasDeviceOnlyContent?: number
+  assetTextHash?: string
   hasConflict: number
   /** The model that embedded the chunk; its catalog entry holds the noise cutoff. */
   modelId: string
@@ -100,6 +106,8 @@ export function bestChunkPerNote(
       snippet: row.text.trim(),
       heading: row.heading,
       isPrivate: row.isPrivate !== 0,
+      ...(row.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
+      ...(row.assetTextHash === undefined ? {} : { assetTextHash: row.assetTextHash }),
       hasConflict: row.hasConflict !== 0,
     })
   }
@@ -118,11 +126,12 @@ async function semanticHits(
   const [vector] = await embedTexts([query], 'query')
   const result = await sql<ChunkHitRow>`
     SELECT c.note_path AS path, n.title, c.heading, c.text,
-           n.is_private AS isPrivate, n.has_conflict AS hasConflict, c.model_id AS modelId, v.distance
+           (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
     FROM embedding_vectors v
     JOIN embedding_chunks c ON c.id = v.rowid
     JOIN notes n ON n.path = c.note_path
     WHERE v.embedding MATCH ${JSON.stringify(vector)} AND k = ${KNN_CANDIDATES}
+      AND c.source_hash = n.file_hash AND c.asset_text_hash = n.asset_text_hash
     ORDER BY v.distance
   `.execute(db)
   // Right after a model switch, until the table is refitted, it still holds
@@ -158,24 +167,16 @@ async function everyTermHits(query: string, limit: number): Promise<RetrievalHit
   if (hits.length === 0) {
     return []
   }
-  const flags = await db
-    .selectFrom('notes')
-    .where(
-      'path',
-      'in',
-      hits.map((hit) => hit.path),
-    )
-    .select(['path', 'isPrivate', 'hasConflict'])
-    .execute()
-  const flagsByPath = new Map(flags.map((row) => [row.path, row]))
   return hits.map((hit) => ({
     path: hit.path,
     title: hit.title,
     score: 0,
     snippet: hit.snippet ?? '',
     heading: null,
-    isPrivate: (flagsByPath.get(hit.path)?.isPrivate ?? 0) !== 0,
-    hasConflict: (flagsByPath.get(hit.path)?.hasConflict ?? 0) !== 0,
+    isPrivate: hit.isPrivate,
+    ...(hit.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
+    ...(hit.assetTextHash === undefined ? {} : { assetTextHash: hit.assetTextHash }),
+    hasConflict: hit.hasConflict,
   }))
 }
 
@@ -195,10 +196,12 @@ async function anyTermHits(
     snippet: string
     isPrivate: number
     hasConflict: number
+    hasDeviceOnlyContent: number
+    assetTextHash: string
   }>`
     SELECT search_fts.path AS path, n.title AS title,
            snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10) AS snippet,
-           n.is_private AS isPrivate, n.has_conflict AS hasConflict
+           n.is_private AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash
     FROM search_fts
     JOIN notes n ON n.path = search_fts.path
     WHERE search_fts MATCH ${match} AND n.kind != 'template'
@@ -215,6 +218,8 @@ async function anyTermHits(
       snippet: row.snippet,
       heading: null,
       isPrivate: row.isPrivate !== 0,
+      ...(row.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
+      ...(row.assetTextHash === undefined ? {} : { assetTextHash: row.assetTextHash }),
       hasConflict: row.hasConflict !== 0,
     }))
 }
@@ -229,10 +234,19 @@ export function fuseRanked(lists: RetrievalHit[][], limit: number): RetrievalHit
       const score = 1 / (K + index + 1)
       if (entry) {
         entry.score += score
+        const isPrivate = entry.hit.isPrivate || hit.isPrivate
+        const deviceOnly =
+          entry.hit.hasDeviceOnlyContent ||
+          hit.hasDeviceOnlyContent ||
+          (entry.hit.assetTextHash !== undefined &&
+            hit.assetTextHash !== undefined &&
+            entry.hit.assetTextHash !== hit.assetTextHash)
         // Prefer a snippet-bearing form when one side lacks content.
         if (entry.hit.snippet === '' && hit.snippet !== '') {
           entry.hit = { ...hit }
         }
+        entry.hit.isPrivate = isPrivate
+        if (deviceOnly) entry.hit.hasDeviceOnlyContent = true
       } else {
         fused.set(hit.path, { hit: { ...hit }, score })
       }
@@ -267,7 +281,9 @@ function withPrivacy(hits: RetrievalHit[], excludePrivateContent: boolean): Retr
   if (!excludePrivateContent) {
     return hits
   }
-  return hits.map((hit) => (hit.isPrivate ? { ...hit, snippet: '', heading: null } : hit))
+  return hits.map((hit) =>
+    hit.isPrivate || hit.hasDeviceOnlyContent ? { ...hit, snippet: '', heading: null } : hit,
+  )
 }
 
 export async function retrieve(query: string, options?: RetrieveOptions): Promise<RetrievalHit[]> {
@@ -334,7 +350,9 @@ export async function relatedNotes(path: string, limit = 10): Promise<RetrievalH
     SELECT vec_to_json(v.embedding) AS vec
     FROM embedding_chunks c
     JOIN embedding_vectors v ON v.rowid = c.id
+    JOIN notes n ON n.path = c.note_path
     WHERE c.note_path = ${path}
+      AND c.source_hash = n.file_hash AND c.asset_text_hash = n.asset_text_hash
     ORDER BY c.pos_from
     LIMIT ${MAX_RELATED_SEEDS}
   `.execute(db)
@@ -345,11 +363,12 @@ export async function relatedNotes(path: string, limit = 10): Promise<RetrievalH
     seeds.rows.map(async (seed) => {
       const result = await sql<ChunkHitRow>`
         SELECT c.note_path AS path, n.title, c.heading, c.text,
-               n.is_private AS isPrivate, n.has_conflict AS hasConflict, c.model_id AS modelId, v.distance
+               (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
         FROM embedding_vectors v
         JOIN embedding_chunks c ON c.id = v.rowid
         JOIN notes n ON n.path = c.note_path
         WHERE v.embedding MATCH ${seed.vec} AND k = ${RELATED_KNN_CANDIDATES}
+          AND c.source_hash = n.file_hash AND c.asset_text_hash = n.asset_text_hash
           AND n.is_private = 0
         ORDER BY v.distance
       `.execute(db)
