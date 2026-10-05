@@ -58,5 +58,5 @@ minimumReleaseAgeExclude:
 # feat/remote-media) from tarballs vendored by
 # apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.78.4-4c0e5eb425f1.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.76.4-4c0e5eb425f1.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.78.4-a47bd410ea70.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.76.4-a47bd410ea70.tgz

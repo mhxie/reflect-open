@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { outlineDepths } from '@/editor/outline/outline-headings.ts'
+import { outlineDepths, outlineHeadingKey } from '@/editor/outline/outline-headings.ts'
 import { useNoteOutline } from '@/editor/outline/outline-store.ts'
 import { cn } from '@/lib/utils.ts'
 import { SidebarSection } from './sidebar-section.tsx'
@@ -30,7 +30,7 @@ export function OutlineSection({ path }: OutlineSectionProps): ReactElement | nu
         {outline.headings.map((heading, index) => {
           const active = index === outline.activeIndex
           return (
-            <li key={heading.position}>
+            <li key={outlineHeadingKey(heading)}>
               <button
                 type="button"
                 aria-current={active ? 'location' : undefined}

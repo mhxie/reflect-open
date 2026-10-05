@@ -6,8 +6,13 @@ import {
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
 import { useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react'
-import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
-import { MarkdownView } from '@meowdown/react'
+import type {
+  FileClickHandler,
+  ImageUrlResolver,
+  LinkClickHandler,
+  WikiEmbedResolver,
+} from '@meowdown/core'
+import { MarkdownView, type NoteEmbedRenderer } from '@meowdown/react'
 import { useOpenExternalLink } from '@/editor/open-external-link.ts'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { cn } from '@/lib/utils.ts'
@@ -26,6 +31,8 @@ import { cn } from '@/lib/utils.ts'
 interface MarkdownPreviewProps {
   /** The markdown body to render (callers strip frontmatter first). */
   content: string
+  /** Demote displayed headings for an embedded source without rewriting its Markdown. */
+  headingOffset?: number
   /**
    * Resolve `![…](…)` sources to displayable URLs, possibly later; unresolved
    * images are skipped. Pass a stable function.
@@ -36,12 +43,18 @@ interface MarkdownPreviewProps {
    * omitted, embeds stay literal text. Pass a stable function.
    */
   resolveWikiEmbed?: WikiEmbedResolver
+  /** Render standalone note embeds through the source note's read-only reader. */
+  renderNoteEmbed?: NoteEmbedRenderer
   /**
    * Navigate a clicked `[[wiki link]]` target. Omitted, links render as
    * inert chips (the palette preview's behavior). `event` carries the
    * originating click so handlers can honor ⌘-click (open in new window).
    */
   onWikiLinkClick?: (options: { target: string; openInNewWindow: boolean }) => void
+  /** Override link activation for a source-aware reading surface. */
+  onLinkClick?: LinkClickHandler
+  /** Open a file pill through the source note's attachment resolver. */
+  onFileClick?: FileClickHandler
   /**
    * Whether rendered links, images, and task checkboxes can be activated
    * (default true). A passive preview renders no anchors, focusable controls,
@@ -62,9 +75,13 @@ interface MarkdownPreviewProps {
 
 export function MarkdownPreview({
   content,
+  headingOffset = 0,
   resolveImageUrl,
   resolveWikiEmbed,
+  renderNoteEmbed,
   onWikiLinkClick,
+  onLinkClick,
+  onFileClick,
   interactive = true,
   remoteEmbeds = true,
   className,
@@ -103,12 +120,15 @@ export function MarkdownPreview({
       mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
       remoteMedia={remoteEmbeds}
       markdown={content}
+      headingOffset={headingOffset}
       markMode="hide"
       interactive={interactive}
       resolveWikilink={resolveWikilink}
       {...(imageResolver !== undefined ? { resolveImageUrl: imageResolver } : {})}
       {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
-      {...(interactive ? { onLinkClick: openExternalLink } : {})}
+      {...(renderNoteEmbed !== undefined ? { renderNoteEmbed } : {})}
+      {...(interactive ? { onLinkClick: onLinkClick ?? openExternalLink } : {})}
+      {...(interactive && onFileClick !== undefined ? { onFileClick } : {})}
       {...(navigates ? { onWikilinkClick: onWikilinkClickStable } : {})}
       className={cn('reflect-editor', className)}
     />

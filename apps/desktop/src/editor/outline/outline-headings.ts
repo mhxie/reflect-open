@@ -15,6 +15,12 @@ export interface OutlineHeading {
    * that editor and only until its next document change.
    */
   readonly position: number
+  /** A read-only source heading; position identifies its containing editor block. */
+  readonly embedded?: {
+    readonly key: string
+    readonly element: () => HTMLElement | null
+    readonly reveal: () => void
+  }
 }
 
 /**
@@ -22,13 +28,13 @@ export interface OutlineHeading {
  * note's title, so it is not a section; later H1s are. Headings nested in
  * lists or blockquotes, and empty headings, stay out.
  */
-export function readOutlineHeadings(doc: OutlineSourceDoc): OutlineHeading[] {
+export function readOutlineHeadings(doc: OutlineSourceDoc, includeTitle = false): OutlineHeading[] {
   const headings: OutlineHeading[] = []
   doc.forEach((node, offset, index) => {
     if (!isNodeOfType(node, 'heading')) {
       return
     }
-    if (index === 0 && node.attrs['level'] === 1) {
+    if (!includeTitle && index === 0 && node.attrs['level'] === 1) {
       return
     }
     const text = getTextblockDisplayText(node).replaceAll(/\s+/g, ' ').trim()
@@ -54,10 +60,17 @@ export function outlineHeadingsEqual(
         other !== undefined &&
         heading.level === other.level &&
         heading.text === other.text &&
-        heading.position === other.position
+        heading.position === other.position &&
+        heading.embedded?.key === other.embedded?.key &&
+        heading.embedded?.reveal === other.embedded?.reveal
       )
     })
   )
+}
+
+/** Editor positions and source-instance keys occupy separate outline namespaces. */
+export function outlineHeadingKey(heading: OutlineHeading): string {
+  return heading.embedded?.key ?? `editor:${heading.position}`
 }
 
 /** Deepest indent an outline row gets, so deep nesting cannot squeeze titles out. */

@@ -90,8 +90,8 @@ export function HeadingPicker({ context }: HeadingPickerProps): ReactElement {
             <CommandGroup>
               {headings.map((heading, index) => (
                 <CommandItem
-                  key={heading.position}
-                  value={`heading-${heading.position}`}
+                  key={heading.embedded?.key ?? heading.position}
+                  value={`heading-${heading.embedded?.key ?? heading.position}`}
                   keywords={[heading.text]}
                   onSelect={() => jump(index)}
                 >

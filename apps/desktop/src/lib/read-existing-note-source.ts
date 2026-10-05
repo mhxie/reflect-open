@@ -10,7 +10,7 @@ import { openSession } from '@/editor/open-documents.ts'
  * return content from the newly active graph.
  */
 export async function readExistingNoteSource(path: string, generation: number): Promise<string> {
-  const session = openSession(path)
+  const session = openSession(path, generation)
   if (session !== null) {
     const liveContent = session.liveContent()
     if (liveContent !== null) {
