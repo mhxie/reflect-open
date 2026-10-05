@@ -10,7 +10,7 @@ import {
   CommandList,
 } from '@/components/ui/command.tsx'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
-import { outlineDepths } from '@/editor/outline/outline-headings.ts'
+import { outlineDepths, outlineHeadingKey } from '@/editor/outline/outline-headings.ts'
 import { useNoteOutline } from '@/editor/outline/outline-store.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { cn } from '@/lib/utils.ts'
@@ -90,8 +90,8 @@ export function HeadingPicker({ context }: HeadingPickerProps): ReactElement {
             <CommandGroup>
               {headings.map((heading, index) => (
                 <CommandItem
-                  key={heading.position}
-                  value={`heading-${heading.position}`}
+                  key={outlineHeadingKey(heading)}
+                  value={`heading-${outlineHeadingKey(heading)}`}
                   keywords={[heading.text]}
                   onSelect={() => jump(index)}
                 >

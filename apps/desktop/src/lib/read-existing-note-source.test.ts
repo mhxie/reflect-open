@@ -26,6 +26,7 @@ describe('readExistingNoteSource', () => {
 
     await expect(readExistingNoteSource('notes/a.md', 7)).resolves.toBe('# Live')
     expect(readNoteMock).toHaveBeenCalledWith('notes/a.md', 7)
+    expect(openSessionMock).toHaveBeenCalledWith('notes/a.md', 7)
   })
 
   it('preserves an authoritative empty live buffer', async () => {

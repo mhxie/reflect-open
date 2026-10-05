@@ -392,6 +392,16 @@ html:root {
   @apply text-note-subject;
 }
 
+/* Inline excerpts retain the note's typography; only overflowing tails fade. */
+.reflect-note-embed-preview {
+  min-height: 2.75rem;
+  max-height: 16em;
+  overflow: hidden;
+}
+.reflect-note-embed-preview-overflowing {
+  mask-image: linear-gradient(to bottom, black calc(100% - 3.5em), transparent);
+}
+
 /* The new-note flow's name field: ghost "Untitled" over the seeded empty H1
    (`editor/title-placeholder.ts`) without occupying layout, so the caret
    blinks at the line start as if the ghost text weren't there. */

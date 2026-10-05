@@ -42,6 +42,7 @@ import {
   useLightbox,
   WikilinkHoverCard,
   type EditorHandle,
+  type NoteEmbedRenderer,
   type PendingReplacementResolveHandler,
   type SelectionMenuSearchHandler,
   type SlashMenuSearchHandler,
@@ -190,6 +191,8 @@ interface NoteEditorProps {
    * chips; `undefined` leaves the source literal.
    */
   resolveWikiEmbed?: WikiEmbedResolver
+  /** Source-backed readers for standalone `![[note]]` paragraphs. */
+  renderNoteEmbed?: NoteEmbedRenderer
   /**
    * Vet a source (an image `src` or a link `href`) as a graph-relative asset
    * path for {@link openAsset}. Returns null for remote or unsafe sources.
@@ -300,6 +303,7 @@ export function NoteEditor({
   resolveImageUrl,
   resolveEmbed,
   resolveWikiEmbed,
+  renderNoteEmbed,
   resolveAssetOpenPath,
   openAsset,
   saveFile,
@@ -604,6 +608,7 @@ export function NoteEditor({
         resolveImageUrl={handleResolveImageUrl}
         resolveEmbed={handleResolveEmbed}
         resolveWikiEmbed={handleResolveWikiEmbed}
+        {...(renderNoteEmbed !== undefined ? { renderNoteEmbed } : {})}
         resolveWikilink={resolveWikilink}
         onFilePaste={handleFilePaste}
         shouldEmbedFile={shouldEmbedFile}

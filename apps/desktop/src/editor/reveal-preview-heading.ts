@@ -31,7 +31,13 @@ export function revealPreviewHeading(root: HTMLElement, source: string, fragment
     ordinal += 1
     return true
   })
-  const heading = root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')[index]
+  const headings = [...root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')].filter(
+    (heading) => {
+      const embeddedReader = heading.closest('.md-note-embed-reader')
+      return embeddedReader === null || !root.contains(embeddedReader)
+    },
+  )
+  const heading = headings[index]
   if (heading === undefined) return false
   heading.tabIndex = -1
   heading.scrollIntoView({ block: 'start' })

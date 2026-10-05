@@ -34,6 +34,7 @@ import {
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
+import { useNoteEmbedRenderer } from '@/editor/note-embed-reader.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
@@ -373,6 +374,12 @@ export function NotePaneComponent({
     sessionEpoch: document.sessionEpoch,
     privateHeader: document.privateHeader,
   })
+  const renderNoteEmbed = useNoteEmbedRenderer({
+    sourcePath: path,
+    generation,
+    graphKey,
+    remoteEmbeds: !privateNote && !privacyPending,
+  })
   const aiMenu = useEditorAiMenu({
     path,
     privateNote,
@@ -485,6 +492,7 @@ export function NotePaneComponent({
             content={body}
             resolveImageUrl={resolveImageUrl}
             resolveWikiEmbed={resolveWikiEmbed}
+            renderNoteEmbed={renderNoteEmbed}
             onWikiLinkClick={onWikiLinkClick}
             remoteEmbeds={false}
             className={cn('reflect-note-surface', editorClassName)}
@@ -574,6 +582,7 @@ export function NotePaneComponent({
         resolveImageUrl={resolveImageUrl}
         resolveEmbed={resolveEmbed}
         resolveWikiEmbed={resolveWikiEmbed}
+        renderNoteEmbed={renderNoteEmbed}
         resolveAssetOpenPath={resolveAssetOpenPath}
         openAsset={openAsset}
         saveFile={saveFile}

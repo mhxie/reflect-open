@@ -51,8 +51,8 @@ export function imageThumbnailUrl(generation: number, path: string, width: numbe
 
 /**
  * An attachment renders as an image, a PDF preview (through the image view's
- * `resolveEmbed`), or a file pill, a note as a link chip to it (note content
- * is never transcluded), and an unsafe path stays literal.
+ * `resolveEmbed`), or a file pill. A note renders as a link chip unless the
+ * host supplies a standalone note reader; an unsafe path stays literal.
  */
 const resolveWikiEmbed: WikiEmbedResolver = ({ target }) => {
   const embed = resolveWikiEmbedTarget(target)
