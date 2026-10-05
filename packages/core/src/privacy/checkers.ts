@@ -40,11 +40,13 @@ export interface CloudSendable {
    * be read and so counts as locked (see {@link notePrivate}).
    */
   isPrivate: boolean
+  /** Device-only derivations in an indexed search snapshot. */
+  hasDeviceOnlyContent?: boolean
 }
 
 /** Whether a note may not leave the device: flagged private, or local-only by its path. */
 function isPrivateNote(note: CloudSendable): boolean {
-  return note.isPrivate || isLocalOnlyPath(note.path)
+  return note.isPrivate || note.hasDeviceOnlyContent === true || isLocalOnlyPath(note.path)
 }
 
 /** Thrown when a private note would otherwise reach an external service. */
@@ -96,6 +98,8 @@ export interface CloudSearchHit {
   title: string
   snippet: string
   heading: string | null
+  /** Persisted attachment-text identity for subsequent history privacy checks. */
+  assetTextHash?: string
 }
 
 /**
@@ -115,12 +119,18 @@ export async function cloudSafeSearchHits(
   hits: readonly RetrievalHit[],
   isPrivateLive: (path: string) => Promise<boolean>,
 ): Promise<CloudSafe<CloudSearchHit>[]> {
-  const indexedPublic = hits.filter((hit) => !isPrivateNote(hit))
+  const indexedPublic = hits.filter((hit) => !isPrivateNote(hit) && hit.assetTextHash !== undefined)
   const liveFlags = await Promise.all(indexedPublic.map((hit) => isPrivateLive(hit.path)))
   return indexedPublic
     .filter((_, index) => liveFlags[index] === false)
     .map((hit) =>
-      mint({ path: hit.path, title: hit.title, snippet: hit.snippet, heading: hit.heading }),
+      mint({
+        path: hit.path,
+        title: hit.title,
+        snippet: hit.snippet,
+        heading: hit.heading,
+        ...(hit.assetTextHash === undefined ? {} : { assetTextHash: hit.assetTextHash }),
+      }),
     )
 }
 

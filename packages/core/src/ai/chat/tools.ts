@@ -2,6 +2,7 @@ import type { Tool, TypedToolCall, TypedToolResult } from '@reflect/modules/ai'
 import { isNotNullish } from '@ocavue/utils'
 import { z } from 'zod'
 import { isLocalOnlyPath } from '../../graph/local-only.ts'
+import { readNoteForDevice, type DeviceNoteRead } from '../../graph/commands.ts'
 import { retrieve, type RetrievalHit, type RetrieveOptions } from '../../embeddings/retrieve.ts'
 import { assetReferencingNotePaths } from '../../indexing/asset-refs.ts'
 import { listDailyNotes, type DailyNoteRow, type DailyNotesRange } from '../../indexing/queries.ts'
@@ -27,6 +28,14 @@ import {
   type CloudSearchHit,
   type CloudSendable,
 } from '../../privacy/checkers.ts'
+import {
+  localSafeNoteListing,
+  localSafeSearchHit,
+  type LocalSafe,
+} from '../../privacy/local-checkers.ts'
+import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
+import { hasRestrictedSearchSources, snapshotHasAttachmentText } from './search-privacy.ts'
+import { ReflectError } from '../../errors.ts'
 
 /**
  * The read-only note tools the chat model can call (Plan 10, first wave),
@@ -58,12 +67,23 @@ export const MAX_DAILY_NOTE_DAYS = 31
 export interface NoteToolDeps {
   retrieveFn?: (query: string, options?: RetrieveOptions) => Promise<RetrievalHit[]>
   readNoteFn?: (path: string) => Promise<string>
+  readDeviceNoteFn?: (path: string, generation?: number) => Promise<DeviceNoteRead>
+  /** Test seam for attachment provenance; production also checks indexed references. */
+  hasRestrictedSearchSourcesFn?: (
+    path: string,
+    source: string,
+    assetTextHash?: string,
+  ) => Promise<boolean>
   listRecentNotesFn?: (options: RecentNotesOptions) => Promise<RecentNoteRow[]>
   listDailyNotesFn?: (range: DailyNotesRange) => Promise<DailyNoteRow[]>
   assetReferencingNotePathsFn?: (assetPath: string, owners?: readonly string[]) => Promise<string[]>
 }
 
 export interface BuildNoteToolsOptions extends NoteToolDeps {
+  /** The same verified destination bound to the model executing these tools. */
+  target?: VerifiedModelTarget
+  /** Native reads stay pinned to the graph that began the chat turn. */
+  generation?: number | undefined
   /**
    * Whether note search can use embeddings for meaning-based recall. When
    * false, `search_notes` stays lexical so disabled semantic search is honored.
@@ -72,7 +92,7 @@ export interface BuildNoteToolsOptions extends NoteToolDeps {
 }
 
 export interface SearchNotesOutput {
-  hits: CloudSafe<CloudSearchHit>[]
+  hits: Array<CloudSafe<CloudSearchHit> | LocalSafe<CloudSearchHit>>
 }
 
 /**
@@ -82,7 +102,7 @@ export interface SearchNotesOutput {
  * and a model hunting for an "all notes" sentinel just keeps guessing.
  */
 export type ListRecentNotesOutput =
-  | { ok: true; notes: CloudSafe<CloudNoteListing>[] }
+  | { ok: true; notes: Array<CloudSafe<CloudNoteListing> | LocalSafe<CloudNoteListing>> }
   | { ok: false; tag: string; error: string }
 
 /** The refusal text — one string, read verbatim by both model and chip. */
@@ -90,7 +110,7 @@ export const INVALID_TAG_ERROR =
   'Not a tag — omit the tag to list all recent notes. Tags are single words like "book" or "project/atlas".'
 
 export interface ListDailyNotesOutput {
-  days: CloudSafe<CloudNoteListing>[]
+  days: Array<CloudSafe<CloudNoteListing> | LocalSafe<CloudNoteListing>>
   /** The range held more days than one call returns — narrow it to see the rest. */
   truncated: boolean
 }
@@ -150,8 +170,21 @@ function listingCandidate(
  * layer and the live filesystem.
  */
 export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
+  const target = options.target
+  if (target?.kind === 'on-device' && options.generation === undefined) {
+    throw new ReflectError('noGraph', 'On-device note tools require the active graph generation.')
+  }
   const retrieveFn = options.retrieveFn ?? retrieve
-  const readNoteFn = options.readNoteFn ?? readShareableNote
+  const readDeviceNoteFn = options.readDeviceNoteFn ?? readNoteForDevice
+  const readNoteFn =
+    options.readNoteFn ??
+    (target?.kind === 'on-device'
+      ? async (path: string): Promise<string> => {
+          const read = await readDeviceNoteFn(path, options.generation)
+          if (read.localOnly) throw new ReflectError('auth', 'Search source is local-only.')
+          return read.content
+        }
+      : readShareableNote)
   const listRecentNotesFn = options.listRecentNotesFn ?? listRecentNotes
   const listDailyNotesFn = options.listDailyNotesFn ?? listDailyNotes
   const assetRefsFn = options.assetReferencingNotePathsFn ?? assetReferencingNotePaths
@@ -162,35 +195,113 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
   // just-saved `private: true`, so each candidate's frontmatter is re-read
   // from disk. Fail closed — a note that can't be read can't be cleared
   // for sending. A local-only note is private by its path and never read.
-  const isPrivateLive = async (path: string): Promise<boolean> => {
+  // Only a search hit can carry attachment text (listings show the note's
+  // own preview), so only a hit's snapshot has its attachments rechecked.
+  const isPrivateLive = async (
+    path: string,
+    searchSnapshot: Pick<SearchSnapshot, 'assetTextHash'> | null = null,
+  ): Promise<boolean> => {
     if (isLocalOnlyPath(path)) {
       return true
     }
     try {
-      return notePrivate(await readNoteFn(path))
+      if (target?.kind === 'on-device') {
+        const read = await readDeviceNoteFn(path, options.generation)
+        return (
+          read.localOnly ||
+          notePrivate(read.content) ||
+          (await restrictedSources(path, read.content, searchSnapshot))
+        )
+      }
+      const source = await readNoteFn(path)
+      return notePrivate(source) || (await restrictedSources(path, source, searchSnapshot))
     } catch {
       return true
     }
   }
 
-  const readOneNote = buildReadOneNote({ readNoteFn })
+  async function restrictedSources(
+    path: string,
+    source: string,
+    searchSnapshot: Pick<SearchSnapshot, 'assetTextHash'> | null,
+  ): Promise<boolean> {
+    if (
+      searchSnapshot === null ||
+      !(await snapshotHasAttachmentText(searchSnapshot.assetTextHash))
+    ) {
+      return false
+    }
+    const { assetTextHash } = searchSnapshot
+    return await (options.hasRestrictedSearchSourcesFn?.(path, source, assetTextHash) ??
+      hasRestrictedSearchSources(path, source, readNoteFn, options.generation, assetTextHash))
+  }
+
+  const readOneNote = buildReadOneNote({
+    readNoteFn,
+    readDeviceNoteFn,
+    target,
+    generation: options.generation,
+  })
 
   const readOneAsset = buildReadOneAsset({
     readNoteFn,
+    readDeviceNoteFn,
     assetReferencingNotePathsFn: assetRefsFn,
+    target,
+    generation: options.generation,
   })
+
+  const privacyDescription =
+    target?.kind === 'on-device'
+      ? 'Includes private and local-only notes; this tool is bound to a verified model on this Mac.'
+      : 'Private notes are excluded.'
+
+  async function listings(rows: Array<RecentNoteRow | DailyNoteRow>) {
+    const entries = rows.map(listingCandidate)
+    if (target?.kind !== 'on-device') {
+      return await cloudSafeNoteListings(entries, isPrivateLive)
+    }
+    return await Promise.all(
+      entries.map(async (entry) =>
+        localSafeNoteListing(target, {
+          ...entry,
+          isPrivate: entry.isPrivate || (await isPrivateLive(entry.path)),
+        }),
+      ),
+    )
+  }
 
   return {
     search_notes: {
-      description: searchNotesDescription(options.semanticSearchEnabled !== false),
+      description: searchNotesDescription(
+        options.semanticSearchEnabled !== false,
+        privacyDescription,
+      ),
       inputSchema: searchNotesInput,
       execute: async ({ query, limit }): Promise<SearchNotesOutput> => {
         const hits = await retrieveFn(query, {
           limit: limit ?? DEFAULT_SEARCH_LIMIT,
           mode: searchMode,
-          excludePrivateContent: true,
+          excludePrivateContent: target?.kind !== 'on-device',
         })
-        return { hits: await cloudSafeSearchHits(hits, isPrivateLive) }
+        if (target?.kind === 'on-device') {
+          return {
+            hits: await Promise.all(
+              hits.map(async (hit) =>
+                localSafeSearchHit(target, {
+                  ...hit,
+                  isPrivate: hit.isPrivate || (await isPrivateLive(hit.path, hit)),
+                }),
+              ),
+            ),
+          }
+        }
+        const snapshots = new Map(hits.map((hit) => [hit.path, hit]))
+        return {
+          hits: await cloudSafeSearchHits(hits, (path) =>
+            isPrivateLive(path, snapshots.get(path) ?? null),
+          ),
+        }
       },
     },
 
@@ -199,7 +310,7 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
         'List the most recently edited notes, newest first — call it with no tag to see ' +
         'what the user wrote or worked on lately. Pass a tag only to narrow to notes ' +
         'carrying it. Daily notes are not included — use list_daily_notes for those. ' +
-        'Private notes are excluded.',
+        privacyDescription,
       inputSchema: listRecentNotesInput,
       execute: async ({ limit, tag }): Promise<ListRecentNotesOutput> => {
         if (tag != null && !isTagName(tag)) {
@@ -208,10 +319,11 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
         const rows = await listRecentNotesFn({
           limit: limit ?? DEFAULT_RECENT_LIMIT,
           tag: tag ?? null,
+          ...(target?.kind === 'on-device' ? { includePrivate: true } : {}),
         })
         return {
           ok: true,
-          notes: await cloudSafeNoteListings(rows.map(listingCandidate), isPrivateLive),
+          notes: await listings(rows),
         }
       },
     },
@@ -221,14 +333,19 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
         'List the daily notes (the user’s journal, one note per day) in an inclusive date ' +
         'range, most recent first. Only days the user wrote on appear. Returns at most ' +
         `${MAX_DAILY_NOTE_DAYS} days — when truncated, narrow the range. ` +
-        'Private notes are excluded.',
+        privacyDescription,
       inputSchema: listDailyNotesInput,
       execute: async ({ start, end }): Promise<ListDailyNotesOutput> => {
-        const rows = await listDailyNotesFn({ start, end, limit: MAX_DAILY_NOTE_DAYS + 1 })
+        const rows = await listDailyNotesFn({
+          start,
+          end,
+          limit: MAX_DAILY_NOTE_DAYS + 1,
+          ...(target?.kind === 'on-device' ? { includePrivate: true } : {}),
+        })
         const truncated = rows.length > MAX_DAILY_NOTE_DAYS
         const kept = truncated ? rows.slice(0, MAX_DAILY_NOTE_DAYS) : rows
         return {
-          days: await cloudSafeNoteListings(kept.map(listingCandidate), isPrivateLive),
+          days: await listings(kept),
           truncated,
         }
       },
@@ -238,7 +355,7 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
       description:
         'Read the full markdown content of one or more notes by their graph-relative ' +
         'paths (from search_notes results). Pass every note you need in a single call ' +
-        'rather than reading them one at a time. Private notes cannot be read.',
+        `rather than reading them one at a time. ${privacyDescription}`,
       inputSchema: readNotesInput,
       execute: async ({ paths }): Promise<ReadNotesOutput> => {
         return { notes: await Promise.all(paths.map(readOneNote)) }
@@ -251,7 +368,9 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
         'attachments that notes embed as assets/… markdown links, e.g. ' +
         '![sketch](assets/sketch.png). Returns descriptive text about each file, not ' +
         'the file itself. Pass every attachment you need in a single call. ' +
-        'Attachments of private notes cannot be read.',
+        (target?.kind === 'on-device'
+          ? 'Includes private attachments and on-device OCR text.'
+          : 'Attachments of private notes cannot be read.'),
       inputSchema: readAssetsInput,
       execute: async ({ paths }): Promise<ReadAssetsOutput> => {
         return { assets: await Promise.all(paths.map(readOneAsset)) }
@@ -261,9 +380,11 @@ export function buildNoteTools(options: BuildNoteToolsOptions = {}): NoteTools {
 }
 
 /** Tool description for the active search mode. */
-function searchNotesDescription(semanticSearchEnabled: boolean): string {
-  const suffix =
-    'Returns the best-matching notes with short snippets. Queries are plain language — there is no wildcard or operator syntax. Private notes are excluded.'
+function searchNotesDescription(
+  semanticSearchEnabled: boolean,
+  privacyDescription: string,
+): string {
+  const suffix = `Returns the best-matching notes with short snippets. Queries are plain language — there is no wildcard or operator syntax. ${privacyDescription}`
   if (semanticSearchEnabled) {
     return `Search the user’s notes by meaning and keywords. ${suffix}`
   }
@@ -414,12 +535,20 @@ export function noteToolResult(part: TypedToolResult<NoteTools>): NoteToolResult
   }
 }
 
-/** The graph paths a stored tool result carries content from. */
+/** Attachment-text identity retained with a persisted search snippet. */
+export interface SearchSnapshot {
+  path: string
+  assetTextHash?: string | undefined
+}
+
+/** The sources and search snapshot identities persisted by a tool result. */
 export interface ToolResultSources {
   /** Notes behind search hits, listing rows, and note reads. */
   notes: string[]
   /** Attachments whose descriptions read_assets returned. */
   assets: string[]
+  /** Search snippets require the original attachment-text identity on cloud resend. */
+  searchSnapshots?: readonly SearchSnapshot[]
 }
 
 const sourceSchema = z.object({ path: z.string() })
@@ -447,7 +576,18 @@ function noteSources(entries: readonly { path: string }[]): ToolResultSources {
 const storedResultSources = new Map<string, z.ZodType<ToolResultSources>>([
   [
     'search_notes',
-    z.object({ hits: z.array(sourceSchema) }).transform(({ hits }) => noteSources(hits)),
+    z
+      .object({
+        hits: z.array(
+          sourceSchema.extend({
+            assetTextHash: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
+          }),
+        ),
+      })
+      .transform(({ hits }) => ({ ...noteSources(hits), searchSnapshots: hits })),
   ],
   [
     'read_notes',

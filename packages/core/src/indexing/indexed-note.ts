@@ -122,8 +122,10 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * only comments is empty.
  * 27 - file reads normalize line endings without changing the privacy verdict,
  * so existing file hashes and Markdown-derived rows must be rebuilt.
+ * 28 - attachment text records device-only provenance and its source hash,
+ * so existing notes and embedding chunks must be rebuilt.
  */
-export const PROJECTION_VERSION = 27
+export const PROJECTION_VERSION = 28
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -254,6 +256,8 @@ export const indexedNoteSchema = z.object({
    * Empty when the note has no described assets.
    */
   assetText: z.string(),
+  /** Provenance of the FTS/embedding snapshot, for outbound retrieval gates. */
+  hasDeviceOnlyContent: z.boolean().default(false),
   /** The All Notes row snippet, derived once here rather than per query. */
   preview: z.string(),
   links: z.array(indexedLinkSchema),
@@ -370,7 +374,13 @@ export function projectNoteClaims(
  */
 export function buildIndexedNote(
   parsed: ParsedNote,
-  meta: { fileHash: string; mtime: number; source: string; assetText?: string },
+  meta: {
+    fileHash: string
+    mtime: number
+    source: string
+    assetText?: string
+    hasDeviceOnlyContent?: boolean
+  },
 ): IndexedNote {
   const wikiLinks: IndexedLink[] = parsed.wikiLinks.map((link) => {
     const reference = wikiNoteReference(link.target)
@@ -433,6 +443,7 @@ export function buildIndexedNote(
     mtime: meta.mtime,
     text: body,
     assetText: meta.assetText ?? '',
+    hasDeviceOnlyContent: meta.hasDeviceOnlyContent ?? false,
     preview: previewSnippet(parsed.displayText, parsed.title),
     hasContent: parsed.displayText !== '' || hasSearchableChar(body),
     bodyChars: countDisplayChars(parsed),

@@ -20,6 +20,35 @@ afterEach(() => {
 })
 
 describe('searchWithFilters', () => {
+  it('reads privacy flags in the same snapshot as the search snippet', async () => {
+    mockInvoke.mockResolvedValueOnce([
+      {
+        path: 'notes/scan.md',
+        title: 'Scan',
+        daily_date: null,
+        preview: 'Private OCR',
+        mtime: 2000,
+        is_pinned: 0,
+        is_private: 1,
+        has_device_only_content: 1,
+        asset_text_hash: 'a'.repeat(64),
+        fts_highlighted_title: 'Scan',
+        snippet: 'Private \u{1}OCR\u{2}',
+      },
+    ])
+    const hits = await searchWithFilters(parseSearchQuery('OCR'))
+    expect(hits[0]).toMatchObject({
+      snippet: 'Private \u{1}OCR\u{2}',
+      isPrivate: true,
+      hasDeviceOnlyContent: true,
+      assetTextHash: 'a'.repeat(64),
+    })
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
+    expect(mockInvoke.mock.calls[0]![1]['sql']).toContain('"is_private"')
+    expect(mockInvoke.mock.calls[0]![1]['sql']).toContain('"has_device_only_content"')
+    expect(mockInvoke.mock.calls[0]![1]['sql']).toContain('"asset_text_hash"')
+  })
+
   it.each(['#Work', '', 'work'])(
     'preserves Private and conflict metadata for %j using one bulk query',
     async (query) => {
@@ -58,6 +87,7 @@ describe('searchWithFilters', () => {
         preview: 'Weekly agenda.',
         mtime: 2000,
         is_pinned: 0,
+        has_device_only_content: 0,
       },
     ])
 
@@ -70,6 +100,7 @@ describe('searchWithFilters', () => {
         path: 'notes/work.md',
         title: 'Work',
         highlightedTitle: 'Work',
+        hasDeviceOnlyContent: false,
         dailyDate: null,
         snippet: null,
         preview: 'Weekly agenda.',
@@ -128,6 +159,7 @@ describe('searchWithFilters', () => {
         preview: 'Standup notes.',
         mtime: 1000,
         is_pinned: 1,
+        has_device_only_content: 0,
       },
     ])
 
@@ -141,6 +173,7 @@ describe('searchWithFilters', () => {
         path: 'daily/2026-01-02.md',
         title: '2026-01-02',
         highlightedTitle: '2026-01-02',
+        hasDeviceOnlyContent: false,
         dailyDate: '2026-01-02',
         snippet: null,
         preview: 'Standup notes.',
@@ -169,6 +202,7 @@ describe('searchWithFilters', () => {
         preview: 'Quokka facts.',
         mtime: 3000,
         is_pinned: 0,
+        has_device_only_content: 0,
         fts_highlighted_title: '\u{1}Quokka\u{2}',
         snippet: '\u{1}a\u{2} …',
       },
@@ -183,6 +217,7 @@ describe('searchWithFilters', () => {
         path: 'notes/quokka.md',
         title: 'Quokka',
         highlightedTitle: '\u{1}Quokka\u{2}',
+        hasDeviceOnlyContent: false,
         dailyDate: null,
         snippet: '\u{1}a\u{2} …',
         preview: 'Quokka facts.',

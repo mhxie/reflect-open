@@ -16,6 +16,13 @@ import {
 } from '@/lib/on-device-settings.ts'
 import type { AddAiProviderValues } from './add-ai-provider-form.tsx'
 import { OnDeviceAttestationCopy } from './on-device-attestation-copy.tsx'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select.tsx'
 
 const FIELD_LABEL_CLASS = 'text-xs font-medium text-text-secondary'
 
@@ -87,6 +94,23 @@ export function AddAiProviderLocalFields({
               baseUrl={baseUrl.trim()}
             />
           </p>
+        ) : null}
+        {onDevice && loopback ? (
+          <Select
+            defaultValue="openai-compatible"
+            onValueChange={(value) => {
+              if (value === 'ollama' || value === 'openai-compatible')
+                setValue('onDeviceServer', value)
+            }}
+          >
+            <SelectTrigger aria-label="Local inference server">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ollama">Ollama</SelectItem>
+              <SelectItem value="openai-compatible">Other local server (e.g. LM Studio)</SelectItem>
+            </SelectContent>
+          </Select>
         ) : null}
       </div>
 

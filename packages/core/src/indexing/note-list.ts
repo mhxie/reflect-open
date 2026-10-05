@@ -281,6 +281,8 @@ export interface RecentNotesOptions {
   limit: number
   /** Only notes carrying this tag (case-insensitive). `null` lists all. */
   tag?: string | null
+  /** Local callers may include private rows; cloud-facing callers keep the default. */
+  includePrivate?: boolean
 }
 
 /**
@@ -298,7 +300,7 @@ export async function listRecentNotes(options: RecentNotesOptions): Promise<Rece
       ? await db
           .selectFrom('notes')
           .where('notes.kind', '=', 'note')
-          .where('notes.isPrivate', '=', 0)
+          .$if(options.includePrivate !== true, (query) => query.where('notes.isPrivate', '=', 0))
           .select(['notes.path', 'notes.title', 'notes.preview', 'notes.mtime', 'notes.isPrivate'])
           .orderBy('notes.mtime', 'desc')
           .orderBy('notes.path')
@@ -309,7 +311,7 @@ export async function listRecentNotes(options: RecentNotesOptions): Promise<Rece
           .innerJoin('notes', 'notes.path', 'tags.notePath')
           .where('tags.tagKey', '=', foldTag(tag))
           .where('notes.kind', '=', 'note')
-          .where('notes.isPrivate', '=', 0)
+          .$if(options.includePrivate !== true, (query) => query.where('notes.isPrivate', '=', 0))
           .select(['notes.path', 'notes.title', 'notes.preview', 'notes.mtime', 'notes.isPrivate'])
           .distinct()
           .orderBy('notes.mtime', 'desc')

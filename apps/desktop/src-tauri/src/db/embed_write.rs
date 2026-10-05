@@ -22,6 +22,9 @@ pub struct EmbeddedChunk {
     pub(super) content_hash: String,
     pub(super) model_id: String,
     pub(super) vector: Option<Vec<f32>>,
+    pub(super) is_private: bool,
+    pub(super) source_hash: String,
+    pub(super) asset_text_hash: String,
 }
 
 fn vector_json(vector: &[f32]) -> String {
@@ -56,6 +59,17 @@ pub(super) fn apply_chunks(
     if !note_exists {
         return remove_chunks(conn, note_path); // hygiene: drop any leftovers
     }
+    let snapshot: (String, String) = conn.query_row(
+        "SELECT file_hash, asset_text_hash FROM notes WHERE path = ?1",
+        params![note_path],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if chunks
+        .iter()
+        .any(|chunk| chunk.source_hash != snapshot.0 || chunk.asset_text_hash != snapshot.1)
+    {
+        return Ok(());
+    }
 
     // Existing rows by content hash (a note rarely has duplicate-hash chunks;
     // if it does, rows pair up by position order — both forms are identical).
@@ -82,7 +96,7 @@ pub(super) fn apply_chunks(
                 let (id, _) = existing.remove(at);
                 conn.prepare_cached(
                     "UPDATE embedding_chunks
-                     SET heading = ?2, pos_from = ?3, pos_to = ?4, model_id = ?5
+                     SET heading = ?2, pos_from = ?3, pos_to = ?4, model_id = ?5, is_private = ?6, source_hash = ?7, asset_text_hash = ?8
                      WHERE id = ?1",
                 )?
                 .execute(params![
@@ -90,15 +104,18 @@ pub(super) fn apply_chunks(
                     chunk.heading,
                     chunk.pos_from,
                     chunk.pos_to,
-                    chunk.model_id
+                    chunk.model_id,
+                    chunk.is_private,
+                    chunk.source_hash,
+                    chunk.asset_text_hash
                 ])?;
                 kept.push(id);
             }
             Some(vector) => {
                 conn.prepare_cached(
                     "INSERT INTO embedding_chunks
-                       (note_path, heading, pos_from, pos_to, text, content_hash, model_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                       (note_path, heading, pos_from, pos_to, text, content_hash, model_id, is_private, source_hash, asset_text_hash)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 )?
                 .execute(params![
                     note_path,
@@ -107,7 +124,10 @@ pub(super) fn apply_chunks(
                     chunk.pos_to,
                     chunk.text,
                     chunk.content_hash,
-                    chunk.model_id
+                    chunk.model_id,
+                    chunk.is_private,
+                    chunk.source_hash,
+                    chunk.asset_text_hash
                 ])?;
                 let id = conn.last_insert_rowid();
                 conn.prepare_cached(

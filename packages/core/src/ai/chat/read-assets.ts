@@ -2,11 +2,17 @@ import { getXArchiveOwners } from '../../x-archive.ts'
 import { z } from 'zod'
 import { classifyAssetFromNotes } from '../../actions/asset-privacy.ts'
 import { isAppError } from '../../errors.ts'
-import { descriptionPathFor, isAssetPath } from '../../graph/paths.ts'
-import { canonicalAssetPath } from '../../markdown/extract.ts'
+import { descriptionPathFor, isAssetPath, isAttachmentPath } from '../../graph/paths.ts'
+import { canonicalAssetPath, attachmentReferenceCandidates } from '../../markdown/extract.ts'
 import { splitFrontmatter } from '../../markdown/frontmatter.ts'
+import { localSafeAssetDescription, type LocalSafe } from '../../privacy/local-checkers.ts'
+import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
+import { readAssetOcrState } from '../../actions/asset-ocr-cache.ts'
+import { readManagedDescription } from '../../actions/asset-description-helpers.ts'
+import { listAttachments, readNoteForDevice, type DeviceNoteRead } from '../../graph/commands.ts'
 import {
   cloudSafeAssetDescription,
+  notePrivate,
   isPrivateNoteError,
   type CloudAssetDescription,
   type CloudSafe,
@@ -46,7 +52,7 @@ export const NOT_AN_ASSET_ERROR =
 
 /** One asset in a {@link ReadAssetsOutput}: its stored description, or a structured miss/refusal. */
 export type ReadAssetResult =
-  | { ok: true; asset: CloudSafe<CloudAssetDescription> }
+  | { ok: true; asset: CloudSafe<CloudAssetDescription> | LocalSafe<CloudAssetDescription> }
   | { ok: false; path: string; error: string }
 
 /** The read_assets output: one {@link ReadAssetResult} per requested path, in order. */
@@ -68,7 +74,10 @@ export const readAssetsInput = z.object({
 /** The effects {@link buildReadOneAsset} needs, already defaulted by the caller. */
 export interface ReadAssetDeps {
   readNoteFn: (path: string) => Promise<string>
+  readDeviceNoteFn?: (path: string, generation?: number) => Promise<DeviceNoteRead>
   assetReferencingNotePathsFn: (assetPath: string, owners?: readonly string[]) => Promise<string[]>
+  target?: VerifiedModelTarget | undefined
+  generation?: number | undefined
 }
 
 /**
@@ -85,34 +94,79 @@ export interface ReadAssetDeps {
  */
 export function buildReadOneAsset(deps: ReadAssetDeps) {
   return async function readOneAsset(path: string): Promise<ReadAssetResult> {
-    const canonical = canonicalAssetPath(path)
-    if (canonical === null || !isAssetPath(canonical)) {
+    const local = deps.target?.kind === 'on-device'
+    let canonical = local
+      ? (attachmentReferenceCandidates('', path)[0] ?? null)
+      : canonicalAssetPath(path)
+    if (local && canonical !== null && !canonical.includes('/')) {
+      const matches = (await listAttachments(deps.generation)).filter(
+        (file) => file.path.split('/').at(-1) === canonical,
+      )
+      if (matches.length > 1)
+        return {
+          ok: false,
+          path,
+          error: 'Several attachments have this filename. Pass the full graph-relative path.',
+        }
+      canonical = matches[0]?.path ?? canonical
+    }
+    if (canonical === null || !(local ? isAttachmentPath(canonical) : isAssetPath(canonical))) {
       return { ok: false, path, error: NOT_AN_ASSET_ERROR }
     }
-    let source: string
+    const cacheState = await readAssetOcrState(canonical, deps.generation)
+    const cache = cacheState?.status === 'complete' ? cacheState : null
+    if (!local && cacheState !== null) {
+      return { ok: false, path, error: ASSET_UNAVAILABLE_ERROR }
+    }
+    let source: string | null = null
+    let localOnly = false
     try {
-      source = await deps.readNoteFn(descriptionPathFor(canonical))
+      if (local) {
+        const read = await (deps.readDeviceNoteFn ?? readNoteForDevice)(
+          descriptionPathFor(canonical),
+          deps.generation,
+        )
+        source = read.content
+        localOnly = read.localOnly
+      } else {
+        source = await deps.readNoteFn(descriptionPathFor(canonical))
+      }
     } catch (cause) {
       if (isAppError(cause) && cause.kind === 'notFound') {
-        return { ok: false, path, error: NO_ASSET_DESCRIPTION_ERROR }
-      }
-      if (isPrivateNoteError(cause)) {
+        if (cache === null) {
+          return { ok: false, path, error: NO_ASSET_DESCRIPTION_ERROR }
+        }
+      } else if (isPrivateNoteError(cause)) {
         return { ok: false, path, error: ASSET_UNAVAILABLE_ERROR }
+      } else {
+        throw cause
       }
-      throw cause
     }
-    const body = splitFrontmatter(source).body.trim()
+    if (
+      cacheState?.status === 'invalid' &&
+      source !== null &&
+      readManagedDescription(source) !== null
+    ) {
+      return { ok: false, path, error: NO_ASSET_DESCRIPTION_ERROR }
+    }
+    const useCache = cache !== null && (source === null || readManagedDescription(source) !== null)
+    const body = useCache ? cache.body : splitFrontmatter(source ?? '').body.trim()
     const owners = await getXArchiveOwners(canonical)
     const candidates = await deps.assetReferencingNotePathsFn(canonical, owners)
     const verdict = await classifyAssetFromNotes(canonical, candidates, deps.readNoteFn, owners)
     const truncated = body.length > MAX_ASSET_DESCRIPTION_CHARS
     try {
-      const asset = cloudSafeAssetDescription({
+      const content = {
         path: canonical,
-        isPrivate: verdict !== 'send',
+        isPrivate:
+          verdict !== 'send' || useCache || localOnly || (source !== null && notePrivate(source)),
         description: truncated ? body.slice(0, MAX_ASSET_DESCRIPTION_CHARS) : body,
         truncated,
-      })
+      }
+      const asset =
+        deps.target?.kind === 'on-device'
+          ? localSafeAssetDescription(deps.target, content)
+          : cloudSafeAssetDescription(content)
       if (body === '') {
         // An existing-but-empty sidecar reads as "no description" — but only
         // for a sendable asset; a blocked one threw above, so the two miss

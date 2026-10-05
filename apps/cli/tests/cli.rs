@@ -287,6 +287,35 @@ fn search_ranks_hits_and_excludes_private_notes() {
     );
 }
 
+#[test]
+fn search_excludes_device_only_ocr_from_every_term_and_sentence_recall() {
+    let fixture = graph();
+    fixture.write_note(
+        "notes/public.md",
+        "# Public\nzebra wombat columnar formats\n",
+    );
+    fixture.write_note(
+        "notes/ocr.md",
+        "# OCR Sentinel\nzebra wombat columnar formats secret OCR\n",
+    );
+    fixture.build_index();
+    let conn = reflect_index_schema::open_index_at(fixture.root()).unwrap();
+    conn.execute(
+        "UPDATE notes SET has_device_only_content=1 WHERE path='notes/ocr.md'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    for query in ["zebra", "how does wombat store columnar formats on disk"] {
+        let output = reflect(&fixture, &["search", query, "--json"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let text = stdout(&output);
+        assert!(text.contains("notes/public.md"), "{text}");
+        assert!(!text.contains("OCR"), "{text}");
+        assert!(!text.contains("notes/ocr.md"), "{text}");
+    }
+}
+
 /// Ranking parity with the desktop palette search (`filtered-search.ts`):
 /// title hits are bm25-boosted 10× over body hits, so a title-only match must
 /// outrank a body-only match.

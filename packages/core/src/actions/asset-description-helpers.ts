@@ -28,6 +28,18 @@ export function assetTypeFor(path: string): AssetType | null {
   if (!path.startsWith(`${ASSETS_DIR}/`) || path.endsWith(DESCRIPTION_SUFFIX)) {
     return null
   }
+  return localOcrAssetTypeFor(path)
+}
+
+/** Supported image/PDF types at visible graph paths, including local-only folders. */
+export function localOcrAssetTypeFor(path: string): AssetType | null {
+  if (
+    path.split('/').some((segment) => segment === '' || segment.startsWith('.')) ||
+    path.includes('\\') ||
+    path.includes('\0')
+  ) {
+    return null
+  }
   const dot = path.lastIndexOf('.')
   if (dot < 0) {
     return null

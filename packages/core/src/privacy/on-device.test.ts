@@ -154,7 +154,11 @@ describe('pickOnDeviceProvider', () => {
 })
 
 describe('verifyOnDeviceServer', () => {
-  it('answers ok until verification step V1 decides on a probe', async () => {
-    expect(await verifyOnDeviceServer(resolveOnDeviceTarget(attested())!)).toBe('ok')
+  it('refuses an unverified server before any private context is sent', async () => {
+    expect(
+      await verifyOnDeviceServer(resolveOnDeviceTarget(attested())!, {
+        fetchFn: async () => new Response('', { status: 404 }),
+      }),
+    ).toMatchObject({ kind: 'refused' })
   })
 })

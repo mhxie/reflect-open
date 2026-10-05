@@ -213,6 +213,19 @@ export async function readNoteShareable(
   return await call('note_read_shareable', { path, generation }, shareableNoteReadSchema)
 }
 
+const deviceNoteReadSchema = z.object({ content: z.string(), localOnly: z.boolean() })
+
+/** A visible Markdown read whose local-only status is checked by the native filesystem boundary. */
+export type DeviceNoteRead = z.infer<typeof deviceNoteReadSchema>
+
+/** Read visible Markdown for an on-device model, including approved local-only sources. */
+export async function readNoteForDevice(
+  path: string,
+  generation?: number,
+): Promise<DeviceNoteRead> {
+  return await call('note_read_for_device', { path, generation }, deviceNoteReadSchema)
+}
+
 /**
  * Atomically write a note's markdown by graph-relative path. `generation` (from
  * `GraphInfo`) pins the write to the graph it was issued for — Rust rejects it
@@ -296,6 +309,71 @@ export async function readAssetBinary(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const buffer = await call('asset_read_binary', { path, generation }, z.instanceof(ArrayBuffer))
   return new Uint8Array(buffer)
+}
+
+/** Generation-pinned attachment bytes for verified on-device OCR, including local-only sources. */
+export async function readAssetForDevice(
+  path: string,
+  generation: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = await call(
+    'asset_read_for_device',
+    { path, generation },
+    z.instanceof(ArrayBuffer),
+  )
+  return new Uint8Array(buffer)
+}
+
+/** Render a 1-based PDF page to PNG for local vision models (macOS). */
+export async function readPdfPageForDevice(
+  path: string,
+  page: number,
+  generation: number,
+  sourceHash: string,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = await call(
+    'pdf_page_read_for_device',
+    { path, page, generation, sourceHash },
+    z.instanceof(ArrayBuffer),
+  )
+  return new Uint8Array(buffer)
+}
+
+/** Read PDF page metadata from the same verified source snapshot as local OCR. */
+export async function pdfInfoForDevice(
+  path: string,
+  generation: number,
+  sourceHash: string,
+): Promise<PdfInfo> {
+  return await call('pdf_info_for_device', { path, generation, sourceHash }, pdfInfoSchema)
+}
+
+/** Whether safe device-only OCR cache writes are supported by this native platform. */
+export async function localOcrSupported(generation: number): Promise<boolean> {
+  return await call('asset_ocr_supported', { generation }, z.boolean())
+}
+
+/** Read a derived OCR cache entry; missing entries throw `notFound`. */
+export async function readAssetOcrCache(key: string, generation?: number): Promise<string> {
+  return await call('asset_ocr_cache_read', { key, generation }, z.string())
+}
+
+/** List derived OCR digest keys in the active graph's runtime cache. */
+export async function listAssetOcrCacheKeys(generation: number): Promise<string[]> {
+  return await call(
+    'asset_ocr_cache_keys',
+    { generation },
+    z.array(z.string().regex(/^[a-f\d]{64}$/u)),
+  )
+}
+
+/** Atomically write a complete OCR cache entry into `.reflect/asset-ocr/`. */
+export async function writeAssetOcrCache(
+  key: string,
+  contents: string,
+  generation: number,
+): Promise<void> {
+  await call('asset_ocr_cache_write', { key, contents, generation }, voidSchema)
 }
 
 /**

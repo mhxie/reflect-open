@@ -40,6 +40,7 @@ function sampleNote(overrides: Partial<IndexedNote> = {}): IndexedNote {
     mtime: 1_700_000_000_000,
     text: 'Sample Note body about local-first sync',
     assetText: '',
+    hasDeviceOnlyContent: false,
     preview: 'body about local-first sync',
     links: [
       {

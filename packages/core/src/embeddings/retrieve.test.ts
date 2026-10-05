@@ -160,6 +160,26 @@ describe('fuseRanked (reciprocal rank fusion)', () => {
     expect(fused[0]!.isPrivate).toBe(true)
     expect(fused[0]!.hasConflict).toBe(true)
   })
+
+  it('retains device-only provenance across lexical and semantic legs', () => {
+    const fused = fuseRanked(
+      [[hit('p')], [hit('p', { isPrivate: true, hasDeviceOnlyContent: true })]],
+      5,
+    )
+    expect(fused[0]).toMatchObject({ isPrivate: true, hasDeviceOnlyContent: true })
+  })
+
+  it('restricts snippets fused from different attachment-text snapshots', () => {
+    expect(
+      fuseRanked(
+        [
+          [hit('p', { assetTextHash: 'a'.repeat(64) })],
+          [hit('p', { assetTextHash: 'b'.repeat(64) })],
+        ],
+        5,
+      )[0],
+    ).toMatchObject({ hasDeviceOnlyContent: true })
+  })
 })
 
 describe('retrieve', () => {
@@ -173,7 +193,6 @@ describe('retrieve', () => {
     anyTerm: object[]
     knn?: object[]
     loadedModel?: string
-    flags?: object[]
   }): Array<[string, unknown]> {
     const calls: Array<[string, unknown]> = []
     setBridge({
@@ -189,13 +208,14 @@ describe('retrieve', () => {
         }
         const sql = String(args['sql'] ?? '')
         if (sql.includes('materialized')) {
-          return answers.everyTerm
+          return answers.everyTerm.map((entry) => ({
+            is_private: 0,
+            has_device_only_content: 0,
+            ...entry,
+          }))
         }
         if (sql.includes('bm25(search_fts, 0, 10.0, 1.0, 1.0)')) {
           return answers.anyTerm
-        }
-        if (sql.includes('"is_private"')) {
-          return answers.flags ?? [{ path: 'notes/exact.md', is_private: 0, has_conflict: 0 }]
         }
         if (sql.includes('embedding_vectors v')) {
           return answers.knn ?? []
@@ -219,6 +239,17 @@ describe('retrieve', () => {
     fts_highlighted_title: 'Exact',
     snippet: 'every term',
   }
+
+  it('keeps device-only snippet provenance without a second index read', async () => {
+    const snippet = '\u{1}exact\u{2} OCR'
+    const calls = fakeIndex({
+      everyTerm: [{ ...EXACT, snippet, has_device_only_content: 1 }],
+      anyTerm: [],
+    })
+    const hits = await retrieve('exact', { mode: 'lexical', limit: 1 })
+    expect(hits[0]).toMatchObject({ snippet, hasDeviceOnlyContent: true })
+    expect(calls.filter(([command]) => command === 'db_query')).toHaveLength(1)
+  })
 
   it('fills a sentence-long query with any-term matches after the every-term ones', async () => {
     const calls = fakeIndex({
@@ -317,8 +348,7 @@ describe('retrieve', () => {
 
   it('preserves Private and conflict metadata from both lexical legs', async () => {
     fakeIndex({
-      everyTerm: [EXACT],
-      flags: [{ path: EXACT.path, is_private: 1, has_conflict: 1 }],
+      everyTerm: [{ ...EXACT, is_private: 1, has_conflict: 1 }],
       anyTerm: [
         {
           path: 'notes/related.md',

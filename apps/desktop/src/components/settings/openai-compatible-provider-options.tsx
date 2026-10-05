@@ -4,6 +4,7 @@ import {
   resolveOnDeviceTarget,
   type AiProviderCapabilities,
   type OpenAiCompatibleProviderConfig,
+  type OnDeviceServerKind,
 } from '@reflect/core'
 import { Checkbox } from '@/components/ui/checkbox.tsx'
 import { Switch } from '@/components/ui/switch.tsx'
@@ -15,11 +16,12 @@ import {
 } from '@/lib/on-device-settings.ts'
 import { ContextLengthField } from './context-length-field.tsx'
 import { OnDeviceAttestationDialog } from './on-device-attestation-dialog.tsx'
+import { Button } from '@/components/ui/button.tsx'
 
 interface OpenAiCompatibleProviderOptionsProps {
   config: OpenAiCompatibleProviderConfig
   /** Attest (after the dialog) or withdraw "runs on this Mac". */
-  onSetOnDevice: (id: string, attest: boolean) => void
+  onSetOnDevice: (id: string, attest: boolean, server?: OnDeviceServerKind) => void
   /** Change what the entry declares about its model. */
   onSetCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
 }
@@ -87,14 +89,19 @@ export function OpenAiCompatibleProviderOptions({
       {stale ? (
         <InlineAlert tone="warning">Re-confirm: endpoint or model changed</InlineAlert>
       ) : null}
+      {attested && config.onDevice?.server === undefined ? (
+        <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}>
+          Confirm local server type
+        </Button>
+      ) : null}
       {confirming ? (
         <OnDeviceAttestationDialog
           model={config.model}
           baseUrl={config.baseUrl}
           onCancel={() => setConfirming(false)}
-          onConfirm={() => {
+          onConfirm={(server) => {
             setConfirming(false)
-            onSetOnDevice(config.id, true)
+            onSetOnDevice(config.id, true, server)
           }}
         />
       ) : null}

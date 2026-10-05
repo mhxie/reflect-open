@@ -83,7 +83,7 @@ export async function answerSearchIpcRequest(
     return {
       mode,
       results: hits
-        .filter((hit) => !hit.isPrivate)
+        .filter((hit) => !hit.isPrivate && hit.hasDeviceOnlyContent !== true)
         .map((hit) => ({
           path: hit.path,
           title: hit.title,

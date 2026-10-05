@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use tauri::http::StatusCode;
 use tauri::State;
 use tokio::sync::Semaphore;
@@ -316,6 +317,85 @@ pub async fn pdf_info(
     .await
 }
 
+fn read_device_pdf(target: &ReadTarget, source_hash: &str) -> AppResult<Vec<u8>> {
+    let bytes = super::device::read_source_for_device(target)?;
+    let actual_hash: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    if actual_hash != source_hash {
+        return Err(AppError::invalid(
+            "PDF source changed during local OCR; retry.",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Inspect the exact PDF bytes pinned by a local OCR source hash.
+#[tauri::command]
+pub async fn pdf_info_for_device(
+    path: String,
+    generation: u64,
+    source_hash: String,
+    state: State<'_, GraphState>,
+) -> AppResult<PdfInfo> {
+    super::ensure_readable_attachment_path(&path)?;
+    let (root, local_only) = super::graph_for(&state, Some(generation))?;
+    if !engine::SUPPORTED {
+        return Err(PdfError::Unsupported.into());
+    }
+    let _slot = RENDER_SLOTS
+        .acquire()
+        .await
+        .expect("render semaphore stays open");
+    crate::blocking::run_blocking(move || {
+        let target = resolve_read(&root, &path, local_only.as_deref())?;
+        let bytes = read_device_pdf(&target, &source_hash)?;
+        let pages = engine::page_boxes(&bytes)?
+            .into_iter()
+            .map(PageBox::displayed)
+            .collect::<Result<_, _>>()?;
+        Ok(PdfInfo { pages })
+    })
+    .await
+}
+
+/// Render one source-hash-pinned PDF page for on-device OCR, bypassing the preview cache.
+#[tauri::command]
+pub async fn pdf_page_read_for_device(
+    path: String,
+    page: usize,
+    generation: u64,
+    source_hash: String,
+    state: State<'_, GraphState>,
+) -> AppResult<tauri::ipc::Response> {
+    super::ensure_readable_attachment_path(&path)?;
+    if page == 0 {
+        return Err(AppError::invalid("PDF page numbers start at 1"));
+    }
+    let (root, local_only) = super::graph_for(&state, Some(generation))?;
+    if !engine::SUPPORTED {
+        return Err(PdfError::Unsupported.into());
+    }
+    let _slot = RENDER_SLOTS
+        .acquire()
+        .await
+        .expect("render semaphore stays open");
+    crate::blocking::run_blocking(move || {
+        let target = resolve_read(&root, &path, local_only.as_deref())?;
+        let bytes = read_device_pdf(&target, &source_hash)?;
+        let png = engine::render_png(
+            &bytes,
+            PageRequest {
+                page,
+                bucket: width_bucket(2048),
+            },
+        )?;
+        Ok(tauri::ipc::Response::new(png))
+    })
+    .await
+}
+
 /// The cheap half of a page request.
 pub(crate) enum PageLookup {
     /// The page was cached.
@@ -546,6 +626,47 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn device_pdf_reads_validate_each_consumed_snapshot_and_never_follow_late_links() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("assets")).unwrap();
+        let source = root.join("assets/paper.pdf");
+        let first = fixtures::sample();
+        let mut second = first.clone();
+        second.extend_from_slice(b"\n% second version\n");
+        let hash = |bytes: &[u8]| -> String {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        };
+        let first_hash = hash(&first);
+        fs::write(&source, &first).unwrap();
+        let target = resolve_read(&root, "assets/paper.pdf", None).unwrap();
+        assert_eq!(read_device_pdf(&target, &first_hash).unwrap(), first);
+        fs::write(&source, &second).unwrap();
+        assert!(matches!(
+            read_device_pdf(&target, &first_hash),
+            Err(AppError::Invalid { .. })
+        ));
+        fs::write(&source, &first).unwrap();
+        assert_eq!(read_device_pdf(&target, &first_hash).unwrap(), first);
+
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("paper.pdf"), &second).unwrap();
+        fs::remove_file(&source).unwrap();
+        symlink(outside.path().join("paper.pdf"), &source).unwrap();
+        assert!(read_device_pdf(&target, &hash(&second)).is_err());
+        fs::remove_file(&source).unwrap();
+        fs::write(&source, &first).unwrap();
+        fs::rename(root.join("assets"), root.join("original-assets")).unwrap();
+        symlink(outside.path(), root.join("assets")).unwrap();
+        assert!(read_device_pdf(&target, &hash(&second)).is_err());
+    }
 
     #[test]
     fn widths_round_up_to_a_bucket_and_cap_at_the_largest() {
@@ -917,6 +1038,50 @@ mod tests {
             ] })
         );
         assert_eq!(info("finance/secure/scan.pdf", 4).unwrap().pages.len(), 3);
+        let source_hash: String = Sha256::digest(fixtures::sample())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(
+            tauri::async_runtime::block_on(pdf_info_for_device(
+                "assets/paper.pdf".into(),
+                4,
+                source_hash.clone(),
+                app.state::<GraphState>()
+            ))
+            .unwrap()
+            .pages
+            .len(),
+            3
+        );
+        assert!(tauri::async_runtime::block_on(pdf_page_read_for_device(
+            "finance/secure/scan.pdf".into(),
+            1,
+            4,
+            source_hash.clone(),
+            app.state::<GraphState>()
+        ))
+        .is_ok());
+        fs::write(root.join("assets/paper.pdf"), b"changed during OCR").unwrap();
+        assert!(matches!(
+            tauri::async_runtime::block_on(pdf_info_for_device(
+                "assets/paper.pdf".into(),
+                4,
+                source_hash.clone(),
+                app.state::<GraphState>()
+            )),
+            Err(AppError::Invalid { .. })
+        ));
+        assert!(matches!(
+            tauri::async_runtime::block_on(pdf_page_read_for_device(
+                "assets/paper.pdf".into(),
+                1,
+                4,
+                source_hash,
+                app.state::<GraphState>()
+            )),
+            Err(AppError::Invalid { .. })
+        ));
         assert!(matches!(
             info("assets/fake.pdf", 4),
             Err(AppError::Invalid { .. })

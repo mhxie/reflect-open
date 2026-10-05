@@ -1,15 +1,15 @@
 import { useEffect, useRef, type ReactElement, type ReactNode } from 'react'
 import type { AiProvidersState, GraphInfo } from '@reflect/core'
 import { createAssetDescribeController } from '@/lib/asset-describe-controller.ts'
+import { startAssetOcrMaintenance } from '@/lib/asset-ocr-maintenance-controller.ts'
 import { useMainWindowEffect } from '@/hooks/use-main-window-effect.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 
 /**
  * Mounts the asset-description lifecycle for the open graph (Plan 20): runs the
- * {@link createAssetDescribeController} loop that describes new eligible
- * images/PDFs into managed `.reflect.md` descriptions. No UI — the only surface is
- * the Settings backfill button; this provider only handles the automatic path
- * for newly added assets, and only when `describeAssets` is on.
+ * description loop for new attachments when enabled. Local OCR uses the
+ * device-only cache; default AI descriptions use managed sidecars. Existing
+ * local OCR is maintained across source changes even when generation is off.
  */
 
 interface AssetDescribeProviderProps {
@@ -23,6 +23,10 @@ export function AssetDescribeProvider({
 }: AssetDescribeProviderProps): ReactElement {
   const { settings } = useSettings()
   const describeAssets = settings.describeAssets
+  const localOcrProviderIdRef = useRef(settings.localOcrProviderId)
+  useEffect(() => {
+    localOcrProviderIdRef.current = settings.localOcrProviderId
+  })
 
   // Read lazily at the start of every pass — a key added in Settings
   // mid-session must be seen without rebuilding the controller.
@@ -38,6 +42,7 @@ export function AssetDescribeProvider({
   })
 
   // Main window only — two describers would double-bill the same assets.
+  useMainWindowEffect(() => startAssetOcrMaintenance(graph.generation), [graph.generation])
   useMainWindowEffect(() => {
     if (!describeAssets) {
       return
@@ -45,12 +50,13 @@ export function AssetDescribeProvider({
     const controller = createAssetDescribeController({
       generation: graph.generation,
       getProviders: () => providersRef.current,
+      getLocalOcrProviderId: () => localOcrProviderIdRef.current,
     })
     controller.start()
     return () => {
       controller.dispose()
     }
-  }, [graph.generation, describeAssets])
+  }, [graph.generation, describeAssets, settings.localOcrProviderId])
 
   return <>{children}</>
 }

@@ -9,8 +9,9 @@ import {
   project,
 } from '../../indexing/flow-test-harness.ts'
 import { getBridge, setBridge } from '../../ipc/bridge.ts'
-import { modelTarget, verifyOnDeviceServer } from '../../privacy/on-device.ts'
+import { modelTarget, verifyModelTarget, verifyOnDeviceServer } from '../../privacy/on-device.ts'
 import { historyForTarget } from './history-privacy.ts'
+import { hashContent } from '../../indexing/hash.ts'
 
 /**
  * The resend gate over a real index: notes are projected from Markdown into
@@ -19,8 +20,8 @@ import { historyForTarget } from './history-privacy.ts'
  * a test overrides it.
  */
 
-vi.mock('../../privacy/on-device', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../privacy/on-device.ts')>()
+vi.mock('../../privacy/on-device-verification', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../privacy/on-device-verification.ts')>()
   return {
     ...original,
     verifyOnDeviceServer: vi.fn(original.verifyOnDeviceServer),
@@ -70,6 +71,12 @@ function openIndex(
     invoke: (command, args) => {
       if (command === 'db_query') {
         queries.push(String(args['sql']))
+      }
+      if (command === 'note_read_shareable') {
+        const path = String(args['path'])
+        return notes[path] === undefined
+          ? Promise.reject({ kind: 'notFound', message: 'No sidecar' })
+          : Promise.resolve({ kind: 'content', content: notes[path] })
       }
       return bridge.invoke(command, args)
     },
@@ -143,6 +150,147 @@ function listing(path: string): JsonValue {
 }
 
 describe('historyForTarget', () => {
+  it('refuses legacy search conversations without snapshot provenance', async () => {
+    openIndex({ 'notes/atlas.md': PUBLIC })
+    const history = [
+      ...exchange(
+        'find',
+        'search_notes',
+        json({ hits: [{ path: 'notes/atlas.md', snippet: 'old text' }] }),
+        'Old answer',
+      ),
+      user('next'),
+    ]
+    await expect(historyForTarget(history, CLOUD)).rejects.toMatchObject({ kind: 'auth' })
+  })
+
+  it('refuses later paraphrases after a folded source is replaced under the same bare name', async () => {
+    openIndex(
+      {
+        'notes/atlas.md': '![[scan.png]]',
+        'notes/scan.png.reflect.md': 'New public caption',
+        'assets/scan.png.reflect.md': '---\nprivate: true\n---\nOld caption',
+      },
+      [['notes/atlas.md', 'scan.png']],
+    )
+    const bridge = getBridge()
+    setBridge({
+      ...bridge,
+      invoke: (command, args) =>
+        command === 'list_attachments'
+          ? Promise.resolve([{ path: 'notes/scan.png', size: 1, modifiedMs: 1 }])
+          : bridge.invoke(command, args),
+    })
+    const history: ModelMessage[] = [
+      ...exchange(
+        'find',
+        'search_notes',
+        json({
+          hits: [
+            {
+              path: 'notes/atlas.md',
+              snippet: 'Old caption',
+              assetTextHash: await hashContent('Old caption'),
+            },
+          ],
+        }),
+        'Old answer',
+      ),
+      user('repeat it'),
+      { role: 'assistant', content: 'A later paraphrase of the old caption' },
+      user('next'),
+    ]
+    await expect(historyForTarget(history, CLOUD, 1)).rejects.toMatchObject({ kind: 'auth' })
+  })
+
+  it('keeps a note read whose embedded attachment became private, since reads carry no attachment text', async () => {
+    const notes = {
+      'notes/atlas.md': '![scan](assets/scan.png)',
+      'assets/scan.png.reflect.md': 'Public caption',
+    }
+    openIndex(notes, [['notes/atlas.md', 'assets/scan.png']])
+    notes['assets/scan.png.reflect.md'] = '---\nprivate: true\n---\nPrivate caption'
+    const history = [
+      ...exchange('atlas?', 'read_notes', readNotes('notes/atlas.md'), 'Atlas answer'),
+      user('next'),
+    ]
+    expect(await historyForTarget(history, CLOUD, 1)).toEqual({
+      messages: history,
+      withheldTurns: 0,
+    })
+  })
+
+  it('withholds a legacy caption after its sidecar becomes private before reindexing', async () => {
+    const notes = {
+      'notes/atlas.md': '![scan](assets/scan.png)',
+      'assets/scan.png.reflect.md': 'Public caption',
+    }
+    openIndex(notes, [['notes/atlas.md', 'assets/scan.png']])
+    notes['assets/scan.png.reflect.md'] = '---\nprivate: true\n---\nPrivate caption'
+    const history = [
+      ...exchange('caption?', 'read_assets', readAssets('assets/scan.png'), 'Caption answer'),
+      user('next'),
+    ]
+    expect(await historyForTarget(history, CLOUD, 1)).toEqual({
+      messages: [user('next')],
+      withheldTurns: 1,
+    })
+  })
+
+  it("refuses a cloud turn after an earlier search snippet's sidecar becomes private", async () => {
+    const notes = {
+      'notes/atlas.md': '![scan](assets/scan.png)',
+      'assets/scan.png.reflect.md': 'Public caption',
+    }
+    openIndex(notes, [['notes/atlas.md', 'assets/scan.png']])
+    notes['assets/scan.png.reflect.md'] = '---\nprivate: true\n---\nPrivate caption'
+    const history = [
+      ...exchange(
+        'search?',
+        'search_notes',
+        json({
+          hits: [
+            {
+              path: 'notes/atlas.md',
+              title: 'Atlas',
+              snippet: 'Public caption',
+              assetTextHash: await hashContent('Public caption'),
+            },
+          ],
+        }),
+        'Search answer',
+      ),
+      user('next'),
+    ]
+    await expect(historyForTarget(history, CLOUD, 1)).rejects.toMatchObject({ kind: 'auth' })
+  })
+
+  it('refuses the entire cloud turn when an earlier local result carries private provenance', async () => {
+    const history: ModelMessage[] = [
+      ...exchange(
+        'private?',
+        'read_notes',
+        json({
+          notes: [
+            {
+              ok: true,
+              note: {
+                path: 'notes/private.md',
+                title: 'Private',
+                content: 'secret',
+                truncated: false,
+                reflectPrivateContext: true,
+              },
+            },
+          ],
+        }),
+        'Paraphrased secret',
+      ),
+      user('Send a summary'),
+    ]
+    await expect(historyForTarget(history, CLOUD)).rejects.toThrow('private local context')
+    expect(queries).toHaveLength(0)
+  })
   it('leaves out the whole exchange that read a note made private since', async () => {
     openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
     const history: ModelMessage[] = [
@@ -194,7 +342,16 @@ describe('historyForTarget', () => {
       ...exchange(
         'find atlas',
         'search_notes',
-        json({ hits: [{ path: 'notes/atlas.md', title: 'Atlas', snippet: 'launch' }] }),
+        json({
+          hits: [
+            {
+              path: 'notes/atlas.md',
+              title: 'Atlas',
+              snippet: 'launch',
+              assetTextHash: await hashContent(''),
+            },
+          ],
+        }),
         'Found [[Atlas]].',
       ),
       ...exchange(
@@ -225,7 +382,16 @@ describe('historyForTarget', () => {
       ...exchange(
         'search',
         'search_notes',
-        json({ hits: [{ path: 'notes/x.md', title: 'Diary', snippet: 'secret' }] }),
+        json({
+          hits: [
+            {
+              path: 'notes/x.md',
+              title: 'Diary',
+              snippet: 'secret',
+              assetTextHash: await hashContent(''),
+            },
+          ],
+        }),
         'Found it.',
       ),
       ...exchange(
@@ -283,15 +449,19 @@ describe('historyForTarget', () => {
       user('next'),
     ]
 
-    const result = await historyForTarget(history, ON_DEVICE)
+    verifyOnDeviceServerMock.mockResolvedValueOnce('ok')
+    const result = await historyForTarget(history, await verifyModelTarget(ON_DEVICE, ''))
 
     expect(result.withheldTurns).toBe(0)
     expect(result.messages).toBe(history)
     expect(queries).toHaveLength(0)
-    expect(verifyOnDeviceServerMock).toHaveBeenCalledExactlyOnceWith(ON_DEVICE)
+    expect(verifyOnDeviceServerMock).toHaveBeenCalledExactlyOnceWith(ON_DEVICE, {
+      apiKey: '',
+      signal: undefined,
+    })
   })
 
-  it('filters the history like a cloud model when the on-device server is refused', async () => {
+  it('refuses verification instead of downgrading an on-device conversation', async () => {
     openIndex({ 'notes/atlas.md': PUBLIC, 'notes/x.md': LOCKED })
     verifyOnDeviceServerMock.mockResolvedValueOnce({
       kind: 'refused',
@@ -303,17 +473,22 @@ describe('historyForTarget', () => {
       user('next'),
     ]
 
-    expect(await historyForTarget(history, ON_DEVICE)).toEqual({
-      messages: history.slice(4),
-      withheldTurns: 1,
-    })
-    expect(queries).toHaveLength(1)
+    await expect(verifyModelTarget(ON_DEVICE, '')).rejects.toThrow(
+      'This model runs in Ollama’s cloud.',
+    )
+    expect(history).toHaveLength(9)
+    expect(queries).toHaveLength(0)
   })
 
-  it('checks every named note and asset in one index query', async () => {
-    openIndex({ 'notes/a.md': PUBLIC, 'notes/b.md': PUBLIC, 'notes/c.md': PUBLIC }, [
-      ['notes/c.md', 'assets/chart.png'],
-    ])
+  it('checks every named note and asset against the index and live files', async () => {
+    openIndex(
+      {
+        'notes/a.md': PUBLIC,
+        'notes/b.md': PUBLIC,
+        'notes/c.md': `${PUBLIC}\n![[assets/chart.png]]`,
+      },
+      [['notes/c.md', 'assets/chart.png']],
+    )
     const history: ModelMessage[] = [
       ...exchange('a', 'read_notes', readNotes('notes/a.md', 'notes/b.md'), 'A.'),
       ...exchange(
@@ -321,8 +496,8 @@ describe('historyForTarget', () => {
         'search_notes',
         json({
           hits: [
-            { path: 'notes/b.md', title: 'B' },
-            { path: 'notes/c.md', title: 'C' },
+            { path: 'notes/b.md', title: 'B', assetTextHash: await hashContent('') },
+            { path: 'notes/c.md', title: 'C', assetTextHash: await hashContent('') },
           ],
         }),
         'B.',
@@ -332,7 +507,7 @@ describe('historyForTarget', () => {
     ]
 
     expect((await historyForTarget(history, CLOUD)).withheldTurns).toBe(0)
-    expect(queries).toHaveLength(1)
+    expect(queries.length).toBeGreaterThan(0)
   })
 
   it('asks the index nothing when no earlier exchange read anything', async () => {

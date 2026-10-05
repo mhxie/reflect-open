@@ -49,13 +49,16 @@ export interface ChatMessages {
 }
 
 export interface EmbeddingChunks {
+  assetTextHash: Generated<string>;
   contentHash: string;
   heading: string | null;
   id: Generated<number | null>;
+  isPrivate: Generated<number>;
   modelId: string;
   notePath: string;
   posFrom: number;
   posTo: number;
+  sourceHash: Generated<string>;
   text: string;
 }
 
@@ -94,6 +97,7 @@ export interface NoteKeys {
 }
 
 export interface Notes {
+  assetTextHash: Generated<string>;
   bodyChars: Generated<number>;
   dailyDate: string | null;
   fileHash: string;
@@ -101,6 +105,7 @@ export interface Notes {
   gistUrl: string | null;
   hasConflict: Generated<number>;
   hasContent: Generated<number>;
+  hasDeviceOnlyContent: Generated<number>;
   id: string | null;
   isPinned: Generated<number>;
   isPrivate: Generated<number>;

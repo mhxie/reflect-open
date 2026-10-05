@@ -38,6 +38,35 @@ beforeEach(() => {
 })
 
 describe('DescribeAssetsField', () => {
+  it('pins a local OCR backfill to the selected vision model while the default AI is cloud', async () => {
+    const local = {
+      id: 'local',
+      provider: 'openai-compatible',
+      model: 'vision',
+      keyHint: '',
+      supportsImages: true,
+      baseUrl: 'http://localhost:1234/v1',
+      onDevice: {
+        baseUrl: 'http://localhost:1234/v1',
+        model: 'vision',
+        server: 'openai-compatible',
+      },
+    } as const
+    settingsRef.current = {
+      ...settingsRef.current,
+      aiProviders: [PROVIDER, local],
+      localOcrProviderId: 'local',
+    }
+    await render(<DescribeAssetsField />)
+    await page.getByRole('button', { name: /backfill assets/i }).click()
+    await page.getByRole('button', { name: /^backfill assets$/i }).click()
+    expect(backfill).toHaveBeenCalledWith(
+      5,
+      { providers: [PROVIDER, local], defaultProviderId: 'cfg' },
+      'local',
+    )
+  })
+
   it('reflects and toggles the automatic OCR setting', async () => {
     await render(<DescribeAssetsField />)
     const toggle = page.getByRole('switch', { name: /ocr new assets automatically/i })
@@ -62,10 +91,14 @@ describe('DescribeAssetsField', () => {
     expect(backfill).not.toHaveBeenCalled()
 
     await page.getByRole('button', { name: /^backfill assets$/i }).click()
-    expect(backfill).toHaveBeenCalledWith(5, {
-      providers: [PROVIDER],
-      defaultProviderId: 'cfg',
-    })
+    expect(backfill).toHaveBeenCalledWith(
+      5,
+      {
+        providers: [PROVIDER],
+        defaultProviderId: 'cfg',
+      },
+      null,
+    )
   })
 
   it('cancels without sending anything', async () => {

@@ -242,6 +242,8 @@ export interface DailyNotesRange {
   end: string
   /** Row cap — the most recent days in range win. */
   limit: number
+  /** Local callers may include private rows; cloud-facing callers keep the default. */
+  includePrivate?: boolean
 }
 
 /**
@@ -256,7 +258,7 @@ export async function listDailyNotes(range: DailyNotesRange): Promise<DailyNoteR
     .where('dailyDate', 'is not', null)
     .where('dailyDate', '>=', range.start)
     .where('dailyDate', '<=', range.end)
-    .where('isPrivate', '=', 0)
+    .$if(range.includePrivate !== true, (query) => query.where('isPrivate', '=', 0))
     .select(['path', 'title', 'dailyDate', 'preview', 'mtime', 'isPrivate'])
     .orderBy('dailyDate', 'desc')
     .limit(range.limit)

@@ -15,7 +15,10 @@ import {
   type IndexedNoteTouch,
 } from './commands.ts'
 import { assetReferencingNotePaths } from './asset-refs.ts'
-import { gatherAssetDescriptionText } from './asset-description-text.ts'
+import {
+  gatherAssetDescriptionBodies,
+  foldAssetDescriptionBodies,
+} from './asset-description-text.ts'
 import { emitIndexApplied } from './index-applied.ts'
 import { hashContent } from './hash.ts'
 import { buildIndexedNote, PROJECTION_VERSION, type IndexedNote } from './indexed-note.ts'
@@ -83,12 +86,17 @@ export async function buildNoteProjection(
   facts: { fileHash: string; mtime: number },
 ): Promise<IndexedNote> {
   const parsed = parseNote({ path, source: content })
-  const assetText = await gatherAssetDescriptionText(parsed.assets.map((asset) => asset.path))
+  const { bodies } = await gatherAssetDescriptionBodies(
+    parsed.assets.map((asset) => asset.path),
+    path,
+  )
+  const assetText = foldAssetDescriptionBodies(bodies)
   return buildIndexedNote(parsed, {
     fileHash: facts.fileHash,
     mtime: facts.mtime,
     source: content,
     assetText,
+    hasDeviceOnlyContent: bodies.some((entry) => entry.deviceOnly === true),
   })
 }
 

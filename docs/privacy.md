@@ -10,7 +10,7 @@ carries.
 The one hard rule sits above all of it: **a note with `private: true` frontmatter never
 has its content sent to any external service.** This is enforced in code at every AI
 call site (the `CloudSafe` type brand in `packages/core/src/ai/` — content for a
-provider cannot even be constructed from a private note, and the flag is re-read from
+cloud provider cannot even be constructed from a private note, and the flag is re-read from
 disk at call time), and it is covered by tests. The rule fails closed: frontmatter Reflect
 can't read with certainty — YAML that doesn't parse but mentions `private`, a `private`
 value that is neither true nor false, a block hidden behind a byte-order mark — counts
@@ -24,16 +24,57 @@ locked" until the YAML is fixed.
 - **What:** your chat messages and configured system prompt, plus what the model's
   tools read from your graph: search snippets, note content, and note listings. The
   configured prompt is stored in the device's ordinary settings file and is sent with
-  every chat turn. Private notes are dropped from every tool result, and reading one is
-  refused outright — the model sees a refusal, not the content. Each turn resends the
+  every chat turn. Cloud tools drop private notes and device-only attachment text.
+  A verified on-device model can search and read private and local-only notes.
+  Each turn resends the
   conversation so far, except earlier exchanges that read a note or attachment that has
   since become private or local-only, or that can no longer be confirmed public, such as
-  a note since renamed or deleted (a model you marked as running on this Mac still
-  receives those); the transcript keeps them and notes once that they are no longer
-  sent. That protection cannot identify note content you manually paste into a message
+  a note since renamed or deleted (a verified on-device model still receives those);
+  the transcript keeps them and notes once that they are no longer sent. If any
+  stored local tool result contains private or device-only context, the entire
+  conversation is blocked from switching to a cloud model, including later answers.
+  Continue locally or start a new conversation. That protection cannot identify
+  note content you manually paste into a message
   or the configured prompt, nor a later answer that repeats what a withheld exchange
   read.
 - **When:** only while you use chat (⌘J). No background calls.
+
+On-device models require consent for one exact loopback URL and model. Requests use
+the native client with proxies and redirects disabled. Before each turn or OCR run,
+Reflect checks Ollama's version and the exact model's `/api/show` metadata; remote
+models, aliases with remote provenance, and failed probes are refused. Explicit cloud
+model tags are refused before probing because Ollama can forward `/api/show` itself.
+A generic OpenAI-compatible server requires explicit consent for that server type
+and a 404 version endpoint. Reflect cannot determine whether an otherwise local
+server forwards requests; only attest a server you configured to run locally.
+
+## Image and PDF text
+
+Settings → Search → OCR assets can use the default AI for public attachments or an explicitly
+selected, attested local vision model. Local OCR can process attachments referenced
+by private notes and approved local-only folders. Safe source reads and local image
+OCR are supported on macOS and Linux; Windows refuses local OCR before reading
+attachments. Source reads are capped at 20 MiB. PDF pages are rendered locally on
+macOS and processed in order (up to 100 pages). A failed or
+interrupted run stores no partial result and never falls back to a cloud provider.
+
+Complete local results live in `.reflect/asset-ocr/`, outside markdown and Git backup.
+User-authored `.reflect.md` captions take precedence and are preserved. OCR and
+private/local-only captions participate in local lexical and semantic search; cloud
+tools and CLI search exclude the affected results. Source hashes invalidate changed
+or deleted attachments on open, wake, and file changes, even when automatic OCR is
+disabled. Local OCR text is capped at 200,000 characters per attachment, and folded
+search text at 8,000 characters per referencing note.
+
+Search tool results retain the attachment-text hash from their index snapshot.
+Cloud requests recheck it against the current folded text. A conversation holding
+attachment snippets that can no longer be cleared for cloud use, or legacy search
+results without this identity, requires an on-device model or a new cloud chat;
+later answers may repeat those snippets. Stored chat history is preserved.
+
+On-device full-note reads use the same bounded, no-follow boundary on macOS and
+Linux. Windows can search the local index with an attested model, but full-note
+reads currently return unsupported.
 
 ## Audio memos (off until you add a key)
 
@@ -188,9 +229,10 @@ sit inside the synced graph.
 
 - **Where:** nowhere. Notes inside a local-only folder are listed, opened,
   previewed, searched locally (including on-device semantic search), and
-  resolved as link and backlink targets — and that is all.
+  resolved as link and backlink targets. Verified on-device chat and local vision
+  OCR can also read them.
 - **What is blocked:** they are private whatever their frontmatter says (every
-  AI surface, asset descriptions of images they reference or contain, gist
+  cloud AI surface, cloud asset descriptions of images they reference or contain, gist
   publishing, link previews, and X/YouTube/remote-image embeds); they open
   read-only and the app never writes, creates, moves, or deletes anything
   inside them; Git backup never stages the folder entry or anything in it; and
@@ -380,7 +422,8 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 
 | Call | Destination | Carries note content? | Off by default? |
 | --- | --- | --- | --- |
-| AI chat | Your chosen provider | Yes — private-note tool reads are blocked | Yes (needs your key) |
+| AI chat | Your chosen provider or verified local model | Yes — cloud tools block private and device-only sources | Yes (needs configuration) |
+| Local image/PDF OCR | Your verified local vision model | Yes — stays on your machine | Yes (explicit model selection) |
 | Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
 | On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |
 | Recording on the Mac | Nowhere (on-device) | — (audio and transcript stay on your Mac) | Yes (each recording is started by you) |

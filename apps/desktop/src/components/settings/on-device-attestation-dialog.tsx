@@ -1,4 +1,12 @@
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
+import type { OnDeviceServerKind } from '@reflect/core'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
   Dialog,
@@ -16,7 +24,7 @@ interface OnDeviceAttestationDialogProps {
   /** The endpoint being attested. */
   baseUrl: string
   /** The user confirmed: store the attestation. */
-  onConfirm: () => void
+  onConfirm: (server: OnDeviceServerKind) => void
   /** The user backed out: nothing changes. */
   onCancel: () => void
 }
@@ -31,6 +39,9 @@ export function OnDeviceAttestationDialog({
   onConfirm,
   onCancel,
 }: OnDeviceAttestationDialogProps): ReactElement {
+  const [server, setServer] = useState<OnDeviceServerKind>(
+    new URL(baseUrl).port === '11434' ? 'ollama' : 'openai-compatible',
+  )
   return (
     <Dialog
       open
@@ -47,11 +58,25 @@ export function OnDeviceAttestationDialog({
             <OnDeviceAttestationCopy model={model} baseUrl={baseUrl} />
           </DialogDescription>
         </DialogHeader>
+        <Select
+          value={server}
+          onValueChange={(value) => {
+            if (value === 'ollama' || value === 'openai-compatible') setServer(value)
+          }}
+        >
+          <SelectTrigger aria-label="Local inference server">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ollama">Ollama (check model provenance)</SelectItem>
+            <SelectItem value="openai-compatible">Other local server (e.g. LM Studio)</SelectItem>
+          </SelectContent>
+        </Select>
         <DialogFooter>
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="button" size="sm" onClick={onConfirm}>
+          <Button type="button" size="sm" onClick={() => onConfirm(server)}>
             Turn on
           </Button>
         </DialogFooter>

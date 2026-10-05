@@ -43,6 +43,7 @@ describe('createDemoModel', () => {
     const turn = streamChat({
       config,
       apiKey: APP_REVIEW_STUB_KEY,
+      generation: 1,
       fetchFn: throwingFetch,
       messages: [{ role: 'user', content: 'What is in my notes?' }],
       today: '2026-08-14',

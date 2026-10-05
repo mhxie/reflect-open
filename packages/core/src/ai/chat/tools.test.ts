@@ -6,6 +6,8 @@ import { setBridge } from '../../ipc/bridge.ts'
 import { PrivateNoteError } from '../../privacy/checkers.ts'
 import type { DailyNoteRow, DailyNotesRange } from '../../indexing/queries.ts'
 import type { RecentNoteRow, RecentNotesOptions } from '../../indexing/note-list.ts'
+import { modelTarget, verifyModelTarget } from '../../privacy/on-device.ts'
+import { hasRestrictedSearchSources } from './search-privacy.ts'
 import {
   ASSET_UNAVAILABLE_ERROR,
   MAX_ASSET_DESCRIPTION_CHARS,
@@ -32,6 +34,96 @@ import {
   type SearchNotesOutput,
 } from './tools.ts'
 
+vi.mock('./search-privacy', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./search-privacy.ts')>()),
+  hasRestrictedSearchSources: vi.fn(async () => false),
+}))
+vi.mock('../../actions/asset-ocr-cache', () => ({ readAssetOcrState: async () => null }))
+vi.mock('../../privacy/on-device-verification', () => ({ verifyOnDeviceServer: async () => 'ok' }))
+
+async function localTarget() {
+  return await verifyModelTarget(
+    modelTarget({
+      id: 'local',
+      provider: 'openai-compatible',
+      model: 'local',
+      baseUrl: 'http://localhost:1234/v1',
+      keyHint: '',
+      onDevice: {
+        baseUrl: 'http://localhost:1234/v1',
+        model: 'local',
+        server: 'openai-compatible',
+      },
+    }),
+    '',
+  )
+}
+
+describe('verified local note tools', () => {
+  it('marks a stale public search snapshot when native sidecar provenance is local-only', async () => {
+    const target = await localTarget()
+    vi.mocked(hasRestrictedSearchSources).mockImplementationOnce(async (_path, _source, read) => {
+      await read('people/ſecure/scan.png.reflect.md')
+      return false
+    })
+    const tools = buildNoteTools({
+      target,
+      generation: 1,
+      retrieveFn: async () => [hit({ snippet: PRIVATE_BODY, assetTextHash: 'a'.repeat(64) })],
+      readDeviceNoteFn: async (path) => ({
+        content: path.endsWith('.reflect.md') ? PRIVATE_BODY : '# Public',
+        localOnly: path.endsWith('.reflect.md'),
+      }),
+    })
+    expect((await runSearch(tools, { query: 'caption' })).hits[0]).toMatchObject({
+      snippet: PRIVATE_BODY,
+      reflectPrivateContext: true,
+    })
+  })
+
+  it('retains private search snippets and marks the persisted context', async () => {
+    const target = await localTarget()
+    const retrieveFn = vi.fn().mockResolvedValue([hit({ isPrivate: true, snippet: PRIVATE_BODY })])
+    const tools = buildNoteTools({
+      target,
+      generation: 1,
+      retrieveFn,
+      readDeviceNoteFn: async () => ({
+        content: `---\nprivate: true\n---\n${PRIVATE_BODY}`,
+        localOnly: false,
+      }),
+    })
+    const output = await runSearch(tools, { query: 'private' })
+    expect(output.hits[0]).toMatchObject({ snippet: PRIVATE_BODY, reflectPrivateContext: true })
+    expect(retrieveFn).toHaveBeenCalledWith(
+      'private',
+      expect.objectContaining({ excludePrivateContent: false }),
+    )
+  })
+
+  it('uses Rust local-only provenance for attachment descriptions even through a folded path spelling', async () => {
+    const target = await localTarget()
+    const tools = buildNoteTools({
+      target,
+      generation: 1,
+      readDeviceNoteFn: async () => ({ content: 'Private caption', localOnly: true }),
+      readNoteFn: async () => '![photo](assets/photo.png)',
+      assetReferencingNotePathsFn: async () => ['notes/public.md'],
+    })
+    const output = await runReadAsset(tools, 'assets/photo.png')
+    expect(output).toMatchObject({
+      ok: true,
+      asset: { description: 'Private caption', reflectPrivateContext: true },
+    })
+  })
+
+  it('requires a graph generation before any private reads are enabled', async () => {
+    expect(() => buildNoteTools()).not.toThrow()
+    const target = await localTarget()
+    expect(() => buildNoteTools({ target })).toThrow('graph generation')
+  })
+})
+
 const CALL: ToolExecutionOptions<Record<string, unknown>> = {
   toolCallId: 'call-1',
   messages: [],
@@ -53,6 +145,7 @@ function hit(overrides: Partial<RetrievalHit>): RetrievalHit {
     snippet: 'a public snippet',
     heading: null,
     isPrivate: false,
+    assetTextHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
     hasConflict: false,
     ...overrides,
   }
@@ -218,7 +311,13 @@ describe('search_notes', () => {
     expect(payload).not.toContain(PRIVATE_TITLE)
     expect(payload).not.toContain(PRIVATE_PATH)
     expect(output.hits).toEqual([
-      { path: 'notes/public.md', title: 'Public note', snippet: 'a public snippet', heading: null },
+      {
+        path: 'notes/public.md',
+        title: 'Public note',
+        snippet: 'a public snippet',
+        heading: null,
+        assetTextHash: hit({}).assetTextHash,
+      },
     ])
   })
 
@@ -675,6 +774,21 @@ describe('list_recent_notes', () => {
     expect(JSON.stringify(output)).not.toContain(PRIVATE_TITLE)
   })
 
+  it('keeps a public row that embeds restricted attachments, since listings carry no attachment text', async () => {
+    const hasRestrictedSearchSourcesFn = vi.fn(async () => true)
+    const tools = buildNoteTools({
+      listRecentNotesFn: async () => [recentRow({})],
+      readNoteFn: async () => '# Trip\n![[scan.png]]\n',
+      hasRestrictedSearchSourcesFn,
+    })
+    const output = await runRecents(tools, {})
+    if (!output.ok) {
+      expect.unreachable('expected a listing')
+    }
+    expect(output.notes).toHaveLength(1)
+    expect(hasRestrictedSearchSourcesFn).not.toHaveBeenCalled()
+  })
+
   it('fails closed: an unreadable row is dropped, not sent', async () => {
     const tools = buildNoteTools({
       listRecentNotesFn: async () => [recentRow({})],
@@ -817,7 +931,7 @@ describe('toolResultSources', () => {
   it('names what each note tool read, successful entries only', () => {
     expect(
       toolResultSources('search_notes', { hits: [{ path: 'notes/a.md', title: 'A' }] }),
-    ).toEqual({ notes: ['notes/a.md'], assets: [] })
+    ).toEqual({ notes: ['notes/a.md'], assets: [], searchSnapshots: [{ path: 'notes/a.md' }] })
     expect(
       toolResultSources('read_notes', {
         notes: [

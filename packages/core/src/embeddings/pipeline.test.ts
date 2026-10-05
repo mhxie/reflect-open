@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
 import { embedNote, passageText } from './pipeline.ts'
+import { hashContent } from '../indexing/hash.ts'
 
 afterEach(() => {
   setBridge(null)
@@ -12,6 +13,9 @@ interface AppliedChunk {
   text: string
   contentHash: string
   vector: number[] | null
+  isPrivate: boolean
+  sourceHash: string
+  assetTextHash: string
 }
 
 /**
@@ -33,6 +37,9 @@ function fakePipelineBridge(options: {
   const applied: { path: string; chunks: AppliedChunk[] }[] = []
   setBridge({
     invoke: async (command, args) => {
+      if (command === 'asset_ocr_cache_read')
+        throw { kind: 'notFound', message: 'No local OCR cache' }
+      if (command === 'list_attachments') return []
       if (command === 'note_read_local') {
         const path = (args as { path: string }).path
         if (path.endsWith('.reflect.md')) {
@@ -77,6 +84,21 @@ function fakePipelineBridge(options: {
 const MODEL = 'all-MiniLM-L6-v2'
 
 describe('embedNote', () => {
+  it('pins a private-sidecar snapshot to its source hashes before an asynchronous write', async () => {
+    const content = '# Public\n![scan](assets/a.png)\n'
+    const { applied } = fakePipelineBridge({
+      content,
+      storedRows: [],
+      descriptions: { 'assets/a.png.reflect.md': '---\nprivate: true\n---\nPrivate caption' },
+    })
+    await embedNote({ path: 'notes/a.md', generation: 1, modelId: MODEL })
+    expect(applied[0]?.chunks.every((chunk) => chunk.isPrivate)).toBe(true)
+    expect(applied[0]?.chunks[0]).toMatchObject({
+      sourceHash: await hashContent(content),
+      assetTextHash: await hashContent('Private caption'),
+    })
+  })
+
   it('never embeds a template — boilerplate must not reach retrieval', async () => {
     const { embedded, applied } = fakePipelineBridge({
       content: '# Journal\n\nMood:\n\nGratitude:\n',

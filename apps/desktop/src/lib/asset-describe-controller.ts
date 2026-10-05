@@ -1,6 +1,7 @@
 import {
   hasBridge,
   isEligibleAssetPath,
+  localOcrAssetTypeFor,
   isNotePath,
   isSilentStop,
   parseNote,
@@ -48,6 +49,8 @@ export interface AssetDescribeControllerOptions {
    * added in Settings mid-session must be seen by the very next pass.
    */
   getProviders: () => AiProvidersState
+  /** Explicit local OCR selection, read at each pass. */
+  getLocalOcrProviderId?: () => string | null
 }
 
 /** Build the controller for one graph session. `dispose()` is terminal. */
@@ -57,6 +60,7 @@ export function createAssetDescribeController(
   let started = false
   /** Eligible assets observed changed and not yet successfully reconciled. */
   const dirty = new Set<string>()
+  const pendingReindex = new Set<string>()
   /** Last logged stop message — retries must not re-log it. */
   let loggedStop: string | null = null
 
@@ -89,16 +93,30 @@ export function createAssetDescribeController(
       return // browser dev (no graph to read assets from), or nothing pending
     }
     const batch = [...dirty]
+    for (const path of batch) dirty.delete(path)
+    const restoreBatch = (): void => {
+      for (const path of batch) dirty.add(path)
+    }
+    const providers = options.getProviders()
+    const localOcrProviderId = options.getLocalOcrProviderId?.() ?? null
+    const providerSnapshot = JSON.stringify(providers)
+    const passIsStale = (): boolean =>
+      isStale() ||
+      (options.getLocalOcrProviderId?.() ?? null) !== localOcrProviderId ||
+      JSON.stringify(options.getProviders()) !== providerSnapshot
     const outcome = await reconcileAssetDescriptions({
-      providers: options.getProviders(),
+      providers,
+      localOcrProviderId,
       generation: options.generation,
       mode: 'incremental',
       changed: batch,
       fetchFn: providerFetch,
-      isStale,
+      isStale: passIsStale,
     })
+    for (const path of outcome.describedAssetPaths) pendingReindex.add(path)
     surfaceStop(outcome.stopped)
-    if (isStale()) {
+    if (passIsStale()) {
+      restoreBatch()
       return 'stop'
     }
     // Runs even on a stop — whatever was described is real. A re-index failure
@@ -108,25 +126,34 @@ export function createAssetDescribeController(
     // them off it); our own index-applied trigger hears that emit too and
     // re-marks the notes' assets, which the next pass skips as up-to-date —
     // one cheap extra cycle, no loop (a clean pass writes nothing new).
-    if (outcome.describedAssetPaths.length > 0) {
+    if (pendingReindex.size > 0) {
+      const reindexBatch = [...pendingReindex]
       try {
-        await reindexNotesReferencing(outcome.describedAssetPaths, options.generation)
+        await reindexNotesReferencing(reindexBatch, options.generation)
+        for (const path of reindexBatch) pendingReindex.delete(path)
       } catch (cause) {
+        restoreBatch()
         console.warn('asset-description re-index failed:', cause)
+        return 'stop'
       }
       // The re-index wrote search rows directly (not via the watcher → onApplied
       // path), so nothing invalidated the index-backed query caches
       // (staleTime: Infinity). Refresh them so ⌘K reflects the new descriptions.
       invalidateIndexQueries()
     }
-    if (isStale()) {
+    if (passIsStale()) {
+      restoreBatch()
       return 'stop'
     }
     if (outcome.stopped !== null) {
+      const changedWhileRunning = dirty.size > 0
+      restoreBatch()
+      if (changedWhileRunning) return
       return 'stop' // transient/config stop: keep the batch, wait for the next trigger
     }
-    for (const path of batch) {
-      dirty.delete(path)
+    if (outcome.skippedChanged > 0) {
+      restoreBatch()
+      loop.schedule()
     }
   }
 
@@ -165,7 +192,11 @@ export function createAssetDescribeController(
         continue // deleted/unreadable since the change — nothing to re-evaluate
       }
       for (const asset of parseNote({ path: notePath, source }).assets) {
-        if (isEligibleAssetPath(asset.path)) {
+        if (
+          options.getLocalOcrProviderId?.() != null
+            ? localOcrAssetTypeFor(asset.path) !== null
+            : isEligibleAssetPath(asset.path)
+        ) {
           referenced.add(asset.path)
         }
       }
@@ -200,7 +231,11 @@ export function createAssetDescribeController(
           if (change.kind !== 'upsert') {
             continue
           }
-          if (isEligibleAssetPath(change.path)) {
+          if (
+            options.getLocalOcrProviderId?.() != null
+              ? localOcrAssetTypeFor(change.path) !== null
+              : isEligibleAssetPath(change.path)
+          ) {
             newAssets.push(change.path)
           } else if (isNotePath(change.path)) {
             changedNotes.push(change.path)
