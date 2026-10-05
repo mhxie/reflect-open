@@ -105,7 +105,7 @@ export async function reconcileLocalAssetOcr(
       ...new Set(
         requested.flatMap((path) =>
           path.includes('/')
-            ? [path]
+            ? path
             : catalog
                 .filter((file) => file.path.split('/').at(-1) === path)
                 .map((file) => file.path),

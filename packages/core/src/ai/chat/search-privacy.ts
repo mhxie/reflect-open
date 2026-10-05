@@ -61,7 +61,7 @@ export async function hasRestrictedSearchSources(
     ...new Set(
       references.flatMap((reference) =>
         reference.includes('/')
-          ? [reference]
+          ? reference
           : [
               resolveAttachmentLink(path, reference, catalog) ?? reference,
               ...(catalog?.named(reference) ?? []),

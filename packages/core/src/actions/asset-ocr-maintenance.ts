@@ -37,7 +37,7 @@ export async function reconcileCachedAssetOcr(
     ...new Set(
       references.flatMap((reference) =>
         reference.includes('/')
-          ? [reference]
+          ? reference
           : catalog
               .filter((file) => assetReferenceMatches(reference, file.path))
               .map((file) => file.path),
