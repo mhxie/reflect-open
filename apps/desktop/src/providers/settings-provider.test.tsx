@@ -148,6 +148,46 @@ describe('SettingsProvider', () => {
     expect(result.current.settings.editorMarkdownSyntax).toBe('hide')
   })
 
+  it('an empty functional patch keeps the loaded settings and skips persistence', async () => {
+    stored = { allNotesFilterTags: ['book', 'person'] }
+    const { result, act } = await renderHook(() => useSettings(), { wrapper })
+    await loadSettled()
+    const before = queryClient.getQueryData(queryKeys.settings.all)
+
+    await act(() => {
+      result.current.updateSettingsWith(() => ({}))
+    })
+    await act(async () => {
+      await flushSettings()
+    })
+
+    expect(queryClient.getQueryData(queryKeys.settings.all)).toBe(before)
+    expect(saveAttempts).toEqual([])
+    expect(saved).toEqual([])
+  })
+
+  it('an empty queued functional patch preserves disk pins without a hydration save', async () => {
+    stored = { allNotesFilterTags: ['travel'], futureSetting: 'keep' }
+    gateLoad = true
+    const { result, act } = await renderHook(() => useSettings(), { wrapper })
+
+    await act(() => {
+      result.current.updateSettingsWith(() => ({}))
+      result.current.updateSettingsWith(() => ({}))
+    })
+    releaseLoad()
+    await vi.waitFor(() => expect(result.current.settings.allNotesFilterTags).toEqual(['travel']))
+    await act(async () => {
+      await flushSettings()
+    })
+
+    expect(queryClient.getQueryData(queryKeys.settings.all)).toMatchObject({
+      futureSetting: 'keep',
+    })
+    expect(saveAttempts).toEqual([])
+    expect(saved).toEqual([])
+  })
+
   it('an equal-but-rebuilt array value does not trigger a save', async () => {
     stored = { allNotesFilterTags: ['book', 'person'] }
     const { result, act } = await renderHook(() => useSettings(), { wrapper })

@@ -1072,9 +1072,9 @@ describe('SettingsScreen', () => {
     const input = page.getByLabelText('Add filter tag')
 
     await input.fill(' #Meeting ')
-    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await page.getByRole('button', { name: 'Pin #meeting', exact: true }).click()
 
-    await expect.element(page.getByText('#meeting')).toBeInTheDocument()
+    await expect.element(page.getByText('#meeting', { exact: true })).toBeInTheDocument()
     await vi.waitFor(() =>
       expect(saved).toEqual([
         {
@@ -1137,7 +1137,7 @@ describe('SettingsScreen', () => {
     const input = page.getByLabelText('Add filter tag')
 
     await input.fill('my tag')
-    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect.element(page.getByRole('button', { name: 'Pin tag', exact: true })).toBeDisabled()
 
     await expect.element(page.getByRole('alert')).toMatchTextContent(`"my tag" can't be a tag`)
     // The draft stays put for fixing, and nothing reaches the store.
@@ -1154,7 +1154,9 @@ describe('SettingsScreen', () => {
     await expect.element(page.getByText('#book')).toBeInTheDocument()
 
     await page.getByLabelText('Add filter tag').fill('BOOK')
-    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect
+      .element(page.getByRole('button', { name: 'Pin #book', exact: true }))
+      .toBeDisabled()
 
     await vi.waitFor(() => expect(saved).toEqual([]))
   })
@@ -1166,9 +1168,10 @@ describe('SettingsScreen', () => {
     await expectLocatorToHaveCount(page.getByText('#link'), 0)
     await expect.element(page.getByText('#book')).toBeInTheDocument()
 
-    await page.getByRole('button', { name: 'Remove book' }).click()
+    await page.getByRole('button', { name: 'Actions for #book' }).click()
+    await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click()
 
-    expect(page.getByText('#book').query()).toBeNull()
+    expect(page.getByRole('button', { name: 'Actions for #book' }).query()).toBeNull()
     await vi.waitFor(() =>
       expect(saved).toEqual([
         {
@@ -1224,6 +1227,61 @@ describe('SettingsScreen', () => {
         },
       ]),
     )
+  })
+
+  it('orders pinned filters through their menus and retains the moved row focus', async () => {
+    await renderScreen()
+    await expect
+      .element(page.getByRole('button', { name: 'Actions for #link' }))
+      .toBeInTheDocument()
+
+    await page.getByRole('button', { name: 'Actions for #link' }).click()
+    await page.getByRole('menuitem', { name: 'Move up', exact: true }).click()
+
+    await vi.waitFor(() =>
+      expect(saved).toEqual([
+        expect.objectContaining({ allNotesFilterTags: ['link', 'book', 'person'] }),
+      ]),
+    )
+    await expect.element(page.getByRole('button', { name: 'Actions for #link' })).toHaveFocus()
+    expect(page.getByRole('list', { name: 'Pinned filters' }).element().textContent).toMatch(
+      /#link.*#book.*#person/,
+    )
+
+    await page.getByRole('button', { name: 'Actions for #link' }).click()
+    await expect
+      .element(page.getByRole('menuitem', { name: 'Move up', exact: true }))
+      .toHaveAttribute('aria-disabled', 'true')
+    await userEvent.keyboard('{Escape}')
+  })
+
+  it('keeps the saved pin order visible while searching for a tag to add', async () => {
+    await renderScreen()
+    await page.getByLabelText('Add filter tag').fill('research')
+
+    expect(page.getByRole('list', { name: 'Pinned filters' }).element().textContent).toMatch(
+      /#book.*#link.*#person/,
+    )
+    await expect.element(page.getByRole('button', { name: 'Pin #research' })).toBeEnabled()
+    expect(saved).toEqual([])
+  })
+
+  it('retains an empty pinned list after removing the final filter and reopening settings', async () => {
+    stored = { allNotesFilterTags: ['book'] }
+    const screen = await renderScreen()
+    await expectLocatorToHaveCount(page.getByRole('button', { name: 'Actions for #person' }), 0)
+
+    await page.getByRole('button', { name: 'Actions for #book' }).click()
+    await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click()
+    await expect.element(page.getByLabelText('Add filter tag')).toHaveFocus()
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ allNotesFilterTags: [] }))
+    await screen.unmount()
+
+    stored = { allNotesFilterTags: [] }
+    queryClient.clear()
+    await renderScreen()
+    await expectLocatorToHaveCount(page.getByRole('button', { name: /Actions for #/ }), 0)
+    await expect.element(page.getByText('No pinned tags. Add a tag below.')).toBeInTheDocument()
   })
 
   it('toggles an All Notes attachment filter off and back on, in a fixed order', async () => {

@@ -16,33 +16,11 @@ The app does not require a Reflect account. Notes live in a folder you choose,
 and optional services such as AI providers, transcription, iCloud, GitHub, or
 another git remote are connected directly by the user.
 
-## Features Added in This Fork
+## This Fork
 
-In addition to upstream Reflect's features, this fork adds:
-
-- **Daily workspace:** a journaling heatmap with edited-note previews,
-  "On this day" entries from earlier years, and due/overdue tasks in the sidebar.
-- **Editor aids:** a heading outline and quick jumps, plus live character and
-  selection counts and the note's last edit time.
-- **Pinned note shortcuts:** `⌘1`–`⌘9` and `⌘0` open the first ten pinned notes
-  in sidebar order, with floating hints on hover and keyboard focus.
-- **Peek and PDFs on Mac:** open notes and PDFs over the current editor, and read
-  PDFs inline as scrollable page previews.
-- **Attachment browsing:** an attachment library with image/PDF previews,
-  type/tag filters, and source-note links; image/PDF galleries in All Notes.
-- **Wiki browser:** browse entries by topic and language, with claim and
-  review signals and links to specific headings.
-- **File capture:** drop files onto the sidebar to create a note with their
-  attachments.
-- **Mac audio:** on-device audio memo transcription and meeting recording
-  with microphone/system audio capture on macOS 14.2+.
-- **Multilingual search:** CJK-aware lexical matching, local EmbeddingGemma
-  embeddings, and semantic/hybrid CLI search through the running desktop app.
-- **Local-only folders:** configurable read-only folders, plus in-place
-  editing on Mac with local attachment storage and unsaved-text recovery;
-  their content stays out of AI and Git backup.
-- **Git backup protection:** preserve uncommitted notes and open edits during
-  pulls, refuse stale writes, and configure backup file-size limits per graph.
+This fork extends upstream Reflect with daily-workspace tools, keyboard navigation,
+attachment and wiki browsing, local search, and Git backup safeguards.
+See the [fork feature guide](docs/fork-features.md) for the full list and controls.
 
 <img width="2926" height="1800" alt="Reflect" src="https://github.com/user-attachments/assets/6da0e0d2-3f25-4fc4-850c-b764548c3abe" />
 

@@ -1,14 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
+import { mouse } from 'vitest-browser-commands/playwright'
 import { render } from 'vitest-browser-react'
-import type { ReactElement } from 'react'
-import { setBridge, type NoteListSort } from '@reflect/core'
+import { act, type ReactElement } from 'react'
+import { DEFAULT_SETTINGS, setBridge, type Settings } from '@reflect/core'
 import { resetOperations, useOperations } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
+import { hover } from '@/test-utils/mouse.ts'
 import { AllNotesScreen } from './all-notes-screen.tsx'
 
 /**
@@ -34,21 +36,30 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
     indexing: false,
   }),
 }))
-/** The persisted sort, as a tiny store so a header click re-renders the screen. */
-const sortStore = vi.hoisted(() => {
-  const DEFAULT: NoteListSort = { key: 'updated', direction: 'desc' }
-  let sort = DEFAULT
+/** Settings writes re-render the real filter and sort controls. */
+const settingsStore = vi.hoisted(() => {
+  let settings: Settings
+  let writes: Partial<Settings>[] = []
   const listeners = new Set<() => void>()
   return {
-    get: (): NoteListSort => sort,
-    set: (next: NoteListSort): void => {
-      sort = next
+    get: (): Settings => settings,
+    set: (next: Settings): void => {
+      settings = next
       for (const listener of listeners) {
         listener()
       }
     },
-    reset: (): void => {
-      sort = DEFAULT
+    update: (patch: Partial<Settings>): void => {
+      writes.push(patch)
+      settings = { ...settings, ...patch }
+      for (const listener of listeners) {
+        listener()
+      }
+    },
+    writes: (): Partial<Settings>[] => writes,
+    reset: (initial: Settings): void => {
+      settings = initial
+      writes = []
     },
     subscribe: (listener: () => void): (() => void) => {
       listeners.add(listener)
@@ -60,26 +71,16 @@ vi.mock('@/providers/settings-provider.tsx', async () => {
   const { useSyncExternalStore } = await import('react')
   return {
     useSettings: () => {
-      const allNotesSort = useSyncExternalStore(sortStore.subscribe, sortStore.get)
+      const settings = useSyncExternalStore(settingsStore.subscribe, settingsStore.get)
       return {
         settings: {
-          editorMarkdownSyntax: 'hide',
-          theme: 'system',
-          timeFormat: '12h',
+          ...settings,
           dateFormat: settingsState.dateFormat,
-          allNotesFilterTags: ['book', 'person'],
           allNotesFilterAttachments: settingsState.allNotesFilterAttachments,
-          allNotesSort,
         },
-        updateSettings: () => {},
-        updateSettingsWith: (
-          updater: (current: { allNotesSort: NoteListSort }) => { allNotesSort?: NoteListSort },
-        ) => {
-          const patch = updater({ allNotesSort: sortStore.get() })
-          if (patch.allNotesSort !== undefined) {
-            sortStore.set(patch.allNotesSort)
-          }
-        },
+        updateSettings: settingsStore.update,
+        updateSettingsWith: (updater: (current: Settings) => Partial<Settings>) =>
+          settingsStore.update(updater(settingsStore.get())),
       }
     },
   }
@@ -152,7 +153,7 @@ beforeEach(() => {
   resetOperations()
   settingsState.dateFormat = 'mdy'
   settingsState.allNotesFilterAttachments = ['pdf', 'video']
-  sortStore.reset()
+  settingsStore.reset({ ...DEFAULT_SETTINGS, allNotesFilterTags: ['book', 'person'] })
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
   mockInvoke.mockReset()
   mockInvoke.mockImplementation(async (command, args) => {
@@ -230,13 +231,14 @@ function ReArrive(): ReactElement {
 function renderScreen(
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   filter: AllNotesFilter | null = null,
+  width?: number,
 ) {
   return render(
     <QueryClientProvider client={client}>
       <RouterProvider initialRoute={{ kind: 'allNotes', filter }}>
         {/* The screen fills its container (`h-full`); hand it the viewport
             height so the scroll container gets a real, bounded size. */}
-        <div style={{ height: '100vh' }}>
+        <div data-testid="screen-container" style={{ height: '100vh', width }}>
           <RoutedScreen />
         </div>
         <RouteProbe />
@@ -249,6 +251,42 @@ function renderScreen(
 
 function probedRoute(view: Awaited<ReturnType<typeof renderScreen>>): unknown {
   return JSON.parse(view.getByTestId('route').element().textContent ?? 'null')
+}
+
+async function openPinnedFilters(view: Awaited<ReturnType<typeof renderScreen>>): Promise<void> {
+  await view
+    .getByRole('group', { name: 'Filter notes' })
+    .getByRole('button', { expanded: false })
+    .click()
+  await page.getByRole('button', { name: 'Manage pinned filters…' }).click()
+  await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
+}
+
+function pinnedTabOrder(view: Awaited<ReturnType<typeof renderScreen>>): string[] {
+  const pins = settingsStore.get().allNotesFilterTags
+  return [...view.getByRole('group', { name: 'Filter notes' }).element().querySelectorAll('button')]
+    .map((button) => button.textContent?.trim() ?? '')
+    .filter((label) => pins.some((tag) => label === `#${tag}`))
+}
+
+function pinWrites(): Partial<Settings>[] {
+  return settingsStore.writes()
+}
+
+async function movePinnedTagUpWithKeyboard(tag: string): Promise<void> {
+  const handle = page.getByRole('button', { name: `Reorder #${tag}` })
+  handle.element().focus()
+  await userEvent.keyboard('{Space}')
+  await expect.element(handle).toHaveAttribute('aria-pressed', 'true')
+  await userEvent.keyboard('{ArrowUp}')
+  await expect
+    .element(
+      page.getByText(
+        `#${tag} will move to position 1 of ${settingsStore.get().allNotesFilterTags.length}.`,
+        { exact: true },
+      ),
+    )
+    .toBeInTheDocument()
 }
 
 describe('AllNotesScreen', () => {
@@ -504,15 +542,16 @@ describe('AllNotesScreen', () => {
     await view.unmount()
   })
 
-  it('offers unpinned tags in the Custom combobox and shows the chosen one', async () => {
+  it('offers pinned and unpinned tags in Custom and shows the chosen filter', async () => {
     const view = await renderScreen()
 
-    // `book` is pinned, so the combobox offers only `travel` (with its count).
     await view.getByRole('button', { name: 'Custom' }).click()
     const listbox = page.getByRole('listbox')
     await expect.element(listbox).toMatchTextContent('#travel')
     await expect.element(listbox).toMatchTextContent('2')
-    expect(listbox.element().textContent).not.toContain('#book')
+    await expect.element(page.getByRole('option', { name: /#book/ })).toMatchTextContent('Pinned')
+    await expect.element(page.getByRole('option', { name: /#book/ })).toMatchTextContent('3')
+    await expect.element(page.getByRole('option', { name: /#person/ })).toMatchTextContent('Pinned')
 
     await page.getByRole('option', { name: /#travel/ }).click()
 
@@ -569,6 +608,357 @@ describe('AllNotesScreen', () => {
   })
 })
 
+describe('AllNotesScreen — pinned tag management', () => {
+  it('pins the active Custom filter without changing its route or results', async () => {
+    const view = await renderScreen(undefined, { kind: 'tag', tag: 'travel' })
+    await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+
+    await view.getByRole('button', { name: /#travel/, expanded: false }).click()
+    await page.getByRole('button', { name: 'Pin #travel', exact: true }).click()
+
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person', 'travel'])
+    expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#travel'])
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
+    await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Custom' })).toBeInTheDocument()
+    await view.unmount()
+  })
+
+  it('searches configured pins even when a pin has no graph facet', async () => {
+    const view = await renderScreen()
+    await view.getByRole('button', { name: 'Custom' }).click()
+    await page.getByPlaceholder('Filter by any tag…').fill('#PERSON')
+
+    await expect.element(page.getByRole('option', { name: /#person/ })).toMatchTextContent('Pinned')
+    expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
+    await page.getByRole('option', { name: /#person/ }).click()
+
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'person' } })
+    await expect.element(view.getByText('No notes tagged #person.')).toBeInTheDocument()
+    await view.unmount()
+  })
+
+  it('adds a normalized zero-result tag while keeping every ordered row visible', async () => {
+    const view = await renderScreen()
+    await openPinnedFilters(view)
+    const input = page.getByPlaceholder('Find a tag to pin…')
+    await input.fill(' #研究/PROJECT ')
+
+    await expect
+      .element(page.getByRole('button', { name: 'Actions for #book' }))
+      .toBeInTheDocument()
+    await expect
+      .element(page.getByRole('button', { name: 'Actions for #person' }))
+      .toBeInTheDocument()
+    await page.getByRole('button', { name: 'Pin #研究/project', exact: true }).click()
+
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person', '研究/project'])
+    expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#研究/project'])
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
+    await expect.element(input).toHaveValue('')
+
+    await input.fill('#BOOK')
+    const duplicatePin = page.getByRole('button', { name: 'Pin #book', exact: true })
+    if (duplicatePin.query() !== null) {
+      await expect.element(duplicatePin).toBeDisabled()
+    }
+    await input.fill('not a tag')
+    const invalidPin = page.getByRole('button', { name: /^Pin #/ })
+    if (invalidPin.query() !== null) {
+      await expect.element(invalidPin).toBeDisabled()
+    }
+    expect(pinWrites()).toHaveLength(1)
+    await view.unmount()
+  })
+
+  it('keeps an unpinned active filter and supports removing every shortcut', async () => {
+    settingsStore.update({ allNotesFilterTags: ['book', 'person', 'travel'] })
+    const view = await renderScreen(undefined, { kind: 'tag', tag: 'travel' })
+    await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+    await openPinnedFilters(view)
+
+    await page.getByRole('button', { name: 'Actions for #travel' }).click()
+    await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click()
+    await expect.element(page.getByRole('button', { name: 'Actions for #person' })).toHaveFocus()
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
+    await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+
+    for (const tag of ['book', 'person']) {
+      await page.getByRole('button', { name: `Actions for #${tag}` }).click()
+      await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click()
+    }
+    expect(settingsStore.get().allNotesFilterTags).toEqual([])
+    await expect.element(page.getByPlaceholder('Find a tag to pin…')).toHaveFocus()
+    await page.getByRole('button', { name: 'Done', exact: true }).click()
+    expect(pinnedTabOrder(view)).toEqual([])
+    await expect
+      .element(view.getByRole('button', { name: /#travel/, expanded: false }))
+      .toHaveFocus()
+    await expect.element(view.getByRole('button', { name: 'All', exact: true })).toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'PDF', exact: true })).toBeInTheDocument()
+    await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+    await view.unmount()
+
+    const reopened = await renderScreen()
+    expect(pinnedTabOrder(reopened)).toEqual([])
+    await reopened.unmount()
+  })
+
+  it('moves a tag through its menu, disables boundaries, and returns focus to that tag', async () => {
+    settingsStore.update({ allNotesFilterTags: ['book', 'person', 'travel'] })
+    const view = await renderScreen(undefined, { kind: 'tag', tag: 'travel' })
+    await openPinnedFilters(view)
+    await page.getByRole('button', { name: 'Actions for #book' }).click()
+    await expect
+      .element(page.getByRole('menuitem', { name: 'Move to top', exact: true }))
+      .toHaveAttribute('aria-disabled', 'true')
+    await expect
+      .element(page.getByRole('menuitem', { name: 'Move up', exact: true }))
+      .toHaveAttribute('aria-disabled', 'true')
+    await page.getByRole('menuitem', { name: 'Move to bottom', exact: true }).click()
+
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'travel', 'book'])
+    expect(pinnedTabOrder(view)).toEqual(['#person', '#travel', '#book'])
+    await expect.element(page.getByRole('button', { name: 'Actions for #book' })).toHaveFocus()
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
+    await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+
+    await page.getByRole('button', { name: 'Actions for #book' }).click()
+    await expect
+      .element(page.getByRole('menuitem', { name: 'Move down', exact: true }))
+      .toHaveAttribute('aria-disabled', 'true')
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
+    await expect.element(page.getByRole('button', { name: 'Actions for #book' })).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await view.unmount()
+  })
+
+  it('reorders from the drag handle with the pointer and saves only on drop', async () => {
+    const view = await renderScreen()
+    await openPinnedFilters(view)
+    const origin = await hover(page.getByRole('button', { name: 'Reorder #person' }))
+    const target = page
+      .getByRole('button', { name: 'Reorder #book' })
+      .element()
+      .getBoundingClientRect()
+    await mouse.down()
+    try {
+      await mouse.move(origin.x + 10, origin.y, { steps: 3 })
+      await expect
+        .element(page.getByRole('button', { name: 'Reorder #person' }))
+        .toHaveAttribute('aria-pressed', 'true')
+      await mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 8 })
+      await expect
+        .element(page.getByText('#person will move to position 1 of 2.', { exact: true }))
+        .toBeInTheDocument()
+      expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+      expect(pinWrites()).toHaveLength(0)
+    } finally {
+      await mouse.up()
+    }
+
+    await vi.waitFor(() =>
+      expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book']),
+    )
+    expect(pinWrites()).toHaveLength(1)
+    expect(pinnedTabOrder(view)).toEqual(['#person', '#book'])
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
+    await expect
+      .element(page.getByRole('button', { name: 'Reorder #person' }))
+      .not.toHaveAttribute('aria-pressed', 'true')
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await view.unmount()
+  })
+
+  it('saves a keyboard reorder once on drop and retains the active filter', async () => {
+    const view = await renderScreen(undefined, { kind: 'tag', tag: 'book' })
+    await openPinnedFilters(view)
+    const handle = page.getByRole('button', { name: 'Reorder #person' })
+    await movePinnedTagUpWithKeyboard('person')
+
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+    expect(pinWrites()).toHaveLength(0)
+    await userEvent.keyboard('{Enter}')
+
+    await vi.waitFor(() =>
+      expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book']),
+    )
+    expect(pinWrites()).toHaveLength(1)
+    expect(pinnedTabOrder(view)).toEqual(['#person', '#book'])
+    await expect.element(handle).not.toHaveAttribute('aria-pressed', 'true')
+    await expect.element(handle).toHaveFocus()
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'book' } })
+    await view.unmount()
+  })
+
+  it('cancels a keyboard reorder with Escape while leaving management open', async () => {
+    const view = await renderScreen()
+    await openPinnedFilters(view)
+    const handle = page.getByRole('button', { name: 'Reorder #person' })
+    await movePinnedTagUpWithKeyboard('person')
+    await userEvent.keyboard('{Escape}')
+    await expect.element(handle).not.toHaveAttribute('aria-pressed', 'true')
+
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+    expect(pinWrites()).toHaveLength(0)
+    expect(pinnedTabOrder(view)).toEqual(['#book', '#person'])
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
+    await expect.element(handle).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await view.unmount()
+  })
+
+  it.each(['Done', 'outside click'])(
+    'discards a drag when management closes through %s',
+    async (exit) => {
+      const view = await renderScreen()
+      await openPinnedFilters(view)
+      await movePinnedTagUpWithKeyboard('person')
+
+      if (exit === 'Done') {
+        await page.getByRole('button', { name: 'Done', exact: true }).click()
+      } else {
+        await view.getByRole('heading', { name: 'Notes', exact: true }).click()
+      }
+      await expect
+        .element(page.getByRole('list', { name: 'Pinned filters' }))
+        .not.toBeInTheDocument()
+      expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+      expect(pinWrites()).toHaveLength(0)
+      await openPinnedFilters(view)
+      await expect
+        .element(page.getByRole('button', { name: 'Actions for #book' }))
+        .toBeInTheDocument()
+      expect(pinnedTabOrder(view)).toEqual(['#book', '#person'])
+      await movePinnedTagUpWithKeyboard('person')
+      await userEvent.keyboard('{Enter}')
+      await vi.waitFor(() =>
+        expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book']),
+      )
+      expect(pinWrites()).toHaveLength(1)
+      await view.unmount()
+    },
+  )
+
+  it('cancels an unactivated pointer gesture before navigation removes the editor', async () => {
+    for (const dismissal of ['unmount', 'Escape']) {
+      const view = await renderScreen()
+      await openPinnedFilters(view)
+      const handle = page.getByRole('button', { name: 'Reorder #person' })
+      const origin = await hover(handle)
+      await mouse.down()
+      await expect.element(handle).not.toHaveAttribute('aria-pressed', 'true')
+      if (dismissal === 'Escape') {
+        await userEvent.keyboard('{Escape}')
+        await expect
+          .element(page.getByRole('list', { name: 'Pinned filters' }))
+          .not.toBeInTheDocument()
+      }
+      await view.unmount()
+      const clicked = vi.fn()
+      const receiver = await render(
+        <button type="button" onClick={clicked}>
+          Continue after navigation
+        </button>,
+      )
+      try {
+        const button = receiver.getByRole('button', { name: 'Continue after navigation' })
+        button.element().focus()
+        await expect.element(button).toHaveFocus()
+        await userEvent.keyboard('{Enter}')
+        expect(
+          clicked,
+          `${dismissal} permits a click before later pointer movement`,
+        ).toHaveBeenCalledOnce()
+        await mouse.move(origin.x + 12, origin.y, { steps: 3 })
+        button.element().focus()
+        await expect.element(button).toHaveFocus()
+        await userEvent.keyboard('{Enter}')
+        expect(
+          clicked,
+          `${dismissal} leaves subsequent native keyboard clicks working`,
+        ).toHaveBeenCalledTimes(2)
+        expect(pinWrites()).toHaveLength(0)
+      } finally {
+        await mouse.up()
+        await receiver.unmount()
+      }
+    }
+  })
+
+  it('cancels a draft after an external pin update and keeps the external order', async () => {
+    const view = await renderScreen()
+    await openPinnedFilters(view)
+    await movePinnedTagUpWithKeyboard('person')
+    await act(async () => {
+      settingsStore.set({
+        ...settingsStore.get(),
+        allNotesFilterTags: ['book', 'person', 'external'],
+      })
+    })
+    await expect
+      .element(page.getByRole('button', { name: 'Actions for #external' }))
+      .toBeInTheDocument()
+    page.getByPlaceholder('Find a tag to pin…').element().focus()
+    await userEvent.keyboard('{ArrowUp}{Enter}')
+
+    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person', 'external'])
+    expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#external'])
+    expect(pinWrites()).toHaveLength(0)
+    await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
+    await movePinnedTagUpWithKeyboard('person')
+    await userEvent.keyboard('{Enter}')
+    await vi.waitFor(() =>
+      expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book', 'external']),
+    )
+    expect(pinWrites()).toHaveLength(1)
+    await view.unmount()
+  })
+
+  it('keeps All and Custom reachable in a narrow header with long tags and the edit-day filter', async () => {
+    const longTags = Array.from({ length: 12 }, (_, index) => `非常长的项目标签/project-${index}`)
+    settingsStore.update({ allNotesFilterTags: longTags })
+    const view = await renderScreen(undefined, { kind: 'updated', date: '2020-01-15' }, 320)
+    await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
+    const group = view.getByRole('group', { name: 'Filter notes' })
+    const all = group
+      .getByRole('button', { name: 'All', exact: true })
+      .element()
+      .getBoundingClientRect()
+    const custom = group.getByRole('button', { name: 'Custom' }).element().getBoundingClientRect()
+    const container = view.getByTestId('screen-container').element().getBoundingClientRect()
+
+    expect(all.left).toBeGreaterThanOrEqual(container.left)
+    expect(all.right).toBeLessThan(custom.left)
+    expect(custom.right).toBeLessThanOrEqual(container.right)
+    await expect.element(group.getByRole('button', { name: /^Edited / })).toBeInTheDocument()
+    await expect
+      .element(group.getByRole('button', { name: `#${longTags[11]}`, exact: true }))
+      .toBeInTheDocument()
+    await expect
+      .element(group.getByRole('button', { name: 'PDF', exact: true }))
+      .toBeInTheDocument()
+    const strip = [...group.element().querySelectorAll('div')].find((element) =>
+      ['auto', 'scroll'].includes(getComputedStyle(element).overflowX),
+    )
+    expect(strip).toBeDefined()
+    expect(strip?.scrollWidth).toBeGreaterThan(strip?.clientWidth ?? 0)
+    await group.getByRole('button', { name: 'Custom' }).click()
+    await page.getByRole('option', { name: /#travel/ }).click()
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
+    await view.unmount()
+  })
+})
+
 describe('AllNotesScreen — selection and bulk trash', () => {
   it('selects a row on click and reveals the bulk Trash action', async () => {
     const view = await renderScreen()
@@ -579,9 +969,12 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     const trashButton = view.getByRole('button', { name: /Trash \(1\)/ })
     await expect.element(trashButton).toBeInTheDocument()
-    expect(view.getByRole('group', { name: 'Filter notes' }).element().previousElementSibling).toBe(
-      trashButton.element(),
-    )
+    expect(
+      trashButton
+        .element()
+        .closest('header')
+        ?.contains(view.getByRole('group', { name: 'Filter notes' }).element()),
+    ).toBe(true)
 
     // ⌘-click a second row extends the selection.
     await view.getByText('Dandelion chocolate.').click({ modifiers: ['ControlOrMeta'] })
@@ -641,7 +1034,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(1) // newest first: Health (Jan 15) above Tokyo (Jan 10)
 
     await view.getByRole('button', { name: 'Sort by subject' }).click()
-    expect(sortStore.get()).toEqual({ key: 'title', direction: 'asc' })
+    expect(settingsStore.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     await expect
       .element(view.getByRole('button', { name: 'Subject, sorted A to Z' }))
       .toBeInTheDocument()
@@ -654,7 +1047,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(-1)
 
     await view.getByRole('button', { name: 'Sort by updated' }).click()
-    expect(sortStore.get()).toEqual({ key: 'updated', direction: 'desc' })
+    expect(settingsStore.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
     await view.getByRole('button', { name: 'Updated, sorted newest first' }).click()
     await expect
       .element(view.getByRole('button', { name: 'Updated, sorted oldest first' }))
@@ -664,7 +1057,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
   })
 
   it('moves the keyboard selection through the sorted order', async () => {
-    sortStore.set({ key: 'updated', direction: 'asc' })
+    settingsStore.update({ allNotesSort: { key: 'updated', direction: 'asc' } })
     const view = await renderScreen()
     await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
 
@@ -684,7 +1077,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     view.getByRole('button', { name: 'Sort by subject' }).element().focus()
     await userEvent.keyboard('{Enter}')
 
-    expect(sortStore.get()).toEqual({ key: 'title', direction: 'asc' })
+    expect(settingsStore.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
