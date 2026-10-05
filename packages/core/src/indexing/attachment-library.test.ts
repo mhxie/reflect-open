@@ -13,7 +13,7 @@ function file(path: string, modifiedMs: number, extra: Partial<FileMeta> = {}): 
 }
 
 function reference(assetPath: string, notePath: string, mtime = 1): AttachmentReferenceRow {
-  return { assetPath, notePath, title: notePath, mtime }
+  return { assetPath, notePath, title: notePath, mtime, isPrivate: false, hasConflict: false }
 }
 
 describe('buildAttachmentLibrary', () => {
@@ -41,17 +41,35 @@ describe('buildAttachmentLibrary', () => {
     const [entry] = buildAttachmentLibrary(
       [file('assets/photo.png', 1)],
       [
-        reference('assets/photo.png', 'notes/trip.md', 5),
+        {
+          ...reference('assets/photo.png', 'notes/trip.md', 5),
+          isPrivate: true,
+          hasConflict: true,
+        },
         reference('photo.png', 'daily/2026-10-01.md', 9),
-        reference('photo.png', 'notes/trip.md', 5),
+        { ...reference('photo.png', 'notes/trip.md', 5), isPrivate: true, hasConflict: true },
         reference('notes/assets/photo.png', 'notes/other.md', 7),
         reference('assets/other.png', 'notes/unrelated.md', 8),
       ],
     )
 
     expect(entry?.notes).toEqual([
-      { path: 'daily/2026-10-01.md', title: 'daily/2026-10-01.md', mtime: 9, tags: [] },
-      { path: 'notes/trip.md', title: 'notes/trip.md', mtime: 5, tags: [] },
+      {
+        path: 'daily/2026-10-01.md',
+        title: 'daily/2026-10-01.md',
+        mtime: 9,
+        tags: [],
+        isPrivate: false,
+        hasConflict: false,
+      },
+      {
+        path: 'notes/trip.md',
+        title: 'notes/trip.md',
+        mtime: 5,
+        tags: [],
+        isPrivate: true,
+        hasConflict: true,
+      },
     ])
   })
 
@@ -191,18 +209,35 @@ describe('attachment reference queries', () => {
 
   it('reads media references from regular and daily notes with their titles', async () => {
     mockInvoke.mockResolvedValueOnce([
-      { asset_path: 'assets/photo.png', note_path: 'notes/trip.md', title: 'Trip', mtime: 4 },
+      {
+        asset_path: 'assets/photo.png',
+        note_path: 'notes/trip.md',
+        title: 'Trip',
+        mtime: 4,
+        is_private: 1,
+        has_conflict: 1,
+      },
     ])
 
     const rows = await listAttachmentReferences()
 
     expect(rows).toEqual([
-      { assetPath: 'assets/photo.png', notePath: 'notes/trip.md', title: 'Trip', mtime: 4 },
+      {
+        assetPath: 'assets/photo.png',
+        notePath: 'notes/trip.md',
+        title: 'Trip',
+        mtime: 4,
+        isPrivate: true,
+        hasConflict: true,
+      },
     ])
     const [command, args] = mockInvoke.mock.calls[0]!
     expect(command).toBe('db_query')
     const sql = String(args['sql'])
     expect(sql).toContain('inner join "notes" on "notes"."path" = "assets"."note_path"')
+    expect(sql).toContain('"notes"."is_private"')
+    expect(sql).toContain('"notes"."has_conflict"')
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
     expect(sql).toContain('"notes"."kind" in (?, ?)')
     expect(sql).toContain('"assets"."asset_path" like ?')
     const parameters = args['params']

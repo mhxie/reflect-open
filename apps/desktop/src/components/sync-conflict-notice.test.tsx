@@ -54,7 +54,9 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function renderNotice(props: { shownContent?: string } = {}): Promise<void> {
+async function renderNotice(
+  props: { shownContent?: string; compact?: boolean } = {},
+): Promise<void> {
   await render(
     <QueryClientProvider client={queryClient}>
       <SyncConflictNotice path="notes/clash.md" {...props} />
@@ -63,6 +65,23 @@ async function renderNotice(props: { shownContent?: string } = {}): Promise<void
 }
 
 describe('SyncConflictNotice', () => {
+  it('offers compact recovery for the shown conflict before the index catches up', async () => {
+    vi.mocked(getNote).mockResolvedValue({ ...NOTE, hasConflict: false })
+    const shown = '<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n'
+    await renderNotice({ shownContent: shown, compact: true })
+
+    await page.getByRole('button', { name: /keep this device’s version/i }).click()
+    expect(resolution.resolve).toHaveBeenCalledWith('ours')
+    await page.getByRole('button', { name: /keep the other device’s/i }).click()
+    expect(resolution.resolve).toHaveBeenCalledWith('theirs')
+    await page.getByRole('button', { name: /keep both/i }).click()
+    expect(resolution.resolve).toHaveBeenCalledWith('both')
+    expect(useConflictResolution).toHaveBeenCalledWith('notes/clash.md', shown)
+    expect(getNote).not.toHaveBeenCalled()
+    expect(readNote).not.toHaveBeenCalled()
+    expect(page.getByText(/edited on two devices/i).query()).toBeNull()
+  })
+
   it('renders nothing for a note without conflict markers', async () => {
     vi.mocked(getNote).mockResolvedValue({ ...NOTE, hasConflict: false })
     await renderNotice()

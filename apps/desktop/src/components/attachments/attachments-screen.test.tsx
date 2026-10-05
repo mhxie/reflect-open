@@ -60,9 +60,30 @@ const files = [
   { path: 'assets/stray.jpg', size: 10, modifiedMs: 1 * DAY },
 ]
 const references = [
-  { asset_path: 'assets/photo.png', note_path: 'notes/trip.md', title: 'Trip', mtime: 9 },
-  { asset_path: 'photo.png', note_path: 'notes/later.md', title: 'Later', mtime: 10 },
-  { asset_path: 'assets/report.pdf', note_path: 'notes/report.md', title: 'Report', mtime: 3 },
+  {
+    is_private: 0,
+    has_conflict: 0,
+    asset_path: 'assets/photo.png',
+    note_path: 'notes/trip.md',
+    title: 'Trip',
+    mtime: 9,
+  },
+  {
+    is_private: 0,
+    has_conflict: 0,
+    asset_path: 'photo.png',
+    note_path: 'notes/later.md',
+    title: 'Later',
+    mtime: 10,
+  },
+  {
+    is_private: 0,
+    has_conflict: 0,
+    asset_path: 'assets/report.pdf',
+    note_path: 'notes/report.md',
+    title: 'Report',
+    mtime: 3,
+  },
 ]
 const noteTags = [
   { note_path: 'notes/trip.md', tag: 'travel' },

@@ -1,7 +1,13 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { GitMerge } from 'lucide-react'
-import { conflictMarkerBlockCount, conflictMarkerLabels, getNote, readNote } from '@reflect/core'
+import {
+  conflictMarkerBlockCount,
+  conflictMarkerLabels,
+  detectConflictMarkers,
+  getNote,
+  readNote,
+} from '@reflect/core'
 import { CONFLICT_SIDE_DOT } from '@/components/conflict-note-view.tsx'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
@@ -21,6 +27,8 @@ interface SyncConflictNoticeProps {
    * where no conflict view renders; resolution then reads the file at click.
    */
   shownContent?: string
+  /** Show the same resolution actions inside the note-state popover. */
+  compact?: boolean
   className?: string
 }
 
@@ -47,6 +55,7 @@ interface SyncConflictNoticeProps {
 export function SyncConflictNotice({
   path,
   shownContent,
+  compact = false,
   className,
 }: SyncConflictNoticeProps): ReactElement | null {
   const { graph } = useGraph()
@@ -55,9 +64,10 @@ export function SyncConflictNotice({
   const { data } = useQuery({
     queryKey: queryKeys.index.noteConflict(graph?.root, path),
     queryFn: async () => (await getNote(path)) ?? null,
-    enabled: bridgeReady && graph !== null,
+    enabled: bridgeReady && graph !== null && shownContent === undefined,
   })
-  const hasConflict = data?.hasConflict === true
+  const hasConflict =
+    shownContent === undefined ? data?.hasConflict === true : detectConflictMarkers(shownContent)
   // The iCloud sweep labels marker sides with real device names (or the two
   // colliding filenames) — read them so the buttons say what they keep. The
   // Git path's generic `this device`/`other device` keeps the classic copy.
@@ -72,34 +82,32 @@ export function SyncConflictNotice({
         blocks: conflictMarkerBlockCount(source),
       }
     },
-    enabled: bridgeReady && graph !== null && hasConflict,
+    enabled: bridgeReady && graph !== null && hasConflict && shownContent === undefined,
   })
 
-  if (data == null || !hasConflict || graph === null) {
+  if (!bridgeReady || !hasConflict || graph === null) {
     return null
   }
-  const labels = markerInfo?.labels ?? null
-  const manySided = (markerInfo?.blocks ?? 0) > 1
+  const labels =
+    shownContent === undefined ? (markerInfo?.labels ?? null) : conflictMarkerLabels(shownContent)
+  const manySided =
+    (shownContent === undefined
+      ? (markerInfo?.blocks ?? 0)
+      : conflictMarkerBlockCount(shownContent)) > 1
   const named = labels != null && labels.ours !== 'this device'
   const mobile = isMobileSurface()
   // One row when the labels fit (short generic labels, wide panes); a button
   // whose device name doesn't fit wraps to its own full-width line. Mobile
   // buttons are touch-sized and stretch to share the row evenly.
-  const actionClassName = mobile ? 'h-9 flex-1 justify-center px-3' : undefined
+  const actionClassName = compact
+    ? 'h-auto min-h-8 w-full justify-start py-2 text-left whitespace-normal'
+    : mobile
+      ? 'h-9 flex-1 justify-center px-3'
+      : undefined
 
-  return (
-    <InlineAlert tone="warning" className={className}>
-      <div className="flex gap-2">
-        <GitMerge aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">This note was edited on two devices at once.</p>
-          <p className="mt-0.5">
-            Both versions are highlighted below. Choose what to keep — every version stays
-            recoverable in the backup history.
-          </p>
-        </div>
-      </div>
-      <div className={cn('flex flex-wrap gap-2', mobile ? 'mt-3' : 'mt-2.5')}>
+  const actions = (
+    <>
+      <div className={cn('flex flex-wrap gap-2', !compact && (mobile ? 'mt-3' : 'mt-2.5'))}>
         <ResolveButton
           dot="ours"
           className={actionClassName}
@@ -132,6 +140,25 @@ export function SyncConflictNotice({
       {error !== null ? (
         <p className="mt-2 text-red-700 dark:text-red-300">Couldn’t resolve: {error}</p>
       ) : null}
+    </>
+  )
+
+  if (compact) {
+    return <div className={className}>{actions}</div>
+  }
+  return (
+    <InlineAlert tone="warning" className={className}>
+      <div className="flex gap-2">
+        <GitMerge aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">This note was edited on two devices at once.</p>
+          <p className="mt-0.5">
+            Both versions are highlighted below. Choose what to keep — every version stays
+            recoverable in the backup history.
+          </p>
+        </div>
+      </div>
+      {actions}
     </InlineAlert>
   )
 }
@@ -159,16 +186,19 @@ function ResolveButton({
   return (
     <Button size="sm" variant="outline" className={className} disabled={disabled} onClick={onClick}>
       {dot === 'both' ? (
-        <span aria-hidden className="flex items-center -space-x-0.5">
+        <span aria-hidden className="flex shrink-0 items-center -space-x-0.5">
           <span
-            className={cn('size-2 rounded-full ring-1 ring-background', CONFLICT_SIDE_DOT.ours)}
+            className={cn(
+              'size-2 shrink-0 rounded-full ring-1 ring-background',
+              CONFLICT_SIDE_DOT.ours,
+            )}
           />
-          <span className={cn('size-2 rounded-full', CONFLICT_SIDE_DOT.theirs)} />
+          <span className={cn('size-2 shrink-0 rounded-full', CONFLICT_SIDE_DOT.theirs)} />
         </span>
       ) : (
-        <span aria-hidden className={cn('size-2 rounded-full', CONFLICT_SIDE_DOT[dot])} />
+        <span aria-hidden className={cn('size-2 shrink-0 rounded-full', CONFLICT_SIDE_DOT[dot])} />
       )}
-      {children}
+      <span className="min-w-0 break-words">{children}</span>
     </Button>
   )
 }

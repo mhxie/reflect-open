@@ -29,6 +29,8 @@ export interface AttachmentNoteRef {
   readonly mtime: number
   /** The note's body tags (first-seen casing), ordered on the folded key. */
   readonly tags: readonly string[]
+  readonly isPrivate: boolean
+  readonly hasConflict: boolean
 }
 
 /** One media file in the Attachments library. */
@@ -53,6 +55,8 @@ export interface AttachmentReferenceRow {
   readonly notePath: string
   readonly title: string
   readonly mtime: number
+  readonly isPrivate: boolean
+  readonly hasConflict: boolean
 }
 
 /** One body tag of a note that links to a media attachment. */
@@ -81,9 +85,21 @@ function mediaReferences() {
 
 /** The indexed references from notes to media attachment spellings. */
 export async function listAttachmentReferences(): Promise<AttachmentReferenceRow[]> {
-  return await mediaReferences()
-    .select(['assets.assetPath', 'assets.notePath', 'notes.title', 'notes.mtime'])
+  const rows = await mediaReferences()
+    .select([
+      'assets.assetPath',
+      'assets.notePath',
+      'notes.title',
+      'notes.mtime',
+      'notes.isPrivate',
+      'notes.hasConflict',
+    ])
     .execute()
+  return rows.map((row) => ({
+    ...row,
+    isPrivate: row.isPrivate !== 0,
+    hasConflict: row.hasConflict !== 0,
+  }))
 }
 
 /**
@@ -179,6 +195,8 @@ export function buildAttachmentLibrary(
         title: reference.title,
         mtime: reference.mtime,
         tags: tagsByNote.get(reference.notePath) ?? [],
+        isPrivate: reference.isPrivate,
+        hasConflict: reference.hasConflict,
       })
     }
     entries.push({

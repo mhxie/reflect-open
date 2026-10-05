@@ -1,6 +1,9 @@
 import {
   applyTaskEdits,
+  detectConflictMarkers,
+  isLocalOnlyPath,
   isLocalOnlyReadOnlyPath,
+  notePrivate,
   patchNote,
   ReflectError,
   type TaskEdit,
@@ -15,9 +18,15 @@ export interface TaskRef extends TaskLocator {
   notePath: string
 }
 
+/** An inserted task with note flags from the source successfully written by its mutation. */
+export interface InsertedNoteTask extends TaskSnapshot {
+  readonly isPrivate: boolean
+  readonly hasConflict: boolean
+}
+
 export interface ContinuedTaskInContext {
   /** The new empty task, as the written note addresses it. */
-  readonly created: TaskSnapshot
+  readonly created: InsertedNoteTask
   /** Where every pre-existing task of the note ended up after the write. */
   readonly moved: TaskEditResult['moved']
 }
@@ -248,7 +257,7 @@ export async function continueTaskInContext(
     edits.push({ kind: 'setMarkdown', task: locator, markdown: content })
   }
   const result = await writeTaskEdits(task.notePath, edits, generation)
-  return { created: requireInserted(result), moved: result.moved }
+  return { created: insertedNoteTask(task.notePath, result), moved: result.moved }
 }
 
 /**
@@ -257,12 +266,20 @@ export async function continueTaskInContext(
  * open its inline editor. A missing note (today's daily not yet created)
  * starts empty.
  */
-export async function insertTask(notePath: string, generation: number): Promise<TaskSnapshot> {
+export async function insertTask(notePath: string, generation: number): Promise<InsertedNoteTask> {
   const result = await writeTaskEdits(
     notePath,
     [{ kind: 'insert', at: { kind: 'documentEnd' }, markdown: '' }],
     generation,
     { createIfMissing: true },
   )
-  return requireInserted(result)
+  return insertedNoteTask(notePath, result)
+}
+
+function insertedNoteTask(notePath: string, result: TaskEditResult): InsertedNoteTask {
+  return {
+    ...requireInserted(result),
+    isPrivate: notePrivate(result.source) || isLocalOnlyPath(notePath),
+    hasConflict: detectConflictMarkers(result.source),
+  }
 }

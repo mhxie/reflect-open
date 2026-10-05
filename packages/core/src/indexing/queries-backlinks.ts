@@ -42,6 +42,8 @@ export interface BacklinkContext {
    * read failed.
    */
   sourcePrivate: boolean
+  /** Whether the indexed source contains sync conflict markers. */
+  sourceHasConflict: boolean
   /**
    * The Markdown block context around the link (old Reflect's rules — see
    * {@link blockContextAt}): the whole paragraph, the containing list item with
@@ -139,6 +141,7 @@ export async function getBacklinksWithContext(
       'backlinks.sourcePath',
       'notes.title as sourceTitle',
       'notes.isPrivate as sourceIsPrivate',
+      'notes.hasConflict as sourceHasConflict',
       sourceRecency.as('recencyMs'),
     ])
     .$narrowType<{ sourcePath: string }>()
@@ -268,6 +271,7 @@ export async function getBacklinksWithContext(
         sourcePath: pageSource.sourcePath,
         sourceTitle: pageSource.sourceTitle,
         sourcePrivate,
+        sourceHasConflict: pageSource.sourceHasConflict !== 0,
         snippet,
         posFrom,
         tasks: extractSnippetTasks(

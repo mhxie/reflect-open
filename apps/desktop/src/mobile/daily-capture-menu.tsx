@@ -16,13 +16,18 @@ const ACTION_MOTION =
 const ACTION_BUTTON_MOTION =
   'transition-[background-color,color,box-shadow,translate,scale] duration-100 ease-out active:translate-y-0 active:scale-[0.94] motion-reduce:transition-none'
 
+interface DailyCaptureMenuProps {
+  /** Height in pixels of content chrome between the daily editor and shell toolbar. */
+  readonly contentInset?: number
+}
+
 /**
  * The Daily screen's compact capture speed dial. The persistent `+` expands
  * into new-note and audio-memo actions along one anchored vertical path. The
  * action wrappers remain mounted so a rapid second tap reverses from their
  * live on-screen transforms instead of restarting or jumping.
  */
-export function DailyCaptureMenu(): ReactElement {
+export function DailyCaptureMenu({ contentInset = 0 }: DailyCaptureMenuProps): ReactElement {
   const [expanded, setExpanded] = useState(false)
   const memo = useMobileAudioMemo()
   const { navigate } = useRouter()
@@ -57,7 +62,10 @@ export function DailyCaptureMenu(): ReactElement {
     <div
       className="fixed right-4 z-40 size-12"
       style={{
-        bottom: 'calc(max(env(safe-area-inset-bottom), var(--keyboard-height, 0px)) + 4.25rem)',
+        bottom:
+          contentInset === 0
+            ? 'calc(max(env(safe-area-inset-bottom), var(--keyboard-height, 0px)) + 4.25rem)'
+            : `calc(max(env(safe-area-inset-bottom), var(--keyboard-height, 0px)) + 4.25rem + ${contentInset}px)`,
       }}
     >
       <Button

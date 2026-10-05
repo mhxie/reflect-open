@@ -89,7 +89,7 @@ export function CustomFilterMenu({
       aria-label={activeTag !== null ? `#${activeTag}` : label}
       className={cn(
         'flex h-full items-center gap-1 px-3 py-1.5 text-[13px] font-medium transition-colors duration-100',
-        management !== undefined && 'max-w-40 shrink-0 rounded-r-lg',
+        management !== undefined && 'max-w-28 shrink-0 rounded-r-lg @3xl/all-notes:max-w-40',
         activeTag !== null
           ? 'bg-surface-hover text-text'
           : 'text-text-secondary hover:bg-surface-hover hover:text-text',

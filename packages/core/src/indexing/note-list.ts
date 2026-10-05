@@ -35,6 +35,9 @@ export interface NoteListEntry {
   isPinned: boolean
   /** A numbered pin's shelf position (`pinned: <n>`); null for bare or no pins. */
   pinnedOrder: number | null
+  /** Indexed privacy and sync conflict flags, normalized at the read boundary. */
+  isPrivate: boolean
+  hasConflict: boolean
 }
 
 export interface NoteListOptions {
@@ -144,6 +147,8 @@ const NOTE_LIST_COLUMNS = [
   'notes.preview',
   'notes.isPinned',
   'notes.pinnedOrder',
+  'notes.isPrivate',
+  'notes.hasConflict',
 ] as const
 
 /** The All Notes rows for one filter (or none), before ordering. */
@@ -255,6 +260,8 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     tags: tagsByPath.get(row.path) ?? [],
     isPinned: row.isPinned !== 0,
     pinnedOrder: row.pinnedOrder,
+    isPrivate: row.isPrivate !== 0,
+    hasConflict: row.hasConflict !== 0,
   }))
 }
 

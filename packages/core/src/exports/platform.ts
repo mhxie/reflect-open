@@ -147,6 +147,12 @@ export {
   localOnlyFolderRoot,
 } from '../graph/local-only.ts'
 export {
+  deriveNoteState,
+  type NoteState,
+  type NoteStateInput,
+  type NoteStateKind,
+} from '../graph/note-state.ts'
+export {
   createAttachmentCatalog,
   isImageAttachmentPath,
   isPdfAttachmentPath,

@@ -14,7 +14,7 @@ import { useTaskCheckboxToggle } from '@/lib/tasks/use-task-checkbox-toggle.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { TaskEditor, type TaskNavigate } from './task-editor.tsx'
 import { TaskText } from './task-text.tsx'
 
@@ -206,7 +206,12 @@ export function TaskRow({
           }}
           className="flex h-6 shrink-0 items-center whitespace-nowrap text-xs text-text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none"
         >
-          <LocalOnlyMark path={task.notePath} className="mr-1" />
+          <NoteStateIndicator
+            path={task.notePath}
+            isPrivate={task.isPrivate}
+            hasConflict={task.hasConflict}
+            className="mr-1"
+          />
           {task.dailyDate !== null
             ? formatDayLabel(task.dailyDate, settings.dateFormat)
             : displayNoteTitle(task.noteTitle)}

@@ -256,6 +256,7 @@ describe('getBacklinksWithContext', () => {
     positions: number[]
     /** The index row's `is_private` (default 0). */
     isPrivate?: number
+    hasConflict?: number
   }
 
   function mockBacklinkPage({
@@ -290,6 +291,7 @@ describe('getBacklinksWithContext', () => {
           source_path: source.path,
           source_title: source.title,
           source_is_private: source.isPrivate ?? 0,
+          source_has_conflict: source.hasConflict ?? 0,
           recency_ms: source.recencyMs,
         }))
       }
@@ -512,6 +514,7 @@ describe('getBacklinksWithContext', () => {
           content: link,
           positions: [position],
           isPrivate: 1,
+          hasConflict: 1,
         },
         {
           // Locked on disk before the index caught up: the row still says public.
@@ -543,26 +546,61 @@ describe('getBacklinksWithContext', () => {
     ])
     const sourceQuery = dbQueries().find(({ sql }) => sql.includes('select distinct'))
     expect(sourceQuery?.sql).toContain('"notes"."is_private"')
+    expect(sourceQuery?.sql).toContain('"notes"."has_conflict"')
+    expect(
+      page.contexts.find((context) => context.sourcePath === 'notes/indexed-locked.md'),
+    ).toMatchObject({ sourcePrivate: true, sourceHasConflict: true })
   })
 })
 
 describe('getPinnedNotes', () => {
   it('selects pinned rows: explicit orders first, then folded title', async () => {
     mockInvoke.mockResolvedValue([
-      { path: 'notes/a.md', title: 'Alpha', daily_date: null, pinned_order: 0 },
-      { path: 'notes/b.md', title: 'Beta', daily_date: null, pinned_order: null },
+      {
+        path: 'notes/a.md',
+        title: 'Alpha',
+        daily_date: null,
+        pinned_order: 0,
+        is_private: 1,
+        has_conflict: 1,
+      },
+      {
+        path: 'notes/b.md',
+        title: 'Beta',
+        daily_date: null,
+        pinned_order: null,
+        is_private: 0,
+        has_conflict: 0,
+      },
     ])
 
     const pinned = await getPinnedNotes()
 
     expect(pinned).toEqual([
-      { path: 'notes/a.md', title: 'Alpha', dailyDate: null, pinnedOrder: 0 },
-      { path: 'notes/b.md', title: 'Beta', dailyDate: null, pinnedOrder: null },
+      {
+        path: 'notes/a.md',
+        title: 'Alpha',
+        dailyDate: null,
+        pinnedOrder: 0,
+        isPrivate: true,
+        hasConflict: true,
+      },
+      {
+        path: 'notes/b.md',
+        title: 'Beta',
+        dailyDate: null,
+        pinnedOrder: null,
+        isPrivate: false,
+        hasConflict: false,
+      },
     ])
     const [command, args] = mockInvoke.mock.calls[0]!
     expect(command).toBe('db_query')
     const sql = String(args['sql'])
     expect(sql).toContain('is_pinned')
+    expect(sql).toContain('"is_private"')
+    expect(sql).toContain('"has_conflict"')
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
     // Ordered pins lead (NULL orders sort last), alphabetical within.
     expect(sql).toContain('order by pinned_order IS NULL')
     expect(sql).toContain('"pinned_order"')
@@ -630,6 +668,41 @@ describe('getNoteIdsByPath', () => {
 })
 
 describe('suggestWikiTargets', () => {
+  it.each(['title', 'alias'])(
+    'carries Private and conflict metadata from %s candidates without more queries',
+    async (source) => {
+      mockInvoke.mockImplementation(async (_command, args) => {
+        const fromAliases = String(args['sql']).includes('from "aliases"')
+        if (fromAliases !== (source === 'alias')) return []
+        return [
+          {
+            path: 'notes/unique.md',
+            title: 'Unique',
+            title_key: 'unique',
+            daily_date: null,
+            mtime: 1,
+            link_count: 0,
+            alias: 'Unique',
+            alias_key: 'unique',
+            is_private: 1,
+            has_conflict: 1,
+          },
+        ]
+      })
+      const result = await suggestWikiTargets('unique')
+      expect(result[0]).toMatchObject({
+        path: 'notes/unique.md',
+        isPrivate: true,
+        hasConflict: true,
+      })
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+      for (const [, args] of mockInvoke.mock.calls) {
+        expect(String(args['sql'])).toContain('"is_private"')
+        expect(String(args['sql'])).toContain('"has_conflict"')
+      }
+    },
+  )
+
   // Wednesday, 1 January 2020, day/month — the date generator's worked-example
   // clock. This exercises the live glue (generator + merge) the editor hits;
   // the parts themselves are unit-tested in date-suggestions/suggest.
@@ -658,6 +731,8 @@ describe('suggestWikiTargets', () => {
           {
             path: 'notes/today.md',
             title: 'Today',
+            is_private: 1,
+            has_conflict: 1,
             title_key: 'today',
             daily_date: null,
             mtime: 1,
@@ -671,6 +746,9 @@ describe('suggestWikiTargets', () => {
 
     expect(result.map((row) => row.target)).toEqual(['Today', '2020-01-01'])
     expect(result[0]!.path).toBe('notes/today.md')
+    expect(result[0]).toMatchObject({ isPrivate: true, hasConflict: true })
+    expect(result[1]).not.toHaveProperty('isPrivate')
+    expect(result[1]).not.toHaveProperty('hasConflict')
     expect(result[1]).toMatchObject({
       date: '2020-01-01',
       generated: { phrase: 'Today' },
@@ -708,6 +786,8 @@ describe('getOpenTasks', () => {
     mockInvoke.mockResolvedValue([
       {
         note_path: 'notes/project.md',
+        is_private: 1,
+        has_conflict: 1,
         ast_path: '[2,1]',
         markdown: 'ship [[it]] **now**',
         breadcrumbs: '["StartupToolbox","*Reflections*"]',
@@ -724,6 +804,8 @@ describe('getOpenTasks', () => {
     await expect(getOpenTasks()).resolves.toEqual([
       {
         notePath: 'notes/project.md',
+        isPrivate: true,
+        hasConflict: true,
         astPath: [2, 1],
         markdown: 'ship [[it]] **now**',
         text: 'ship it now',
@@ -751,6 +833,8 @@ describe('getOpenTasks', () => {
       daily_date: null,
       is_pinned: 0,
       pinned_order: null,
+      is_private: 0,
+      has_conflict: 0,
       updated_at: 0,
     })
     mockInvoke.mockResolvedValue([

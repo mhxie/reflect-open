@@ -26,6 +26,7 @@ export interface RetrievalHit {
   snippet: string
   heading: string | null
   isPrivate: boolean
+  hasConflict: boolean
   /** Hybrid only: which leg found the note — wording, meaning, or both. */
   matchedBy?: 'lexical' | 'semantic' | 'both'
 }
@@ -59,6 +60,7 @@ export interface ChunkHitRow {
   heading: string | null
   text: string
   isPrivate: number
+  hasConflict: number
   /** The model that embedded the chunk; its catalog entry holds the noise cutoff. */
   modelId: string
   distance: number
@@ -98,6 +100,7 @@ export function bestChunkPerNote(
       snippet: row.text.trim(),
       heading: row.heading,
       isPrivate: row.isPrivate !== 0,
+      hasConflict: row.hasConflict !== 0,
     })
   }
   return [...byNote.values()].slice(0, limit)
@@ -115,7 +118,7 @@ async function semanticHits(
   const [vector] = await embedTexts([query], 'query')
   const result = await sql<ChunkHitRow>`
     SELECT c.note_path AS path, n.title, c.heading, c.text,
-           n.is_private AS isPrivate, c.model_id AS modelId, v.distance
+           n.is_private AS isPrivate, n.has_conflict AS hasConflict, c.model_id AS modelId, v.distance
     FROM embedding_vectors v
     JOIN embedding_chunks c ON c.id = v.rowid
     JOIN notes n ON n.path = c.note_path
@@ -162,16 +165,17 @@ async function everyTermHits(query: string, limit: number): Promise<RetrievalHit
       'in',
       hits.map((hit) => hit.path),
     )
-    .select(['path', 'isPrivate'])
+    .select(['path', 'isPrivate', 'hasConflict'])
     .execute()
-  const privateByPath = new Map(flags.map((row) => [row.path, row.isPrivate !== 0]))
+  const flagsByPath = new Map(flags.map((row) => [row.path, row]))
   return hits.map((hit) => ({
     path: hit.path,
     title: hit.title,
     score: 0,
     snippet: hit.snippet ?? '',
     heading: null,
-    isPrivate: privateByPath.get(hit.path) ?? false,
+    isPrivate: (flagsByPath.get(hit.path)?.isPrivate ?? 0) !== 0,
+    hasConflict: (flagsByPath.get(hit.path)?.hasConflict ?? 0) !== 0,
   }))
 }
 
@@ -185,10 +189,16 @@ async function anyTermHits(
   if (match === null) {
     return []
   }
-  const result = await sql<{ path: string; title: string; snippet: string; isPrivate: number }>`
+  const result = await sql<{
+    path: string
+    title: string
+    snippet: string
+    isPrivate: number
+    hasConflict: number
+  }>`
     SELECT search_fts.path AS path, n.title AS title,
            snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10) AS snippet,
-           n.is_private AS isPrivate
+           n.is_private AS isPrivate, n.has_conflict AS hasConflict
     FROM search_fts
     JOIN notes n ON n.path = search_fts.path
     WHERE search_fts MATCH ${match} AND n.kind != 'template'
@@ -205,6 +215,7 @@ async function anyTermHits(
       snippet: row.snippet,
       heading: null,
       isPrivate: row.isPrivate !== 0,
+      hasConflict: row.hasConflict !== 0,
     }))
 }
 
@@ -334,7 +345,7 @@ export async function relatedNotes(path: string, limit = 10): Promise<RetrievalH
     seeds.rows.map(async (seed) => {
       const result = await sql<ChunkHitRow>`
         SELECT c.note_path AS path, n.title, c.heading, c.text,
-               n.is_private AS isPrivate, c.model_id AS modelId, v.distance
+               n.is_private AS isPrivate, n.has_conflict AS hasConflict, c.model_id AS modelId, v.distance
         FROM embedding_vectors v
         JOIN embedding_chunks c ON c.id = v.rowid
         JOIN notes n ON n.path = c.note_path

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { isLocalOnlyPath, isLocalOnlyReadOnlyPath } from '@reflect/core'
-import { Lock } from 'lucide-react'
+import { Shield, ShieldOff } from 'lucide-react'
 import { PinIcon } from '@/components/icons/pin-icon.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
@@ -32,7 +32,10 @@ const PIN_KEYBINDING = keybindingFor('note.togglePin')
 const PRIVATE_KEYBINDING = keybindingFor('note.togglePrivate')
 const GIST_KEYBINDING = keybindingFor('note.publishGist')
 
-const LOCK_LABELS = { active: 'Unlock note', inactive: 'Lock note' }
+const PRIVACY_LABELS = {
+  active: 'Make this note standard',
+  inactive: 'Make this note private',
+}
 const UNREADABLE_LABELS = {
   active: UNREADABLE_FRONTMATTER_LABEL,
   inactive: UNREADABLE_FRONTMATTER_LABEL,
@@ -47,7 +50,7 @@ const UNREADABLE_LABELS = {
  * a note whose frontmatter can't be read shows as locked with the toggle
  * disabled. A note inside a read-only local-only folder gets no section:
  * every action would write or publish it. One in an editable local-only
- * folder keeps Pin (its frontmatter stays in the folder) and Trash; Lock is
+ * folder keeps Pin (its frontmatter stays in the folder) and Trash; privacy is
  * gone because its privacy is not a toggle, and Gist because it publishes.
  */
 export function NoteActionsSection({
@@ -96,13 +99,21 @@ export function NoteActionsSection({
           isActive={isPrivate}
           disabled={unreadable}
           onClick={togglePrivate}
-          icon={<Lock size={14} aria-hidden />}
-          labels={unreadable ? UNREADABLE_LABELS : LOCK_LABELS}
+          icon={
+            isPrivate && !unreadable ? (
+              <ShieldOff size={14} aria-hidden />
+            ) : (
+              <Shield size={14} aria-hidden />
+            )
+          }
+          labels={unreadable ? UNREADABLE_LABELS : PRIVACY_LABELS}
           keybinding={PRIVATE_KEYBINDING}
           tooltip={
             unreadable
               ? UNREADABLE_FRONTMATTER_HINT
-              : 'Locks this note out of AI. Backup and sync still include it.'
+              : isPrivate
+                ? 'Allows this note to use AI. Backup and sync still include it.'
+                : 'Blocks this note from AI. Backup and sync still include it.'
           }
         />
       )}

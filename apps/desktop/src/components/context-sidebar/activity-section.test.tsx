@@ -130,6 +130,8 @@ describe('ActivitySection', () => {
 
   it('previews the hovered day’s most recently edited notes', async () => {
     const entry = (path: string, title: string, mtime: number): NoteListEntry => ({
+      isPrivate: false,
+      hasConflict: false,
       path,
       title,
       snippet: '',

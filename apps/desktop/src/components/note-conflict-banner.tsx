@@ -7,6 +7,8 @@ interface NoteConflictBannerProps {
   onKeepMine: () => void
   /** Resolve by loading the external content (discards the buffer). */
   onLoadTheirs: () => void
+  /** Show only the existing recovery controls inside another explanation. */
+  compact?: boolean
 }
 
 /**
@@ -18,18 +20,25 @@ interface NoteConflictBannerProps {
 export function NoteConflictBanner({
   onKeepMine,
   onLoadTheirs,
+  compact = false,
 }: NoteConflictBannerProps): ReactElement {
+  const actions = (
+    <div className={compact ? 'flex flex-col gap-2' : 'flex gap-2'}>
+      <Button size={compact ? 'sm' : 'xs'} variant="outline" onClick={onKeepMine}>
+        Keep mine
+      </Button>
+      <Button size={compact ? 'sm' : 'xs'} variant="outline" onClick={onLoadTheirs}>
+        Load theirs
+      </Button>
+    </div>
+  )
+  if (compact) {
+    return actions
+  }
   return (
     <InlineAlert className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
       <span className="min-w-0 flex-1">This note changed on disk while you had unsaved edits.</span>
-      <div className="flex gap-2">
-        <Button size="xs" variant="outline" onClick={onKeepMine}>
-          Keep mine
-        </Button>
-        <Button size="xs" variant="outline" onClick={onLoadTheirs}>
-          Load theirs
-        </Button>
-      </div>
+      {actions}
     </InlineAlert>
   )
 }

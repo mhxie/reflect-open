@@ -20,6 +20,8 @@ describe('listNotes', () => {
     mockInvoke
       .mockResolvedValueOnce([
         {
+          is_private: 1,
+          has_conflict: 1,
           path: 'notes/pinned.md',
           title: 'Pinned Plan',
           mtime: 500,
@@ -28,6 +30,8 @@ describe('listNotes', () => {
           pinned_order: 1,
         },
         {
+          is_private: 0,
+          has_conflict: 0,
           path: 'notes/health.md',
           title: 'Health Stacked',
           mtime: 2000,
@@ -45,6 +49,8 @@ describe('listNotes', () => {
 
     expect(entries).toEqual([
       {
+        isPrivate: true,
+        hasConflict: true,
         path: 'notes/pinned.md',
         title: 'Pinned Plan',
         mtime: 500,
@@ -54,6 +60,8 @@ describe('listNotes', () => {
         pinnedOrder: 1,
       },
       {
+        isPrivate: false,
+        hasConflict: false,
         path: 'notes/health.md',
         title: 'Health Stacked',
         mtime: 2000,
@@ -69,6 +77,8 @@ describe('listNotes', () => {
     const sql = String(args['sql'])
     // The snippet is the stored projection column, not a per-query derivation.
     expect(sql).toContain('"preview"')
+    expect(sql).toContain('"notes"."is_private"')
+    expect(sql).toContain('"notes"."has_conflict"')
     // `kind = 'note'` excludes dailies (the stream is their home) and templates.
     expect(sql).toContain('"notes"."kind" = ?')
     // Pinned notes lead (explicit order first), then recency — V1's list
@@ -98,6 +108,8 @@ describe('listNotes', () => {
     mockInvoke
       .mockResolvedValueOnce([
         {
+          is_private: 0,
+          has_conflict: 0,
           path: 'notes/health.md',
           title: 'Health Stacked',
           mtime: 2000,
@@ -106,6 +118,8 @@ describe('listNotes', () => {
           pinned_order: null,
         },
         {
+          is_private: 0,
+          has_conflict: 0,
           path: 'daily/2026-06-09.md',
           title: 'June 9, 2026',
           mtime: 1500,
@@ -144,6 +158,8 @@ describe('listNotes', () => {
     mockInvoke
       .mockResolvedValueOnce([
         {
+          is_private: 0,
+          has_conflict: 0,
           path: 'papers/socc.md',
           title: 'SoCC',
           mtime: 2000,
@@ -174,6 +190,8 @@ describe('listNotes', () => {
     mockInvoke
       .mockResolvedValueOnce([
         {
+          is_private: 0,
+          has_conflict: 0,
           path: 'daily/2026-10-02.md',
           title: '2026-10-02',
           mtime: 1,

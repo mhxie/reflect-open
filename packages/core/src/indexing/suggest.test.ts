@@ -20,6 +20,8 @@ function note(title: string, mtime = 0, extra?: Partial<TitleCandidate>): TitleC
     dailyDate: null,
     mtime,
     linkCount: 0,
+    isPrivate: false,
+    hasConflict: false,
     ...extra,
   }
 }

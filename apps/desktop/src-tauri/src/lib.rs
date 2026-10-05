@@ -432,6 +432,7 @@ pub fn run() {
             on_device_http::on_device_http_read,
             on_device_http::on_device_http_cancel,
             git::git_status,
+            git::git_note_version,
             git::git_setup,
             git::git_disconnect,
             git::git_clone,

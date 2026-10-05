@@ -26,7 +26,15 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
 }))
 
 function hit(path: string): RetrievalHit {
-  return { path, title: path, score: 0.9, snippet: '', heading: null, isPrivate: false }
+  return {
+    hasConflict: false,
+    path,
+    title: path,
+    score: 0.9,
+    snippet: '',
+    heading: null,
+    isPrivate: false,
+  }
 }
 
 function wrapper(client: QueryClient) {

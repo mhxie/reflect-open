@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { Pin, PinOff, Trash2 } from 'lucide-react'
 import type { HighlightSegment } from '@reflect/core'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { SWIPE_ACTION_WIDTH, SwipeActionButton } from '@/mobile/swipe-action-button.tsx'
 import { useRowSwipe } from '@/mobile/use-row-swipe.ts'
@@ -17,6 +18,8 @@ export interface NoteRowModel {
   /** File modification time (epoch ms) — the relative timestamp. */
   mtime: number
   isPinned: boolean
+  isPrivate: boolean
+  hasConflict: boolean
   /** Daily notes are part of the chronological spine and cannot be deleted. */
   canDelete: boolean
   /** First content line; search hits carry highlighted match segments. */
@@ -124,6 +127,12 @@ export function SwipeableNoteRow({
         style={{ height: NOTE_ROW_HEIGHT }}
       >
         <span className="flex w-full items-baseline gap-2">
+          <NoteStateIndicator
+            path={row.path}
+            isPrivate={row.isPrivate}
+            hasConflict={row.hasConflict}
+            className="self-center"
+          />
           {row.isPinned ? (
             <>
               <Pin aria-hidden className="size-3 shrink-0 self-center text-text-muted" />

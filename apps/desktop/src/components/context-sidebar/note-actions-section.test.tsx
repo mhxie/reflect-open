@@ -197,7 +197,9 @@ describe('NoteActionsSection for a local-only note', () => {
   it('offers no actions in a read-only folder: each would write or publish the note', async () => {
     getNote.mockResolvedValue(noteRow('archive/2019/bank.md', true))
     const view = await renderSection('archive/2019/bank.md', true)
-    await expect.element(view.getByRole('button', { name: /Unlock note/ })).not.toBeInTheDocument()
+    await expect
+      .element(view.getByRole('button', { name: /Make this note standard/ }))
+      .not.toBeInTheDocument()
     await expect
       .element(view.getByRole('button', { name: /Pin this note/ }))
       .not.toBeInTheDocument()
@@ -211,7 +213,9 @@ describe('NoteActionsSection for a local-only note', () => {
     await expect.element(view.getByRole('button', { name: /Pin this note/ })).toBeVisible()
     await expect.element(view.getByRole('button', { name: 'Trash note' })).toBeVisible()
     // Its privacy is its folder's, never a toggle, and nothing publishes it.
-    expect(view.getByRole('button', { name: /Lock note|Unlock note/ }).query()).toBeNull()
+    expect(
+      view.getByRole('button', { name: /Make this note (private|standard)/ }).query(),
+    ).toBeNull()
     expect(view.getByRole('button', { name: /private link|Unpublish/ }).query()).toBeNull()
     await view.unmount()
   })
@@ -235,30 +239,44 @@ describe('NoteActionsSection for a local-only note', () => {
 })
 
 describe('NoteActionsSection private toggle', () => {
-  it('offers Lock note and toggles on click', async () => {
+  it('offers Private and toggles on click', async () => {
     const view = await renderSection('notes/a.md')
-    await userEvent.click(view.getByRole('button', { name: /Lock note/ }))
+    expect(
+      view
+        .getByRole('button', { name: /^Make this note private\b/ })
+        .element()
+        .querySelector('.lucide-shield'),
+    ).not.toBeNull()
+    await userEvent.click(view.getByRole('button', { name: /Make this note private/ }))
     expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/a.md', { private: true }, 7)
     await view.unmount()
   })
 
-  it('offers Unlock note when the index reports the note private', async () => {
+  it('offers Standard when the index reports the note private', async () => {
     getNote.mockResolvedValue(noteRow('daily/2026-06-10.md', true))
     noteSource.value = '---\nprivate: true\n---\n# A\n'
     const view = await renderSection('daily/2026-06-10.md')
-    await expect.element(view.getByText('Unlock note')).toBeInTheDocument()
-    await userEvent.click(view.getByRole('button', { name: /Unlock note/ }))
+    await expect.element(view.getByText('Make this note standard')).toBeInTheDocument()
+    expect(
+      view
+        .getByRole('button', { name: /^Make this note standard\b/ })
+        .element()
+        .querySelector('.lucide-shield-off'),
+    ).not.toBeNull()
+    await userEvent.click(view.getByRole('button', { name: /Make this note standard/ }))
     expect(commitNoteFrontmatter).toHaveBeenCalledWith('daily/2026-06-10.md', { private: false }, 7)
     await view.unmount()
   })
 
   it('flips the label from the toggle result before the index catches up', async () => {
     const view = await renderSection('notes/a.md')
-    await userEvent.click(view.getByRole('button', { name: /Lock note/ }))
-    await expect.element(view.getByText('Unlock note')).toBeInTheDocument()
+    await userEvent.click(view.getByRole('button', { name: /Make this note private/ }))
+    await expect.element(view.getByText('Make this note standard')).toBeInTheDocument()
     noteSource.value = '---\nprivate: true\n---\n# A\n'
-    await userEvent.click(view.getByRole('button', { name: /Unlock note/ }))
-    await expect.element(view.getByText('Lock note', { exact: true })).toBeInTheDocument()
+    await userEvent.click(view.getByRole('button', { name: /Make this note standard/ }))
+    await expect
+      .element(view.getByText('Make this note private', { exact: true }))
+      .toBeInTheDocument()
     expect(commitNoteFrontmatter).toHaveBeenCalledTimes(2)
     await view.unmount()
   })
@@ -275,7 +293,7 @@ describe('NoteActionsSection private toggle', () => {
       generation: 7,
       path: 'notes/a.md',
     })
-    await expect.element(view.getByText('Unlock note')).toBeInTheDocument()
+    await expect.element(view.getByText('Make this note standard')).toBeInTheDocument()
     write.resolve()
     await action
     await view.unmount()
@@ -294,7 +312,7 @@ describe('NoteActionsSection private toggle', () => {
     await expect
       .element(view.getByRole('button', { name: /Frontmatter can't be read — treated as locked/ }))
       .toBeDisabled()
-    expect(view.getByRole('button', { name: /Unlock note/ }).query()).toBeNull()
+    expect(view.getByRole('button', { name: /Make this note standard/ }).query()).toBeNull()
     expect(commitNoteFrontmatter).not.toHaveBeenCalled()
     await view.unmount()
   })
@@ -313,8 +331,10 @@ describe('NoteActionsSection private toggle', () => {
   it('restores the private label when a write fails', async () => {
     commitNoteFrontmatter.mockRejectedValueOnce({ kind: 'io', message: 'disk on fire' })
     const view = await renderSection('notes/a.md')
-    await userEvent.click(view.getByRole('button', { name: /Lock note/ }))
-    await expect.element(view.getByText('Lock note', { exact: true })).toBeInTheDocument()
+    await userEvent.click(view.getByRole('button', { name: /Make this note private/ }))
+    await expect
+      .element(view.getByText('Make this note private', { exact: true }))
+      .toBeInTheDocument()
     expect(startOperation).toHaveBeenCalledWith('Updating privacy')
     expect(operationFail).toHaveBeenCalled()
     await view.unmount()

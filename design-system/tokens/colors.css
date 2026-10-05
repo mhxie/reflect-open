@@ -79,6 +79,10 @@
   --text-on-brand: #ffffff;
   --text-on-inverse: hsl(210 40% 98%); /* number on selected square   */
 
+  --note-state-private: #776585;
+  --note-state-local-only: #587886;
+  --note-state-protected: #9b5a58;
+
   --border: var(--coolgray-100); /* hairline dividers           */
   --border-strong: rgba(11, 19, 36, 0.15); /* input outlines              */
   --input-bg: #ffffff;
@@ -110,6 +114,13 @@
    DARK app theme — opt in with .dark on a wrapper
    Deep navy, indigo-500 brand, near-white text.
    ============================================================ */
+.dark,
+.reflect-space {
+  --note-state-private: #a197af;
+  --note-state-local-only: #89a0ab;
+  --note-state-protected: #bd8482;
+}
+
 .dark {
   --surface: #0b1020;
   --surface-sunken: rgba(31, 41, 55, 0.3);

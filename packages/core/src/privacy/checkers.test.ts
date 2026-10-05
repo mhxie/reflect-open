@@ -86,6 +86,7 @@ describe('cloudSafeSearchHits', () => {
     snippet: 'body',
     heading: null,
     isPrivate: false,
+    hasConflict: false,
   }
   const PRIVATE: RetrievalHit = {
     path: PRIVATE_PATH,
@@ -94,6 +95,7 @@ describe('cloudSafeSearchHits', () => {
     snippet: '',
     heading: null,
     isPrivate: true,
+    hasConflict: false,
   }
 
   const neverPrivate = async () => false
@@ -263,6 +265,7 @@ describe('local-only folders', () => {
         snippet: 'body',
         heading: null,
         isPrivate: false,
+        hasConflict: false,
       },
       {
         path: LOCAL_PATH,
@@ -271,6 +274,7 @@ describe('local-only folders', () => {
         snippet: PRIVATE_BODY,
         heading: null,
         isPrivate: false,
+        hasConflict: false,
       },
     ]
     const safe = await cloudSafeSearchHits(hits, async (path) => {

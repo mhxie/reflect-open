@@ -8,7 +8,15 @@ function row(
   posFrom: number,
   sourcePrivate = false,
 ): BacklinkContext {
-  return { sourcePath, sourceTitle: sourcePath, sourcePrivate, snippet, posFrom, tasks: [] }
+  return {
+    sourceHasConflict: false,
+    sourcePath,
+    sourceTitle: sourcePath,
+    sourcePrivate,
+    snippet,
+    posFrom,
+    tasks: [],
+  }
 }
 
 describe('groupBacklinksBySource', () => {
@@ -24,6 +32,7 @@ describe('groupBacklinksBySource', () => {
         path: 'notes/a.md',
         title: 'notes/a.md',
         isPrivate: false,
+        hasConflict: false,
         snippets: [
           { key: 'notes/a.md:4', text: 'first [[t]]', tasks: [] },
           { key: 'notes/a.md:40', text: 'second [[t]]', tasks: [] },
@@ -33,6 +42,7 @@ describe('groupBacklinksBySource', () => {
         path: 'notes/b.md',
         title: 'notes/b.md',
         isPrivate: false,
+        hasConflict: false,
         snippets: [{ key: 'notes/b.md:9', text: 'only [[t]]', tasks: [] }],
       },
     ])
@@ -41,7 +51,13 @@ describe('groupBacklinksBySource', () => {
   it('drops empty snippets but keeps the source group', () => {
     const groups = groupBacklinksBySource([row('notes/gone.md', '', 0, true)])
     expect(groups).toEqual([
-      { path: 'notes/gone.md', title: 'notes/gone.md', isPrivate: true, snippets: [] },
+      {
+        path: 'notes/gone.md',
+        title: 'notes/gone.md',
+        isPrivate: true,
+        hasConflict: false,
+        snippets: [],
+      },
     ])
   })
 
@@ -62,5 +78,19 @@ describe('groupBacklinksBySource', () => {
     // Simulates a row from outside the typed query (a mocked or older bridge).
     const groups = groupBacklinksBySource([unsaid as BacklinkContext])
     expect(groups[0]?.isPrivate).toBe(true)
+  })
+
+  it('preserves conflict when any snippet from the source carries it', () => {
+    const groups = groupBacklinksBySource([
+      row('notes/a.md', 'first [[t]]', 4, true),
+      { ...row('notes/a.md', 'second [[t]]', 40), sourceHasConflict: true },
+      row('notes/b.md', 'only [[t]]', 9),
+    ])
+    expect(
+      groups.map(({ path, isPrivate, hasConflict }) => ({ path, isPrivate, hasConflict })),
+    ).toEqual([
+      { path: 'notes/a.md', isPrivate: true, hasConflict: true },
+      { path: 'notes/b.md', isPrivate: false, hasConflict: false },
+    ])
   })
 })

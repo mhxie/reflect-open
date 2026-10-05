@@ -92,6 +92,8 @@ export function usePaletteResults(open: boolean, query: string): PaletteResults 
         dailyDate: null,
         snippet: hit.snippet === '' ? null : hit.snippet,
         related: hit.matchedBy === 'semantic',
+        isPrivate: hit.isPrivate,
+        hasConflict: hit.hasConflict,
       }))
     },
     enabled: searching && trimmed !== '',

@@ -34,6 +34,7 @@ const editorProbe = vi.hoisted(() => ({
   selectionCalls: [] as Array<'start' | 'end'>,
 }))
 const hapticImpactLight = vi.hoisted(() => vi.fn())
+const statusBarPreferences = vi.hoisted(() => ({ enabled: false }))
 
 vi.mock('@/editor/note-editor.tsx', async () => {
   const { useEffect, useRef } = await import('react')
@@ -129,6 +130,7 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
     settings: {
+      statusBarEnabled: statusBarPreferences.enabled,
       editorMarkdownSyntax: 'hide',
       dateFormat: 'mdy',
       weekStartDay: 'monday',
@@ -175,10 +177,12 @@ setBridge({
 afterEach(async () => {
   await cleanup()
   publishKeyboardHeight(0)
+  document.documentElement.style.removeProperty('--keyboard-height')
 })
 
 beforeEach(async () => {
   await page.viewport(375, 700)
+  statusBarPreferences.enabled = false
   files = {}
   editorProbe.focusCalls = 0
   editorProbe.selectionCalls = []
@@ -314,6 +318,60 @@ function otherDayInWeek(date: string): string {
 }
 
 describe('MobileShell', () => {
+  it('keeps a note status row above the tabs and software keyboard', async () => {
+    statusBarPreferences.enabled = true
+    files['notes/target.md'] = 'A note on mobile'
+    const view = await mount({ kind: 'note', path: 'notes/target.md' })
+
+    const footer = view.getByRole('status', { name: 'Note status' })
+    await expect.element(footer).toBeVisible()
+    const footerElement = footer.element()
+    const main = visibleLayer(view).querySelector('main')
+    expect(main).not.toBeNull()
+    expect(getComputedStyle(footerElement).position).toBe('static')
+    expect(main?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      footerElement.getBoundingClientRect().top,
+    )
+    expect(footerElement.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      view.getByRole('navigation', { name: 'Sections' }).element().getBoundingClientRect().top,
+    )
+
+    document.documentElement.style.setProperty('--keyboard-height', '240px')
+    act(() => publishKeyboardHeight(240))
+    await waitFor(() =>
+      expect(footerElement.getBoundingClientRect().bottom).toBeLessThanOrEqual(460),
+    )
+    await expect.element(footer).toBeVisible()
+  })
+
+  it('keeps Daily capture above a visible status row and restores its inset when hidden', async () => {
+    const today = todayIso()
+    files[`daily/${today}.md`] = 'Captured today'
+    const withoutStatus = await mount({ kind: 'today' })
+    await waitFor(() =>
+      expect(withoutStatus.getByTestId('fake-editor').elements().length).toBeGreaterThan(0),
+    )
+    const defaultBottom = withoutStatus
+      .getByRole('button', { name: 'Show capture actions' })
+      .element()
+      .getBoundingClientRect().bottom
+    expect(withoutStatus.getByRole('status', { name: 'Note status' }).query()).toBeNull()
+    await withoutStatus.unmount()
+
+    statusBarPreferences.enabled = true
+    const withStatus = await mount({ kind: 'today' })
+    const footer = withStatus.getByRole('status', { name: 'Note status' })
+    await expect.element(footer).toBeVisible()
+    const capture = withStatus.getByRole('button', { name: 'Show capture actions' }).element()
+    await waitFor(() =>
+      expect(
+        capture.getBoundingClientRect().bottom,
+        capture.parentElement?.getAttribute('style') ?? '',
+      ).toBeLessThan(footer.element().getBoundingClientRect().top),
+    )
+    await waitFor(() => expect(defaultBottom - capture.getBoundingClientRect().bottom).toBe(24))
+  })
+
   it('renders today as the daily spine with its note content', async () => {
     const today = todayIso()
     files[`daily/${today}.md`] = 'captured on the go'

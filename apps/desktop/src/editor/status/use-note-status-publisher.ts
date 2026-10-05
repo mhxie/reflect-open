@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
-import { countDisplayChars, parseNote } from '@reflect/core'
-import { clearNoteStatus, publishNoteStatus, type NoteStatus } from './note-status-store.ts'
+import { countDisplayChars, parseNote, type NoteState } from '@reflect/core'
+import type { NoteProtection } from './note-protection.ts'
+import {
+  clearNoteStatus,
+  publishNoteStatus,
+  type NoteStatus,
+  type NoteStatusScope,
+} from './note-status-store.ts'
 
 /** Typing settles this long before the count re-parses the buffer. */
 const RECOUNT_DELAY_MS = 250
-
-const EMPTY_STATUS: NoteStatus = { characters: 0, selectedCharacters: 0, editedAt: null }
 
 interface SelectionSource {
   /** The pane holding the editor; only a selection inside its editor counts. */
@@ -14,50 +18,115 @@ interface SelectionSource {
   readonly getSelectedText: () => string
 }
 
+/** Optional live selection and recovery details owned by the publishing pane. */
+export interface NoteStatusPublisherOptions {
+  readonly selection?: SelectionSource
+  readonly protection?: NoteProtection | null
+}
+
+interface PublishingSession {
+  readonly scope: NoteStatusScope
+  readonly owner: symbol
+  status: NoteStatus
+  loaded: boolean
+  active: boolean
+  timer: ReturnType<typeof setTimeout> | null
+}
+
 function countChars(path: string, markdown: string): number {
   return countDisplayChars(parseNote({ path, source: markdown }))
 }
 
 /**
- * Publish `path`'s live status for the status bar: the character count from
- * `initialMarkdown` once loaded, then from each editor change after typing
- * settles (stamping the edit time), and the selection's count as it changes.
- * Returns the change listener to chain onto the editor's `onChange`.
+ * Publish counts and explicit note state within a graph's file generation.
+ * Privacy and edit-gate changes preserve counts and edit times. Deferred counts
+ * remain pinned to the pane that scheduled them, even after a graph switch.
  */
 export function useNoteStatusPublisher(
-  path: string,
+  scope: NoteStatusScope | null,
   initialMarkdown: string | null,
-  selection?: SelectionSource,
+  state: NoteState,
+  options: NoteStatusPublisherOptions = {},
 ): (markdown: string) => void {
-  const owner = useRef(Symbol('note-status'))
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pathRef = useRef(path)
-  const current = useRef(EMPTY_STATUS)
+  const { selection, protection = null } = options
+  const generation = scope?.generation ?? null
+  const path = scope?.path ?? null
+  const current = useRef<PublishingSession | null>(null)
+  const stateRef = useRef(state)
+  const protectionRef = useRef(protection)
   const selectionRef = useRef(selection)
   useLayoutEffect(() => {
+    stateRef.current = state
+    protectionRef.current = protection
     selectionRef.current = selection
   })
 
-  const update = useCallback((patch: Partial<NoteStatus>) => {
-    current.current = { ...current.current, ...patch }
-    publishNoteStatus(pathRef.current, owner.current, current.current)
+  const update = useCallback((session: PublishingSession, patch: Partial<NoteStatus>) => {
+    if (!session.active || current.current !== session) {
+      return
+    }
+    session.status = { ...session.status, ...patch }
+    if (session.loaded) {
+      publishNoteStatus(session.scope, session.owner, session.status)
+    }
   }, [])
 
-  useEffect(() => {
-    pathRef.current = path
-    const token = owner.current
-    if (initialMarkdown !== null) {
-      current.current = EMPTY_STATUS
-      update({ characters: countChars(path, initialMarkdown) })
+  useLayoutEffect(() => {
+    if (generation === null || path === null) {
+      return
     }
+    const session: PublishingSession = {
+      scope: { generation, path },
+      owner: Symbol('note-status'),
+      status: {
+        characters: 0,
+        selectedCharacters: 0,
+        editedAt: null,
+        state: stateRef.current,
+        protection: protectionRef.current,
+      },
+      loaded: false,
+      active: true,
+      timer: null,
+    }
+    current.current = session
     return () => {
-      if (timer.current !== null) {
-        clearTimeout(timer.current)
-        timer.current = null
+      session.active = false
+      if (session.timer !== null) {
+        clearTimeout(session.timer)
       }
-      clearNoteStatus(path, token)
+      if (current.current === session) {
+        current.current = null
+      }
+      clearNoteStatus(session.scope, session.owner)
     }
-  }, [path, initialMarkdown, update])
+  }, [generation, path])
+
+  useLayoutEffect(() => {
+    const session = current.current
+    if (session !== null) {
+      update(session, { state: stateRef.current, protection: protectionRef.current })
+    }
+  }, [
+    generation,
+    path,
+    state.kind,
+    state.isPrivate,
+    state.isLocalOnly,
+    state.isReadOnly,
+    state.isProtected,
+    protection,
+    update,
+  ])
+
+  useEffect(() => {
+    const session = current.current
+    if (session === null || initialMarkdown === null) {
+      return
+    }
+    session.loaded = true
+    update(session, { characters: countChars(session.scope.path, initialMarkdown) })
+  }, [generation, path, initialMarkdown, update])
 
   const tracksSelection = selection !== undefined && initialMarkdown !== null
   useEffect(() => {
@@ -67,6 +136,14 @@ export function useNoteStatusPublisher(
     let frame = 0
     const recount = (): void => {
       frame = 0
+      const session = current.current
+      if (
+        session === null ||
+        session.scope.generation !== generation ||
+        session.scope.path !== path
+      ) {
+        return
+      }
       const source = selectionRef.current
       const domSelection = window.getSelection()
       const editor = source?.pane.current?.querySelector('[contenteditable="true"]')
@@ -76,9 +153,9 @@ export function useNoteStatusPublisher(
         !domSelection.isCollapsed &&
         editor != null &&
         editor.contains(domSelection.anchorNode)
-      const selected = inside ? countChars(pathRef.current, source.getSelectedText()) : 0
-      if (selected !== current.current.selectedCharacters) {
-        update({ selectedCharacters: selected })
+      const selected = inside ? countChars(session.scope.path, source.getSelectedText()) : 0
+      if (selected !== session.status.selectedCharacters) {
+        update(session, { selectedCharacters: selected })
       }
     }
     const schedule = (): void => {
@@ -91,18 +168,29 @@ export function useNoteStatusPublisher(
       document.removeEventListener('selectionchange', schedule)
       cancelAnimationFrame(frame)
     }
-  }, [tracksSelection, update])
+  }, [tracksSelection, generation, path, update])
 
   return useCallback(
     (markdown: string) => {
-      if (timer.current !== null) {
-        clearTimeout(timer.current)
+      const session = current.current
+      if (
+        session === null ||
+        session.scope.generation !== generation ||
+        session.scope.path !== path
+      ) {
+        return
       }
-      timer.current = setTimeout(() => {
-        timer.current = null
-        update({ characters: countChars(pathRef.current, markdown), editedAt: Date.now() })
+      if (session.timer !== null) {
+        clearTimeout(session.timer)
+      }
+      session.timer = setTimeout(() => {
+        session.timer = null
+        update(session, {
+          characters: countChars(session.scope.path, markdown),
+          editedAt: Date.now(),
+        })
       }, RECOUNT_DELAY_MS)
     },
-    [update],
+    [generation, path, update],
   )
 }

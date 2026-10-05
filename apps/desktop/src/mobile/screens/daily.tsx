@@ -1,10 +1,15 @@
 import { useCallback, type ReactElement } from 'react'
+import { dailyPath } from '@reflect/core'
+import { NoteStatusBar } from '@/components/note-status-bar.tsx'
+import { useNoteStatus } from '@/editor/status/note-status-store.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { CalendarStrip } from '@/mobile/calendar-strip.tsx'
 import { DailyCaptureMenu } from '@/mobile/daily-capture-menu.tsx'
 import { DayCarousel } from '@/mobile/day-carousel.tsx'
 import { useDailyArrivals } from '@/mobile/use-daily-arrivals.ts'
 import { useSwipeTarget } from '@/mobile/use-swipe-target.ts'
+import { useGraph } from '@/providers/graph-provider.tsx'
+import { useSettings } from '@/providers/settings-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 
 /**
@@ -20,6 +25,11 @@ import { useRouter } from '@/routing/router.tsx'
  */
 export function MobileDaily({ date }: { date: string }): ReactElement {
   const { navigate, entryId, arrivalSeq, arrivalFocusEditor } = useRouter()
+  const { graph } = useGraph()
+  const { settings } = useSettings()
+  const path = dailyPath(date)
+  const status = useNoteStatus(graph === null ? null : { generation: graph.generation, path })
+  const statusBarVisible = settings.statusBarEnabled && status !== null
   // One live `today` for the whole surface: the strip marks today's cell and
   // the `select` below decide "is this today?" from the *same* value, so they
   // can't disagree across the midnight rollover (which would otherwise route a
@@ -71,7 +81,8 @@ export function MobileDaily({ date }: { date: string }): ReactElement {
         onSelect={select}
         onTarget={followSwipeTarget}
       />
-      <DailyCaptureMenu />
+      <NoteStatusBar placement="inline" path={path} />
+      <DailyCaptureMenu contentInset={statusBarVisible ? 24 : 0} />
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { isUntitledNotePath } from '@reflect/core'
 import { NotePane } from '@/components/note-pane.tsx'
+import { NoteStatusBar } from '@/components/note-status-bar.tsx'
 import { IncomingBacklinks } from '@/mobile/incoming-backlinks.tsx'
 import { MOBILE_CONTENT_GUTTER } from '@/mobile/mobile-content-gutter.ts'
 import { MobileScreenHeader } from '@/mobile/screen-header.tsx'
@@ -71,6 +72,7 @@ export function MobileNote({ path }: { path: string }): ReactElement {
           <IncomingBacklinks path={path} className={cn(MOBILE_CONTENT_GUTTER, 'pb-4')} />
         </div>
       </main>
+      <NoteStatusBar placement="inline" path={path} />
     </div>
   )
 }

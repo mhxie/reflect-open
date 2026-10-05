@@ -3,7 +3,7 @@ import { displayNoteTitle, type WikiEntry } from '@reflect/core'
 import { Languages } from 'lucide-react'
 import { ListRow } from '@/components/all-notes/list-row.tsx'
 import { ListRowSubject } from '@/components/all-notes/list-row-subject.tsx'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { formatDayRecencyLabel, formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
@@ -86,7 +86,12 @@ export const WikiEntryRow = memo(function WikiEntryRow({
             selected ? 'text-accent' : untranslated === null ? 'text-text' : 'text-text-secondary'
           }
         >
-          <LocalOnlyMark path={entry.path} className="mr-1" />
+          <NoteStateIndicator
+            path={entry.path}
+            isPrivate={entry.isPrivate}
+            hasConflict={entry.hasConflict}
+            className="mr-1"
+          />
           {displayNoteTitle(entry.title)}
         </ListRowSubject>
         {untranslated === null ? null : (

@@ -8,7 +8,7 @@ import { useTaskCheckboxToggle } from '@/lib/tasks/use-task-checkbox-toggle.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
-import { LocalOnlyMark } from '@/components/local-only-mark.tsx'
+import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 
 interface DayTaskRowProps {
   task: OpenTask
@@ -65,7 +65,12 @@ export function DayTaskRow({ task, day, onNavigate }: DayTaskRowProps): ReactEle
         </span>
         {source === null ? null : (
           <span className="truncate text-2xs text-text-muted">
-            <LocalOnlyMark path={task.notePath} className="mr-1" />
+            <NoteStateIndicator
+              path={task.notePath}
+              isPrivate={task.isPrivate}
+              hasConflict={task.hasConflict}
+              className="mr-1"
+            />
             {source}
           </span>
         )}

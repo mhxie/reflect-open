@@ -21,6 +21,7 @@ mod displace;
 mod history_roots;
 mod max_file_size;
 mod merge;
+mod note_version;
 mod remote;
 mod repo;
 #[cfg(test)]
@@ -135,6 +136,17 @@ fn setup(root: &Path, remote_url: Option<String>, branch: Option<String>) -> App
 pub async fn git_status(generation: u64, state: State<'_, GraphState>) -> AppResult<GitStatus> {
     let root = crate::fs::root_for_generation(&state, generation)?;
     run_blocking(move || status(&root)).await
+}
+
+/// Read the latest committed version of one graph-relative note, with no network.
+#[tauri::command]
+pub async fn git_note_version(
+    path: String,
+    generation: u64,
+    state: State<'_, GraphState>,
+) -> AppResult<Option<String>> {
+    let root = crate::fs::root_for_generation(&state, generation)?;
+    run_blocking(move || note_version::note_version(&root, &path)).await
 }
 
 /// Initialize (or adopt) the graph's repository, optionally point `origin` at

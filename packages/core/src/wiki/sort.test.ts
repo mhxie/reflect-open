@@ -16,6 +16,8 @@ function entry(
     title,
     topic: 'topic',
     mtime: dates.mtime ?? 0,
+    isPrivate: false,
+    hasConflict: false,
     state: 'local',
     preview: null,
     revised: dates.revised ?? null,

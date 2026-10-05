@@ -53,6 +53,7 @@ function hit(overrides: Partial<RetrievalHit>): RetrievalHit {
     snippet: 'a public snippet',
     heading: null,
     isPrivate: false,
+    hasConflict: false,
     ...overrides,
   }
 }

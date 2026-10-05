@@ -351,6 +351,9 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
           inProgress: false,
         }
 
+      case 'git_note_version':
+        return null
+
       case 'calendar_authorization_status':
       case 'contacts_authorization_status':
         return 'denied'

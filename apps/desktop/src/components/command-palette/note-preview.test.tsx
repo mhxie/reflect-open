@@ -33,6 +33,8 @@ async function renderedFor(path: string): Promise<{ remoteEmbeds?: boolean }> {
     <QueryClientProvider client={client}>
       <NotePreview
         entry={{
+          isPrivate: false,
+          hasConflict: false,
           path,
           title: 'T',
           date: null,
