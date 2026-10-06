@@ -50,15 +50,14 @@ export const AllNotesRow = memo(function AllNotesRow({
       <ListRowSubject
         path={note.path}
         onOpen={onOpen}
-        className={selected ? 'text-accent' : 'text-text'}
+        className={cn('flex min-w-0 items-center gap-1.5', selected ? 'text-accent' : 'text-text')}
       >
+        <span className="truncate">{displayNoteTitle(note.title)}</span>
         <NoteStateIndicator
           path={note.path}
           isPrivate={note.isPrivate}
           hasConflict={note.hasConflict}
-          className="mr-1"
         />
-        {displayNoteTitle(note.title)}
       </ListRowSubject>
       <span
         className={cn('truncate text-[13px]', selected ? 'text-accent' : 'text-text-secondary')}

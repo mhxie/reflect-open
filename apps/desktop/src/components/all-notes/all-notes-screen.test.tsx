@@ -310,8 +310,8 @@ describe('AllNotesScreen', () => {
       return sql.includes('from "tags"') ? tagRows : []
     })
     const view = await renderScreen()
-    const privateNote = view.getByRole('button', { name: 'Private Health Stacked', exact: true })
-    const protectedNote = view.getByRole('button', { name: 'Protected Tokyo Gâteau', exact: true })
+    const privateNote = view.getByRole('button', { name: 'Health Stacked Private', exact: true })
+    const protectedNote = view.getByRole('button', { name: 'Tokyo Gâteau Protected', exact: true })
     await expect
       .element(privateNote.getByRole('img', { name: 'Private', exact: true }))
       .toBeVisible()

@@ -16,9 +16,10 @@ import { useSyncContext } from '@/providers/sync-provider.tsx'
 import { focusedNotePathForRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
-import { NotePrivacyAction } from '@/components/note-privacy-action.tsx'
 import { NoteProtectionDetails } from '@/components/note-protection-details.tsx'
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover.tsx'
+import { NoteStatusMenu } from '@/components/note-status-menu.tsx'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 
 const numberFormat = new Intl.NumberFormat()
 
@@ -83,7 +84,7 @@ export function NoteStatusBar({
   const { state } = status
   const kinds = activeNoteStateKinds(state)
   const labels = kinds.map((kind) => noteStatePresentation(kind).label)
-  const rows = noteDetails({ state, backup: sync?.backup, version })
+  const sections = noteDetails({ state, backup: sync?.backup, version })
   const canTogglePrivacy = scope !== null && !state.isLocalOnly && !state.isProtected
   const editedAt = Math.max(mtime ?? 0, status.editedAt ?? 0)
   const characters = numberFormat.format(status.characters)
@@ -101,68 +102,53 @@ export function NoteStatusBar({
         open={open}
         onOpenChange={(next) => setDetails({ root, generation, path, open: next })}
       >
-        <PopoverTrigger
-          type="button"
-          aria-label={`Note state: ${labels.join(', ')}`}
-          className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-2 rounded px-1 text-2xs hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-        >
-          {kinds.map((kind, index) => {
-            const presentation = noteStatePresentation(kind)
-            return (
-              <span
-                key={kind}
-                data-testid="note-state-badge"
-                className={cn('inline-flex items-center gap-1', presentation.className)}
-              >
-                {createElement(presentation.icon, {
-                  className: 'relative -top-px size-3 shrink-0',
-                  'aria-hidden': true,
-                })}
-                <span className={index === 0 ? undefined : 'hidden @sm/note-status:inline'}>
-                  {presentation.label}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <PopoverTrigger
+                type="button"
+                aria-label={`Note state: ${labels.join(', ')}`}
+                className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+              />
+            }
+          >
+            {kinds.map((kind) => {
+              const presentation = noteStatePresentation(kind)
+              return (
+                <span key={kind} data-testid="note-state-badge" data-state={kind}>
+                  {createElement(presentation.icon, {
+                    className: cn('size-3 shrink-0', presentation.className),
+                    'aria-hidden': true,
+                  })}
                 </span>
-              </span>
-            )
-          })}
-        </PopoverTrigger>
+              )
+            })}
+          </TooltipTrigger>
+          <TooltipContent side="top">{labels.join(' · ')}</TooltipContent>
+        </Tooltip>
         <PopoverContent
           side="top"
           align="start"
           aria-label="Note details"
           className={cn(
-            'pointer-events-auto max-h-(--available-height) max-w-[calc(100vw-2rem)] overflow-y-auto',
-            state.isProtected ? 'w-72' : 'w-64',
+            'pointer-events-auto max-h-(--available-height) max-w-[calc(100vw-2rem)] gap-0 overflow-y-auto p-1',
+            state.isProtected ? 'w-72' : 'w-60',
           )}
         >
-          <PopoverTitle className="text-xs">Note details</PopoverTitle>
           {state.isProtected && status.protection !== null && scope !== null ? (
-            <NoteProtectionDetails
-              key={`${scope.generation}:${scope.path}:${status.protection.kind}`}
-              scope={scope}
-              protection={status.protection}
-            />
-          ) : null}
-          <dl className="space-y-2 text-xs">
-            {rows.map(({ name, value, hint, monospace }) => (
-              <div key={name} className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-0.5">
-                <dt className="text-text-muted">{name}</dt>
-                <dd className={cn('text-right', monospace && 'font-mono')}>{value}</dd>
-                {hint === null ? null : (
-                  <dd
-                    data-testid="note-detail-hint"
-                    className="col-span-2 text-2xs break-words whitespace-normal text-text-muted"
-                  >
-                    {hint}
-                  </dd>
-                )}
-              </div>
-            ))}
-          </dl>
-          {canTogglePrivacy ? (
-            <div className="mt-3 border-t border-border pt-3">
-              <NotePrivacyAction path={scope.path} isPrivate={state.isPrivate} />
+            <div className="px-2 pt-2">
+              <NoteProtectionDetails
+                key={`${scope.generation}:${scope.path}:${status.protection.kind}`}
+                scope={scope}
+                protection={status.protection}
+              />
             </div>
           ) : null}
+          <NoteStatusMenu
+            sections={sections}
+            state={state}
+            togglePath={canTogglePrivacy ? scope.path : null}
+          />
         </PopoverContent>
       </Popover>
       <div

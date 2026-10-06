@@ -24,12 +24,11 @@ afterEach(async () => {
 })
 
 describe('NoteStateIndicator', () => {
-  it('marks an ordinary daily note Editable with one document glyph', async () => {
+  it('leaves an ordinary note unmarked', async () => {
     const view = await render(<NoteStateIndicator path="daily/2026-10-05.md" isPrivate={false} />)
 
-    await expect.element(page.getByRole('img', { name: 'Editable' })).toBeInTheDocument()
-    expect(view.container.querySelectorAll('svg')).toHaveLength(1)
-    expect(view.container.querySelector('.lucide-file-text')).not.toBeNull()
+    expect(view.container.querySelector('[role="img"]')).toBeNull()
+    expect(view.container.querySelectorAll('svg')).toHaveLength(0)
   })
 
   it('explains Private in its tooltip behind a one-word accessible label', async () => {
@@ -82,7 +81,8 @@ describe('NoteStateIndicator', () => {
 
     generation = 2
     await view.rerender(<NoteStateIndicator path={path} isPrivate={false} />)
-    await expect.element(page.getByRole('img', { name: 'Editable' })).toBeInTheDocument()
+    await expect.element(page.getByRole('img', { name: 'Private' })).not.toBeInTheDocument()
+    expect(view.container.querySelector('[role="img"]')).toBeNull()
   })
 
   it('uses indexed metadata again when the mounted session closes', async () => {

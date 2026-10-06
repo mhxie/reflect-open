@@ -89,8 +89,13 @@ beforeEach(() => {
 })
 
 describe('NoteRowList', () => {
+  it('leaves an ordinary note row unmarked', async () => {
+    const view = await render(<SwipeHarness note={row({})} />)
+    await expect.element(view.getByRole('button')).toBeVisible()
+    expect(view.container.querySelector('[role="img"]')).toBeNull()
+  })
+
   it.each([
-    { label: 'Editable', overrides: {} },
     { label: 'Private', overrides: { isPrivate: true } },
     { label: 'Protected', overrides: { hasConflict: true } },
   ])('shows $label in a note row without adding another button', async ({ label, overrides }) => {

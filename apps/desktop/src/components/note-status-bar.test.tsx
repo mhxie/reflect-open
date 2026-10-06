@@ -18,6 +18,7 @@ import type { Route } from '@/routing/route.ts'
 import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { NoteStatusBar } from './note-status-bar.tsx'
 
 const revealAsset = vi.hoisted(() => vi.fn(async (_path: string, _generation: number) => {}))
@@ -140,11 +141,11 @@ function renderBar(
   )
 }
 
-/** The short value of each detail row, without the explanatory hints. */
+/** Each menu row's label, without the explanatory hints. */
 function detailValues(): (string | null)[] {
   const dialog = page.getByRole('dialog', { name: 'Note details' })
-  return [...dialog.element().querySelectorAll('dd:not([data-testid="note-detail-hint"])')].map(
-    (node) => node.textContent,
+  return [...dialog.element().querySelectorAll('[data-testid="note-menu-label"]')].map(
+    (node) => node.textContent?.trim() ?? null,
   )
 }
 
@@ -181,9 +182,7 @@ describe('NoteStatusBar', () => {
     await page.getByRole('button', { name: 'Show file', exact: true }).click()
 
     expect(revealAsset).toHaveBeenCalledWith('notes/source.md', 7)
-    await expect
-      .element(page.getByRole('button', { name: 'Note state: Protected' }))
-      .toHaveTextContent('Protected')
+    await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
   })
 
   it('keeps protection and reports a failed file reveal', async () => {
@@ -390,40 +389,50 @@ describe('NoteStatusBar', () => {
   })
 
   it.each([
-    { state: states.editable, labels: ['Editable'] },
-    { state: states.private, labels: ['Private'] },
-    { state: states['local-only'], labels: ['Local-only'] },
-    { state: states['read-only'], labels: ['Read-only', 'Local-only'] },
-    { state: states.protected, labels: ['Protected'] },
-    { state: { ...states.protected, isPrivate: true }, labels: ['Protected', 'Private'] },
-  ])('shows every state that applies: $labels', async ({ state, labels }) => {
+    { state: states.editable, kinds: ['editable'], labels: ['Editable'] },
+    { state: states.private, kinds: ['private'], labels: ['Private'] },
+    { state: states['local-only'], kinds: ['local-only'], labels: ['Local-only'] },
+    {
+      state: states['read-only'],
+      kinds: ['read-only', 'local-only'],
+      labels: ['Read-only', 'Local-only'],
+    },
+    { state: states.protected, kinds: ['protected'], labels: ['Protected'] },
+    {
+      state: { ...states.protected, isPrivate: true },
+      kinds: ['protected', 'private'],
+      labels: ['Protected', 'Private'],
+    },
+  ])('shows an icon for every state that applies: $labels', async ({ state, kinds, labels }) => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null, state })
     await renderBar({ kind: 'note', path: 'notes/a.md' })
 
     const button = page.getByRole('button', { name: `Note state: ${labels.join(', ')}` })
     await expect.element(button).toBeVisible()
     const badges = [...button.element().querySelectorAll('[data-testid="note-state-badge"]')]
-    expect(badges.map((badge) => badge.textContent?.trim())).toEqual(labels)
+    expect(badges.map((badge) => badge.getAttribute('data-state'))).toEqual(kinds)
+    expect(button.element().textContent?.trim()).toBe('')
   })
 
-  it('keeps secondary states as icons when the footer is narrow', async () => {
+  it('names the states in a tooltip on the icon-only trigger', async () => {
     publishStatus('notes/a.md', {
       characters: 10,
       selectedCharacters: 0,
       editedAt: null,
       state: states['read-only'],
     })
-    const view = await renderBar({ kind: 'note', path: 'notes/a.md' })
-    view.container.style.position = 'relative'
-    view.container.style.height = '60px'
-    view.container.style.width = '520px'
-    const button = page.getByRole('button', { name: 'Note state: Read-only, Local-only' })
-    await expect.element(button.getByText('Local-only')).toBeVisible()
+    await render(
+      <TooltipProvider delay={0}>
+        <QueryClientProvider client={new QueryClient()}>
+          <RouterProvider initialRoute={{ kind: 'note', path: 'notes/a.md' }}>
+            <NoteStatusBar />
+          </RouterProvider>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    )
+    await userEvent.hover(page.getByRole('button', { name: 'Note state: Read-only, Local-only' }))
 
-    view.container.style.width = '320px'
-    await expect.element(button.getByText('Read-only')).toBeVisible()
-    await expect.element(button.getByText('Local-only')).not.toBeVisible()
-    expect(button.element().querySelectorAll('svg')).toHaveLength(2)
+    await expect.element(page.getByText('Read-only · Local-only', { exact: true })).toBeVisible()
   })
 
   it('opens full dimensions with the keyboard and restores focus after Escape', async () => {
@@ -450,10 +459,11 @@ describe('NoteStatusBar', () => {
 
     const dialog = page.getByRole('dialog', { name: 'Note details' })
     await expect.element(dialog).toBeVisible()
-    expect(detailValues()).toEqual(['Editable', 'Private', 'Included', 'abc123def4'])
+    expect(detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4'])
+    await expect.element(dialog.getByText('Never sent to AI or other services.')).toBeVisible()
     await expect
-      .element(dialog.getByText('Never sent to AI or other services. Backup still includes it.'))
-      .toBeVisible()
+      .element(dialog.getByRole('button', { name: 'Private' }))
+      .toHaveAttribute('aria-pressed', 'true')
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md', open: true }),
     )
@@ -490,7 +500,7 @@ describe('NoteStatusBar', () => {
     })
 
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
-    expect(detailValues()).toEqual(['Paused', 'Standard', 'Offline', 'abc123def4'])
+    expect(detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4'])
   })
 
   it('keeps one horizontal row and hides the time before a narrow footer wraps', async () => {
@@ -540,9 +550,8 @@ describe('NoteStatusBar', () => {
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ path: 'daily/2026-10-02.md', isLocalOnly: true }),
     )
-    expect(detailValues()).toEqual(['Editable', 'Local-only', 'Excluded'])
-    expect(page.getByRole('button', { name: 'Mark as private' }).query()).toBeNull()
-    expect(page.getByRole('button', { name: 'Unmark as private' }).query()).toBeNull()
+    expect(detailValues()).toEqual(['Local-only', 'Editable', 'Never backed up'])
+    expect(page.getByRole('button', { name: 'Private' }).query()).toBeNull()
   })
 
   it('reads the same path only from its graph file generation', async () => {
@@ -561,7 +570,7 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    expect(detailValues()).toEqual(['Editable', 'Standard', 'Checking', 'abc123def4'])
+    expect(detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4'])
   })
 
   it('toggles privacy from the details through the shared note action', async () => {
@@ -569,7 +578,9 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    await page.getByRole('button', { name: 'Mark as private' }).click()
+    const privacy = page.getByRole('button', { name: 'Private', exact: true })
+    await expect.element(privacy).toHaveAttribute('aria-pressed', 'false')
+    await privacy.click()
 
     expect(toggleNotePrivate).toHaveBeenCalledWith(
       expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md' }),
@@ -583,7 +594,7 @@ describe('NoteStatusBar', () => {
       })
     })
     await expect.element(page.getByRole('button', { name: 'Note state: Private' })).toBeVisible()
-    await expect.element(page.getByRole('button', { name: 'Unmark as private' })).toBeVisible()
+    await expect.element(privacy).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('keeps a locked note with unreadable frontmatter locked', async () => {
@@ -597,7 +608,7 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await page.getByRole('button', { name: 'Note state: Private' }).click()
 
-    await expect.element(page.getByRole('button', { name: 'Unmark as private' })).toBeDisabled()
+    await expect.element(page.getByRole('button', { name: 'Private', exact: true })).toBeDisabled()
     await expect
       .element(page.getByText("Fix this note's frontmatter to lock or unlock it."))
       .toBeVisible()
@@ -615,6 +626,29 @@ describe('NoteStatusBar', () => {
     await page.getByRole('button', { name: 'Note state: Protected' }).click()
 
     await expect.element(page.getByText('Unsupported Markdown', { exact: true })).toBeVisible()
-    expect(page.getByRole('button', { name: 'Mark as private' }).query()).toBeNull()
+    expect(page.getByRole('button', { name: 'Private', exact: true }).query()).toBeNull()
+    expect(detailValues()).toEqual(['Standard', 'Paused', 'Backup off', 'abc123def4'])
+  })
+
+  it('moves between actionable rows with the arrow keys and copies the version', async () => {
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Editable' }).click()
+
+    const privacy = page.getByRole('button', { name: 'Private', exact: true })
+    const version = page.getByRole('button', { name: 'Copy version abc123def4' })
+    privacy.element().focus()
+    await userEvent.keyboard('{ArrowDown}')
+    await expect.element(version).toHaveFocus()
+    await userEvent.keyboard('{ArrowDown}')
+    await expect.element(privacy).toHaveFocus()
+    await userEvent.keyboard('{End}')
+    await expect.element(version).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+
+    expect(writeText).toHaveBeenCalledWith('abc123def4')
+    await expect.element(version.getByText('Copied', { exact: true })).toBeVisible()
+    writeText.mockRestore()
   })
 })

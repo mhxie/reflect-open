@@ -1,23 +1,26 @@
 import type { ReactElement } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Shield, ShieldOff } from 'lucide-react'
+import { Check, Shield } from 'lucide-react'
 import { useUnreadableFrontmatter } from '@/hooks/use-unreadable-frontmatter.ts'
 import { toggleNotePrivate, UNREADABLE_FRONTMATTER_HINT } from '@/lib/note-private.ts'
+import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
-import { Button } from '@/components/ui/button.tsx'
+import { NOTE_MENU_ITEM, NoteMenuHint } from './note-menu-row.tsx'
 
 interface NotePrivacyActionProps {
   /** Graph-relative path of a note whose privacy is its `private` frontmatter flag. */
   readonly path: string
   readonly isPrivate: boolean
+  /** What being private means, under the row while it is checked. */
+  readonly hint: string | null
 }
 
 /**
- * The privacy toggle next to the state it changes, through the same
+ * "Private" as a checkable menu row, through the same
  * {@link toggleNotePrivate} as the command and the context sidebar. A note
  * whose frontmatter can't be read stays locked and says how to fix it.
  */
-export function NotePrivacyAction({ path, isPrivate }: NotePrivacyActionProps): ReactElement {
+export function NotePrivacyAction({ path, isPrivate, hint }: NotePrivacyActionProps): ReactElement {
   const { graph } = useGraph()
   const queryClient = useQueryClient()
   const unreadable = useUnreadableFrontmatter(path, isPrivate)
@@ -29,20 +32,24 @@ export function NotePrivacyAction({ path, isPrivate }: NotePrivacyActionProps): 
   }
 
   return (
-    <div className="space-y-1">
-      <Button
-        size="sm"
-        variant="outline"
-        className="w-full"
+    <>
+      <button
+        type="button"
+        data-note-menu-item
+        aria-pressed={isPrivate}
         disabled={unreadable}
         onClick={() => void toggle()}
+        className={cn(NOTE_MENU_ITEM, 'text-text disabled:opacity-60')}
       >
-        {isPrivate ? <ShieldOff aria-hidden /> : <Shield aria-hidden />}
-        {isPrivate ? 'Unmark as private' : 'Mark as private'}
-      </Button>
-      {unreadable ? (
-        <p className="text-2xs whitespace-normal text-text-muted">{UNREADABLE_FRONTMATTER_HINT}</p>
-      ) : null}
-    </div>
+        <Shield className={isPrivate ? 'text-note-state-private' : 'text-text-muted'} />
+        <span data-testid="note-menu-label" className="flex-1 text-left">
+          Private
+        </span>
+        {isPrivate ? <Check className="text-accent" /> : null}
+      </button>
+      <NoteMenuHint>
+        {unreadable ? UNREADABLE_FRONTMATTER_HINT : isPrivate ? hint : null}
+      </NoteMenuHint>
+    </>
   )
 }

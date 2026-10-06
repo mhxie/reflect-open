@@ -454,7 +454,7 @@ describe('TasksScreen', () => {
     ])
     const view = await renderScreen()
 
-    const sourceLink = await view.findByRole('button', { name: 'Editable Project' })
+    const sourceLink = await view.findByRole('button', { name: 'Project', exact: true })
     expect(sourceLink.querySelector('.lucide-arrow-up-right')).toBeNull()
     await userEvent.click(sourceLink)
     expect(view.getByTestId('route').element().textContent).toContain('notes/p.md')
@@ -473,7 +473,7 @@ describe('TasksScreen', () => {
     ])
     const view = await renderScreen()
 
-    fireEvent.click(await view.findByRole('button', { name: 'Editable Project' }), {
+    fireEvent.click(await view.findByRole('button', { name: 'Project', exact: true }), {
       metaKey: true,
       ctrlKey: true,
     })
@@ -521,7 +521,9 @@ describe('TasksScreen', () => {
     ])
     const view = await renderScreen()
 
-    await userEvent.click(await view.findByRole('button', { name: 'Editable Tue, June 9th, 2026' }))
+    await userEvent.click(
+      await view.findByRole('button', { name: 'Tue, June 9th, 2026', exact: true }),
+    )
 
     expect(view.getByTestId('route').element().textContent).toBe(
       '{"kind":"daily","date":"2026-06-09"}',

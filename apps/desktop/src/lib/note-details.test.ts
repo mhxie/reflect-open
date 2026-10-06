@@ -16,40 +16,41 @@ function connected(status: Extract<BackupState, { phase: 'connected' }>['status'
   return { phase: 'connected', remoteUrl: 'https://github.com/test/notes', repo: null, status }
 }
 
-function values(...args: Parameters<typeof noteDetails>): Record<string, string> {
-  return Object.fromEntries(noteDetails(...args).map((detail) => [detail.name, detail.value]))
+function backupLabel(backup: BackupState | undefined, state: NoteState = EDITABLE): string {
+  return noteDetails({ state, backup, version: COMMITTED }).backup[0]?.value ?? ''
 }
 
 describe('noteDetails', () => {
-  it('describes an ordinary backed-up note', () => {
-    const details = noteDetails({
-      state: EDITABLE,
-      backup: connected({ state: 'idle' }),
-      version: COMMITTED,
+  it('describes an ordinary backed-up note without explaining the obvious', () => {
+    expect(
+      noteDetails({ state: EDITABLE, backup: connected({ state: 'idle' }), version: COMMITTED }),
+    ).toEqual({
+      note: [
+        { name: 'Privacy', value: 'Standard', hint: null },
+        { name: 'Editing', value: 'Editable', hint: null },
+      ],
+      backup: [
+        { name: 'Backup', value: 'Backed up', hint: null },
+        { name: 'Version', value: 'abc123def4', hint: null, monospace: true },
+      ],
     })
-    expect(details).toEqual([
-      { name: 'Editing', value: 'Editable', hint: null },
-      { name: 'Privacy', value: 'Standard', hint: 'AI features can read this note.' },
-      { name: 'Backup', value: 'Included', hint: null },
-      { name: 'Version', value: 'abc123def4', hint: null, monospace: true },
-    ])
   })
 
-  it('says a private note is kept from AI but still backed up', () => {
-    const [, privacy] = noteDetails({
+  it('says what keeping a note private means', () => {
+    const { note } = noteDetails({
       state: { ...EDITABLE, kind: 'private', isPrivate: true },
       backup: connected({ state: 'idle' }),
       version: COMMITTED,
     })
-    expect(privacy).toEqual({
+    expect(note[0]).toEqual({
       name: 'Privacy',
       value: 'Private',
-      hint: 'Never sent to AI or other services. Backup still includes it.',
+      hint: 'Never sent to AI or other services.',
     })
   })
 
   it('explains a read-only local-only note and leaves Git out of it', () => {
-    const details = noteDetails({
+    const { note, backup } = noteDetails({
       state: {
         kind: 'read-only',
         isPrivate: true,
@@ -60,69 +61,63 @@ describe('noteDetails', () => {
       backup: connected({ state: 'idle' }),
       version: COMMITTED,
     })
-    expect(details.map((detail) => detail.name)).toEqual(['Editing', 'Privacy', 'Backup'])
-    expect(details[0]?.hint).toBe('Its local-only folder isn’t editable in Reflect.')
-    expect(details[1]?.value).toBe('Local-only')
-    expect(details[2]).toEqual({
-      name: 'Backup',
-      value: 'Excluded',
-      hint: 'Never committed or synced.',
-    })
+    expect(note).toEqual([
+      {
+        name: 'Privacy',
+        value: 'Local-only',
+        hint: 'Stays on this device. Never synced or sent to AI.',
+      },
+      {
+        name: 'Editing',
+        value: 'Read-only',
+        hint: 'Its folder isn’t editable in Reflect. Edit it in another app.',
+      },
+    ])
+    expect(backup).toEqual([{ name: 'Backup', value: 'Never backed up', hint: null }])
   })
 
-  it('points a protected note at the recovery shown above', () => {
-    const [editing] = noteDetails({
+  it('pauses editing on a protected note', () => {
+    const { note } = noteDetails({
       state: { ...EDITABLE, kind: 'protected', isReadOnly: true, isProtected: true },
       backup: undefined,
       version: COMMITTED,
     })
-    expect(editing).toEqual({
-      name: 'Editing',
-      value: 'Paused',
-      hint: 'Resolve the issue above to keep editing.',
-    })
+    expect(note[1]).toEqual({ name: 'Editing', value: 'Paused', hint: null })
   })
 
-  it('folds live graph sync into the Backup value', () => {
-    const version = COMMITTED
-    expect(values({ state: EDITABLE, backup: { phase: 'loading' }, version }).Backup).toBe(
-      'Checking',
-    )
-    expect(values({ state: EDITABLE, backup: { phase: 'disconnected' }, version }).Backup).toBe(
-      'Off',
-    )
+  it('folds live graph sync into the Backup row', () => {
+    expect(backupLabel({ phase: 'loading' })).toBe('Checking')
+    expect(backupLabel({ phase: 'disconnected' })).toBe('Backup off')
+    expect(backupLabel(connected({ state: 'syncing' }))).toBe('Syncing')
     expect(
-      values({ state: EDITABLE, backup: connected({ state: 'syncing' }), version }).Backup,
-    ).toBe('Syncing')
-    expect(
-      values({
+      noteDetails({
         state: EDITABLE,
         backup: connected({ state: 'offline', message: 'unreachable' }),
-        version,
-      }).Backup,
-    ).toBe('Offline')
-    const [, , failed] = noteDetails({
-      state: EDITABLE,
-      backup: connected({ state: 'error', errorKind: 'auth', message: 'Token expired' }),
-      version,
+        version: COMMITTED,
+      }).backup[0],
+    ).toEqual({
+      name: 'Backup',
+      value: 'Offline',
+      hint: 'Changes sync once the remote is reachable.',
     })
-    expect(failed).toEqual({ name: 'Backup', value: 'Sync failed', hint: 'Token expired' })
+    expect(
+      noteDetails({
+        state: EDITABLE,
+        backup: connected({ state: 'error', errorKind: 'auth', message: 'Token expired' }),
+        version: COMMITTED,
+      }).backup[0],
+    ).toEqual({ name: 'Backup', value: 'Sync failed', hint: 'Token expired' })
   })
 
   it('reports the version lookup without claiming a commit it has not seen', () => {
-    const state = EDITABLE
-    const backup = undefined
-    expect(
-      values({ state, backup, version: { version: null, pending: true, unavailable: false } })
-        .Version,
-    ).toBe('Loading')
-    expect(
-      values({ state, backup, version: { version: null, pending: false, unavailable: true } })
-        .Version,
-    ).toBe('Unavailable')
-    expect(
-      values({ state, backup, version: { version: null, pending: false, unavailable: false } })
-        .Version,
-    ).toBe('Uncommitted')
+    const version = (pending: boolean, unavailable: boolean): string =>
+      noteDetails({
+        state: EDITABLE,
+        backup: undefined,
+        version: { version: null, pending, unavailable },
+      }).backup[1]?.value ?? ''
+    expect(version(true, false)).toBe('Loading')
+    expect(version(false, true)).toBe('Unavailable')
+    expect(version(false, false)).toBe('Uncommitted')
   })
 })
