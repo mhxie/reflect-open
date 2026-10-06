@@ -70,6 +70,11 @@ function titlesFor(filter: WikiFilter | null): string[] {
 }
 
 describe('filterWikiEntries', () => {
+  it('separates knowledge from index guides without assigning unread entries a role', () => {
+    expect(titlesFor({ kind: 'knowledge' })).toEqual(['Verified', 'Flagged', 'Unreviewed'])
+    expect(titlesFor({ kind: 'index' })).toEqual(['Guide'])
+  })
+
   it('narrows to review states and unsourced claims, never selecting guides or unread entries', () => {
     expect(titlesFor({ kind: 'flagged' })).toEqual(['Flagged'])
     expect(titlesFor({ kind: 'unreviewed' })).toEqual(['Unreviewed'])
@@ -105,6 +110,9 @@ describe('wikiFiltersEqual', () => {
   it('compares filters by kind and argument', () => {
     expect(wikiFiltersEqual(null, null)).toBe(true)
     expect(wikiFiltersEqual({ kind: 'flagged' }, null)).toBe(false)
+    expect(wikiFiltersEqual({ kind: 'knowledge' }, { kind: 'knowledge' })).toBe(true)
+    expect(wikiFiltersEqual({ kind: 'index' }, { kind: 'index' })).toBe(true)
+    expect(wikiFiltersEqual({ kind: 'knowledge' }, { kind: 'index' })).toBe(false)
     expect(wikiFiltersEqual({ kind: 'tag', tag: 'Memory' }, { kind: 'tag', tag: 'memory' })).toBe(
       true,
     )

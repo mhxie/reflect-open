@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { userEvent } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
+import '@/styles/index.css'
 import { render } from 'vitest-browser-react'
 import { Suspense, type ReactElement } from 'react'
 import { normalizeWikiLanguages, setBridge, type Settings } from '@reflect/core'
@@ -284,6 +285,33 @@ function rowTitles(view: Awaited<ReturnType<typeof renderScreen>>): string[] {
 }
 
 describe('WikiScreen', () => {
+  it('keeps filters reachable in a narrow window with several languages', async () => {
+    const previousViewport = { width: window.innerWidth, height: window.innerHeight }
+    settingsStore.set({
+      wikiLanguages: normalizeWikiLanguages([
+        { label: 'English', folder: 'wiki' },
+        { label: '简体中文', folder: 'wiki-cn' },
+        { label: '日本語', folder: 'wiki-jp' },
+        { label: 'Français', folder: 'wiki-fr' },
+      ]),
+    })
+    await page.viewport(760, 650)
+    const view = await renderScreen()
+    try {
+      await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
+      const filter = view.getByRole('group', { name: 'Filter entries' }).element()
+      expect(filter.getBoundingClientRect().right).toBeLessThanOrEqual(window.innerWidth)
+      expect(filter.scrollWidth).toBeGreaterThan(filter.clientWidth)
+
+      await view.getByRole('button', { name: 'Missing Français 3' }).click()
+      await expectRoute(view, wikiRoute({ filter: { kind: 'untranslated', folder: 'wiki-fr' } }))
+      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Spacing Effect', 'Zeigarnik Effect'])
+    } finally {
+      await view.unmount()
+      await page.viewport(previousViewport.width, previousViewport.height)
+    }
+  })
+
   it('lists entries flat, like All Notes, with review, claims, sources, and citations', async () => {
     const view = await renderScreen()
 
@@ -324,6 +352,63 @@ describe('WikiScreen', () => {
     await expect.element(view.getByRole('img', { name: '3 sources' })).toBeInTheDocument()
     await expect.element(view.getByRole('img', { name: 'Cited by 3 notes' })).toBeInTheDocument()
     expect(view.getByText('Verified').query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('labels indexes in both layouts and filters by role across languages', async () => {
+    fixture = {
+      notes: [
+        ...WIKI.notes,
+        {
+          path: 'wiki-cn/index.md',
+          title: 'Wiki Index (中文)',
+          mtime: 1,
+          file_hash: 'index-cn',
+        },
+      ],
+      files: { ...WIKI.files, 'wiki-cn/index.md': '# Wiki Index (中文)\n\n- [[Spacing Effect]]\n' },
+    }
+    const view = await renderScreen()
+    const header = view.getByRole('banner')
+
+    await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
+    await expect
+      .element(header.getByRole('button', { name: 'All 4' }))
+      .toHaveAttribute('aria-pressed', 'true')
+    await header.getByRole('button', { name: 'Knowledge 3' }).click()
+    await expectRoute(view, wikiRoute({ filter: { kind: 'knowledge' } }))
+    expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Spacing Effect', 'Zeigarnik Effect'])
+    expect(view.getByText('Index', { exact: true }).query()).toBeNull()
+
+    await header.getByRole('button', { name: 'Indexes 1' }).click()
+    await expectRoute(view, wikiRoute({ filter: { kind: 'index' } }))
+    expect(rowTitles(view)).toEqual(['Wiki Index'])
+    await expect
+      .element(header.getByRole('button', { name: 'Indexes 1' }))
+      .toHaveAttribute('aria-pressed', 'true')
+
+    await header.getByRole('button', { name: '简体中文', exact: true }).click()
+    await expectRoute(view, wikiRoute({ filter: { kind: 'index' }, language: 'wiki-cn' }))
+    expect(rowTitles(view)).toEqual(['Wiki Index (中文)'])
+    await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
+
+    await header.getByRole('button', { name: 'Topics' }).click()
+    await expect.element(view.getByRole('region', { name: 'Overview' })).toBeInTheDocument()
+    await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
+
+    await header.getByRole('button', { name: 'All 4' }).click()
+    await expectRoute(view, wikiRoute({ language: 'wiki-cn' }))
+    expect(rowTitles(view)).toEqual([
+      'Wiki Index (中文)',
+      'Retrieval Practice',
+      'Spacing Effect (中文)',
+      'Zeigarnik Effect',
+    ])
+
+    await header.getByRole('button', { name: 'Indexes 1' }).click()
+    view.container.querySelector<HTMLElement>('[aria-label="Wiki"]')?.focus()
+    await userEvent.keyboard('{ArrowDown}{Enter}')
+    await expectRoute(view, { kind: 'note', path: 'wiki-cn/index.md' })
     await view.unmount()
   })
 

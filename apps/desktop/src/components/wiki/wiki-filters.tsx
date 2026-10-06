@@ -21,10 +21,9 @@ interface WikiFiltersProps {
 }
 
 /**
- * The Wiki screen's filter bar: All, then the states the claims schema makes
- * legible — a flagged claim, no reviewer verification yet, a claim without a
- * source, no copy in a translation — each with its count, and a Tag menu once
- * any entry carries a tag. One filter at a time, like All Notes.
+ * The Wiki screen's filter bar: All, Knowledge, Indexes, then review and
+ * translation states — each with its count, and a Tag menu once any entry
+ * carries a tag. One filter at a time, like All Notes.
  */
 export function WikiFilters({
   entries,
@@ -34,6 +33,8 @@ export function WikiFilters({
 }: WikiFiltersProps): ReactElement {
   const tabs = useMemo(() => {
     const candidates: { label: string; filter: WikiFilter }[] = [
+      { label: 'Knowledge', filter: { kind: 'knowledge' } },
+      { label: 'Indexes', filter: { kind: 'index' } },
       { label: 'Flagged', filter: { kind: 'flagged' } },
       { label: 'Unreviewed', filter: { kind: 'unreviewed' } },
       { label: 'Unsourced', filter: { kind: 'unsourced' } },
@@ -60,9 +61,13 @@ export function WikiFilters({
     <div
       role="group"
       aria-label="Filter entries"
-      className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-surface shadow-sm"
+      className="flex max-w-full items-stretch divide-x divide-border overflow-x-auto rounded-lg border border-border bg-surface shadow-sm"
     >
-      <FilterTab label="All" active={filter === null} onClick={() => onSelect(null)} />
+      <FilterTab
+        label={`All ${entries.length}`}
+        active={filter === null}
+        onClick={() => onSelect(null)}
+      />
       {tabs.map((tab) => (
         <FilterTab
           key={
