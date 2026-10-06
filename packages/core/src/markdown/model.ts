@@ -36,7 +36,7 @@ function coercePinned(value: unknown): boolean | number {
  * The note's published GitHub Gist (Plan 12 follow-up): written by the publish
  * action, read back to drive "Republish" and to update the same gist in place.
  * `file` is the gist filename last published as (a PATCH renames via the old
- * name), and `hash` is {@link gistBodyHash} of the published body — staleness
+ * name), and `hash` is {@link noteBodyHash} of the published body — staleness
  * is a hash comparison, never an mtime one (writing this very block bumps the
  * file's mtime).
  */
@@ -61,10 +61,24 @@ export const gistFrontmatterSchema = z.object({
   }),
   /** The gist filename the body was last published under. */
   file: z.string(),
-  /** {@link gistBodyHash} of the body as last published (coerced like `id`). */
+  /** {@link noteBodyHash} of the body as last published (coerced like `id`). */
   hash: z.coerce.string(),
 })
 export type GistFrontmatter = z.infer<typeof gistFrontmatterSchema>
+
+/**
+ * The note's AI summary, written by the background summary pass and shown as
+ * the All Notes row preview while it still describes the body: `hash` is
+ * {@link noteBodyHash} of the body that was summarized, so any edit makes the
+ * block stale (the plain snippet shows again until it is regenerated).
+ */
+export const aiSummaryFrontmatterSchema = z.object({
+  /** One plain-text sentence or two describing the note. */
+  text: z.string(),
+  /** {@link noteBodyHash} of the summarized body (coerced like `gist.hash`). */
+  hash: z.coerce.string(),
+})
+export type AiSummaryFrontmatter = z.infer<typeof aiSummaryFrontmatterSchema>
 
 /**
  * Known frontmatter subset; unknown keys are preserved untouched (passthrough).
@@ -94,6 +108,11 @@ export const frontmatterSchema = z.looseObject({
    * publish then creates a fresh gist and rewrites it whole.
    */
   gist: gistFrontmatterSchema.optional().catch(undefined),
+  /**
+   * The AI summary block. A value of another shape is someone else's — it
+   * reads as no summary here, and the summary pass never overwrites it.
+   */
+  aiSummary: aiSummaryFrontmatterSchema.optional().catch(undefined),
   /**
    * Contact names whose suggested-contact card was dismissed on this note
    * (v1's `ignoredContactNames`). Per contact, not per note: ignoring "Ada"

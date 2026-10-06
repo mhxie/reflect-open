@@ -6,11 +6,13 @@
 export {
   frontmatterSchema,
   gistFrontmatterSchema,
+  aiSummaryFrontmatterSchema,
   isPinned,
   pinnedOrder,
   PARSED_NOTE_VERSION,
   type Frontmatter,
   type GistFrontmatter,
+  type AiSummaryFrontmatter,
   type Span,
   type WikiLink,
   type MarkdownLink,
@@ -61,7 +63,14 @@ export {
 } from './conflict-markers.ts'
 export { canonicalEmail, canonicalEmails, extractEmailFields, foldEmail } from './email-fields.ts'
 export { foldFallbackTitleKey, foldKey, foldTag } from './keys.ts'
-export { gistBodyHash, gistFilename } from './gist.ts'
+export {
+  AI_SUMMARY_KEY,
+  AI_SUMMARY_MAX_CHARS,
+  aiSummaryOwner,
+  freshAiSummary,
+} from './ai-summary.ts'
+export { noteBodyHash } from './body-hash.ts'
+export { gistFilename } from './gist.ts'
 export { slugForTitle } from './slug.ts'
 export { subjectAliases } from './subject-aliases.ts'
 export {

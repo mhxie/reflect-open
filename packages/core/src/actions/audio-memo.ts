@@ -5,11 +5,8 @@ import {
   type AiProvidersState,
 } from '../ai/provider-config.ts'
 import { aiApiKeyForConfig, aiKeySecretName } from '../ai/secrets.ts'
-import {
-  audioMemoEnrichmentConfig,
-  pickAudioMemoEnrichmentConfig,
-  type AudioMemoEnrichmentCredentials,
-} from '../ai/audio-memo-title.ts'
+import type { AudioMemoEnrichmentCredentials } from '../ai/audio-memo-title.ts'
+import { pickSmallModelConfig, smallModelConfig } from '../ai/small-model.ts'
 import { enrichSessionTranscript } from '../ai/audio-memo-transcript.ts'
 import { AUDIO_EXTENSION_BY_MIME, baseMimeType } from '../ai/transcribe.ts'
 import { APP_REVIEW_STUB_KEY, stubTranscriptBody } from '../ai/app-review-demo.ts'
@@ -567,14 +564,14 @@ async function resolveTranscriptionEngine(
     }
   }
   const { config, apiKey } = target
-  const enrichmentConfig = pickAudioMemoEnrichmentConfig(input.providers)
+  const enrichmentConfig = pickSmallModelConfig(input.providers)
   const enrichmentApiKey =
     enrichmentConfig === null
       ? null
       : enrichmentConfig.id === config.id
         ? apiKey
         : await aiApiKeyForConfig(enrichmentConfig).catch(() => null)
-  const fallbackEnrichmentConfig = audioMemoEnrichmentConfig(config)
+  const fallbackEnrichmentConfig = smallModelConfig(config)
   return {
     transcriber: cloudSegmentTranscriber({
       provider: config.provider,

@@ -853,13 +853,56 @@ pub async fn note_write(
     Ok(modified_ms)
 }
 
-fn write_note_revision(
+/// [`note_write`] for a change that is not an edit: the note keeps its
+/// modification time, so the All Notes recency order and "Updated" column
+/// don't move. The background AI summary pass writes its `aiSummary`
+/// frontmatter block through it; a whole graph of summaries must not read as
+/// a graph of fresh edits.
+///
+/// The file must exist and still hold `expected_contents`. A note in a
+/// local-only folder is refused (`Unsupported`): its descriptor-based write
+/// path has no way to carry the time across.
+///
+/// Returns the kept mtime (epoch ms) for the index echo.
+#[tauri::command]
+pub async fn note_write_keep_modified(
+    path: String,
+    contents: String,
+    generation: u64,
+    expected_contents: String,
+    state: State<'_, GraphState>,
+) -> AppResult<Option<u64>> {
+    let (root, local_only) = graph_for(&state, Some(generation))?;
+    let target = resolve_note_edit(&root, &path, local_only.as_deref(), TargetKind::Note)?;
+    let written = root.clone();
+    let modified_ms = crate::blocking::run_blocking(move || match target {
+        EditTarget::Graph(target) => {
+            write_note_keeping_modified(&written, &target, &contents, &expected_contents)
+        }
+        EditTarget::LocalOnly(_) => Err(AppError::unsupported(
+            "a note in a local-only folder can't be written without touching its modification time",
+        )),
+    })
+    .await?;
+    invalidate_file_catalog(&state, &root);
+    Ok(modified_ms)
+}
+
+fn write_note_keeping_modified(
     root: &Path,
     target: &Path,
     contents: &str,
-    expected: Option<&str>,
+    expected: &str,
 ) -> AppResult<Option<u64>> {
     let _guard = note_write_guard();
+    check_note_revision(root, target, Some(expected))?;
+    let modified = fs::symlink_metadata(target)?.modified()?;
+    io::atomic_write_with_modified(root, target, contents, modified)
+}
+
+/// Refuse unless the note at `target` holds exactly `expected` (`None`: the
+/// file must not exist). The caller holds the note write guard.
+fn check_note_revision(root: &Path, target: &Path, expected: Option<&str>) -> AppResult<()> {
     // The graph root may legitimately sit behind a symlink (`/var`, a linked
     // `~/Dropbox`): canonicalize it once, police the rest.
     let rest = target
@@ -873,6 +916,17 @@ fn write_note_revision(
     if current.as_deref() != expected {
         return Err(AppError::io(CHANGED_ON_DISK));
     }
+    Ok(())
+}
+
+fn write_note_revision(
+    root: &Path,
+    target: &Path,
+    contents: &str,
+    expected: Option<&str>,
+) -> AppResult<Option<u64>> {
+    let _guard = note_write_guard();
+    check_note_revision(root, target, expected)?;
     atomic_write(root, target, contents)
 }
 
@@ -2234,6 +2288,49 @@ mod note_write_command_tests {
             fs::read_to_string(session.root.join("notes/new.md")).unwrap(),
             "# Replaced"
         );
+    }
+
+    fn write_keeping_modified(
+        session: &Session,
+        path: &str,
+        expected_contents: &str,
+    ) -> AppResult<Option<u64>> {
+        tauri::async_runtime::block_on(note_write_keep_modified(
+            path.to_string(),
+            "# Replaced".to_string(),
+            1,
+            expected_contents.to_string(),
+            session.app.state(),
+        ))
+    }
+
+    #[test]
+    fn a_write_keeping_modified_lands_with_the_old_mtime() {
+        let session = session();
+        let plan = session.root.join("notes/plan.md");
+        let earlier =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
+        fs::File::options()
+            .write(true)
+            .open(&plan)
+            .unwrap()
+            .set_modified(earlier)
+            .unwrap();
+
+        let modified_ms = write_keeping_modified(&session, "notes/plan.md", "# Plan").unwrap();
+        assert_eq!(fs::read_to_string(&plan).unwrap(), "# Replaced");
+        assert_eq!(fs::metadata(&plan).unwrap().modified().unwrap(), earlier);
+        assert_eq!(modified_ms, Some(1_600_000_000_000));
+    }
+
+    #[test]
+    fn a_write_keeping_modified_is_checked_and_never_creates() {
+        let session = session();
+        let plan = session.root.join("notes/plan.md");
+        assert!(write_keeping_modified(&session, "notes/plan.md", "# Stale").is_err());
+        assert_eq!(fs::read_to_string(&plan).unwrap(), "# Plan");
+        assert!(write_keeping_modified(&session, "notes/new.md", "").is_err());
+        assert!(!session.root.join("notes/new.md").exists());
     }
 }
 

@@ -151,8 +151,6 @@ const GRAPH: GraphInfo = {
 }
 
 const RUST_PIN: PinnedNote = {
-  isPrivate: false,
-  hasConflict: false,
   path: 'notes/rust.md',
   title: 'Rust',
   dailyDate: null,

@@ -22,7 +22,8 @@ import {
   foldEmail,
   foldKey,
   foldTag,
-  gistBodyHash,
+  freshAiSummary,
+  noteBodyHash,
   isPinned,
   pinnedOrder,
   splitFrontmatter,
@@ -127,8 +128,11 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * 29 - `notes.is_private` withholds a set key spelled like `private`
  * (`Private: true`), and a block that doesn't load when it mentions `private`
  * in any case.
+ * 30 - `notes.summary_fresh` (migration 0027) and the `aiSummary` frontmatter
+ * block as `notes.preview` while it summarizes the current body: a note synced
+ * in with a summary before this version must reproject to show it.
  */
-export const PROJECTION_VERSION = 29
+export const PROJECTION_VERSION = 30
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -261,8 +265,13 @@ export const indexedNoteSchema = z.object({
   assetText: z.string(),
   /** Provenance of the FTS/embedding snapshot, for outbound retrieval gates. */
   hasDeviceOnlyContent: z.boolean().default(false),
-  /** The All Notes row snippet, derived once here rather than per query. */
+  /**
+   * The All Notes row snippet, derived once here rather than per query: the
+   * note's fresh AI summary when it has one, its leading plain text otherwise.
+   */
   preview: z.string(),
+  /** The `aiSummary` frontmatter block summarizes the current body. */
+  summaryFresh: z.boolean(),
   links: z.array(indexedLinkSchema),
   tags: z.array(indexedTagSchema),
   aliases: z.array(indexedAliasSchema),
@@ -419,6 +428,7 @@ export function buildIndexedNote(
   })
   const aliases = projectNoteAliases(parsed)
   const body = splitFrontmatter(meta.source).body
+  const summary = freshAiSummary(parsed.frontmatter, body)
 
   return {
     path: parsed.path,
@@ -441,13 +451,14 @@ export function buildIndexedNote(
     // writes the `gist` block itself, and a pin/private toggle is not an edit
     // worth a "republish" nudge.
     gistStale:
-      parsed.frontmatter.gist !== undefined && gistBodyHash(body) !== parsed.frontmatter.gist.hash,
+      parsed.frontmatter.gist !== undefined && noteBodyHash(body) !== parsed.frontmatter.gist.hash,
     fileHash: meta.fileHash,
     mtime: meta.mtime,
     text: body,
     assetText: meta.assetText ?? '',
     hasDeviceOnlyContent: meta.hasDeviceOnlyContent ?? false,
-    preview: previewSnippet(parsed.displayText, parsed.title),
+    preview: summary ?? previewSnippet(parsed.displayText, parsed.title),
+    summaryFresh: summary !== null,
     hasContent: parsed.displayText !== '' || hasSearchableChar(body),
     bodyChars: countDisplayChars(parsed),
     links: [...wikiLinks, ...mdLinks],

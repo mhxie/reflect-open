@@ -286,6 +286,22 @@ pub(super) fn atomic_write(root: &Path, target: &Path, contents: &str) -> AppRes
     atomic_write_bytes(root, target, contents.as_bytes())
 }
 
+/// [`atomic_write`] that stamps the written file with `modified` before the
+/// rename, so it lands carrying that modification time rather than now.
+pub(super) fn atomic_write_with_modified(
+    root: &Path,
+    target: &Path,
+    contents: &str,
+    modified: std::time::SystemTime,
+) -> AppResult<Option<u64>> {
+    let tmp = stage_bytes(root, target, contents.as_bytes())?;
+    tmp.as_file().set_modified(modified)?;
+    let file = tmp
+        .persist(target)
+        .map_err(|err| AppError::io(err.to_string()))?;
+    Ok(file.metadata().ok().as_ref().and_then(modified_ms))
+}
+
 /// Result of an atomic create-if-absent attempt.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum AtomicCreateOutcome {

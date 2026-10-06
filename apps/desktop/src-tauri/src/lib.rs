@@ -343,6 +343,7 @@ pub fn run() {
             fs::device::asset_ocr_supported,
             fs::note_create,
             fs::note_write,
+            fs::note_write_keep_modified,
             fs::asset_write,
             fs::asset_read,
             fs::asset_read_binary,

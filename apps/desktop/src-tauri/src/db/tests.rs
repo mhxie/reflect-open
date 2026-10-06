@@ -64,6 +64,7 @@ fn note(path: &str, title: &str, links: Vec<IndexedLink>) -> IndexedNote {
         has_device_only_content: false,
         gist_url: None,
         gist_stale: false,
+        summary_fresh: false,
         file_hash: "h".to_string(),
         mtime: 0,
         text: format!("{title} body"),

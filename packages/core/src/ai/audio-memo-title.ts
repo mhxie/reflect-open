@@ -1,17 +1,14 @@
 import { z } from 'zod'
-import type { AiProvidersState } from './provider-config.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
 import { languageModel } from './language-model.ts'
+import { smallModelConfig } from './small-model.ts'
 import { clipAtWordBoundary } from './text.ts'
 
 const TITLE_TIMEOUT_MS = 30_000
 const MAX_TRANSCRIPT_CHARS = 4_000
 const MAX_TITLE_CHARS = 80
 const MAX_FALLBACK_WORDS = 8
-const OPENAI_AUDIO_MEMO_ENRICHMENT_MODEL = 'gpt-5.4-nano'
-const ANTHROPIC_AUDIO_MEMO_ENRICHMENT_MODEL = 'claude-haiku-4-5'
-const GOOGLE_AUDIO_MEMO_ENRICHMENT_MODEL = 'gemini-3.1-flash-lite'
 
 const audioMemoTitleSchema = z.object({
   title: z.string(),
@@ -33,44 +30,6 @@ export interface GenerateAudioMemoTitleRequest {
   readonly transcript: string
   /** Timestamp-derived fallback when the transcript cannot produce a title. */
   readonly fallbackTitle: string
-}
-
-/** Replace a configured model with the provider's fixed small audio-enrichment model. */
-export function audioMemoEnrichmentConfig(config: AiProviderConfig): AiProviderConfig | null {
-  switch (config.provider) {
-    case 'openai':
-      return { ...config, model: OPENAI_AUDIO_MEMO_ENRICHMENT_MODEL }
-    case 'anthropic':
-      return { ...config, model: ANTHROPIC_AUDIO_MEMO_ENRICHMENT_MODEL }
-    case 'google':
-      return { ...config, model: GOOGLE_AUDIO_MEMO_ENRICHMENT_MODEL }
-    case 'openrouter':
-      return null
-    case 'openai-compatible':
-      return config
-  }
-}
-
-/**
- * Pick the small-model provider for audio memo enrichment. The user's
- * default provider wins when it has a fixed small model; otherwise the
- * first supported configured provider is used. OpenRouter is skipped because
- * `openrouter/auto` is not a small-model guarantee; OpenAI-compatible entries
- * use the model the user configured for that endpoint.
- */
-export function pickAudioMemoEnrichmentConfig(state: AiProvidersState): AiProviderConfig | null {
-  const preferred = state.providers.find((provider) => provider.id === state.defaultProviderId)
-  const ordered =
-    preferred === undefined
-      ? state.providers
-      : [preferred, ...state.providers.filter((provider) => provider.id !== preferred.id)]
-  for (const provider of ordered) {
-    const titleConfig = audioMemoEnrichmentConfig(provider)
-    if (titleConfig !== null) {
-      return titleConfig
-    }
-  }
-  return null
 }
 
 function firstContentLine(text: string): string {
@@ -136,7 +95,7 @@ export async function generateAudioMemoTitle(
   if (request.credentials === undefined) {
     return fallback
   }
-  const titleConfig = audioMemoEnrichmentConfig(request.credentials.config)
+  const titleConfig = smallModelConfig(request.credentials.config)
   if (titleConfig === null) {
     return fallback
   }

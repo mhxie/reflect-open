@@ -44,6 +44,8 @@ pub struct IndexedNote {
     pub(super) gist_url: Option<String>,
     /// The body changed since it was last published to the gist.
     pub(super) gist_stale: bool,
+    /// The `aiSummary` frontmatter block summarizes the current body.
+    pub(super) summary_fresh: bool,
     pub(super) file_hash: String,
     pub(super) mtime: i64,
     pub(super) text: String,
@@ -168,8 +170,8 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
     remove_note(conn, &note.path)?;
 
     conn.prepare_cached(
-        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20)",
+        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
     )?
     .execute(params![
         note.path,
@@ -195,6 +197,7 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>(),
+        i64::from(note.summary_fresh),
     ])?;
     {
         let mut stmt = conn.prepare_cached(

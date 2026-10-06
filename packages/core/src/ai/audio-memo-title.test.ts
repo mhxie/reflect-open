@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MockLanguageModelV3 } from '@reflect/modules/ai/test'
 import type { LanguageModelV3Usage } from '@ai-sdk/provider'
 import type { AiProviderConfig } from '../settings/schema.ts'
-import { generateAudioMemoTitle, pickAudioMemoEnrichmentConfig } from './audio-memo-title.ts'
+import { generateAudioMemoTitle } from './audio-memo-title.ts'
+import { pickSmallModelConfig } from './small-model.ts'
 import { languageModel } from './language-model.ts'
 
 vi.mock('./language-model', () => ({
@@ -142,7 +143,7 @@ describe('generateAudioMemoTitle', () => {
 
   it('prefers the default supported provider for title generation', () => {
     expect(
-      pickAudioMemoEnrichmentConfig({
+      pickSmallModelConfig({
         providers: [CONFIG, ANTHROPIC_CONFIG],
         defaultProviderId: ANTHROPIC_CONFIG.id,
       }),
@@ -155,7 +156,7 @@ describe('generateAudioMemoTitle', () => {
 
   it('skips OpenRouter because it does not guarantee a small model', () => {
     expect(
-      pickAudioMemoEnrichmentConfig({
+      pickSmallModelConfig({
         providers: [OPENROUTER_CONFIG, GOOGLE_CONFIG],
         defaultProviderId: OPENROUTER_CONFIG.id,
       }),

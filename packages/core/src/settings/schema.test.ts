@@ -16,6 +16,7 @@ describe('settingsSchema', () => {
       semanticSearchEnabled: false,
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
+      aiSummaries: 'local',
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',
@@ -134,6 +135,10 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ semanticSearchEnabled: false }).semanticSearchEnabled).toBe(false)
     expect(settingsSchema.parse({ describeAssets: true }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: false }).describeAssets).toBe(false)
+    expect(settingsSchema.parse({ aiSummaries: 'off' }).aiSummaries).toBe('off')
+    expect(settingsSchema.parse({ aiSummaries: 'local-and-cloud' }).aiSummaries).toBe(
+      'local-and-cloud',
+    )
     expect(settingsSchema.parse({ transcriptionEngine: 'local' }).transcriptionEngine).toBe('local')
     expect(settingsSchema.parse({ transcriptionEngine: 'whisper' }).transcriptionEngine).toBe(
       'cloud',
@@ -316,6 +321,7 @@ describe('settingsSchema', () => {
     // back to the default rather than failing the whole settings load.
     expect(settingsSchema.parse({ describeAssets: 'yes' }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: 0 }).describeAssets).toBe(true)
+    expect(settingsSchema.parse({ aiSummaries: 'cloud' }).aiSummaries).toBe('local')
     expect(settingsSchema.parse({ transcriptionFormat: 'yes' }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionFormat: 0 }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionPrompt: 42 }).transcriptionPrompt).toBe('')
@@ -366,6 +372,7 @@ describe('settingsSchema', () => {
       semanticSearchEnabled: false,
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
+      aiSummaries: 'local',
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',

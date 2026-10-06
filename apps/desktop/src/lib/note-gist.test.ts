@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { gistBodyHash, upsertFrontmatter } from '@reflect/core'
+import { noteBodyHash, upsertFrontmatter } from '@reflect/core'
 import type { NoteSession } from '@/editor/note-session.ts'
 import { getNoteRowOverlay, resetNoteRowOverlays } from '@/hooks/note-row-overlay.ts'
 
@@ -91,7 +91,7 @@ describe('publishNoteToGist', () => {
       { name: 'A.md', content: BODY },
       expect.any(Function),
     )
-    const gist = { id: 'g1', url: PUBLISHED.htmlUrl, file: 'A.md', hash: gistBodyHash(BODY) }
+    const gist = { id: 'g1', url: PUBLISHED.htmlUrl, file: 'A.md', hash: noteBodyHash(BODY) }
     expect(writeNote).toHaveBeenCalledWith('notes/a.md', upsertFrontmatter(BODY, { gist }), 3, BODY)
   })
 
@@ -125,7 +125,7 @@ describe('publishNoteToGist', () => {
     await publishNoteToGist('notes/a.md', 3)
 
     expect(commitFrontmatter).toHaveBeenCalledWith({
-      gist: { id: 'g1', url: PUBLISHED.htmlUrl, file: 'A.md', hash: gistBodyHash(BODY) },
+      gist: { id: 'g1', url: PUBLISHED.htmlUrl, file: 'A.md', hash: noteBodyHash(BODY) },
     })
     expect(writeNote).not.toHaveBeenCalled()
   })

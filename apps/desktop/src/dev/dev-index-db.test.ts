@@ -36,6 +36,7 @@ function sampleNote(overrides: Partial<IndexedNote> = {}): IndexedNote {
     bodyChars: 0,
     gistUrl: null,
     gistStale: false,
+    summaryFresh: false,
     fileHash: 'hash-1',
     mtime: 1_700_000_000_000,
     text: 'Sample Note body about local-first sync',
