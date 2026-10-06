@@ -6,6 +6,8 @@ interface ListRowProps {
   path: string
   /** The column template the list's header row shares. */
   grid: string
+  /** Additional row styling; callers preserve the row's selection treatment. */
+  className?: string | undefined
   /** Position in the list's render order, for keyboard scrolling (`data-row-index`). */
   index?: number | undefined
   /** What a row is, for the indicator's label: "note", "entry". */
@@ -29,6 +31,7 @@ interface ListRowProps {
 export function ListRow({
   path,
   grid,
+  className,
   index,
   noun,
   selected,
@@ -55,6 +58,7 @@ export function ListRow({
         selected
           ? 'border-y border-accent/20 bg-accent-soft text-text dark:border-accent/10 dark:text-text'
           : 'shadow-[var(--border-hairline)] hover:bg-surface-hover',
+        className,
       )}
     >
       <button

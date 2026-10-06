@@ -4,11 +4,14 @@ import { isWikiGuide } from './group.ts'
 import type { WikiEntry } from './list.ts'
 
 /**
- * What the Wiki screen is narrowed to: entries with a flagged claim, with no
- * reviewer verification yet, with a claim lacking a source, without a copy in
- * one translation folder, or carrying a tag.
+ * What the Wiki screen is narrowed to: knowledge entries, index guides,
+ * entries with a flagged claim, with no reviewer verification yet, with a
+ * claim lacking a source, without a copy in one translation folder, or
+ * carrying a tag.
  */
 export type WikiFilter =
+  | { readonly kind: 'knowledge' }
+  | { readonly kind: 'index' }
   | { readonly kind: 'flagged' }
   | { readonly kind: 'unreviewed' }
   | { readonly kind: 'unsourced' }
@@ -21,6 +24,8 @@ export function wikiFiltersEqual(left: WikiFilter | null, right: WikiFilter | nu
     return left === right
   }
   switch (left.kind) {
+    case 'knowledge':
+    case 'index':
     case 'flagged':
     case 'unreviewed':
     case 'unsourced':
@@ -33,11 +38,17 @@ export function wikiFiltersEqual(left: WikiFilter | null, right: WikiFilter | nu
 }
 
 /**
- * Whether `entry` passes `filter`. Guides make no claims, so only a tag can
- * select one; an unread entry (no summary) passes only the translation and
- * tag filters, which don't depend on its contents.
+ * Whether `entry` passes `filter`. Guides make no claims, so only the index
+ * and tag filters select them. Unread entries pass only the translation and
+ * tag filters; their role stays unknown until their contents can be read.
  */
 export function matchesWikiFilter(entry: WikiEntry, filter: WikiFilter): boolean {
+  if (filter.kind === 'index') {
+    return isWikiGuide(entry)
+  }
+  if (filter.kind === 'knowledge') {
+    return entry.summary !== null && entry.summary.claims > 0
+  }
   if (filter.kind === 'tag') {
     const key = foldTag(filter.tag)
     return entry.tags.some((tag) => foldTag(tag) === key)

@@ -1,9 +1,10 @@
 import { memo, type MouseEvent, type ReactElement } from 'react'
-import { displayNoteTitle, type WikiEntry } from '@reflect/core'
-import { Languages } from 'lucide-react'
+import { displayNoteTitle, isWikiGuide, type WikiEntry } from '@reflect/core'
+import { Languages, Waypoints } from 'lucide-react'
 import { ListRow } from '@/components/all-notes/list-row.tsx'
 import { ListRowSubject } from '@/components/all-notes/list-row-subject.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
+import { Badge } from '@/components/ui/badge.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { formatDayRecencyLabel, formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
@@ -60,6 +61,7 @@ export const WikiEntryRow = memo(function WikiEntryRow({
   onOpen,
 }: WikiEntryRowProps): ReactElement {
   const { settings } = useSettings()
+  const isIndex = isWikiGuide(entry)
   let updated = '—'
   if (entry.revised !== null) {
     updated = formatDayRecencyLabel(entry.revised, settings)
@@ -71,6 +73,7 @@ export const WikiEntryRow = memo(function WikiEntryRow({
     <ListRow
       path={entry.path}
       grid={WIKI_GRID}
+      className={isIndex && !selected ? 'bg-accent-soft/30' : undefined}
       index={index}
       noun="entry"
       selected={selected}
@@ -87,6 +90,7 @@ export const WikiEntryRow = memo(function WikiEntryRow({
             selected ? 'text-accent' : untranslated === null ? 'text-text' : 'text-text-secondary',
           )}
         >
+          {isIndex ? <Waypoints aria-hidden className="size-3.5 flex-none text-accent" /> : null}
           <span className="truncate">{displayNoteTitle(entry.title)}</span>
           <NoteStateIndicator
             path={entry.path}
@@ -94,6 +98,11 @@ export const WikiEntryRow = memo(function WikiEntryRow({
             hasConflict={entry.hasConflict}
           />
         </ListRowSubject>
+        {isIndex ? (
+          <Badge variant="secondary" className="h-4 rounded px-1.5 text-[10px]">
+            Index
+          </Badge>
+        ) : null}
         {untranslated === null ? null : (
           <Tooltip>
             <TooltipTrigger
