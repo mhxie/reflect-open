@@ -24,6 +24,8 @@ export interface CommandContext {
   togglePin: () => Promise<void>
   /** Toggle the focused note privacy with immediate shared feedback. */
   togglePrivate: () => Promise<void>
+  /** Open the focused note's status menu (privacy, edit state, backup). */
+  showNoteDetails: () => void
   back: () => void
   forward: () => void
   /** Discard the current view's saved scroll offsets so it re-anchors when revisited. */

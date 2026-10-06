@@ -24,6 +24,7 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath, type AllNotesFilter } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
+import { AllNotesPrivacyButton } from './all-notes-privacy-button.tsx'
 import { AllNotesTable } from './all-notes-table.tsx'
 import { AttachmentGallery } from './attachment-gallery.tsx'
 import { AllNotesTrashDialog } from './all-notes-trash-dialog.tsx'
@@ -154,6 +155,10 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
     () => [...selection.selected].filter((path) => !isDaily(path)),
     [selection.selected],
   )
+  const selectedNotes = useMemo(
+    () => (sortedNotes ?? []).filter((note) => selection.selected.has(note.path)),
+    [sortedNotes, selection.selected],
+  )
   const openTrashConfirm = useCallback(() => {
     if (trashableSelectedPaths.length === 0) {
       return
@@ -196,6 +201,7 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
           <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2 @xs/all-notes:ml-0 @xl/all-notes:gap-3">
+          <AllNotesPrivacyButton notes={selectedNotes} />
           {trashableSelectedPaths.length > 0 ? (
             <Button
               type="button"

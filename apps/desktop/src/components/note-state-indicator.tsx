@@ -47,7 +47,7 @@ export function NoteStateIndicator({
               className,
             )}
           >
-            {createElement(Icon, { 'aria-hidden': true, className: 'size-3', strokeWidth: 2 })}
+            {createElement(Icon, { 'aria-hidden': true, className: 'size-3.5', strokeWidth: 2 })}
           </span>
         }
       />

@@ -6,6 +6,7 @@ import {
   type ParsedNote,
 } from '@reflect/core'
 import { commitNoteFrontmatter, readNoteSource } from '@/lib/note-frontmatter.ts'
+import { toast } from '@/components/ui/toast.tsx'
 import { startOperation } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { NoteActionInput } from './notes/types.ts'
@@ -35,21 +36,29 @@ export function hasUnreadableLock(
   return kind === 'unreadable' || (kind === 'private' && note.frontmatterWarning !== undefined)
 }
 
+/** How a single note's privacy write ended. */
+type PrivacyWrite =
+  | { readonly kind: 'written'; readonly previous: boolean; readonly next: boolean }
+  | { readonly kind: 'skipped' }
+
 /**
- * Toggle privacy with shared optimistic feedback and save-error reporting.
- * Markdown owns the final state. A note inside a local-only folder is private
- * by its path and read-only, so there is nothing to toggle; neither is there
- * for a locked note whose frontmatter can't be read ({@link hasUnreadableLock}),
- * which stays locked untouched.
+ * Set one note's `private` flag to what `decide` picks from its current value,
+ * with optimistic row feedback and save-error reporting. Markdown owns the
+ * final state. A note inside a local-only folder is private by its path, and a
+ * locked note whose frontmatter can't be read ({@link hasUnreadableLock})
+ * stays locked untouched; both are skipped, as is a note already being written.
  */
-export async function toggleNotePrivate(input: NoteActionInput): Promise<void> {
+async function writeNotePrivacy(
+  input: NoteActionInput,
+  decide: (current: boolean) => boolean,
+): Promise<PrivacyWrite> {
   const { queryClient, root, generation, path } = input
   if (isLocalOnlyPath(path)) {
-    return
+    return { kind: 'skipped' }
   }
   const key = JSON.stringify([root, generation, path])
   if (pendingPrivacy.has(key)) {
-    return
+    return { kind: 'skipped' }
   }
   pendingPrivacy.add(key)
   const queryKey = queryKeys.index.note(root, path)
@@ -64,21 +73,106 @@ export async function toggleNotePrivate(input: NoteActionInput): Promise<void> {
       startOperation('Updating privacy').fail(
         `${UNREADABLE_FRONTMATTER_LABEL}. ${UNREADABLE_FRONTMATTER_HINT}`,
       )
-      return
+      return { kind: 'skipped' }
     }
     const previous = queryClient.getQueryData<NoteRow | null>(queryKey)
-    const predicted = !(previous?.isPrivate ?? false)
+    const predicted = decide(previous?.isPrivate ?? false)
     apply(predicted)
 
-    const actual = !parsed.frontmatter.private
-    await commitNoteFrontmatter(path, { private: actual }, generation)
-    if (actual !== predicted) {
-      apply(actual)
+    const current = parsed.frontmatter.private === true
+    const next = decide(current)
+    // A note already in the asked-for state keeps its file byte for byte.
+    if (next !== current) {
+      await commitNoteFrontmatter(path, { private: next }, generation)
     }
+    if (next !== predicted) {
+      apply(next)
+    }
+    return { kind: 'written', previous: current, next }
   } catch (cause) {
     void queryClient.invalidateQueries({ queryKey, exact: true })
     startOperation('Updating privacy').fail(errorMessage(cause))
+    return { kind: 'skipped' }
   } finally {
     pendingPrivacy.delete(key)
   }
+}
+
+/** Set each note's privacy back to what it was before a write. */
+async function restorePrivacy(
+  input: Omit<NoteActionInput, 'path'>,
+  previous: ReadonlyMap<string, boolean>,
+): Promise<void> {
+  for (const [path, isPrivate] of previous) {
+    await writeNotePrivacy({ ...input, path }, () => isPrivate)
+  }
+}
+
+/** Confirm a privacy change with a toast whose Undo puts every note back. */
+function announcePrivacy(
+  input: Omit<NoteActionInput, 'path'>,
+  title: string,
+  previous: ReadonlyMap<string, boolean>,
+): void {
+  toast.add({
+    title,
+    actionProps: {
+      children: 'Undo',
+      onClick: () => void restorePrivacy(input, previous),
+    },
+  })
+}
+
+/**
+ * Toggle one note's privacy — the command, the context sidebar, the status
+ * menu and the mobile actions all land here — and offer Undo.
+ */
+export async function toggleNotePrivate(input: NoteActionInput): Promise<void> {
+  const result = await writeNotePrivacy(input, (current) => !current)
+  if (result.kind === 'written') {
+    announcePrivacy(
+      input,
+      result.next ? 'Marked private' : 'No longer private',
+      new Map([[input.path, result.previous]]),
+    )
+  }
+}
+
+/** What a bulk privacy change did, for the caller's own feedback. */
+export interface BulkPrivacyResult {
+  /** Notes whose flag changed. */
+  readonly changed: number
+  /** Notes left alone: local-only, unreadable, already being written, or failed. */
+  readonly skipped: number
+}
+
+/**
+ * Set every listed note's privacy to `isPrivate`, one note at a time, and
+ * offer one Undo for the notes that changed. Notes already in that state are
+ * left as they are.
+ */
+export async function setNotesPrivate(
+  input: Omit<NoteActionInput, 'path'>,
+  paths: readonly string[],
+  isPrivate: boolean,
+): Promise<BulkPrivacyResult> {
+  const previous = new Map<string, boolean>()
+  let skipped = 0
+  for (const path of paths) {
+    const result = await writeNotePrivacy({ ...input, path }, () => isPrivate)
+    if (result.kind === 'skipped') {
+      skipped += 1
+    } else if (result.previous !== result.next) {
+      previous.set(path, result.previous)
+    }
+  }
+  if (previous.size > 0) {
+    const notes = previous.size === 1 ? '1 note' : `${previous.size} notes`
+    announcePrivacy(
+      input,
+      isPrivate ? `Marked ${notes} private` : `${notes} no longer private`,
+      previous,
+    )
+  }
+  return { changed: previous.size, skipped }
 }

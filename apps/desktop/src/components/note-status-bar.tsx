@@ -1,4 +1,5 @@
 import { createElement, useState, type ReactElement } from 'react'
+import { useNoteMenuRequest } from '@/editor/status/note-menu-request.ts'
 import { useNoteStatus } from '@/editor/status/note-status-store.ts'
 import { useNoteGitVersion } from '@/hooks/use-note-git-version.ts'
 import { useNoteMtime } from '@/hooks/use-note-mtime.ts'
@@ -18,7 +19,12 @@ import { useRouter } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { NoteProtectionDetails } from '@/components/note-protection-details.tsx'
 import { NoteStatusMenu } from '@/components/note-status-menu.tsx'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu.tsx'
+import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 
 const numberFormat = new Intl.NumberFormat()
@@ -61,6 +67,27 @@ export function NoteStatusBar({
   if (details.root !== root || details.generation !== generation || details.path !== path) {
     setDetails({ root, generation, path, open: false })
   }
+  const [recovery, setRecovery] = useState({ root, generation, path, open: false })
+  const recoveryOpen =
+    visible &&
+    recovery.root === root &&
+    recovery.generation === generation &&
+    recovery.path === path &&
+    recovery.open
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
+  // The palette's "Show note details" and the editor's Private notice open
+  // this menu from afar: each new request for this note opens it once, and a
+  // request made before this note was shown is not replayed.
+  const requested = useNoteMenuRequest(path)
+  const [handled, setHandled] = useState({ path, id: requested })
+  if (handled.path !== path) {
+    setHandled({ path, id: requested })
+  } else if (requested !== handled.id) {
+    setHandled({ path, id: requested })
+    if (requested !== null) {
+      setDetails({ root, generation, path, open: true })
+    }
+  }
   const open =
     visible &&
     details.root === root &&
@@ -98,17 +125,17 @@ export function NoteStatusBar({
         placement === 'overlay' && peekedPath !== null && 'z-30',
       )}
     >
-      <Popover
+      <DropdownMenu
         open={open}
         onOpenChange={(next) => setDetails({ root, generation, path, open: next })}
       >
         <Tooltip>
           <TooltipTrigger
             render={
-              <PopoverTrigger
-                type="button"
+              <DropdownMenuTrigger
+                ref={setAnchor}
                 aria-label={`Note state: ${labels.join(', ')}`}
-                className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+                className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none data-popup-open:bg-surface-active"
               />
             }
           >
@@ -126,31 +153,40 @@ export function NoteStatusBar({
           </TooltipTrigger>
           <TooltipContent side="top">{labels.join(' · ')}</TooltipContent>
         </Tooltip>
-        <PopoverContent
+        <DropdownMenuContent
           side="top"
           align="start"
-          aria-label="Note details"
-          className={cn(
-            'pointer-events-auto max-h-(--available-height) max-w-[calc(100vw-2rem)] gap-0 overflow-y-auto p-1',
-            state.isProtected ? 'w-72' : 'w-60',
-          )}
+          className="pointer-events-auto w-60 max-w-[calc(100vw-2rem)]"
         >
-          {state.isProtected && status.protection !== null && scope !== null ? (
-            <div className="px-2 pt-2">
-              <NoteProtectionDetails
-                key={`${scope.generation}:${scope.path}:${status.protection.kind}`}
-                scope={scope}
-                protection={status.protection}
-              />
-            </div>
-          ) : null}
           <NoteStatusMenu
             sections={sections}
             state={state}
+            protection={state.isProtected ? (status.protection?.kind ?? null) : null}
             togglePath={canTogglePrivacy ? scope.path : null}
+            onResolve={() => setRecovery({ root, generation, path, open: true })}
           />
-        </PopoverContent>
-      </Popover>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {state.isProtected && status.protection !== null && scope !== null ? (
+        <Popover
+          open={recoveryOpen}
+          onOpenChange={(next) => setRecovery({ root, generation, path, open: next })}
+        >
+          <PopoverContent
+            side="top"
+            align="start"
+            anchor={anchor}
+            aria-label="Resolve note"
+            className="pointer-events-auto max-h-(--available-height) w-72 max-w-[calc(100vw-2rem)] overflow-y-auto"
+          >
+            <NoteProtectionDetails
+              key={`${scope.generation}:${scope.path}:${status.protection.kind}`}
+              scope={scope}
+              protection={status.protection}
+            />
+          </PopoverContent>
+        </Popover>
+      ) : null}
       <div
         data-testid="note-statistics"
         className={cn(
