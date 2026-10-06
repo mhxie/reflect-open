@@ -27,12 +27,15 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   isLocalOnlyReadOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
   getNote,
 }))
+const requestNoteMenu = vi.hoisted(() => vi.fn<(path: string) => void>())
+vi.mock('@/editor/status/note-menu-request.ts', () => ({ requestNoteMenu }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 }, indexing: false }),
 }))
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
     settings: {
+      statusBarEnabled: true,
       editorMarkdownSyntax: 'hide',
       allNotesFilterTags: [],
       aiProviders: [],
@@ -239,6 +242,18 @@ it('opens a locked note in the editor with nothing remote', async () => {
   await view.unmount()
 })
 
+it('marks a private note above its title and opens its status menu from there', async () => {
+  files['notes/locked.md'] = `---\nprivate: true\n---\n# Locked\n`
+  getNote.mockImplementation(async (path) => noteRow(path, true))
+  const view = await renderNote('notes/locked.md')
+
+  const notice = page.getByRole('button', { name: 'Private note: show note details' })
+  await expect.element(notice).toHaveTextContent('Private · never sent to AI or other services')
+  await notice.click()
+  expect(requestNoteMenu).toHaveBeenCalledWith('notes/locked.md')
+  await view.unmount()
+})
+
 it('treats a note whose live header is locked as private while its row says public', async () => {
   files['notes/locked.md'] = `---\nprivate: true\n---\n# Locked\n\n${REMOTE_BODY}`
   const view = await renderNote('notes/locked.md')
@@ -271,9 +286,12 @@ it('switches the policy live on a Lock toggle, without remounting the editor', a
     expect(commands.slice(beforeLock)).not.toContain(command)
   }
 
+  await expect.element(page.getByTestId('private-note-notice')).toBeVisible()
+
   await toggleNotePrivate({ queryClient: client, root: '/g', generation: 1, path })
   await expect.element(page.getByText('Archived post')).toBeVisible()
   expect(page.getByTestId('embed-link').query()).toBeNull()
+  expect(page.getByTestId('private-note-notice').query()).toBeNull()
   expect(editable()).toBe(editor)
   await view.unmount()
 })

@@ -297,9 +297,17 @@ export function useEditorAiMenu({
 
   const openMenu = useCallback((): boolean => {
     const editor = editorRef.current
-    // Only consume the key when the menu can actually open — a private note
-    // or an empty selection lets ⌘⇧J fall through.
-    if (privateNote || !editor || editor.getSelectedText() === '') return false
+    // An empty selection lets ⌘⇧J fall through.
+    if (!editor || editor.getSelectedText() === '') return false
+    // A private note has no AI entry at all, so asking for one explicitly
+    // says why rather than doing nothing.
+    if (privateNote) {
+      toast.add({
+        title: 'AI is off for this note',
+        description: 'It’s private, so its content is never sent to an AI provider.',
+      })
+      return true
+    }
     editor.openSelectionMenu()
     return true
   }, [privateNote, editorRef])

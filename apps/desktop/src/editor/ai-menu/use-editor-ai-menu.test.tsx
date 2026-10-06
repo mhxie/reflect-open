@@ -7,6 +7,7 @@ import type {
   TransformStreamEvent,
 } from '@reflect/core'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
+import { toast } from '@/components/ui/toast.tsx'
 import { useEditorAiMenu } from './use-editor-ai-menu.tsx'
 
 const provider = vi.hoisted((): AiProviderConfig => ({
@@ -71,14 +72,17 @@ beforeEach(() => {
 })
 
 describe('useEditorAiMenu', () => {
-  it('offers no cloud AI entry for a private note', async () => {
+  it('offers no cloud AI entry for a private note and says why when asked', async () => {
+    const add = vi.spyOn(toast, 'add')
     const { editorRef, openSelectionMenu } = editorWithSelection()
     const { result } = await renderHook(() =>
       useEditorAiMenu({ path: 'notes/plan.md', privateNote: true, sessionEpoch: 1, editorRef }),
     )
     expect(result.current.onSelectionMenuSearch).toBeUndefined()
-    expect(result.current.openMenu()).toBe(false)
+    expect(result.current.openMenu()).toBe(true)
     expect(openSelectionMenu).not.toHaveBeenCalled()
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ title: 'AI is off for this note' }))
+    add.mockRestore()
   })
 
   it('offers the menu for a public note (control)', async () => {

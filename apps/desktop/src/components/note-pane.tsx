@@ -16,6 +16,7 @@ import {
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
 import { ConflictNoteView } from '@/components/conflict-note-view.tsx'
 import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
+import { PrivateNoteNotice } from '@/components/private-note-notice.tsx'
 import { NoteLoading } from '@/components/note-loading.tsx'
 import { NoteOpenError } from '@/components/note-open-error.tsx'
 import { NoteRecoveryBanner } from '@/components/note-recovery-banner.tsx'
@@ -537,6 +538,9 @@ export function NotePaneComponent({
     <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
       <div className={gutterClassName}>
         {localOnly ? <LocalOnlyNotice editable className="mb-3" /> : null}
+        {privateNote && !localOnly ? (
+          <PrivateNoteNotice path={path} interactive={settings.statusBarEnabled} className="mb-3" />
+        ) : null}
 
         {/* A parked conflict comes first: restoring under it would race the
             choice between the two versions. */}

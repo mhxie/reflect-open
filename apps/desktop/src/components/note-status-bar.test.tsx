@@ -1,6 +1,7 @@
 import { act, type ReactElement } from 'react'
 import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NoteState, NoteStateKind } from '@reflect/core'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
@@ -17,6 +18,9 @@ import type { Route } from '@/routing/route.ts'
 import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import { toast } from '@/components/ui/toast.tsx'
+import { TooltipProvider } from '@/components/ui/tooltip.tsx'
+import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { NoteStatusBar } from './note-status-bar.tsx'
 
 const revealAsset = vi.hoisted(() => vi.fn(async (_path: string, _generation: number) => {}))
@@ -51,6 +55,15 @@ const gitVersion = vi.hoisted(() => {
   return { current, use: vi.fn<typeof useNoteGitVersion>(() => current.value) }
 })
 vi.mock('@/hooks/use-note-git-version.ts', () => ({ useNoteGitVersion: gitVersion.use }))
+const toggleNotePrivate = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('@/lib/note-private.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/note-private.ts')>()),
+  toggleNotePrivate,
+}))
+const unreadable = vi.hoisted(() => ({ value: false }))
+vi.mock('@/hooks/use-unreadable-frontmatter.ts', () => ({
+  useUnreadableFrontmatter: () => unreadable.value,
+}))
 
 const EDITABLE: NoteState = {
   kind: 'editable',
@@ -122,10 +135,27 @@ function renderBar(
   path?: string,
 ) {
   return render(
-    <RouterProvider initialRoute={initialRoute}>
-      <NoteStatusBar placement={placement} {...(path === undefined ? {} : { path })} />
-    </RouterProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider initialRoute={initialRoute}>
+        <NoteStatusBar placement={placement} {...(path === undefined ? {} : { path })} />
+      </RouterProvider>
+    </QueryClientProvider>,
   )
+}
+
+/** Each menu row's label, without the explanatory hints. */
+function detailValues(): (string | null)[] {
+  const menu = page.getByRole('menu')
+  return [...menu.element().querySelectorAll('[data-testid="note-menu-label"]')].map(
+    (node) => node.textContent?.trim() ?? null,
+  )
+}
+
+/** Open a protected note's menu and its recovery panel. */
+async function openRecovery(states: string): Promise<void> {
+  await page.getByRole('button', { name: `Note state: ${states}` }).click()
+  await page.getByRole('menuitem', { name: /Resolve…/ }).click()
+  await expect.element(page.getByRole('dialog', { name: 'Resolve note' })).toBeVisible()
 }
 
 afterEach(async () => {
@@ -140,6 +170,8 @@ afterEach(async () => {
   gitVersion.current.value = { version: 'abc123def4', pending: false, unavailable: false }
   gitVersion.use.mockClear()
   revealAsset.mockReset()
+  toggleNotePrivate.mockClear()
+  unreadable.value = false
   setPlatformSurface({ mobileApp: false })
 })
 
@@ -153,15 +185,13 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'unsupported-markdown' },
     })
     await renderBar({ kind: 'note', path: 'notes/source.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await openRecovery('Protected')
 
-    await expect.element(page.getByText('Unsupported Markdown', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('The editor cannot save', { exact: false })).toBeVisible()
     await page.getByRole('button', { name: 'Show file', exact: true }).click()
 
     expect(revealAsset).toHaveBeenCalledWith('notes/source.md', 7)
-    await expect
-      .element(page.getByRole('button', { name: 'Note state: Protected' }))
-      .toHaveTextContent('Protected')
+    await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
   })
 
   it('keeps protection and reports a failed file reveal', async () => {
@@ -174,7 +204,7 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'unsupported-markdown' },
     })
     await renderBar({ kind: 'note', path: 'notes/source.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await openRecovery('Protected')
     await page.getByRole('button', { name: 'Show file', exact: true }).click()
 
     await expect.element(page.getByRole('alert')).toHaveTextContent('File is unavailable')
@@ -191,7 +221,7 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'save-blocked', message: 'Folder is unavailable', retrySave },
     })
     await renderBar({ kind: 'note', path: 'notes/local.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await openRecovery('Protected, Local-only')
 
     await expect.element(page.getByText('Folder is unavailable', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Try again', exact: true }).click()
@@ -216,7 +246,7 @@ describe('NoteStatusBar', () => {
       },
     })
     await renderBar({ kind: 'note', path: 'notes/local.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await openRecovery('Protected, Local-only')
 
     await expect.element(page.getByText('External change', { exact: true })).toBeVisible()
     expect(page.getByRole('button', { name: 'Try again', exact: true }).query()).toBeNull()
@@ -239,7 +269,7 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'unsupported-markdown' },
     })
     await renderBar({ kind: 'note', path: 'notes/recovery.md' })
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await openRecovery('Protected')
     await expect.element(page.getByRole('button', { name: 'Show file' })).toBeVisible()
 
     const retrySave = vi.fn()
@@ -267,9 +297,9 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'unsupported-markdown' },
     })
     await renderBar({ kind: 'note', path: 'notes/source.md' }, 'inline')
-    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+    await openRecovery('Protected')
 
-    await expect.element(page.getByText('Unsupported Markdown', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('The editor cannot save', { exact: false })).toBeVisible()
     expect(page.getByRole('button', { name: 'Show file' }).query()).toBeNull()
     expect(revealAsset).not.toHaveBeenCalled()
   })
@@ -341,7 +371,7 @@ describe('NoteStatusBar', () => {
     await vi.waitFor(() => expect(statistics().className).toContain('opacity-0'))
     expect(view.container.querySelector('[role="status"]')!.className).not.toContain('opacity-0')
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
-    await expect.element(page.getByRole('dialog', { name: 'Note details' })).toBeVisible()
+    await expect.element(page.getByRole('menu')).toBeVisible()
 
     document.dispatchEvent(new MouseEvent('mousemove'))
     await vi.waitFor(() => expect(statistics().className).not.toContain('opacity-0'))
@@ -368,18 +398,50 @@ describe('NoteStatusBar', () => {
   })
 
   it.each([
-    { state: states.editable, label: 'Editable' },
-    { state: states.private, label: 'Private' },
-    { state: states['local-only'], label: 'Local-only' },
-    { state: states['read-only'], label: 'Read-only' },
-    { state: states.protected, label: 'Protected' },
-  ])('shows one primary word for $label', async ({ state, label }) => {
+    { state: states.editable, kinds: ['editable'], labels: ['Editable'] },
+    { state: states.private, kinds: ['private'], labels: ['Private'] },
+    { state: states['local-only'], kinds: ['local-only'], labels: ['Local-only'] },
+    {
+      state: states['read-only'],
+      kinds: ['read-only', 'local-only'],
+      labels: ['Read-only', 'Local-only'],
+    },
+    { state: states.protected, kinds: ['protected'], labels: ['Protected'] },
+    {
+      state: { ...states.protected, isPrivate: true },
+      kinds: ['protected', 'private'],
+      labels: ['Protected', 'Private'],
+    },
+  ])('shows an icon for every state that applies: $labels', async ({ state, kinds, labels }) => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null, state })
     await renderBar({ kind: 'note', path: 'notes/a.md' })
 
-    const button = page.getByRole('button', { name: `Note state: ${label}` })
-    await expect.element(button).toHaveTextContent(label)
-    expect(button.element().textContent?.trim()).toBe(label)
+    const button = page.getByRole('button', { name: `Note state: ${labels.join(', ')}` })
+    await expect.element(button).toBeVisible()
+    const badges = [...button.element().querySelectorAll('[data-testid="note-state-badge"]')]
+    expect(badges.map((badge) => badge.getAttribute('data-state'))).toEqual(kinds)
+    expect(button.element().textContent?.trim()).toBe('')
+  })
+
+  it('names the states in a tooltip on the icon-only trigger', async () => {
+    publishStatus('notes/a.md', {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+      state: states['read-only'],
+    })
+    await render(
+      <TooltipProvider delay={0}>
+        <QueryClientProvider client={new QueryClient()}>
+          <RouterProvider initialRoute={{ kind: 'note', path: 'notes/a.md' }}>
+            <NoteStatusBar />
+          </RouterProvider>
+        </QueryClientProvider>
+      </TooltipProvider>,
+    )
+    await userEvent.hover(page.getByRole('button', { name: 'Note state: Read-only, Local-only' }))
+
+    await expect.element(page.getByText('Read-only · Local-only', { exact: true })).toBeVisible()
   })
 
   it('opens full dimensions with the keyboard and restores focus after Escape', async () => {
@@ -404,11 +466,13 @@ describe('NoteStatusBar', () => {
     await expect.element(button).toHaveFocus()
     await userEvent.keyboard('{Enter}')
 
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
+    const dialog = page.getByRole('menu')
     await expect.element(dialog).toBeVisible()
-    const values = [...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)
-    expect(values).toEqual(['Editable', 'Private', 'Blocked', 'Included', 'Idle', 'abc123def4'])
-    expect(values.every((value) => value !== null && !/\s/.test(value))).toBe(true)
+    expect(detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4'])
+    await expect.element(dialog.getByText('Never sent to AI or other services.')).toBeVisible()
+    await expect
+      .element(dialog.getByRole('menuitemcheckbox', { name: 'Private' }))
+      .toHaveAttribute('aria-checked', 'true')
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md', open: true }),
     )
@@ -445,15 +509,7 @@ describe('NoteStatusBar', () => {
     })
 
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
-    expect([...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
-      'Read-only',
-      'Standard',
-      'Allowed',
-      'Included',
-      'Offline',
-      'abc123def4',
-    ])
+    expect(detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4'])
   })
 
   it('keeps one horizontal row and hides the time before a narrow footer wraps', async () => {
@@ -503,15 +559,8 @@ describe('NoteStatusBar', () => {
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ path: 'daily/2026-10-02.md', isLocalOnly: true }),
     )
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
-    expect([...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
-      'Editable',
-      'Private',
-      'Blocked',
-      'Excluded',
-      'Disconnected',
-      'Excluded',
-    ])
+    expect(detailValues()).toEqual(['Local-only', 'Editable', 'Never backed up'])
+    expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
   })
 
   it('reads the same path only from its graph file generation', async () => {
@@ -530,14 +579,118 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    const dialog = page.getByRole('dialog', { name: 'Note details' })
-    expect([...dialog.element().querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
-      'Editable',
+    expect(detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4'])
+  })
+
+  it('toggles privacy from the details through the shared note action', async () => {
+    publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Editable' }).click()
+
+    const privacy = page.getByRole('menuitemcheckbox', { name: 'Private' })
+    await expect.element(privacy).toHaveAttribute('aria-checked', 'false')
+    await privacy.click()
+
+    expect(toggleNotePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md' }),
+    )
+    await act(async () => {
+      publishStatus('notes/a.md', {
+        characters: 10,
+        selectedCharacters: 0,
+        editedAt: null,
+        state: states.private,
+      })
+    })
+    await expect.element(page.getByRole('button', { name: 'Note state: Private' })).toBeVisible()
+    await expect.element(privacy).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('keeps a locked note with unreadable frontmatter locked', async () => {
+    unreadable.value = true
+    publishStatus('notes/a.md', {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+      state: states.private,
+    })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Private' }).click()
+
+    await expect
+      .element(page.getByRole('menuitemcheckbox', { name: 'Private' }))
+      .toHaveAttribute('aria-disabled', 'true')
+    await expect
+      .element(page.getByText("Fix this note's frontmatter to lock or unlock it."))
+      .toBeVisible()
+  })
+
+  it('offers no privacy toggle while the note is protected', async () => {
+    publishStatus('notes/a.md', {
+      characters: 10,
+      selectedCharacters: 0,
+      editedAt: null,
+      state: states.protected,
+      protection: { kind: 'unsupported-markdown' },
+    })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await page.getByRole('button', { name: 'Note state: Protected' }).click()
+
+    await expect.element(page.getByRole('menuitem', { name: /Resolve…/ })).toBeVisible()
+    expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
+    expect(detailValues()).toEqual([
+      'Unsupported Markdown',
       'Standard',
-      'Allowed',
-      'Unknown',
-      'Unknown',
+      'Paused',
+      'Backup off',
       'abc123def4',
     ])
+  })
+
+  it('moves between actionable items with the arrow keys and copies the version', async () => {
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const add = vi.spyOn(toast, 'add')
+    publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    page.getByRole('button', { name: 'Note state: Editable' }).element().focus()
+    await userEvent.keyboard('{Enter}')
+
+    const privacy = page.getByRole('menuitemcheckbox', { name: 'Private' })
+    const version = page.getByRole('menuitem', { name: 'Copy version abc123def4' })
+    await expect.element(privacy).toHaveFocus()
+    // Facts are disabled items a screen reader still reaches.
+    await userEvent.keyboard('{ArrowDown}')
+    await expect.element(page.getByRole('menuitem', { name: 'Editable' })).toHaveFocus()
+    await expect
+      .element(page.getByRole('menuitem', { name: 'Editable' }))
+      .toHaveAttribute('aria-disabled', 'true')
+    await userEvent.keyboard('{End}')
+    await expect.element(version).toHaveFocus()
+    await userEvent.keyboard('{Home}')
+    await expect.element(privacy).toHaveFocus()
+    await userEvent.keyboard('{End}{Enter}')
+
+    expect(writeText).toHaveBeenCalledWith('abc123def4')
+    await vi.waitFor(() =>
+      expect(add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Version copied' })),
+    )
+    await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
+    writeText.mockRestore()
+    add.mockRestore()
+  })
+
+  it('opens on a request for its note and never replays one made for another', async () => {
+    publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
+    await act(async () => {
+      requestNoteMenu('notes/b.md')
+    })
+    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await expect.element(page.getByTestId('note-statistics')).toHaveTextContent('10 chars')
+    expect(page.getByRole('menu').query()).toBeNull()
+
+    await act(async () => {
+      requestNoteMenu('notes/a.md')
+    })
+    await expect.element(page.getByRole('menu')).toBeVisible()
   })
 })

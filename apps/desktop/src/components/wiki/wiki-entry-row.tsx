@@ -82,17 +82,17 @@ export const WikiEntryRow = memo(function WikiEntryRow({
         <ListRowSubject
           path={entry.path}
           onOpen={onOpen}
-          className={
-            selected ? 'text-accent' : untranslated === null ? 'text-text' : 'text-text-secondary'
-          }
+          className={cn(
+            'flex min-w-0 items-center gap-1.5',
+            selected ? 'text-accent' : untranslated === null ? 'text-text' : 'text-text-secondary',
+          )}
         >
+          <span className="truncate">{displayNoteTitle(entry.title)}</span>
           <NoteStateIndicator
             path={entry.path}
             isPrivate={entry.isPrivate}
             hasConflict={entry.hasConflict}
-            className="mr-1"
           />
-          {displayNoteTitle(entry.title)}
         </ListRowSubject>
         {untranslated === null ? null : (
           <Tooltip>

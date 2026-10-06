@@ -85,6 +85,11 @@ vi.mock('@/providers/settings-provider.tsx', async () => {
     },
   }
 })
+const setNotesPrivate = vi.hoisted(() => vi.fn(async () => ({ changed: 0, skipped: 0 })))
+vi.mock('@/lib/note-private.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/note-private.ts')>()),
+  setNotesPrivate,
+}))
 vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
   openRouteInNewWindow,
@@ -310,8 +315,8 @@ describe('AllNotesScreen', () => {
       return sql.includes('from "tags"') ? tagRows : []
     })
     const view = await renderScreen()
-    const privateNote = view.getByRole('button', { name: 'Private Health Stacked', exact: true })
-    const protectedNote = view.getByRole('button', { name: 'Protected Tokyo Gâteau', exact: true })
+    const privateNote = view.getByRole('button', { name: 'Health Stacked Private', exact: true })
+    const protectedNote = view.getByRole('button', { name: 'Tokyo Gâteau Protected', exact: true })
     await expect
       .element(privateNote.getByRole('img', { name: 'Private', exact: true }))
       .toBeVisible()
@@ -324,6 +329,36 @@ describe('AllNotesScreen', () => {
     await expect
       .element(view.getByTestId('route'))
       .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/health.md' }))
+    await view.unmount()
+  })
+
+  it.each([
+    { privacy: [0, 0], label: 'Mark private (2)', makePrivate: true },
+    { privacy: [1, 0], label: 'Mark private (2)', makePrivate: true },
+    { privacy: [1, 1], label: 'Unmark private (2)', makePrivate: false },
+  ])('offers $label for the selection', async ({ privacy, label, makePrivate }) => {
+    setNotesPrivate.mockClear()
+    mockInvoke.mockImplementation(async (command, args) => {
+      if (command !== 'db_query') return null
+      const sql = String(args['sql'])
+      if (sql.includes('"preview"'))
+        return noteRows.map((row, index) => ({ ...row, is_private: privacy[index] }))
+      return sql.includes('from "tags"') ? tagRows : []
+    })
+    const view = await renderScreen()
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeVisible()
+    expect(view.getByRole('button', { name: /private \(/ }).query()).toBeNull()
+
+    await view.getByRole('button', { name: 'Select note', exact: true }).first().click()
+    await expect.element(view.getByRole('button', { name: 'Deselect note' })).toBeInTheDocument()
+    await view.getByRole('button', { name: 'Select note', exact: true }).click()
+    await view.getByRole('button', { name: label }).click()
+
+    expect(setNotesPrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ root: '/g', generation: 1 }),
+      expect.arrayContaining(['notes/health.md', 'notes/tokyo.md']),
+      makePrivate,
+    )
     await view.unmount()
   })
 

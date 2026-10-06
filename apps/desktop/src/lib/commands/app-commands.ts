@@ -280,6 +280,15 @@ const APP_COMMANDS: AppCommand[] = [
     run: (context) => context.togglePrivate(),
   },
   {
+    id: 'note.showDetails',
+    title: 'Show note details',
+    keywords: ['status', 'privacy', 'private', 'read-only', 'backup', 'version', 'info'],
+    // Opens the status bar's menu for the note the current route edits, so
+    // its privacy, edit state and backup are reachable without the mouse. No
+    // default keybinding, like the other note-scoped commands.
+    run: (context) => context.showNoteDetails(),
+  },
+  {
     id: 'note.publishGist',
     title: 'Share with private link',
     keywords: ['gist', 'github', 'share', 'publish', 'private link', 'export'],

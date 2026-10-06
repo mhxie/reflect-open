@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { PinnedNote } from '@reflect/core'
 import { toggleNotePinned } from '@/lib/note-pin.ts'
 import { toggleNotePrivate } from '@/lib/note-private.ts'
+import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { getIsComposing } from '@meowdown/core'
 import { usePalette } from '@/components/command-palette/palette-provider.tsx'
 import { registerKeymap } from '@/editor/keymap.ts'
@@ -268,6 +269,12 @@ export function useAppShortcuts(): CommandContext {
         const path = workingNotePath()
         if (root !== null && generation !== null && path !== null) {
           await toggleNotePrivate({ queryClient, root, generation, path })
+        }
+      },
+      showNoteDetails: () => {
+        const path = workingNotePath()
+        if (path !== null) {
+          requestNoteMenu(path)
         }
       },
       back,

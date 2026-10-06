@@ -21,7 +21,12 @@ vi.mock('@reflect/core', async (importOriginal) => {
 })
 vi.mock('@/editor/open-documents.ts', () => ({ openSession }))
 
-const { hasUnreadableLock, toggleNotePrivate } = await import('./note-private.ts')
+const toastAdd = vi.hoisted(() =>
+  vi.fn<(options: { title: string; actionProps?: { onClick?: () => void } }) => void>(),
+)
+vi.mock('@/components/ui/toast.tsx', () => ({ toast: { add: toastAdd } }))
+
+const { hasUnreadableLock, setNotesPrivate, toggleNotePrivate } = await import('./note-private.ts')
 
 let client: QueryClient
 const operationFail = vi.hoisted(() => vi.fn())
@@ -34,6 +39,7 @@ function input(path = 'notes/a.md') {
 beforeEach(() => {
   client = new QueryClient()
   operationFail.mockClear()
+  toastAdd.mockClear()
   readNote.mockReset()
   writeNote.mockClear()
   openSession.mockReset()
@@ -298,6 +304,92 @@ describe('privacy feedback', () => {
       session.discard()
       consoleError.mockRestore()
     }
+  })
+})
+
+/** A disk that keeps what is written, so a later read sees it. */
+function memoryDisk(initial: Record<string, string>): Record<string, string> {
+  const disk = { ...initial }
+  readNote.mockImplementation(async (path: string) => {
+    const source = disk[path]
+    if (source === undefined) {
+      throw { kind: 'notFound', message: path }
+    }
+    return source
+  })
+  writeNote.mockImplementation(async (...args: unknown[]) => {
+    const [path, contents] = args
+    if (typeof path === 'string' && typeof contents === 'string') {
+      disk[path] = contents
+    }
+  })
+  return disk
+}
+
+/** Click the Undo on the newest toast. */
+function undo(): void {
+  toastAdd.mock.lastCall?.[0].actionProps?.onClick?.()
+}
+
+describe('privacy undo', () => {
+  it('confirms a toggle and puts the note back on Undo', async () => {
+    const disk = memoryDisk({ 'notes/a.md': '# A\n' })
+    await toggleNotePrivate(input())
+    expect(disk['notes/a.md']).toBe('---\nprivate: true\n---\n\n# A\n')
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ title: 'Marked private' }))
+
+    undo()
+    await vi.waitFor(() => expect(disk['notes/a.md']).toBe('# A\n'))
+  })
+
+  it('says a note is no longer private when the toggle unlocks it', async () => {
+    memoryDisk({ 'notes/a.md': '---\nprivate: true\n---\n# A\n' })
+    await toggleNotePrivate(input())
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ title: 'No longer private' }))
+  })
+
+  it('offers no Undo when nothing was written', async () => {
+    memoryDisk({ 'notes/a.md': '---\nprivate: maybe\n---\n# A\n' })
+    await toggleNotePrivate(input())
+    expect(toastAdd).not.toHaveBeenCalled()
+  })
+})
+
+describe('setNotesPrivate', () => {
+  it('marks every listed note, skips ones already private, and undoes only its own changes', async () => {
+    const disk = memoryDisk({
+      'notes/a.md': '# A\n',
+      'notes/b.md': '---\nprivate: true\n---\n# B\n',
+      'daily/2026-10-01.md': '- standup\n',
+    })
+    const result = await setNotesPrivate(
+      { queryClient: client, root: '/g', generation: 3 },
+      ['notes/a.md', 'notes/b.md', 'daily/2026-10-01.md'],
+      true,
+    )
+    expect(result).toEqual({ changed: 2, skipped: 0 })
+    expect(disk['notes/a.md']).toContain('private: true')
+    expect(disk['daily/2026-10-01.md']).toContain('private: true')
+    expect(toastAdd).toHaveBeenCalledOnce()
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Marked 2 notes private' }),
+    )
+
+    undo()
+    await vi.waitFor(() => expect(disk['daily/2026-10-01.md']).toBe('- standup\n'))
+    expect(disk['notes/a.md']).toBe('# A\n')
+    expect(disk['notes/b.md']).toBe('---\nprivate: true\n---\n# B\n')
+  })
+
+  it('counts unreadable notes as skipped and stays quiet when nothing changed', async () => {
+    memoryDisk({ 'notes/a.md': '---\nprivate: maybe\n---\n# A\n' })
+    const result = await setNotesPrivate(
+      { queryClient: client, root: '/g', generation: 3 },
+      ['notes/a.md'],
+      false,
+    )
+    expect(result).toEqual({ changed: 0, skipped: 1 })
+    expect(toastAdd).not.toHaveBeenCalled()
   })
 })
 

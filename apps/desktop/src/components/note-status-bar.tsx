@@ -1,11 +1,13 @@
 import { createElement, useState, type ReactElement } from 'react'
+import { useNoteMenuRequest } from '@/editor/status/note-menu-request.ts'
 import { useNoteStatus } from '@/editor/status/note-status-store.ts'
 import { useNoteGitVersion } from '@/hooks/use-note-git-version.ts'
 import { useNoteMtime } from '@/hooks/use-note-mtime.ts'
 import { useNow } from '@/hooks/use-now.ts'
 import { useTyping } from '@/hooks/use-typing.ts'
 import { formatEditedLabel } from '@/lib/dates.ts'
-import { noteStatePresentation } from '@/lib/note-state-presentation.ts'
+import { noteDetails } from '@/lib/note-details.ts'
+import { activeNoteStateKinds, noteStatePresentation } from '@/lib/note-state-presentation.ts'
 import { cn } from '@/lib/utils.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
@@ -16,7 +18,14 @@ import { focusedNotePathForRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { NoteProtectionDetails } from '@/components/note-protection-details.tsx'
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover.tsx'
+import { NoteStatusMenu } from '@/components/note-status-menu.tsx'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu.tsx'
+import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 
 const numberFormat = new Intl.NumberFormat()
 
@@ -58,6 +67,27 @@ export function NoteStatusBar({
   if (details.root !== root || details.generation !== generation || details.path !== path) {
     setDetails({ root, generation, path, open: false })
   }
+  const [recovery, setRecovery] = useState({ root, generation, path, open: false })
+  const recoveryOpen =
+    visible &&
+    recovery.root === root &&
+    recovery.generation === generation &&
+    recovery.path === path &&
+    recovery.open
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
+  // The palette's "Show note details" and the editor's Private notice open
+  // this menu from afar: each new request for this note opens it once, and a
+  // request made before this note was shown is not replayed.
+  const requested = useNoteMenuRequest(path)
+  const [handled, setHandled] = useState({ path, id: requested })
+  if (handled.path !== path) {
+    setHandled({ path, id: requested })
+  } else if (requested !== handled.id) {
+    setHandled({ path, id: requested })
+    if (requested !== null) {
+      setDetails({ root, generation, path, open: true })
+    }
+  }
   const open =
     visible &&
     details.root === root &&
@@ -79,46 +109,10 @@ export function NoteStatusBar({
   }
 
   const { state } = status
-  const backup = sync?.backup
-  const connected = backup?.phase === 'connected'
-  const presentation = noteStatePresentation(state.kind)
-  const Icon = presentation.icon
-  const graphStatus =
-    backup?.phase === 'connected'
-      ? { idle: 'Idle', syncing: 'Syncing', offline: 'Offline', error: 'Error' }[
-          backup.status.state
-        ]
-      : backup?.phase === 'loading'
-        ? 'Unknown'
-        : 'Disconnected'
-  const dimensions = [
-    { name: 'Edit', value: state.isReadOnly ? 'Read-only' : 'Editable' },
-    { name: 'Privacy', value: state.isPrivate ? 'Private' : 'Standard' },
-    { name: 'AI', value: state.isPrivate ? 'Blocked' : 'Allowed' },
-    {
-      name: 'Backup',
-      value: state.isLocalOnly
-        ? 'Excluded'
-        : connected
-          ? 'Included'
-          : backup?.phase === 'loading'
-            ? 'Unknown'
-            : 'Disconnected',
-    },
-    { name: 'Graph', value: graphStatus },
-    {
-      name: 'Version',
-      value: state.isLocalOnly
-        ? 'Excluded'
-        : version.unavailable
-          ? 'Unavailable'
-          : version.version !== null
-            ? version.version
-            : version.pending
-              ? 'Loading'
-              : 'Uncommitted',
-    },
-  ]
+  const kinds = activeNoteStateKinds(state)
+  const labels = kinds.map((kind) => noteStatePresentation(kind).label)
+  const sections = noteDetails({ state, backup: sync?.backup, version })
+  const canTogglePrivacy = scope !== null && !state.isLocalOnly && !state.isProtected
   const editedAt = Math.max(mtime ?? 0, status.editedAt ?? 0)
   const characters = numberFormat.format(status.characters)
   return (
@@ -131,51 +125,68 @@ export function NoteStatusBar({
         placement === 'overlay' && peekedPath !== null && 'z-30',
       )}
     >
-      <Popover
+      <DropdownMenu
         open={open}
         onOpenChange={(next) => setDetails({ root, generation, path, open: next })}
       >
-        <PopoverTrigger
-          type="button"
-          aria-label={`Note state: ${presentation.label}`}
-          className={cn(
-            'pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1 rounded px-1 text-2xs hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none',
-            presentation.className,
-          )}
-        >
-          {createElement(Icon, {
-            className: 'relative -top-px size-3 shrink-0',
-            'aria-hidden': true,
-          })}
-          <span>{presentation.label}</span>
-        </PopoverTrigger>
-        <PopoverContent
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                ref={setAnchor}
+                aria-label={`Note state: ${labels.join(', ')}`}
+                className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none data-popup-open:bg-surface-active"
+              />
+            }
+          >
+            {kinds.map((kind) => {
+              const presentation = noteStatePresentation(kind)
+              return (
+                <span key={kind} data-testid="note-state-badge" data-state={kind}>
+                  {createElement(presentation.icon, {
+                    className: cn('size-3 shrink-0', presentation.className),
+                    'aria-hidden': true,
+                  })}
+                </span>
+              )
+            })}
+          </TooltipTrigger>
+          <TooltipContent side="top">{labels.join(' · ')}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent
           side="top"
           align="start"
-          aria-label="Note details"
-          className={cn(
-            'pointer-events-auto max-h-(--available-height) max-w-[calc(100vw-2rem)] overflow-y-auto',
-            state.isProtected ? 'w-72' : 'w-60',
-          )}
+          className="pointer-events-auto w-60 max-w-[calc(100vw-2rem)]"
         >
-          <PopoverTitle className="text-xs">Note details</PopoverTitle>
-          {state.isProtected && status.protection !== null && scope !== null ? (
+          <NoteStatusMenu
+            sections={sections}
+            state={state}
+            protection={state.isProtected ? (status.protection?.kind ?? null) : null}
+            togglePath={canTogglePrivacy ? scope.path : null}
+            onResolve={() => setRecovery({ root, generation, path, open: true })}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {state.isProtected && status.protection !== null && scope !== null ? (
+        <Popover
+          open={recoveryOpen}
+          onOpenChange={(next) => setRecovery({ root, generation, path, open: next })}
+        >
+          <PopoverContent
+            side="top"
+            align="start"
+            anchor={anchor}
+            aria-label="Resolve note"
+            className="pointer-events-auto max-h-(--available-height) w-72 max-w-[calc(100vw-2rem)] overflow-y-auto"
+          >
             <NoteProtectionDetails
               key={`${scope.generation}:${scope.path}:${status.protection.kind}`}
               scope={scope}
               protection={status.protection}
             />
-          ) : null}
-          <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 text-xs">
-            {dimensions.map(({ name, value }) => (
-              <div key={name} className="contents">
-                <dt className="text-text-muted">{name}</dt>
-                <dd className="text-right">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        </PopoverContent>
-      </Popover>
+          </PopoverContent>
+        </Popover>
+      ) : null}
       <div
         data-testid="note-statistics"
         className={cn(

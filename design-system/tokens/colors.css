@@ -79,9 +79,9 @@
   --text-on-brand: #ffffff;
   --text-on-inverse: hsl(210 40% 98%); /* number on selected square   */
 
-  --note-state-private: #776585;
-  --note-state-local-only: #587886;
-  --note-state-protected: #9b5a58;
+  --note-state-private: #7c5ba6;
+  --note-state-local-only: #3f7a94;
+  --note-state-protected: #b4504b;
 
   --border: var(--coolgray-100); /* hairline dividers           */
   --border-strong: rgba(11, 19, 36, 0.15); /* input outlines              */
@@ -116,9 +116,9 @@
    ============================================================ */
 .dark,
 .reflect-space {
-  --note-state-private: #a197af;
-  --note-state-local-only: #89a0ab;
-  --note-state-protected: #bd8482;
+  --note-state-private: #b49ad8;
+  --note-state-local-only: #7fb0c6;
+  --note-state-protected: #d9827c;
 }
 
 .dark {

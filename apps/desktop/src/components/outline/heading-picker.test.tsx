@@ -26,6 +26,7 @@ function commandContext(notePath: string | null): CommandContext {
     clearScrollState: vi.fn(),
     togglePin: vi.fn(async () => {}),
     togglePrivate: vi.fn(async () => {}),
+    showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
     newChat: vi.fn(),
