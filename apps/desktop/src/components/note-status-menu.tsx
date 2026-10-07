@@ -13,7 +13,12 @@ import {
   Shield,
 } from 'lucide-react'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
-import type { NoteDetail, NoteDetailSections } from '@/lib/note-details.ts'
+import type {
+  BackupDetail,
+  EditingDetail,
+  NoteDetailSections,
+  VersionDetail,
+} from '@/lib/note-details.ts'
 import { startOperation } from '@/lib/operations.ts'
 import {
   DropdownMenuGroup,
@@ -45,27 +50,29 @@ interface NoteStatusMenuProps {
   readonly onResolve: () => void
 }
 
-function editingIcon(detail: NoteDetail): ReactElement {
-  switch (detail.value) {
-    case 'Paused':
+function editingIcon(detail: EditingDetail): ReactElement {
+  switch (detail.status) {
+    case 'paused':
       return <FileWarning className="text-note-state-protected" />
-    case 'Read-only':
+    case 'read-only':
       return <LockKeyhole />
-    default:
+    case 'editable':
       return <FileText />
   }
 }
 
-function backupIcon(detail: NoteDetail): ReactElement {
-  switch (detail.value) {
-    case 'Backed up':
+function backupIcon(detail: BackupDetail): ReactElement {
+  switch (detail.status) {
+    case 'backed-up':
       return <CloudCheck />
-    case 'Sync failed':
+    case 'failed':
       return <CloudAlert className="text-destructive" />
-    case 'Syncing':
-    case 'Checking':
+    case 'syncing':
+    case 'checking':
       return <CloudUpload />
-    default:
+    case 'never':
+    case 'off':
+    case 'offline':
       return <CloudOff />
   }
 }
@@ -77,6 +84,33 @@ async function copyVersion(version: string): Promise<void> {
   } catch (cause) {
     startOperation('Copying version').fail(errorMessage(cause))
   }
+}
+
+interface VersionRowProps {
+  readonly detail: VersionDetail
+}
+
+/** The Version row: a committed hash copies on Enter; anything else is a fact. */
+function VersionRow({ detail }: VersionRowProps): ReactElement {
+  if (detail.status !== 'committed') {
+    return (
+      <NoteMenuInfoItem icon={<GitCommitHorizontal />} label={detail.value} hint={detail.hint} />
+    )
+  }
+  return (
+    <DropdownMenuItem
+      aria-label={`Copy version ${detail.value}`}
+      onClick={() => void copyVersion(detail.value)}
+      className={`${NOTE_MENU_ITEM} text-text-secondary`}
+    >
+      <NoteMenuItemContent
+        icon={<GitCommitHorizontal />}
+        label={detail.value}
+        monospace
+        trailing="Copy"
+      />
+    </DropdownMenuItem>
+  )
 }
 
 /**
@@ -93,6 +127,7 @@ export function NoteStatusMenu({
   onResolve,
 }: NoteStatusMenuProps): ReactElement {
   const [privacy, editing] = sections.note
+  const [backup, version] = sections.backup
   return (
     <>
       {protection === null ? null : (
@@ -133,30 +168,8 @@ export function NoteStatusMenu({
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
         <DropdownMenuLabel className={SECTION_LABEL}>Backup</DropdownMenuLabel>
-        {sections.backup.map((detail) =>
-          detail.name === 'Version' && detail.monospace === true ? (
-            <DropdownMenuItem
-              key={detail.name}
-              aria-label={`Copy version ${detail.value}`}
-              onClick={() => void copyVersion(detail.value)}
-              className={`${NOTE_MENU_ITEM} text-text-secondary`}
-            >
-              <NoteMenuItemContent
-                icon={<GitCommitHorizontal />}
-                label={detail.value}
-                monospace
-                trailing="Copy"
-              />
-            </DropdownMenuItem>
-          ) : (
-            <NoteMenuInfoItem
-              key={detail.name}
-              icon={detail.name === 'Version' ? <GitCommitHorizontal /> : backupIcon(detail)}
-              label={detail.value}
-              hint={detail.hint}
-            />
-          ),
-        )}
+        <NoteMenuInfoItem icon={backupIcon(backup)} label={backup.value} hint={backup.hint} />
+        {version === undefined ? null : <VersionRow detail={version} />}
       </DropdownMenuGroup>
     </>
   )
