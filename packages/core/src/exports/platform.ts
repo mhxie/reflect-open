@@ -10,7 +10,6 @@ export {
   KNOWLEDGE_LEVELS_PATH,
   classifyKnowledgePath,
   loadKnowledgeLevels,
-  parseKnowledgeLevels,
   type KnowledgeClassification,
   type KnowledgeLevels,
   type KnowledgeLevelsState,
@@ -92,8 +91,6 @@ export {
   type EmbedChunkPayload,
 } from '../embeddings/commands.ts'
 export {
-  DEFAULT_SEMANTIC_MODEL,
-  SEMANTIC_MODEL_IDS,
   SEMANTIC_MODELS,
   semanticModel,
   type SemanticModel,
@@ -170,11 +167,7 @@ export {
   type AttachmentCatalog,
   type WikiEmbedTarget,
 } from '../graph/attachment-resolution.ts'
-export {
-  attachmentTypeOf,
-  NOTE_ATTACHMENT_TYPES,
-  type NoteAttachmentType,
-} from '../graph/attachment-types.ts'
+export { NOTE_ATTACHMENT_TYPES, type NoteAttachmentType } from '../graph/attachment-types.ts'
 export {
   wikiNoteReference,
   splitWikiLinkTarget,
@@ -211,10 +204,7 @@ export {
   type PdfPageSize,
 } from '../graph/schemas.ts'
 export { PDF_PAGE_WIDTH_BUCKETS, pdfPageWidthBucket } from '../graph/pdf-pages.ts'
-export {
-  IMAGE_THUMBNAIL_WIDTH_BUCKETS,
-  imageThumbnailWidthBucket,
-} from '../graph/image-thumbnails.ts'
+export { imageThumbnailWidthBucket } from '../graph/image-thumbnails.ts'
 export {
   openGraph,
   openNoteWindow,
@@ -263,12 +253,8 @@ export {
   promoteCaptureScreenshot,
 } from '../graph/commands.ts'
 export {
-  PATCH_NOTE_ATTEMPTS,
-  NoteChangedError,
-  isNoteChangedError,
   patchNote,
   patchNoteWith,
-  readNoteOrNull,
   type NotePatch,
   type NotePatchIo,
   type PatchNoteOptions,
@@ -318,7 +304,6 @@ export {
   transcriptionEngineSchema,
   localTranscriptionModelSchema,
   transcriptionLanguageSchema,
-  normalizeTranscriptionLanguage,
   localTranscriptionUpdateChecksSchema,
   recordingMenuBarSchema,
   recordingShortcutSchema,

@@ -66,11 +66,8 @@ export {
 export {
   isLoopbackHttpUrl,
   isOnDeviceOption,
-  modelTarget,
   pickOnDeviceProvider,
   resolveOnDeviceTarget,
-  verifyOnDeviceServer,
-  verifyModelTarget,
   type VerifiedModelTarget,
   type VerifiedOnDeviceTarget,
   type CloudTarget,
@@ -83,10 +80,7 @@ export { languageModelFor, type TargetModel } from '../ai/language-model.ts'
 export { localOcrAssetTypeFor } from '../actions/asset-description-helpers.ts'
 export { reconcileCachedAssetOcr } from '../actions/asset-ocr-maintenance.ts'
 export {
-  MIN_SUMMARY_BODY_CHARS,
-  noteSummaryKey,
   reconcileNoteSummaries,
-  SUMMARY_QUIET_MS,
   type ReconcileNoteSummariesInput,
   type ReconcileNoteSummariesOutcome,
 } from '../actions/note-summaries.ts'
@@ -174,8 +168,6 @@ export {
   type TranscriptSegment,
 } from '../ai/local-transcription.ts'
 export {
-  DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
-  LOCAL_TRANSCRIPTION_MODEL_IDS,
   LOCAL_TRANSCRIPTION_MODELS,
   localTranscriptionModel,
   type LocalTranscriptionModel,
@@ -269,16 +261,7 @@ export {
   type MeetingAttendee,
 } from '../actions/add-meeting.ts'
 export {
-  dropEchoRepeats,
-  ECHO_MIN_WEIGHT,
-  echoScore,
-  formatClock,
   RECORDING_TRANSCRIPTS_DIR,
-  recordingIdentity,
-  recordingTitle,
-  mergeTurns,
-  renderRecordingTranscript,
-  textWeight,
   type EchoFilterOptions,
   type RecordingIdentity,
   type RecordingSegment,
@@ -287,10 +270,8 @@ export {
 } from '../recordings/transcript.ts'
 export { MEETING_EVENT_LEAD_MS, pickMeetingEvent } from '../recordings/event-match.ts'
 export {
-  archiveRecording,
   cancelRecorder,
   configureRecorder,
-  finishedRecordings,
   recorderStatus,
   startRecorder,
   stopRecorder,
@@ -298,7 +279,6 @@ export {
   subscribeRecorderLevel,
   subscribeRecorderWarnings,
   subscribeRecorderFinished,
-  transcribeRecording,
   type FinishedRecording,
   type RecorderConfig,
   type RecorderStatus,

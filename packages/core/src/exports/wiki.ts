@@ -26,9 +26,7 @@ export {
 export {
   findWikiClaim,
   readWikiClaimIndex,
-  wikiByteOffsetToSource,
   wikiClaimId,
-  wikiSourceSpan,
   type WikiArticleDiagnostic,
   type WikiClaimIndex,
   type WikiClaimLedger,
