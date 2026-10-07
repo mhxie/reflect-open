@@ -16,7 +16,7 @@ import {
   upsertFrontmatter,
   type AiSummaryFrontmatter,
 } from '../markdown/index.ts'
-import { cloudSafeNoteContent } from '../privacy/checkers.ts'
+import { cloudSafeNoteContent, isPrivateNote } from '../privacy/checkers.ts'
 import {
   modelTarget,
   pickOnDeviceProvider,
@@ -239,14 +239,12 @@ async function summarizeCandidate(
   } else if (models.cloud !== null) {
     // The live flag, re-read with the source: the index can lag a note
     // marked private moments ago.
-    const isPrivate =
-      parsed.frontmatter.private || candidate.isPrivate || candidate.hasDeviceOnlyContent
-    if (isPrivate) {
+    if (parsed.frontmatter.private || isPrivateNote(candidate)) {
       return { kind: 'settled' } // marked private since it was indexed
     }
     const note = cloudSafeNoteContent({
       path: candidate.path,
-      isPrivate,
+      isPrivate: parsed.frontmatter.private,
       hasDeviceOnlyContent: candidate.hasDeviceOnlyContent,
       title: parsed.title,
       content,
@@ -329,7 +327,7 @@ export async function reconcileNoteSummaries(
       }
       // Without an on-device model a private note has nowhere to go; it is
       // not even read.
-      if (models.local === null && (candidate.isPrivate || candidate.hasDeviceOnlyContent)) {
+      if (models.local === null && isPrivateNote(candidate)) {
         continue
       }
       if (handled >= MAX_SUMMARIES_PER_PASS) {

@@ -44,8 +44,12 @@ export interface CloudSendable {
   hasDeviceOnlyContent?: boolean
 }
 
-/** Whether a note may not leave the device: flagged private, or local-only by its path. */
-function isPrivateNote(note: CloudSendable): boolean {
+/**
+ * Whether a note may not leave the device: flagged private, carrying
+ * device-only derivations, or local-only by its path. Every cloud gate and
+ * on-device provenance marker decides with this one predicate.
+ */
+export function isPrivateNote(note: CloudSendable): boolean {
   return note.isPrivate || note.hasDeviceOnlyContent === true || isLocalOnlyPath(note.path)
 }
 

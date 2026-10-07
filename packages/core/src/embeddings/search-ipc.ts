@@ -4,6 +4,7 @@ import { call } from '../ipc/invoke.ts'
 import { errorMessage } from '../errors.ts'
 import { HIGHLIGHT_END, HIGHLIGHT_START } from '../indexing/search.ts'
 import { embedStatus } from './commands.ts'
+import { isPrivateNote } from '../privacy/checkers.ts'
 import { retrieve } from './retrieve.ts'
 
 /**
@@ -91,7 +92,7 @@ export async function answerSearchIpcRequest(
     return {
       mode,
       results: hits
-        .filter((hit) => !hit.isPrivate && hit.hasDeviceOnlyContent !== true)
+        .filter((hit) => !isPrivateNote(hit))
         .slice(0, request.limit)
         .map((hit) => ({
           path: hit.path,
