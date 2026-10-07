@@ -624,7 +624,7 @@ describe('CommandPalette', () => {
     ])
     searchWithFilters.mockResolvedValue([])
     const { view } = await renderPalette('dad')
-    await expect.element(view.getByText('Tim MacCaw', { exact: true })).toBeInTheDocument()
+    await expectLocatorToHaveCount(view.getByText('Tim MacCaw', { exact: true }), 2)
     await expect.element(view.getByText('Dad → Tim MacCaw')).toBeInTheDocument()
     expect(view.getByText('Tim MacCaw // Dad').query()).toBeNull()
 

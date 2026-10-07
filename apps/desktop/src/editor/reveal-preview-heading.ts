@@ -1,6 +1,13 @@
 import { getTextblockDisplayText, isNodeOfType, markdownToDoc } from '@meowdown/core'
-import { splitFrontmatter, wikiClaimHeadingText } from '@reflect/core'
+import {
+  findWikiClaim,
+  readWikiClaimIndex,
+  splitFrontmatter,
+  wikiClaimId,
+  wikiClaimHeadingText,
+} from '@reflect/core'
 import GithubSlugger from 'github-slugger'
+import { todayIso } from '@/lib/dates.ts'
 
 function lookupKey(text: string): string {
   return text.normalize('NFKC').trim().replaceAll(/\s+/g, ' ').toLowerCase()
@@ -8,6 +15,25 @@ function lookupKey(text: string): string {
 
 /** Scroll and focus the heading a text, slug, or wiki claim fragment names in a preview. */
 export function revealPreviewHeading(root: HTMLElement, source: string, fragment: string): boolean {
+  const claimId = wikiClaimId(fragment)
+  if (claimId !== null) {
+    const claim = findWikiClaim(readWikiClaimIndex(source, todayIso()), fragment)
+    if (claim === null) return false
+    if (claim.kind === 'range') {
+      const elements = [
+        ...root.querySelectorAll<HTMLElement>(`[data-wiki-claim="${CSS.escape(claimId)}"]`),
+      ]
+      const first = elements[0]
+      if (first === undefined) return false
+      for (const previous of root.querySelectorAll<HTMLElement>('[data-wiki-claim-target]'))
+        previous.removeAttribute('data-wiki-claim-target')
+      for (const element of elements) element.dataset['wikiClaimTarget'] = ''
+      first.tabIndex = -1
+      first.scrollIntoView({ block: 'center' })
+      first.focus({ preventScroll: true })
+      return true
+    }
+  }
   const target = wikiClaimHeadingText(source, fragment) ?? fragment.replace(/^#/, '')
   let decoded = target
   try {

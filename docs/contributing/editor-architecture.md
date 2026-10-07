@@ -96,6 +96,78 @@ silently do nothing inside the app even though they work in a plain browser
 `onDragDropEvent` (OS file drops delivered to Rust), which the app does not use:
 we handle every drop in the webview with HTML5 events instead.
 
+## Wiki evidence and knowledge layers
+
+An evidence reference stays an ordinary, renameable wiki link:
+
+```markdown
+A supported statement. [[Source#^c2|ref]]<!-- {"metadata":{"citation":{"valid_at":"2026-01-02"}}} -->
+```
+
+The reserved `ref` alias plus immediately adjacent valid citation metadata renders as a small `[1]`
+link. Ordinary topic links keep their labels. `valid_at` is the recorded
+evidence date; optional `invalid_at` must be later. Invalid, future-dated, or
+unknown citation fields fall back to the ordinary link. Numbers follow visible
+document order within each editor or preview; they never replace the stable
+note/claim target. Backlinks and title renames preserve the alias, fragment,
+and metadata bytes. Recorded dates do not imply a page-wide review.
+
+Hover or focus a reference to identify its source and dates; activation uses
+normal note/claim navigation. In the editor, **Alt-click** or **Alt-Enter** on
+a focused reference reveals its link and metadata for editing. **Escape** or
+moving the caret outside folds the source again. Edits use normal undo.
+
+Existing `anchors` fences and paragraphs containing only complete `@cite`
+lines use the same numbered appearance. **Details** exposes sources, reviews,
+dates, and original Markdown; **Edit metadata** enters the original block.
+Only current records occupy numbered slots; inactive records remain in Details.
+Trailing Markdown source links after a complete sentence join the adjacent
+evidence row when every URL exactly matches a current anchor. Their author/page
+labels remain in tooltips and Details. Other links keep their prose position.
+Entering the paragraph or evidence block reveals the original source links.
+Arrow keys and Delete/Backspace at a folded block's boundary enter its source
+before any destructive join. Flagged reviews and uninterpreted lines keep a
+visible indicator; malformed or mixed-prose citation paragraphs stay visible.
+Rendering and disclosure never rewrite Markdown. Editor and read-only previews
+share `wiki-anchors/wiki-evidence.ts`; Meowdown's generic `renderBlock` callback
+provides preview parity without splitting or rebuilding the document.
+
+Knowledge labels such as `L4 · Wiki` are separate path classifications.
+All Notes and Wiki lists put their compact values in a dedicated **Level** column.
+The graph's harness exports `.reflect/knowledge-levels.json`; Reflect reads it via
+the existing generation-pinned file API and never maintains its own path table:
+
+```json
+{
+  "version": 1,
+  "levels": [
+    { "level": 1, "label": "Capture" },
+    { "level": 2, "label": "Working" },
+    { "level": 3, "label": "Sources" },
+    { "level": 4, "label": "Wiki" }
+  ],
+  "rules": [
+    { "path": "raw", "match": "segment", "level": 1 },
+    { "path": "wiki", "match": "tree", "level": 4 },
+    { "path": "wiki-cn", "match": "tree", "level": 4, "role": "shadow" }
+  ]
+}
+```
+
+`file` matches an exact path and outranks other rules. `tree` matches a folder's
+descendants; `segment` matches a named directory at any depth. The deepest
+match wins, with the first rule breaking equal-depth ties. Conflicting duplicate
+rules, invalid relative paths, and unknown versions make the contract unavailable.
+No rule means no assigned level. A missing sidecar leaves an ordinary graph
+unclassified; an invalid or unreadable sidecar shows `L?`. `role: "shadow"` adds
+“Translation,” which does not establish independent validation.
+
+Note headers, All Notes rows, and Wiki rows share one graph/session query. The
+hidden sidecar is outside normal note watching, so an actual window-focus event
+invalidates that exact query and loads newly exported rules, without polling.
+Atelier owns the definitions and export; changes to this contract must evolve
+its exporter and Reflect's `graph/knowledge-levels.ts` validator together.
+
 ## Work that outlives a pane
 
 React unmount effects never run on the quit paths (window close, ⌘Q), and some
@@ -134,7 +206,9 @@ editor work must survive pane teardown. The pieces to understand are:
 | `title-rename.ts` | settled-title detection (pure, timer-driven) |
 | `rename-coordinator.ts` | rename lifecycle: rewrite chain + alias placement + file move |
 | `move-note.ts` | move a note while carrying/following a live session |
-| `wiki-links.ts` | `[[…]]` chips as view decorations over literal text |
+| `resolve-wikilink.ts` | host labels and numbered evidence appearance for ordinary wiki links |
+| `wiki-anchors/` | shared evidence rows, legacy source folds, and safe caret entry |
+| `markdown-preview.tsx` | read-only renderer with the same reference and evidence presentation |
 | `wiki-autocomplete.tsx` / `-entries.ts` | `[[` popover; pure row assembly |
 | `use-wiki-link-navigation.ts` | chip click → resolve → navigate or create |
 | `use-wiki-link-hover-preview.tsx` | desktop chip hover → side-effect-free local preview renderer |
@@ -150,7 +224,7 @@ editor work must survive pane teardown. The pieces to understand are:
 - **A new editor feature** (decoration, input rule) → its own module composed
   in `note-editor.tsx`. Keep markdown *literal* in the document and render via
   decorations — that's what keeps serialization byte-identical (see
-  `wiki-links.ts` for the full rationale). Shortcuts go through `keymap.ts`.
+  `wiki-anchors/wiki-anchor-chips.ts`). Shortcuts go through `keymap.ts`.
 - **Markdown grammar** (what counts as a wiki link, an image, a heading) →
   `packages/core/src/markdown/`, never the editor: the editor and the indexer
   share one grammar so chips and index links can't drift.

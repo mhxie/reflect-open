@@ -56,6 +56,28 @@ beforeEach(() => {
 })
 
 describe('SimilarNotesSection', () => {
+  it('presents localized names with metadata while navigating by the original path', async () => {
+    relatedNotes.mockResolvedValue([
+      {
+        path: 'wiki-cn/example.md',
+        title: 'Example (中文)',
+        displayTitle: 'Example',
+        lang: 'zh-CN',
+        score: 0.9,
+        snippet: '',
+        heading: null,
+        isPrivate: false,
+      },
+    ])
+    const view = await renderSimilar('notes/source.md')
+    const row = view.getByRole('button', { name: 'Example，中文' })
+    await expect.element(row).toBeVisible()
+    expect(row.element().textContent).toBe('Example中文')
+    await row.click()
+    await expect.element(view.getByTestId('route')).toMatchTextContent('wiki-cn/example.md')
+    await view.unmount()
+  })
+
   it('renders nothing at all when the note has no semantic neighbors', async () => {
     const view = await renderSimilar('daily/2026-06-09.md', false)
     await vi.waitFor(() => expect(relatedNotes).toHaveBeenCalledWith('daily/2026-06-09.md', 6))

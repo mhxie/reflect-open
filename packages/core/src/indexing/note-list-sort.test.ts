@@ -21,6 +21,18 @@ function row(path: string, overrides: Partial<Row> = {}): Row {
 const paths = (rows: readonly Row[]): string[] => rows.map((each) => each.path)
 
 describe('sortNoteListRows', () => {
+  it('sorts by presentation while retaining canonical identity', () => {
+    const overridden = { ...row('zeta', { title: 'Zeta' }), displayTitle: 'Alpha' }
+    expect(
+      paths(
+        sortNoteListRows([row('beta', { title: 'Beta' }), overridden], {
+          key: 'title',
+          direction: 'asc',
+        }),
+      ),
+    ).toEqual(['zeta', 'beta'])
+    expect(overridden.title).toBe('Zeta')
+  })
   const rows = [
     row('notes/b.md', { title: 'banana', mtime: 300 }),
     row('notes/n10.md', { title: 'Note 10', mtime: 100 }),

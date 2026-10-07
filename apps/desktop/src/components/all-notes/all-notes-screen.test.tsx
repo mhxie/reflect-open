@@ -4,7 +4,7 @@ import { page, userEvent } from 'vitest/browser'
 import { mouse } from 'vitest-browser-commands/playwright'
 import { render } from 'vitest-browser-react'
 import { act, type ReactElement } from 'react'
-import { DEFAULT_SETTINGS, setBridge, type Settings } from '@reflect/core'
+import { DEFAULT_SETTINGS, KNOWLEDGE_LEVELS_PATH, setBridge, type Settings } from '@reflect/core'
 import { resetOperations, useOperations } from '@/lib/operations.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
@@ -137,6 +137,21 @@ const facetRows = [
 ]
 
 const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
+let knowledgeLevelSource: string | null = null
+const knowledgeLevelContract = {
+  version: 1,
+  levels: [
+    { level: 1, label: 'Capture' },
+    { level: 2, label: 'Working' },
+    { level: 3, label: 'Sources' },
+    { level: 4, label: 'Wiki' },
+  ],
+  rules: [
+    { path: 'daily', match: 'tree', level: 1 },
+    { path: 'notes', match: 'tree', level: 2 },
+    { path: 'notes/tokyo.md', match: 'file', level: 4, role: 'shadow' },
+  ],
+}
 
 setBridge({ invoke: mockInvoke, listen: async () => () => {} })
 
@@ -163,6 +178,7 @@ function mockManyNotes(): void {
 }
 
 beforeEach(() => {
+  knowledgeLevelSource = null
   resetOperations()
   settingsState.dateFormat = 'mdy'
   settingsState.allNotesFilterAttachments = ['pdf', 'video']
@@ -170,6 +186,9 @@ beforeEach(() => {
   openRouteInNewWindow.mockReset().mockResolvedValue(true)
   mockInvoke.mockReset()
   mockInvoke.mockImplementation(async (command, args) => {
+    if (command === 'note_read' && args['path'] === KNOWLEDGE_LEVELS_PATH) {
+      return knowledgeLevelSource
+    }
     if (command === 'note_delete') {
       return { trashed: 'system' }
     }
@@ -196,7 +215,7 @@ beforeEach(() => {
       if (sql.includes('from "assets"')) {
         return params.includes('%.pdf') ? [noteRows[1]] : []
       }
-      return noteRows
+      return params.includes('daily') ? [...noteRows, taggedDailyRow] : noteRows
     }
     if (sql.includes('from "tags"')) {
       // The per-note tags fetch (a join, not an IN list); rows for unlisted
@@ -229,15 +248,20 @@ function RoutedScreen(): ReactElement {
 
 /** Navigates to the already-active route — the sidebar-click-while-here case. */
 function ReArrive(): ReactElement {
-  const { navigate } = useRouter()
+  const { navigate, back } = useRouter()
   return (
-    <button
-      type="button"
-      data-testid="re-arrive"
-      onClick={() => navigate({ kind: 'allNotes', filter: null })}
-    >
-      re-arrive
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="re-arrive"
+        onClick={() => navigate({ kind: 'allNotes', filter: null })}
+      >
+        re-arrive
+      </button>
+      <button type="button" data-testid="history-back" onClick={back}>
+        back
+      </button>
+    </>
   )
 }
 
@@ -316,6 +340,7 @@ describe('AllNotesScreen', () => {
     })
     const view = await renderScreen()
     const privateNote = view.getByRole('button', { name: 'Health Stacked Private', exact: true })
+    await expect.element(view.getByText('Wiki', { exact: true })).toBeVisible()
     const protectedNote = view.getByRole('button', { name: 'Tokyo Gâteau Protected', exact: true })
     await expect
       .element(privateNote.getByRole('img', { name: 'Private', exact: true }))
@@ -381,7 +406,7 @@ describe('AllNotesScreen', () => {
     const updated = view.getByText('2020-01-15')
     await expect.element(updated).toHaveClass('whitespace-nowrap')
     expect(updated.element().parentElement?.className ?? '').toContain(
-      'grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,8rem)_6rem]',
+      'grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_minmax(0,8rem)_6rem]',
     )
     await view.unmount()
   })
@@ -529,6 +554,79 @@ describe('AllNotesScreen', () => {
     await view.getByRole('button', { name: 'Video' }).click()
 
     await expect.element(view.getByText('No notes with video.')).toBeInTheDocument()
+    await view.unmount()
+  })
+
+  it('filters by level after Video, keeps translations compact, and restores the filter on Back', async () => {
+    knowledgeLevelSource = JSON.stringify(knowledgeLevelContract)
+    const view = await renderScreen()
+    const level = view.getByRole('button', { name: 'Wiki', exact: true })
+    await expect.element(level).toBeVisible()
+    const video = view.getByRole('button', { name: 'Video', exact: true }).element()
+    expect(video.nextElementSibling).toBe(level.element())
+
+    level.element().focus()
+    await userEvent.keyboard('{ArrowDown}')
+    await expect.element(page.getByRole('menuitemradio', { name: 'All levels' })).toHaveFocus()
+    await userEvent.keyboard('{End}')
+    await expect.element(page.getByRole('menuitemradio', { name: 'L4', exact: true })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect
+      .element(view.getByRole('button', { name: 'Wiki: L4' }))
+      .toHaveAttribute('aria-pressed', 'true')
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'level', level: 4 } })
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeVisible()
+    expect(view.getByText('Health Stacked').query()).toBeNull()
+    expect(view.container.querySelector('[data-knowledge-level="4"]')?.textContent).toBe('L4')
+
+    await view.getByRole('button', { name: 'Tokyo Gâteau', exact: true }).click()
+    expect(probedRoute(view)).toEqual({ kind: 'note', path: 'notes/tokyo.md' })
+    await view.getByTestId('history-back').click()
+    await expect.element(view.getByRole('button', { name: 'Wiki: L4' })).toBeVisible()
+    expect(view.getByText('Health Stacked').query()).toBeNull()
+
+    await view.getByRole('button', { name: 'Wiki: L4' }).click()
+    await page.getByRole('menuitemradio', { name: 'L1', exact: true }).click()
+    await expect.element(view.getByText('June 9, 2026')).toBeVisible()
+    expect(view.getByText('Tokyo Gâteau').query()).toBeNull()
+
+    await view.getByRole('button', { name: 'Wiki: L1' }).click()
+    await page.getByRole('menuitemradio', { name: 'All levels' }).click()
+    expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
+    await expect.element(view.getByText('Health Stacked')).toBeVisible()
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeVisible()
+    expect(view.getByText('June 9, 2026').query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('updates the active level filter when path rules change on focus', async () => {
+    knowledgeLevelSource = JSON.stringify(knowledgeLevelContract)
+    const view = await renderScreen(undefined, { kind: 'level', level: 3 })
+    await expect.element(view.getByText('No L3 notes.')).toBeVisible()
+    knowledgeLevelSource = JSON.stringify({
+      ...knowledgeLevelContract,
+      rules: [
+        ...knowledgeLevelContract.rules,
+        { path: 'notes/health.md', match: 'file', level: 3 },
+      ],
+    })
+    window.dispatchEvent(new Event('focus'))
+    await expect.element(view.getByText('Health Stacked')).toBeVisible()
+    expect(view.getByText('Tokyo Gâteau').query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('explains unavailable levels and lets the reader clear the filter', async () => {
+    knowledgeLevelSource = '{"version":2}'
+    const view = await renderScreen(undefined, { kind: 'level', level: 4 })
+    await expect
+      .element(view.getByText('Knowledge levels are unavailable. Choose All levels to show notes.'))
+      .toBeVisible()
+    expect(view.getByText('No L4 notes.').query()).toBeNull()
+    expect(view.getByText('Health Stacked').query()).toBeNull()
+    await view.getByRole('button', { name: 'Wiki: L4' }).click()
+    await page.getByRole('menuitemradio', { name: 'All levels' }).click()
+    await expect.element(view.getByText('Health Stacked')).toBeVisible()
     await view.unmount()
   })
 

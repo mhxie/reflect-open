@@ -104,6 +104,8 @@ export {
   type ConflictSide,
   parseBody,
   displayNoteTitle,
+  noteTitlePresentation,
+  type NoteTitleMetadata,
   wikiLinkTargetForTitle,
   scanInlineWikiLinks,
   scanInlineImages,

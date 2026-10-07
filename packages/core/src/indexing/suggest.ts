@@ -31,6 +31,8 @@ export interface WikiSuggestion {
   path: string | null
   /** Display title (for dailies this is the ISO date; hosts format it). */
   title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
   /** Set for an alias hit; shown in the menu and preserved as the link's display text. */
   alias: string | null
   /** Set on daily-note suggestions. */
@@ -104,6 +106,8 @@ export function serializeWikiSuggestionAddress(
 export interface TitleCandidate {
   path: string
   title: string
+  displayTitle?: string | null
+  lang?: string | null
   titleKey: string
   dailyDate: string | null
   mtime: number
@@ -182,6 +186,8 @@ function toScored(row: TitleCandidate, matchedAlias: string | null, rank: number
       target,
       path: row.path,
       title: row.title,
+      displayTitle: row.displayTitle,
+      lang: row.lang,
       alias,
       date: row.dailyDate,
       isPrivate: row.isPrivate,

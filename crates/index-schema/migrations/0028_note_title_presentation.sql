@@ -1,0 +1,2 @@
+ALTER TABLE notes ADD COLUMN display_title TEXT;
+ALTER TABLE notes ADD COLUMN lang TEXT;

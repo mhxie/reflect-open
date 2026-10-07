@@ -131,8 +131,10 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * 30 - `notes.summary_fresh` (migration 0027) and the `aiSummary` frontmatter
  * block as `notes.preview` while it summarizes the current body: a note synced
  * in with a summary before this version must reproject to show it.
+ * 31 - display_title/lang presentation metadata is indexed separately from identity.
+ * 32 - localized notes derive display titles from the H1 when no override is authored.
  */
-export const PROJECTION_VERSION = 30
+export const PROJECTION_VERSION = 32
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -233,6 +235,8 @@ export const indexedNoteSchema = z.object({
   path: z.string(),
   id: z.string().nullable(),
   title: z.string(),
+  displayTitle: z.string().nullable().default(null),
+  lang: z.string().nullable().default(null),
   titleKey: z.string(),
   /** ASCII-folded graph path: what a path-qualified link joins against. */
   pathKey: z.string(),
@@ -434,6 +438,12 @@ export function buildIndexedNote(
     path: parsed.path,
     id: parsed.id ?? null,
     title: parsed.title,
+    displayTitle:
+      parsed.frontmatter.display_title ??
+      (parsed.frontmatter.lang
+        ? (parsed.headings.find((heading) => heading.level === 1 && heading.topLevel)?.text ?? null)
+        : null),
+    lang: parsed.frontmatter.lang ?? null,
     titleKey: foldKey(parsed.title),
     pathKey: foldGraphPath(parsed.path),
     kind: isDaily(parsed.path) ? 'daily' : isTemplatePath(parsed.path) ? 'template' : 'note',

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
+import type { SelectionMenuSearchHandler } from '@meowdown/react'
 import {
   deriveNoteState,
   detectConflictMarkers,
@@ -12,6 +13,9 @@ import {
   splitWikiLinkTarget,
   untitledNoteSeed,
   wikiClaimHeadingText,
+  findWikiClaim,
+  readWikiClaimIndex,
+  wikiClaimId,
 } from '@reflect/core'
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
 import { ConflictNoteView } from '@/components/conflict-note-view.tsx'
@@ -34,13 +38,18 @@ import {
 } from '@/editor/editor-handle-registry.ts'
 import { markModeFromSyntax } from '@/editor/mark-mode.ts'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
+import { NoteTitlePresentationBridge } from '@/editor/note-title-presentation.tsx'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useNoteEmbedRenderer } from '@/editor/note-embed-reader.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
+import { toast } from '@/components/ui/toast.tsx'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
 import { OutlineBridge } from '@/editor/outline/outline-bridge.tsx'
 import { WikiAnchorsBridge } from '@/editor/wiki-anchors/wiki-anchors-bridge.tsx'
+import { WikiArticleBridge } from '@/editor/wiki-anchors/wiki-article-bridge.tsx'
+import { noteArticleFor } from '@/editor/wiki-anchors/wiki-article-store.ts'
+import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
 import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useNoteDocument } from '@/editor/use-note-document.ts'
@@ -54,7 +63,7 @@ import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
-import { formatRecencyLabel } from '@/lib/dates.ts'
+import { formatRecencyLabel, todayIso } from '@/lib/dates.ts'
 import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
 import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -134,9 +143,16 @@ interface NotePaneProps {
   onRevealed?: ((key: number) => void) | undefined
 }
 
-/** Scroll `editor` to the heading `fragment` names; a wiki claim's `^cN` is its `[CN]` heading. */
-function revealFragment(editor: NoteEditorHandle, fragment: string): void {
-  editor.revealHeading(wikiClaimHeadingText(editor.getMarkdown(), fragment) ?? fragment)
+/** Reveal an exact claim range, or an ordinary heading for non-claim fragments. */
+function revealFragment(editor: NoteEditorHandle, fragment: string): boolean {
+  if (wikiClaimId(fragment) !== null) {
+    const claim = findWikiClaim(readWikiClaimIndex(editor.getMarkdown(), todayIso()), fragment)
+    if (claim?.kind === 'range') return editor.revealSourceRange?.(claim.from, claim.to) ?? false
+    else if (claim?.heading !== null && claim?.heading !== undefined)
+      return editor.revealHeading(claim.heading)
+    return false
+  }
+  return editor.revealHeading(wikiClaimHeadingText(editor.getMarkdown(), fragment) ?? fragment)
 }
 
 /**
@@ -285,11 +301,17 @@ export function NotePaneComponent({
   const previewOnly = readOnlyLocal || (localOnly && document.protected)
   const revealInPane = useCallback(
     (fragment: string): void => {
+      let found = true
       if (revealEditor !== null) {
-        revealFragment(revealEditor, fragment)
+        found = revealFragment(revealEditor, fragment)
       } else if (previewOnly && document.status === 'ready' && paneRef.current !== null) {
-        revealPreviewHeading(paneRef.current, document.initialContent, fragment)
+        found = revealPreviewHeading(paneRef.current, document.initialContent, fragment)
       }
+      if (!found && wikiClaimId(fragment) !== null)
+        toast.add({
+          type: 'error',
+          title: `Claim ${wikiClaimId(fragment)?.toUpperCase()} is missing or has invalid boundaries.`,
+        })
     },
     [revealEditor, previewOnly, document.status, document.initialContent],
   )
@@ -387,6 +409,37 @@ export function NotePaneComponent({
     sessionEpoch: document.sessionEpoch,
     editorRef: aiEditorRef,
   })
+  const onSelectionMenuSearch = useCallback<SelectionMenuSearchHandler>(
+    async (query, context) => {
+      const existing = (await aiMenu.onSelectionMenuSearch?.(query, context)) ?? []
+      if (dailyNote) return existing
+      const article = noteArticleFor(path)
+      const claims = article?.selectionClaims(context.from, context.to) ?? []
+      const local: Awaited<ReturnType<SelectionMenuSearchHandler>> = [
+        {
+          id: 'mark-claim',
+          label: 'Mark as claim',
+          onSelect: (selection) => article?.markSelection(selection.from, selection.to),
+        },
+        ...claims.map((id) => ({
+          id: `adjust-${id}`,
+          label: `Set ${id.toUpperCase()} boundaries to selection`,
+          onSelect: (selection: { from: number; to: number }) =>
+            article?.adjustSelection(id, selection.from, selection.to),
+        })),
+        {
+          id: 'copy-source',
+          label: 'Copy Markdown source',
+          onSelect: async (selection) => await article?.copySource(selection.from, selection.to),
+        },
+      ]
+      return [
+        ...local.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase())),
+        ...existing,
+      ]
+    },
+    [aiMenu.onSelectionMenuSearch, dailyNote, path],
+  )
 
   const handleExitBoundary: ExitBoundaryHandler | undefined = useMemo(() => {
     if (!dailyDate || !onExitBoundary) {
@@ -483,6 +536,7 @@ export function NotePaneComponent({
       : document.initialContent
     return (
       <div ref={paneRef} className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
+        <KnowledgeLevelLabel path={path} className="mb-2 block" />
         {/* A dashed sheet sets the read-only, device-bound note apart at a glance. */}
         <div
           data-testid="local-only-sheet"
@@ -491,6 +545,7 @@ export function NotePaneComponent({
           <LocalOnlyNotice className="mb-3" />
           <MarkdownPreview
             content={body}
+            titleMetadata={document.titleMetadata}
             resolveImageUrl={resolveImageUrl}
             resolveWikiEmbed={resolveWikiEmbed}
             renderNoteEmbed={renderNoteEmbed}
@@ -514,6 +569,7 @@ export function NotePaneComponent({
     const conflicted = detectConflictMarkers(document.initialContent)
     return (
       <div className={cn(gutterClassName, className)}>
+        <KnowledgeLevelLabel path={path} className="mb-2 block" />
         <SyncConflictNotice path={path} shownContent={document.initialContent} className="mb-4" />
         {conflicted ? (
           <ConflictNoteView content={document.initialContent} />
@@ -537,6 +593,7 @@ export function NotePaneComponent({
   return (
     <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
       <div className={gutterClassName}>
+        <KnowledgeLevelLabel path={path} className="mb-2 block" />
         {localOnly ? <LocalOnlyNotice editable className="mb-3" /> : null}
         {privateNote && !localOnly ? (
           <PrivateNoteNotice path={path} interactive={settings.statusBarEnabled} className="mb-3" />
@@ -602,9 +659,7 @@ export function NotePaneComponent({
         onTagClick={onTagClick}
         onWikilinkSearch={onWikilinkSearch}
         onTagSearch={onTagSearch}
-        {...(aiMenu.onSelectionMenuSearch !== undefined
-          ? { onSelectionMenuSearch: aiMenu.onSelectionMenuSearch }
-          : {})}
+        onSelectionMenuSearch={onSelectionMenuSearch}
         pendingReplacementActions={aiMenu.pendingReplacementActions}
         onPendingReplacementResolve={aiMenu.onPendingReplacementResolve}
         onSlashMenuSearch={onSlashMenuSearch}
@@ -619,8 +674,16 @@ export function NotePaneComponent({
         onExitBoundary={handleExitBoundary}
       >
         <EditorAiKeymap onTrigger={aiMenu.openMenu} />
+        <NoteTitlePresentationBridge
+          metadata={
+            markModeFromSyntax(settings.editorMarkdownSyntax) === 'show'
+              ? undefined
+              : document.titleMetadata
+          }
+        />
         {outline ? <OutlineBridge path={path} /> : null}
-        <WikiAnchorsBridge />
+        <WikiAnchorsBridge onWikiLinkClick={onWikiLinkClick} />
+        <WikiArticleBridge path={path} onWikiLinkClick={onWikiLinkClick} />
       </NoteEditor>
 
       {showBacklinks ? (

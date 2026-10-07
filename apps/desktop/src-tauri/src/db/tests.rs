@@ -51,6 +51,8 @@ fn note(path: &str, title: &str, links: Vec<IndexedLink>) -> IndexedNote {
         path: path.to_string(),
         id: None,
         title: title.to_string(),
+        display_title: None,
+        lang: None,
         title_key: title.to_lowercase(),
         path_key: path.to_lowercase(),
         kind: "note".to_string(),

@@ -944,6 +944,31 @@ describe('retarget (Plan 17)', () => {
 })
 
 describe('commitSourceEdit', () => {
+  it('saves a simple localized H1 without rewriting the canonical identity or language', async () => {
+    const header = '---\ntitle: Anchoring (中文)\nlang: zh-CN\n---\n\n'
+    const h = harness({ disk: `${header}# Anchoring\n\n正文\n` })
+    h.session.load()
+    await settled()
+    expect(h.snapshots.at(-1)?.titleMetadata?.lang).toBe('zh-CN')
+    h.session.editorChanged('# Anchoring\n\n修订正文\n')
+    await h.session.flush()
+    expect(h.writes.at(-1)?.contents).toBe(`${header}# Anchoring\n\n修订正文\n`)
+  })
+
+  it('refreshes presentation metadata on external changes while keeping canonical title bytes', async () => {
+    const source =
+      '---\ntitle: Anchoring (中文)\ndisplay_title: Anchoring\nlang: zh-CN\n---\n\n# Anchoring (中文)\n'
+    const h = harness({ disk: source })
+    h.session.load()
+    await settled()
+    expect(h.snapshots.at(-1)?.titleMetadata).toEqual({ displayTitle: 'Anchoring', lang: 'zh-CN' })
+    h.setDisk(source.replace('display_title: Anchoring', 'display_title: Anchor'))
+    h.session.externalChanged()
+    await settled()
+    expect(h.snapshots.at(-1)?.titleMetadata?.displayTitle).toBe('Anchor')
+    expect(h.applied.at(-1)).toBe('# Anchoring (中文)\n')
+    expect(h.writes).toEqual([])
+  })
   it('applies a task toggle to the live buffer, preserving unsaved edits, and reflects it in the editor', async () => {
     const source = '# Todo\n\n+ [ ] buy milk\n'
     const h = harness({ disk: source })

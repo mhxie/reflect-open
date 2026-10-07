@@ -5,8 +5,11 @@ import {
   frontmatterPrivacy,
   isAppError,
   notePrivate,
+  parseFrontmatter,
+  splitFrontmatter,
   upsertFrontmatter,
   type NoteRecovery,
+  type NoteTitleMetadata,
 } from '@reflect/core'
 import { splitDoc } from './note-session-doc.ts'
 import { frontmatterPatchToYaml, type FrontmatterPatch } from './note-session-frontmatter.ts'
@@ -38,6 +41,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
   let conflict: string | null = null
   let error: string | null = null
   let privateHeader = true
+  let titleMetadata: NoteTitleMetadata | undefined
   let recovery: NoteRecovery | null = null
   let saveBlocked = false
 
@@ -98,6 +102,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       conflict,
       error,
       privateHeader,
+      ...(titleMetadata === undefined ? {} : { titleMetadata }),
       recovery,
       saveBlocked,
     }
@@ -111,6 +116,8 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       lastEmitted.conflict === next.conflict &&
       lastEmitted.error === next.error &&
       lastEmitted.privateHeader === next.privateHeader &&
+      lastEmitted.titleMetadata?.displayTitle === next.titleMetadata?.displayTitle &&
+      lastEmitted.titleMetadata?.lang === next.titleMetadata?.lang &&
       lastEmitted.recovery === next.recovery &&
       lastEmitted.saveBlocked === next.saveBlocked
     ) {
@@ -127,6 +134,11 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
    */
   function classifyHeader(): void {
     privateHeader = notePrivate(header + buffer)
+    const data = parseFrontmatter(splitFrontmatter(header).raw).data
+    titleMetadata =
+      data.display_title || data.lang
+        ? { displayTitle: data.display_title, lang: data.lang }
+        : undefined
   }
 
   /** Queue recovery-copy IO behind any earlier; a failure is logged, never thrown. */

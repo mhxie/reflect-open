@@ -15,6 +15,8 @@ function projection(path: string, mtime: number, fileHash: string): IndexedNote 
     path,
     id: null,
     title: path,
+    displayTitle: null,
+    lang: null,
     titleKey: path,
     pathKey: foldGraphPath(path),
     kind: 'note',

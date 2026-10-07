@@ -56,6 +56,14 @@ function titles(entries: readonly WikiEntry[]): string[] {
 }
 
 describe('sortWikiEntries', () => {
+  it('sorts by presentation while retaining canonical identity', () => {
+    const overridden = { ...entry('Zeta', null), displayTitle: 'Alpha' }
+    expect(
+      titles(
+        sortWikiEntries([entry('Beta', null), overridden], { key: 'title', direction: 'asc' }),
+      ),
+    ).toEqual(['Zeta', 'Beta'])
+  })
   it('orders titles case-insensitively with numbers in numeric order', () => {
     expect(titles(sortWikiEntries(ENTRIES, DEFAULT_WIKI_SORT))).toEqual([
       'Alpha',

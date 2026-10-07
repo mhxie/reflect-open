@@ -34,6 +34,25 @@ export function displayNoteTitle(title: string): string {
     .join('')
 }
 
+/** Optional display metadata, kept separate from the title used by links and renames. */
+export interface NoteTitleMetadata {
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
+}
+
+/** Reader-facing title and a compact language label; this never creates a title alias. */
+export function noteTitlePresentation(
+  title: string,
+  metadata: NoteTitleMetadata = {},
+): { text: string; language: string | null } {
+  const code = metadata.lang?.split('-')[0]?.toLowerCase()
+  const labels: Record<string, string> = { zh: '中文', ja: '日本語', ko: '한국어' }
+  return {
+    text: displayNoteTitle(metadata.displayTitle?.trim() || title),
+    language: code ? (labels[code] ?? code.toUpperCase()) : null,
+  }
+}
+
 /**
  * A complete `[[target]]` / `[[target|alias]]` embedded in a title. Mirrors the
  * grammar's inner-character rule (no `[`, `]`, or newline inside), but is

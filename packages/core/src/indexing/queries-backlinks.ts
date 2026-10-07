@@ -34,6 +34,8 @@ export function getBacklinks(path: string): Promise<Backlink[]> {
 export interface BacklinkContext {
   sourcePath: string
   sourceTitle: string
+  sourceDisplayTitle?: string | null
+  sourceLang?: string | null
   /**
    * Whether the source note is private, so the snippet must not reach the
    * network: its index row says so (locked, unreadable frontmatter, or in a
@@ -140,6 +142,8 @@ export async function getBacklinksWithContext(
     .select([
       'backlinks.sourcePath',
       'notes.title as sourceTitle',
+      'notes.displayTitle as sourceDisplayTitle',
+      'notes.lang as sourceLang',
       'notes.isPrivate as sourceIsPrivate',
       'notes.hasConflict as sourceHasConflict',
       sourceRecency.as('recencyMs'),
@@ -270,6 +274,8 @@ export async function getBacklinksWithContext(
       results.push({
         sourcePath: pageSource.sourcePath,
         sourceTitle: pageSource.sourceTitle,
+        sourceDisplayTitle: pageSource.sourceDisplayTitle,
+        sourceLang: pageSource.sourceLang,
         sourcePrivate,
         sourceHasConflict: pageSource.sourceHasConflict !== 0,
         snippet,

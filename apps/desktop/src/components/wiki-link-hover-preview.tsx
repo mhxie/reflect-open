@@ -1,12 +1,16 @@
 import type { ReactElement } from 'react'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
-import { dateFromDailyPath, type DateFormat } from '@reflect/core'
+import { dateFromDailyPath, type DateFormat, type NoteTitleMetadata } from '@reflect/core'
+import { NoteTitle } from './note-title.tsx'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { usePreviewOverflow } from '@/hooks/use-preview-overflow.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 
 interface WikiLinkHoverPreviewProps {
+  titleMetadata?: NoteTitleMetadata | undefined
+  sourceTitle?: string | undefined
+  claimFragment?: string | undefined
   path: string
   /** The note body with frontmatter already stripped. */
   markdown: string
@@ -31,6 +35,9 @@ interface WikiLinkHoverPreviewProps {
  */
 export function WikiLinkHoverPreview({
   path,
+  titleMetadata,
+  sourceTitle,
+  claimFragment,
   markdown,
   privateNote,
   dateFormat,
@@ -51,6 +58,11 @@ export function WikiLinkHoverPreview({
       data-testid="wiki-link-hover-preview"
     >
       <div>
+        {sourceTitle ? (
+          <div className="mb-2 font-medium">
+            <NoteTitle title={sourceTitle} {...titleMetadata} />
+          </div>
+        ) : null}
         {dailyDate !== null ? (
           <div className="reflect-daily-subject mb-1">{formatDayLabel(dailyDate, dateFormat)}</div>
         ) : null}
@@ -59,6 +71,8 @@ export function WikiLinkHoverPreview({
         ) : (
           <MarkdownPreview
             content={markdown}
+            titleMetadata={titleMetadata}
+            claimFragment={claimFragment}
             resolveImageUrl={resolveImageUrl}
             {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
             interactive={false}

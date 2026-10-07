@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu.tsx'
 import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
+import { WikiClaimToggle } from '@/editor/wiki-anchors/wiki-claim-toggle.tsx'
 
 const numberFormat = new Intl.NumberFormat()
 
@@ -125,48 +126,51 @@ export function NoteStatusBar({
         placement === 'overlay' && peekedPath !== null && 'z-30',
       )}
     >
-      <DropdownMenu
-        open={open}
-        onOpenChange={(next) => setDetails({ root, generation, path, open: next })}
-      >
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <DropdownMenuTrigger
-                ref={setAnchor}
-                aria-label={`Note state: ${labels.join(', ')}`}
-                className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none data-popup-open:bg-surface-active"
-              />
-            }
-          >
-            {kinds.map((kind) => {
-              const presentation = noteStatePresentation(kind)
-              return (
-                <span key={kind} data-testid="note-state-badge" data-state={kind}>
-                  {createElement(presentation.icon, {
-                    className: cn('size-3 shrink-0', presentation.className),
-                    'aria-hidden': true,
-                  })}
-                </span>
-              )
-            })}
-          </TooltipTrigger>
-          <TooltipContent side="top">{labels.join(' · ')}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent
-          side="top"
-          align="start"
-          className="pointer-events-auto w-60 max-w-[calc(100vw-2rem)]"
+      <div className="flex min-w-0 items-center gap-1">
+        <DropdownMenu
+          open={open}
+          onOpenChange={(next) => setDetails({ root, generation, path, open: next })}
         >
-          <NoteStatusMenu
-            sections={sections}
-            state={state}
-            protection={state.isProtected ? (status.protection?.kind ?? null) : null}
-            togglePath={canTogglePrivacy ? scope.path : null}
-            onResolve={() => setRecovery({ root, generation, path, open: true })}
-          />
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  ref={setAnchor}
+                  aria-label={`Note state: ${labels.join(', ')}`}
+                  className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-active focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none data-popup-open:bg-surface-active"
+                />
+              }
+            >
+              {kinds.map((kind) => {
+                const presentation = noteStatePresentation(kind)
+                return (
+                  <span key={kind} data-testid="note-state-badge" data-state={kind}>
+                    {createElement(presentation.icon, {
+                      className: cn('size-3 shrink-0', presentation.className),
+                      'aria-hidden': true,
+                    })}
+                  </span>
+                )
+              })}
+            </TooltipTrigger>
+            <TooltipContent side="top">{labels.join(' · ')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent
+            side="top"
+            align="start"
+            className="pointer-events-auto w-60 max-w-[calc(100vw-2rem)]"
+          >
+            <NoteStatusMenu
+              sections={sections}
+              state={state}
+              protection={state.isProtected ? (status.protection?.kind ?? null) : null}
+              togglePath={canTogglePrivacy ? scope.path : null}
+              onResolve={() => setRecovery({ root, generation, path, open: true })}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <WikiClaimToggle path={path} />
+      </div>
       {state.isProtected && status.protection !== null && scope !== null ? (
         <Popover
           open={recoveryOpen}

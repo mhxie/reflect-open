@@ -21,6 +21,8 @@ import { semanticModel } from './models.ts'
 export interface RetrievalHit {
   path: string
   title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
   score: number
   /** Chunk text (semantic) or highlight-markered FTS snippet (lexical). */
   snippet: string
@@ -61,6 +63,8 @@ const RELATED_KNN_CANDIDATES = 24
 export interface ChunkHitRow {
   path: string
   title: string
+  displayTitle?: string | null
+  lang?: string | null
   heading: string | null
   text: string
   isPrivate: number
@@ -102,6 +106,8 @@ export function bestChunkPerNote(
     byNote.set(row.path, {
       path: row.path,
       title: row.title,
+      displayTitle: row.displayTitle,
+      lang: row.lang,
       score: 1 - row.distance,
       snippet: row.text.trim(),
       heading: row.heading,
@@ -125,7 +131,7 @@ async function semanticHits(
   }
   const [vector] = await embedTexts([query], 'query', status.model)
   const result = await sql<ChunkHitRow>`
-    SELECT c.note_path AS path, n.title, c.heading, c.text,
+    SELECT c.note_path AS path, n.title, n.display_title AS displayTitle, n.lang, c.heading, c.text,
            (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
     FROM embedding_vectors v
     JOIN embedding_chunks c ON c.id = v.rowid
@@ -170,6 +176,8 @@ async function everyTermHits(query: string, limit: number): Promise<RetrievalHit
   return hits.map((hit) => ({
     path: hit.path,
     title: hit.title,
+    displayTitle: hit.displayTitle,
+    lang: hit.lang,
     score: 0,
     snippet: hit.snippet ?? '',
     heading: null,
@@ -193,13 +201,15 @@ async function anyTermHits(
   const result = await sql<{
     path: string
     title: string
+    displayTitle: string | null
+    lang: string | null
     snippet: string
     isPrivate: number
     hasConflict: number
     hasDeviceOnlyContent: number
     assetTextHash: string
   }>`
-    SELECT search_fts.path AS path, n.title AS title,
+    SELECT search_fts.path AS path, n.title AS title, n.display_title AS displayTitle, n.lang,
            snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10) AS snippet,
            n.is_private AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash
     FROM search_fts
@@ -214,6 +224,8 @@ async function anyTermHits(
     .map((row) => ({
       path: row.path,
       title: row.title,
+      displayTitle: row.displayTitle,
+      lang: row.lang,
       score: 0,
       snippet: row.snippet,
       heading: null,
@@ -362,7 +374,7 @@ export async function relatedNotes(path: string, limit = 10): Promise<RetrievalH
   const neighborLists = await Promise.all(
     seeds.rows.map(async (seed) => {
       const result = await sql<ChunkHitRow>`
-        SELECT c.note_path AS path, n.title, c.heading, c.text,
+        SELECT c.note_path AS path, n.title, n.display_title AS displayTitle, n.lang, c.heading, c.text,
                (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
         FROM embedding_vectors v
         JOIN embedding_chunks c ON c.id = v.rowid

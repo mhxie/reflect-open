@@ -16,6 +16,29 @@ export {
 } from '../wiki/list.ts'
 export { wikiEntryIn } from '../wiki/localize.ts'
 export { wikiClaimHeadingText } from '../wiki/claims.ts'
+export { planWikiClaim, planWikiClaimBoundary, type WikiClaimEdit } from '../wiki/article-edit.ts'
+export {
+  findWikiClaim,
+  readWikiClaimIndex,
+  wikiByteOffsetToSource,
+  wikiClaimId,
+  wikiSourceSpan,
+  type WikiArticleDiagnostic,
+  type WikiClaimIndex,
+  type WikiClaimLedger,
+  type WikiClaimMarker,
+  type WikiClaimRange,
+  type WikiSourceSpan,
+} from '../wiki/article.ts'
+export {
+  readWikiArticle,
+  type WikiArticleIndex,
+  type WikiArticleOptions,
+  type WikiBibliographyEntry,
+  type WikiReferenceGroup,
+  type WikiReferenceOccurrence,
+} from '../wiki/article-references.ts'
+export { readWikiSourceLinks, type WikiSourceLinks } from '../wiki/source-links.ts'
 export {
   groupWikiEntries,
   isWikiGuide,
@@ -33,7 +56,13 @@ export {
 } from '../wiki/filter.ts'
 export {
   readWikiAnchorsBlock,
+  isWikiCitationTarget,
+  readWikiCitationMetadata,
+  readWikiCitationParagraph,
+  wikiCitationDescription,
   type WikiAnchorsBlock,
+  type WikiCitation,
+  type WikiCitationDates,
   type WikiReviewPass,
   type WikiSource,
 } from '../wiki/anchors.ts'

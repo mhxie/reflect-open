@@ -1,4 +1,5 @@
-import { wikiNoteReference } from '../graph/note-reference.ts'
+import { splitWikiLinkTarget, wikiNoteReference } from '../graph/note-reference.ts'
+import { readWikiCitationComment } from '../wiki/anchors.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { parseNote } from './extract.ts'
 import { foldKey } from './keys.ts'
@@ -70,12 +71,25 @@ export function retitleWikiLinks(source: string, options: WikiLinkRetitleOptions
     const targetRaw = pipe === -1 ? inner : inner.slice(0, pipe)
     const displayRaw = pipe === -1 ? null : inner.slice(pipe + 1)
 
-    const targetKey = foldKey(link.target)
-    const nextTarget = repoint !== null && targetKey === repoint.fromKey ? repoint.to : targetRaw
+    const { name } = splitWikiLinkTarget(link.target)
+    const targetKey = foldKey(name)
+    const hash = targetRaw.indexOf('#')
+    const fragment = hash === -1 ? '' : targetRaw.slice(hash)
+    const nextTarget =
+      repoint !== null && targetKey === repoint.fromKey ? `${repoint.to}${fragment}` : targetRaw
+    const comment = /^(<!--[^\r\n]*?-->)/.exec(source.slice(link.to))?.[1]
+    const citationRoleWouldChange =
+      comment !== undefined &&
+      readWikiCitationComment(comment) !== null &&
+      (link.alias === 'ref') !== (display?.to === 'ref')
     // A bare `[[target]]` has no display to mirror the old title, so it never
-    // gains one: `link.alias` is undefined and can't equal `display.from`.
+    // gains one. Display ownership was confirmed against the complete target,
+    // including its fragment. A title rename cannot create/remove evidence.
     const nextDisplay =
-      display !== null && subjectTargetKeys.has(targetKey) && link.alias === display.from
+      display !== null &&
+      !citationRoleWouldChange &&
+      subjectTargetKeys.has(foldKey(link.target)) &&
+      link.alias === display.from
         ? display.to
         : displayRaw
     if (nextTarget === targetRaw && nextDisplay === displayRaw) {

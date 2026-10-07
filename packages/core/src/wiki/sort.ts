@@ -1,5 +1,6 @@
 import { localDayStartMs } from '../indexing/filter-query.ts'
 import type { SortDirection } from '../indexing/note-list-sort.ts'
+import { noteTitlePresentation } from '../markdown/note-title.ts'
 import { wikiReviewState, type WikiReviewState } from './entry-summary.ts'
 import { isWikiGuide } from './group.ts'
 import type { WikiEntry } from './list.ts'
@@ -67,7 +68,10 @@ function sortValue(entry: WikiEntry, key: Exclude<WikiSortKey, 'title'>): number
 export function sortWikiEntries(entries: readonly WikiEntry[], sort: WikiSort): WikiEntry[] {
   const sign = sort.direction === 'asc' ? 1 : -1
   const byTitle = (left: WikiEntry, right: WikiEntry): number =>
-    collator.compare(left.title, right.title) || left.path.localeCompare(right.path)
+    collator.compare(
+      noteTitlePresentation(left.title, left).text,
+      noteTitlePresentation(right.title, right).text,
+    ) || left.path.localeCompare(right.path)
   const { key } = sort
   if (key === 'title') {
     return [...entries].sort((left, right) => sign * byTitle(left, right))

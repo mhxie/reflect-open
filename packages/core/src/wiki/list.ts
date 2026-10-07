@@ -26,6 +26,8 @@ export type WikiCopyState = 'local' | 'evicted' | 'unreadable'
 export interface WikiEntryCopy {
   readonly path: string
   readonly title: string
+  readonly displayTitle?: string | null
+  readonly lang?: string | null
   /** File modification time (epoch ms). */
   readonly mtime: number
   readonly isPrivate: boolean
@@ -85,6 +87,8 @@ const READ_CONCURRENCY = 8
 interface WikiNoteRow {
   readonly path: string
   readonly title: string
+  readonly displayTitle: string | null
+  readonly lang: string | null
   readonly mtime: number
   readonly fileHash: string
   readonly isPrivate: number
@@ -125,6 +129,8 @@ function copyOf(row: WikiNoteRow, { state, summary }: CopyRead): WikiEntryCopy {
   return {
     path: row.path,
     title: row.title,
+    displayTitle: row.displayTitle,
+    lang: row.lang,
     mtime: row.mtime,
     isPrivate: row.isPrivate !== 0,
     hasConflict: row.hasConflict !== 0,
@@ -233,6 +239,8 @@ export async function listWikiEntries(options: ListWikiEntriesOptions): Promise<
       .select([
         'notes.path',
         'notes.title',
+        'notes.displayTitle',
+        'notes.lang',
         'notes.mtime',
         'notes.fileHash',
         'notes.isPrivate',

@@ -88,6 +88,45 @@ describe('retitleWikiLinks', () => {
   it('keeps display padding when only the target changes', () => {
     expect(retitleWikiLinks('[[Foo| bar ]]', repointOnly('foo', 'Baz'))).toBe('[[Baz| bar ]]')
   })
+
+  it('renames a citation note target while preserving claim, ref alias, and metadata bytes', () => {
+    const metadata = '<!-- {"metadata":{"citation":{"valid_at":"2026-01-02"}}} -->'
+    const source = `[[Foo#^c2|ref]]${metadata}\n\n@cite: [[Foo#^c3]] | valid_at: 2026-01-02`
+    expect(retitleWikiLinks(source, repointOnly('foo', 'Baz'))).toBe(
+      `[[Baz#^c2|ref]]${metadata}\n\n@cite: [[Baz#^c3]] | valid_at: 2026-01-02`,
+    )
+  })
+
+  it('does not create or remove a citation role while syncing a renamed title display', () => {
+    const metadata = '<!-- {"metadata":{"citation":{"valid_at":"2020-01-02"}}} -->'
+    for (const { from, to } of [
+      { from: 'ref', to: 'New Title' },
+      { from: 'Old Title', to: 'ref' },
+    ]) {
+      const source = `[[stable#^c2|${from}]]${metadata}`
+      expect(
+        retitleWikiLinks(source, {
+          repoint: null,
+          display: { from, to },
+          subjectTargetKeys: new Set(['stable#^c2']),
+        }),
+      ).toBe(source)
+    }
+    expect(
+      retitleWikiLinks(`[[ref#^c2|ref]]${metadata}`, {
+        repoint: { fromKey: 'ref', to: 'New Title' },
+        display: { from: 'ref', to: 'New Title' },
+        subjectTargetKeys: new Set(['ref#^c2']),
+      }),
+    ).toBe(`[[New Title#^c2|ref]]${metadata}`)
+    expect(
+      retitleWikiLinks(`[[stable#^c2|Old Title]] ${metadata}`, {
+        repoint: null,
+        display: { from: 'Old Title', to: 'ref' },
+        subjectTargetKeys: new Set(['stable#^c2']),
+      }),
+    ).toBe(`[[stable#^c2|ref]] ${metadata}`)
+  })
 })
 
 describe('repointPathWikiLinks', () => {

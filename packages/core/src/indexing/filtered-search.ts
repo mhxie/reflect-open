@@ -5,7 +5,7 @@ import { literalSearchQuery, type ParsedSearchQuery } from './filter-query.ts'
 import { resolveWikiTarget } from './queries.ts'
 import { HIGHLIGHT_END, HIGHLIGHT_START } from './search.ts'
 import { buildFtsMatch, buildTitleMatchSql, cjkSnippetSql } from './search-query.ts'
-import { displayNoteTitle } from '../markdown/note-title.ts'
+import { displayNoteTitle, noteTitlePresentation } from '../markdown/note-title.ts'
 import { highlightTitle } from './title-highlight.ts'
 
 /**
@@ -28,6 +28,8 @@ import { highlightTitle } from './title-highlight.ts'
 export interface FilteredSearchHit {
   path: string
   title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
   /**
    * The title's display form (a `//` subject reduced to its first segment)
    * with search matches marked; plain when the title did not match.
@@ -74,6 +76,8 @@ export interface FilteredSearchOptions {
 const HIT_COLUMNS = [
   'notes.path',
   'notes.title',
+  'notes.displayTitle',
+  'notes.lang',
   'notes.isPrivate',
   'notes.hasDeviceOnlyContent',
   'notes.assetTextHash',
@@ -204,7 +208,7 @@ export async function searchWithFilters(
     const rows = await taggedQuery.execute()
     return rows.map((row) => ({
       ...row,
-      highlightedTitle: displayNoteTitle(row.title),
+      highlightedTitle: noteTitlePresentation(row.title, row).text,
       snippet: null,
       isPinned: row.isPinned !== 0,
       isPrivate: row.isPrivate !== 0,
@@ -278,7 +282,7 @@ export async function searchWithFilters(
     const rows = await recallQuery.execute()
     return rows.map((row) => ({
       ...row,
-      highlightedTitle: displayNoteTitle(row.title),
+      highlightedTitle: noteTitlePresentation(row.title, row).text,
       snippet: null,
       isPinned: row.isPinned !== 0,
       isPrivate: row.isPrivate !== 0,
@@ -320,6 +324,8 @@ export async function searchWithFilters(
     .select([
       'filteredNotes.path',
       'filteredNotes.title',
+      'filteredNotes.displayTitle',
+      'filteredNotes.lang',
       'filteredNotes.isPrivate',
       'filteredNotes.hasDeviceOnlyContent',
       'filteredNotes.assetTextHash',
@@ -362,9 +368,11 @@ export async function searchWithFilters(
     // The FTS markers describe the complete title; the same display
     // derivation keeps them aligned with the shortened title they highlight.
     highlightedTitle: highlightTitle(
-      displayNoteTitle(row.title),
+      noteTitlePresentation(row.title, row).text,
       parsed.text,
-      ftsHighlightedTitle === null ? null : displayNoteTitle(ftsHighlightedTitle),
+      ftsHighlightedTitle === null || row.displayTitle != null
+        ? null
+        : displayNoteTitle(ftsHighlightedTitle),
     ),
     isPinned: row.isPinned !== 0,
     isPrivate: row.isPrivate !== 0,

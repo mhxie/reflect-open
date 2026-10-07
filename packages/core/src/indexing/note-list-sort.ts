@@ -29,6 +29,7 @@ export const NOTE_LIST_SORT_DEFAULT_DIRECTION: Record<NoteListSortKey, SortDirec
 export interface SortableNoteRow extends PinRank {
   readonly path: string
   readonly title: string
+  readonly displayTitle?: string | null | undefined
   readonly mtime: number
 }
 
@@ -57,7 +58,7 @@ export function sortNoteListRows<TRow extends SortableNoteRow>(
   const sign = sort.direction === 'asc' ? 1 : -1
   const keyed = rows.map((row) => ({
     row,
-    title: sort.key === 'title' ? sortableTitle(row.title) : '',
+    title: sort.key === 'title' ? sortableTitle(row.displayTitle?.trim() || row.title) : '',
   }))
   keyed.sort((left, right) => {
     const byPin = comparePinPrecedence(left.row, right.row)

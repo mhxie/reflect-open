@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { displayNoteTitle, wikiLinkTargetForTitle } from './note-title.ts'
+import { displayNoteTitle, noteTitlePresentation, wikiLinkTargetForTitle } from './note-title.ts'
+
+it('presents language separately without changing wiki-link identity', () => {
+  const canonical = 'Anchoring (中文)'
+  expect(noteTitlePresentation(canonical, { displayTitle: 'Anchoring', lang: 'zh-CN' })).toEqual({
+    text: 'Anchoring',
+    language: '中文',
+  })
+  expect(wikiLinkTargetForTitle(canonical)).toBe(canonical)
+  expect(noteTitlePresentation('Anchoring')).toEqual({ text: 'Anchoring', language: null })
+})
 
 describe('displayNoteTitle', () => {
   it('flattens wiki links to their alias and markdown links to their text', () => {

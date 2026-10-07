@@ -36,6 +36,16 @@ describe('parseNote — wiki links', () => {
     const note = parse('[[broken\nlink]]')
     expect(note.wikiLinks).toEqual([])
   })
+
+  it('indexes evidence references as ordinary backlinks, excluding only their metadata comment', () => {
+    const reference = '[[Source#^c2|ref]]'
+    const source = `Claim. ${reference}<!-- {"metadata":{"citation":{"valid_at":"2026-01-02"}}} -->`
+    const note = parse(source)
+    expect(note.wikiLinks).toEqual([
+      { target: 'Source#^c2', alias: 'ref', from: 7, to: 7 + reference.length },
+    ])
+    expect(note.displayText).not.toContain('valid_at')
+  })
 })
 
 describe('parseNote — headings & title', () => {

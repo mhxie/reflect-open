@@ -1,4 +1,5 @@
 import { parseXPostId } from '@post-embed/schema'
+import { isWikiCitationTarget, readWikiCitationComment } from '../wiki/anchors.ts'
 import { dateFromDailyPath, isAttachmentPath, isDaily } from '../graph/paths.ts'
 import { frontmatterPrivacy, parseFrontmatter, splitFrontmatter } from './frontmatter.ts'
 import { parseBody } from './grammar.ts'
@@ -359,6 +360,21 @@ export function parseNote(input: { path: string; source: string }): ParsedNote {
   tree.iterate({
     enter: (node) => {
       const { name, from, to } = node
+
+      if (name === 'Comment') {
+        const previous = node.node.prevSibling
+        if (
+          previous?.name === 'Wikilink' &&
+          previous.to === from &&
+          isWikiCitationTarget(readWikiLink(body, previous.from, previous.to, bodyOffset).target) &&
+          readWikiLink(body, previous.from, previous.to, bodyOffset).alias === 'ref' &&
+          readWikiCitationComment(body.slice(from, to)) !== null
+        ) {
+          cuts.push({ from, to })
+          tagExcluded.push({ from, to })
+          return false
+        }
+      }
 
       if (isSyntaxNode(name)) {
         cuts.push({ from, to })

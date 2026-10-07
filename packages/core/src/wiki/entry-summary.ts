@@ -12,6 +12,7 @@ import {
   type WikiMarker,
 } from './anchors.ts'
 import { wikiClaimNumber } from './claims.ts'
+import { readWikiClaimIndex } from './article.ts'
 
 /**
  * What a wiki entry's markdown says about its claims and their evidence, read
@@ -26,7 +27,7 @@ export interface WikiEntrySummary {
    * Null when the entry has none.
    */
   readonly preview: string | null
-  /** Numbered claims under `## Claims`. */
+  /** Valid explicit ranges and legacy numbered claims. */
   readonly claims: number
   /** Claims with no `@anchor` — Wikipedia's "citation needed". */
   readonly unsourcedClaims: number
@@ -228,6 +229,27 @@ export function summarizeWikiEntry(source: string, asOf: string): WikiEntrySumma
     }
   }
   closeClaim()
+
+  const article = readWikiClaimIndex(source, asOf)
+  if (article.article) {
+    claims = article.claims.length
+    unsourcedClaims = 0
+    verifiedClaims = 0
+    flaggedClaims = 0
+    sources.clear()
+    for (const claim of article.claims) {
+      claimAnchors = 0
+      claimReview = null
+      for (const ledger of article.ledgers) {
+        if (!ledger.valid || ledger.owner !== claim.id) continue
+        for (const line of ledger.raw.split(/\r?\n/)) {
+          const marker = parseWikiMarker(line)
+          if (marker !== null) applyMarker(marker)
+        }
+      }
+      closeClaim()
+    }
+  }
 
   const preview =
     previewLines.length === 0
