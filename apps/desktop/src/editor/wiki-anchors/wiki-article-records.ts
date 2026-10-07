@@ -1,5 +1,6 @@
 import type { Node as ProseMirrorNode } from '@prosekit/pm/model'
 import type { Transaction } from '@prosekit/pm/state'
+import { isBibliographyHeadingNode, isRevisionHeadingNode } from './wiki-article-nodes.ts'
 
 /** One complete owned ledger, including opaque lines and historical records. */
 export interface WikiArticleLedgerRecord {
@@ -22,11 +23,10 @@ export function appendWikiArticleRecords(
       at = Math.min(at, position)
       return
     }
-    if (node.attrs['level'] === 2 && /^(?:Evidence|References)$/.test(node.textContent)) {
+    if (isBibliographyHeadingNode(node)) {
       evidence = position
       at = transaction.doc.content.size
-    } else if (node.attrs['level'] === 2 && node.textContent === 'Revision Log')
-      at = Math.min(at, position)
+    } else if (isRevisionHeadingNode(node)) at = Math.min(at, position)
   })
   const { schema } = transaction.doc.type
   const nodes: ProseMirrorNode[] = []

@@ -1,6 +1,33 @@
 import { splitFrontmatter } from '../markdown/frontmatter.ts'
 import { parseBody } from '../markdown/grammar.ts'
 
+const LEDGER_OWNER = /^anchors (c[1-9]\d*)$/
+const BIBLIOGRAPHY_HEADING = /^(?:Evidence|References)$/i
+const REVISION_HEADING = /^Revision Log$/i
+
+/**
+ * The claim a fenced block's info string assigns its evidence ledger to:
+ * `anchors c3` → `c3`; null for any other fence.
+ */
+export function wikiLedgerOwner(info: string): string | null {
+  return LEDGER_OWNER.exec(info)?.[1] ?? null
+}
+
+/** Whether an H2's text opens the article's bibliography (`Evidence` or `References`). */
+export function isWikiBibliographyHeading(text: string): boolean {
+  return BIBLIOGRAPHY_HEADING.test(text.trim())
+}
+
+/** Whether an H2's text opens the article's `Revision Log`. */
+export function isWikiRevisionHeading(text: string): boolean {
+  return REVISION_HEADING.test(text.trim())
+}
+
+/** The ledger line recording that an editor has yet to review a claim as of `asOf`. */
+export function wikiPendingPass(asOf: string): string {
+  return `@pass: editor | status: pending | at: ${asOf}`
+}
+
 /** Markdown structure with comment tokens omitted, projected into one source coordinate space. */
 export function wikiMarkdownStructure(
   source: string,

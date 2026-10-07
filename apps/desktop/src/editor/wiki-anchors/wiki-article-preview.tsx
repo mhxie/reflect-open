@@ -5,6 +5,7 @@ import { WikiArticleEvidence } from './wiki-article-evidence.tsx'
 import { WikiArticleBibliography } from './wiki-article-bibliography.tsx'
 import { WikiArticleRevision } from './wiki-article-revision.tsx'
 import { WikiArticleDefinitions } from './wiki-article-definitions.tsx'
+import { isBibliographyHeadingNode, ledgerOwnerOf } from './wiki-article-nodes.ts'
 import { wikiRevisionSection } from './wiki-revision-section.ts'
 import { WikiReferenceGroupView } from './wiki-reference-group.tsx'
 import { wikiEditorRange, type WikiArticleProjection } from './wiki-article-projection.ts'
@@ -142,14 +143,9 @@ export function renderWikiArticleBlock(
     return position === revision.from ? (
       <WikiArticleRevision markdown={revision.markdown} options={options} />
     ) : null
-  const owner =
-    node.type.name === 'codeBlock'
-      ? /^anchors (c[1-9]\d*)$/.exec(String(node.attrs['language']))?.[1]
-      : undefined
+  const owner = ledgerOwnerOf(node)
   const ledger =
-    owner === undefined
-      ? undefined
-      : index.ledgers.find((item) => item.valid && item.owner === owner)
+    owner === null ? undefined : index.ledgers.find((item) => item.valid && item.owner === owner)
   let rendered =
     ledger === undefined ? (
       renderedInline(context, projection, options, showRanges)
@@ -159,22 +155,14 @@ export function renderWikiArticleBlock(
   let bibliographyAt: number | null = null
   doc.descendants((candidate, candidatePosition) => {
     if (bibliographyAt !== null) return false
-    if (
-      candidate.type.name === 'heading' &&
-      candidate.attrs['level'] === 2 &&
-      /^(?:Evidence|References)$/.test(candidate.textContent)
-    )
-      bibliographyAt = candidatePosition
+    if (isBibliographyHeadingNode(candidate)) bibliographyAt = candidatePosition
     return true
   })
   if (bibliographyAt === null) {
     doc.descendants((candidate, candidatePosition) => {
       if (bibliographyAt !== null) return false
-      const id =
-        candidate.type.name === 'codeBlock'
-          ? /^anchors (c[1-9]\d*)$/.exec(String(candidate.attrs['language']))?.[1]
-          : undefined
-      if (id !== undefined && index.ledgers.some((item) => item.valid && item.owner === id))
+      const id = ledgerOwnerOf(candidate)
+      if (id !== null && index.ledgers.some((item) => item.valid && item.owner === id))
         bibliographyAt = candidatePosition
       return true
     })

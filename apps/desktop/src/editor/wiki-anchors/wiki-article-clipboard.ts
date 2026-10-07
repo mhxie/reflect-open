@@ -12,10 +12,10 @@ import { readWikiClaimIndex } from '@reflect/core'
 import { toast } from '@/components/ui/toast.tsx'
 import { todayIso } from '@/lib/dates.ts'
 import { wikiEditorRange, type WikiArticleProjection } from './wiki-article-projection.ts'
+import { ledgerOwnerOf } from './wiki-article-nodes.ts'
 import { appendWikiArticleRecords, type WikiArticleLedgerRecord } from './wiki-article-records.ts'
 
 const LEDGER_DATA = 'data-wiki-claim-ledgers'
-const OWNER = /^anchors (c[1-9]\d*)$/
 
 type ClaimLedgerTransfer = WikiArticleLedgerRecord
 
@@ -42,7 +42,7 @@ function proseSlice(slice: Slice): Slice {
   function clean(content: Fragment): Fragment {
     const nodes: ProseMirrorNode[] = []
     content.forEach((node) => {
-      if (node.type.name === 'codeBlock' && OWNER.test(String(node.attrs['language']))) return
+      if (ledgerOwnerOf(node) !== null) return
       if (
         node.type.name === 'htmlComment' &&
         stripWikiClaimOwnership(String(node.attrs['content'])) === ''
@@ -164,11 +164,7 @@ function withoutTransferredLedgers(slice: Slice, ledgers: readonly ClaimLedgerTr
   function clean(content: Fragment): Fragment {
     const nodes: ProseMirrorNode[] = []
     content.forEach((node) => {
-      if (
-        node.type.name === 'codeBlock' &&
-        ids.has(OWNER.exec(String(node.attrs['language']))?.[1] ?? '')
-      )
-        return
+      if (ids.has(ledgerOwnerOf(node) ?? '')) return
       nodes.push(node.childCount ? node.copy(clean(node.content)) : node)
     })
     return Fragment.from(nodes)
@@ -324,9 +320,9 @@ function claimMoveRange(
   const ledgers: ClaimMoveRange['ledgers'][number][] = []
   view.state.doc.descendants((node, position) => {
     if (node.type.name !== 'codeBlock') return true
-    const id = OWNER.exec(String(node.attrs['language']))?.[1]
+    const id = ledgerOwnerOf(node)
     if (
-      id !== undefined &&
+      id !== null &&
       owners.has(id) &&
       projection.index.ledgers.some((ledger) => ledger.owner === id && ledger.valid)
     )
