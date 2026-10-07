@@ -144,8 +144,9 @@ function renderBar(
 }
 
 /** Each menu row's label, without the explanatory hints. */
-function detailValues(): (string | null)[] {
+async function detailValues(): Promise<(string | null)[]> {
   const menu = page.getByRole('menu')
+  await expect.element(menu).toBeVisible()
   return [...menu.element().querySelectorAll('[data-testid="note-menu-label"]')].map(
     (node) => node.textContent?.trim() ?? null,
   )
@@ -468,7 +469,7 @@ describe('NoteStatusBar', () => {
 
     const dialog = page.getByRole('menu')
     await expect.element(dialog).toBeVisible()
-    expect(detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4'])
+    expect(await detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4'])
     await expect.element(dialog.getByText('Never sent to AI or other services.')).toBeVisible()
     await expect
       .element(dialog.getByRole('menuitemcheckbox', { name: 'Private' }))
@@ -509,7 +510,7 @@ describe('NoteStatusBar', () => {
     })
 
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
-    expect(detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4'])
+    expect(await detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4'])
   })
 
   it('keeps one horizontal row and hides the time before a narrow footer wraps', async () => {
@@ -559,7 +560,7 @@ describe('NoteStatusBar', () => {
     expect(gitVersion.use).toHaveBeenLastCalledWith(
       expect.objectContaining({ path: 'daily/2026-10-02.md', isLocalOnly: true }),
     )
-    expect(detailValues()).toEqual(['Local-only', 'Editable', 'Never backed up'])
+    expect(await detailValues()).toEqual(['Local-only', 'Editable', 'Never backed up'])
     expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
   })
 
@@ -579,7 +580,7 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    expect(detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4'])
+    expect(await detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4'])
   })
 
   it('toggles privacy from the details through the shared note action', async () => {
@@ -638,7 +639,7 @@ describe('NoteStatusBar', () => {
 
     await expect.element(page.getByRole('menuitem', { name: /Resolve…/ })).toBeVisible()
     expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
-    expect(detailValues()).toEqual([
+    expect(await detailValues()).toEqual([
       'Unsupported Markdown',
       'Standard',
       'Paused',
