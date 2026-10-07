@@ -2,7 +2,6 @@ import { localDayStartMs } from '../indexing/filter-query.ts'
 import type { SortDirection } from '../indexing/note-list-sort.ts'
 import { noteTitlePresentation } from '../markdown/note-title.ts'
 import { wikiReviewState, type WikiReviewState } from './entry-summary.ts'
-import { isWikiGuide } from './group.ts'
 import type { WikiEntry } from './list.ts'
 import type { WikiSort, WikiSortKey } from './sort-keys.ts'
 
@@ -35,8 +34,8 @@ export function chooseWikiSort(current: WikiSort, key: WikiSortKey): WikiSort {
 const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
 /**
- * The value an entry sorts by, or null when it has none — a guide makes no
- * claims and an unread entry has no summary, so they have no counts or review.
+ * The value an entry sorts by, or null when it has none — an entry without
+ * claims, or unread, has no counts or review.
  * An entry was updated on its newest revision-log day, or else when its file
  * last changed.
  */
@@ -48,7 +47,7 @@ function sortValue(entry: WikiEntry, key: Exclude<WikiSortKey, 'title'>): number
     return entry.citedBy
   }
   const { summary } = entry
-  if (summary === null || isWikiGuide(entry)) {
+  if (summary === null || summary.claims === 0) {
     return null
   }
   switch (key) {

@@ -1,3 +1,4 @@
+import { isWikiIndex } from './hierarchy.ts'
 import type { WikiEntry } from './list.ts'
 
 /** One topic's entries on the Wiki screen. */
@@ -9,17 +10,9 @@ export interface WikiTopicGroup {
 
 /** What the Wiki screen's header counts. */
 export interface WikiTotals {
-  /** Entries with claims (guides and unread entries excluded). */
+  /** Entries with claims (claimless and unread entries excluded). */
   readonly entries: number
   readonly claims: number
-}
-
-/**
- * Whether an entry is a guide — a hub such as a topic's `index.md` that
- * routes readers without making claims of its own.
- */
-export function isWikiGuide(entry: WikiEntry): boolean {
-  return entry.summary !== null && entry.summary.claims === 0
 }
 
 const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
@@ -39,14 +32,14 @@ export function wikiTopicKey(topic: string | null): string {
   return topic ?? ''
 }
 
-/** Guides first; a stable sort keeps the given order otherwise. */
-function guidesFirst(left: WikiEntry, right: WikiEntry): number {
-  return Number(isWikiGuide(right)) - Number(isWikiGuide(left))
+/** Indexes first; a stable sort keeps the given order otherwise. */
+function indexesFirst(left: WikiEntry, right: WikiEntry): number {
+  return Number(isWikiIndex(right)) - Number(isWikiIndex(left))
 }
 
 /**
  * Group entries for display: root entries first, then topics A–Z. Within a
- * topic, guides lead and the rest keep the order they arrive in, so a sort
+ * topic, indexes lead and the rest keep the order they arrive in, so a sort
  * applied beforehand holds inside every group.
  */
 export function groupWikiEntries(entries: readonly WikiEntry[]): WikiTopicGroup[] {
@@ -61,7 +54,7 @@ export function groupWikiEntries(entries: readonly WikiEntry[]): WikiTopicGroup[
   }
   return [...byTopic]
     .sort(([left], [right]) => compareTopics(left, right))
-    .map(([topic, group]) => ({ topic, entries: [...group].sort(guidesFirst) }))
+    .map(([topic, group]) => ({ topic, entries: [...group].sort(indexesFirst) }))
 }
 
 /** The header's counts over `entries`. */

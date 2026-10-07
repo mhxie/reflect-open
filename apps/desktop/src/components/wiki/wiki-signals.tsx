@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { BookOpen, Link, ListOrdered } from 'lucide-react'
-import { isWikiGuide, type WikiEntry } from '@reflect/core'
+import type { WikiEntry } from '@reflect/core'
 import { WikiCount } from './wiki-count.tsx'
 import { WikiReviewGlyph } from './wiki-review-glyph.tsx'
 
@@ -21,11 +21,11 @@ function counted(count: number, noun: string): string {
 
 /**
  * An entry's wiki columns: reviewer standing, its claims (with an amber dot
- * when one lacks a source), distinct sources, and the notes citing it. Guides
- * make no claims and an unread entry has no summary, so theirs stay blank.
+ * when one lacks a source), distinct sources, and the notes citing it. An
+ * entry without claims, or unread, leaves them blank.
  */
 export function WikiSignals({ entry }: WikiSignalsProps): ReactElement {
-  const summary = entry.summary !== null && !isWikiGuide(entry) ? entry.summary : null
+  const summary = entry.summary !== null && entry.summary.claims > 0 ? entry.summary : null
   return (
     <div className={WIKI_SIGNALS_GRID}>
       <span>{summary === null ? null : <WikiReviewGlyph summary={summary} />}</span>

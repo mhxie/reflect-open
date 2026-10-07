@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
 import { DEFAULT_WIKI_LANGUAGES, type WikiLanguage } from './languages.ts'
-import { hasWikiEntries, listWikiEntries, wikiCopies } from './list.ts'
+import { hasWikiEntries, listWikiEntries, wikiAncestors, wikiCopies } from './list.ts'
 
 // A fake bridge answers `db_query` from the compiled SQL and `note_read_local`
 // from in-memory files, so the tests exercise the real queries and reads.
@@ -96,7 +96,7 @@ function serve(): void {
     if (query.includes('"notes"."path" in')) {
       return fixture.notes
         .filter((note) => params.includes(note.path))
-        .map(({ path }) => ({ path }))
+        .map(({ path, title }) => ({ path, title, display_title: null, lang: null }))
     }
     if (query.includes('limit')) {
       return fixture.notes.slice(0, 1).map(({ path }) => ({ path }))
@@ -300,6 +300,37 @@ describe('wikiCopies', () => {
 
   it('is empty for a note outside the wiki', async () => {
     await expect(wikiCopies('notes/plan.md', LANGUAGES)).resolves.toEqual([])
+  })
+})
+
+describe('wikiAncestors', () => {
+  function queries(): number {
+    return mockInvoke.mock.calls.filter(([command]) => command === 'db_query').length
+  }
+
+  it('lists the existing indexes above a note, root first, skipping folders without one', async () => {
+    fixture.notes.push(
+      { path: 'wiki/memory/index.md', title: 'Memory', mtime: 1, file_hash: 'm' },
+      { path: 'wiki/memory/deep/sub/Note.md', title: 'Note', mtime: 1, file_hash: 'n' },
+    )
+
+    await expect(wikiAncestors('wiki/memory/deep/sub/Note.md', LANGUAGES)).resolves.toEqual([
+      { path: 'wiki/index.md', title: 'Wiki Index', displayTitle: null, lang: null },
+      { path: 'wiki/memory/index.md', title: 'Memory', displayTitle: null, lang: null },
+    ])
+    await expect(wikiAncestors('wiki/memory/index.md', LANGUAGES)).resolves.toEqual([
+      { path: 'wiki/index.md', title: 'Wiki Index', displayTitle: null, lang: null },
+    ])
+  })
+
+  it('stays in the note’s own language', async () => {
+    await expect(wikiAncestors('wiki-cn/memory/Spacing Effect.md', LANGUAGES)).resolves.toEqual([])
+  })
+
+  it('is empty without asking the index for a root index or a note outside the wiki', async () => {
+    await expect(wikiAncestors('wiki/index.md', LANGUAGES)).resolves.toEqual([])
+    await expect(wikiAncestors('notes/plan.md', LANGUAGES)).resolves.toEqual([])
+    expect(queries()).toBe(0)
   })
 })
 

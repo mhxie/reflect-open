@@ -50,6 +50,7 @@ import { WikiAnchorsBridge } from '@/editor/wiki-anchors/wiki-anchors-bridge.tsx
 import { WikiArticleBridge } from '@/editor/wiki-anchors/wiki-article-bridge.tsx'
 import { noteArticleFor } from '@/editor/wiki-anchors/wiki-article-store.ts'
 import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
+import { WikiBreadcrumb } from '@/components/wiki/wiki-breadcrumb.tsx'
 import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useNoteDocument } from '@/editor/use-note-document.ts'
@@ -536,6 +537,7 @@ export function NotePaneComponent({
       : document.initialContent
     return (
       <div ref={paneRef} className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
+        <WikiBreadcrumb path={path} className="mb-1" />
         <KnowledgeLevelLabel path={path} className="mb-2 block" />
         {/* A dashed sheet sets the read-only, device-bound note apart at a glance. */}
         <div
@@ -569,6 +571,7 @@ export function NotePaneComponent({
     const conflicted = detectConflictMarkers(document.initialContent)
     return (
       <div className={cn(gutterClassName, className)}>
+        <WikiBreadcrumb path={path} className="mb-1" />
         <KnowledgeLevelLabel path={path} className="mb-2 block" />
         <SyncConflictNotice path={path} shownContent={document.initialContent} className="mb-4" />
         {conflicted ? (
@@ -593,6 +596,7 @@ export function NotePaneComponent({
   return (
     <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
       <div className={gutterClassName}>
+        <WikiBreadcrumb path={path} className="mb-1" />
         <KnowledgeLevelLabel path={path} className="mb-2 block" />
         {localOnly ? <LocalOnlyNotice editable className="mb-3" /> : null}
         {privateNote && !localOnly ? (

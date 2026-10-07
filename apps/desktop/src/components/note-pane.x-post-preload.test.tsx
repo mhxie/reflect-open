@@ -33,6 +33,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
     settings: {
       editorMarkdownSyntax: 'hide',
       allNotesFilterTags: [],
+      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
       aiProviders: [],
       defaultAiProviderId: null,
       chatSystemPrompt: '',

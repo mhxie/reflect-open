@@ -50,6 +50,15 @@ export const queryKeys = {
         languages.map((language) => [language.folder, language.label]),
       ] as const
     },
+    /** Keyed on the language folders: they bound where the ancestors are looked for. */
+    wikiAncestors(root: GraphRoot, path: string, languages: readonly WikiLanguage[]) {
+      return [
+        ...this.graph(root),
+        'wiki-ancestors',
+        path,
+        languages.map((language) => language.folder),
+      ] as const
+    },
     paletteSuggestions(
       root: GraphRoot,
       options: { text: string; dateFormat: string; weekStartDay: string; today: string },
