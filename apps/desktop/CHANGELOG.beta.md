@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0-beta.4](https://github.com/team-reflect/reflect-open/compare/v0.15.0-beta.3...v0.15.0-beta.4) (2026-10-05)
+
+
+### Features
+
+* add experimental Windows arm64 support ([#1441](https://github.com/team-reflect/reflect-open/issues/1441)) ([d05acd9](https://github.com/team-reflect/reflect-open/commit/d05acd9cc22681ebc52b4b2456cddc2026480569))
+
 ## [0.15.0-beta.3](https://github.com/team-reflect/reflect-open/compare/v0.15.0-beta.2...v0.15.0-beta.3) (2026-10-05)
 
 
