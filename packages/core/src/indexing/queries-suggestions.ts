@@ -127,7 +127,17 @@ export async function getWikiAddressForPath(path: string): Promise<WikiLinkSugge
     .selectFrom('notes')
     .where('path', '=', path)
     .where('kind', '!=', 'template')
-    .select(['path', 'title', 'titleKey', 'dailyDate', 'mtime', 'isPrivate', 'hasConflict'])
+    .select([
+      'path',
+      'title',
+      'displayTitle',
+      'lang',
+      'titleKey',
+      'dailyDate',
+      'mtime',
+      'isPrivate',
+      'hasConflict',
+    ])
     .executeTakeFirst()
   if (note === undefined) {
     return null
@@ -167,6 +177,8 @@ async function queryWikiTargetCandidates(
     .select([
       'path',
       'title',
+      'displayTitle',
+      'lang',
       'titleKey',
       'dailyDate',
       'mtime',
@@ -200,6 +212,8 @@ async function queryWikiTargetCandidates(
       .select([
         'notes.path',
         'notes.title',
+        'notes.displayTitle',
+        'notes.lang',
         'notes.titleKey',
         'notes.dailyDate',
         'notes.mtime',

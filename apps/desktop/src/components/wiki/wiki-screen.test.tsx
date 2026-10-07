@@ -316,6 +316,9 @@ describe('WikiScreen', () => {
     const view = await renderScreen()
 
     await expect.element(view.getByText('3 entries · 4 claims')).toBeInTheDocument()
+    await expect
+      .element(view.getByTestId('wiki-scroll').getByText('Wiki', { exact: true }))
+      .toBeVisible()
     expect(view.getByRole('region', { name: 'memory' }).query()).toBeNull()
     for (const name of [
       'Subject, sorted A to Z',

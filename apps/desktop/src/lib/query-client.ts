@@ -23,6 +23,9 @@ export const queryKeys = {
     allNotesUpdatedOn(root: GraphRoot, date: string) {
       return [...this.allNotes(root), 'updated', date] as const
     },
+    allNotesIncludingDaily(root: GraphRoot) {
+      return [...this.allNotes(root), 'including-daily'] as const
+    },
     allNotesTags(root: GraphRoot) {
       return [...this.graph(root), 'all-notes-tags'] as const
     },

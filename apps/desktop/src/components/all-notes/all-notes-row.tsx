@@ -1,20 +1,22 @@
 import { memo, type MouseEvent, type ReactElement } from 'react'
-import { displayNoteTitle, type NoteListEntry } from '@reflect/core'
+import type { NoteListEntry } from '@reflect/core'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
+import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
+import { NoteTitle } from '@/components/note-title.tsx'
 import { ListRow } from './list-row.tsx'
 import { ListRowSubject } from './list-row-subject.tsx'
 
 /**
- * The shared column template (Subject · Snippet · Tags · Updated) — the header
+ * The shared column template (Subject · Level · Snippet · Tags · Updated) — the header
  * row in {@link AllNotesTable} uses the same classes so the columns line up.
  * The selection indicator is positioned beside the row, outside the column flow.
  */
 export const ALL_NOTES_GRID =
-  'grid grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,8rem)_6rem] items-center gap-4 pl-12 pr-7'
+  'grid grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_minmax(0,8rem)_6rem] items-center gap-4 pl-12 pr-7'
 
 interface AllNotesRowProps {
   note: NoteListEntry
@@ -52,13 +54,16 @@ export const AllNotesRow = memo(function AllNotesRow({
         onOpen={onOpen}
         className={cn('flex min-w-0 items-center gap-1.5', selected ? 'text-accent' : 'text-text')}
       >
-        <span className="truncate">{displayNoteTitle(note.title)}</span>
+        <NoteTitle title={note.title} displayTitle={note.displayTitle} lang={note.lang} />
         <NoteStateIndicator
           path={note.path}
           isPrivate={note.isPrivate}
           hasConflict={note.hasConflict}
         />
       </ListRowSubject>
+      <span className="min-w-0" aria-label="Knowledge level">
+        <KnowledgeLevelLabel path={note.path} compact />
+      </span>
       <span
         className={cn('truncate text-[13px]', selected ? 'text-accent' : 'text-text-secondary')}
       >

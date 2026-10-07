@@ -12,17 +12,19 @@ import {
   dateFromDailyPath,
   isDaily,
   wikiFiltersEqual,
+  type KnowledgeClassification,
   type NoteAttachmentType,
   type WikiFilter,
 } from '@reflect/core'
 import { isIsoDate } from '@/lib/dates.ts'
 
-/** What the All Notes list is narrowed to: one tag or one attachment type. */
+/** What the All Notes list is narrowed to: one tag, attachment type, edit day, or level. */
 export type AllNotesFilter =
   | { kind: 'tag'; tag: string }
   | { kind: 'attachment'; type: NoteAttachmentType }
   /** Notes last edited on this local day (ISO `YYYY-MM-DD`). */
   | { kind: 'updated'; date: string }
+  | { kind: 'level'; level: KnowledgeClassification['level'] }
 
 export type Route =
   | { kind: 'today' }
@@ -110,6 +112,8 @@ export function allNotesFiltersEqual(a: AllNotesFilter | null, b: AllNotesFilter
       return b.kind === 'attachment' && a.type === b.type
     case 'updated':
       return b.kind === 'updated' && a.date === b.date
+    case 'level':
+      return b.kind === 'level' && a.level === b.level
   }
 }
 

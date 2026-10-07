@@ -6,6 +6,7 @@ import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import type { BacklinkSource } from '@/lib/group-backlinks.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
+import { NoteTitle } from '@/components/note-title.tsx'
 
 interface BacklinkSourceGroupProps {
   source: BacklinkSource
@@ -74,7 +75,7 @@ export function BacklinkSourceGroup({
             hasConflict={source.hasConflict}
             className="mr-1"
           />
-          {displayNoteTitle(source.title)}
+          <NoteTitle title={source.title} displayTitle={source.displayTitle} lang={source.lang} />
         </button>
 
         {source.snippets.length > 0 ? (

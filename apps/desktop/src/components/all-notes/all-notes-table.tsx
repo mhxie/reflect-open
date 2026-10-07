@@ -92,6 +92,7 @@ export function AllNotesTable({
           onSort={onSort}
           directionLabels={{ asc: 'A to Z', desc: 'Z to A' }}
         />
+        <span>Wiki</span>
         <span>Snippet</span>
         <span className="text-right">Tags</span>
         <SortHeader
@@ -143,5 +144,7 @@ function emptyListMessage(filter: AllNotesFilter | null, dateFormat: DateFormat)
       return `No notes with ${ATTACHMENT_FILTER_NOUNS[filter.type]}.`
     case 'updated':
       return `No notes edited on ${formatShortDate(filter.date, dateFormat)}.`
+    case 'level':
+      return `No L${filter.level} notes.`
   }
 }

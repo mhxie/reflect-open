@@ -16,6 +16,8 @@ export interface BacklinkSource {
   path: string
   /** Title of the source note. */
   title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
   /**
    * The source note is private (locked, unreadable, or local-only), so its
    * snippets must not reach the network. Any of its rows saying so, or
@@ -43,6 +45,8 @@ export function groupBacklinksBySource(backlinks: readonly BacklinkContext[]): B
       group = {
         path: backlink.sourcePath,
         title: backlink.sourceTitle,
+        displayTitle: backlink.sourceDisplayTitle,
+        lang: backlink.sourceLang,
         isPrivate: sourcePrivate,
         hasConflict: backlink.sourceHasConflict,
         snippets: [],

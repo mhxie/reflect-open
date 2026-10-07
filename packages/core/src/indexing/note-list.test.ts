@@ -22,6 +22,33 @@ afterEach(() => {
 })
 
 describe('listNotes', () => {
+  it('includes dailies and their tags when a caller will filter by path', async () => {
+    mockInvoke
+      .mockResolvedValueOnce([
+        {
+          path: 'daily/2026-06-09.md',
+          title: 'June 9, 2026',
+          mtime: 1000,
+          preview: 'Captured ideas.',
+          is_private: 0,
+          has_conflict: 0,
+          is_pinned: 0,
+          pinned_order: null,
+        },
+      ])
+      .mockResolvedValueOnce([{ note_path: 'daily/2026-06-09.md', tag: 'idea' }])
+
+    const entries = await listNotes({ includeDaily: true })
+
+    expect(entries[0]?.tags).toEqual(['idea'])
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+    for (const [command, args] of mockInvoke.mock.calls) {
+      expect(command).toBe('db_query')
+      expect(String(args['sql'])).toContain('"notes"."kind" in (?, ?)')
+      expect(args['params']).toEqual(['note', 'daily'])
+    }
+  })
+
   it('lists non-daily notes pinned-first then newest with stored previews and grouped tags', async () => {
     mockInvoke
       .mockResolvedValueOnce([

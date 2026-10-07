@@ -332,11 +332,99 @@ html:root {
   padding-inline: var(--editor-content-gutter, max(2rem, calc((100% - 42rem) / 2)));
 }
 
-/* A wiki `anchors` fence the caret is outside of, folded away while its source
-   chips render in its place (editor/wiki-anchors). Un-layered, so it beats
+/* Wiki evidence source the caret is outside of, folded away while numbered
+   references render in its place (editor/wiki-anchors). Un-layered, so it beats
    meowdown's layered code-block display rules. */
-[data-wiki-anchors-folded] {
+[data-wiki-anchors-folded],
+[data-wiki-source-links-folded] {
   display: none;
+}
+
+[data-wiki-claim-marker],
+[data-wiki-article-reference-source],
+.md-wikilink-view:has([data-wiki-article-reference-source]),
+[data-wiki-definition-folded],
+[data-wiki-revision-folded] {
+  display: none !important;
+}
+
+[data-wiki-claim-visible],
+[data-wiki-claim-target] {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 2px;
+  box-decoration-break: clone;
+}
+
+.wiki-claim-label {
+  display: inline;
+  margin-inline-end: 0.25em;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.65em;
+  vertical-align: super;
+}
+
+.wiki-article-references {
+  white-space: nowrap;
+}
+.wiki-article-reference {
+  display: inline;
+  padding: 0 0.08em;
+  border: 0;
+  border-radius: 2px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.72em;
+  line-height: 1;
+  vertical-align: super;
+}
+.wiki-article-reference:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.wiki-article-ledger,
+.wiki-article-revision,
+.wiki-article-bibliography,
+.wiki-article-diagnostics {
+  margin-block: 0.65rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+.wiki-article-ledger > summary,
+.wiki-article-revision > summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+.wiki-article-bibliography {
+  overflow-wrap: anywhere;
+}
+.wiki-article-bibliography ol {
+  padding-inline-start: 1.8em;
+  list-style: decimal;
+}
+.wiki-article-bibliography li {
+  padding-inline-start: 0.25em;
+  margin-block: 0.4em;
+}
+.wiki-article-bibliography li > button {
+  display: inline;
+  vertical-align: top;
+}
+.wiki-article-diagnostics {
+  border-inline-start: 2px solid var(--color-accent);
+  padding-inline-start: 0.75rem;
+}
+
+.wiki-evidence-details[open] {
+  flex-basis: 100%;
+}
+
+.wiki-evidence-row .meowdown-reference {
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
 }
 
 /* Outline jump tail space (sized in editor/outline/outline-scroll.ts). A

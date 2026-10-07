@@ -89,6 +89,8 @@ export function usePaletteResults(open: boolean, query: string): PaletteResults 
       return hits.map((hit) => ({
         path: hit.path,
         title: hit.title,
+        displayTitle: hit.displayTitle,
+        lang: hit.lang,
         dailyDate: null,
         snippet: hit.snippet === '' ? null : hit.snippet,
         related: hit.matchedBy === 'semantic',

@@ -1,8 +1,10 @@
 import { memo, type MouseEvent, type ReactElement } from 'react'
-import { displayNoteTitle, isWikiGuide, type WikiEntry } from '@reflect/core'
+import { isWikiGuide, type WikiEntry } from '@reflect/core'
 import { Languages, Waypoints } from 'lucide-react'
 import { ListRow } from '@/components/all-notes/list-row.tsx'
 import { ListRowSubject } from '@/components/all-notes/list-row-subject.tsx'
+import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
+import { NoteTitle } from '@/components/note-title.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
@@ -13,12 +15,12 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 import { WikiSignals } from './wiki-signals.tsx'
 
 /**
- * The shared column template — All Notes' Subject · Snippet · Tags · Updated,
+ * The shared column template — All Notes' Subject · Wiki · Snippet · Tags · Updated,
  * then the wiki's own columns ({@link WikiSignals}). The Wiki screen's header
  * row uses the same classes so the columns line up.
  */
 export const WIKI_GRID =
-  'grid grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,8rem)_6rem_auto] items-center gap-4 pl-12 pr-7'
+  'grid grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_minmax(0,8rem)_6rem_auto] items-center gap-4 pl-12 pr-7'
 
 interface WikiEntryRowProps {
   /** The entry as listed in the open language (see `wikiEntryIn`). */
@@ -91,7 +93,7 @@ export const WikiEntryRow = memo(function WikiEntryRow({
           )}
         >
           {isIndex ? <Waypoints aria-hidden className="size-3.5 flex-none text-accent" /> : null}
-          <span className="truncate">{displayNoteTitle(entry.title)}</span>
+          <NoteTitle title={entry.title} displayTitle={entry.displayTitle} lang={entry.lang} />
           <NoteStateIndicator
             path={entry.path}
             isPrivate={entry.isPrivate}
@@ -120,6 +122,9 @@ export const WikiEntryRow = memo(function WikiEntryRow({
           </Tooltip>
         )}
       </div>
+      <span className="min-w-0" aria-label="Knowledge level">
+        <KnowledgeLevelLabel path={entry.path} compact />
+      </span>
       <span
         className={cn(
           'truncate text-[13px]',

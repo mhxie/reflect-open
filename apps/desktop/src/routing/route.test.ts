@@ -26,6 +26,17 @@ describe('routeForPath', () => {
 })
 
 describe('routesEqual', () => {
+  it('compares allNotes routes by knowledge level', () => {
+    const levelFour = { kind: 'allNotes', filter: { kind: 'level', level: 4 } } as const
+    expect(routesEqual(levelFour, { ...levelFour })).toBe(true)
+    expect(routesEqual(levelFour, { kind: 'allNotes', filter: { kind: 'level', level: 1 } })).toBe(
+      false,
+    )
+    expect(
+      routesEqual(levelFour, { kind: 'allNotes', filter: { kind: 'attachment', type: 'video' } }),
+    ).toBe(false)
+  })
+
   it('compares allNotes routes by their edit day', () => {
     const editedOn = (date: string) =>
       ({ kind: 'allNotes', filter: { kind: 'updated', date } }) as const

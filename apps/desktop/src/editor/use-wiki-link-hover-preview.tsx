@@ -3,13 +3,20 @@ import type { ImageUrlResolver, WikilinkHoverHit } from '@meowdown/core'
 import {
   isLocalOnlyPath,
   notePrivate,
+  parseFrontmatter,
+  parseNote,
   resolveExistingWikiTarget,
   splitFrontmatter,
+  splitWikiLinkTarget,
+  findWikiClaim,
+  readWikiArticle,
+  wikiClaimId,
   type DateFormat,
 } from '@reflect/core'
 import { WikiLinkHoverPreview } from '@/components/wiki-link-hover-preview.tsx'
 import { createNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { readExistingNoteSource } from '@/lib/read-existing-note-source.ts'
+import { todayIso } from '@/lib/dates.ts'
 
 interface WikiLinkHoverPreviewOptions {
   generation: number | null
@@ -71,10 +78,26 @@ export function useWikiLinkHoverPreview({
           return null
         }
         const source = await readExistingNoteSource(resolution.path, generation)
+        const { fragment } = splitWikiLinkTarget(target)
+        const parts = splitFrontmatter(source)
+        const frontmatter = parseFrontmatter(parts.raw).data
+        const markdown = parts.body
+        let sourceTitle: string | undefined
+        let claimFragment: string | undefined
+        if (fragment !== null && wikiClaimId(fragment) !== null) {
+          const index = readWikiArticle(source, todayIso())
+          const claim = findWikiClaim(index, fragment)
+          if (claim === null) return null
+          sourceTitle = parseNote({ path: resolution.path, source }).title
+          claimFragment = fragment
+        }
         return (
           <WikiLinkHoverPreview
             path={resolution.path}
-            markdown={splitFrontmatter(source).body}
+            markdown={markdown}
+            titleMetadata={{ displayTitle: frontmatter.display_title, lang: frontmatter.lang }}
+            sourceTitle={sourceTitle}
+            claimFragment={claimFragment}
             privateNote={isLocalOnlyPath(resolution.path) || notePrivate(source)}
             dateFormat={dateFormat}
             resolveImageUrl={passiveImageResolver(generation, resolution.path)}

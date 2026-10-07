@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { useQuery } from '@tanstack/react-query'
 import {
   chooseNoteListSort,
+  classifyKnowledgePath,
   foldTag,
   isDaily,
   listNotes,
@@ -13,6 +14,7 @@ import {
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import { useKnowledgeLevels } from '@/hooks/use-knowledge-level.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
@@ -43,6 +45,8 @@ function noteListOptions(filter: AllNotesFilter | null): NoteListOptions {
       return { attachment: filter.type }
     case 'updated':
       return { updatedOn: filter.date }
+    case 'level':
+      return { includeDaily: true }
   }
 }
 
@@ -57,6 +61,8 @@ function allNotesQueryKey(root: string | undefined, filter: AllNotesFilter | nul
       return queryKeys.index.allNotesWithAttachment(root, filter.type)
     case 'updated':
       return queryKeys.index.allNotesUpdatedOn(root, filter.date)
+    case 'level':
+      return queryKeys.index.allNotesIncludingDaily(root)
   }
 }
 
@@ -69,7 +75,7 @@ interface AllNotesScreenProps {
  * The All Notes screen (a routed view, like settings): every non-daily note,
  * newest first or in the order chosen from the column headers (the
  * `allNotesSort` setting, so it holds across filters and restarts), filterable
- * by a tag, an attachment type, or the day notes were last edited. The active filter lives on the route so
+ * by a tag, attachment type, edit day, or knowledge level. The active filter lives on the route so
  * back/forward and "open a note, come back" keep it.
  * Daily notes are deliberately absent from the unfiltered view, but appear when
  * they match the active filter.
@@ -86,6 +92,7 @@ interface AllNotesScreenProps {
 export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const { graph } = useGraph()
   const { settings, updateSettingsWith } = useSettings()
+  const knowledgeLevels = useKnowledgeLevels()
   const sort = settings.allNotesSort
   const { navigate } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
@@ -114,10 +121,29 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
 
   // The index read is newest first; another order re-sorts the cached rows, so
   // switching order is instant and shares the filter's query.
-  const sortedNotes = useMemo(
-    () => (notes === undefined ? undefined : sortNoteListRows(notes, sort)),
-    [notes, sort],
+  const sortedNotes = useMemo(() => {
+    if (notes === undefined) return
+    if (filter?.kind !== 'level') return sortNoteListRows(notes, sort)
+    if (knowledgeLevels === undefined) return
+    if (knowledgeLevels.kind !== 'ready') return []
+    return sortNoteListRows(
+      notes.filter(
+        (note) => classifyKnowledgePath(note.path, knowledgeLevels.config)?.level === filter.level,
+      ),
+      sort,
+    )
+  }, [notes, sort, filter, knowledgeLevels])
+  const levels = useMemo(
+    () =>
+      knowledgeLevels?.kind === 'ready'
+        ? knowledgeLevels.config.levels
+            .map(({ level }) => level)
+            .sort((left, right) => left - right)
+        : [],
+    [knowledgeLevels],
   )
+  const levelUnavailable =
+    filter?.kind === 'level' && knowledgeLevels !== undefined && knowledgeLevels.kind !== 'ready'
   const handleSort = useCallback(
     (key: NoteListSortKey) =>
       updateSettingsWith((current) => ({
@@ -198,7 +224,12 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
           Notes
         </h1>
         <div className="ml-auto w-full min-w-0 @xs/all-notes:w-auto">
-          <AllNotesFilters filter={filter} facets={facets ?? []} onSelect={handleFilterSelect} />
+          <AllNotesFilters
+            filter={filter}
+            facets={facets ?? []}
+            levels={levels}
+            onSelect={handleFilterSelect}
+          />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2 @xs/all-notes:ml-0 @xl/all-notes:gap-3">
           <AllNotesPrivacyButton notes={selectedNotes} />
@@ -229,10 +260,14 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-auto"
       >
-        {filter?.kind === 'attachment' &&
-        (filter.type === 'image' || filter.type === 'pdf') &&
-        sortedNotes !== undefined &&
-        sortedNotes.length > 0 ? (
+        {levelUnavailable ? (
+          <p role="status" className="py-8 pl-12 pr-7 text-sm text-text-muted">
+            Knowledge levels are unavailable. Choose All levels to show notes.
+          </p>
+        ) : filter?.kind === 'attachment' &&
+          (filter.type === 'image' || filter.type === 'pdf') &&
+          sortedNotes !== undefined &&
+          sortedNotes.length > 0 ? (
           <AttachmentGallery
             type={filter.type}
             notes={sortedNotes}

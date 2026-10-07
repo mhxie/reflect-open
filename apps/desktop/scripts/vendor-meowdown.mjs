@@ -5,17 +5,21 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-const PACKAGES = ['core', 'react']
+const PACKAGES = ['markdown', 'core', 'react']
 
 const here = import.meta.dirname
 const repoRoot = join(here, '..', '..', '..')
 const vendorDir = join(repoRoot, 'vendor', 'meowdown')
 const workspaceFile = join(repoRoot, 'pnpm-workspace.yaml')
-const forkDir = resolve(process.argv[2] ?? join(homedir(), 'repos', 'meowdown'))
+const snapshot = process.argv.includes('--snapshot')
+const forkDir = resolve(
+  process.argv.slice(2).find((arg) => !arg.startsWith('--')) ??
+    join(homedir(), 'repos', 'meowdown'),
+)
 
 function run(command, args, cwd) {
   return execFileSync(command, args, {
@@ -25,18 +29,36 @@ function run(command, args, cwd) {
   }).trim()
 }
 
-// A tarball must name a commit that exists, so the fork has to be clean.
-if (run('git', ['status', '--porcelain'], forkDir) !== '') {
+if (!snapshot && run('git', ['status', '--porcelain'], forkDir) !== '') {
   throw new Error(`vendor-meowdown: commit the changes in ${forkDir} first`)
 }
 const sourceCommit = run('git', ['rev-parse', 'HEAD'], forkDir)
-const commit = sourceCommit.slice(0, 12)
+const sourceHash = createHash('sha256')
+for (const file of run(
+  'git',
+  ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+  forkDir,
+)
+  .split('\0')
+  .filter(Boolean)
+  .sort()) {
+  sourceHash
+    .update(file)
+    .update('\0')
+    .update(readFileSync(join(forkDir, file)))
+    .update('\0')
+}
+const snapshotHash = sourceHash.digest('hex')
+const commit = sourceCommit.slice(0, 12) + (snapshot ? `-local-${snapshotHash.slice(0, 12)}` : '')
 
 console.log(`vendor-meowdown: building ${forkDir} at ${commit}`)
-run('pnpm', ['install', '--frozen-lockfile'], forkDir)
-run('pnpm', ['--filter', '@meowdown/react...', 'run', 'build'], forkDir)
+if (!snapshot) run('pnpm', ['install', '--frozen-lockfile'], forkDir)
+run(
+  'pnpm',
+  ['--config.verify-deps-before-run=false', '--filter', '@meowdown/react...', 'run', 'build'],
+  forkDir,
+)
 
-rmSync(vendorDir, { recursive: true, force: true })
 mkdirSync(vendorDir, { recursive: true })
 
 let workspace = readFileSync(workspaceFile, 'utf8')
@@ -62,15 +84,12 @@ for (const name of PACKAGES) {
   }
   console.log(`vendor-meowdown: wrote vendor/meowdown/${tarball}`)
 }
+if (missing.length > 0)
+  workspace = workspace.replace(/^overrides:\s*$/m, `overrides:\n${missing.join('\n')}`)
 writeFileSync(workspaceFile, workspace)
 writeFileSync(
   join(vendorDir, 'README.md'),
-  `# Vendored Meowdown packages\n\nThese packages are built from Meowdown fork commit \`${sourceCommit}\`. The filenames record its first 12 characters, and the lockfile pins each archive's integrity.\n\n| Package | SHA-256 |\n| --- | --- |\n${provenance.join('\n')}\n\nTo refresh, run \`node apps/desktop/scripts/vendor-meowdown.mjs /path/to/meowdown\` from the repository root with a clean, committed renderer checkout, then run \`pnpm install\`. The script regenerates these archives and this provenance file.\n`,
+  `# Vendored Meowdown packages\n\n${snapshot ? 'Local review snapshot, with uncommitted changes on top of' : 'Built from'} Meowdown fork commit \`${sourceCommit}\`. Source file SHA-256: \`${snapshotHash}\`. The lockfile pins each archive's integrity.\n\n| Package | SHA-256 |\n| --- | --- |\n${provenance.join('\n')}\n\nTo refresh, run \`node apps/desktop/scripts/vendor-meowdown.mjs /path/to/meowdown${snapshot ? ' --snapshot' : ''}\`, then \`pnpm install\`. Snapshot mode records local source content without creating a commit.\n`,
 )
 
-if (missing.length > 0) {
-  console.log(
-    `vendor-meowdown: add to the overrides in pnpm-workspace.yaml:\n${missing.join('\n')}`,
-  )
-}
-console.log('vendor-meowdown: now run `pnpm install` and commit vendor/meowdown/')
+console.log('vendor-meowdown: now run `pnpm install`')

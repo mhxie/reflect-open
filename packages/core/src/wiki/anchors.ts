@@ -9,6 +9,7 @@
  */
 
 import { isIsoDate } from '@reflect/utils'
+import { z } from 'zod'
 
 /** Which marker a line carries. */
 export type WikiMarkerKind = 'anchor' | 'pass' | 'cite'
@@ -34,6 +35,8 @@ export interface WikiSource {
   readonly readwiseUrl: string | null
   /** Whether the anchor holds on the day read (dated, and not invalidated). */
   readonly current: boolean
+  readonly validAt: string | null
+  readonly invalidAt: string | null
 }
 
 /** One recorded review of a claim. */
@@ -45,16 +48,137 @@ export interface WikiReviewPass {
   /** The review's date (`YYYY-MM-DD`), or null when unrecorded. */
   readonly at: string | null
   readonly current: boolean
+  /** Source note or session explaining the review. */
+  readonly ref?: string
+}
+
+/** Dates attached to an ordinary wiki link that is explicitly marked as evidence. */
+export interface WikiCitationDates {
+  readonly validAt: string
+  readonly invalidAt?: string
+}
+
+/** A note/claim reference; its target remains an ordinary renameable wiki link. */
+export interface WikiCitation extends WikiCitationDates {
+  readonly target: string
+  readonly label: string
+  readonly current: boolean
+}
+
+/** Evidence targets name a note, optionally one stable positive-numbered wiki claim. */
+export function isWikiCitationTarget(target: string): boolean {
+  const match = /^([^#[\]\r\n|]+)(?:#\^c[1-9]\d*)?$/.exec(target)
+  return match !== null && (match[1]?.trim() ?? '') !== ''
 }
 
 /** What one fenced `anchors` block records about its claim. */
 export interface WikiAnchorsBlock {
   readonly sources: readonly WikiSource[]
   readonly passes: readonly WikiReviewPass[]
+  readonly citations: readonly WikiCitation[]
+  /** Lines that must remain discoverable rather than disappearing behind a successful parse. */
+  readonly unparsed: readonly string[]
 }
 
 const MARKER_RE = /^\s*@(anchor|pass|cite):\s*(.*)$/
 const HTTP_URL_RE = /^https?:\/\//i
+const citationSchema = z
+  .strictObject({
+    valid_at: z.string().refine(isIsoDate),
+    invalid_at: z.string().refine(isIsoDate).optional(),
+  })
+  .refine((dates) => dates.invalid_at === undefined || dates.invalid_at > dates.valid_at)
+const citationMetadataSchema = z.object({ citation: citationSchema })
+
+function markerNeedsAttention(marker: WikiMarker, line: string, asOf: string): boolean {
+  const allowed =
+    marker.kind === 'pass'
+      ? new Set(['status', 'at', 'valid_at', 'invalid_at', 'ref'])
+      : new Set(['valid_at', 'invalid_at', 'readwise'])
+  const seen = new Set<string>()
+  for (const pair of line.split(' | ').slice(1)) {
+    const key = pair.slice(0, pair.indexOf(':')).trim()
+    if (!allowed.has(key) || seen.has(key)) return true
+    seen.add(key)
+  }
+  const date = wikiMarkerDate(marker)
+  const invalidAt = marker.fields.get('invalid_at')
+  return (
+    date === undefined ||
+    !isIsoDate(date) ||
+    date > asOf ||
+    (invalidAt !== undefined && (!isIsoDate(invalidAt) || invalidAt <= date)) ||
+    (marker.kind === 'pass' && (marker.head === '' || !marker.fields.get('status')))
+  )
+}
+
+/** Validate citation magic-comment metadata without inferring or changing its dates. */
+export function readWikiCitationMetadata(metadata: unknown): WikiCitationDates | null {
+  const parsed = citationMetadataSchema.safeParse(metadata)
+  if (!parsed.success) return null
+  const { valid_at: validAt, invalid_at: invalidAt } = parsed.data.citation
+  return { validAt, ...(invalidAt === undefined ? {} : { invalidAt }) }
+}
+
+/** Read a same-line citation comment for non-editor consumers of Markdown source. */
+export function readWikiCitationComment(comment: string): WikiCitationDates | null {
+  if (/[\r\n]/.test(comment)) return null
+  const json = /^<!--\s*(\{[\s\S]*\})\s*-->$/.exec(comment)?.[1]
+  if (json === undefined) return null
+  try {
+    const parsed = z.object({ metadata: citationMetadataSchema }).safeParse(JSON.parse(json))
+    return parsed.success ? readWikiCitationMetadata(parsed.data.metadata) : null
+  } catch {
+    return null
+  }
+}
+
+/** Human-readable dates shared by inline reference tooltips and evidence disclosures. */
+export function wikiCitationDescription(dates: WikiCitationDates): string {
+  return `Evidence recorded ${dates.validAt}${dates.invalidAt === undefined ? '' : `; invalidated ${dates.invalidAt}`}`
+}
+
+function readCitationLine(line: string, asOf: string): WikiCitation | null {
+  const match = /^\s*@cite:\s*\[\[([^\]\r\n[]+)\]\]((?:\s+\|\s+.*)?)\s*$/.exec(line)
+  if (match === null) return null
+  const inner = match[1] ?? ''
+  const pipe = inner.indexOf('|')
+  const target = (pipe === -1 ? inner : inner.slice(0, pipe)).trim()
+  if (!isWikiCitationTarget(target)) return null
+  const fields: Record<string, string> = {}
+  for (const part of (match[2] ?? '').split(/\s+\|\s+/)) {
+    if (part.trim() === '') continue
+    const pair = /^([a-z_]+):\s*(\S+)\s*$/.exec(part.trim())
+    const key = pair?.[1]
+    const value = pair?.[2]
+    if (key === undefined || value === undefined || key in fields) return null
+    fields[key] = value
+  }
+  const dates = readWikiCitationMetadata({ citation: fields })
+  if (dates === null) return null
+  return {
+    target,
+    label: target,
+    ...dates,
+    current: dates.validAt <= asOf && (dates.invalidAt === undefined || dates.invalidAt > asOf),
+  }
+}
+
+/**
+ * Fold only a paragraph made entirely of valid legacy citation lines. Mixed
+ * prose, incomplete metadata, and unknown fields retain their normal editor.
+ */
+export function readWikiCitationParagraph(text: string, asOf: string): WikiAnchorsBlock | null {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '')
+  if (lines.length === 0) return null
+  const citations: WikiCitation[] = []
+  for (const line of lines) {
+    const citation = readCitationLine(line, asOf)
+    if (citation === null || citation.validAt > asOf) return null
+    citations.push(citation)
+  }
+  return { sources: [], passes: [], citations, unparsed: [] }
+}
 
 function isMarkerKind(value: string): value is WikiMarkerKind {
   return value === 'anchor' || value === 'pass' || value === 'cite'
@@ -170,18 +294,24 @@ export function wikiSourceLabel(type: string, id: string): string {
 /**
  * The sources and reviews one fenced `anchors` block records, as of `asOf`
  * (ISO `YYYY-MM-DD`). Sources and passes that no longer hold stay listed,
- * marked not current, so an invalidated anchor reads as struck rather than
- * vanishing. `@cite` lines carry no source and are skipped.
+ * marked not current, for the evidence history disclosure. Unknown or malformed
+ * lines are retained for the evidence disclosure.
  */
 export function readWikiAnchorsBlock(text: string, asOf: string): WikiAnchorsBlock {
   const sources: WikiSource[] = []
   const passes: WikiReviewPass[] = []
+  const citations: WikiCitation[] = []
+  const unparsed: string[] = []
   for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === '') continue
     const marker = parseWikiMarker(line)
     if (marker === null) {
+      unparsed.push(line)
       continue
     }
     const current = wikiMarkerHolds(marker, asOf)
+    const needsAttention = marker.kind !== 'cite' && markerNeedsAttention(marker, line, asOf)
+    if (needsAttention) unparsed.push(line)
     if (marker.kind === 'anchor' && wikiAnchorNamesSource(marker.head)) {
       const { type, id } = splitAnchorHead(marker.head)
       const readwise = marker.fields.get('readwise')
@@ -195,15 +325,25 @@ export function readWikiAnchorsBlock(text: string, asOf: string): WikiAnchorsBlo
             ? null
             : `https://read.readwise.io/read/${readwise}`,
         current,
+        validAt: marker.fields.get('valid_at') ?? null,
+        invalidAt: marker.fields.get('invalid_at') ?? null,
       })
     } else if (marker.kind === 'pass') {
+      const ref = marker.fields.get('ref')
       passes.push({
         agent: marker.head,
         status: marker.fields.get('status') ?? '',
         at: wikiMarkerDate(marker) ?? null,
         current,
+        ...(ref === undefined ? {} : { ref }),
       })
+    } else if (marker.kind === 'cite') {
+      const citation = readCitationLine(line, asOf)
+      if (citation === null) unparsed.push(line)
+      else citations.push(citation)
+    } else {
+      if (!needsAttention) unparsed.push(line)
     }
   }
-  return { sources, passes }
+  return { sources, passes, citations, unparsed }
 }

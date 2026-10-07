@@ -234,6 +234,46 @@ describe('rewriteLinksForTitleChange', () => {
 })
 
 describe('rewriteLinksForTitleChange stable-target displays', () => {
+  it('syncs a title display when a stable target includes a fragment', async () => {
+    const sourcePath = 'notes/source.md'
+    const target = 'stable#Heading'
+    const { io, writes } = fakeIo(
+      { [sourcePath]: `[[${target}|Old Title]]\n` },
+      {
+        sources: [],
+        resolveByTarget: { [target]: 'notes/subject.md' },
+        backlinks: [{ sourcePath, targetRaw: target, alias: 'Old Title' }],
+      },
+    )
+    await rewriteLinksForTitleChange({
+      path: 'notes/subject.md',
+      from: 'Old Title',
+      to: 'New Title',
+      io,
+    })
+    expect(writes[sourcePath]).toBe('[[stable#Heading|New Title]]\n')
+  })
+
+  it.each([
+    ['ref', 'New Title'],
+    ['Old Title', 'ref'],
+  ])('preserves citation status when the title changes from %s to %s', async (from, to) => {
+    const sourcePath = 'notes/source.md'
+    const target = 'stable#^c2'
+    const source = `[[${target}|${from}]]<!-- {"metadata":{"citation":{"valid_at":"2020-01-02"}}} -->\n`
+    const { io, writes } = fakeIo(
+      { [sourcePath]: source },
+      {
+        sources: [],
+        resolveByTarget: { [target]: 'notes/subject.md' },
+        backlinks: [{ sourcePath, targetRaw: target, alias: from }],
+      },
+    )
+    const result = await rewriteLinksForTitleChange({ path: 'notes/subject.md', from, to, io })
+    expect(result.rewritten).toEqual([])
+    expect(writes).toEqual({})
+  })
+
   it('updates a title-mirroring display while keeping the stable target', async () => {
     const sourcePath = 'daily/2026-07-23.md'
     const stableTarget = 'capture-2026-07-23-154848-811-c2b0'

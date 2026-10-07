@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { displayNoteTitle } from '@reflect/core'
+import { NoteTitle } from '@/components/note-title.tsx'
 import { ArrowUturnLeftIcon } from '@/components/icons/arrow-uturn-left-icon.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useSimilarNotes } from '@/lib/use-similar-notes.ts'
@@ -47,7 +47,7 @@ export function SimilarNotesSection({ path }: SimilarNotesSectionProps): ReactEl
               className="flex w-full items-center space-x-1 rounded-md px-3 py-1 leading-5 text-text-secondary hover:bg-surface-hover hover:text-text"
             >
               <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">
-                {displayNoteTitle(hit.title)}
+                <NoteTitle title={hit.title} displayTitle={hit.displayTitle} lang={hit.lang} />
               </span>
               <span aria-hidden className="flex-none -scale-x-100">
                 <ArrowUturnLeftIcon width={13} height={13} />

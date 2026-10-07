@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { Command } from 'cmdk'
-import { cleanSnippetText, displayNoteTitle, parseHighlights } from '@reflect/core'
+import { cleanSnippetText, parseHighlights } from '@reflect/core'
 import { CalendarDays, FileText } from 'lucide-react'
 import { getIsComposing, isModEvent } from '@meowdown/core'
 import { Kbd } from '@/components/kbd.tsx'
@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
+import { NoteTitle } from '@/components/note-title.tsx'
 import { COMMAND_ICONS, FALLBACK_COMMAND_ICON } from './command-icons.ts'
 import type { NoteEntry } from './entries.ts'
 import { NotePreview } from './note-preview.tsx'
@@ -232,11 +233,17 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-1.5 text-sm">
                               <span className="min-w-0 truncate">
-                                {entry.phrase !== null
-                                  ? entry.phrase
-                                  : entry.date !== null
-                                    ? formatDayLabel(entry.date, settings.dateFormat)
-                                    : displayNoteTitle(entry.title)}
+                                {entry.phrase !== null ? (
+                                  entry.phrase
+                                ) : entry.date !== null ? (
+                                  formatDayLabel(entry.date, settings.dateFormat)
+                                ) : (
+                                  <NoteTitle
+                                    title={entry.title}
+                                    displayTitle={entry.displayTitle}
+                                    lang={entry.lang}
+                                  />
+                                )}
                               </span>
                               {entry.isPrivate === undefined ||
                               entry.hasConflict === undefined ? null : (
@@ -259,7 +266,12 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                             ) : null}
                             {entry.alias !== null ? (
                               <span className="block truncate text-xs text-text-muted">
-                                {entry.alias} → {displayNoteTitle(entry.title)}
+                                {entry.alias} →{' '}
+                                <NoteTitle
+                                  title={entry.title}
+                                  displayTitle={entry.displayTitle}
+                                  lang={entry.lang}
+                                />
                               </span>
                             ) : null}
                             {entry.snippet !== null ? <Snippet snippet={entry.snippet} /> : null}

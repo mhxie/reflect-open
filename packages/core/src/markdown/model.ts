@@ -88,6 +88,20 @@ export type AiSummaryFrontmatter = z.infer<typeof aiSummaryFrontmatterSchema>
 export const frontmatterSchema = z.looseObject({
   /** Reserved stable id. Not auto-written in the first wave (identity = path). */
   id: z.string().optional().catch(undefined),
+  /** Presentation only; neither field changes the note's canonical title or aliases. */
+  display_title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(/^[^\r\n]+$/)
+    .optional()
+    .catch(undefined),
+  lang: z
+    .string()
+    .regex(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i)
+    .optional()
+    .catch(undefined),
   aliases: z.array(z.string()).catch([]).default([]),
   /**
    * Hard privacy flag: such notes must never be sent to any external service.
@@ -179,7 +193,7 @@ export interface AssetRef extends Span {
  * 4 — task rows carry parent outline/list breadcrumbs.
  * 5 — tasks are projected from the block AST (`ParsedTask`): addressed by AST
  * path, round tasks inside blockquotes included, text kept as Markdown. */
-export const PARSED_NOTE_VERSION = 5
+export const PARSED_NOTE_VERSION = 6
 
 /** The full parse of one note — the stable contract downstream plans depend on. */
 export interface ParsedNote {

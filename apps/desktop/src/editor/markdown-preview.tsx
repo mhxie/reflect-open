@@ -5,17 +5,28 @@ import {
 } from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
-import { useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react'
+import { createElement, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react'
+import type { NoteTitleMetadata } from '@reflect/core'
+import { NoteTitle } from '@/components/note-title.tsx'
 import type {
   FileClickHandler,
   ImageUrlResolver,
   LinkClickHandler,
   WikiEmbedResolver,
 } from '@meowdown/core'
-import { MarkdownView, type NoteEmbedRenderer } from '@meowdown/react'
+import { MarkdownView, type MarkdownBlockRenderer, type NoteEmbedRenderer } from '@meowdown/react'
 import { useOpenExternalLink } from '@/editor/open-external-link.ts'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { cn } from '@/lib/utils.ts'
+import { todayIso } from '@/lib/dates.ts'
+import {
+  readWikiEvidenceNode,
+  readWikiSourceLinkPair,
+} from '@/editor/wiki-anchors/wiki-evidence.ts'
+import { WikiEvidencePreview } from '@/editor/wiki-anchors/wiki-evidence-preview.tsx'
+import { createWikiArticleProjectionReader } from '@/editor/wiki-anchors/wiki-article-projection.ts'
+import { renderWikiArticleBlock } from '@/editor/wiki-anchors/wiki-article-preview.tsx'
+import { useWikiArticleIdentities } from '@/editor/wiki-anchors/use-wiki-article-identities.ts'
 
 /**
  * A read-only rendering of note markdown via @meowdown/react's `<MarkdownView>`
@@ -29,6 +40,7 @@ import { cn } from '@/lib/utils.ts'
  */
 
 interface MarkdownPreviewProps {
+  titleMetadata?: NoteTitleMetadata | undefined
   /** The markdown body to render (callers strip frontmatter first). */
   content: string
   /** Demote displayed headings for an embedded source without rewriting its Markdown. */
@@ -71,10 +83,15 @@ interface MarkdownPreviewProps {
   remoteEmbeds?: boolean
   /** Extra classes for the rendered root. */
   className?: string
+  /** Reveal exact claim extents without changing the source document. */
+  showClaimRanges?: boolean
+  /** Render one exact claim in the full Markdown context, retaining enclosing formatting. */
+  claimFragment?: string | undefined
 }
 
 export function MarkdownPreview({
   content,
+  titleMetadata,
   headingOffset = 0,
   resolveImageUrl,
   resolveWikiEmbed,
@@ -85,6 +102,8 @@ export function MarkdownPreview({
   interactive = true,
   remoteEmbeds = true,
   className,
+  showClaimRanges = false,
+  claimFragment,
 }: MarkdownPreviewProps): ReactElement {
   const openExternalLink = useOpenExternalLink()
   // The click handler is read through a ref so a changing prop never gives
@@ -112,6 +131,83 @@ export function MarkdownPreview({
       navigateRef.current?.({ target: payload.target, openInNewWindow: payload.mod }),
     [],
   )
+  const noteIdentity = useWikiArticleIdentities(content)
+  const articleProjection = useMemo(
+    () => createWikiArticleProjectionReader({ noteIdentity }),
+    [noteIdentity],
+  )
+  const renderBlock = useCallback<MarkdownBlockRenderer>(
+    (context) => {
+      const {
+        node,
+        doc,
+        previousSibling,
+        nextSibling,
+        renderDefault,
+        interactive: blockInteractive,
+      } = context
+      if (
+        claimFragment === undefined &&
+        node === doc.firstChild &&
+        node.type.name === 'heading' &&
+        node.attrs.level === 1 &&
+        (titleMetadata?.displayTitle || titleMetadata?.lang)
+      ) {
+        return createElement(
+          `h${Math.min(6, 1 + headingOffset)}`,
+          {},
+          <NoteTitle title={node.textContent} {...titleMetadata} wrap />,
+        )
+      }
+      const asOf = todayIso()
+      const projection = articleProjection(doc, asOf)
+      const article = renderWikiArticleBlock(
+        context,
+        projection,
+        {
+          interactive: blockInteractive,
+          openUrl: (href, event) =>
+            (onLinkClick ?? openExternalLink)({ href, event, mod: event.metaKey || event.ctrlKey }),
+          ...(navigates ? { openWikiLink: (options) => navigateRef.current?.(options) } : {}),
+        },
+        showClaimRanges,
+        claimFragment,
+      )
+      if (article !== undefined) return article
+      const cluster = readWikiSourceLinkPair(node, nextSibling, asOf)
+      if (cluster !== null) return renderDefault(node.content.cut(0, cluster.from))
+      const block =
+        readWikiSourceLinkPair(previousSibling, node, asOf)?.block ??
+        readWikiEvidenceNode(node, asOf)
+      if (block === null) return
+      return (
+        <WikiEvidencePreview
+          block={block}
+          raw={node.textContent}
+          options={{
+            interactive: blockInteractive,
+            openUrl: (href, event) =>
+              (onLinkClick ?? openExternalLink)({
+                href,
+                event,
+                mod: event.metaKey || event.ctrlKey,
+              }),
+            ...(navigates ? { openWikiLink: (options) => navigateRef.current?.(options) } : {}),
+          }}
+        />
+      )
+    },
+    [
+      navigates,
+      onLinkClick,
+      openExternalLink,
+      articleProjection,
+      showClaimRanges,
+      claimFragment,
+      titleMetadata,
+      headingOffset,
+    ],
+  )
 
   return (
     <MarkdownView
@@ -124,6 +220,7 @@ export function MarkdownPreview({
       markMode="hide"
       interactive={interactive}
       resolveWikilink={resolveWikilink}
+      renderBlock={renderBlock}
       {...(imageResolver !== undefined ? { resolveImageUrl: imageResolver } : {})}
       {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
       {...(renderNoteEmbed !== undefined ? { renderNoteEmbed } : {})}

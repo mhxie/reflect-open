@@ -6,6 +6,15 @@ export {
   type Unlisten,
 } from '../ipc/bridge.ts'
 export { call, callBinary } from '../ipc/invoke.ts'
+export {
+  KNOWLEDGE_LEVELS_PATH,
+  classifyKnowledgePath,
+  loadKnowledgeLevels,
+  parseKnowledgeLevels,
+  type KnowledgeClassification,
+  type KnowledgeLevels,
+  type KnowledgeLevelsState,
+} from '../graph/knowledge-levels.ts'
 export { type PluginSubscription } from '../ipc/plugin.ts'
 export {
   actionPerformed,

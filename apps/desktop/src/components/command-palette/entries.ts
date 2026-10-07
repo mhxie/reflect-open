@@ -9,7 +9,7 @@ import type { FilteredSearchHit, WikiSuggestion } from '@reflect/core'
  */
 export type PaletteHit = Pick<
   FilteredSearchHit,
-  'path' | 'title' | 'dailyDate' | 'snippet' | 'isPrivate' | 'hasConflict'
+  'path' | 'title' | 'displayTitle' | 'lang' | 'dailyDate' | 'snippet' | 'isPrivate' | 'hasConflict'
 > & {
   /** Found by meaning alone (hybrid search), not by its wording. */
   readonly related?: boolean
@@ -25,6 +25,8 @@ export type PaletteHit = Pick<
 export interface NoteEntry {
   path: string
   title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
   /** Set for daily notes (render the day label). */
   date: string | null
   /** Body snippet with highlight markers (search hits only). */
@@ -102,6 +104,8 @@ export function buildPaletteSections(options: {
       notes: hits.slice(0, NOTE_CAP).map((hit) => ({
         path: hit.path,
         title: hit.title,
+        displayTitle: hit.displayTitle,
+        lang: hit.lang,
         date: hit.dailyDate,
         snippet: hit.snippet,
         phrase: null,
@@ -136,6 +140,8 @@ export function buildPaletteSections(options: {
       notes.push({
         path,
         title: suggestion.title,
+        displayTitle: suggestion.displayTitle,
+        lang: suggestion.lang,
         date: suggestion.date,
         snippet: null,
         phrase: suggestion.generated?.phrase ?? null,
@@ -154,6 +160,8 @@ export function buildPaletteSections(options: {
       notes.push({
         path: hit.path,
         title: hit.title,
+        displayTitle: hit.displayTitle,
+        lang: hit.lang,
         date: hit.dailyDate,
         snippet: hit.snippet,
         phrase: null,

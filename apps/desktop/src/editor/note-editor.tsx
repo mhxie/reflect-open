@@ -17,6 +17,8 @@ import {
   type Ref,
 } from 'react'
 import { errorMessage, isPdfAttachmentPath, type TimeFormat } from '@reflect/core'
+import { createMarkdownSourceMap } from '@meowdown/core'
+import { TextSelection } from '@prosekit/pm/state'
 import type {
   AcceptPendingReplacementOptions,
   EmbedResolver,
@@ -129,6 +131,8 @@ export interface NoteEditorHandle {
    * numbered `-1`, `-2` — and scroll it into view; false when none matches.
    */
   revealHeading(fragment: string): boolean
+  /** Select and reveal an exact UTF-16 range in the current Markdown snapshot. */
+  revealSourceRange?(from: number, to: number): boolean
 }
 
 interface NoteEditorProps {
@@ -394,6 +398,23 @@ export function NoteEditor({
       findNext: () => innerRef.current?.findNext(),
       findPrevious: () => innerRef.current?.findPrevious(),
       revealHeading: (fragment) => innerRef.current?.revealHeading(fragment) ?? false,
+      revealSourceRange: (from, to) => {
+        const editor = innerRef.current?.getEditor()
+        if (editor === undefined || !editor.mounted) return false
+        const map = createMarkdownSourceMap(editor.state.doc)
+        const first = map.sourceToEditor(from, 1)
+        const last = map.sourceToEditor(to, -1)
+        if (first === null || last === null) return false
+        const anchor = TextSelection.near(editor.state.doc.resolve(first), 1).from
+        const head = TextSelection.near(editor.state.doc.resolve(last), -1).to
+        editor.view.dispatch(
+          editor.state.tr
+            .setSelection(TextSelection.create(editor.state.doc, anchor, head))
+            .scrollIntoView(),
+        )
+        editor.focus()
+        return true
+      },
     }),
     [],
   )

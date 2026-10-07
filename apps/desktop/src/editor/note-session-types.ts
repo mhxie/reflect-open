@@ -1,4 +1,4 @@
-import type { NoteRecovery } from '@reflect/core'
+import type { NoteRecovery, NoteTitleMetadata } from '@reflect/core'
 import type { FrontmatterPatch } from './note-session-frontmatter.ts'
 import type { RoundTripFidelity } from './roundtrip.ts'
 
@@ -6,6 +6,7 @@ export type NoteSessionStatus = 'loading' | 'ready' | 'error'
 
 /** The observable document state, emitted to `onSnapshot` whenever it changes. */
 export interface NoteSessionSnapshot {
+  titleMetadata?: NoteTitleMetadata
   status: NoteSessionStatus
   /**
    * Markdown to seed the editor with once `status` is `ready` — the body

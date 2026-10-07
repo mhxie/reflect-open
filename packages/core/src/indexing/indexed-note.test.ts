@@ -10,7 +10,50 @@ import {
 
 describe('buildIndexedNote', () => {
   it('carries the projection version for AI summary previews', () => {
-    expect(PROJECTION_VERSION).toBe(30)
+    expect(PROJECTION_VERSION).toBe(32)
+  })
+
+  it('indexes presentation metadata without changing the canonical title or its claims', () => {
+    const source =
+      '---\ntitle: Anchoring (中文)\ndisplay_title: Anchoring\nlang: zh-CN\n---\n# Anchoring (中文)\n\n正文'
+    const indexed = buildIndexedNote(parseNote({ path: 'wiki-cn/anchoring.md', source }), {
+      fileHash: 'h',
+      mtime: 1,
+      source,
+    })
+    expect(indexed).toMatchObject({
+      title: 'Anchoring (中文)',
+      titleKey: 'anchoring (中文)',
+      displayTitle: 'Anchoring',
+      lang: 'zh-CN',
+    })
+    expect(indexed.aliases).toEqual([])
+    const plain = source.replace('display_title: Anchoring\nlang: zh-CN\n', '')
+    expect(indexed.claims).toEqual(
+      buildIndexedNote(parseNote({ path: 'wiki-cn/anchoring.md', source: plain }), {
+        fileHash: 'h',
+        mtime: 1,
+        source: plain,
+      }).claims,
+    )
+  })
+
+  it('uses a localized H1 for display while its frontmatter title keeps link ownership', () => {
+    const source = '---\ntitle: Anchoring (中文)\nlang: zh-CN\n---\n# Anchoring\n\n正文'
+    const indexed = buildIndexedNote(parseNote({ path: 'wiki-cn/anchoring.md', source }), {
+      fileHash: 'h',
+      mtime: 1,
+      source,
+    })
+    expect(indexed).toMatchObject({
+      title: 'Anchoring (中文)',
+      displayTitle: 'Anchoring',
+      lang: 'zh-CN',
+    })
+    expect(
+      indexed.claims.filter((claim) => claim.tier === CLAIM_TIER.title).map((claim) => claim.key),
+    ).toEqual(['anchoring (中文)'])
+    expect(indexed.aliases).toEqual([])
   })
 
   it('marks a note private when its frontmatter cannot be read', () => {

@@ -24,6 +24,8 @@ function sampleNote(overrides: Partial<IndexedNote> = {}): IndexedNote {
     path: 'notes/sample.md',
     id: '01hv3xq7c2dm8k4t9w5e6r1n99',
     title: 'Sample Note',
+    displayTitle: null,
+    lang: null,
     titleKey: 'sample note',
     pathKey: 'notes/sample.md',
     kind: 'note',

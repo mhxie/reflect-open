@@ -26,6 +26,8 @@ import { recallOrder } from './filtered-search.ts'
 export interface NoteListEntry {
   path: string
   title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
   /** The indexed row preview (`buildIndexedNote`; may be empty). */
   snippet: string
   /** The note's body tags (first-seen casing), alphabetical. */
@@ -42,6 +44,8 @@ export interface NoteListEntry {
 }
 
 export interface NoteListOptions {
+  /** Include daily notes in an unfiltered read, for callers that filter rows by path. */
+  includeDaily?: boolean
   /** Only notes carrying this tag (case-insensitive). `null` lists all. */
   tag?: string | null
   /**
@@ -170,6 +174,8 @@ function editedOnDay(date: string): RawBuilder<SqlBool> {
 const NOTE_LIST_COLUMNS = [
   'notes.path',
   'notes.title',
+  'notes.displayTitle',
+  'notes.lang',
   'notes.mtime',
   'notes.preview',
   'notes.isPinned',
@@ -183,6 +189,7 @@ function noteListQuery(
   tag: string | null,
   attachment: NoteAttachmentType | null,
   updatedOn: string | null,
+  includeDaily: boolean,
 ) {
   if (tag !== null) {
     return db
@@ -207,7 +214,10 @@ function noteListQuery(
       .where(editedOnDay(updatedOn))
       .select(NOTE_LIST_COLUMNS)
   }
-  return db.selectFrom('notes').where('notes.kind', '=', 'note').select(NOTE_LIST_COLUMNS)
+  const notes = db.selectFrom('notes').select(NOTE_LIST_COLUMNS)
+  return includeDaily
+    ? notes.where('notes.kind', 'in', ['note', 'daily'])
+    : notes.where('notes.kind', '=', 'note')
 }
 
 /**
@@ -219,6 +229,7 @@ function noteListTagsQuery(
   tag: string | null,
   attachment: NoteAttachmentType | null,
   updatedOn: string | null,
+  includeDaily: boolean,
 ) {
   const tags = db
     .selectFrom('tags')
@@ -240,7 +251,9 @@ function noteListTagsQuery(
   if (updatedOn !== null) {
     return tags.where('notes.kind', 'in', ['note', 'daily']).where(editedOnDay(updatedOn))
   }
-  return tags.where('notes.kind', '=', 'note')
+  return includeDaily
+    ? tags.where('notes.kind', 'in', ['note', 'daily'])
+    : tags.where('notes.kind', '=', 'note')
 }
 
 /**
@@ -258,7 +271,7 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     return []
   }
 
-  let listQuery = noteListQuery(tag, attachment, updatedOn)
+  let listQuery = noteListQuery(tag, attachment, updatedOn, options.includeDaily ?? false)
   for (const order of recallOrder(true)) {
     listQuery = listQuery.orderBy(order)
   }
@@ -268,7 +281,12 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     return []
   }
 
-  const tagRows = await noteListTagsQuery(tag, attachment, updatedOn).execute()
+  const tagRows = await noteListTagsQuery(
+    tag,
+    attachment,
+    updatedOn,
+    options.includeDaily ?? false,
+  ).execute()
   const tagsByPath = new Map<string, string[]>()
   for (const row of tagRows) {
     const tags = tagsByPath.get(row.notePath)
@@ -282,6 +300,8 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
   return rows.map((row) => ({
     path: row.path,
     title: row.title,
+    displayTitle: row.displayTitle,
+    lang: row.lang,
     mtime: row.mtime,
     snippet: row.preview,
     tags: tagsByPath.get(row.path) ?? [],

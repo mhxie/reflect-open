@@ -100,6 +100,7 @@ export interface Notes {
   assetTextHash: Generated<string>;
   bodyChars: Generated<number>;
   dailyDate: string | null;
+  displayTitle: string | null;
   fileHash: string;
   gistStale: Generated<number>;
   gistUrl: string | null;
@@ -110,6 +111,7 @@ export interface Notes {
   isPinned: Generated<number>;
   isPrivate: Generated<number>;
   kind: Generated<string>;
+  lang: string | null;
   mtime: Generated<number>;
   path: string;
   pathKey: Generated<string>;

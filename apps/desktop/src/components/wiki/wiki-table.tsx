@@ -99,6 +99,7 @@ export function WikiTable({
           onSort={onSort}
           directionLabels={{ asc: 'A to Z', desc: 'Z to A' }}
         />
+        <span>Wiki</span>
         <span>Snippet</span>
         <span className="text-right">Tags</span>
         <SortHeader

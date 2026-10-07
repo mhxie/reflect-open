@@ -24,6 +24,8 @@ pub struct IndexedNote {
     pub(super) path: String,
     pub(super) id: Option<String>,
     pub(super) title: String,
+    pub(super) display_title: Option<String>,
+    pub(super) lang: Option<String>,
     pub(super) title_key: String,
     /// ASCII-folded graph path: what a path-qualified link joins against.
     pub(super) path_key: String,
@@ -170,8 +172,8 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
     remove_note(conn, &note.path)?;
 
     conn.prepare_cached(
-        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh, display_title, lang)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
     )?
     .execute(params![
         note.path,
@@ -198,6 +200,8 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>(),
         i64::from(note.summary_fresh),
+        note.display_title,
+        note.lang,
     ])?;
     {
         let mut stmt = conn.prepare_cached(
