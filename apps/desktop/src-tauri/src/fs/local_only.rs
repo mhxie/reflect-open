@@ -47,13 +47,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use reflect_graph_paths::{folder_name_problem, LocalOnlyFolders};
+use reflect_graph_paths::{
+    folder_name_problem, same_folder, LocalOnlyFolders, LOCAL_ONLY_SETTINGS_KEY as SETTINGS_KEY,
+};
 use serde_json::{Map, Value};
 
-use crate::settings::SettingsDoc;
-
-/// The settings-document key holding every graph's local-only configuration.
-pub(crate) const SETTINGS_KEY: &str = "localOnlyFolders";
+use crate::settings::{graph_section, GraphSection, SettingsDoc};
 
 /// One graph's configuration as loaded at open.
 #[derive(Debug)]
@@ -351,24 +350,21 @@ pub(crate) fn with_recorded(mut loaded: LoadedConfig, recorded: Recorded) -> Loa
 /// silently ignored.
 fn from_settings(doc: &SettingsDoc, root: &Path, opened: &[PathBuf]) -> LoadedConfig {
     let mut warnings = Vec::new();
-    let Some(value) = doc.get(SETTINGS_KEY) else {
-        return LoadedConfig::default();
-    };
-    let Some(entries) = value.as_object() else {
-        warnings.push(format!(
-            "\"{SETTINGS_KEY}\" in the settings file must map graph folders to their \
-             configuration, so it is ignored."
-        ));
-        return LoadedConfig {
-            warnings,
-            ..LoadedConfig::default()
-        };
-    };
-    let matched = matching_key(entries, root);
-    for key in entries.keys() {
-        if Some(key) == matched {
-            continue;
+    let (entry, others) = match graph_section(doc, SETTINGS_KEY, root) {
+        GraphSection::Absent => return LoadedConfig::default(),
+        GraphSection::Malformed => {
+            warnings.push(format!(
+                "\"{SETTINGS_KEY}\" in the settings file must map graph folders to their \
+                 configuration, so it is ignored."
+            ));
+            return LoadedConfig {
+                warnings,
+                ..LoadedConfig::default()
+            };
         }
+        GraphSection::Present { entry, others } => (entry, others),
+    };
+    for key in others {
         if !Path::new(key).is_dir() {
             warnings.push(format!(
                 "Local-only folders are configured for {key}, which does not exist (was the \
@@ -381,7 +377,7 @@ fn from_settings(doc: &SettingsDoc, root: &Path, opened: &[PathBuf]) -> LoadedCo
             ));
         }
     }
-    let Some(entry) = matched.and_then(|key| entries.get(key)) else {
+    let Some(entry) = entry else {
         return LoadedConfig {
             warnings,
             ..LoadedConfig::default()
@@ -521,27 +517,6 @@ fn string_list(entry: &Map<String, Value>, key: &str, warnings: &mut Vec<String>
         }
     }
     out
-}
-
-/// The entry key for `root`: the exact root string or, failing that, one
-/// naming the same folder (recents may hold a non-canonical spelling).
-/// Shared with the other settings keyed by graph root.
-pub(crate) fn matching_key<'doc>(
-    entries: &'doc Map<String, Value>,
-    root: &Path,
-) -> Option<&'doc String> {
-    if let Some((key, _)) = root.to_str().and_then(|root| entries.get_key_value(root)) {
-        return Some(key);
-    }
-    entries.keys().find(|key| same_folder(key, root))
-}
-
-fn same_folder(key: &str, root: &Path) -> bool {
-    Path::new(key) == root
-        || match (Path::new(key).canonicalize(), root.canonicalize()) {
-            (Ok(key), Ok(root)) => key == root,
-            _ => false,
-        }
 }
 
 #[cfg(test)]

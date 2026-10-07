@@ -72,6 +72,42 @@ pub fn settings_load() -> AppResult<SettingsDoc> {
     load_document()
 }
 
+/// One graph's slice of a settings section keyed by graph root (the
+/// local-only folders, backup size limit, and accepted history roots).
+pub(crate) enum GraphSection<'doc> {
+    /// The document has no such section.
+    Absent,
+    /// The section is not an object mapping graph folders to entries.
+    Malformed,
+    /// The section, resolved for one graph.
+    Present {
+        /// This graph's entry, if it has one.
+        entry: Option<&'doc Value>,
+        /// Every other graph's key, for callers to report stale or mistyped folders.
+        others: Vec<&'doc String>,
+    },
+}
+
+/// Resolve the section under `key` for the graph at `root`, matching keys the
+/// way every surface does ([`reflect_graph_paths::graph_settings_key`]).
+pub(crate) fn graph_section<'doc>(
+    doc: &'doc SettingsDoc,
+    key: &str,
+    root: &Path,
+) -> GraphSection<'doc> {
+    let Some(value) = doc.get(key) else {
+        return GraphSection::Absent;
+    };
+    let Some(entries) = value.as_object() else {
+        return GraphSection::Malformed;
+    };
+    let matched = reflect_graph_paths::graph_settings_key(entries.keys(), root);
+    GraphSection::Present {
+        entry: matched.and_then(|key| entries.get(key)),
+        others: entries.keys().filter(|key| Some(*key) != matched).collect(),
+    }
+}
+
 /// The persisted settings document, for the few keys Rust itself must read
 /// (the local-only folders, backup size limit, and accepted history roots a
 /// graph open loads into `GraphState`).
@@ -84,7 +120,7 @@ pub(crate) fn load_document() -> AppResult<SettingsDoc> {
 /// whole, so every field of a graph's local-only entry (`folders`,
 /// `editable`, `released`, `rawRoot`) survives a save exactly as written.
 const RUST_OWNED_KEYS: [&str; 3] = [
-    crate::fs::LOCAL_ONLY_SETTINGS_KEY,
+    reflect_graph_paths::LOCAL_ONLY_SETTINGS_KEY,
     crate::git::MAX_FILE_SIZE_SETTINGS_KEY,
     crate::git::ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY,
 ];
@@ -136,7 +172,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("settings.json");
         TEST_STORE_PATH.with(|store| *store.borrow_mut() = Some(path.clone()));
-        let key = crate::fs::LOCAL_ONLY_SETTINGS_KEY;
+        let key = reflect_graph_paths::LOCAL_ONLY_SETTINGS_KEY;
         let configured = json!({ "/Users/me/Notes": { "folders": ["secure"] } });
         save_to(
             &path,
@@ -200,7 +236,7 @@ mod tests {
     fn a_save_keeps_the_local_only_configuration_on_disk() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        let key = crate::fs::LOCAL_ONLY_SETTINGS_KEY;
+        let key = reflect_graph_paths::LOCAL_ONLY_SETTINGS_KEY;
         // The app loaded the document before the user configured a folder...
         let app_copy = doc(&[("theme", json!("dark")), (key, json!({ "/old": {} }))]);
         // ...then the user edited the file while the app ran, making a folder
