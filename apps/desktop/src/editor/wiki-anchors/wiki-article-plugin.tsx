@@ -170,18 +170,17 @@ function decorations(
         )
       return false
     })
-    // On demand, the inline mark waits for the reveal unless the claim lens is on.
-    const inline =
-      trustView?.display === 'inline'
-        ? 'inline'
-        : trustView?.display === 'on-demand'
-          ? showRanges
-            ? 'inline'
-            : 'on-demand'
-          : null
-    if (trust !== null && inline !== null) result.push(trustWidget(range.to, [trust], inline))
-    if (trust !== null && trustView?.display === 'margin' && block !== null)
-      margin.set(block, [...(margin.get(block) ?? []), trust])
+    // Sound claims stay silent: a Solid mark, like every mark on demand, waits
+    // for the reveal (Option or the claim lens) after its claim.
+    const quiet = trust !== null && wikiStandingStyle(trust.standing) === 'solid'
+    const waits = !showRanges && (trustView?.display === 'on-demand' || quiet)
+    if (trust !== null && trustView !== null) {
+      if (waits) result.push(trustWidget(range.to, [trust], 'on-demand'))
+      else if (trustView.display === 'margin' && !quiet && block !== null)
+        margin.set(block, [...(margin.get(block) ?? []), trust])
+      else if (trustView.display !== 'margin' || quiet)
+        result.push(trustWidget(range.to, [trust], 'inline'))
+    }
     if (showRanges) {
       const position = TextSelection.near(state.doc.resolve(range.from), 1).from
       result.push(

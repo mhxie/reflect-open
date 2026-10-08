@@ -246,7 +246,7 @@ export const wikiFoldedTopicsSchema = z.array(z.string()).catch([])
 
 /**
  * How claim trust from the harness's report shows while reading a wiki
- * article: a mark after each claim, marks in the margin, only on demand, or
+ * article: a mark after each claim to check, marks in the margin, only on demand, or
  * off. Inline by default.
  */
 export const wikiTrustDisplaySchema = z.enum(WIKI_TRUST_DISPLAYS).catch('inline')

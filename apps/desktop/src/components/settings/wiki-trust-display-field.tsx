@@ -13,7 +13,7 @@ interface DisplayOption {
 }
 
 const OPTIONS: readonly DisplayOption[] = [
-  { value: 'inline', label: 'Inline', hint: 'After each claim' },
+  { value: 'inline', label: 'Inline', hint: 'After claims to check' },
   { value: 'margin', label: 'Margin', hint: 'Beside the paragraph' },
   { value: 'on-demand', label: 'On demand', hint: 'While you hold ⌥' },
   { value: 'off', label: 'Off', hint: 'No marks' },

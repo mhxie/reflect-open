@@ -415,8 +415,9 @@ html:root {
   content: '';
   flex-shrink: 0;
   box-sizing: border-box;
-  width: 0.7em;
-  height: 0.7em;
+  /* At least 10px at reading size, so dashes and dots stay distinct. */
+  width: max(0.85em, 10px);
+  height: max(0.85em, 10px);
   border: 1.5px solid var(--color-trust-supported);
   border-radius: 999px;
 }
@@ -463,10 +464,11 @@ html:root {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
-/* On demand: the marks wait for the reveal, so the card stays one click away.
-   Hidden marks collapse to nothing but stay focusable: Tab or a closing card
-   can focus one, which shows it; an open card keeps every mark shown. */
-[data-wiki-trust-display='on-demand']:not([data-wiki-trust-reveal], [data-wiki-trust-card])
+/* Waiting marks (every mark on demand, a Solid claim's in any style) show on
+   the reveal, so the card stays one press away. They collapse to nothing but
+   stay focusable: Tab or a closing card can focus one, which shows it; an open
+   card keeps every mark shown. */
+[data-wiki-trust-display]:not([data-wiki-trust-reveal], [data-wiki-trust-card])
   .wiki-trust-on-demand:not(:focus-within) {
   display: inline-block;
   width: 0;

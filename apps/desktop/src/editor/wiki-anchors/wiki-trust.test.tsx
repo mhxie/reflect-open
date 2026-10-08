@@ -232,9 +232,14 @@ describe('claim trust from the harness report', () => {
     expect(editor.state.selection.empty).toBe(false)
   })
 
-  it("opens a cited claim's verdict and its weighted sources", async () => {
-    await editorFixture()
+  it("opens a sound claim's verdict and its weighted sources on reveal", async () => {
+    const { container } = await editorFixture()
+    // A Solid claim's mark stays silent until the reveal.
+    const wrapper = container.querySelector('[data-wiki-trust-claim="c1"]')!.parentElement!
+    expect(wrapper.getBoundingClientRect().width).toBe(0)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }))
     await page.getByRole('button', { name: 'Claim C1: Solid' }).click()
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }))
     await expect.element(page.getByText('2 independent primary sources')).toBeVisible()
     await expect.element(page.getByText('example.org', { exact: true })).toBeVisible()
   })
@@ -500,6 +505,12 @@ describe('claim trust from the harness report', () => {
 
   it('draws marks in the margin instead when that style is chosen', async () => {
     settingsState.settings.wikiTrustDisplay = 'margin'
+    // Two claims to check, so the column stacks two marks (a Solid one stays silent).
+    const supported = JSON.parse(report.contents) as {
+      notes: Record<string, { claims: Record<string, { tier: string }> }>
+    }
+    supported.notes[PATH]!.claims['c1']!.tier = 'supported'
+    report = { stamp: '6:6', contents: JSON.stringify(supported) }
     const { container } = await editorFixture()
     await vi.waitFor(() =>
       expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2),

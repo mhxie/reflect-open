@@ -114,11 +114,11 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
       </header>
       {standing.state === 'changed' ? (
         <p className="text-text-secondary">
-          Saved after your harness evaluated it on {standing.verdict.evaluatedAt}.
+          Edited since it was evaluated on {standing.verdict.evaluatedAt}.
         </p>
       ) : null}
       {standing.state === 'unevaluated' ? (
-        <p className="text-text-secondary">Your harness has not evaluated this text yet.</p>
+        <p className="text-text-secondary">Not evaluated yet.</p>
       ) : null}
       {standing.state === 'current' && standing.verdict.reasons.length > 0 ? (
         <ul className="space-y-0.5 text-text-secondary">
@@ -151,6 +151,7 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
           onClick={() => {
             setAsked(question() ? 'recorded' : 'refused')
           }}
+          title="Flags the claim in its evidence for your agent to review; ⌘Z undoes it"
           className="rounded-md border border-border-strong px-2 py-1 font-medium text-text-secondary shadow-input transition-colors duration-100 hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
         >
           Question this claim
