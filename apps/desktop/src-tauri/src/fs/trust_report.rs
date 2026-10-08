@@ -246,7 +246,8 @@ mod tests {
         let dir = graph();
         fs::create_dir_all(dir.path().join(".harness")).unwrap();
         fs::write(dir.path().join(".harness/.wiki-trust.json.icloud"), "").unwrap();
-        assert!(read_report(dir.path(), ".harness/wiki-trust.json", None).is_err());
+        let err = read_report(dir.path(), ".harness/wiki-trust.json", None).unwrap_err();
+        assert!(format!("{err:?}").contains("downloading"), "{err:?}");
     }
 
     #[cfg(unix)]

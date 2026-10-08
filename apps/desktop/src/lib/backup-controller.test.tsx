@@ -496,6 +496,25 @@ describe('createBackupController', () => {
     controller.dispose()
   })
 
+  it('commits a change the watcher does not report once told of it', async () => {
+    const { calls } = fakeBridge({ auth: null, remoteUrl: null })
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    await controller.start()
+    await vi.waitFor(() => {
+      expect(commitCount(calls)).toBe(1)
+    })
+
+    vi.useFakeTimers()
+    try {
+      controller.fileChanged()
+      await vi.advanceTimersByTimeAsync(30_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(commitCount(calls)).toBe(2)
+    controller.dispose()
+  })
+
   it('never starts local history on mobile', async () => {
     setPlatformSurface({ mobileApp: true })
     try {

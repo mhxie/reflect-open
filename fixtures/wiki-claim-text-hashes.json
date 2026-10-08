@@ -47,6 +47,21 @@
       "name": "markers inside a code fence are not a claim",
       "markdown": "# T\n\n```\n<!-- claim:c1 -->A.<!-- /claim:c1 -->\n```\n",
       "hashes": {}
+    },
+    {
+      "name": "markers that change how emphasis parses are not a claim",
+      "markdown": "# T\n\na*<!-- claim:c1 -->formatting<!-- /claim:c1 -->*b\n",
+      "hashes": {}
+    },
+    {
+      "name": "an empty claim carries no hash",
+      "markdown": "# T\n\nA <!-- claim:c1 -->  <!-- /claim:c1 --> B.\n",
+      "hashes": {}
+    },
+    {
+      "name": "a claim inside Evidence carries no hash",
+      "markdown": "# T\n\nBody.\n\n## Evidence\n\n<!-- claim:c1 -->A.<!-- /claim:c1 -->\n",
+      "hashes": {}
     }
   ]
 }

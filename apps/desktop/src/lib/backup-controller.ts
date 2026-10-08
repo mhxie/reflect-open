@@ -121,6 +121,12 @@ export interface BackupController {
   signOut(): Promise<void>
   /** Full cycle now: commit, pull/merge, push. */
   backUpNow(): Promise<void>
+  /**
+   * A graph file the watcher does not report changed (one under a hidden
+   * folder, such as an agent harness's trust report); schedules a backup the
+   * way a note edit does.
+   */
+  fileChanged(this: void): void
   /** Tear everything down; the controller is unusable afterwards. */
   dispose(): void
 }
@@ -546,6 +552,9 @@ export function createBackupController(options: BackupControllerOptions): Backup
     },
     backUpNow: async () => {
       await engine?.syncNow()
+    },
+    fileChanged: () => {
+      engine?.noteChanged()
     },
     dispose: () => {
       disposed = true

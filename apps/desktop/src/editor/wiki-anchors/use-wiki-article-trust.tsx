@@ -132,6 +132,19 @@ export function useWikiArticleTrust(
   }, [editor, display])
 
   const open = cardFor === null ? null : (trust.view?.claim(cardFor) ?? null)
+  const cardOpen = open !== null
+  useEffect(() => {
+    if (!cardOpen) return
+    let dom: HTMLElement | null = null
+    const cancel = whenEditorMounted(editor, () => {
+      dom = editor.view.dom
+      dom.dataset['wikiTrustCard'] = ''
+    })
+    return () => {
+      cancel()
+      if (dom !== null) delete dom.dataset['wikiTrustCard']
+    }
+  }, [editor, cardOpen])
   const card =
     open === null ? null : (
       <Popover

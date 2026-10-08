@@ -8,6 +8,7 @@ import {
 import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useSyncContext } from '@/providers/sync-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 
 /** How often an open graph re-checks the report file for a new version. */
@@ -55,6 +56,7 @@ async function loadReport(
   key: readonly unknown[],
   path: string,
   generation: number,
+  changed: () => void,
 ): Promise<Loaded> {
   const previous = client.getQueryData<Loaded>(key)
   const last =
@@ -73,6 +75,8 @@ async function loadReport(
   }
   if (file === null) return { status: 'missing', path }
   if (file.contents === null && previous?.status === 'ready') return previous
+  // A new version under a hidden folder escapes the watcher, and so backup.
+  if (previous !== undefined) changed()
   const parsed = parseWikiTrustReport(file.contents ?? '')
   return parsed.ok
     ? {
@@ -96,6 +100,7 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   const bridgeReady = useBridgeReady()
   const { settings } = useSettings()
   const client = useQueryClient()
+  const sync = useSyncContext()
   const path = settings.wikiTrustReportPath
   const enabled = graph !== null && bridgeReady && (always || settings.wikiTrustDisplay !== 'off')
   const generation = graph?.generation
@@ -104,7 +109,7 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
     queryKey: key,
     queryFn:
       enabled && generation !== undefined
-        ? () => loadReport(client, key, path, generation)
+        ? () => loadReport(client, key, path, generation, () => sync?.fileChanged())
         : skipToken,
     refetchInterval: (query) =>
       query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS,

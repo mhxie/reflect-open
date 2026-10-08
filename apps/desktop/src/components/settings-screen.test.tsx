@@ -34,6 +34,7 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
   }),
 }))
 vi.mock('@/providers/sync-provider.tsx', () => ({
+  useSyncContext: () => null,
   useSync: () => ({
     backup: { phase: 'disconnected' },
     connectNewRepo: async () => {},

@@ -176,6 +176,12 @@ describe('claim trust from the harness report', () => {
     expect(container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')).toBe(
       'solid',
     )
+    // A reindex for some other change re-reads the same file: still unsaved.
+    await queryClient.invalidateQueries({ queryKey: ['index'] })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
+      'pending',
+    )
     // Saved: the reindex re-reads the file, whose hash no longer matches.
     disk = ref.current!.getMarkdown()
     await queryClient.invalidateQueries({ queryKey: ['index'] })
@@ -227,6 +233,9 @@ describe('claim trust from the harness report', () => {
     await expect.element(page.getByText('Add a primary source.')).toBeVisible()
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }))
     expect(container.querySelector('[data-wiki-trust-reveal]')).toBeNull()
+    // The open card keeps its mark, and so its anchor, after Option is released.
+    await expect.element(mark).toBeVisible()
+    await expect.element(page.getByText('Add a primary source.')).toBeVisible()
   })
 
   it('closes the open card when its mark is pressed again', async () => {

@@ -54,19 +54,19 @@ from the reader, so it cannot drift). A complete example:
 | `notes` | Entries by graph-relative note path (`wiki/memory/Spacing effect.md`); Reflect compares paths in Unicode NFC. |
 | `notes.<path>.claims` | Verdicts by claim id: `c` and a positive number without leading zeros (`c1`, `c12`). |
 | `sources` | Optional standings by origin key: any string you choose that names one source and stays the same across reports (a DOI, a normalized domain). Reflect only matches it to verdicts. |
-| `source_threshold` | Optional weight a source needs to count as trusted, 0–1. |
+| `source_threshold` | Optional weight a source needs to count as trusted, 0–1; drawn as a tick on each source's weight bar. |
 
 A claim verdict:
 
 | Field | Meaning |
 |---|---|
-| `tier` | `"solid"`, `"supported"`, or `"needs-work"`. Closed in version 1: any other value drops the verdict. |
-| `overlays` | Optional: `"disputed"`, `"edited"`. Unknown values are ignored. |
+| `tier` | `"solid"` (filled mark), `"supported"` (ring), or `"needs-work"` (dashed ring; inline, the prose is underlined). Closed in version 1: any other value drops the verdict. |
+| `overlays` | Optional. `"disputed"` draws the mark and underline in red and names the claim Disputed; `"edited"` adds "edited since review" to the card. Unknown values are ignored. |
 | `text_sha256` | SHA-256 of the claim text you evaluated, lowercase hex (below). |
-| `evaluated_at` | The day you evaluated it, `YYYY-MM-DD`. |
-| `reasons` | Optional `[{ "text" }]`, shown in order. Write `text` for a reader. |
-| `next` | Optional sentence: what would raise the tier. |
-| `sources` | Optional origin keys the verdict rests on, linking to `sources`. |
+| `evaluated_at` | The day you evaluated it, `YYYY-MM-DD`; the card cites it once the text has changed. |
+| `reasons` | Optional `[{ "text" }]`, listed on the card in order. Write `text` for a reader. |
+| `next` | Optional sentence on the card: what would raise the tier. |
+| `sources` | Optional origin keys the verdict rests on, linking to `sources`; the card lists each with its weight. |
 
 A source standing: `label`, `weight` (normalized across the wiki, 0–1),
 `trusted` (whether it clears your threshold), optional `url` (an `http` or
@@ -86,19 +86,35 @@ one that did and says why in Settings.
 ## The claim text hash
 
 A verdict only shows while the claim reads as it did when you evaluated it.
-Take the note's saved text with CRLF and lone CR turned into LF, then hash the
-UTF-8 bytes after the opening marker's `-->` and before the closing marker's
-`<!--`. The markers are HTML comments, written `<!-- claim:cN -->` and
-`<!-- /claim:cN -->` (any spaces or tabs after `<!--` and before `-->`, none
-inside `/claim:cN`), and the hash is SHA-256, lowercase hex. No other normalization. Legacy `### [Cn]` claims carry their ledger
-inside their own range, so Reflect shows no trust for them. Markers that
-repeat an id, nest, lack a partner, or sit inside a code fence make no claim
-either; Reflect flags them in the editor, and a verdict for them never shows. Test vectors:
+For each claim:
+
+1. Take the note's saved text and turn CRLF and lone CR into LF. No other
+   normalization.
+2. Slice the bytes after the opening marker's `-->` and before the closing
+   marker's `<!--`. Markers are HTML comments, `<!-- claim:cN -->` and
+   `<!-- /claim:cN -->`, with any spaces or tabs after `<!--` and before
+   `-->`, and none inside `/claim:cN`.
+3. Hash the UTF-8 bytes with SHA-256 and write lowercase hex.
+
+Test vectors:
 [`fixtures/wiki-claim-text-hashes.json`](../fixtures/wiki-claim-text-hashes.json).
 
-Reflect hashes the file as saved, as you read it. When the text changes, it
-shows the claim as **changed since its last evaluation** until a report
-carries the new hash.
+Reflect hashes the note as saved, as you read it, and an edit not yet saved
+shows at once. Either way the claim reads **changed since its last
+evaluation** until a report carries the new hash.
+
+### What is not a claim
+
+Reflect shows no verdict for these, and flags the markers in the editor:
+
+- Legacy `### [Cn]` claims, which carry their ledger inside their own range.
+- An id without exactly one opening marker and one later closing marker, or
+  whose text is empty.
+- Markers that change how the Markdown around them parses (as in
+  `a*<!-- claim:c1 -->x<!-- /claim:c1 -->*b`), split a citation from its
+  date, or cross a table cell.
+- Ranges that nest or overlap, or that sit in a heading, a code fence, or the
+  article's Evidence, References, or revision section.
 
 ## Records Reflect writes back
 

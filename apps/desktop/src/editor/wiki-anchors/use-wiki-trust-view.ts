@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
 import {
   icloudRequestDownloads,
   readNoteLocal,
   wikiClaimStanding,
   wikiClaimTextHashes,
+  wikiClaimTextSha256,
   wikiLocation,
   wikiPathIn,
   wikiSourceLanguage,
@@ -20,6 +21,7 @@ import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
+import { hasUnsavedEdit, nextSavedClaims, type SavedClaim } from './wiki-trust-edits.ts'
 import type { WikiTrustView } from './wiki-trust-view.ts'
 
 /** What the note footer says about a note's claims. */
@@ -44,12 +46,13 @@ const EXCERPT_CHARS = 160
 /** Each range claim's text as the editor holds it, for spotting unsaved edits. */
 function claimTexts(index: WikiArticleIndex | null): ReadonlyMap<string, string> {
   const texts = new Map<string, string>()
-  for (const claim of index?.claims ?? [])
-    if (claim.kind === 'range') texts.set(claim.id, index!.source.slice(claim.from, claim.to))
+  if (index === null) return texts
+  for (const claim of index.claims)
+    if (claim.kind === 'range') texts.set(claim.id, index.source.slice(claim.from, claim.to))
   return texts
 }
 
-/** The claim's prose for the card: citations dropped, inline syntax stripped, shortened. */
+/** The claim's prose for the card: citations dropped, links read as their labels, shortened. */
 function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
   let text = ''
   let at = from
@@ -65,7 +68,6 @@ function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
       (_, target: string, alias?: string) => alias ?? target,
     )
     .replaceAll(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replaceAll(/\*\*|__|[*`~]/g, '')
     .replaceAll(/\s+/g, ' ')
     .trim()
   return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS - 1).trimEnd()}…` : text
@@ -99,8 +101,8 @@ function sourcesOf(
 /**
  * The harness's verdicts for the note at `path`, matched to its claims'
  * text. The saved file is hashed as the harness reads it, so the editor's
- * serialization never decides freshness; a claim edited since that read
- * shows as changed at once. A translation copy shows its source entry's
+ * serialization never decides freshness; a claim typed in since the file
+ * was read shows as changed at once. A translation copy shows its source entry's
  * verdicts and offers no question (the record belongs in the source's
  * ledger). `question` is absent where the note is read-only. Null while
  * trust display is off, no report loaded, or the report leaves the note out.
@@ -143,15 +145,32 @@ export function useWikiTrustView(
   }).data
   const loaded = hashes === undefined || hashes === 'evicted' ? null : hashes
 
-  // The editor's claim texts when the file was last hashed: a claim whose
-  // text has moved on since is an unsaved edit.
+  // Unsaved edits: each claim's editor text is snapshotted per saved file
+  // version, and the editor's own hashes clear a claim that shows the file.
   const texts = useMemo(() => claimTexts(index), [index])
-  const [baseline, setBaseline] = useState<{
-    readonly hashes: ReadonlyMap<string, string>
+  const tracking = active && !translation && index !== null
+  const [editorHashes, setEditorHashes] = useState<{
     readonly texts: ReadonlyMap<string, string>
+    readonly hashes: ReadonlyMap<string, string>
   } | null>(null)
-  if (loaded !== null && baseline?.hashes !== loaded) setBaseline({ hashes: loaded, texts })
-  const savedTexts = baseline?.hashes === loaded ? baseline.texts : null
+  useEffect(() => {
+    if (!tracking) return
+    let live = true
+    void Promise.all(
+      [...texts].map(async ([id, text]) => [id, await wikiClaimTextSha256(text)] as const),
+    ).then((entries) => {
+      if (live) setEditorHashes({ texts, hashes: new Map(entries) })
+    })
+    return () => {
+      live = false
+    }
+  }, [tracking, texts])
+  const shownHashes = editorHashes?.texts === texts ? editorHashes.hashes : null
+  const [savedClaims, setSavedClaims] = useState<ReadonlyMap<string, SavedClaim>>(new Map())
+  if (tracking && loaded !== null) {
+    const next = nextSavedClaims(savedClaims, loaded, texts, shownHashes)
+    if (next !== savedClaims) setSavedClaims(next)
+  }
 
   return useMemo((): TrustViewResult => {
     if (display === 'off' || !covered || report === null || index === null || loaded === null)
@@ -166,7 +185,8 @@ export function useWikiTrustView(
           ? { state: 'unevaluated' }
           : wikiClaimStanding(report, sourcePath, claim.id, hash)
       const edited =
-        !translation && savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
+        !translation &&
+        hasUnsavedEdit(savedClaims, claim.id, texts.get(claim.id), shownHashes?.get(claim.id))
       if (edited && standing.state === 'current')
         standing = { state: 'changed', verdict: standing.verdict }
       trusts.set(claim.id, {
@@ -198,7 +218,8 @@ export function useWikiTrustView(
     report,
     index,
     loaded,
-    savedTexts,
+    savedClaims,
+    shownHashes,
     texts,
     sourcePath,
     translation,

@@ -35,6 +35,8 @@ interface SyncContextValue {
   /** Sign the machine out of GitHub (every connected graph stops syncing). */
   signOut: () => Promise<void>
   backUpNow: () => Promise<void>
+  /** Schedule a backup for a change the watcher does not report (see {@link BackupController.fileChanged}). */
+  fileChanged: () => void
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null)
@@ -112,6 +114,7 @@ export function SyncProvider({ graph, children }: SyncProviderProps): ReactEleme
       disconnectGraph: () => require().disconnectGraph(),
       signOut: () => require().signOut(),
       backUpNow: () => require().backUpNow(),
+      fileChanged: () => controller?.fileChanged(),
     }
   }, [controller, backup])
 

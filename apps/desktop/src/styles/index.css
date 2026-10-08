@@ -449,8 +449,11 @@ html:root {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
-/* On demand: the marks wait for the reveal, so the card stays one click away. */
-[data-wiki-trust-display='on-demand']:not([data-wiki-trust-reveal]) .wiki-trust-on-demand {
+/* On demand: the marks wait for the reveal, so the card stays one click away.
+   A focused mark and an open card's marks outlast it, so focus and the card's
+   anchor survive releasing Option. */
+[data-wiki-trust-display='on-demand']:not([data-wiki-trust-reveal], [data-wiki-trust-card])
+  .wiki-trust-on-demand:not(:focus-within) {
   display: none;
 }
 
@@ -491,6 +494,9 @@ html:root {
 
 /* Reveal (the claim lens, or Option held): every claim tinted by its tier. */
 [data-wiki-claim][data-wiki-trust] {
+  --wiki-trust-tint: transparent 0%;
+}
+[data-wiki-claim][data-wiki-trust='supported'] {
   --wiki-trust-tint: var(--color-trust-supported) 12%;
 }
 [data-wiki-claim][data-wiki-trust='solid'] {
