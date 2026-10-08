@@ -9,7 +9,7 @@ const MARGIN_PITCH_PX = 24
 export function spaceWikiTrustMarginMarks(dom: HTMLElement): void {
   const marks = [...dom.querySelectorAll<HTMLElement>('.wiki-trust-margin')]
   for (const mark of marks) mark.style.removeProperty('--wiki-trust-nudge')
-  let floor = Number.NEGATIVE_INFINITY
+  let floor = -Infinity
   for (const mark of marks) {
     const top = mark.getBoundingClientRect().top
     const nudge = Math.max(0, floor - top)
