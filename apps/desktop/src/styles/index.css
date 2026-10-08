@@ -466,10 +466,10 @@ html:root {
 }
 /* Waiting marks (every mark on demand, a Solid claim's in any style) show on
    the reveal, so the card stays one press away. They collapse to nothing but
-   stay focusable: Tab or a closing card can focus one, which shows it; an open
-   card keeps every mark shown. */
-[data-wiki-trust-display]:not([data-wiki-trust-reveal], [data-wiki-trust-card])
-  .wiki-trust-on-demand:not(:focus-within) {
+   stay focusable: Tab or a closing card can focus one, which shows it; the
+   open card's own mark stays shown as its anchor. */
+[data-wiki-trust-display]:not([data-wiki-trust-reveal])
+  .wiki-trust-on-demand:not(:focus-within, :has([aria-expanded='true'])) {
   display: inline-block;
   width: 0;
   overflow: hidden;

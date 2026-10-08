@@ -232,6 +232,17 @@ describe('claim trust from the harness report', () => {
     expect(editor.state.selection.empty).toBe(false)
   })
 
+  it("keeps only the open card's mark shown", async () => {
+    const { container } = await editorFixture()
+    await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
+    await expect.element(page.getByText('Add a primary source.')).toBeVisible()
+    expect(
+      container.querySelector('[data-wiki-trust-claim="c2"]')?.getAttribute('aria-expanded'),
+    ).toBe('true')
+    const solid = container.querySelector('[data-wiki-trust-claim="c1"]')!.parentElement!
+    expect(solid.getBoundingClientRect().width).toBe(0)
+  })
+
   it("opens a sound claim's verdict and its weighted sources on reveal", async () => {
     const { container } = await editorFixture()
     // A Solid claim's mark stays silent until the reveal.

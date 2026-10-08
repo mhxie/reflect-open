@@ -151,19 +151,20 @@ export function useWikiArticleTrust(
   }, [editor, display])
 
   const open = cardFor === null ? null : (trust.view?.claim(cardFor) ?? null)
-  const cardOpen = open !== null
+  // The open card's mark says so, and stays shown while it is open.
+  const openId = open?.claimId ?? null
   useEffect(() => {
-    if (!cardOpen) return
-    let dom: HTMLElement | null = null
+    if (openId === null) return
+    let mark: HTMLElement | null = null
     const cancel = whenEditorMounted(editor, () => {
-      dom = editor.view.dom
-      dom.dataset['wikiTrustCard'] = ''
+      mark = markOf(editor, openId)
+      mark?.setAttribute('aria-expanded', 'true')
     })
     return () => {
       cancel()
-      if (dom !== null) delete dom.dataset['wikiTrustCard']
+      mark?.removeAttribute('aria-expanded')
     }
-  }, [editor, cardOpen])
+  }, [editor, openId])
   const card =
     open === null ? null : (
       <Popover
