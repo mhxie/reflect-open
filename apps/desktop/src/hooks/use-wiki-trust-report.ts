@@ -26,6 +26,8 @@ export type WikiTrustReportState =
       readonly status: 'invalid' | 'unreadable'
       readonly path: string
       readonly error: string
+      /** The version of the file that failed, when it could be read at all. */
+      readonly stamp: string | null
       /** The last report that parsed, still shown while this read fails. */
       readonly last: WikiTrustReportReady | null
     }
@@ -67,16 +69,24 @@ async function loadReport(
         : null
   // Only a report that parsed is kept by stamp; anything else is read again.
   const known = previous?.status === 'ready' ? previous.stamp : null
+  const before =
+    previous === undefined || previous.status === 'missing' ? null : (previous.stamp ?? null)
   let file: Awaited<ReturnType<typeof readWikiTrustReportFile>>
   try {
     file = await readWikiTrustReportFile(path, known, generation)
   } catch (cause) {
-    return { status: 'unreadable', path, error: errorMessage(cause), last }
+    return { status: 'unreadable', path, error: errorMessage(cause), last, stamp: null }
   }
+  // A new version or a deletion under a hidden folder escapes the file
+  // watcher, and so backup; tell it, once per version.
+  if (
+    previous !== undefined &&
+    (file?.stamp ?? null) !== before &&
+    (file !== null || before !== null)
+  )
+    changed()
   if (file === null) return { status: 'missing', path }
   if (file.contents === null && previous?.status === 'ready') return previous
-  // A new version under a hidden folder escapes the watcher, and so backup.
-  if (previous !== undefined) changed()
   const parsed = parseWikiTrustReport(file.contents ?? '')
   return parsed.ok
     ? {
@@ -86,14 +96,15 @@ async function loadReport(
         ignored: parsed.ignored,
         stamp: file.stamp,
       }
-    : { status: 'invalid', path, error: parsed.error, last }
+    : { status: 'invalid', path, error: parsed.error, last, stamp: file.stamp }
 }
 
 /**
  * The open graph's wiki trust report, re-read whenever the harness replaces
  * the file (checked every few seconds, every half minute while there is no
- * file, and on window focus; an unchanged file costs one stat). `off` when trust display is off, unless `always` is set,
- * as Settings does to show the report's status while display is off.
+ * file, and on window focus; an unchanged file costs one stat). `off` when
+ * trust display is off, unless `always` is set, as Settings and the backup
+ * watcher do.
  */
 export function useWikiTrustReport(always = false): WikiTrustReportState {
   const { graph } = useGraph()
@@ -118,4 +129,13 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   })
   if (!enabled) return { status: 'off' }
   return data ?? { status: 'loading' }
+}
+
+/**
+ * Keeps the report under watch for the open graph's lifetime, so a new
+ * version reaches Git backup even when no note or Settings shows it.
+ */
+export function WikiTrustReportWatcher(): null {
+  useWikiTrustReport(true)
+  return null
 }

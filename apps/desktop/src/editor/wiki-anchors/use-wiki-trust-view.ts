@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
 import {
   icloudRequestDownloads,
   readNoteLocal,
+  readWikiArticle,
   wikiClaimStanding,
   wikiClaimTextHashes,
-  wikiClaimTextSha256,
   wikiLocation,
   wikiPathIn,
   wikiSourceLanguage,
@@ -21,7 +21,6 @@ import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
-import { hasUnsavedEdit, nextSavedClaims, type SavedClaim } from './wiki-trust-edits.ts'
 import type { WikiTrustView } from './wiki-trust-view.ts'
 
 /** What the note footer says about a note's claims. */
@@ -101,16 +100,19 @@ function sourcesOf(
 /**
  * The harness's verdicts for the note at `path`, matched to its claims'
  * text. The saved file is hashed as the harness reads it, so the editor's
- * serialization never decides freshness; a claim typed in since the file
- * was read shows as changed at once. A translation copy shows its source entry's
- * verdicts and offers no question (the record belongs in the source's
- * ledger). `question` is absent where the note is read-only. Null while
- * trust display is off, no report loaded, or the report leaves the note out.
+ * serialization never decides freshness. `asEditor` turns the saved file
+ * into the editor's own Markdown, so a claim whose editor text differs from
+ * it has an unsaved edit and shows as changed at once. A translation copy
+ * shows its source entry's verdicts and offers no question (the record
+ * belongs in the source's ledger). `question` is absent where the note is
+ * read-only. Null while trust display is off, no report loaded, or the
+ * report leaves the note out.
  */
 export function useWikiTrustView(
   path: string,
   index: WikiArticleIndex | null,
   question: ((claimId: string) => boolean) | undefined,
+  asEditor: (markdown: string) => string,
 ): TrustViewResult {
   const { graph } = useGraph()
   const { settings } = useSettings()
@@ -129,13 +131,17 @@ export function useWikiTrustView(
   const active = display !== 'off' && covered && index?.article === true
 
   // Under the index keys, so the reindex after a save re-reads the file.
-  const hashes = useQuery({
+  const saved = useQuery({
     queryKey: queryKeys.index.wikiClaimHashes(graph?.root, sourcePath),
     queryFn:
       active && graph !== null
         ? async () => {
             const read = await readNoteLocal(sourcePath, graph.generation)
-            if (read.kind === 'content') return await wikiClaimTextHashes(read.content, todayIso())
+            if (read.kind === 'content')
+              return {
+                content: read.content,
+                hashes: await wikiClaimTextHashes(read.content, todayIso()),
+              }
             // Materializing an unchanged file reindexes nothing, so poll for it.
             await icloudRequestDownloads([sourcePath])
             return 'evicted' as const
@@ -143,34 +149,17 @@ export function useWikiTrustView(
         : skipToken,
     refetchInterval: (query) => (query.state.data === 'evicted' ? EVICTED_RETRY_MS : false),
   }).data
-  const loaded = hashes === undefined || hashes === 'evicted' ? null : hashes
+  const file = saved === undefined || saved === 'evicted' ? null : saved
+  const loaded = file?.hashes ?? null
 
-  // Unsaved edits: each claim's editor text is snapshotted per saved file
-  // version, and the editor's own hashes clear a claim that shows the file.
+  // The saved claims as the editor would hold them; editor text that differs
+  // is an unsaved edit. Translations are compared through their source.
   const texts = useMemo(() => claimTexts(index), [index])
-  const tracking = active && !translation && index !== null
-  const [editorHashes, setEditorHashes] = useState<{
-    readonly texts: ReadonlyMap<string, string>
-    readonly hashes: ReadonlyMap<string, string>
-  } | null>(null)
-  useEffect(() => {
-    if (!tracking) return
-    let live = true
-    void Promise.all(
-      [...texts].map(async ([id, text]) => [id, await wikiClaimTextSha256(text)] as const),
-    ).then((entries) => {
-      if (live) setEditorHashes({ texts, hashes: new Map(entries) })
-    })
-    return () => {
-      live = false
-    }
-  }, [tracking, texts])
-  const shownHashes = editorHashes?.texts === texts ? editorHashes.hashes : null
-  const [savedClaims, setSavedClaims] = useState<ReadonlyMap<string, SavedClaim>>(new Map())
-  if (tracking && loaded !== null) {
-    const next = nextSavedClaims(savedClaims, loaded, texts, shownHashes)
-    if (next !== savedClaims) setSavedClaims(next)
-  }
+  const content = translation ? null : (file?.content ?? null)
+  const savedTexts = useMemo(
+    () => (content === null ? null : claimTexts(readWikiArticle(asEditor(content), todayIso()))),
+    [content, asEditor],
+  )
 
   return useMemo((): TrustViewResult => {
     if (display === 'off' || !covered || report === null || index === null || loaded === null)
@@ -184,9 +173,7 @@ export function useWikiTrustView(
         hash === undefined
           ? { state: 'unevaluated' }
           : wikiClaimStanding(report, sourcePath, claim.id, hash)
-      const edited =
-        !translation &&
-        hasUnsavedEdit(savedClaims, claim.id, texts.get(claim.id), shownHashes?.get(claim.id))
+      const edited = savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
       if (edited && standing.state === 'current')
         standing = { state: 'changed', verdict: standing.verdict }
       trusts.set(claim.id, {
@@ -218,8 +205,7 @@ export function useWikiTrustView(
     report,
     index,
     loaded,
-    savedClaims,
-    shownHashes,
+    savedTexts,
     texts,
     sourcePath,
     translation,

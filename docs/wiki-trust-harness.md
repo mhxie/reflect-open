@@ -34,8 +34,9 @@ Prefer a hidden folder: a report under a visible folder is listed among the
 graph's attachments.
 
 The report syncs wherever the graph syncs, so Reflect on other devices,
-including iOS, shows trust without the harness running there. With Git backup
-each new report is committed; write it when verdicts change rather than on a
+including iOS, shows trust without the harness running there. With Git backup,
+Reflect commits each new version it sees while the graph is open (it checks
+every few seconds); write the report when verdicts change rather than on a
 timer.
 
 ## The format
@@ -105,16 +106,20 @@ evaluation** until a report carries the new hash.
 
 ### What is not a claim
 
-Reflect shows no verdict for these, and flags the markers in the editor:
+Reflect shows no verdict for a claim its editor flags; the parser
+(`readWikiClaimIndex` in `packages/core/src/wiki/article.ts`) is the full
+rule. The cases:
 
 - Legacy `### [Cn]` claims, which carry their ledger inside their own range.
 - An id without exactly one opening marker and one later closing marker, or
   whose text is empty.
-- Markers that change how the Markdown around them parses (as in
+- Markers inside a link, wikilink, inline code, or heading, or ones that
+  change how the Markdown around them parses (as in
   `a*<!-- claim:c1 -->x<!-- /claim:c1 -->*b`), split a citation from its
   date, or cross a table cell.
-- Ranges that nest or overlap, or that sit in a heading, a code fence, or the
-  article's Evidence, References, or revision section.
+- Ranges that nest or overlap, or that sit in a code fence or the article's
+  Evidence, References, or revision section.
+- An id also used by a `### [Cn]` heading claim.
 
 ## Records Reflect writes back
 

@@ -493,10 +493,10 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
               asOf !== previous.asOf ||
               transaction.getMeta(wikiArticleKey) === 'identities'
             const projection = refresh ? wikiArticleProjection(state.doc, asOf, options) : previous
-            // New verdicts redraw the marks but keep the projection, whose
-            // identity the trust view itself depends on.
-            const redraw = refresh || transaction.getMeta(wikiArticleKey) === 'trust'
-            const revision = previous.revision + (redraw ? 1 : 0)
+            // New verdicts redraw only the trust decorations, which are keyed by
+            // what they show; the projection, whose identity the trust view
+            // depends on, and the revision-keyed reading widgets stay put.
+            const revision = previous.revision + (refresh ? 1 : 0)
             const meta: unknown = transaction.getMeta(wikiArticleKey)
             const showRanges = meta === 'toggle' ? !previous.showRanges : previous.showRanges
             return {

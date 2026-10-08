@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
-import type { EditorExtension } from '@meowdown/core'
+import { createMarkdownSourceMap, markdownToDoc, type EditorExtension } from '@meowdown/core'
 import type { useEditor } from '@meowdown/react'
 import type { WikiArticleIndex } from '@reflect/core'
 import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
@@ -38,6 +38,18 @@ function editableView(editor: Editor): Editor['view'] | null {
   return editor.mounted && editor.view.editable ? editor.view : null
 }
 
+/** `markdown` as the editor holds it once parsed: the source its projection reads. */
+function editorMarkdown(editor: Editor, markdown: string): string {
+  return createMarkdownSourceMap(markdownToDoc(markdown, { nodes: editor.nodes })).markdown
+}
+
+/** The claim's trust mark in the editor, if drawn. */
+function markOf(editor: Editor, claimId: string): HTMLElement | null {
+  return editor.mounted
+    ? editor.view.dom.querySelector<HTMLElement>(`[data-wiki-trust-claim="${CSS.escape(claimId)}"]`)
+    : null
+}
+
 /** A text field outside the editor, where Option belongs to typing. */
 function inOtherField(target: EventTarget | null, editorDom: HTMLElement): boolean {
   return (
@@ -67,7 +79,9 @@ export function useWikiArticleTrust(
     },
     [editor],
   )
-  const trust = useWikiTrustView(path, index, question)
+  // A saved file read the way the editor reads it, for spotting unsaved edits.
+  const asEditor = useCallback((markdown: string) => editorMarkdown(editor, markdown), [editor])
+  const trust = useWikiTrustView(path, index, question, asEditor)
   const viewRef = useRef(trust.view)
   const summaryRef = useRef(trust.summary)
   const [cardFor, setCardFor] = useState<string | null>(null)
@@ -161,14 +175,10 @@ export function useWikiArticleTrust(
         }}
       >
         <PopoverContent
-          // Found again on each layout: a redraw replaces the mark's button.
-          anchor={() =>
-            editor.mounted
-              ? editor.view.dom.querySelector(
-                  `[data-wiki-trust-claim="${CSS.escape(open.claimId)}"]`,
-                )
-              : null
-          }
+          // Found again on each layout and on close: a redraw replaces the
+          // mark's button, and focus returns to the current one.
+          anchor={() => markOf(editor, open.claimId)}
+          finalFocus={() => markOf(editor, open.claimId)}
           side="top"
           align="start"
           className="max-h-[min(var(--available-height),28rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto text-xs"
