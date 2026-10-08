@@ -55,26 +55,26 @@ describe('useWikiTrustReport and backup', () => {
   it('tells backup once per new version or deletion, never for an unchanged file', async () => {
     const { result } = await renderHook(() => useWikiTrustReport(true), { wrapper })
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
-    // The first read is what backup already has.
-    expect(fileChanged).not.toHaveBeenCalled()
+    // The first version seen may be one backup has not committed.
+    expect(fileChanged).toHaveBeenCalledTimes(1)
     await poll()
-    expect(fileChanged).not.toHaveBeenCalled()
+    expect(fileChanged).toHaveBeenCalledTimes(1)
 
     file = { stamp: '2:2', contents: VALID }
     await poll()
-    expect(fileChanged).toHaveBeenCalledTimes(1)
+    expect(fileChanged).toHaveBeenCalledTimes(2)
 
     // A rejected report counts once, not on every poll.
     file = { stamp: '3:3', contents: '{' }
     await poll()
     await poll()
     await vi.waitFor(() => expect(result.current.status).toBe('invalid'))
-    expect(fileChanged).toHaveBeenCalledTimes(2)
+    expect(fileChanged).toHaveBeenCalledTimes(3)
 
     file = null
     await poll()
     await poll()
     await vi.waitFor(() => expect(result.current.status).toBe('missing'))
-    expect(fileChanged).toHaveBeenCalledTimes(3)
+    expect(fileChanged).toHaveBeenCalledTimes(4)
   })
 })

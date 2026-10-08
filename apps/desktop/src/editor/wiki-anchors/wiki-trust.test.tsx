@@ -28,8 +28,20 @@ vi.mock('@/lib/open-url.ts', () => ({ openUrlSync: vi.fn() }))
 const PATH = 'wiki/Example.md'
 const SOLID = 'First claim [ref][one]'
 const WEAK = 'Second claim'
+// Frontmatter, a table, and a lazy blockquote: Markdown the editor may
+// re-serialize, which must not read as an unsaved edit.
 const SOURCE = [
+  '---',
+  'tags: [wiki]',
+  '---',
   '# Example',
+  '',
+  '> A quote',
+  'lazy continuation',
+  '',
+  '| a | b |',
+  '|---|---|',
+  '| 1 | 2 |',
   '',
   `Lead <!-- claim:c1 -->${SOLID}<!-- /claim:c1 --> and <!-- claim:c2 -->${WEAK}<!-- /claim:c2 -->.`,
   '',
@@ -43,7 +55,8 @@ const SOURCE = [
   '',
 ].join('\n')
 
-async function reportText(): Promise<string> {
+/** A report; `weak` is the c2 text the harness evaluated. */
+async function reportText(weak = WEAK): Promise<string> {
   const claim = async (tier: string, text: string, extra: object = {}): Promise<object> => ({
     tier,
     text_sha256: await wikiClaimTextSha256(text),
@@ -62,7 +75,7 @@ async function reportText(): Promise<string> {
             reasons: [{ text: '2 independent primary sources' }],
             sources: ['host:example.org'],
           }),
-          c2: await claim('needs-work', WEAK, { next: 'Add a primary source.' }),
+          c2: await claim('needs-work', weak, { next: 'Add a primary source.' }),
         },
       },
     },
@@ -197,6 +210,14 @@ describe('claim trust from the harness report', () => {
         container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
       ).toBe('pending'),
     )
+    // Evaluated as saved: the editor's own output reads clean against it.
+    report = { stamp: '9:9', contents: await reportText(`Edited ${WEAK}`) }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
+      ).toBe('needs-work'),
+    )
   })
 
   it('records a question as a reader flag in the claim ledger', async () => {
@@ -247,6 +268,39 @@ describe('claim trust from the harness report', () => {
     expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
       'needs-work',
     )
+  })
+
+  it('keeps citation widgets in place when a new report arrives', async () => {
+    const { container } = await editorFixture()
+    const citation = container.querySelector('.wiki-article-reference')
+    expect(citation).not.toBeNull()
+    report = { stamp: '5:5', contents: await reportText() }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(citation?.isConnected).toBe(true)
+  })
+
+  it('writes no question into a ledger that does not count', async () => {
+    // c2's only ledger sits in the prose, outside Evidence: invalid.
+    disk = SOURCE.replace('## Evidence', '```anchors c2\n```\n\n## Evidence')
+    const ref = createRef<EditorHandle>()
+    await render(
+      <QueryClientProvider client={queryClient}>
+        <MeowdownEditor
+          initialMarkdown={disk}
+          mode="hide"
+          handleRef={ref}
+          resolveWikilink={resolveWikilink}
+        >
+          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+        </MeowdownEditor>
+      </QueryClientProvider>,
+    )
+    await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
+    await page.getByRole('button', { name: 'Question this claim' }).click()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(ref.current!.getMarkdown()).not.toContain('@pass: reader')
+    await expect.element(page.getByRole('button', { name: 'Question this claim' })).toBeVisible()
   })
 
   it('keeps the last report while a new one fails to parse', async () => {

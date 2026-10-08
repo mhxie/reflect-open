@@ -26,7 +26,7 @@ export type WikiTrustReportState =
       readonly status: 'invalid' | 'unreadable'
       readonly path: string
       readonly error: string
-      /** The version of the file that failed, when it could be read at all. */
+      /** The last version of the file seen, if any. */
       readonly stamp: string | null
       /** The last report that parsed, still shown while this read fails. */
       readonly last: WikiTrustReportReady | null
@@ -75,16 +75,11 @@ async function loadReport(
   try {
     file = await readWikiTrustReportFile(path, known, generation)
   } catch (cause) {
-    return { status: 'unreadable', path, error: errorMessage(cause), last, stamp: null }
+    return { status: 'unreadable', path, error: errorMessage(cause), last, stamp: before }
   }
-  // A new version or a deletion under a hidden folder escapes the file
-  // watcher, and so backup; tell it, once per version.
-  if (
-    previous !== undefined &&
-    (file?.stamp ?? null) !== before &&
-    (file !== null || before !== null)
-  )
-    changed()
+  // A report under a hidden folder escapes the file watcher, and so backup:
+  // tell it once per version seen, the first included, and per deletion.
+  if ((file?.stamp ?? null) !== before) changed()
   if (file === null) return { status: 'missing', path }
   if (file.contents === null && previous?.status === 'ready') return previous
   const parsed = parseWikiTrustReport(file.contents ?? '')
@@ -129,13 +124,4 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   })
   if (!enabled) return { status: 'off' }
   return data ?? { status: 'loading' }
-}
-
-/**
- * Keeps the report under watch for the open graph's lifetime, so a new
- * version reaches Git backup even when no note or Settings shows it.
- */
-export function WikiTrustReportWatcher(): null {
-  useWikiTrustReport(true)
-  return null
 }

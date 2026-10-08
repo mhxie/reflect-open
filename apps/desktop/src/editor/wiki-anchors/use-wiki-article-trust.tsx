@@ -74,8 +74,13 @@ export function useWikiArticleTrust(
   const question = useCallback(
     (claimId: string) => {
       const view = editableView(editor)
-      view?.dispatch(wikiQuestionTransaction(view.state, claimId, todayIso()))
-      return view !== null
+      if (view === null) return false
+      const index = wikiArticleKey.getState(view.state)?.index
+      const transaction =
+        index === undefined ? null : wikiQuestionTransaction(view.state, index, claimId, todayIso())
+      if (transaction === null) return false
+      view.dispatch(transaction)
+      return true
     },
     [editor],
   )

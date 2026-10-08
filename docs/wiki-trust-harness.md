@@ -46,6 +46,8 @@ A JSON object, validated against
 from the reader, so it cannot drift). A complete example:
 [`fixtures/wiki-trust-report.example.json`](../fixtures/wiki-trust-report.example.json).
 
+Fields not marked optional are required.
+
 | Field | Meaning |
 |---|---|
 | `format` | Always `"reflect-wiki-trust"`. |

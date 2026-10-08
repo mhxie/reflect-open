@@ -23,7 +23,7 @@ import { SyncProvider } from '@/providers/sync-provider.tsx'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { RouterProvider } from '@/routing/router.tsx'
 import { PeekProvider } from '@/components/peek/peek-provider.tsx'
-import { WikiTrustReportWatcher } from '@/hooks/use-wiki-trust-report.ts'
+import { WikiTrustReportWatcher } from '@/components/wiki-trust-report-watcher.tsx'
 
 interface GraphWorkspaceProps {
   graph: GraphInfo
