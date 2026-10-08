@@ -1,16 +1,16 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   icloudRequestDownloads,
   readNoteLocal,
   readWikiArticle,
-  subscribeFileChanges,
   wikiClaimStanding,
   wikiClaimTextHashes,
   wikiLocation,
   wikiPathIn,
   wikiSourceLanguage,
   type WikiArticleIndex,
+  type FileChange,
   type WikiClaimStanding,
   type WikiTrustReport,
 } from '@reflect/core'
@@ -18,6 +18,7 @@ import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { shownWikiTrustReport, useWikiTrustReport } from '@/hooks/use-wiki-trust-report.ts'
 import { todayIso } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
+import { useFileChanges } from '@/lib/use-file-changes.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
@@ -177,22 +178,16 @@ export function useWikiTrustView(
   }, [client, active, report, savedKey])
   // A change to the file itself (a save here, an edit elsewhere) rereads it
   // without waiting for the index, which may be unavailable.
-  useEffect(() => {
-    if (!active) return
-    let live = true
-    let unlisten: (() => void) | null = null
-    void subscribeFileChanges((changes) => {
-      if (changes.some((change) => change.path === sourcePath))
-        void client.refetchQueries({ queryKey: savedKey, exact: true }, { cancelRefetch: false })
-    }).then((stop) => {
-      if (live) unlisten = stop
-      else stop()
-    })
-    return () => {
-      live = false
-      unlisten?.()
-    }
-  }, [client, active, savedKey, sourcePath])
+  const sourceKey = sourcePath.normalize('NFC')
+  const onFileChanges = useCallback(
+    (changes: FileChange[]) => {
+      // Restart a read already in flight: it may predate this change.
+      if (changes.some((change) => change.path.normalize('NFC') === sourceKey))
+        void client.refetchQueries({ queryKey: savedKey, exact: true })
+    },
+    [client, savedKey, sourceKey],
+  )
+  useFileChanges(active ? onFileChanges : null)
   // Returning to the window rereads too: a source edited in another app
   // reaches no index invalidation while the index is unavailable.
   useEffect(() => {

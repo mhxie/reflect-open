@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MeowdownEditor, type EditorHandle } from '@meowdown/react'
 import { emitFileChanges, setBridge, wikiClaimTextSha256 } from '@reflect/core'
 import { cleanup, render } from 'vitest-browser-react'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
@@ -400,7 +400,10 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() =>
       expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeNull(),
     )
-    expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeVisible()
+    // Hidden: the mark's wrapper collapses to nothing (it stays focusable).
+    const wrapper = container.querySelector('[data-wiki-trust-claim="c2"]')!.parentElement!
+    expect(wrapper.getBoundingClientRect().width).toBe(0)
+    expect(getComputedStyle(wrapper).opacity).toBe('0')
     const mark = page.getByRole('button', { name: 'Claim C2: Needs work' })
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }))
     await expect.element(mark).toBeVisible()
@@ -411,6 +414,12 @@ describe('claim trust from the harness report', () => {
     // The open card keeps its mark, and so its anchor, after Option is released.
     await expect.element(mark).toBeVisible()
     await expect.element(page.getByText('Add a primary source.')).toBeVisible()
+    // Escape returns focus to the mark, which stays shown while focused.
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByText('Add a primary source.')).not.toBeInTheDocument()
+    const element = container.querySelector('[data-wiki-trust-claim="c2"]')
+    await vi.waitFor(() => expect(document.activeElement).toBe(element))
+    await expect.element(mark).toBeVisible()
   })
 
   it('closes the open card when its mark is pressed again', async () => {

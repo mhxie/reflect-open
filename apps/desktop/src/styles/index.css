@@ -464,11 +464,14 @@ html:root {
   outline-offset: 1px;
 }
 /* On demand: the marks wait for the reveal, so the card stays one click away.
-   A focused mark and an open card's marks outlast it, so focus and the card's
-   anchor survive releasing Option. */
+   Hidden marks collapse to nothing but stay focusable: Tab or a closing card
+   can focus one, which shows it; an open card keeps every mark shown. */
 [data-wiki-trust-display='on-demand']:not([data-wiki-trust-reveal], [data-wiki-trust-card])
   .wiki-trust-on-demand:not(:focus-within) {
-  display: none;
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
 }
 
 /* Inline: only the prose that needs work is marked; sound prose stays clean. */
