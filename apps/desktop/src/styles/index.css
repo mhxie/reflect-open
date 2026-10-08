@@ -501,20 +501,24 @@ html:root {
   position: relative;
 }
 .wiki-trust-margin {
-  /* No top: the static position keeps it on its claim's last line. */
+  /* No top: the static position keeps it on its claim's last line, and the
+     paragraph's own line height centres the mark on that line. */
   position: absolute;
   right: -1.75rem;
-  font-size: 0.8rem;
-  line-height: 1;
   translate: 0 var(--wiki-trust-nudge, 0px);
+  /* The line-tall box is layout only; presses belong to the mark. */
+  pointer-events: none;
 }
 .wiki-trust-margin .wiki-trust-mark {
-  font-size: 1em;
-  vertical-align: baseline;
+  font-size: 0.8rem;
+  vertical-align: middle;
+  pointer-events: auto;
 }
 /* A phone's gutter is 1rem: the mark sits inside it. */
 .reflect-mobile-content-gutter .wiki-trust-margin {
   right: -1rem;
+}
+.reflect-mobile-content-gutter .wiki-trust-margin .wiki-trust-mark {
   font-size: 0.75rem;
 }
 

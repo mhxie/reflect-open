@@ -561,9 +561,9 @@ describe('claim trust from the harness report', () => {
     ).toBe(lower)
     // Each mark sits on its claim's last line, beside the prose.
     const line = container.querySelector('[data-wiki-claim="c2"]')!.getBoundingClientRect()
+    // Centred on that line, within a few pixels of the text's middle.
     const center = top.top + top.height / 2
-    expect(center).toBeGreaterThanOrEqual(line.top)
-    expect(center).toBeLessThanOrEqual(line.bottom)
+    expect(Math.abs(center - (line.top + line.bottom) / 2)).toBeLessThan(4)
     expect(container.querySelector('.ProseMirror')?.getAttribute('data-wiki-trust-display')).toBe(
       'margin',
     )
