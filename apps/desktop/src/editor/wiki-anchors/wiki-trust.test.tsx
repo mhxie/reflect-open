@@ -357,6 +357,25 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
+  it('reads again when the file changes during the first read', async () => {
+    let release = (): void => {}
+    readGate = new Promise((resolve) => {
+      release = resolve
+    })
+    await render(
+      <QueryClientProvider client={queryClient}>
+        <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+        </MeowdownEditor>
+      </QueryClientProvider>,
+    )
+    await vi.waitFor(() => expect(reads).toBe(0))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    emitFileChanges([{ path: PATH, kind: 'upsert' }], 'external')
+    release()
+    await vi.waitFor(() => expect(reads).toBe(2))
+  })
+
   it('rereads the saved file when the window regains focus', async () => {
     await editorFixture()
     await new Promise((resolve) => setTimeout(resolve, 50))

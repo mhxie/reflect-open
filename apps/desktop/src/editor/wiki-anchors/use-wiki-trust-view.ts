@@ -181,9 +181,12 @@ export function useWikiTrustView(
   const sourceKey = sourcePath.normalize('NFC')
   const onFileChanges = useCallback(
     (changes: FileChange[]) => {
-      // Restart a read already in flight: it may predate this change.
+      // Cancel a read already in flight, even the first one, then read again:
+      // it may predate this change.
       if (changes.some((change) => change.path.normalize('NFC') === sourceKey))
-        void client.refetchQueries({ queryKey: savedKey, exact: true })
+        void client
+          .cancelQueries({ queryKey: savedKey, exact: true })
+          .then(() => client.refetchQueries({ queryKey: savedKey, exact: true }))
     },
     [client, savedKey, sourceKey],
   )
