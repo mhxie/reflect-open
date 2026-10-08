@@ -174,6 +174,16 @@ export function useWikiTrustView(
     if (!active || report === null) return
     void client.refetchQueries({ queryKey: savedKey, exact: true }, { cancelRefetch: false })
   }, [client, active, report, savedKey])
+  // Returning to the window rereads too: a source edited in another app
+  // reaches no index invalidation while the index is unavailable.
+  useEffect(() => {
+    if (!active) return
+    const reread = (): void => {
+      void client.refetchQueries({ queryKey: savedKey, exact: true }, { cancelRefetch: false })
+    }
+    window.addEventListener('focus', reread)
+    return () => window.removeEventListener('focus', reread)
+  }, [client, active, savedKey])
   // A failed reread (the source deleted or unreadable) keeps the old data in
   // the cache; trust nothing from it.
   const saved = savedQuery.isError ? undefined : savedQuery.data

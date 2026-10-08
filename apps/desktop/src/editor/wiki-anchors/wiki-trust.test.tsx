@@ -347,6 +347,14 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
+  it('rereads the saved file when the window regains focus', async () => {
+    await editorFixture()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const settled = reads
+    window.dispatchEvent(new Event('focus'))
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(settled))
+  })
+
   it('drops verdicts while the saved file cannot be read, then recovers', async () => {
     const { container } = await editorFixture()
     const c1 = (): string | null | undefined =>

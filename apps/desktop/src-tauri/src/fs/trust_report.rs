@@ -277,16 +277,21 @@ mod tests {
         assert_eq!(again.contents.as_deref(), Some("{\"a\":2}"));
     }
 
-    // A case-insensitive volume (the macOS default) folds `ﬂ` to `fl`.
-    #[cfg(target_os = "macos")]
     #[test]
     fn refuses_a_name_the_volume_folds_into_reflect_state() {
         let dir = graph();
         fs::create_dir_all(dir.path().join(".reflect")).unwrap();
         fs::write(dir.path().join(".reflect/trust.json"), "{}").unwrap();
+        // `ﬂ` passes the path rules; a case-insensitive volume (the macOS
+        // default) folds it to `fl`, a case-sensitive one does not.
         let ligature = ".re\u{FB02}ect/trust.json";
         assert!(reflect_graph_paths::is_wiki_trust_report_path(ligature));
-        assert!(read_report(dir.path(), ligature, None).is_err());
+        let read = read_report(dir.path(), ligature, None);
+        if dir.path().join(ligature).exists() {
+            assert!(read.is_err());
+        } else {
+            assert!(matches!(read, Ok(None)));
+        }
     }
 
     #[test]
