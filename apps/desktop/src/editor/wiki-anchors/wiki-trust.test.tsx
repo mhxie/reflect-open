@@ -92,6 +92,8 @@ let report: { stamp: string; contents: string }
 let readGate: Promise<void> | null
 /** Note reads still to fail. */
 let readFailures: number
+/** Note reads made. */
+let reads: number
 
 beforeEach(async () => {
   settingsState.settings.wikiTrustDisplay = 'inline'
@@ -99,13 +101,22 @@ beforeEach(async () => {
   disk = SOURCE
   readGate = null
   readFailures = 0
+  reads = 0
   report = { stamp: '1:1', contents: await reportText() }
   setBridge({
-    invoke: async (command) =>
+    invoke: async (command, args) =>
       command === 'wiki_trust_report_read'
-        ? report
+        ? {
+            stamp: report.stamp,
+            // As Rust does: the caller's copy is current, so no contents.
+            contents:
+              (args as { knownStamp: string | null }).knownStamp === report.stamp
+                ? null
+                : report.contents,
+          }
         : command === 'note_read_local'
           ? await (readGate ?? Promise.resolve()).then(() => {
+              reads += 1
               if (readFailures > 0) {
                 readFailures -= 1
                 throw new Error('read failed')
@@ -310,6 +321,18 @@ describe('claim trust from the harness report', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(ref.current!.getMarkdown()).not.toContain('@pass: reader')
     await expect.element(page.getByText(/evidence ledger needs fixing/)).toBeVisible()
+  })
+
+  it('rereads the saved file for a new report, not for an unchanged poll', async () => {
+    await editorFixture()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const settled = reads
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(reads).toBe(settled)
+    report = { stamp: '7:7', contents: await reportText() }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
   it('retries a saved-file read that failed', async () => {

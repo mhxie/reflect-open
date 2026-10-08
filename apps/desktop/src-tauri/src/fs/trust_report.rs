@@ -46,22 +46,37 @@ fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
     super::device::read_bounded_source(&root.canonicalize()?, Path::new(rel), MAX_REPORT_BYTES)
 }
 
-/// Where `abs` really lands, links and the filesystem's own name folding
-/// resolved (a case-insensitive volume reads `.Reflect` or `.reﬂect` as
-/// `.reflect`): it must still be a report path inside the graph.
-fn ensure_landing(root: &Path, abs: &Path, rel: &str) -> AppResult<()> {
-    let canonical_root = root.canonicalize()?;
-    let target = abs.canonicalize()?;
-    let landed = target.strip_prefix(&canonical_root).map_err(|_| {
+/// `target`, canonical, must still be a report path inside the graph.
+fn ensure_landed(root: &Path, target: &Path, rel: &str) -> AppResult<()> {
+    let landed = target.strip_prefix(root.canonicalize()?).map_err(|_| {
         AppError::traversal(format!("trust report resolves outside the graph: {rel:?}"))
     })?;
     ensure_report_path(&landed.to_string_lossy().replace('\\', "/"))
 }
 
+/// Where the report's folder really lands, links and the filesystem's own
+/// name folding resolved (a case-insensitive volume reads `.Reflect` or
+/// `.reﬂect` as `.reflect`). Checked before anything touches the file, so it
+/// also guards iCloud download requests; `false` when the folder is absent.
+fn folder_lands(root: &Path, abs: &Path, rel: &str) -> AppResult<bool> {
+    let (Some(folder), Some(name)) = (abs.parent(), abs.file_name()) else {
+        return Err(AppError::traversal(format!(
+            "not a trust report path: {rel:?}"
+        )));
+    };
+    match folder.canonicalize() {
+        Ok(folder) => ensure_landed(root, &folder.join(name), rel).map(|()| true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
 #[cfg(not(unix))]
 fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
     use std::io::Read;
+    // Without a no-follow walk, check the file itself where it really lands.
     let target = resolve(root, rel)?.canonicalize()?;
+    ensure_landed(root, &target, rel)?;
     let mut bytes = Vec::new();
     std::fs::File::open(&target)?
         .take(MAX_REPORT_BYTES + 1)
@@ -103,6 +118,9 @@ fn read_report(
 ) -> AppResult<Option<TrustReportRead>> {
     ensure_report_path(rel)?;
     let abs = resolve(root, rel)?;
+    if !folder_lands(root, &abs, rel)? {
+        return Ok(None);
+    }
     let meta = match std::fs::symlink_metadata(&abs) {
         Ok(meta) => meta,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -139,7 +157,6 @@ fn read_report(
         crate::icloud::storage::request_download(&abs);
         return Err(downloading());
     }
-    ensure_landing(root, &abs, rel)?;
     let contents = String::from_utf8(read_bounded(root, rel)?)
         .map_err(|_| AppError::invalid(format!("the trust report is not UTF-8: {rel:?}")))?;
     Ok(Some(TrustReportRead {
@@ -260,16 +277,16 @@ mod tests {
         assert_eq!(again.contents.as_deref(), Some("{\"a\":2}"));
     }
 
+    // A case-insensitive volume (the macOS default) folds `ﬂ` to `fl`.
+    #[cfg(target_os = "macos")]
     #[test]
     fn refuses_a_name_the_volume_folds_into_reflect_state() {
         let dir = graph();
         fs::create_dir_all(dir.path().join(".reflect")).unwrap();
         fs::write(dir.path().join(".reflect/trust.json"), "{}").unwrap();
-        // `ﬂ` passes the path rules; a case-insensitive volume (the macOS
-        // default) folds it to `fl`. Elsewhere the file simply is not there.
         let ligature = ".re\u{FB02}ect/trust.json";
         assert!(reflect_graph_paths::is_wiki_trust_report_path(ligature));
-        assert!(read_report(dir.path(), ligature, None).map_or(true, |read| read.is_none()));
+        assert!(read_report(dir.path(), ligature, None).is_err());
     }
 
     #[test]

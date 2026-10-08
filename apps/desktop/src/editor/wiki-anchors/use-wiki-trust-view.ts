@@ -36,8 +36,10 @@ interface TrustViewResult {
   readonly summary: WikiNoteTrustSummary | null
 }
 
-/** How often a note that is not local yet, or failed to read, is tried again. */
+/** How often a note that is not local yet is checked, and the first retry of a failed read. */
 const RETRY_MS = 5000
+/** The longest wait between retries of a read that keeps failing. */
+const MAX_RETRY_MS = 60_000
 
 /** The longest claim excerpt the trust card quotes. */
 const EXCERPT_CHARS = 160
@@ -132,8 +134,13 @@ export function useWikiTrustView(
   const active = display !== 'off' && covered && index?.article === true
 
   // Under the index keys, so the reindex after a save re-reads the file.
+  const root = graph?.root
+  const savedKey = useMemo(
+    () => queryKeys.index.wikiClaimHashes(root, sourcePath),
+    [root, sourcePath],
+  )
   const savedQuery = useQuery({
-    queryKey: queryKeys.index.wikiClaimHashes(graph?.root, sourcePath),
+    queryKey: savedKey,
     queryFn:
       active && graph !== null
         ? async () => {
@@ -148,21 +155,22 @@ export function useWikiTrustView(
             return 'evicted' as const
           }
         : skipToken,
-    // Keep asking while the file is not local or a read failed.
+    // Keep asking while the file is not local, and back off while reads fail.
     refetchInterval: (query) =>
-      query.state.data === 'evicted' || query.state.status === 'error' ? RETRY_MS : false,
+      query.state.status === 'error'
+        ? Math.min(RETRY_MS * 2 ** Math.max(0, query.state.fetchFailureCount - 1), MAX_RETRY_MS)
+        : query.state.data === 'evicted'
+          ? RETRY_MS
+          : false,
   })
   // A new report rereads the file too, so freshness never hangs on the index
   // lifecycle (which may be unavailable while editing still works).
+  // The report keeps its identity across polls of an unchanged file.
   const client = useQueryClient()
-  const root = graph?.root
   useEffect(() => {
     if (!active || report === null) return
-    void client.refetchQueries(
-      { queryKey: queryKeys.index.wikiClaimHashes(root, sourcePath), exact: true },
-      { cancelRefetch: false },
-    )
-  }, [client, active, report, root, sourcePath])
+    void client.refetchQueries({ queryKey: savedKey, exact: true }, { cancelRefetch: false })
+  }, [client, active, report, savedKey])
   // A failed reread (the source deleted or unreadable) keeps the old data in
   // the cache; trust nothing from it.
   const saved = savedQuery.isError ? undefined : savedQuery.data
