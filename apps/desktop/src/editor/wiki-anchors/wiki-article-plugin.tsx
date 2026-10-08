@@ -170,8 +170,16 @@ function decorations(
         )
       return false
     })
-    if (trust !== null && trustView?.display === 'inline')
-      result.push(trustWidget(range.to, `claim-trust:${revision}:${claim.id}`, [trust], 'inline'))
+    // On demand, the inline mark waits for the reveal unless the claim lens is on.
+    const inline =
+      trustView?.display === 'inline'
+        ? 'inline'
+        : trustView?.display === 'on-demand'
+          ? showRanges
+            ? 'inline'
+            : 'on-demand'
+          : null
+    if (trust !== null && inline !== null) result.push(trustWidget(range.to, [trust], inline))
     if (trust !== null && trustView?.display === 'margin' && block !== null)
       margin.set(block, [...(margin.get(block) ?? []), trust])
     if (showRanges) {
@@ -257,14 +265,7 @@ function decorations(
     result.push(
       Decoration.node(position, position + node.nodeSize, { class: 'wiki-trust-margin-host' }),
     )
-    result.push(
-      trustWidget(
-        position + 1,
-        `trust-margin:${revision}:${claims.map((trust) => trust.claimId).join(',')}`,
-        claims,
-        'margin',
-      ),
-    )
+    result.push(trustWidget(position + 1, claims, 'margin'))
   }
   let bibliographyAt: number | null = null
   state.doc.descendants((node, position) => {
@@ -435,18 +436,29 @@ function trustMark(trust: WikiClaimTrust): HTMLButtonElement {
   return button
 }
 
-/** One claim's mark after its text, or a paragraph's marks in a margin column. */
+const TRUST_LAYOUT_CLASS = {
+  inline: 'wiki-trust-inline',
+  'on-demand': 'wiki-trust-inline wiki-trust-on-demand',
+  margin: 'wiki-trust-margin',
+} as const
+
+/**
+ * One claim's mark after its text, or a paragraph's marks in a margin column.
+ * The key names everything the DOM shows, so typing elsewhere keeps the node.
+ */
 function trustWidget(
   position: number,
-  key: string,
   marks: readonly WikiClaimTrust[],
-  layout: 'inline' | 'margin',
+  layout: keyof typeof TRUST_LAYOUT_CLASS,
 ): Decoration {
+  const key = `trust:${layout}:${marks
+    .map((trust) => `${trust.claimId}=${wikiStandingLabel(trust.standing)}`)
+    .join(',')}`
   return Decoration.widget(
     position,
     () => {
       const node = document.createElement('span')
-      node.className = layout === 'margin' ? 'wiki-trust-margin' : 'wiki-trust-inline'
+      node.className = TRUST_LAYOUT_CLASS[layout]
       node.contentEditable = 'false'
       node.append(...marks.map(trustMark))
       return node

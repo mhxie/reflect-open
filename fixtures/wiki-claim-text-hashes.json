@@ -1,5 +1,5 @@
 {
-  "description": "Claim text hashes a harness must produce (Plan 30): SHA-256, lowercase hex, of the UTF-8 bytes between a claim's opening and closing markers, after CRLF and lone CR become LF. Legacy `### [Cn]` claims get none. Reflect's wikiClaimTextHashes and any harness must agree on every case.",
+  "description": "Claim text hashes a harness must produce: SHA-256, lowercase hex, of the UTF-8 bytes between a claim's opening and closing markers, after CRLF and lone CR become LF. Legacy `### [Cn]` claims get none. Reflect's wikiClaimTextHashes and any harness must agree on every case.",
   "cases": [
     {
       "name": "two claims in one paragraph",

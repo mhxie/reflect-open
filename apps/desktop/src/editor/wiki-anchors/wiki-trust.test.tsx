@@ -71,14 +71,23 @@ async function reportText(): Promise<string> {
 }
 
 let queryClient: QueryClient
+/** The note as saved, which the view hashes. */
+let disk: string
+/** The report file as the harness last wrote it. */
+let report: { stamp: string; contents: string }
 
 beforeEach(async () => {
   settingsState.settings.wikiTrustDisplay = 'inline'
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const contents = await reportText()
+  disk = SOURCE
+  report = { stamp: '1:1', contents: await reportText() }
   setBridge({
     invoke: async (command) =>
-      command === 'wiki_trust_report_read' ? { stamp: '1:1', contents } : null,
+      command === 'wiki_trust_report_read'
+        ? report
+        : command === 'note_read_local'
+          ? { kind: 'content', content: disk, localOnly: false }
+          : null,
     listen: async () => () => {},
   })
 })
@@ -146,13 +155,19 @@ describe('claim trust from the harness report', () => {
     await expect.element(page.getByText('example.org', { exact: true })).toBeVisible()
   })
 
-  it('shows a claim as changed once its text moves on from the evaluated text', async () => {
-    const { editor, container } = await editorFixture()
+  it('shows a claim as changed once its saved text moves on from the evaluated text', async () => {
+    const { editor, container, ref } = await editorFixture()
     const projection = wikiArticleKey.getState(editor.state)!
     const claim = projection.index.claims.find((item) => item.id === 'c2')!
     editor.view.dispatch(
       editor.state.tr.insertText('Edited ', wikiEditorRange(projection.map, claim)!.from),
     )
+    // Unsaved text keeps the verdict; the reindex after a save re-reads the file.
+    expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
+      'needs-work',
+    )
+    disk = ref.current!.getMarkdown()
+    await queryClient.invalidateQueries({ queryKey: ['index'] })
     await vi.waitFor(() =>
       expect(
         container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
@@ -170,7 +185,46 @@ describe('claim trust from the harness report', () => {
       ),
     )
     expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
-    await expect.element(page.getByText(/You questioned this claim on/)).toBeVisible()
+    await expect.element(page.getByText('You questioned this claim today.')).toBeVisible()
+  })
+
+  it('keeps the last report while a new one fails to parse', async () => {
+    const { container } = await editorFixture()
+    report = { stamp: '2:1', contents: '{"format":' }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    expect(queryClient.getQueriesData({ queryKey: ['wiki-trust'] })[0]?.[1]).toMatchObject({
+      status: 'invalid',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')).toBe(
+      'solid',
+    )
+    await expect.element(page.getByRole('button', { name: 'Claim C1: Solid' })).toBeVisible()
+  })
+
+  it('holds marks back on demand until Option reveals them', async () => {
+    settingsState.settings.wikiTrustDisplay = 'on-demand'
+    const { container } = await editorFixture()
+    await vi.waitFor(() =>
+      expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeNull(),
+    )
+    expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeVisible()
+    const mark = page.getByRole('button', { name: 'Claim C2: Needs work' })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }))
+    await expect.element(mark).toBeVisible()
+    await mark.click()
+    await expect.element(page.getByText('Add a primary source.')).toBeVisible()
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }))
+    expect(container.querySelector('[data-wiki-trust-reveal]')).toBeNull()
+  })
+
+  it('closes the open card when its mark is pressed again', async () => {
+    await editorFixture()
+    const mark = page.getByRole('button', { name: 'Claim C2: Needs work' })
+    await mark.click()
+    await expect.element(page.getByText('Add a primary source.')).toBeVisible()
+    await mark.click()
+    await expect.element(page.getByText('Add a primary source.')).not.toBeInTheDocument()
   })
 
   it('draws marks in the margin instead when that style is chosen', async () => {

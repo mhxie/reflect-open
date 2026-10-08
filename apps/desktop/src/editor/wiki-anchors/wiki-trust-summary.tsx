@@ -16,12 +16,12 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
   const step = useRef(-1)
   const summary = article?.trust ?? null
   if (article === null || summary === null) return null
-  const { counts, needsWork } = summary
+  const { needsWork, pending } = summary
   const label =
     needsWork.length > 0
       ? `${needsWork.length} need${needsWork.length === 1 ? 's' : ''} work`
-      : counts.pending > 0
-        ? `${counts.pending} awaiting evaluation`
+      : pending > 0
+        ? `${pending} awaiting evaluation`
         : null
   if (label === null) return null
   const next = (): void => {
@@ -42,11 +42,8 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
           >
             <span
               aria-hidden
-              className={
-                needsWork.length > 0
-                  ? 'size-2 rounded-full border border-dashed border-trust-needs-work'
-                  : 'size-2 rounded-full border border-dotted border-text-muted'
-              }
+              className="wiki-trust-glyph"
+              data-wiki-trust={needsWork.length > 0 ? 'needs-work' : 'pending'}
             />
             {label}
           </button>
@@ -55,7 +52,7 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
       <TooltipContent side="top">
         {needsWork.length > 0
           ? 'Go to the next claim that needs work'
-          : 'These claims changed since your harness last evaluated them'}
+          : 'Your harness has not evaluated these claims as saved'}
       </TooltipContent>
     </Tooltip>
   )

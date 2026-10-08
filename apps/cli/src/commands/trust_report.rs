@@ -1,5 +1,5 @@
 //! `reflect trust-report` — where agent harnesses publish this graph's wiki
-//! trust report (Plan 30): the path set in Reflect's Settings → Wiki, or the
+//! trust report: the path set in Reflect's Settings → Wiki, or the
 //! default when none is set. Harnesses ask here instead of assuming the
 //! default, since the setting lives outside the graph.
 
@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use reflect_graph_paths::{
-    is_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY,
+    normalize_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY,
 };
 use serde_json::Value;
 
@@ -32,8 +32,7 @@ fn configured_in(path: &Path) -> Option<String> {
         }
     };
     let document: Value = serde_json::from_str(&raw).ok()?;
-    let configured = document.get(WIKI_TRUST_REPORT_PATH_KEY)?.as_str()?;
-    is_wiki_trust_report_path(configured).then(|| configured.to_owned())
+    normalize_wiki_trust_report_path(document.get(WIKI_TRUST_REPORT_PATH_KEY)?.as_str()?)
 }
 
 pub fn run(graph: &Graph, json: bool) -> Result<(), CliError> {
@@ -72,6 +71,8 @@ mod tests {
             configured_in(&settings).as_deref(),
             Some("_meta/wiki-trust.json")
         );
+        fs::write(&settings, r#"{"wikiTrustReportPath":" ./_meta/t.json "}"#).unwrap();
+        assert_eq!(configured_in(&settings).as_deref(), Some("_meta/t.json"));
         fs::write(&settings, r#"{"wikiTrustReportPath":".reflect/x.json"}"#).unwrap();
         assert_eq!(configured_in(&settings), None);
         fs::write(&settings, r#"{"theme":"dark"}"#).unwrap();

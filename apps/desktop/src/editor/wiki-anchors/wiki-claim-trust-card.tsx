@@ -1,23 +1,85 @@
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
 import type { WikiClaimStanding, WikiSourceStanding } from '@reflect/core'
+import { openUrlSync } from '@/lib/open-url.ts'
 import { cn } from '@/lib/utils.ts'
-import { WikiTrustGlyph } from './wiki-trust-glyph.tsx'
-import { wikiStandingLabel } from './wiki-trust-labels.ts'
+import { wikiStandingLabel, wikiStandingStyle } from './wiki-trust-labels.ts'
 
 /** What the trust card shows about one claim, and the one action it offers. */
 export interface WikiClaimTrust {
   readonly claimId: string
+  /** The claim's text, whitespace collapsed and shortened, so the card names what it judges. */
+  readonly excerpt: string
   readonly standing: WikiClaimStanding
   /** Standings of the sources the verdict names, in the verdict's order. */
   readonly sources: readonly (WikiSourceStanding & { readonly key: string })[]
-  /** The day the reader questioned the claim, when that record is still open. */
-  readonly questionedAt: string | null
+  /** The harness's trust threshold on the weight scale, when it published one. */
+  readonly sourceThreshold: number | null
+  /** The reader already questioned this claim today. */
+  readonly questionedToday: boolean
   /** Record the reader's doubt; absent where the note cannot be edited. */
   readonly question?: () => void
 }
 
 interface WikiClaimTrustCardProps {
   readonly trust: WikiClaimTrust
+  /** Whether the note accepts the question record now. */
+  readonly editable: boolean
+}
+
+interface SourceRowProps {
+  readonly source: WikiClaimTrust['sources'][number]
+  readonly threshold: number | null
+}
+
+/** A web address from the report; anything else stays plain text. */
+function webUrl(url: string | null): string | null {
+  return url !== null && /^https?:\/\//i.test(url) ? url : null
+}
+
+function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
+  const url = webUrl(source.url)
+  return (
+    <li className="space-y-0.5">
+      <div className="flex items-center gap-2">
+        {url === null ? (
+          <span className="min-w-0 flex-1 truncate text-text-secondary">{source.label}</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => openUrlSync(url)}
+            title={url}
+            className="min-w-0 flex-1 truncate text-left text-text-secondary underline decoration-border-strong underline-offset-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            {source.label}
+          </button>
+        )}
+        <span aria-hidden className="relative h-1 w-10 rounded-full bg-border">
+          <span
+            className={cn(
+              'block h-full rounded-full',
+              source.trusted ? 'bg-trust-solid' : 'bg-trust-supported',
+            )}
+            style={{ width: `${Math.round(source.weight * 100)}%` }}
+          />
+          {threshold === null ? null : (
+            <span
+              className="absolute -top-0.5 h-2 w-px bg-text-muted"
+              style={{ left: `${Math.round(threshold * 100)}%` }}
+            />
+          )}
+        </span>
+        <span className="w-8 text-right text-text-muted tabular-nums">
+          {source.weight.toFixed(2)}
+          <span className="sr-only">
+            {source.trusted ? ', trusted' : ', below the trust threshold'}
+          </span>
+        </span>
+      </div>
+      {source.reasons.length > 0 ? (
+        <p className="text-text-muted">{source.reasons.map((reason) => reason.text).join(' · ')}</p>
+      ) : null}
+    </li>
+  )
 }
 
 /**
@@ -25,25 +87,36 @@ interface WikiClaimTrustCardProps {
  * raise it, and the sources it rests on with their weights. Reflect adds
  * nothing of its own beyond saying when the text changed since evaluation.
  */
-export function WikiClaimTrustCard({ trust }: WikiClaimTrustCardProps): ReactElement {
-  const { standing } = trust
+export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps): ReactElement {
+  const { standing, question } = trust
   const verdict = standing.state === 'unevaluated' ? null : standing.verdict
+  // Set on press, before the ledger reparses, so a double press records once.
+  const [asked, setAsked] = useState(false)
   return (
     <section aria-label={`Claim ${trust.claimId.toUpperCase()} trust`} className="space-y-2">
-      <header className="flex items-center gap-1.5 text-text">
-        <WikiTrustGlyph standing={standing} />
-        <span className="font-medium">{wikiStandingLabel(standing)}</span>
-        {verdict?.overlays.includes('edited') === true && standing.state === 'current' ? (
-          <span className="text-text-muted">· edited since review</span>
-        ) : null}
+      <header className="space-y-1">
+        <p className="flex items-center gap-1.5 text-text">
+          <span
+            aria-hidden
+            className="wiki-trust-glyph"
+            data-wiki-trust={wikiStandingStyle(standing)}
+          />
+          <span className="font-medium">{wikiStandingLabel(standing)}</span>
+          {verdict?.overlays.includes('edited') === true && standing.state === 'current' ? (
+            <span className="text-text-muted">· edited since review</span>
+          ) : null}
+        </p>
+        {trust.excerpt === '' ? null : (
+          <p className="line-clamp-2 text-text-muted">{trust.excerpt}</p>
+        )}
       </header>
       {standing.state === 'changed' ? (
         <p className="text-text-muted">
-          The text changed after your harness evaluated it on {standing.verdict.evaluatedAt}.
+          Saved after your harness evaluated it on {standing.verdict.evaluatedAt}.
         </p>
       ) : null}
       {standing.state === 'unevaluated' ? (
-        <p className="text-text-muted">Your harness has not evaluated this claim yet.</p>
+        <p className="text-text-muted">Your harness has not evaluated this text yet.</p>
       ) : null}
       {standing.state === 'current' && standing.verdict.reasons.length > 0 ? (
         <ul className="space-y-0.5 text-text-secondary">
@@ -56,37 +129,21 @@ export function WikiClaimTrustCard({ trust }: WikiClaimTrustCardProps): ReactEle
         <p className="text-text-muted">{standing.verdict.next}</p>
       ) : null}
       {trust.sources.length > 0 ? (
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {trust.sources.map((source) => (
-            <li key={source.key} className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-text-secondary">{source.label}</span>
-              <span
-                aria-hidden
-                className="h-1 w-10 overflow-hidden rounded-full bg-border"
-                title={`Weight ${source.weight.toFixed(2)}`}
-              >
-                <span
-                  className={cn(
-                    'block h-full rounded-full',
-                    source.trusted ? 'bg-trust-solid' : 'bg-trust-supported',
-                  )}
-                  style={{ width: `${Math.round(source.weight * 100)}%` }}
-                />
-              </span>
-              <span className="w-14 text-right text-text-muted tabular-nums">
-                {source.weight.toFixed(2)}
-                <span className="sr-only">{source.trusted ? ', trusted' : ', not trusted'}</span>
-              </span>
-            </li>
+            <SourceRow key={source.key} source={source} threshold={trust.sourceThreshold} />
           ))}
         </ul>
       ) : null}
-      {trust.questionedAt !== null ? (
-        <p className="text-text-muted">You questioned this claim on {trust.questionedAt}.</p>
-      ) : trust.question === undefined ? null : (
+      {question === undefined || !editable ? null : trust.questionedToday || asked ? (
+        <p className="text-text-muted">You questioned this claim today.</p>
+      ) : (
         <button
           type="button"
-          onClick={trust.question}
+          onClick={() => {
+            setAsked(true)
+            question()
+          }}
           className="rounded-md border border-border-strong px-2 py-1 font-medium text-text-secondary shadow-input transition-colors duration-100 hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
         >
           Question this claim

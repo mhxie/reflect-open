@@ -23,7 +23,7 @@
           "minLength": 1
         },
         "version": {
-          "type": "string"
+          "type": ["string", "null"]
         }
       },
       "required": ["name"]
@@ -50,10 +50,17 @@
                   "enum": ["solid", "supported", "needs-work"]
                 },
                 "overlays": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "text_sha256": {
                   "type": "string",
@@ -64,29 +71,40 @@
                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                 },
                 "reasons": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "text": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "kind": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["text"]
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "next": {
+                  "type": ["string", "null"]
+                },
+                "sources": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
                         "type": "string"
                       }
                     },
-                    "required": ["text"]
-                  }
-                },
-                "next": {
-                  "type": "string"
-                },
-                "sources": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": ["tier", "text_sha256", "evaluated_at"]
@@ -97,52 +115,70 @@
       }
     },
     "sources": {
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string",
-            "minLength": 1
-          },
-          "weight": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          },
-          "trusted": {
-            "type": "boolean"
-          },
-          "url": {
+      "anyOf": [
+        {
+          "type": "object",
+          "propertyNames": {
             "type": "string"
           },
-          "reasons": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "kind": {
-                  "type": "string"
-                }
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
               },
-              "required": ["text"]
-            }
+              "weight": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "trusted": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": ["string", "null"]
+              },
+              "reasons": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["text"]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["label", "weight", "trusted"]
           }
         },
-        "required": ["label", "weight", "trusted"]
-      }
+        {
+          "type": "null"
+        }
+      ]
     },
     "source_threshold": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": ["format", "version", "generated_at", "harness", "notes"]

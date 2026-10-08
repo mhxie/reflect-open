@@ -32,9 +32,14 @@ function statusOf(
         text: 'No report yet. Your agent harness writes it here; Settings → Agents installs a skill that tells it how.',
       }
     case 'unreadable':
-      return { tone: 'problem', text: `Couldn’t read the report: ${state.error}` }
-    case 'invalid':
-      return { tone: 'problem', text: state.error }
+    case 'invalid': {
+      const error =
+        state.status === 'unreadable' ? `Couldn’t read the report: ${state.error}` : state.error
+      return {
+        tone: 'problem',
+        text: state.last === null ? error : `${error} Showing the last report that loaded.`,
+      }
+    }
     case 'ready': {
       const { report, ignored } = state
       let claims = 0

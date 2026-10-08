@@ -1,5 +1,5 @@
 //! The wiki trust report: a JSON file an agent harness writes into the graph,
-//! which Reflect reads and displays but never computes (Plan 30). The path is
+//! which Reflect reads and displays but never computes. The path is
 //! the user's setting, graph-relative, and may sit in a hidden folder such as
 //! `.harness/`; it never names Reflect's own `.reflect/` state or `.git/`.
 
@@ -105,6 +105,14 @@ fn read_report(
         return Err(AppError::unsupported(format!(
             "trust report exceeds {MAX_REPORT_BYTES} bytes"
         )));
+    }
+    // A version another device wrote may still be an iCloud placeholder:
+    // nothing downloads it on its own, so ask, and the next poll reads it.
+    if reflect_graph_paths::is_dataless(&meta) {
+        crate::icloud::storage::request_download(&abs);
+        return Err(AppError::io(
+            "the trust report is still downloading from iCloud",
+        ));
     }
     let contents = String::from_utf8(read_bounded(root, rel)?)
         .map_err(|_| AppError::invalid(format!("the trust report is not UTF-8: {rel:?}")))?;

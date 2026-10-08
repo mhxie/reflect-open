@@ -388,8 +388,9 @@ html:root {
   outline-offset: 2px;
 }
 
-/* Claim trust (Plan 30): marks drawn from the agent harness's report. Shape
-   carries each tier (filled, ring, dashed, dotted); color only reinforces it. */
+/* Claim trust: marks drawn from the agent harness's report. Shape carries
+   each tier (filled, ring, dashed, dotted); color only reinforces it. The
+   card's glyph and the marks share these rules. */
 .wiki-trust-inline {
   white-space: nowrap;
 }
@@ -408,27 +409,36 @@ html:root {
   vertical-align: super;
   cursor: pointer;
 }
-.wiki-trust-mark::before {
+.wiki-trust-mark::before,
+.wiki-trust-glyph {
   content: '';
+  flex-shrink: 0;
   box-sizing: border-box;
   width: 0.7em;
   height: 0.7em;
   border: 1.5px solid var(--color-trust-supported);
   border-radius: 999px;
 }
-.wiki-trust-mark[data-wiki-trust='solid']::before {
+.wiki-trust-glyph {
+  display: inline-block;
+}
+.wiki-trust-mark[data-wiki-trust='solid']::before,
+.wiki-trust-glyph[data-wiki-trust='solid'] {
   border-color: var(--color-trust-solid);
   background: var(--color-trust-solid);
 }
-.wiki-trust-mark[data-wiki-trust='needs-work']::before {
+.wiki-trust-mark[data-wiki-trust='needs-work']::before,
+.wiki-trust-glyph[data-wiki-trust='needs-work'] {
   border-style: dashed;
   border-color: var(--color-trust-needs-work);
 }
-.wiki-trust-mark[data-wiki-trust='disputed']::before {
+.wiki-trust-mark[data-wiki-trust='disputed']::before,
+.wiki-trust-glyph[data-wiki-trust='disputed'] {
   border-style: dashed;
   border-color: var(--color-trust-disputed);
 }
-.wiki-trust-mark[data-wiki-trust='pending']::before {
+.wiki-trust-mark[data-wiki-trust='pending']::before,
+.wiki-trust-glyph[data-wiki-trust='pending'] {
   border-style: dotted;
   border-color: var(--color-text-muted);
 }
@@ -438,6 +448,10 @@ html:root {
 .wiki-trust-mark:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
+}
+/* On demand: the marks wait for the reveal, so the card stays one click away. */
+[data-wiki-trust-display='on-demand']:not([data-wiki-trust-reveal]) .wiki-trust-on-demand {
+  display: none;
 }
 
 /* Inline: only the prose that needs work is marked; sound prose stays clean. */

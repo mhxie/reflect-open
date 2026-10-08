@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { WikiArticleIndex } from '@reflect/core'
-import type { WikiTrustSummary } from './use-wiki-trust-view.ts'
+import type { WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 
 /** The live source projection and view controls of one mounted note. */
 export interface NoteArticle {
@@ -12,7 +12,7 @@ export interface NoteArticle {
   readonly adjustSelection: (id: string, from: number, to: number) => void
   readonly copySource: (from: number, to: number) => Promise<void>
   /** The harness's verdict counts for this note; null while trust is off or not loaded. */
-  readonly trust: WikiTrustSummary | null
+  readonly trust: WikiNoteTrustSummary | null
   /** Select claim `id` and scroll it into view. */
   readonly focusClaim: (id: string) => void
 }

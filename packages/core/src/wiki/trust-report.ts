@@ -1,5 +1,5 @@
 /**
- * The wiki trust report (Plan 30): the one interface between Reflect and an
+ * The wiki trust report: the one interface between Reflect and an
  * agent harness's trust engine. A harness (atelier, or any other) evaluates
  * claims and sources however it likes and writes one JSON file into the
  * graph; Reflect validates it, checks each verdict against the claim text it
@@ -35,7 +35,7 @@ export type WikiTrustDisplay = (typeof WIKI_TRUST_DISPLAYS)[number]
 export function isWikiTrustReportPath(path: string): boolean {
   const segments = path.split('/')
   const plain = segments.every(
-    (segment) => segment !== '' && segment !== '.' && segment !== '..' && !segment.includes('\\'),
+    (segment) => segment !== '' && segment !== '.' && segment !== '..' && !/[\\:]/.test(segment),
   )
   const first = (segments[0] ?? '').toLowerCase()
   return plain && first !== '.reflect' && first !== '.git' && path.toLowerCase().endsWith('.json')
@@ -56,11 +56,9 @@ export type WikiTrustOverlay = 'disputed' | 'edited'
 const TIERS = ['solid', 'supported', 'needs-work'] as const
 const OVERLAYS: ReadonlySet<string> = new Set<WikiTrustOverlay>(['disputed', 'edited'])
 
-/** One fact behind a verdict, as the harness wrote it. */
+/** One fact behind a verdict, as the harness wrote it for a reader. */
 export interface WikiTrustReason {
   readonly text: string
-  /** The harness's category for the reason, for styling; free-form. */
-  readonly kind: string | null
 }
 
 /** The harness's verdict on one claim. */
@@ -120,19 +118,16 @@ const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/)
 const claimIdSchema = z.string().regex(/^c[1-9]\d*$/)
 
-const reasonSchema = z.object({
-  text: z.string().min(1),
-  kind: z.string().optional(),
-})
+const reasonSchema = z.object({ text: z.string().min(1) })
 
 const claimSchema = z.object({
   tier: z.enum(TIERS),
-  overlays: z.array(z.string()).optional(),
+  overlays: z.array(z.string()).nullish(),
   text_sha256: sha256Hex,
   evaluated_at: isoDay,
-  reasons: z.array(reasonSchema).optional(),
-  next: z.string().optional(),
-  sources: z.array(z.string()).optional(),
+  reasons: z.array(reasonSchema).nullish(),
+  next: z.string().nullish(),
+  sources: z.array(z.string()).nullish(),
 })
 
 const noteSchema = z.object({
@@ -144,18 +139,18 @@ const sourceSchema = z.object({
   label: z.string().min(1),
   weight: z.number().min(0).max(1),
   trusted: z.boolean(),
-  url: z.string().optional(),
-  reasons: z.array(reasonSchema).optional(),
+  url: z.string().nullish(),
+  reasons: z.array(reasonSchema).nullish(),
 })
 
 const envelopeSchema = z.object({
   format: z.literal(WIKI_TRUST_REPORT_FORMAT),
   version: z.literal(WIKI_TRUST_REPORT_VERSION),
   generated_at: z.string().min(1),
-  harness: z.object({ name: z.string().min(1), version: z.string().optional() }),
+  harness: z.object({ name: z.string().min(1), version: z.string().nullish() }),
   notes: z.record(z.string(), z.unknown()),
-  sources: z.record(z.string(), z.unknown()).optional(),
-  source_threshold: z.number().min(0).max(1).optional(),
+  sources: z.record(z.string(), z.unknown()).nullish(),
+  source_threshold: z.number().min(0).max(1).nullish(),
 })
 
 /**
@@ -164,7 +159,7 @@ const envelopeSchema = z.object({
  */
 const reportSchema = envelopeSchema.extend({
   notes: z.record(z.string(), noteSchema.extend({ claims: z.record(claimIdSchema, claimSchema) })),
-  sources: z.record(z.string(), sourceSchema).optional(),
+  sources: z.record(z.string(), sourceSchema).nullish(),
 })
 
 /** The report format as a JSON Schema document, for harness authors. */
@@ -172,8 +167,8 @@ export function wikiTrustReportJsonSchema(): Record<string, unknown> {
   return { title: 'Reflect wiki trust report', ...z.toJSONSchema(reportSchema, { io: 'input' }) }
 }
 
-function reasonsOf(reasons: z.infer<typeof reasonSchema>[] | undefined): WikiTrustReason[] {
-  return (reasons ?? []).map((reason) => ({ text: reason.text, kind: reason.kind ?? null }))
+function reasonsOf(reasons: z.infer<typeof reasonSchema>[] | null | undefined): WikiTrustReason[] {
+  return (reasons ?? []).map((reason) => ({ text: reason.text }))
 }
 
 function isOverlay(value: string): value is WikiTrustOverlay {
@@ -291,38 +286,4 @@ export function wikiClaimStanding(
   return verdict.textSha256 === textSha256
     ? { state: 'current', verdict }
     : { state: 'changed', verdict }
-}
-
-/** How many of a note's standings fall in each tier, plus the changed and unevaluated. */
-export interface WikiTrustCounts {
-  readonly solid: number
-  readonly supported: number
-  readonly needsWork: number
-  readonly disputed: number
-  readonly edited: number
-  /** Claims whose text changed since evaluation, or that have no verdict. */
-  readonly pending: number
-}
-
-/** Count standings for an article summary or a Wiki screen row; display only. */
-export function wikiTrustCounts(standings: readonly WikiClaimStanding[]): WikiTrustCounts {
-  let solid = 0
-  let supported = 0
-  let needsWork = 0
-  let disputed = 0
-  let edited = 0
-  let pending = 0
-  for (const standing of standings) {
-    if (standing.state !== 'current') {
-      pending += 1
-      continue
-    }
-    const { tier, overlays } = standing.verdict
-    if (tier === 'solid') solid += 1
-    else if (tier === 'supported') supported += 1
-    else needsWork += 1
-    if (overlays.includes('disputed')) disputed += 1
-    if (overlays.includes('edited')) edited += 1
-  }
-  return { solid, supported, needsWork, disputed, edited, pending }
 }

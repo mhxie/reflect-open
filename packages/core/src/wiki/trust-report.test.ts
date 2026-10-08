@@ -2,12 +2,12 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
+  DEFAULT_WIKI_TRUST_REPORT_PATH,
   isWikiTrustReportPath,
   normalizeWikiTrustReportPath,
   parseWikiTrustReport,
   wikiClaimStanding,
   wikiClaimTextSha256,
-  wikiTrustCounts,
   wikiTrustReportJsonSchema,
   type WikiTrustReport,
 } from './trust-report.ts'
@@ -90,6 +90,26 @@ describe('parseWikiTrustReport', () => {
     expect(parsed.ok && parsed.report.notes.get(NOTE)?.claims.size).toBe(0)
   })
 
+  it('reads null optional fields as absent', () => {
+    const parsed = parseWikiTrustReport(
+      withClaim({
+        tier: 'supported',
+        overlays: null,
+        text_sha256: 'a'.repeat(64),
+        evaluated_at: '2026-10-08',
+        reasons: null,
+        next: null,
+        sources: null,
+      }),
+    )
+    expect(parsed.ok && parsed.report.notes.get(NOTE)?.claims.get('c1')).toMatchObject({
+      overlays: [],
+      reasons: [],
+      next: null,
+      sources: [],
+    })
+  })
+
   it('keeps known overlays and ignores ones this build does not show', () => {
     const parsed = parseWikiTrustReport(
       withClaim({
@@ -137,24 +157,13 @@ describe('wikiClaimStanding', () => {
   })
 })
 
-describe('wikiTrustCounts', () => {
-  it('counts current verdicts by tier and everything else as pending', () => {
-    const report = exampleReport()
-    const verdict = report.notes.get(NOTE)!.claims.get('c5')!
-    expect(
-      wikiTrustCounts([
-        { state: 'current', verdict },
-        { state: 'changed', verdict },
-        { state: 'unevaluated' },
-      ]),
-    ).toEqual({ solid: 0, supported: 0, needsWork: 1, disputed: 1, edited: 0, pending: 2 })
-  })
-})
-
 describe('isWikiTrustReportPath', () => {
   it('matches the corpus the Rust reader runs', () => {
     const corpus = z
-      .object({ cases: z.array(z.object({ path: z.string(), valid: z.boolean() })) })
+      .object({
+        cases: z.array(z.object({ path: z.string(), valid: z.boolean() })),
+        default: z.string(),
+      })
       .parse(
         JSON.parse(
           readFileSync(
@@ -166,6 +175,7 @@ describe('isWikiTrustReportPath', () => {
     for (const { path, valid } of corpus.cases) {
       expect(isWikiTrustReportPath(path), path).toBe(valid)
     }
+    expect(DEFAULT_WIKI_TRUST_REPORT_PATH).toBe(corpus.default)
   })
 })
 

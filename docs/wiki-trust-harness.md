@@ -4,7 +4,7 @@ Reflect shows how well each wiki claim stands, but it does not decide. An
 agent harness (atelier, or any other) owns the trust algorithm, ranking, and
 source reputation. The two meet at one file: the harness writes a **trust
 report** into the graph, and Reflect reads and displays it. This page is the
-whole contract; [Plan 30](plans/30-claim-trust.md) records the design.
+whole contract.
 
 ## The loop
 
@@ -27,7 +27,7 @@ rather than assuming the default:
     reflect --graph <graph> trust-report        # prints the absolute path
 
 The default is `.harness/wiki-trust.json`. A path is valid when every segment
-is plain (no empty, `.`, or `..` segment), it ends in `.json`, and it is not
+is plain (not empty, `.`, or `..`, and without `\` or `:`), it ends in `.json`, and it is not
 under `.reflect/` (Reflect's rebuildable state) or `.git/`; the cases are in
 [`fixtures/wiki-trust-report-paths.json`](../fixtures/wiki-trust-report-paths.json).
 Prefer a hidden folder: a report under a visible folder is listed among the
@@ -52,8 +52,8 @@ from the reader, so it cannot drift). A complete example:
 | `generated_at` | When the report was written (RFC 3339). |
 | `harness` | `{ "name", "version"? }`, shown in Settings. |
 | `notes` | Entries by graph-relative note path (`wiki/memory/Spacing effect.md`); Reflect compares paths in Unicode NFC. |
-| `notes.<path>.claims` | Verdicts by claim id (`c1`, `c2`, …). |
-| `sources` | Optional standings by origin key (below). |
+| `notes.<path>.claims` | Verdicts by claim id: `c` and a positive number without leading zeros (`c1`, `c12`). |
+| `sources` | Optional standings by origin key: any string you choose that names one source and stays the same across reports (a DOI, a normalized domain). Reflect only matches it to verdicts. |
 | `source_threshold` | Optional weight a source needs to count as trusted, 0–1. |
 
 A claim verdict:
@@ -64,33 +64,39 @@ A claim verdict:
 | `overlays` | Optional: `"disputed"`, `"edited"`. Unknown values are ignored. |
 | `text_sha256` | SHA-256 of the claim text you evaluated, lowercase hex (below). |
 | `evaluated_at` | The day you evaluated it, `YYYY-MM-DD`. |
-| `reasons` | Optional `[{ "text", "kind"? }]`, shown in order. Write `text` for a reader. |
+| `reasons` | Optional `[{ "text" }]`, shown in order. Write `text` for a reader. |
 | `next` | Optional sentence: what would raise the tier. |
 | `sources` | Optional origin keys the verdict rests on, linking to `sources`. |
 
 A source standing: `label`, `weight` (normalized across the wiki, 0–1),
-`trusted` (whether it clears your threshold), optional `url` and `reasons`.
+`trusted` (whether it clears your threshold), optional `url` (an `http` or
+`https` address Reflect links to) and `reasons` (`[{ "text" }]`).
 How you normalize and where the threshold sits are yours to decide; keep the
 scale independent of corpus size, or a fixed threshold drifts as the wiki
 grows.
 
 Reflect drops a note, claim, or source entry that does not validate, or a
-claim whose id is not `c` and a positive number, and counts it in Settings, so
-one bad entry never blanks the whole wiki. Keys it does not know are ignored,
-so later versions can add optional fields.
+claim whose id is malformed, and counts it in Settings, so one bad entry never
+blanks the whole wiki. An optional field may be omitted or `null`. Keys it
+does not know are ignored, so later versions can add optional fields.
+
+While a new report fails to read or validate, Reflect keeps showing the last
+one that did and says why in Settings.
 
 ## The claim text hash
 
 A verdict only shows while the claim reads as it did when you evaluated it.
-Take the note's text with CRLF and lone CR turned into LF (Reflect holds every
-note that way), then hash the UTF-8 bytes between the end of
-`<!-- claim:cN -->` and the start of `<!-- /claim:cN -->`: SHA-256, lowercase
-hex. No other normalization. Legacy `### [Cn]` claims carry their ledger
+Take the note's saved text with CRLF and lone CR turned into LF, then hash the
+UTF-8 bytes after the opening marker's `-->` and before the closing marker's
+`<!--`. The markers are HTML comments, written `<!-- claim:cN -->` and
+`<!-- /claim:cN -->` (any spaces or tabs after `<!--` and before `-->`, none
+inside `/claim:cN`), and the hash is SHA-256, lowercase hex. No other normalization. Legacy `### [Cn]` claims carry their ledger
 inside their own range, so Reflect shows no trust for them. Test vectors:
 [`fixtures/wiki-claim-text-hashes.json`](../fixtures/wiki-claim-text-hashes.json).
 
-When the text changes, Reflect shows the claim as **changed since its last
-evaluation** until a report carries the new hash.
+Reflect hashes the file as saved, as you read it. When the text changes, it
+shows the claim as **changed since its last evaluation** until a report
+carries the new hash.
 
 ## Records Reflect writes back
 
@@ -100,7 +106,8 @@ ledger:
 - `@pass: editor | status: pending | at: YYYY-MM-DD` after a person changes a
   claim's text in Reflect. Never for a file reloaded from disk.
 - `@pass: reader | status: flagged | at: YYYY-MM-DD` when a person questions a
-  claim while reading. What resolves it is your rule.
+  claim while reading, at most once a day per claim. What resolves it is your
+  rule; Reflect shows only your verdict.
 
 ## Privacy
 

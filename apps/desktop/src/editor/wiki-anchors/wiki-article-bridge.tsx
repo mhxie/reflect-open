@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import {
   markdownToDoc,
   createMarkdownSourceMap,
@@ -8,34 +8,17 @@ import {
 import { useEditor, useExtension } from '@meowdown/react'
 import { TextSelection } from '@prosekit/pm/state'
 import { planWikiClaim, planWikiClaimBoundary, type WikiArticleIndex } from '@reflect/core'
-import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { toast } from '@/components/ui/toast.tsx'
 import { todayIso } from '@/lib/dates.ts'
 import { openUrlSync } from '@/lib/open-url.ts'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
 import { clearNoteArticle, publishNoteArticle, useNoteArticle } from './wiki-article-store.ts'
 import { useWikiArticleIdentities } from './use-wiki-article-identities.ts'
-import { useWikiTrustView, type WikiTrustSummary } from './use-wiki-trust-view.ts'
-import { wikiQuestionTransaction } from './wiki-claim-question.ts'
-import { WikiClaimTrustCard } from './wiki-claim-trust-card.tsx'
+import { useWikiArticleTrust } from './use-wiki-article-trust.tsx'
+import type { WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 import { defineWikiArticle, wikiArticleKey } from './wiki-article-plugin.tsx'
 import { wikiEditorRange } from './wiki-article-projection.ts'
 import type { WikiEvidenceOptions } from './wiki-evidence.ts'
-
-/** Scopes one editor's hover rules, so two open notes' `c2` never light up together. */
-let scopes = 0
-
-/** Light up a claim while its trust mark is hovered or focused, without touching the editor's DOM. */
-function highlightRules(scope: string, claimIds: readonly string[]): string {
-  return claimIds
-    .filter((id) => /^c[1-9]\d*$/.test(id))
-    .map(
-      (id) =>
-        `[data-wiki-trust-scope="${scope}"]:has([data-wiki-trust-claim="${id}"]:is(:hover, :focus-visible)) [data-wiki-claim="${id}"]{background:color-mix(in srgb, var(--color-accent) 12%, transparent);border-radius:2px}`,
-    )
-    .join('\n')
-}
 
 interface WikiArticleBridgeProps {
   readonly path: string
@@ -50,19 +33,11 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
   const identitiesRef = useRef(noteIdentity)
   const updateRef = useRef<() => void>(() => {})
   const navigateRef = useRef(onWikiLinkClick)
-  const display = useSettings().settings.wikiTrustDisplay
-  const question = useCallback(
-    (claimId: string) => {
-      if (!editor.mounted || !editor.view.editable) return
-      editor.view.dispatch(wikiQuestionTransaction(editor.state, claimId, todayIso()))
-    },
-    [editor],
-  )
-  const trust = useWikiTrustView(path, article?.index ?? null, question)
-  const trustRef = useRef(trust.view)
-  const summaryRef = useRef<WikiTrustSummary | null>(trust.summary)
-  const [scope] = useState(() => `trust-${(scopes += 1)}`)
-  const [cardFor, setCardFor] = useState<string | null>(null)
+  const {
+    view: trustView,
+    summary: trustSummaryOf,
+    card: trustCard,
+  } = useWikiArticleTrust(editor, path, article?.index ?? null, () => updateRef.current())
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
   }, [onWikiLinkClick])
@@ -76,71 +51,10 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       },
       onUpdate: () => updateRef.current(),
       noteIdentity: (title) => identitiesRef.current(title),
-      trust: () => trustRef.current,
+      trust: trustView,
     }),
   )
   useExtension(extension)
-  useEffect(() => {
-    trustRef.current = trust.view
-    summaryRef.current = trust.summary
-    // A new article projection can publish from inside the editor's own view
-    // update, rendering this synchronously; redraw after that update ends.
-    let live = true
-    queueMicrotask(() => {
-      if (!live || !editor.mounted) return
-      editor.view.dispatch(
-        editor.state.tr.setMeta(wikiArticleKey, 'trust').setMeta('addToHistory', false),
-      )
-      updateRef.current()
-    })
-    return () => {
-      live = false
-    }
-  }, [editor, trust.view, trust.summary])
-  useEffect(() => {
-    let detach = (): void => {}
-    const cancel = whenEditorMounted(editor, () => {
-      const dom = editor.view.dom
-      dom.dataset['wikiTrustDisplay'] = display
-      dom.dataset['wikiTrustScope'] = scope
-      const click = (event: MouseEvent): void => {
-        const mark =
-          event.target instanceof Element
-            ? event.target.closest<HTMLElement>('.wiki-trust-mark')
-            : null
-        const id = mark?.dataset['wikiTrustClaim']
-        if (id === undefined) return
-        event.preventDefault()
-        setCardFor((current) => (current === id ? null : id))
-      }
-      dom.addEventListener('click', click)
-      // Holding Option alone reveals every claim's tier; any other key with
-      // it is a shortcut, so the reveal ends.
-      const reveal = (on: boolean): void => {
-        if (on) dom.dataset['wikiTrustReveal'] = ''
-        else delete dom.dataset['wikiTrustReveal']
-      }
-      const keydown = (event: KeyboardEvent): void => reveal(event.key === 'Alt')
-      const keyup = (event: KeyboardEvent): void => {
-        if (event.key === 'Alt') reveal(false)
-      }
-      const blur = (): void => reveal(false)
-      window.addEventListener('keydown', keydown)
-      window.addEventListener('keyup', keyup)
-      window.addEventListener('blur', blur)
-      detach = () => {
-        dom.removeEventListener('click', click)
-        window.removeEventListener('keydown', keydown)
-        window.removeEventListener('keyup', keyup)
-        window.removeEventListener('blur', blur)
-        reveal(false)
-      }
-    })
-    return () => {
-      cancel()
-      detach()
-    }
-  }, [editor, display, scope])
   useEffect(() => {
     identitiesRef.current = noteIdentity
     if (editor.mounted)
@@ -153,7 +67,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
     let previous: {
       index: WikiArticleIndex
       showRanges: boolean
-      trust: WikiTrustSummary | null
+      trust: WikiNoteTrustSummary | null
     } | null = null
     function markSelection(from: number, to: number, id?: string): void {
       if (!editor.mounted || !editor.view.editable) return
@@ -196,7 +110,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
     function publish(): void {
       if (!editor.mounted) return
       const value = wikiArticleKey.getState(editor.state)
-      const trustSummary = summaryRef.current
+      const trustSummary = trustSummaryOf()
       if (
         value === undefined ||
         (previous?.index === value.index &&
@@ -288,35 +202,6 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       updateRef.current = () => {}
       clearNoteArticle(path, owner)
     }
-  }, [editor, path])
-  const card = cardFor === null ? null : (trust.view?.claim(cardFor) ?? null)
-  return (
-    <>
-      <style>{highlightRules(scope, article?.index.claims.map((claim) => claim.id) ?? [])}</style>
-      {card === null ? null : (
-        <Popover
-          open
-          onOpenChange={(open) => {
-            if (!open) setCardFor(null)
-          }}
-        >
-          <PopoverContent
-            // Found again on each layout: a redraw replaces the mark's button.
-            anchor={() =>
-              editor.mounted
-                ? editor.view.dom.querySelector(
-                    `[data-wiki-trust-claim="${CSS.escape(card.claimId)}"]`,
-                  )
-                : null
-            }
-            side="top"
-            align="start"
-            className="w-72 max-w-[calc(100vw-2rem)] text-xs"
-          >
-            <WikiClaimTrustCard trust={card} />
-          </PopoverContent>
-        </Popover>
-      )}
-    </>
-  )
+  }, [editor, path, trustSummaryOf])
+  return <>{trustCard}</>
 }
