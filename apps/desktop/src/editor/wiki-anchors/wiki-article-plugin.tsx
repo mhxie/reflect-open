@@ -28,6 +28,7 @@ import {
 import type { WikiEvidenceOptions } from './wiki-evidence.ts'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
 import { wikiStandingLabel, wikiStandingStyle } from './wiki-trust-labels.ts'
+import { spaceWikiTrustMarginMarks } from './wiki-trust-margin.ts'
 import type { WikiTrustView } from './wiki-trust-view.ts'
 import {
   copyWikiProse,
@@ -142,7 +143,8 @@ function decorations(
   const trustView = options.trust?.() ?? null
   const claimTrust = (id: string | null | undefined): WikiClaimTrust | null =>
     trustView === null || id === null || id === undefined ? null : trustView.claim(id)
-  const margin = new Map<number, WikiClaimTrust[]>()
+  /** Textblocks holding a margin mark, which position it. */
+  const marginHosts = new Set<number>()
   for (const marker of index.markers) {
     if (!marker.valid) continue
     const range = wikiEditorRange(map, marker)
@@ -176,9 +178,12 @@ function decorations(
     const waits = !showRanges && (trustView?.display === 'on-demand' || quiet)
     if (trust !== null && trustView !== null) {
       if (waits) result.push(trustWidget(range.to, [trust], 'on-demand'))
-      else if (trustView.display === 'margin' && !quiet && block !== null)
-        margin.set(block, [...(margin.get(block) ?? []), trust])
-      else if (trustView.display !== 'margin' || quiet)
+      else if (trustView.display === 'margin' && !quiet) {
+        // Beside the line the claim ends on, positioned by that textblock.
+        const end = state.doc.resolve(range.to)
+        if (end.parent.isTextblock) marginHosts.add(end.before())
+        result.push(trustWidget(range.to, [trust], 'margin'))
+      } else if (trustView.display !== 'margin' || quiet)
         result.push(trustWidget(range.to, [trust], 'inline'))
     }
     if (showRanges) {
@@ -258,18 +263,12 @@ function decorations(
       ),
     )
   }
-  for (const [position, claims] of margin) {
+  for (const position of marginHosts) {
     const node = state.doc.nodeAt(position)
-    if (node === null) continue
-    result.push(
-      // The mark count reserves the column's height, so a short paragraph's
-      // marks never overlap the next one's.
-      Decoration.node(position, position + node.nodeSize, {
-        class: 'wiki-trust-margin-host',
-        style: `--wiki-trust-marks: ${claims.length}`,
-      }),
-    )
-    result.push(trustWidget(position + 1, claims, 'margin'))
+    if (node !== null)
+      result.push(
+        Decoration.node(position, position + node.nodeSize, { class: 'wiki-trust-margin-host' }),
+      )
   }
   let bibliographyAt: number | null = null
   state.doc.descendants((node, position) => {
@@ -437,6 +436,8 @@ function trustMark(trust: WikiClaimTrust): HTMLButtonElement {
     'aria-label',
     `Claim ${trust.claimId.toUpperCase()}: ${wikiStandingLabel(trust.standing)}`,
   )
+  // The shape's name on hover teaches the marks in place.
+  button.title = wikiStandingLabel(trust.standing)
   return button
 }
 
@@ -447,7 +448,7 @@ const TRUST_LAYOUT_CLASS = {
 } as const
 
 /**
- * One claim's mark after its text, or a paragraph's marks in a margin column.
+ * One claim's mark after its text, inline or in the margin beside that line.
  * The key names everything the DOM shows, so typing elsewhere keeps the node.
  */
 function trustWidget(
@@ -608,12 +609,40 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
         },
         view: (view) => {
           articleViews.set(view.state.doc, view)
+          // Margin marks follow their claims' lines, so respace after layout:
+          // next frame, and once more after node views and fonts settle.
+          let frame: number | null = null
+          let settle: ReturnType<typeof setTimeout> | null = null
+          const space = (): void => spaceWikiTrustMarginMarks(view.dom)
+          const spaceSoon = (): void => {
+            if (frame === null)
+              frame = requestAnimationFrame(() => {
+                frame = null
+                space()
+              })
+            if (settle !== null) clearTimeout(settle)
+            settle = setTimeout(() => {
+              settle = null
+              space()
+            }, 250)
+          }
+          const resize = new ResizeObserver(spaceSoon)
+          resize.observe(view.dom)
+          document.fonts.addEventListener('loadingdone', spaceSoon)
+          spaceSoon()
           return {
             update: (current) => {
               articleViews.set(current.state.doc, current)
               options.onUpdate()
+              spaceSoon()
             },
-            destroy: () => endWikiClaimDrag(view),
+            destroy: () => {
+              resize.disconnect()
+              document.fonts.removeEventListener('loadingdone', spaceSoon)
+              if (frame !== null) cancelAnimationFrame(frame)
+              if (settle !== null) clearTimeout(settle)
+              endWikiClaimDrag(view)
+            },
           }
         },
       }),

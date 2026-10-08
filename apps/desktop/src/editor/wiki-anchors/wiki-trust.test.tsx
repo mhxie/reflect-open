@@ -530,15 +530,17 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() =>
       expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2),
     )
-    // Stacked marks sit 24px apart at any root size, so their 24px hit areas
-    // tile without overlap: just inside each one's area hits it.
+    // Both claims end on one line; the layout pass spaces their marks 24px
+    // apart at any root size, so their 24px hit areas tile without overlap.
     for (const root of ['16px', '13px']) {
       document.documentElement.style.fontSize = root
-      const [first, second] = [
-        ...container.querySelectorAll<HTMLElement>('.wiki-trust-margin .wiki-trust-mark'),
-      ].map((item) => item.getBoundingClientRect())
-      const pitch = second!.top + second!.height / 2 - (first!.top + first!.height / 2)
-      expect(pitch).toBeGreaterThanOrEqual(23.5)
+      await vi.waitFor(() => {
+        const [first, second] = [
+          ...container.querySelectorAll<HTMLElement>('.wiki-trust-margin .wiki-trust-mark'),
+        ].map((item) => item.getBoundingClientRect())
+        const pitch = second!.top + second!.height / 2 - (first!.top + first!.height / 2)
+        expect(pitch).toBeGreaterThanOrEqual(23.5)
+      })
     }
     document.documentElement.style.fontSize = ''
     // A right gutter, as the app has, keeps the column in the viewport.
@@ -557,10 +559,11 @@ describe('claim trust from the harness report', () => {
         .elementFromPoint(x, bottom.top + bottom.height / 2 - 10)
         ?.closest('.wiki-trust-mark'),
     ).toBe(lower)
-    // The paragraph reserves the column's height, so the next one's marks cannot overlap.
-    const column = container.querySelector('.wiki-trust-margin')!.getBoundingClientRect()
-    const host = container.querySelector('.wiki-trust-margin-host')!.getBoundingClientRect()
-    expect(column.bottom).toBeLessThanOrEqual(host.bottom + 0.5)
+    // Each mark sits on its claim's last line, beside the prose.
+    const line = container.querySelector('[data-wiki-claim="c2"]')!.getBoundingClientRect()
+    const center = top.top + top.height / 2
+    expect(center).toBeGreaterThanOrEqual(line.top)
+    expect(center).toBeLessThanOrEqual(line.bottom)
     expect(container.querySelector('.ProseMirror')?.getAttribute('data-wiki-trust-display')).toBe(
       'margin',
     )

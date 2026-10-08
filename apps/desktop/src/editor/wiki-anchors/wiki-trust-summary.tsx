@@ -21,7 +21,10 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
     if (pending === 0) return null
     // Nothing to step to, so plain text whose words carry the meaning.
     return (
-      <span className="inline-flex h-6 shrink-0 items-center gap-1.5 px-1.5 text-text-muted">
+      <span
+        title="Hold ⌥ to see every claim"
+        className="inline-flex h-6 shrink-0 items-center gap-1.5 px-1.5 text-text-muted"
+      >
         <span aria-hidden className="wiki-trust-glyph" data-wiki-trust="pending" />
         {pending} not yet evaluated
       </span>
@@ -46,7 +49,9 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
           </button>
         }
       />
-      <TooltipContent side="top">Go to the next claim that needs work</TooltipContent>
+      <TooltipContent side="top">
+        Next claim that needs work · Hold ⌥ to see every claim
+      </TooltipContent>
     </Tooltip>
   )
 }

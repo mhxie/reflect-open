@@ -428,6 +428,8 @@ html:root {
 .wiki-trust-glyph[data-wiki-trust='solid'] {
   border-color: var(--color-trust-solid);
   background: var(--color-trust-solid);
+  /* A filled dot reads heavier than a ring: smaller, so sound claims stay quiet. */
+  scale: 0.7;
 }
 .wiki-trust-mark[data-wiki-trust='needs-work']::before,
 .wiki-trust-glyph[data-wiki-trust='needs-work'] {
@@ -492,30 +494,25 @@ html:root {
   text-underline-offset: 0.3em;
 }
 
-/* Margin: marks beside the paragraph, prose untouched. */
+/* Margin: each mark beside the line its claim ends on, prose untouched. A
+   layout pass (wiki-trust-margin.ts) nudges a mark down when it would sit
+   within 24px of the one above, so their 24px hit areas never overlap. */
 .wiki-trust-margin-host {
   position: relative;
-  /* Room for the mark column: its top offset plus one 24px row per mark. */
-  min-height: calc(0.35em + var(--wiki-trust-marks, 1) * 24px);
 }
-/* The right margin, clear of the block handle, reads like a sidenote. */
 .wiki-trust-margin {
+  /* No top: the static position keeps it on its claim's last line. */
   position: absolute;
-  top: 0.35em;
   right: -1.75rem;
-  display: flex;
-  flex-direction: column;
   font-size: 0.8rem;
-  /* Marks (1.15em tall) sit 24px apart center to center at any font size,
-     so their hit areas never overlap. */
-  gap: calc(24px - 1.15em);
   line-height: 1;
+  translate: 0 var(--wiki-trust-nudge, 0px);
 }
 .wiki-trust-margin .wiki-trust-mark {
   font-size: 1em;
   vertical-align: baseline;
 }
-/* A phone's gutter is 1rem: the column sits inside it. */
+/* A phone's gutter is 1rem: the mark sits inside it. */
 .reflect-mobile-content-gutter .wiki-trust-margin {
   right: -1rem;
   font-size: 0.75rem;
