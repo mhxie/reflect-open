@@ -129,9 +129,14 @@ describe('claim trust from the harness report', () => {
       'solid',
     )
     await expect.element(page.getByRole('button', { name: 'Claim C1: Solid' })).toBeVisible()
-    expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
-      'needs-work',
-    )
+    const weak = container.querySelector<HTMLElement>('[data-wiki-claim="c2"]')!
+    expect(weak.getAttribute('data-wiki-trust')).toBe('needs-work')
+    // Underlined in the tier's color, not the text's.
+    await vi.waitFor(() => {
+      const style = getComputedStyle(weak)
+      expect(style.textDecorationLine).toBe('underline')
+      expect(style.textDecorationColor).not.toBe(style.color)
+    })
     await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
     await expect.element(page.getByText('Add a primary source.')).toBeVisible()
     expect(noteArticleFor(PATH)?.trust?.needsWork).toEqual(['c2'])

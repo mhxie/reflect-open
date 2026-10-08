@@ -456,12 +456,16 @@ html:root {
 
 /* Inline: only the prose that needs work is marked; sound prose stays clean. */
 [data-wiki-trust-display='inline'] [data-wiki-claim][data-wiki-trust='needs-work'] {
-  text-decoration: underline dotted var(--color-trust-needs-work);
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-trust-needs-work);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 0.3em;
 }
 [data-wiki-trust-display='inline'] [data-wiki-claim][data-wiki-trust='disputed'] {
-  text-decoration: underline dotted var(--color-trust-disputed);
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-trust-disputed);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 0.3em;
 }
