@@ -36,14 +36,18 @@ interface TrustViewResult {
   readonly summary: WikiNoteTrustSummary | null
 }
 
-/** How often a note iCloud has not downloaded yet is checked again. */
-const EVICTED_RETRY_MS = 5000
 /**
- * How often a failed read is tried again. Fixed, not a back-off: the query
- * library resets its failure count at each fetch. A save's reindex or a new
- * report rereads sooner.
+ * When to read the saved file again on its own: every 5 s while iCloud has
+ * not downloaded it, every 30 s after a failed read (a save's reindex or a
+ * new report rereads sooner), otherwise only when asked.
  */
-const FAILED_RETRY_MS = 30_000
+export function savedFileRetryMs(state: {
+  readonly status: 'pending' | 'error' | 'success'
+  readonly data?: unknown
+}): number | false {
+  if (state.status === 'error') return 30_000
+  return state.data === 'evicted' ? 5000 : false
+}
 
 /** The longest claim excerpt the trust card quotes. */
 const EXCERPT_CHARS = 160
@@ -159,12 +163,7 @@ export function useWikiTrustView(
             return 'evicted' as const
           }
         : skipToken,
-    refetchInterval: (query) =>
-      query.state.status === 'error'
-        ? FAILED_RETRY_MS
-        : query.state.data === 'evicted'
-          ? EVICTED_RETRY_MS
-          : false,
+    refetchInterval: (query) => savedFileRetryMs(query.state),
   })
   // A new report rereads the file too, so freshness never hangs on the index
   // lifecycle (which may be unavailable while editing still works).

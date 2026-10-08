@@ -7,6 +7,7 @@ import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
+import { savedFileRetryMs } from './use-wiki-trust-view.ts'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import { noteArticleFor } from './wiki-article-store.ts'
 import { wikiEditorRange } from './wiki-article-projection.ts'
@@ -335,26 +336,19 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
-  it('shows no verdicts while the saved file cannot be read, then recovers', async () => {
+  it('drops verdicts while the saved file cannot be read, then recovers', async () => {
+    const { container } = await editorFixture()
+    const c1 = (): string | null | undefined =>
+      container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')
+    expect(c1()).toBe('solid')
+    // A reread that fails: the cache keeps the old hashes, which must not show.
     readFailures = 1
-    const { container } = await render(
-      <QueryClientProvider client={queryClient}>
-        <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
-          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MeowdownEditor>
-      </QueryClientProvider>,
-    )
-    await vi.waitFor(() => expect(readFailures).toBe(0))
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(container.querySelector('[data-wiki-trust]')).toBeNull()
-    // The next reread (here, for a new report) brings them back.
     report = { stamp: '8:8', contents: await reportText() }
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
-    await vi.waitFor(() =>
-      expect(
-        container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('solid'),
-    )
+    await vi.waitFor(() => expect(c1()).toBeNull())
+    report = { stamp: '9:9', contents: await reportText() }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await vi.waitFor(() => expect(c1()).toBe('solid'))
   })
 
   it('keeps the last report while a new one fails to parse', async () => {
@@ -428,5 +422,15 @@ describe('claim trust from the harness report', () => {
     expect(container.querySelector('.ProseMirror')?.getAttribute('data-wiki-trust-display')).toBe(
       'margin',
     )
+  })
+})
+
+describe('savedFileRetryMs', () => {
+  it('polls an evicted note, retries a failed read more slowly, and otherwise waits', () => {
+    expect(savedFileRetryMs({ status: 'success', data: 'evicted' })).toBe(5000)
+    expect(savedFileRetryMs({ status: 'error', data: 'evicted' })).toBe(30_000)
+    expect(savedFileRetryMs({ status: 'error' })).toBe(30_000)
+    expect(savedFileRetryMs({ status: 'success', data: {} })).toBe(false)
+    expect(savedFileRetryMs({ status: 'pending' })).toBe(false)
   })
 })
