@@ -1,5 +1,6 @@
 import { memo, type MouseEvent, type ReactElement } from 'react'
 import type { NoteListEntry } from '@reflect/core'
+import { Pin } from 'lucide-react'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
@@ -30,7 +31,11 @@ interface AllNotesRowProps {
   onOpen: (path: string, event?: ModClickEvent) => void
 }
 
-/** One note in the All Notes table: subject, snippet, tags, and when it was last edited. */
+/**
+ * One note in the All Notes table: subject, snippet, tags, and when it was
+ * last edited. A pinned note, which sorts ahead of the rest, is marked and
+ * tinted so the pinned block doesn't read as out of order.
+ */
 export const AllNotesRow = memo(function AllNotesRow({
   note,
   selected,
@@ -48,19 +53,30 @@ export const AllNotesRow = memo(function AllNotesRow({
       onSelect={onSelect}
       onToggle={onToggle}
       onOpen={onOpen}
+      className={note.isPinned && !selected ? 'bg-accent-soft/30' : undefined}
     >
-      <ListRowSubject
-        path={note.path}
-        onOpen={onOpen}
-        className={cn('flex min-w-0 items-center gap-1.5', selected ? 'text-accent' : 'text-text')}
-      >
-        <NoteTitle title={note.title} displayTitle={note.displayTitle} lang={note.lang} />
-        <NoteStateIndicator
+      <div className="flex min-w-0 items-center gap-1.5">
+        {note.isPinned ? (
+          <span role="img" aria-label="Pinned" className="flex flex-none text-accent">
+            <Pin aria-hidden className="size-3.5" />
+          </span>
+        ) : null}
+        <ListRowSubject
           path={note.path}
-          isPrivate={note.isPrivate}
-          hasConflict={note.hasConflict}
-        />
-      </ListRowSubject>
+          onOpen={onOpen}
+          className={cn(
+            'flex min-w-0 items-center gap-1.5',
+            selected ? 'text-accent' : 'text-text',
+          )}
+        >
+          <NoteTitle title={note.title} displayTitle={note.displayTitle} lang={note.lang} />
+          <NoteStateIndicator
+            path={note.path}
+            isPrivate={note.isPrivate}
+            hasConflict={note.hasConflict}
+          />
+        </ListRowSubject>
+      </div>
       <span className="min-w-0" aria-label="Knowledge level">
         <KnowledgeLevelLabel path={note.path} compact />
       </span>
