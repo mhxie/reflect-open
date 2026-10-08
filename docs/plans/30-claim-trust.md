@@ -65,7 +65,9 @@ Inputs for one claim, as of a day: its current `@anchor` records, the current
 claim-level citations inside its range, and its current `@pass` records.
 
 - **Origin.** Anchors are deduplicated into independent origins: a paper or
-  book by its type and id; a `url:` or `gist:` anchor by host.
+  book by its identifier (an arXiv or DOI link names its paper), a code host
+  (GitHub, GitLab, gists) by author, and any other page by host, so two pages
+  of one documentation site are one origin.
 - **Kind.** An anchor's `kind: primary|secondary` comes from the writer, which
   alone knows whether a source fits the claim (official documentation and
   source code are primary for system behavior). Without `kind`, `s2`, `arxiv`,
@@ -127,10 +129,11 @@ The visual treatment is settled with a mockup before implementation.
 
 - `wiki-schema.md` is the specification; this repo links to it rather than
   restating it.
-- atelier-wiki owns conformance fixtures: Markdown inputs with expected claims,
-  diagnostics, and tiers as JSON. Reflect vendors them under
-  `fixtures/parity/wiki/` with a sync script and the source commit, the same
-  way other parity fixtures are kept, and runs them in the node test project.
+- Conformance fixtures are language-neutral JSON: Markdown or ledger inputs
+  with expected claims, diagnostics, and tiers. The tier corpus starts as
+  `fixtures/wiki-claim-trust.json` (#30); ownership moves to atelier-wiki once
+  its trust engine runs it, after which Reflect syncs it with the source
+  commit recorded.
 - Unknown fields on a known marker are retained and shown, never treated as
   malformed. Unknown records still fail visibly, per the schema.
 
@@ -145,13 +148,13 @@ The visual treatment is settled with a mockup before implementation.
      about 700 ms to about 19 ms per index rebuild. The wiki bridges stay
      mounted for every note, because ordinary notes may also hold claim
      ranges.
-   - Mark external content transactions and skip them in `pendingEdits`. This
-     needs Meowdown's `replaceState` to tag host replacements, then a vendor
-     refresh.
+   - Mark external content transactions and skip them in `pendingEdits`
+     (mhxie/meowdown#4 tags host replacements; #29 vendors it and skips them).
 2. **Core.** `packages/core/src/wiki/trust.ts`: a pure `wikiClaimTrust` over
    one claim's evidence plus resolved citation tiers, returning tier, overlays,
-   and reasons. Retire the legacy line scanner in `entry-summary.ts` and the
-   pass-based `wikiReviewState`.
+   and reasons, specified by `fixtures/wiki-claim-trust.json` (#30). Retire
+   the legacy line scanner in `entry-summary.ts` and the pass-based
+   `wikiReviewState` when step 4 replaces the Review column.
 3. **Projection.** Index migration in `crates/index-schema`: `wiki_claims`
    (note, claim id, tier, overlays, origin counts, reasons) and
    `wiki_claim_citations` (source note and claim, target note and claim, date
