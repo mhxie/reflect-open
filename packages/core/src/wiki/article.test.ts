@@ -155,6 +155,15 @@ describe('article claim ranges', () => {
     expect(readWikiClaimIndex('A <!--claim:c1-->good<!--/claim:c1-->.', DAY).claims).toHaveLength(1)
   })
 
+  it('invalidates only the claim whose boundary changes formatting', () => {
+    const source = `foo*${pair('c1', 'bar* baz')}\n\nOther ${pair('c2', 'good')} text.`
+    const index = readWikiClaimIndex(source, DAY)
+    expect(index.claims.map((claim) => claim.id)).toEqual(['c2'])
+    expect(index.diagnostics.map((item) => item.message)).toEqual([
+      'c1 changes Markdown formatting at its boundaries.',
+    ])
+  })
+
   it('diagnoses incomplete tokens and overlapping legacy ownership', () => {
     const invalid = readWikiClaimIndex(`A ${pair('c1', 'good')} after <!-- claim:c2`, DAY)
     expect(

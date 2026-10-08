@@ -264,6 +264,7 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
   const claims: WikiClaimRange[] = []
   const invalidIds = new Set<string>()
   const ids = new Set(markers.flatMap((marker) => (marker.id === null ? [] : marker.id)))
+  const pairs: { id: string; first: WikiClaimMarker; last: WikiClaimMarker }[] = []
   for (const id of ids) {
     const own = markers.filter((marker) => marker.id === id)
     const open = own.filter((marker) => !marker.closing)
@@ -289,7 +290,19 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
       )
       continue
     }
-    if (!wikiClaimFormattingPreserved(source, [first, last])) {
+    pairs.push({ id, first, last })
+  }
+  // One parse pair checks every claim at once, as the trust engine does; only
+  // when that fails does each claim get its own check, so a single bad
+  // boundary invalidates its claim alone.
+  const allPreserved =
+    pairs.length === 0 ||
+    wikiClaimFormattingPreserved(
+      source,
+      pairs.flatMap(({ first, last }) => [first, last]),
+    )
+  for (const { id, first, last } of pairs) {
+    if (!allPreserved && !wikiClaimFormattingPreserved(source, [first, last])) {
       invalidIds.add(id)
       diagnostic(first.from, last.to, `${id} changes Markdown formatting at its boundaries.`, id)
       continue
