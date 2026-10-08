@@ -15,7 +15,7 @@ use std::time::UNIX_EPOCH;
 
 use reflect_frontmatter::normalize_line_endings_keeping_privacy;
 use reflect_graph_paths::{
-    evicted_logical_path, eviction_placeholder, is_dataless, LocalOnlyFolders,
+    evicted_logical_path, eviction_placeholder, is_dataless, to_slash_lossy, LocalOnlyFolders,
 };
 
 use crate::error::{AppError, AppResult};
@@ -532,7 +532,7 @@ pub(super) fn collect_files(
             };
             let meta = entry.metadata()?;
             out.push(FileMeta {
-                path: rel.to_string_lossy().replace('\\', "/"),
+                path: to_slash_lossy(rel),
                 size: meta.len(),
                 modified_ms: modified_ms(&meta).unwrap_or(0),
                 // Two eviction forms fold into one flag: the legacy `.icloud`

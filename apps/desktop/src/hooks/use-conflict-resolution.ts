@@ -65,7 +65,7 @@ export function useConflictResolution(
         // watcher will redo that) — reload the open (protected) session,
         // which round-trips again now and reopens editable, and refresh
         // index-backed views.
-        emitFileChanges([{ path, kind: 'upsert' }])
+        emitFileChanges([{ path, kind: 'upsert' }], 'own-write')
         invalidateIndexQueries()
       }
       setBusy(false)

@@ -23,7 +23,7 @@ function start(onWritten: (paths: readonly string[]) => void) {
     getSettings: async () => ({}) as never,
     onWritten,
   })
-  dispose = reconciler.dispose
+  dispose = () => reconciler.dispose()
   reconciler.start()
 }
 

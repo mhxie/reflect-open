@@ -711,26 +711,44 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
    * the suggested-contact card's append) transactionally:
    * `transform` rewrites the live document — header plus the unsaved buffer, so
    * concurrent editor edits survive — then we land it now so the Tasks view
-   * refreshes promptly. Returns false when the session can't safely take a body
-   * edit (no write channel, disposed, protected/read-only, still loading, or a
-   * parked conflict) so the caller refuses rather than clobber the buffer via disk.
-   * `transform` runs before any mutation, so a `TaskStaleError` (the marker can't
-   * be located) propagates with nothing changed. And the write is all-or-nothing:
-   * a failed flush reverts the in-memory edit so the editor and the Tasks list
-   * can't diverge, then re-throws the failure.
+   * refreshes promptly. A session still loading waits for the load first:
+   * navigating to a note (⌘D to today) opens its session in the same tick the
+   * Tasks view's unmount flush writes to it, and the pending read is a moment,
+   * not a reason to refuse. Returns false when the session can't safely take a
+   * body edit (no write channel, disposed, protected/read-only, failed to load,
+   * or a parked conflict) so the caller refuses rather than clobber the buffer
+   * via disk. `transform` runs before any mutation, so a `TaskStaleError` (the
+   * marker can't be located) propagates with nothing changed. And the write is
+   * all-or-nothing: a failed flush reverts the in-memory edit so the editor and
+   * the Tasks list can't diverge, then re-throws the failure.
    */
   async function commitBodyEdit(transform: (full: string) => string): Promise<boolean> {
-    if (io.write === null || disposed || isProtected || status !== 'ready' || conflict !== null) {
+    // What the load can't change is refused at once; a stalled read must not
+    // hold a session that could never write.
+    if (io.write === null || disposed) {
+      return false
+    }
+    if (status === 'loading') {
+      // Never rejects: a failed load settles as `status === 'error'`, which the
+      // gate below refuses like any other unready session.
+      await loadPromise
+    }
+    // Protection is decided by the load, so this gate runs after the wait.
+    if (disposed || isProtected || status !== 'ready' || conflict !== null) {
       return false
     }
     reconcilePendingEditorInput?.()
     const previousHeader = header
     const previousBuffer = buffer
+    const previousInitialContent = initialContent
     const doc = splitDoc(transform(header + buffer))
     header = doc.header
     buffer = doc.body
     classifyHeader()
-    applyToEditor(doc.body) // the open editor shows the edited line
+    // The pane seeds a mounting editor from `initialContent`; after a wait on
+    // the load no editor is mounted yet, so the seed must carry the edit too.
+    initialContent = doc.body
+    applyToEditor(doc.body) // an already open editor shows the edited line
     dirty = header + buffer !== disk
     // A no-op edit (transform changed nothing) writes nothing, so a *prior*
     // surfaced save error must not be mistaken for this edit's failure.
@@ -744,6 +762,7 @@ export function createNoteSession(options: NoteSessionOptions): NoteSession {
       if (header === doc.header) header = previousHeader
       if (buffer === doc.body) {
         buffer = previousBuffer
+        initialContent = previousInitialContent
         applyToEditor(previousBuffer)
       }
       classifyHeader()

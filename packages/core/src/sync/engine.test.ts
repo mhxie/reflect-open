@@ -11,6 +11,7 @@ afterEach(() => {
   setBridge(null)
 })
 
+const CRED = { username: 'x-access-token', secret: 'tok' }
 const CLEAN_COMMIT = { committed: false, sha: null, ahead: 0, skippedLargeFiles: [] }
 const COMMITTED = { committed: true, sha: 'abc', ahead: 1, skippedLargeFiles: [] }
 const PUSHED = { pushed: true, nonFastForward: false, rejectionMessage: null }
@@ -65,7 +66,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 7,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -82,7 +83,7 @@ describe('createSyncEngine', () => {
 
     expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
     expect(calls[0]!.args['generation']).toBe(7)
-    expect(calls[1]!.args['token']).toBe('tok')
+    expect(calls[1]!.args['credential']).toEqual(CRED)
     expect(statuses.map((status) => status.state)).toEqual(['syncing', 'idle'])
     engine.stop()
   })
@@ -91,7 +92,7 @@ describe('createSyncEngine', () => {
     const calls = fakeGit(defaultResponses)
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => null,
+      getCredential: async () => null,
       idleMs: 100,
       maxWaitMs: 250,
     })
@@ -122,7 +123,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -157,7 +158,7 @@ describe('createSyncEngine', () => {
       const statuses: SyncStatus[] = []
       const engine = createSyncEngine({
         generation: 1,
-        getToken: async () => {
+        getCredential: async () => {
           throw new ReflectError(kind, 'refresh failed')
         },
         onStatus: (status) => {
@@ -182,7 +183,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -206,7 +207,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -217,6 +218,208 @@ describe('createSyncEngine', () => {
     await vi.runAllTimersAsync()
 
     expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'auth' })
+    engine.stop()
+  })
+
+  it('commitNow joins the single-flight queue and never touches the network', async () => {
+    const gate: { release: () => void } = { release: () => {} }
+    const calls = fakeGit((command) => {
+      if (command === 'git_merge_remote') {
+        return new Promise((resolve) => {
+          gate.release = () => resolve(MERGED)
+        })
+      }
+      return defaultResponses(command)
+    })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
+
+    const full = engine.syncNow()
+    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    const flushed = engine.commitNow()
+    await Promise.resolve()
+    // The pull is mid-merge (a full cycle commits before its fetch and again
+    // before its merge): the flush commit waits instead of interleaving.
+    expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(2)
+
+    gate.release()
+    await full
+    await flushed
+    const commands = commandsOf(calls)
+    expect(commands.filter((command) => command === 'git_commit_all')).toHaveLength(3)
+    expect(commands.lastIndexOf('git_commit_all')).toBeGreaterThan(commands.indexOf('git_push'))
+    engine.stop()
+  })
+
+  it('a flush queued behind a sync still commits when the app hides meanwhile', async () => {
+    // Visible: a sync is mid-merge and another syncNow queues a full
+    // follow-up. The app goes to the background and the flush joins that
+    // follow-up. The gate must not swallow the commit the flush is owed.
+    const gate: { release: () => void } = { release: () => {} }
+    const calls = fakeGit((command) => {
+      if (command === 'git_merge_remote') {
+        return new Promise((resolve) => {
+          gate.release = () => resolve(MERGED)
+        })
+      }
+      return defaultResponses(command)
+    })
+    let canStartCycle = true
+    const engine = createSyncEngine({
+      generation: 1,
+      getCredential: async () => CRED,
+      canStartCycle: () => canStartCycle,
+    })
+    const first = engine.syncNow()
+    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    const second = engine.syncNow()
+    canStartCycle = false
+    const flushed = engine.commitNow()
+    gate.release()
+    await first
+    await flushed
+    await second
+    const commands = commandsOf(calls)
+    // The running sync stopped at the gate after its merge, and the queued
+    // full follow-up ran as the commit the flush was owed: no push, and the
+    // sync's two commits (before its fetch and its merge) plus the flush's.
+    expect(commands.filter((command) => command === 'git_push')).toHaveLength(0)
+    expect(commands.filter((command) => command === 'git_commit_all')).toHaveLength(3)
+    expect(commands.lastIndexOf('git_commit_all')).toBeGreaterThan(
+      commands.indexOf('git_merge_remote'),
+    )
+    engine.stop()
+  })
+
+  it('a queued flush commits before the follow-up resolves its credential', async () => {
+    // The follow-up starts visible, so it runs as a full sync; the app hides
+    // while the credential is being resolved. The commit has already landed.
+    const gate: { release: () => void } = { release: () => {} }
+    const calls = fakeGit((command) => {
+      if (command === 'git_merge_remote') {
+        return new Promise((resolve) => {
+          gate.release = () => resolve(MERGED)
+        })
+      }
+      return defaultResponses(command)
+    })
+    const credentialGate: { release: () => void } = { release: () => {} }
+    let credentials = 0
+    let canStartCycle = true
+    const engine = createSyncEngine({
+      generation: 1,
+      getCredential: async () => {
+        credentials += 1
+        if (credentials === 2) {
+          await new Promise<void>((resolve) => {
+            credentialGate.release = resolve
+          })
+        }
+        return CRED
+      },
+      canStartCycle: () => canStartCycle,
+    })
+    const first = engine.syncNow()
+    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    const second = engine.syncNow()
+    const flushed = engine.commitNow()
+    gate.release()
+    await first
+    // The follow-up is running: its commit landed before it asked for a credential
+    // (after the first sync's commits before its fetch and its merge).
+    await vi.waitFor(() => expect(credentials).toBe(2))
+    expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(3)
+    canStartCycle = false
+    credentialGate.release()
+    await flushed
+    await second
+    expect(commandsOf(calls).filter((command) => command === 'git_push')).toHaveLength(1) // the first sync only
+    engine.stop()
+  })
+
+  it('requests queued behind a running cycle merge into one follow-up that does their union', async () => {
+    const gate: { release: () => void } = { release: () => {} }
+    const calls = fakeGit((command) => {
+      if (command === 'git_merge_remote') {
+        return new Promise((resolve) => {
+          gate.release = () => resolve(MERGED)
+        })
+      }
+      return defaultResponses(command)
+    })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
+    const first = engine.syncNow()
+    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    engine.noteChanged() // the debounce asks for a push
+    await vi.advanceTimersByTimeAsync(10)
+    const flushed = engine.commitNow() // the flush asks for a commit
+    gate.release()
+    await first
+    await flushed
+    // One follow-up: its commit, then the push the debounce asked for; no
+    // fetch, because nobody asked to pull.
+    expect(commandsOf(calls)).toEqual([
+      'git_commit_all',
+      'git_fetch',
+      'git_commit_all',
+      'git_merge_remote',
+      'git_push',
+      'git_commit_all',
+      'git_push',
+    ])
+    engine.stop()
+  })
+
+  it('commitNow runs even when the owner gates cycles (the hidden-app flush)', async () => {
+    // iOS fires the background flush after the document is hidden, exactly
+    // when canStartCycle says no to network cycles.
+    const calls = fakeGit(defaultResponses)
+    const engine = createSyncEngine({
+      generation: 1,
+      getCredential: async () => CRED,
+      canStartCycle: () => false,
+    })
+    await engine.commitNow()
+    expect(commandsOf(calls)).toEqual(['git_commit_all'])
+    await engine.syncNow()
+    expect(commandsOf(calls)).toEqual(['git_commit_all']) // still gated
+    engine.stop()
+  })
+
+  it('after an auth failure, edits commit locally and skip the network until a resume', async () => {
+    // A rejected sign-in (or an ssh agent with no key) does not fix itself
+    // between keystrokes: per-edit retries would only repeat the error and
+    // the reconnect prompt. Local history keeps accumulating meanwhile.
+    let pushes = 0
+    const calls = fakeGit((command) => {
+      if (command === 'git_push') {
+        pushes += 1
+        throw { kind: 'auth', message: 'token rejected' }
+      }
+      return defaultResponses(command)
+    })
+    const statuses: SyncStatus[] = []
+    const engine = createSyncEngine({
+      generation: 1,
+      getCredential: async () => CRED,
+      onStatus: (status) => {
+        statuses.push(status)
+      },
+      idleMs: 10,
+    })
+
+    engine.noteChanged()
+    await vi.runAllTimersAsync()
+    expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'auth' })
+    const emitted = statuses.length
+
+    engine.noteChanged()
+    await vi.runAllTimersAsync()
+    expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(2)
+    expect(pushes).toBe(1)
+    expect(statuses).toHaveLength(emitted) // the auth error stays on screen
+
+    await engine.syncNow() // focus / online / manual: try the network again
+    expect(pushes).toBe(2)
     engine.stop()
   })
 
@@ -234,7 +437,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -263,7 +466,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -291,7 +494,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -326,7 +529,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -362,7 +565,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -396,7 +599,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok', idleMs: 10 })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
 
     engine.noteChanged()
     await vi.advanceTimersByTimeAsync(10)
@@ -436,7 +639,7 @@ describe('createSyncEngine', () => {
     const batches: Array<Array<{ path: string }>> = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onRemoteChanges: (changes) => {
         batches.push(changes)
       },
@@ -467,7 +670,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -521,7 +724,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -576,7 +779,7 @@ describe('createSyncEngine', () => {
     let canStartCycle = true
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -633,7 +836,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -681,7 +884,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -729,7 +932,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -772,7 +975,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -794,7 +997,7 @@ describe('createSyncEngine', () => {
     const calls = fakeGit((command) =>
       command === 'git_commit_all' ? CLEAN_COMMIT : defaultResponses(command),
     )
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 
@@ -822,7 +1025,7 @@ describe('createSyncEngine', () => {
     const skipped: Array<{ path: string }[]> = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onLargeFilesSkipped: (files) => {
         skipped.push(files)
       },
@@ -850,7 +1053,7 @@ describe('createSyncEngine', () => {
     const frozen: string[][] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onLocalOnlyChangesSkipped: (paths) => {
         frozen.push(paths)
       },
@@ -867,7 +1070,7 @@ describe('createSyncEngine', () => {
     const onLocalOnlyChangesSkipped = vi.fn()
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onLocalOnlyChangesSkipped,
     })
 
@@ -889,7 +1092,7 @@ describe('createSyncEngine', () => {
     })
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       idleMs: 10,
     })
 
@@ -914,7 +1117,7 @@ describe('createSyncEngine', () => {
     const calls = fakeGit((command) =>
       command === 'git_commit_all' ? CLEAN_COMMIT : defaultResponses(command),
     )
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok', idleMs: 10 })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
 
     engine.noteChanged()
     await vi.runAllTimersAsync()
@@ -936,7 +1139,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 
@@ -953,7 +1156,7 @@ describe('createSyncEngine', () => {
     const calls = fakeGit(defaultResponses)
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       idleMs: 100,
     })
 
@@ -975,7 +1178,7 @@ describe('createSyncEngine', () => {
     const calls = fakeGit(defaultResponses)
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => null,
+      getCredential: async () => null,
       localOnly: true,
       idleMs: 10,
     })
@@ -990,7 +1193,7 @@ describe('createSyncEngine', () => {
 
   it('stop() cancels pending work', async () => {
     const calls = fakeGit(defaultResponses)
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok', idleMs: 10 })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
 
     engine.noteChanged()
     engine.stop()
@@ -999,8 +1202,8 @@ describe('createSyncEngine', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('passes a missing credential through as a null token (Rust owns the failure)', async () => {
-    // The engine has no null-token special case on purpose: only the remote
+  it('passes a missing credential through as null (Rust owns the failure)', async () => {
+    // The engine has no null-credential special case on purpose: only the remote
     // knows whether it needs auth. A push refused for a missing credential
     // must still land on the reconnect affordance.
     const calls = fakeGit((command) => {
@@ -1012,7 +1215,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => null,
+      getCredential: async () => null,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1023,7 +1226,7 @@ describe('createSyncEngine', () => {
     await vi.runAllTimersAsync()
 
     const push = calls.find((call) => call.command === 'git_push')
-    expect(push?.args['token']).toBeNull()
+    expect(push?.args['credential']).toBeNull()
     expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'auth' })
     engine.stop()
   })
@@ -1033,7 +1236,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1059,7 +1262,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     const first = engine.syncNow()
     const second = engine.syncNow()
@@ -1110,7 +1313,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1145,7 +1348,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1176,7 +1379,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 
@@ -1202,7 +1405,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1236,7 +1439,7 @@ describe('createSyncEngine', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1281,7 +1484,7 @@ describe('createSyncEngine', () => {
     const order: string[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onDisplaced: (pairs) => {
         order.push(`displaced:${pairs.map((pair) => pair.to).join(',')}`)
       },
@@ -1299,7 +1502,7 @@ describe('createSyncEngine', () => {
   it('stays quiet about displacement when a pull moved nothing (control)', async () => {
     fakeGit(defaultResponses)
     const onDisplaced = vi.fn()
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok', onDisplaced })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, onDisplaced })
 
     await engine.syncNow()
 
@@ -1321,7 +1524,7 @@ describe('createSyncEngine', () => {
     const skipped: Array<{ path: string }[]> = []
     const engine = createSyncEngine({
       generation: 1,
-      getToken: async () => 'tok',
+      getCredential: async () => CRED,
       onLargeFilesSkipped: (files) => {
         skipped.push(files)
       },
@@ -1348,7 +1551,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const engine = createSyncEngine({ generation: 1, getToken: async () => 'tok' })
+    const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 

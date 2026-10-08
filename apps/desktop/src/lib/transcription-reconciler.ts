@@ -1,3 +1,6 @@
+import { createBackgroundReconciler } from '@/lib/background-reconciler.ts'
+import { startOperation } from '@/lib/operations.ts'
+import { providerFetch } from '@/lib/provider-fetch.ts'
 import {
   audioMemoFromPath,
   hasBridge,
@@ -10,9 +13,6 @@ import {
   type ReconcileStop,
   type TranscriptionEngine,
 } from '@reflect/core'
-import { createBackgroundReconciler } from '@/lib/background-reconciler.ts'
-import { startOperation } from '@/lib/operations.ts'
-import { providerFetch } from '@/lib/provider-fetch.ts'
 
 /**
  * The background-transcription lifecycle for one graph session. Built on
@@ -29,9 +29,9 @@ export interface TranscriptionReconciler {
   /** Request a pass; coalesces while one runs (at most one follow-up). */
   schedule(): void
   /** True while a pass has memos to transcribe — drives the mic spinner. */
-  getTranscribing(): boolean
+  getTranscribing(this: void): boolean
   /** Subscribe to `transcribing` changes; returns the unsubscribe. */
-  subscribe(listener: () => void): () => void
+  subscribe(this: void, listener: () => void): () => void
   /** Tear down triggers and abort an in-flight pass at its next gate. */
   dispose(): void
 }

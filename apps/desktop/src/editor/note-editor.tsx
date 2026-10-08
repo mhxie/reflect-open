@@ -1,33 +1,32 @@
+import { EditorInputTraits } from '@/editor/editor-input-traits.tsx'
+import { shouldEmbedFile } from '@/editor/embed-file.ts'
+import { noteTitleFromFile } from '@/editor/file-title.ts'
+import { FormattingToolbarBridge } from '@/editor/formatting-toolbar-bridge.tsx'
 import {
   localImagesOnly,
   resolveNoXPost,
   resolveNoYouTubeVideo,
 } from '@/editor/local-only-render.ts'
-import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
+import { MediaLightbox } from '@/editor/media-lightbox.tsx'
+import { isOpenableExternalUrl } from '@/editor/open-external-link.ts'
+import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
+import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
-import {
-  useCallback,
-  useImperativeHandle,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactElement,
-  type ReactNode,
-  type Ref,
-} from 'react'
-import { errorMessage, isPdfAttachmentPath, type TimeFormat } from '@reflect/core'
-import { createMarkdownSourceMap } from '@meowdown/core'
-import { TextSelection } from '@prosekit/pm/state'
+import { isDeepLinkUrl } from '@/lib/deep-links/parse.ts'
+import { useFollowDeepLink } from '@/lib/deep-links/use-follow-deep-link.ts'
+import { openUrlSync } from '@/lib/open-url.ts'
+import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
+import { cn } from '@/lib/utils.ts'
 import type {
   AcceptPendingReplacementOptions,
   EmbedResolver,
   ExitBoundaryHandler,
   FileClickHandler,
   FileInfoResolver,
-  ImageUrlResolver,
   FileLinkResolver,
   ImageClickHandler,
+  ImageUrlResolver,
   LinkPreviewResolver,
   MarkMode,
   SearchStatus,
@@ -51,18 +50,19 @@ import {
   type TagSearchHandler,
   type WikilinkSearchHandler,
 } from '@meowdown/react'
-import { EditorInputTraits } from '@/editor/editor-input-traits.tsx'
-import { shouldEmbedFile } from '@/editor/embed-file.ts'
-import { noteTitleFromFile } from '@/editor/file-title.ts'
-import { FormattingToolbarBridge } from '@/editor/formatting-toolbar-bridge.tsx'
-import { MediaLightbox } from '@/editor/media-lightbox.tsx'
-import { isOpenableExternalUrl } from '@/editor/open-external-link.ts'
-import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
-import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
-import { isDeepLinkUrl } from '@/lib/deep-links/parse.ts'
-import { useFollowDeepLink } from '@/lib/deep-links/use-follow-deep-link.ts'
-import { openUrlSync } from '@/lib/open-url.ts'
-import { cn } from '@/lib/utils.ts'
+import { createMarkdownSourceMap } from '@meowdown/core'
+import { TextSelection } from '@prosekit/pm/state'
+import { errorMessage, isPdfAttachmentPath, type TimeFormat } from '@reflect/core'
+import {
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+  type Ref,
+} from 'react'
 
 type WikilinkHoverRenderer = (hit: WikilinkHoverHit) => ReactNode | Promise<ReactNode>
 
@@ -90,7 +90,7 @@ export interface NoteEditorHandle {
    * Markdown. If reconciliation changes the document, `onChange` may run
    * synchronously before this method returns.
    */
-  getMarkdown(): string
+  getMarkdown(this: void): string
   /** Replace the document (note switch / external reload). */
   setMarkdown(markdown: string): void
   /**
@@ -101,8 +101,8 @@ export interface NoteEditorHandle {
    * this fires `onChange`, so the insertion flows into the save pipeline like
    * typing. Empty/whitespace-only markdown is a no-op.
    */
-  insertMarkdown(markdown: string): void
-  focus(): void
+  insertMarkdown(this: void, markdown: string): void
+  focus(this: void): void
   /**
    * Move the caret to a document edge and scroll it into view. Used for
    * cross-note arrow navigation in the daily stream (jump to the end of the
@@ -122,9 +122,9 @@ export interface NoteEditorHandle {
   /** Clear the staged replacement without touching the document. */
   discardPendingReplacement(): void
   /** Select the next find match, wrapping at the document end. */
-  findNext(): void
+  findNext(this: void): void
   /** Select the previous find match, wrapping at the document start. */
-  findPrevious(): void
+  findPrevious(this: void): void
   /**
    * Move the caret to the heading a link's `#fragment` names — by its text
    * (case-insensitive, whitespace collapsed) or its GitHub-style slug, repeats
