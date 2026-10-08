@@ -473,7 +473,11 @@ html:root {
 [data-wiki-trust-display]:not([data-wiki-trust-reveal])
   .wiki-trust-on-demand:not(:focus-within, :has([aria-expanded='true'])) {
   display: inline-block;
+  /* Zero by zero, so the line keeps its height (an inline-block with hidden
+     overflow sits on its bottom edge); still focusable. */
   width: 0;
+  height: 0;
+  vertical-align: baseline;
   overflow: hidden;
   opacity: 0;
 }

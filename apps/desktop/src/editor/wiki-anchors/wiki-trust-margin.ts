@@ -11,7 +11,10 @@ export function spaceWikiTrustMarginMarks(dom: HTMLElement): void {
   for (const mark of marks) mark.style.removeProperty('--wiki-trust-nudge')
   let floor = -Infinity
   for (const mark of marks) {
-    const top = mark.getBoundingClientRect().top
+    const box = mark.getBoundingClientRect()
+    // A mark under a hidden ancestor has no box and must not set the floor.
+    if (box.width === 0 && box.height === 0) continue
+    const top = box.top
     const nudge = Math.max(0, floor - top)
     if (nudge > 0) mark.style.setProperty('--wiki-trust-nudge', `${nudge}px`)
     floor = top + nudge + MARGIN_PITCH_PX

@@ -193,6 +193,39 @@ describe('claim trust from the harness report', () => {
     expect(document.elementFromPoint(box.right + 3, y)?.closest('.wiki-trust-mark')).toBeNull()
   })
 
+  it('leaves the line height of prose with a waiting mark unchanged', async () => {
+    const heightOf = async (display: 'inline' | 'off'): Promise<number> => {
+      settingsState.settings.wikiTrustDisplay = display
+      const { container } = await render(
+        <QueryClientProvider client={queryClient}>
+          <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+            <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+          </MeowdownEditor>
+        </QueryClientProvider>,
+      )
+      await vi.waitFor(() =>
+        expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull(),
+      )
+      if (display === 'inline')
+        await vi.waitFor(() =>
+          expect(container.querySelector('[data-wiki-trust-claim="c1"]')).not.toBeNull(),
+        )
+      const height = container
+        .querySelector('[data-wiki-claim="c1"]')!
+        .closest('p')!
+        .getBoundingClientRect().height
+      await cleanup()
+      return height
+    }
+    // Both claims Solid, so their marks wait collapsed: the line must not grow.
+    const sound = JSON.parse(report.contents) as {
+      notes: Record<string, { claims: Record<string, { tier: string }> }>
+    }
+    sound.notes[PATH]!.claims['c2']!.tier = 'solid'
+    report = { stamp: '4:4', contents: JSON.stringify(sound) }
+    expect(await heightOf('inline')).toBeCloseTo(await heightOf('off'), 0)
+  })
+
   it('adds nothing to a sound article but one silent mark per claim', async () => {
     const sound = JSON.parse(report.contents) as {
       notes: Record<string, { claims: Record<string, { tier: string; next?: string }> }>
