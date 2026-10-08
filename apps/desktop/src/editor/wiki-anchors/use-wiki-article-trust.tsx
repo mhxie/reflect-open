@@ -90,8 +90,10 @@ export function useWikiArticleTrust(
   const viewRef = useRef(trust.view)
   const summaryRef = useRef(trust.summary)
   const [cardFor, setCardFor] = useState<string | null>(null)
+  const openClaim = cardFor !== null && trust.view?.claim(cardFor) != null ? cardFor : null
   useEffect(() => {
-    viewRef.current = trust.view
+    viewRef.current =
+      trust.view === null || openClaim === null ? trust.view : { ...trust.view, open: openClaim }
     summaryRef.current = trust.summary
     // A new article projection can publish from inside the editor's own view
     // update, rendering this synchronously; redraw after that update ends.
@@ -108,7 +110,7 @@ export function useWikiArticleTrust(
     return () => {
       live = false
     }
-  }, [editor, published, trust.view, trust.summary])
+  }, [editor, published, trust.view, trust.summary, openClaim])
   useEffect(() => {
     let detach = (): void => {}
     const cancel = whenEditorMounted(editor, () => {

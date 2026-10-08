@@ -142,8 +142,7 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
         <p className="text-text-secondary">You questioned this claim today.</p>
       ) : asked === 'refused' ? (
         <p className="text-text-secondary">
-          This claim’s evidence ledger needs fixing before it can take a question; the article lists
-          the problem.
+          Fix this claim’s entry in the Evidence section first; the problem is listed there.
         </p>
       ) : (
         <button

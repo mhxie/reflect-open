@@ -542,7 +542,8 @@ html:root {
   --wiki-trust-tint: var(--color-text-muted) 10%;
 }
 [data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust],
-[data-wiki-claim-visible][data-wiki-trust] {
+[data-wiki-claim-visible][data-wiki-trust],
+[data-wiki-claim][data-wiki-trust][data-wiki-trust-open] {
   border-radius: 2px;
   background: color-mix(in srgb, var(--wiki-trust-tint), transparent);
   box-decoration-break: clone;

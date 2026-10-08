@@ -168,6 +168,7 @@ function decorations(
             'data-wiki-claim': claim.id,
             ...(showRanges ? { 'data-wiki-claim-visible': '' } : {}),
             ...(trust === null ? {} : { 'data-wiki-trust': wikiStandingStyle(trust.standing) }),
+            ...(trustView?.open === claim.id ? { 'data-wiki-trust-open': '' } : {}),
           }),
         )
       return false

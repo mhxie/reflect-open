@@ -241,6 +241,12 @@ describe('claim trust from the harness report', () => {
     ).toBe('true')
     const solid = container.querySelector('[data-wiki-trust-claim="c1"]')!.parentElement!
     expect(solid.getBoundingClientRect().width).toBe(0)
+    // The card's claim is tinted, so the card points at it in any style.
+    await vi.waitFor(() => {
+      const claim = container.querySelector<HTMLElement>('[data-wiki-claim="c2"]')!
+      expect(claim.hasAttribute('data-wiki-trust-open')).toBe(true)
+      expect(getComputedStyle(claim).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    })
   })
 
   it("opens a sound claim's verdict and its weighted sources on reveal", async () => {
@@ -379,7 +385,7 @@ describe('claim trust from the harness report', () => {
     await page.getByRole('button', { name: 'Question this claim' }).click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(ref.current!.getMarkdown()).not.toContain('@pass: reader')
-    await expect.element(page.getByText(/evidence ledger needs fixing/)).toBeVisible()
+    await expect.element(page.getByText(/entry in the Evidence section first/)).toBeVisible()
   })
 
   it('rereads the saved file for a new report, not for an unchanged poll', async () => {

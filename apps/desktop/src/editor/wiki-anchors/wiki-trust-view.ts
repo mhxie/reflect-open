@@ -9,4 +9,6 @@ import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
 export interface WikiTrustView {
   readonly display: Exclude<WikiTrustDisplay, 'off'>
   readonly claim: (claimId: string) => WikiClaimTrust | null
+  /** The claim whose card is open, drawn tinted so the card points at it. */
+  readonly open?: string
 }
