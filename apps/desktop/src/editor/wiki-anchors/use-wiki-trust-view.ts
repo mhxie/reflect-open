@@ -36,10 +36,14 @@ interface TrustViewResult {
   readonly summary: WikiNoteTrustSummary | null
 }
 
-/** How often a note that is not local yet is checked, and the first retry of a failed read. */
-const RETRY_MS = 5000
-/** The longest wait between retries of a read that keeps failing. */
-const MAX_RETRY_MS = 60_000
+/** How often a note iCloud has not downloaded yet is checked again. */
+const EVICTED_RETRY_MS = 5000
+/**
+ * How often a failed read is tried again. Fixed, not a back-off: the query
+ * library resets its failure count at each fetch. A save's reindex or a new
+ * report rereads sooner.
+ */
+const FAILED_RETRY_MS = 30_000
 
 /** The longest claim excerpt the trust card quotes. */
 const EXCERPT_CHARS = 160
@@ -155,12 +159,11 @@ export function useWikiTrustView(
             return 'evicted' as const
           }
         : skipToken,
-    // Keep asking while the file is not local, and back off while reads fail.
     refetchInterval: (query) =>
       query.state.status === 'error'
-        ? Math.min(RETRY_MS * 2 ** Math.max(0, query.state.fetchFailureCount - 1), MAX_RETRY_MS)
+        ? FAILED_RETRY_MS
         : query.state.data === 'evicted'
-          ? RETRY_MS
+          ? EVICTED_RETRY_MS
           : false,
   })
   // A new report rereads the file too, so freshness never hangs on the index

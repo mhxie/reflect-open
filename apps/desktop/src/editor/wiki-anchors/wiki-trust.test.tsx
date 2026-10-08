@@ -335,7 +335,7 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
-  it('retries a saved-file read that failed', async () => {
+  it('shows no verdicts while the saved file cannot be read, then recovers', async () => {
     readFailures = 1
     const { container } = await render(
       <QueryClientProvider client={queryClient}>
@@ -344,12 +344,16 @@ describe('claim trust from the harness report', () => {
         </MeowdownEditor>
       </QueryClientProvider>,
     )
-    await vi.waitFor(
-      () =>
-        expect(
-          container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
-        ).toBe('solid'),
-      { timeout: 8000 },
+    await vi.waitFor(() => expect(readFailures).toBe(0))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(container.querySelector('[data-wiki-trust]')).toBeNull()
+    // The next reread (here, for a new report) brings them back.
+    report = { stamp: '8:8', contents: await reportText() }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
+      ).toBe('solid'),
     )
   })
 
