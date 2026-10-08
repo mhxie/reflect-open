@@ -13,8 +13,9 @@ import {
 export type WikiTrustTier = 'solid' | 'supported' | 'needs-work'
 
 /**
- * Review states shown beside the tier: `disputed` (the latest verdict flagged
- * the claim or could not confirm it; caps the tier at Needs work) and
+ * Review states shown beside the tier: `disputed` (the latest verdict, an
+ * agent's or a reader's, flagged the claim or could not confirm it; caps the
+ * tier at Needs work) and
  * `edited` (the text changed after its last review).
  */
 export type WikiTrustOverlay = 'disputed' | 'edited'
@@ -56,6 +57,17 @@ export interface WikiClaimTrustInput {
 const PRIMARY_TYPES = new Set(['s2', 'arxiv', 'doi', 'isbn'])
 const ADVERSARIAL_AGENTS = new Set(['challenger', 'scout'])
 const DISPUTED_STATUSES = new Set(['flagged', 'inconclusive'])
+/** The only status each constrained agent may record: an editor flags review work, a reader doubts. */
+const CONSTRAINED_STATUS: ReadonlyMap<string, string> = new Map([
+  ['editor', 'pending'],
+  ['reader', 'flagged'],
+])
+
+/** Whether a pass is one its agent may record; any other is ignored. */
+function permittedPass(pass: WikiReviewPass): boolean {
+  const status = CONSTRAINED_STATUS.get(pass.agent)
+  return status === undefined || pass.status === status
+}
 /** Hosts whose first path segment names an independent author or project. */
 const CODE_HOSTS = new Set([
   'github.com',
@@ -165,7 +177,7 @@ export function wikiClaimTrust({ ledger, citedTiers }: WikiClaimTrustInput): Wik
   }
 
   const dated = (ledger?.passes ?? []).flatMap((pass, order): DatedPass[] =>
-    pass.current && pass.at !== null ? [{ pass, at: pass.at, order }] : [],
+    pass.current && pass.at !== null && permittedPass(pass) ? [{ pass, at: pass.at, order }] : [],
   )
   const edit = latest(
     dated.filter(({ pass }) => pass.agent === 'editor' && pass.status === 'pending'),
