@@ -224,7 +224,7 @@ instead of assuming the default. See [wiki-trust-harness.md](wiki-trust-harness.
 
 ## For agents
 
-The five commands plus `--json` are the supported automation surface (e.g.
+The six commands plus `--json` are the supported automation surface (e.g.
 `~/.agents` discovery workflows). The JSON field names and exit codes above
 are stable; new fields may be added, existing ones won't change meaning.
 Reading a private note is not possible through this surface by design — don't

@@ -83,7 +83,7 @@
   --note-state-local-only: #3f7a94;
   --note-state-protected: #b4504b;
 
-  /* Wiki claim trust, as an agent harness judged it (Plan 30). Shape carries
+  /* Wiki claim trust, as an agent harness judged it. Shape carries
      the tier too, so these never stand alone; each clears 4.5:1 on surface. */
   --trust-solid: var(--indigo-700);
   --trust-supported: var(--coolgray-500);

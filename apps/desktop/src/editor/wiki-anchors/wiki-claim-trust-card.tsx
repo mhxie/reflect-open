@@ -16,8 +16,8 @@ export interface WikiClaimTrust {
   readonly sourceThreshold: number | null
   /** The reader already questioned this claim today. */
   readonly questionedToday: boolean
-  /** Record the reader's doubt; absent where the note cannot be edited. */
-  readonly question?: () => void
+  /** Record the reader's doubt, reporting whether it was written; absent where the note cannot be edited. */
+  readonly question?: () => boolean
 }
 
 interface WikiClaimTrustCardProps {
@@ -90,7 +90,7 @@ function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
 export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps): ReactElement {
   const { standing, question } = trust
   const verdict = standing.state === 'unevaluated' ? null : standing.verdict
-  // Set on press, before the ledger reparses, so a double press records once.
+  // Set on a written press, before the ledger reparses, so a double press records once.
   const [asked, setAsked] = useState(false)
   return (
     <section aria-label={`Claim ${trust.claimId.toUpperCase()} trust`} className="space-y-2">
@@ -141,8 +141,7 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
         <button
           type="button"
           onClick={() => {
-            setAsked(true)
-            question()
+            if (question()) setAsked(true)
           }}
           className="rounded-md border border-border-strong px-2 py-1 font-medium text-text-secondary shadow-input transition-colors duration-100 hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
         >

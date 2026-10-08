@@ -37,7 +37,8 @@ pub fn normalize_wiki_trust_report_path(input: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_wiki_trust_report_path, normalize_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH,
+        is_wiki_trust_report_path, normalize_wiki_trust_report_path,
+        DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY,
     };
     use serde::Deserialize;
 
@@ -51,6 +52,7 @@ mod tests {
     struct Corpus {
         cases: Vec<Case>,
         default: String,
+        settings_key: String,
     }
 
     #[test]
@@ -66,6 +68,7 @@ mod tests {
             );
         }
         assert_eq!(DEFAULT_WIKI_TRUST_REPORT_PATH, corpus.default);
+        assert_eq!(WIKI_TRUST_REPORT_PATH_KEY, corpus.settings_key);
     }
 
     #[test]

@@ -17,15 +17,17 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
   const summary = article?.trust ?? null
   if (article === null || summary === null) return null
   const { needsWork, pending } = summary
-  const label =
-    needsWork.length > 0
-      ? `${needsWork.length} need${needsWork.length === 1 ? 's' : ''} work`
-      : pending > 0
-        ? `${pending} awaiting evaluation`
-        : null
-  if (label === null) return null
+  if (needsWork.length === 0) {
+    if (pending === 0) return null
+    // Nothing to step to, so plain text whose words carry the meaning.
+    return (
+      <span className="inline-flex h-6 shrink-0 items-center gap-1.5 px-1.5 text-text-muted">
+        <span aria-hidden className="wiki-trust-glyph" data-wiki-trust="pending" />
+        {pending} not yet evaluated
+      </span>
+    )
+  }
   const next = (): void => {
-    if (needsWork.length === 0) return
     step.current = (step.current + 1) % needsWork.length
     const id = needsWork[step.current]
     if (id !== undefined) article.focusClaim(id)
@@ -37,23 +39,14 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
           <button
             type="button"
             onClick={next}
-            disabled={needsWork.length === 0}
-            className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1.5 text-text-muted hover:bg-surface-active hover:text-text focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none disabled:hover:bg-transparent disabled:hover:text-text-muted"
+            className="pointer-events-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded px-1.5 text-text-muted hover:bg-surface-active hover:text-text focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
           >
-            <span
-              aria-hidden
-              className="wiki-trust-glyph"
-              data-wiki-trust={needsWork.length > 0 ? 'needs-work' : 'pending'}
-            />
-            {label}
+            <span aria-hidden className="wiki-trust-glyph" data-wiki-trust="needs-work" />
+            {needsWork.length} need{needsWork.length === 1 ? 's' : ''} work
           </button>
         }
       />
-      <TooltipContent side="top">
-        {needsWork.length > 0
-          ? 'Go to the next claim that needs work'
-          : 'Your harness has not evaluated these claims as saved'}
-      </TooltipContent>
+      <TooltipContent side="top">Go to the next claim that needs work</TooltipContent>
     </Tooltip>
   )
 }

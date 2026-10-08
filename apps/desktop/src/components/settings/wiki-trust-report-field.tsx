@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import { normalizeWikiTrustReportPath } from '@reflect/core'
 import { useWikiTrustReport, type WikiTrustReportState } from '@/hooks/use-wiki-trust-report.ts'
 import { formatRecencyLabel } from '@/lib/dates.ts'
+import { isMacosDesktop } from '@/lib/platform.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
@@ -29,7 +30,9 @@ function statusOf(
     case 'missing':
       return {
         tone: 'quiet',
-        text: 'No report yet. Your agent harness writes it here; Settings → Agents installs a skill that tells it how.',
+        text: isMacosDesktop
+          ? 'No report yet. Your agent harness writes it here; Settings → Agents installs a skill that tells it how.'
+          : 'No report yet. Your agent harness writes it here.',
       }
     case 'unreadable':
     case 'invalid': {

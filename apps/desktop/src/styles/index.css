@@ -486,31 +486,27 @@ html:root {
 }
 
 /* Reveal (the claim lens, or Option held): every claim tinted by its tier. */
+[data-wiki-claim][data-wiki-trust] {
+  --wiki-trust-tint: var(--color-trust-supported) 12%;
+}
+[data-wiki-claim][data-wiki-trust='solid'] {
+  --wiki-trust-tint: var(--color-trust-solid) 14%;
+}
+[data-wiki-claim][data-wiki-trust='needs-work'] {
+  --wiki-trust-tint: var(--color-trust-needs-work) 18%;
+}
+[data-wiki-claim][data-wiki-trust='disputed'] {
+  --wiki-trust-tint: var(--color-trust-disputed) 14%;
+}
+[data-wiki-claim][data-wiki-trust='pending'] {
+  --wiki-trust-tint: var(--color-text-muted) 10%;
+}
 [data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust],
 [data-wiki-claim-visible][data-wiki-trust] {
   border-radius: 2px;
+  background: color-mix(in srgb, var(--wiki-trust-tint), transparent);
   box-decoration-break: clone;
   text-decoration: none;
-}
-[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='solid'],
-[data-wiki-claim-visible][data-wiki-trust='solid'] {
-  background: color-mix(in srgb, var(--color-trust-solid) 14%, transparent);
-}
-[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='supported'],
-[data-wiki-claim-visible][data-wiki-trust='supported'] {
-  background: color-mix(in srgb, var(--color-trust-supported) 12%, transparent);
-}
-[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='needs-work'],
-[data-wiki-claim-visible][data-wiki-trust='needs-work'] {
-  background: color-mix(in srgb, var(--color-trust-needs-work) 18%, transparent);
-}
-[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='disputed'],
-[data-wiki-claim-visible][data-wiki-trust='disputed'] {
-  background: color-mix(in srgb, var(--color-trust-disputed) 14%, transparent);
-}
-[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='pending'],
-[data-wiki-claim-visible][data-wiki-trust='pending'] {
-  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
 }
 
 .wiki-article-ledger,

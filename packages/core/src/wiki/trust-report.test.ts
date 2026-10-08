@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { DEFAULT_SETTINGS } from '../settings/schema.ts'
 import {
   DEFAULT_WIKI_TRUST_REPORT_PATH,
   isWikiTrustReportPath,
@@ -163,6 +164,7 @@ describe('isWikiTrustReportPath', () => {
       .object({
         cases: z.array(z.object({ path: z.string(), valid: z.boolean() })),
         default: z.string(),
+        settings_key: z.string(),
       })
       .parse(
         JSON.parse(
@@ -176,6 +178,8 @@ describe('isWikiTrustReportPath', () => {
       expect(isWikiTrustReportPath(path), path).toBe(valid)
     }
     expect(DEFAULT_WIKI_TRUST_REPORT_PATH).toBe(corpus.default)
+    // The CLI reads the configured path from settings under this key.
+    expect(DEFAULT_SETTINGS).toHaveProperty(corpus.settings_key, corpus.default)
   })
 })
 

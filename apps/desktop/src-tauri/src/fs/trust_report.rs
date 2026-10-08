@@ -70,6 +70,11 @@ fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
     Ok(bytes)
 }
 
+/// A report whose bytes are not on this device yet; the next poll reads it.
+fn downloading() -> AppError {
+    AppError::io("the trust report is still downloading from iCloud")
+}
+
 /// Read the report at graph-relative `rel`: `None` when no file is there.
 fn read_report(
     root: &Path,
@@ -80,7 +85,15 @@ fn read_report(
     let abs = resolve(root, rel)?;
     let meta = match std::fs::symlink_metadata(&abs) {
         Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            // Older iCloud keeps an evicted file as a `.name.icloud` stub
+            // beside the absent path; nothing downloads a report on its own.
+            if reflect_graph_paths::eviction_placeholder(&abs).is_some_and(|stub| stub.exists()) {
+                crate::icloud::storage::request_download(&abs);
+                return Err(downloading());
+            }
+            return Ok(None);
+        }
         Err(err) => return Err(err.into()),
     };
     if !meta.is_file() {
@@ -110,9 +123,7 @@ fn read_report(
     // nothing downloads it on its own, so ask, and the next poll reads it.
     if reflect_graph_paths::is_dataless(&meta) {
         crate::icloud::storage::request_download(&abs);
-        return Err(AppError::io(
-            "the trust report is still downloading from iCloud",
-        ));
+        return Err(downloading());
     }
     let contents = String::from_utf8(read_bounded(root, rel)?)
         .map_err(|_| AppError::invalid(format!("the trust report is not UTF-8: {rel:?}")))?;
@@ -228,6 +239,14 @@ mod tests {
         let file = fs::File::create(dir.path().join("trust.json")).unwrap();
         file.set_len(MAX_REPORT_BYTES + 1).unwrap();
         assert!(read_report(dir.path(), "trust.json", None).is_err());
+    }
+
+    #[test]
+    fn an_icloud_stub_is_downloading_not_missing() {
+        let dir = graph();
+        fs::create_dir_all(dir.path().join(".harness")).unwrap();
+        fs::write(dir.path().join(".harness/.wiki-trust.json.icloud"), "").unwrap();
+        assert!(read_report(dir.path(), ".harness/wiki-trust.json", None).is_err());
     }
 
     #[cfg(unix)]

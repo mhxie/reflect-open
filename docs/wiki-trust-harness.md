@@ -60,7 +60,7 @@ A claim verdict:
 
 | Field | Meaning |
 |---|---|
-| `tier` | `"solid"`, `"supported"`, or `"needs-work"`. |
+| `tier` | `"solid"`, `"supported"`, or `"needs-work"`. Closed in version 1: any other value drops the verdict. |
 | `overlays` | Optional: `"disputed"`, `"edited"`. Unknown values are ignored. |
 | `text_sha256` | SHA-256 of the claim text you evaluated, lowercase hex (below). |
 | `evaluated_at` | The day you evaluated it, `YYYY-MM-DD`. |
@@ -91,7 +91,9 @@ UTF-8 bytes after the opening marker's `-->` and before the closing marker's
 `<!--`. The markers are HTML comments, written `<!-- claim:cN -->` and
 `<!-- /claim:cN -->` (any spaces or tabs after `<!--` and before `-->`, none
 inside `/claim:cN`), and the hash is SHA-256, lowercase hex. No other normalization. Legacy `### [Cn]` claims carry their ledger
-inside their own range, so Reflect shows no trust for them. Test vectors:
+inside their own range, so Reflect shows no trust for them. Markers that
+repeat an id, nest, lack a partner, or sit inside a code fence make no claim
+either; Reflect flags them in the editor, and a verdict for them never shows. Test vectors:
 [`fixtures/wiki-claim-text-hashes.json`](../fixtures/wiki-claim-text-hashes.json).
 
 Reflect hashes the file as saved, as you read it. When the text changes, it
@@ -101,7 +103,15 @@ carries the new hash.
 ## Records Reflect writes back
 
 Reflect writes only what the schema defines, into the claim's `anchors cN`
-ledger:
+ledger, a fenced block under the article's `## Evidence` (or `## References`)
+heading, which Reflect creates when the claim has none:
+
+    ```anchors c2
+    @anchor: url:https://example.org/study | valid_at: 2024-05-01
+    @pass: reader | status: flagged | at: 2026-10-08
+    ```
+
+The records:
 
 - `@pass: editor | status: pending | at: YYYY-MM-DD` after a person changes a
   claim's text in Reflect. Never for a file reloaded from disk.

@@ -155,17 +155,23 @@ describe('claim trust from the harness report', () => {
     await expect.element(page.getByText('example.org', { exact: true })).toBeVisible()
   })
 
-  it('shows a claim as changed once its saved text moves on from the evaluated text', async () => {
+  it('shows a claim as changed as soon as its text moves on from the evaluated text', async () => {
     const { editor, container, ref } = await editorFixture()
     const projection = wikiArticleKey.getState(editor.state)!
     const claim = projection.index.claims.find((item) => item.id === 'c2')!
     editor.view.dispatch(
       editor.state.tr.insertText('Edited ', wikiEditorRange(projection.map, claim)!.from),
     )
-    // Unsaved text keeps the verdict; the reindex after a save re-reads the file.
-    expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
-      'needs-work',
+    // Unsaved: the text differs from what was hashed.
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
+      ).toBe('pending'),
     )
+    expect(container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')).toBe(
+      'solid',
+    )
+    // Saved: the reindex re-reads the file, whose hash no longer matches.
     disk = ref.current!.getMarkdown()
     await queryClient.invalidateQueries({ queryKey: ['index'] })
     await vi.waitFor(() =>
@@ -210,7 +216,7 @@ describe('claim trust from the harness report', () => {
     )
     expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeVisible()
     const mark = page.getByRole('button', { name: 'Claim C2: Needs work' })
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }))
     await expect.element(mark).toBeVisible()
     await mark.click()
     await expect.element(page.getByText('Add a primary source.')).toBeVisible()
@@ -225,6 +231,26 @@ describe('claim trust from the harness report', () => {
     await expect.element(page.getByText('Add a primary source.')).toBeVisible()
     await mark.click()
     await expect.element(page.getByText('Add a primary source.')).not.toBeInTheDocument()
+  })
+
+  it('draws nothing for a note the report leaves out', async () => {
+    report = {
+      stamp: '3:1',
+      contents: JSON.stringify({ ...JSON.parse(report.contents), notes: {} }),
+    }
+    const { container } = await render(
+      <QueryClientProvider client={queryClient}>
+        <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+        </MeowdownEditor>
+        <WikiTrustSummary path={PATH} />
+      </QueryClientProvider>,
+    )
+    await vi.waitFor(() => expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull())
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(container.querySelector('[data-wiki-trust]')).toBeNull()
+    expect(container.querySelector('.wiki-trust-mark')).toBeNull()
   })
 
   it('draws marks in the margin instead when that style is chosen', async () => {

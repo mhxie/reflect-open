@@ -37,7 +37,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
     view: trustView,
     summary: trustSummaryOf,
     card: trustCard,
-  } = useWikiArticleTrust(editor, path, article?.index ?? null, () => updateRef.current())
+  } = useWikiArticleTrust(editor, path, article?.index ?? null, updateRef)
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
   }, [onWikiLinkClick])

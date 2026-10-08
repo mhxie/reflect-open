@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
 import {
+  icloudRequestDownloads,
   readNoteLocal,
   wikiClaimStanding,
   wikiClaimTextHashes,
@@ -15,6 +16,7 @@ import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { shownWikiTrustReport, useWikiTrustReport } from '@/hooks/use-wiki-trust-report.ts'
 import { todayIso } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
+import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
@@ -24,7 +26,7 @@ import type { WikiTrustView } from './wiki-trust-view.ts'
 export interface WikiNoteTrustSummary {
   /** Claims whose current verdict is Needs work, in reading order. */
   readonly needsWork: readonly string[]
-  /** Claims with no verdict for their saved text. */
+  /** Claims with no verdict for their current text. */
   readonly pending: number
 }
 
@@ -33,21 +35,50 @@ interface TrustViewResult {
   readonly summary: WikiNoteTrustSummary | null
 }
 
+/** How often a source note iCloud has not downloaded yet is checked again. */
+const EVICTED_RETRY_MS = 5000
+
 /** The longest claim excerpt the trust card quotes. */
 const EXCERPT_CHARS = 160
 
-function excerptOf(source: string, from: number, to: number): string {
-  const text = source.slice(from, to).replaceAll(/\s+/g, ' ').trim()
+/** Each range claim's text as the editor holds it, for spotting unsaved edits. */
+function claimTexts(index: WikiArticleIndex | null): ReadonlyMap<string, string> {
+  const texts = new Map<string, string>()
+  for (const claim of index?.claims ?? [])
+    if (claim.kind === 'range') texts.set(claim.id, index!.source.slice(claim.from, claim.to))
+  return texts
+}
+
+/** The claim's prose for the card: citations dropped, inline syntax stripped, shortened. */
+function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
+  let text = ''
+  let at = from
+  for (const group of index.groups) {
+    if (group.to <= at || group.from >= to) continue
+    text += index.source.slice(at, Math.max(at, group.from))
+    at = Math.min(to, group.to)
+  }
+  text += index.source.slice(at, to)
+  text = text
+    .replaceAll(
+      /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+      (_, target: string, alias?: string) => alias ?? target,
+    )
+    .replaceAll(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replaceAll(/\*\*|__|[*`~]/g, '')
+    .replaceAll(/\s+/g, ' ')
+    .trim()
   return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS - 1).trimEnd()}…` : text
 }
 
-/** Whether the reader already questioned the claim today: a guard against repeats, not a trust rule. */
-function questionedToday(index: WikiArticleIndex, claimId: string, today: string): boolean {
-  const ledger = index.ledgers.find((item) => item.valid && item.owner === claimId)
-  return (
-    ledger?.block.passes.some(
-      (pass) => pass.agent === 'reader' && pass.status === 'flagged' && pass.at === today,
-    ) === true
+/** Whether the reader questioned the claim on `today`: a guard against repeats, not a trust rule. */
+function questionedOn(index: WikiArticleIndex, claimId: string, today: string): boolean {
+  return index.ledgers.some(
+    (ledger) =>
+      ledger.owner === claimId &&
+      ledger.block.passes.some(
+        (pass) => pass.agent === 'reader' && pass.status === 'flagged' && pass.at === today,
+      ),
   )
 }
 
@@ -55,7 +86,8 @@ function sourcesOf(
   report: WikiTrustReport,
   standing: WikiClaimStanding,
 ): WikiClaimTrust['sources'] {
-  if (standing.state === 'unevaluated') return []
+  // A changed claim's sources belong to text that is gone.
+  if (standing.state !== 'current') return []
   const sources: WikiClaimTrust['sources'][number][] = []
   for (const key of standing.verdict.sources) {
     const source = report.sources.get(key)
@@ -66,21 +98,23 @@ function sourcesOf(
 
 /**
  * The harness's verdicts for the note at `path`, matched to its claims'
- * saved text. The file is hashed as the harness reads it, so the editor's
- * serialization never decides freshness and an edit counts once saved. A
- * translation copy shows its source entry's verdicts and offers no question
- * (the record belongs in the source's ledger). `question` is absent where the
- * note is read-only. Null while trust display is off or no report loaded.
+ * text. The saved file is hashed as the harness reads it, so the editor's
+ * serialization never decides freshness; a claim edited since that read
+ * shows as changed at once. A translation copy shows its source entry's
+ * verdicts and offers no question (the record belongs in the source's
+ * ledger). `question` is absent where the note is read-only. Null while
+ * trust display is off, no report loaded, or the report leaves the note out.
  */
 export function useWikiTrustView(
   path: string,
   index: WikiArticleIndex | null,
-  question: ((claimId: string) => void) | undefined,
+  question: ((claimId: string) => boolean) | undefined,
 ): TrustViewResult {
   const { graph } = useGraph()
   const { settings } = useSettings()
   const languages = useWikiLanguages()
   const report = shownWikiTrustReport(useWikiTrustReport())
+  const today = useToday()
   const display = settings.wikiTrustDisplay
   const location = wikiLocation(path, languages)
   const source = wikiSourceLanguage(languages)
@@ -89,7 +123,8 @@ export function useWikiTrustView(
       ? wikiPathIn(source, location.relativePath)
       : path
   const translation = sourcePath !== path
-  const active = display !== 'off' && report !== null && index?.article === true
+  const covered = report?.notes.has(sourcePath.normalize('NFC')) === true
+  const active = display !== 'off' && covered && index?.article === true
 
   // Under the index keys, so the reindex after a save re-reads the file.
   const hashes = useQuery({
@@ -98,33 +133,49 @@ export function useWikiTrustView(
       active && graph !== null
         ? async () => {
             const read = await readNoteLocal(sourcePath, graph.generation)
-            return read.kind === 'content'
-              ? await wikiClaimTextHashes(read.content, todayIso())
-              : null
+            if (read.kind === 'content') return await wikiClaimTextHashes(read.content, todayIso())
+            // Materializing an unchanged file reindexes nothing, so poll for it.
+            await icloudRequestDownloads([sourcePath])
+            return 'evicted' as const
           }
         : skipToken,
+    refetchInterval: (query) => (query.state.data === 'evicted' ? EVICTED_RETRY_MS : false),
   }).data
+  const loaded = hashes === undefined || hashes === 'evicted' ? null : hashes
+
+  // The editor's claim texts when the file was last hashed: a claim whose
+  // text has moved on since is an unsaved edit.
+  const texts = useMemo(() => claimTexts(index), [index])
+  const [baseline, setBaseline] = useState<{
+    readonly hashes: ReadonlyMap<string, string>
+    readonly texts: ReadonlyMap<string, string>
+  } | null>(null)
+  if (loaded !== null && baseline?.hashes !== loaded) setBaseline({ hashes: loaded, texts })
+  const savedTexts = baseline?.hashes === loaded ? baseline.texts : null
 
   return useMemo((): TrustViewResult => {
-    if (display === 'off' || report === null || index === null || hashes == null)
+    if (display === 'off' || !covered || report === null || index === null || loaded === null)
       return { view: null, summary: null }
-    const today = todayIso()
     const trusts = new Map<string, WikiClaimTrust>()
     // Legacy heading claims carry no trust: their ledger sits inside their range.
     for (const claim of index.claims) {
       if (claim.kind !== 'range') continue
-      const hash = hashes.get(claim.id)
-      const standing: WikiClaimStanding =
+      const hash = loaded.get(claim.id)
+      let standing: WikiClaimStanding =
         hash === undefined
           ? { state: 'unevaluated' }
           : wikiClaimStanding(report, sourcePath, claim.id, hash)
+      const edited =
+        !translation && savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
+      if (edited && standing.state === 'current')
+        standing = { state: 'changed', verdict: standing.verdict }
       trusts.set(claim.id, {
         claimId: claim.id,
-        excerpt: excerptOf(index.source, claim.from, claim.to),
+        excerpt: excerptOf(index, claim.from, claim.to),
         standing,
         sources: sourcesOf(report, standing),
         sourceThreshold: report.sourceThreshold,
-        questionedToday: !translation && questionedToday(index, claim.id, today),
+        questionedToday: !translation && questionedOn(index, claim.id, today),
         ...(translation || question === undefined ? {} : { question: () => question(claim.id) }),
       })
     }
@@ -141,5 +192,17 @@ export function useWikiTrustView(
         pending: all.filter((trust) => trust.standing.state !== 'current').length,
       },
     }
-  }, [display, report, index, hashes, sourcePath, translation, question])
+  }, [
+    display,
+    covered,
+    report,
+    index,
+    loaded,
+    savedTexts,
+    texts,
+    sourcePath,
+    translation,
+    question,
+    today,
+  ])
 }

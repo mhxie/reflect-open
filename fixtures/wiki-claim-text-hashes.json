@@ -27,6 +27,26 @@
       "name": "legacy heading claims carry no hash",
       "markdown": "# T\n\n## Claims\n\n### [C1] A legacy claim\n\nBody.\n\n```anchors\n@anchor: doi:10.1/x | valid_at: 2020-01-01\n```\n",
       "hashes": {}
+    },
+    {
+      "name": "a duplicated claim id carries no hash",
+      "markdown": "# T\n\nOne <!-- claim:c1 -->A.<!-- /claim:c1 --> two <!-- claim:c1 -->B.<!-- /claim:c1 -->\n",
+      "hashes": {}
+    },
+    {
+      "name": "an unpaired opening marker carries no hash",
+      "markdown": "# T\n\nOne <!-- claim:c1 -->A.\n",
+      "hashes": {}
+    },
+    {
+      "name": "nested claims carry no hash",
+      "markdown": "# T\n\n<!-- claim:c1 -->A <!-- claim:c2 -->B<!-- /claim:c2 --> C.<!-- /claim:c1 -->\n",
+      "hashes": {}
+    },
+    {
+      "name": "markers inside a code fence are not a claim",
+      "markdown": "# T\n\n```\n<!-- claim:c1 -->A.<!-- /claim:c1 -->\n```\n",
+      "hashes": {}
     }
   ]
 }

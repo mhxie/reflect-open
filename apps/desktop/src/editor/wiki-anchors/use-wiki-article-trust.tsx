@@ -56,24 +56,21 @@ export function useWikiArticleTrust(
   editor: Editor,
   path: string,
   index: WikiArticleIndex | null,
-  published: () => void,
+  published: { readonly current: () => void },
 ): WikiArticleTrust {
   const display = useSettings().settings.wikiTrustDisplay
   const question = useCallback(
     (claimId: string) => {
       const view = editableView(editor)
       view?.dispatch(wikiQuestionTransaction(view.state, claimId, todayIso()))
+      return view !== null
     },
     [editor],
   )
   const trust = useWikiTrustView(path, index, question)
   const viewRef = useRef(trust.view)
   const summaryRef = useRef(trust.summary)
-  const publishedRef = useRef(published)
   const [cardFor, setCardFor] = useState<string | null>(null)
-  useEffect(() => {
-    publishedRef.current = published
-  }, [published])
   useEffect(() => {
     viewRef.current = trust.view
     summaryRef.current = trust.summary
@@ -87,12 +84,12 @@ export function useWikiArticleTrust(
       editor.view.dispatch(
         editor.state.tr.setMeta(wikiArticleKey, 'trust').setMeta('addToHistory', false),
       )
-      publishedRef.current()
+      published.current()
     })
     return () => {
       live = false
     }
-  }, [editor, trust.view, trust.summary])
+  }, [editor, published, trust.view, trust.summary])
   useEffect(() => {
     let detach = (): void => {}
     const cancel = whenEditorMounted(editor, () => {
@@ -105,14 +102,14 @@ export function useWikiArticleTrust(
         setCardFor((current) => (current === id ? null : id))
       }
       dom.addEventListener('click', click)
-      // Holding Option alone reveals every claim's tier; any other key with
-      // it is a shortcut, so the reveal ends.
+      // Holding Option reveals every claim's tier and mark, and lasts through
+      // Option+Tab so the keyboard can reach a mark.
       const reveal = (on: boolean): void => {
         if (on) dom.dataset['wikiTrustReveal'] = ''
         else delete dom.dataset['wikiTrustReveal']
       }
       const keydown = (event: KeyboardEvent): void =>
-        reveal(event.key === 'Alt' && !inOtherField(event.target, dom))
+        reveal(event.altKey && !inOtherField(event.target, dom))
       const keyup = (event: KeyboardEvent): void => {
         if (event.key === 'Alt') reveal(false)
       }
@@ -161,7 +158,7 @@ export function useWikiArticleTrust(
           }
           side="top"
           align="start"
-          className="w-72 max-w-[calc(100vw-2rem)] text-xs"
+          className="max-h-[min(var(--available-height),28rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto text-xs"
         >
           <WikiClaimTrustCard
             key={open.claimId}
