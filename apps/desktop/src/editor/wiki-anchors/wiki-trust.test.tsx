@@ -306,6 +306,10 @@ describe('claim trust from the harness report', () => {
     )
     expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
     await expect.element(page.getByText('You questioned this claim today.')).toBeVisible()
+    // An ordinary edit: undo takes the flag back out, as the button's tooltip says.
+    const editor = ref.current!.getEditor()!
+    ;(editor.commands as unknown as { undo: () => boolean }).undo()
+    await vi.waitFor(() => expect(ref.current!.getMarkdown()).not.toContain('@pass: reader'))
   })
 
   it('marks a claim edited while the saved file is still being read', async () => {
