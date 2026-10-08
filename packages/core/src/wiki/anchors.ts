@@ -22,6 +22,9 @@ export interface WikiMarker {
   readonly fields: ReadonlyMap<string, string>
 }
 
+/** How directly a source supports its claim, as its writer judged. */
+export type WikiSourceKind = 'primary' | 'secondary'
+
 /** One external source of a claim, ready to show. */
 export interface WikiSource {
   /** The anchor type, lowercased: `doi`, `arxiv`, `s2`, `isbn`, `url`, `gist`, … */
@@ -33,6 +36,11 @@ export interface WikiSource {
   readonly url: string | null
   /** The source's saved copy in Readwise Reader, when the anchor names one. */
   readonly readwiseUrl: string | null
+  /**
+   * The writer's judgment of the source's fit to its claim (`kind: primary`
+   * or `kind: secondary`), or null when the anchor states none.
+   */
+  readonly kind: WikiSourceKind | null
   /** Whether the anchor holds on the day read (dated, and not invalidated). */
   readonly current: boolean
   readonly validAt: string | null
@@ -291,6 +299,10 @@ export function wikiSourceLabel(type: string, id: string): string {
   }
 }
 
+function sourceKind(value: string | undefined): WikiSourceKind | null {
+  return value === 'primary' || value === 'secondary' ? value : null
+}
+
 /**
  * The sources and reviews one fenced `anchors` block records, as of `asOf`
  * (ISO `YYYY-MM-DD`). Sources and passes that no longer hold stay listed,
@@ -327,6 +339,7 @@ export function readWikiAnchorsBlock(text: string, asOf: string): WikiAnchorsBlo
         current,
         validAt: marker.fields.get('valid_at') ?? null,
         invalidAt: marker.fields.get('invalid_at') ?? null,
+        kind: sourceKind(marker.fields.get('kind')),
       })
     } else if (marker.kind === 'pass') {
       const ref = marker.fields.get('ref')

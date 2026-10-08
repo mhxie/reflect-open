@@ -73,4 +73,16 @@ export {
   type WikiCitationDates,
   type WikiReviewPass,
   type WikiSource,
+  type WikiSourceKind,
 } from '../wiki/anchors.ts'
+export {
+  isPrimaryWikiSource,
+  wikiClaimTrust,
+  wikiSourceOrigin,
+  wikiTrustDistribution,
+  type WikiClaimTrust,
+  type WikiClaimTrustInput,
+  type WikiTrustOverlay,
+  type WikiTrustReason,
+  type WikiTrustTier,
+} from '../wiki/trust.ts'
