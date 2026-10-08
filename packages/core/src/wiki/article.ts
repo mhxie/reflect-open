@@ -117,6 +117,24 @@ function portableMarker(source: string, from: number, to: number): boolean {
   )
 }
 
+/**
+ * Whether a claim range with an endpoint inside a GFM table spans more than
+ * one cell: an unescaped pipe (ignoring the alias pipe inside a wiki link) or
+ * a line break between its endpoints. A range inside one cell stays valid.
+ */
+function crossesTableCell(
+  source: string,
+  from: number,
+  to: number,
+  tables: readonly { from: number; to: number }[],
+): boolean {
+  const touches = tables.some(
+    (table) => (from >= table.from && from < table.to) || (to > table.from && to <= table.to),
+  )
+  if (!touches) return false
+  return /(?<!\\)\||\n/.test(source.slice(from, to).replaceAll(/\[\[[^\]]*\]\]/g, ''))
+}
+
 function codeInfo(node: SyntaxNode, body: string): string {
   const info = node.getChild('CodeInfo')
   return info === null ? '' : body.slice(info.from, info.to).trim()
@@ -136,6 +154,7 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
   const closedLedgers = new Set<number>()
   const legacyLedgers = new Set<number>()
   const citationUnits: { from: number; to: number }[] = []
+  const tables: { from: number; to: number }[] = []
   const span = (from: number, to: number): WikiSourceSpan => wikiSourceSpan(source, from, to)
   const diagnostic = (from: number, to: number, message: string, claimId: string | null): void => {
     diagnostics.push({ ...span(from, to), message, claimId })
@@ -146,6 +165,7 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
       const from = cursor.from + bodyOffset
       const to = cursor.to + bodyOffset
       const raw = source.slice(from, to)
+      if (cursor.name === 'Table') tables.push({ from, to })
       if (cursor.name === 'Wikilink' && /\|ref\]\]$/.test(raw)) {
         let end = cursor.to
         let next = node.nextSibling
@@ -284,6 +304,11 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
     ) {
       invalidIds.add(id)
       diagnostic(first.from, last.to, `${id} splits a citation from its date metadata.`, id)
+      continue
+    }
+    if (crossesTableCell(source, first.to, last.from, tables)) {
+      invalidIds.add(id)
+      diagnostic(first.from, last.to, `${id} crosses a table cell.`, id)
       continue
     }
     claims.push({

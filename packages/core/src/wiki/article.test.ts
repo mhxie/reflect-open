@@ -64,6 +64,32 @@ describe('article claim ranges', () => {
     ).toHaveLength(1)
   })
 
+  it('keeps a range touching a table within one cell', () => {
+    const table = (row: string): string => `Intro.\n\n| a | b |\n| --- | --- |\n${row}\n\nAfter.\n`
+    const across = readWikiClaimIndex(table('| <!-- claim:c1 -->x | y<!-- /claim:c1 --> |'), DAY)
+    expect(across.claims).toEqual([])
+    expect(across.diagnostics.map((item) => item.message)).toEqual(['c1 crosses a table cell.'])
+
+    // One cell, an escaped pipe, and a wiki link's alias pipe all stay in the cell.
+    for (const cell of [
+      pair('c1', 'x'),
+      pair('c1', String.raw`x \| y`),
+      pair('c1', '[[Note|alias]] x'),
+    ]) {
+      const index = readWikiClaimIndex(table(`| ${cell} | y |`), DAY)
+      expect(index.diagnostics).toEqual([])
+      expect(index.claims).toHaveLength(1)
+    }
+
+    // A range entering the table from the prose above crosses a row.
+    expect(
+      readWikiClaimIndex(
+        'Intro <!-- claim:c1 -->text.\n\n| a | b |\n| --- | --- |\n| x<!-- /claim:c1 --> | y |\n',
+        DAY,
+      ).claims,
+    ).toEqual([])
+  })
+
   it('ignores examples in code and larger comments', () => {
     const source =
       '`<!-- claim:c1 -->`\n\n```md\n<!-- claim:c2 -->\n```\n\n<!-- Example: <!-- claim:c3 --> -->'
