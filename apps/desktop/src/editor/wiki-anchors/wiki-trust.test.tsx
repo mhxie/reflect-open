@@ -300,7 +300,7 @@ describe('claim trust from the harness report', () => {
     await page.getByRole('button', { name: 'Question this claim' }).click()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(ref.current!.getMarkdown()).not.toContain('@pass: reader')
-    await expect.element(page.getByRole('button', { name: 'Question this claim' })).toBeVisible()
+    await expect.element(page.getByText(/evidence ledger needs fixing/)).toBeVisible()
   })
 
   it('keeps the last report while a new one fails to parse', async () => {

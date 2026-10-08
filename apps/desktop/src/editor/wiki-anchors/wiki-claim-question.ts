@@ -23,29 +23,26 @@ export function wikiQuestionTransaction(
   asOf: string,
 ): Transaction | null {
   const record = wikiReaderFlag(asOf)
-  const owned = index.ledgers
-    .filter((ledger) => ledger.owner === claimId)
-    .sort((left, right) => left.from - right.from)
+  const owned = index.ledgers.filter((ledger) => ledger.owner === claimId)
   if (owned.length === 0) {
     const transaction = state.tr
     appendWikiArticleRecords(transaction, [{ id: claimId, raw: record }])
     return transaction
   }
-  // The valid ledger is the same-owner fence at its place in document order.
-  const ordinal = owned.findIndex((ledger) => ledger.valid)
-  if (ordinal === -1) return null
-  const ends: { end: number; separated: boolean }[] = []
+  // A claim's ledger counts only when it is the claim's one ledger.
+  if (owned.length !== 1 || owned[0]?.valid !== true) return null
+  let target: { end: number; separated: boolean } | null = null
   state.doc.descendants((node, position) => {
-    if (ends.length > ordinal) return false
+    if (target !== null) return false
     if (node.type.name !== 'codeBlock') return true
     if (ledgerOwnerOf(node) === claimId)
-      ends.push({
+      target = {
         end: position + node.nodeSize - 1,
         separated: node.textContent === '' || node.textContent.endsWith('\n'),
-      })
+      }
     return false
   })
-  const target = ends[ordinal]
-  if (target === undefined) return null
-  return state.tr.insertText(`${target.separated ? '' : '\n'}${record}`, target.end)
+  if (target === null) return null
+  const { end, separated } = target
+  return state.tr.insertText(`${separated ? '' : '\n'}${record}`, end)
 }

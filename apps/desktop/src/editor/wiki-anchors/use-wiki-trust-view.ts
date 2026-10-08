@@ -131,7 +131,7 @@ export function useWikiTrustView(
   const active = display !== 'off' && covered && index?.article === true
 
   // Under the index keys, so the reindex after a save re-reads the file.
-  const saved = useQuery({
+  const savedQuery = useQuery({
     queryKey: queryKeys.index.wikiClaimHashes(graph?.root, sourcePath),
     queryFn:
       active && graph !== null
@@ -148,7 +148,10 @@ export function useWikiTrustView(
           }
         : skipToken,
     refetchInterval: (query) => (query.state.data === 'evicted' ? EVICTED_RETRY_MS : false),
-  }).data
+  })
+  // A failed reread (the source deleted or unreadable) keeps the old data in
+  // the cache; trust nothing from it.
+  const saved = savedQuery.isError ? undefined : savedQuery.data
   const file = saved === undefined || saved === 'evicted' ? null : saved
   const loaded = file?.hashes ?? null
 

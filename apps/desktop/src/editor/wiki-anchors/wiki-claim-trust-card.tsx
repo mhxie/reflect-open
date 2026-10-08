@@ -91,7 +91,7 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
   const { standing, question } = trust
   const verdict = standing.state === 'unevaluated' ? null : standing.verdict
   // Set on a written press, before the ledger reparses, so a double press records once.
-  const [asked, setAsked] = useState(false)
+  const [asked, setAsked] = useState<'recorded' | 'refused' | null>(null)
   return (
     <section aria-label={`Claim ${trust.claimId.toUpperCase()} trust`} className="space-y-2">
       <header className="space-y-1">
@@ -135,13 +135,19 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
           ))}
         </ul>
       ) : null}
-      {question === undefined || !editable ? null : trust.questionedToday || asked ? (
+      {question === undefined || !editable ? null : trust.questionedToday ||
+        asked === 'recorded' ? (
         <p className="text-text-muted">You questioned this claim today.</p>
+      ) : asked === 'refused' ? (
+        <p className="text-text-muted">
+          This claim’s evidence ledger needs fixing before it can take a question; the article lists
+          the problem.
+        </p>
       ) : (
         <button
           type="button"
           onClick={() => {
-            if (question()) setAsked(true)
+            setAsked(question() ? 'recorded' : 'refused')
           }}
           className="rounded-md border border-border-strong px-2 py-1 font-medium text-text-secondary shadow-input transition-colors duration-100 hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
         >

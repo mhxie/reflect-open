@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { skipToken, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   errorMessage,
@@ -79,6 +80,7 @@ async function loadReport(
   }
   // A report under a hidden folder escapes the file watcher, and so backup:
   // tell it once per version seen, the first included, and per deletion.
+  // Before backup starts, its launch cycle commits the tree, report included.
   if ((file?.stamp ?? null) !== before) changed()
   if (file === null) return { status: 'missing', path }
   if (file.contents === null && previous?.status === 'ready') return previous
@@ -110,7 +112,19 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   const path = settings.wikiTrustReportPath
   const enabled = graph !== null && bridgeReady && (always || settings.wikiTrustDisplay !== 'off')
   const generation = graph?.generation
-  const key = queryKeys.wikiTrust.report(graph?.root, path)
+  const root = graph?.root
+  const key = queryKeys.wikiTrust.report(root, path)
+  // A Tauri window regaining focus fires `focus` without `visibilitychange`,
+  // which is all the query library's own focus refetch hears.
+  useEffect(() => {
+    if (!enabled) return
+    const queryKey = queryKeys.wikiTrust.report(root, path)
+    const refetch = (): void => {
+      void client.refetchQueries({ queryKey, exact: true }, { cancelRefetch: false })
+    }
+    window.addEventListener('focus', refetch)
+    return () => window.removeEventListener('focus', refetch)
+  }, [enabled, client, root, path])
   const { data } = useQuery({
     queryKey: key,
     queryFn:

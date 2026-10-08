@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::resolve::resolve;
-use super::{graph_for, io, GraphState};
+use super::{graph_for, GraphState};
 use crate::error::{AppError, AppResult};
 
 /// The largest report Reflect reads; a larger file is refused, not truncated.
@@ -70,6 +70,22 @@ fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Identifies one version of the report: modification time in nanoseconds,
+/// size, and (on Unix) the inode, so an atomic replace reads as new even
+/// within the clock's resolution or on a coarse-timestamp filesystem.
+fn version_stamp(meta: &std::fs::Metadata) -> String {
+    let nanos = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(meta);
+    #[cfg(not(unix))]
+    let inode = 0_u64;
+    format!("{nanos}:{}:{inode}", meta.len())
+}
+
 /// A report whose bytes are not on this device yet; the next poll reads it.
 fn downloading() -> AppError {
     AppError::io("the trust report is still downloading from iCloud")
@@ -101,13 +117,7 @@ fn read_report(
             "the trust report is not a regular file: {rel:?}"
         )));
     }
-    // Size joins the time so a rewrite within the clock's resolution (or on a
-    // coarse filesystem) still reads as a new version.
-    let stamp = format!(
-        "{}:{}",
-        io::modified_ms(&meta).map_or_else(String::new, |ms| ms.to_string()),
-        meta.len()
-    );
+    let stamp = version_stamp(&meta);
     if known_stamp == Some(stamp.as_str()) {
         return Ok(Some(TrustReportRead {
             stamp,
@@ -169,7 +179,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(read.contents.as_deref(), Some("{\"version\":1}"));
-        assert!(read.stamp.ends_with(":13"));
+        assert!(read.stamp.contains(":13:"));
     }
 
     #[test]
@@ -217,6 +227,32 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(again.contents.as_deref(), Some("{\"a\":1}"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_atomic_replace_of_the_same_size_and_time_is_new() {
+        let dir = graph();
+        fs::write(dir.path().join("trust.json"), "{\"a\":1}").unwrap();
+        let first = read_report(dir.path(), "trust.json", None)
+            .unwrap()
+            .unwrap();
+        let time = fs::metadata(dir.path().join("trust.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        fs::write(dir.path().join("trust.tmp"), "{\"a\":2}").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(dir.path().join("trust.tmp"))
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+        fs::rename(dir.path().join("trust.tmp"), dir.path().join("trust.json")).unwrap();
+        let again = read_report(dir.path(), "trust.json", Some(&first.stamp))
+            .unwrap()
+            .unwrap();
+        assert_eq!(again.contents.as_deref(), Some("{\"a\":2}"));
     }
 
     #[test]
