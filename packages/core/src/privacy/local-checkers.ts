@@ -1,11 +1,11 @@
-import type {
-  CloudAssetDescription,
-  CloudNoteContent,
-  CloudNoteListing,
-  CloudSearchHit,
-  CloudSendable,
+import {
+  isPrivateNote,
+  type CloudAssetDescription,
+  type CloudNoteContent,
+  type CloudNoteListing,
+  type CloudSearchHit,
+  type CloudSendable,
 } from './checkers.ts'
-import { isLocalOnlyPath } from '../graph/local-only.ts'
 import type { VerifiedOnDeviceTarget } from './on-device.ts'
 
 declare const localSafeBrand: unique symbol
@@ -34,10 +34,7 @@ export function localSafeSearchHit(
       heading: hit.heading,
       ...(hit.assetTextHash === undefined ? {} : { assetTextHash: hit.assetTextHash }),
     },
-    hit.isPrivate ||
-      hit.hasDeviceOnlyContent === true ||
-      isLocalOnlyPath(hit.path) ||
-      hit.assetTextHash === undefined,
+    isPrivateNote(hit) || hit.assetTextHash === undefined,
   )
 }
 
@@ -55,7 +52,7 @@ export function localSafeNoteListing(
       snippet: entry.snippet,
       modifiedAt: entry.modifiedAt,
     },
-    entry.isPrivate || isLocalOnlyPath(entry.path),
+    isPrivateNote(entry),
   )
 }
 
@@ -67,7 +64,7 @@ export function localSafeNoteContent(
   return mint(
     target,
     { path: note.path, title: note.title, content: note.content, truncated: note.truncated },
-    note.isPrivate || isLocalOnlyPath(note.path),
+    isPrivateNote(note),
   )
 }
 
@@ -79,6 +76,6 @@ export function localSafeAssetDescription(
   return mint(
     target,
     { path: asset.path, description: asset.description, truncated: asset.truncated },
-    asset.isPrivate || isLocalOnlyPath(asset.path),
+    isPrivateNote(asset),
   )
 }

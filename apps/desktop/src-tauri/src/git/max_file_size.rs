@@ -17,7 +17,7 @@
 
 use std::path::Path;
 
-use crate::settings::SettingsDoc;
+use crate::settings::{graph_section, GraphSection, SettingsDoc};
 
 /// The settings-document key holding every graph's backup size limit.
 pub(crate) const SETTINGS_KEY: &str = "backupMaxFileMiB";
@@ -64,22 +64,22 @@ pub(crate) fn load_for_root(root: &Path) -> LoadedLimit {
 /// that does not exist (a moved vault, a typo) is reported, since it would
 /// otherwise leave this graph on the default without a word.
 fn from_settings(doc: &SettingsDoc, root: &Path) -> LoadedLimit {
-    let Some(value) = doc.get(SETTINGS_KEY) else {
-        return LoadedLimit::default();
+    let (entry, others) = match graph_section(doc, SETTINGS_KEY, root) {
+        GraphSection::Absent => return LoadedLimit::default(),
+        GraphSection::Malformed => {
+            return LoadedLimit {
+                warnings: vec![format!(
+                    "\"{SETTINGS_KEY}\" in the settings file must map graph folders to a size \
+                     in MiB, so it is ignored and backups withhold files of {MAX_MIB} MiB or more."
+                )],
+                ..LoadedLimit::default()
+            }
+        }
+        GraphSection::Present { entry, others } => (entry, others),
     };
-    let Some(entries) = value.as_object() else {
-        return LoadedLimit {
-            warnings: vec![format!(
-                "\"{SETTINGS_KEY}\" in the settings file must map graph folders to a size in \
-                 MiB, so it is ignored and backups withhold files of {MAX_MIB} MiB or more."
-            )],
-            ..LoadedLimit::default()
-        };
-    };
-    let matched = crate::fs::settings_key_for_root(entries, root);
-    let mut warnings: Vec<String> = entries
-        .keys()
-        .filter(|key| Some(*key) != matched && !Path::new(key).is_dir())
+    let mut warnings: Vec<String> = others
+        .into_iter()
+        .filter(|key| !Path::new(key).is_dir())
         .map(|key| {
             format!(
                 "A backup size limit is configured for {key}, which does not exist (was the \
@@ -87,7 +87,7 @@ fn from_settings(doc: &SettingsDoc, root: &Path) -> LoadedLimit {
             )
         })
         .collect();
-    let Some(value) = matched.and_then(|key| entries.get(key)) else {
+    let Some(value) = entry else {
         return LoadedLimit {
             warnings,
             ..LoadedLimit::default()

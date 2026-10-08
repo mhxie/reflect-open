@@ -5,6 +5,7 @@ import { searchWithFilters } from '../indexing/filtered-search.ts'
 import { literalSearchQuery } from '../indexing/filter-query.ts'
 import { HIGHLIGHT_END, HIGHLIGHT_START } from '../indexing/search.ts'
 import { buildFtsAnyMatch, isSentenceLike } from '../indexing/search-query.ts'
+import { isPrivateNote } from '../privacy/checkers.ts'
 import { embedStatus, embedTexts } from './commands.ts'
 import { semanticModel } from './models.ts'
 
@@ -83,6 +84,36 @@ export interface BestChunkOptions {
   maxDistance?: number
 }
 
+/** A note's indexed snapshot as every retrieval leg reads it, flags already decoded. */
+interface NoteSnapshot {
+  path: string
+  title: string
+  displayTitle?: string | null | undefined
+  lang?: string | null | undefined
+  isPrivate: boolean
+  hasDeviceOnlyContent: boolean
+  assetTextHash?: string | undefined
+  hasConflict: boolean
+}
+
+/** Build a hit from one leg's snapshot; optional flags appear only when set. */
+function retrievalHit(
+  note: NoteSnapshot,
+  match: Pick<RetrievalHit, 'score' | 'snippet' | 'heading'>,
+): RetrievalHit {
+  return {
+    path: note.path,
+    title: note.title,
+    displayTitle: note.displayTitle,
+    lang: note.lang,
+    ...match,
+    isPrivate: note.isPrivate,
+    ...(note.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
+    ...(note.assetTextHash === undefined ? {} : { assetTextHash: note.assetTextHash }),
+    hasConflict: note.hasConflict,
+  }
+}
+
 /**
  * Collapse KNN chunk rows (ordered nearest-first) into one hit per note —
  * the best chunk wins. Rows past their model's `maxCosineDistance` are
@@ -103,19 +134,19 @@ export function bestChunkPerNote(
     if (row.path === options.excludePath || byNote.has(row.path)) {
       continue
     }
-    byNote.set(row.path, {
-      path: row.path,
-      title: row.title,
-      displayTitle: row.displayTitle,
-      lang: row.lang,
-      score: 1 - row.distance,
-      snippet: row.text.trim(),
-      heading: row.heading,
-      isPrivate: row.isPrivate !== 0,
-      ...(row.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
-      ...(row.assetTextHash === undefined ? {} : { assetTextHash: row.assetTextHash }),
-      hasConflict: row.hasConflict !== 0,
-    })
+    byNote.set(
+      row.path,
+      retrievalHit(
+        {
+          ...row,
+          isPrivate: row.isPrivate !== 0,
+          hasDeviceOnlyContent:
+            row.hasDeviceOnlyContent !== undefined && row.hasDeviceOnlyContent !== 0,
+          hasConflict: row.hasConflict !== 0,
+        },
+        { score: 1 - row.distance, snippet: row.text.trim(), heading: row.heading },
+      ),
+    )
   }
   return [...byNote.values()].slice(0, limit)
 }
@@ -173,19 +204,9 @@ async function everyTermHits(query: string, limit: number): Promise<RetrievalHit
   if (hits.length === 0) {
     return []
   }
-  return hits.map((hit) => ({
-    path: hit.path,
-    title: hit.title,
-    displayTitle: hit.displayTitle,
-    lang: hit.lang,
-    score: 0,
-    snippet: hit.snippet ?? '',
-    heading: null,
-    isPrivate: hit.isPrivate,
-    ...(hit.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
-    ...(hit.assetTextHash === undefined ? {} : { assetTextHash: hit.assetTextHash }),
-    hasConflict: hit.hasConflict,
-  }))
+  return hits.map((hit) =>
+    retrievalHit(hit, { score: 0, snippet: hit.snippet ?? '', heading: null }),
+  )
 }
 
 /** Notes matching any word or CJK pair of `query`, best bm25 first, skipping `exclude`. */
@@ -221,29 +242,29 @@ async function anyTermHits(
   return result.rows
     .filter((row) => !exclude.has(row.path))
     .slice(0, limit)
-    .map((row) => ({
-      path: row.path,
-      title: row.title,
-      displayTitle: row.displayTitle,
-      lang: row.lang,
-      score: 0,
-      snippet: row.snippet,
-      heading: null,
-      isPrivate: row.isPrivate !== 0,
-      ...(row.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
-      ...(row.assetTextHash === undefined ? {} : { assetTextHash: row.assetTextHash }),
-      hasConflict: row.hasConflict !== 0,
-    }))
+    .map((row) =>
+      retrievalHit(
+        {
+          ...row,
+          isPrivate: row.isPrivate !== 0,
+          hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
+          hasConflict: row.hasConflict !== 0,
+        },
+        { score: 0, snippet: row.snippet, heading: null },
+      ),
+    )
 }
+
+/** The standard reciprocal-rank-fusion damping constant. */
+const RRF_K = 60
 
 /** Reciprocal rank fusion: order-based, scale-free, deterministic. */
 export function fuseRanked(lists: RetrievalHit[][], limit: number): RetrievalHit[] {
-  const K = 60 // the standard RRF damping constant
   const fused = new Map<string, { hit: RetrievalHit; score: number }>()
   for (const list of lists) {
     for (const [index, hit] of list.entries()) {
       const entry = fused.get(hit.path)
-      const score = 1 / (K + index + 1)
+      const score = 1 / (RRF_K + index + 1)
       if (entry) {
         entry.score += score
         const isPrivate = entry.hit.isPrivate || hit.isPrivate
@@ -293,9 +314,7 @@ function withPrivacy(hits: RetrievalHit[], excludePrivateContent: boolean): Retr
   if (!excludePrivateContent) {
     return hits
   }
-  return hits.map((hit) =>
-    hit.isPrivate || hit.hasDeviceOnlyContent ? { ...hit, snippet: '', heading: null } : hit,
-  )
+  return hits.map((hit) => (isPrivateNote(hit) ? { ...hit, snippet: '', heading: null } : hit))
 }
 
 export async function retrieve(query: string, options?: RetrieveOptions): Promise<RetrievalHit[]> {

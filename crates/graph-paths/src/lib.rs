@@ -10,9 +10,11 @@
 
 use std::path::{Component, Path, PathBuf};
 
+mod graph_settings;
 mod local_only;
 mod walk;
 
+pub use graph_settings::{graph_settings_key, same_folder, LOCAL_ONLY_SETTINGS_KEY};
 pub use local_only::{folder_name_problem, LocalOnlyFolders, LocalOnlyLink};
 pub use walk::{
     has_pruned_component, is_pruned_dir_name, local_only_links, walk_catalog, walk_catalog_with,

@@ -34,7 +34,7 @@ use std::path::Path;
 use git2::{Oid, Repository};
 
 use crate::error::{AppError, AppResult};
-use crate::settings::SettingsDoc;
+use crate::settings::{graph_section, GraphSection, SettingsDoc};
 
 /// The settings-document key holding every graph's accepted history roots.
 pub(crate) const SETTINGS_KEY: &str = "acceptedHistoryRoots";
@@ -67,22 +67,23 @@ pub(crate) fn load_for_root(root: &Path) -> LoadedRoots {
 /// folder that does not exist (a moved vault, a typo) is reported, since it
 /// would otherwise leave this graph pausing on a root the user did accept.
 fn from_settings(doc: &SettingsDoc, root: &Path) -> LoadedRoots {
-    let Some(value) = doc.get(SETTINGS_KEY) else {
-        return LoadedRoots::default();
+    let (entry, others) = match graph_section(doc, SETTINGS_KEY, root) {
+        GraphSection::Absent => return LoadedRoots::default(),
+        GraphSection::Malformed => {
+            return LoadedRoots {
+                warnings: vec![format!(
+                    "\"{SETTINGS_KEY}\" in the settings file must map graph folders to lists of \
+                     commit ids, so it is ignored and sync pauses on any history it has not \
+                     accepted."
+                )],
+                ..LoadedRoots::default()
+            }
+        }
+        GraphSection::Present { entry, others } => (entry, others),
     };
-    let Some(entries) = value.as_object() else {
-        return LoadedRoots {
-            warnings: vec![format!(
-                "\"{SETTINGS_KEY}\" in the settings file must map graph folders to lists of \
-                 commit ids, so it is ignored and sync pauses on any history it has not accepted."
-            )],
-            ..LoadedRoots::default()
-        };
-    };
-    let matched = crate::fs::settings_key_for_root(entries, root);
-    let mut warnings: Vec<String> = entries
-        .keys()
-        .filter(|key| Some(*key) != matched && !Path::new(key).is_dir())
+    let mut warnings: Vec<String> = others
+        .into_iter()
+        .filter(|key| !Path::new(key).is_dir())
         .map(|key| {
             format!(
                 "Accepted history roots are configured for {key}, which does not exist (was the \
@@ -90,7 +91,7 @@ fn from_settings(doc: &SettingsDoc, root: &Path) -> LoadedRoots {
             )
         })
         .collect();
-    let Some(value) = matched.and_then(|key| entries.get(key)) else {
+    let Some(value) = entry else {
         return LoadedRoots {
             warnings,
             ..LoadedRoots::default()

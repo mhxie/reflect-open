@@ -85,9 +85,23 @@ const HIT_COLUMNS = [
   'notes.preview',
   'notes.mtime',
   'notes.isPinned',
-  'notes.isPrivate',
   'notes.hasConflict',
 ] as const
+
+type HitFlags = Pick<
+  FilteredSearchHit,
+  'isPinned' | 'isPrivate' | 'hasDeviceOnlyContent' | 'hasConflict'
+>
+
+/** SQLite stores the hit's flags as 0/1 integers; every result path decodes them here. */
+function hitFlags(row: Record<keyof HitFlags, number>): HitFlags {
+  return {
+    isPinned: row.isPinned !== 0,
+    isPrivate: row.isPrivate !== 0,
+    hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
+    hasConflict: row.hasConflict !== 0,
+  }
+}
 
 /**
  * The recall-feed ordering, shared with `listNotes` so the two "V1 list
@@ -210,10 +224,7 @@ export async function searchWithFilters(
       ...row,
       highlightedTitle: noteTitlePresentation(row.title, row).text,
       snippet: null,
-      isPinned: row.isPinned !== 0,
-      isPrivate: row.isPrivate !== 0,
-      hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
-      hasConflict: row.hasConflict !== 0,
+      ...hitFlags(row),
     }))
   }
 
@@ -284,10 +295,7 @@ export async function searchWithFilters(
       ...row,
       highlightedTitle: noteTitlePresentation(row.title, row).text,
       snippet: null,
-      isPinned: row.isPinned !== 0,
-      isPrivate: row.isPrivate !== 0,
-      hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
-      hasConflict: row.hasConflict !== 0,
+      ...hitFlags(row),
     }))
   }
 
@@ -333,7 +341,6 @@ export async function searchWithFilters(
       'filteredNotes.preview',
       'filteredNotes.mtime',
       'filteredNotes.isPinned',
-      'filteredNotes.isPrivate',
       'filteredNotes.hasConflict',
       'lexical.ftsHighlightedTitle',
       'lexical.snippet',
@@ -374,10 +381,7 @@ export async function searchWithFilters(
         ? null
         : displayNoteTitle(ftsHighlightedTitle),
     ),
-    isPinned: row.isPinned !== 0,
-    isPrivate: row.isPrivate !== 0,
-    hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
-    hasConflict: row.hasConflict !== 0,
+    ...hitFlags(row),
   }))
 }
 

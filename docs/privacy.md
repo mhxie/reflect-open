@@ -117,6 +117,22 @@ reads currently return unsupported.
   fifteen minutes. Recording other people may require their consent where you
   are.
 
+## AI summaries in All Notes (on-device only by default)
+
+Settings → All Notes → AI summaries decides who writes the one-sentence summary
+that replaces a long note's opening text in All Notes:
+
+- **On-device model only** (the default): only an attested, verified on-device
+  model summarizes, private notes included. Nothing leaves the Mac.
+- **On-device model, then AI provider:** when no on-device model answers, public notes fall
+  back to the default provider's small model through the same cloud privacy gate
+  as AI chat. Private notes, device-only content, and local-only folders are
+  never sent; local-only notes are never summarized at all.
+- **Off · show the opening text:** nothing is summarized and the plain snippet stays.
+
+The summary is written into the note's `aiSummary` frontmatter, so it travels
+with the note — including to Git backup, like the rest of the note's text.
+
 ## Semantic search (off by default)
 
 - Embeddings are computed **on-device** (a bundled ONNX runtime running the model
@@ -425,6 +441,7 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | Call | Destination | Carries note content? | Off by default? |
 | --- | --- | --- | --- |
 | AI chat | Your chosen provider or verified local model | Yes — cloud tools block private and device-only sources | Yes (needs configuration) |
+| AI summaries | Your verified local model; optionally your default provider for public notes | Yes — private notes stay on-device | No (on-device only by default) |
 | Local image/PDF OCR | Your verified local vision model | Yes — stays on your machine | Yes (explicit model selection) |
 | Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
 | On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |

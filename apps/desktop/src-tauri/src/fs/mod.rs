@@ -46,14 +46,8 @@ use self::resolve::{
     TargetKind,
 };
 
-/// The entry for a graph root in a settings key keyed by graph root, matched
-/// the way the local-only configuration matches it.
-pub(crate) use self::local_only::matching_key as settings_key_for_root;
 /// What an index recorded about its local-only folders (read by `db`).
 pub(crate) use self::local_only::Recorded;
-/// The settings key holding every graph's local-only configuration (Rust
-/// owns it: `settings_save` keeps the copy on disk).
-pub(crate) use self::local_only::SETTINGS_KEY as LOCAL_ONLY_SETTINGS_KEY;
 
 /// Cancellation flag for the running Reflect V1 import, managed as Tauri
 /// state in `lib.rs` (`graph_import_cancel` trips it).
@@ -152,6 +146,17 @@ pub struct GraphInner {
 }
 
 impl GraphInner {
+    /// Refuse a command issued for an earlier graph session; `None` accepts
+    /// whichever graph is open.
+    fn check_generation(&self, generation: Option<u64>) -> AppResult<()> {
+        if generation.is_some_and(|generation| generation != self.generation) {
+            return Err(AppError::io(
+                "the graph changed since this command was issued; dropping it",
+            ));
+        }
+        Ok(())
+    }
+
     /// The open graph's local-only folders (shared with the watcher, which
     /// reads them under the graph lock it already holds).
     #[cfg(desktop)]
@@ -405,11 +410,7 @@ pub(crate) fn graph_for(
     generation: Option<u64>,
 ) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>)> {
     let inner = lock_graph(state)?;
-    if generation.is_some_and(|generation| generation != inner.generation) {
-        return Err(AppError::io(
-            "the graph changed since this command was issued; dropping it",
-        ));
-    }
+    inner.check_generation(generation)?;
     let root = inner.root.clone().ok_or_else(AppError::no_graph)?;
     Ok((root, inner.local_only.clone()))
 }
@@ -419,11 +420,7 @@ pub(crate) fn graph_for(
 /// open did not load one.
 pub(crate) fn backup_max_file_bytes(state: &GraphState, generation: u64) -> AppResult<Option<u64>> {
     let inner = lock_graph(state)?;
-    if generation != inner.generation {
-        return Err(AppError::io(
-            "the graph changed since this command was issued; dropping it",
-        ));
-    }
+    inner.check_generation(Some(generation))?;
     Ok(inner.backup_max_file_bytes)
 }
 
@@ -435,11 +432,7 @@ pub(crate) fn accepted_history_roots(
     generation: u64,
 ) -> AppResult<Vec<git2::Oid>> {
     let inner = lock_graph(state)?;
-    if generation != inner.generation {
-        return Err(AppError::io(
-            "the graph changed since this command was issued; dropping it",
-        ));
-    }
+    inner.check_generation(Some(generation))?;
     Ok(inner.accepted_history_roots.clone())
 }
 
@@ -461,11 +454,7 @@ fn graph_when_known(
     refusal: &'static str,
 ) -> AppResult<(PathBuf, Option<Arc<LocalOnlyFolders>>)> {
     let inner = lock_graph(state)?;
-    if generation.is_some_and(|generation| generation != inner.generation) {
-        return Err(AppError::io(
-            "the graph changed since this command was issued; dropping it",
-        ));
-    }
+    inner.check_generation(generation)?;
     if inner.local_only_unknown {
         return Err(AppError::io(refusal));
     }
@@ -1477,11 +1466,7 @@ pub fn graph_delete(generation: u64, state: State<GraphState>) -> AppResult<()> 
         // pinned write still resolves the doomed root.
         let root = {
             let mut inner = lock_graph(&state)?;
-            if inner.generation != generation {
-                return Err(AppError::io(
-                    "the graph changed since this command was issued; dropping it",
-                ));
-            }
+            inner.check_generation(Some(generation))?;
             let root = inner.root.take().ok_or_else(AppError::no_graph)?;
             inner.local_only = None;
             inner.local_only_warnings = Vec::new();
@@ -1749,11 +1734,7 @@ where
 {
     let (root, local_only, expected_generation, expected_revision) = {
         let inner = lock_graph(state)?;
-        if generation.is_some_and(|generation| generation != inner.generation) {
-            return Err(AppError::io(
-                "the graph changed since this command was issued; dropping it",
-            ));
-        }
+        inner.check_generation(generation)?;
         if let Some(catalog) = &inner.catalog {
             return Ok(catalog.clone());
         }

@@ -14,14 +14,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use reflect_graph_paths::LocalOnlyFolders;
+use reflect_graph_paths::{graph_settings_key, LocalOnlyFolders, LOCAL_ONLY_SETTINGS_KEY};
 use serde_json::Value;
 
 use crate::error::CliError;
-
-/// The settings-document key holding every graph's local-only configuration
-/// (the desktop's `fs::local_only::SETTINGS_KEY`).
-const SETTINGS_KEY: &str = "localOnlyFolders";
 
 /// The desktop's settings document, or `None` when this platform has no
 /// config directory.
@@ -57,16 +53,15 @@ pub(crate) fn folders_in_settings(
         Err(err) => return Err(unknown(err)),
     };
     let document: Value = serde_json::from_str(&raw).map_err(unknown)?;
-    let Some(entries) = document.get(SETTINGS_KEY) else {
+    let Some(entries) = document.get(LOCAL_ONLY_SETTINGS_KEY) else {
         return Ok(None);
     };
     let Some(entries) = entries.as_object() else {
-        return Err(unknown(format!("\"{SETTINGS_KEY}\" is not an object")));
+        return Err(unknown(format!(
+            "\"{LOCAL_ONLY_SETTINGS_KEY}\" is not an object"
+        )));
     };
-    let Some(entry) = entries
-        .iter()
-        .find(|(key, _)| same_folder(Path::new(key), root))
-        .map(|(_, entry)| entry)
+    let Some(entry) = graph_settings_key(entries.keys(), root).and_then(|key| entries.get(key))
     else {
         return Ok(None);
     };
@@ -82,16 +77,6 @@ pub(crate) fn folders_in_settings(
         })
         .collect::<Result<Vec<String>, CliError>>()?;
     Ok(LocalOnlyFolders::recorded(names, None))
-}
-
-/// Whether two paths name the same folder: spelled alike, or canonically
-/// equal (the desktop keys the entry by the root it opened).
-fn same_folder(key: &Path, root: &Path) -> bool {
-    key == root
-        || match (key.canonicalize(), root.canonicalize()) {
-            (Ok(key), Ok(root)) => key == root,
-            _ => false,
-        }
 }
 
 #[cfg(test)]
@@ -113,7 +98,7 @@ mod tests {
         let path = settings(
             dir.path(),
             &serde_json::json!({
-                SETTINGS_KEY: {
+                LOCAL_ONLY_SETTINGS_KEY: {
                     key: { "folders": ["secure", "daily"] },
                     "/elsewhere": { "folders": ["kids"] }
                 }

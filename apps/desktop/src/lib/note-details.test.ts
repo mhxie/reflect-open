@@ -26,12 +26,12 @@ describe('noteDetails', () => {
       noteDetails({ state: EDITABLE, backup: connected({ state: 'idle' }), version: COMMITTED }),
     ).toEqual({
       note: [
-        { name: 'Privacy', value: 'Standard', hint: null },
-        { name: 'Editing', value: 'Editable', hint: null },
+        { name: 'Privacy', status: 'standard', value: 'Standard', hint: null },
+        { name: 'Editing', status: 'editable', value: 'Editable', hint: null },
       ],
       backup: [
-        { name: 'Backup', value: 'Backed up', hint: null },
-        { name: 'Version', value: 'abc123def4', hint: null, monospace: true },
+        { name: 'Backup', status: 'backed-up', value: 'Backed up', hint: null },
+        { name: 'Version', status: 'committed', value: 'abc123def4', hint: null },
       ],
     })
   })
@@ -44,6 +44,7 @@ describe('noteDetails', () => {
     })
     expect(note[0]).toEqual({
       name: 'Privacy',
+      status: 'private',
       value: 'Private',
       hint: 'Never sent to AI or other services.',
     })
@@ -64,16 +65,20 @@ describe('noteDetails', () => {
     expect(note).toEqual([
       {
         name: 'Privacy',
+        status: 'local-only',
         value: 'Local-only',
         hint: 'Stays on this device. Never synced or sent to AI.',
       },
       {
         name: 'Editing',
+        status: 'read-only',
         value: 'Read-only',
         hint: 'Its folder isn’t editable in Reflect. Edit it in another app.',
       },
     ])
-    expect(backup).toEqual([{ name: 'Backup', value: 'Never backed up', hint: null }])
+    expect(backup).toEqual([
+      { name: 'Backup', status: 'never', value: 'Never backed up', hint: null },
+    ])
   })
 
   it('pauses editing on a protected note', () => {
@@ -82,7 +87,7 @@ describe('noteDetails', () => {
       backup: undefined,
       version: COMMITTED,
     })
-    expect(note[1]).toEqual({ name: 'Editing', value: 'Paused', hint: null })
+    expect(note[1]).toEqual({ name: 'Editing', status: 'paused', value: 'Paused', hint: null })
   })
 
   it('folds live graph sync into the Backup row', () => {
@@ -97,6 +102,7 @@ describe('noteDetails', () => {
       }).backup[0],
     ).toEqual({
       name: 'Backup',
+      status: 'offline',
       value: 'Offline',
       hint: 'Changes sync once the remote is reachable.',
     })
@@ -106,7 +112,7 @@ describe('noteDetails', () => {
         backup: connected({ state: 'error', errorKind: 'auth', message: 'Token expired' }),
         version: COMMITTED,
       }).backup[0],
-    ).toEqual({ name: 'Backup', value: 'Sync failed', hint: 'Token expired' })
+    ).toEqual({ name: 'Backup', status: 'failed', value: 'Sync failed', hint: 'Token expired' })
   })
 
   it('reports the version lookup without claiming a commit it has not seen', () => {

@@ -2,7 +2,11 @@ import { splitFrontmatter } from '../markdown/frontmatter.ts'
 import { parseBody } from '../markdown/grammar.ts'
 import { readWikiCitationComment } from './anchors.ts'
 import { readWikiClaimIndex } from './article.ts'
-import { wikiMarkdownStructure } from './article-syntax.ts'
+import {
+  isWikiBibliographyHeading,
+  isWikiRevisionHeading,
+  wikiMarkdownStructure,
+} from './article-syntax.ts'
 
 /** A source edit is returned only after the exact selection survives Markdown parsing. */
 export type WikiClaimEdit =
@@ -92,11 +96,11 @@ function appendLedger(source: string, id: string): string {
       })
     },
   })
-  const owner = headings.findIndex((heading) => /^(?:Evidence|References)$/.test(heading.title))
+  const owner = headings.findIndex((heading) => isWikiBibliographyHeading(heading.title))
   const evidence = owner !== -1
   const revision = evidence
     ? (headings[owner + 1]?.from ?? source.length)
-    : (headings.find((heading) => heading.title === 'Revision Log')?.from ?? source.length)
+    : (headings.find((heading) => isWikiRevisionHeading(heading.title))?.from ?? source.length)
   const block = `${evidence ? '' : '## Evidence\n\n'}\`\`\`anchors ${id}\n\`\`\`\n`
   const prefix = source.slice(0, revision)
   const separator = prefix.endsWith('\n\n') ? '' : prefix.endsWith('\n') ? '\n' : '\n\n'

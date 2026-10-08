@@ -18,11 +18,15 @@ export { wikiEntryIn } from '../wiki/localize.ts'
 export { wikiClaimHeadingText } from '../wiki/claims.ts'
 export { planWikiClaim, planWikiClaimBoundary, type WikiClaimEdit } from '../wiki/article-edit.ts'
 export {
+  isWikiBibliographyHeading,
+  isWikiRevisionHeading,
+  wikiLedgerOwner,
+  wikiPendingPass,
+} from '../wiki/article-syntax.ts'
+export {
   findWikiClaim,
   readWikiClaimIndex,
-  wikiByteOffsetToSource,
   wikiClaimId,
-  wikiSourceSpan,
   type WikiArticleDiagnostic,
   type WikiClaimIndex,
   type WikiClaimLedger,

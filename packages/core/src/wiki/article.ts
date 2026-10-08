@@ -4,7 +4,12 @@ import { parseBody } from '../markdown/grammar.ts'
 import { unescapeMarkdownText } from '../markdown/plain-text.ts'
 import { readWikiAnchorsBlock, readWikiCitationComment, type WikiAnchorsBlock } from './anchors.ts'
 import { wikiClaimNumber } from './claims.ts'
-import { wikiClaimFormattingPreserved } from './article-syntax.ts'
+import {
+  isWikiBibliographyHeading,
+  isWikiRevisionHeading,
+  wikiClaimFormattingPreserved,
+  wikiLedgerOwner,
+} from './article-syntax.ts'
 
 /** Half-open offsets into the unchanged source, in JavaScript UTF-16 and UTF-8 bytes. */
 export interface WikiSourceSpan {
@@ -65,7 +70,6 @@ export interface WikiClaimIndex {
 
 const MARKER = /^<!--[ \t]*(\/?)claim:(c[1-9]\d*)[ \t]*-->$/
 const RESERVED_MARKER = /^<!--\s*\/?claim\s*:/
-const OWNER = /^anchors (c[1-9]\d*)$/
 
 /** UTF-16 boundaries map to bytes without normalizing line endings or Unicode. */
 export function wikiSourceSpan(source: string, from: number, to: number): WikiSourceSpan {
@@ -160,7 +164,7 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
         opaque.push({ from, to })
         const info = codeInfo(node, body)
         if (!/^anchors(?:\s|$)/.test(info)) return false
-        const owner = OWNER.exec(info)?.[1] ?? null
+        const owner = wikiLedgerOwner(info)
         const code = node.getChild('CodeText')
         const content = code === null ? '' : body.slice(code.from, code.to)
         ledgers.push({
@@ -307,7 +311,8 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
       }
     }
     const administrative = headings.some((heading, headingIndex) => {
-      if (!/^(?:Evidence|References|Revision Log)$/i.test(heading.text)) return false
+      if (!isWikiBibliographyHeading(heading.text) && !isWikiRevisionHeading(heading.text))
+        return false
       const end =
         headings.slice(headingIndex + 1).find((next) => next.level <= heading.level)?.from ??
         source.length

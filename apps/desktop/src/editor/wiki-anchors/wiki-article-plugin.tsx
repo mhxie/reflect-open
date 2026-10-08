@@ -10,13 +10,14 @@ import { isHistoryTransaction } from '@prosekit/pm/history'
 import { Decoration, DecorationSet, type EditorView } from '@prosekit/pm/view'
 import { createRoot, type Root } from 'react-dom/client'
 import type { ReactNode } from 'react'
-import type { WikiArticleIndex } from '@reflect/core'
+import { wikiPendingPass, type WikiArticleIndex } from '@reflect/core'
 import { WikiArticleEvidence } from './wiki-article-evidence.tsx'
 import { WikiArticleBibliography } from './wiki-article-bibliography.tsx'
 import { wikiClaimPending } from './wiki-article-pending.ts'
 import { wikiRevisionSection } from './wiki-revision-section.ts'
 import { WikiArticleRevision } from './wiki-article-revision.tsx'
 import { WikiArticleDefinitions } from './wiki-article-definitions.tsx'
+import { isBibliographyHeadingNode, ledgerOwnerOf } from './wiki-article-nodes.ts'
 import { appendWikiArticleRecords } from './wiki-article-records.ts'
 import { WikiReferenceGroupView } from './wiki-reference-group.tsx'
 import {
@@ -99,13 +100,13 @@ function pendingEdits(
   const targets: { position: number; text: string }[] = []
   state.doc.descendants((node, position) => {
     if (node.type.name !== 'codeBlock') return true
-    const id = /^anchors (c[1-9]\d*)$/.exec(String(node.attrs['language']))?.[1]
-    if (id === undefined || !changed.has(id)) return false
+    const id = ledgerOwnerOf(node)
+    if (id === null || !changed.has(id)) return false
     const ledger = next.index.ledgers.find((item) => item.valid && item.owner === id)
     if (ledger !== undefined && !wikiClaimPending(ledger))
       targets.push({
         position: position + node.nodeSize - 1,
-        text: `${node.textContent.endsWith('\n') || node.textContent === '' ? '' : '\n'}@pass: editor | status: pending | at: ${next.asOf}`,
+        text: `${node.textContent.endsWith('\n') || node.textContent === '' ? '' : '\n'}${wikiPendingPass(next.asOf)}`,
       })
     return false
   })
@@ -118,7 +119,7 @@ function pendingEdits(
     transaction.insertText(target.text, target.position)
   appendWikiArticleRecords(
     transaction,
-    missing.map((id) => ({ id, raw: `@pass: editor | status: pending | at: ${next.asOf}` })),
+    missing.map((id) => ({ id, raw: wikiPendingPass(next.asOf) })),
   )
   return transaction.setMeta('wiki-review-pending', true)
 }
@@ -235,16 +236,11 @@ function decorations(
   }
   let bibliographyAt: number | null = null
   state.doc.descendants((node, position) => {
-    if (
-      node.type.name === 'heading' &&
-      node.attrs['level'] === 2 &&
-      /^(?:Evidence|References)$/.test(node.textContent) &&
-      bibliographyAt === null
-    )
+    if (bibliographyAt === null && isBibliographyHeadingNode(node))
       bibliographyAt = position + node.nodeSize
     if (node.type.name !== 'codeBlock') return true
-    const owner = /^anchors (c[1-9]\d*)$/.exec(String(node.attrs['language']))?.[1]
-    if (owner === undefined) return false
+    const owner = ledgerOwnerOf(node)
+    if (owner === null) return false
     const ledger = index.ledgers.find((item) => item.valid && item.owner === owner)
     if (ledger === undefined) return false
     const end = position + node.nodeSize

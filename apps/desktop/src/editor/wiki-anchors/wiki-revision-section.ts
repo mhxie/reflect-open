@@ -1,5 +1,6 @@
 import { createMarkdownSourceMap } from '@meowdown/core'
 import type { Node as ProseMirrorNode } from '@prosekit/pm/model'
+import { isRevisionHeadingNode } from './wiki-article-nodes.ts'
 
 /** A top-level administrative section ends only at the next H1/H2. */
 export function wikiRevisionSection(
@@ -14,7 +15,7 @@ export function wikiRevisionSection(
       to = Math.min(to, position)
       return
     }
-    if (node.attrs['level'] === 2 && node.textContent.trim().toLowerCase() === 'revision log') {
+    if (isRevisionHeadingNode(node)) {
       from = position
       contentFrom = position + node.nodeSize
     }
