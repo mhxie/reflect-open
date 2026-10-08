@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import {
+  isWikiTrustReportPath,
   normalizeWikiTrustReportPath,
   parseWikiTrustReport,
   wikiClaimStanding,
@@ -36,7 +38,6 @@ describe('parseWikiTrustReport', () => {
     const report = exampleReport()
     expect(report.harness).toEqual({ name: 'example-harness', version: '1.0.0' })
     expect(report.sourceThreshold).toBe(0.6)
-    expect(report.notes.get(NOTE)?.rank).toBe(0.82)
     expect(report.notes.get(NOTE)?.claims.get('c5')).toMatchObject({
       tier: 'needs-work',
       overlays: ['disputed'],
@@ -57,6 +58,30 @@ describe('parseWikiTrustReport', () => {
     })
     expect(parseWikiTrustReport(JSON.stringify({ ...json, format: 'other' })).ok).toBe(false)
     expect(parseWikiTrustReport('{').ok).toBe(false)
+  })
+
+  it('drops a claim with a malformed id alone, keeping its valid siblings', () => {
+    const json: Record<string, unknown> = JSON.parse(example)
+    const notes = json['notes'] as Record<string, { claims: Record<string, unknown> }>
+    const claims = notes[NOTE]!.claims
+    const parsed = parseWikiTrustReport(
+      JSON.stringify({ ...json, notes: { [NOTE]: { claims: { ...claims, c0: claims['c1'] } } } }),
+    )
+    expect(parsed.ok && parsed.ignored).toBe(1)
+    expect(parsed.ok && [...parsed.report.notes.get(NOTE)!.claims.keys()]).toEqual(['c1', 'c5'])
+  })
+
+  it('matches note keys whatever Unicode form the harness wrote', () => {
+    const json: Record<string, unknown> = JSON.parse(example)
+    const notes = json['notes'] as Record<string, unknown>
+    const decomposed = 'wiki/Cafe\u{301}.md'
+    const parsed = parseWikiTrustReport(
+      JSON.stringify({ ...json, notes: { [decomposed]: notes[NOTE] } }),
+    )
+    if (!parsed.ok) throw new Error(parsed.error)
+    expect(wikiClaimStanding(parsed.report, 'wiki/Caf\u{E9}.md', 'c1', 'a'.repeat(64)).state).toBe(
+      'changed',
+    )
   })
 
   it('drops and counts a malformed entry without failing the report', () => {
@@ -103,10 +128,12 @@ describe('wikiClaimStanding', () => {
     )
   })
 
-  it('hashes UTF-8 bytes as lowercase hex', async () => {
+  it('hashes UTF-8 bytes as lowercase hex, reading CRLF and CR as LF', async () => {
     expect(await wikiClaimTextSha256('abc')).toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     )
+    const lf = await wikiClaimTextSha256('a\nb\nc')
+    expect(await wikiClaimTextSha256('a\r\nb\rc')).toBe(lf)
   })
 })
 
@@ -121,6 +148,24 @@ describe('wikiTrustCounts', () => {
         { state: 'unevaluated' },
       ]),
     ).toEqual({ solid: 0, supported: 0, needsWork: 1, disputed: 1, edited: 0, pending: 2 })
+  })
+})
+
+describe('isWikiTrustReportPath', () => {
+  it('matches the corpus the Rust reader runs', () => {
+    const corpus = z
+      .object({ cases: z.array(z.object({ path: z.string(), valid: z.boolean() })) })
+      .parse(
+        JSON.parse(
+          readFileSync(
+            new URL('../../../../fixtures/wiki-trust-report-paths.json', import.meta.url),
+            'utf8',
+          ),
+        ),
+      )
+    for (const { path, valid } of corpus.cases) {
+      expect(isWikiTrustReportPath(path), path).toBe(valid)
+    }
   })
 })
 

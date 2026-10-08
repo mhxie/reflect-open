@@ -24,13 +24,12 @@ export type WikiTrustReportState =
       readonly report: WikiTrustReport
       /** Entries the report carried that did not validate. */
       readonly ignored: number
-      readonly modifiedMs: number | null
+      readonly stamp: string
     }
   | {
       readonly status: 'invalid'
       readonly path: string
       readonly error: string
-      readonly modifiedMs: number | null
     }
   | { readonly status: 'unreadable'; readonly path: string; readonly error: string }
 
@@ -43,8 +42,9 @@ async function loadReport(
   generation: number,
 ): Promise<Loaded> {
   const previous = client.getQueryData<Loaded>(key)
-  const known =
-    previous?.status === 'ready' || previous?.status === 'invalid' ? previous.modifiedMs : null
+  // Only a report that parsed is kept by stamp; anything else is read again,
+  // so a file caught mid-write recovers on the next poll.
+  const known = previous?.status === 'ready' ? previous.stamp : null
   let file: Awaited<ReturnType<typeof readWikiTrustReportFile>>
   try {
     file = await readWikiTrustReportFile(path, known, generation)
@@ -52,7 +52,7 @@ async function loadReport(
     return { status: 'unreadable', path, error: errorMessage(cause) }
   }
   if (file === null) return { status: 'missing', path }
-  if (file.contents === null && previous !== undefined) return previous
+  if (file.contents === null && previous?.status === 'ready') return previous
   const parsed = parseWikiTrustReport(file.contents ?? '')
   return parsed.ok
     ? {
@@ -60,9 +60,9 @@ async function loadReport(
         path,
         report: parsed.report,
         ignored: parsed.ignored,
-        modifiedMs: file.modifiedMs,
+        stamp: file.stamp,
       }
-    : { status: 'invalid', path, error: parsed.error, modifiedMs: file.modifiedMs }
+    : { status: 'invalid', path, error: parsed.error }
 }
 
 /**

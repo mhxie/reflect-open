@@ -3,8 +3,8 @@
  * agent harness's trust engine. A harness (atelier, or any other) evaluates
  * claims and sources however it likes and writes one JSON file into the
  * graph; Reflect validates it, checks each verdict against the claim text it
- * was computed for, and displays it. Reflect never computes a tier, score,
- * rank, or source weight. The format is specified in
+ * was computed for, and displays it. Reflect never computes a tier or a
+ * source weight. The format is specified in
  * `docs/wiki-trust-harness.md`; `wikiTrustReportJsonSchema` is its JSON Schema.
  */
 
@@ -26,19 +26,25 @@ export const WIKI_TRUST_DISPLAYS = ['inline', 'margin', 'on-demand', 'off'] as c
 export type WikiTrustDisplay = (typeof WIKI_TRUST_DISPLAYS)[number]
 
 /**
- * A typed report path as a graph-relative path, or null when it cannot name
- * one: trimmed, a leading `./` dropped, forward slashes only, no empty, `.`,
- * or `..` segment, outside `.reflect/` and `.git/`, and ending in `.json`.
- * Mirrors the Rust reader's rules so Settings can say why before a read fails.
+ * Whether `path` names a place a trust report may live: plain `/`-separated
+ * segments (none empty, `.`, `..`, or holding a backslash), ending in `.json`, and
+ * not under `.reflect/` or `.git/`. The same rules as the Rust reader's
+ * (`reflect_graph_paths::is_wiki_trust_report_path`), checked against one
+ * corpus, `fixtures/wiki-trust-report-paths.json`.
  */
+export function isWikiTrustReportPath(path: string): boolean {
+  const segments = path.split('/')
+  const plain = segments.every(
+    (segment) => segment !== '' && segment !== '.' && segment !== '..' && !segment.includes('\\'),
+  )
+  const first = (segments[0] ?? '').toLowerCase()
+  return plain && first !== '.reflect' && first !== '.git' && path.toLowerCase().endsWith('.json')
+}
+
+/** A typed report path, trimmed and without a leading `./`, or null when Reflect may not read it. */
 export function normalizeWikiTrustReportPath(input: string): string | null {
   const path = input.trim().replace(/^\.\//, '')
-  if (path === '' || path.includes('\\') || path.startsWith('/')) return null
-  const segments = path.split('/')
-  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) return null
-  const first = segments[0]!.toLowerCase()
-  if (first === '.reflect' || first === '.git') return null
-  return path.toLowerCase().endsWith('.json') ? path : null
+  return isWikiTrustReportPath(path) ? path : null
 }
 
 /** How well a claim stands, strongest first, as the harness judged it. */
@@ -65,7 +71,6 @@ export interface WikiClaimVerdict {
   readonly textSha256: string
   /** The day the harness evaluated the claim (`YYYY-MM-DD`). */
   readonly evaluatedAt: string
-  readonly score: number | null
   readonly reasons: readonly WikiTrustReason[]
   /** What would raise the tier, when the harness says. */
   readonly next: string | null
@@ -86,8 +91,6 @@ export interface WikiSourceStanding {
 
 /** One note's entry in the report. */
 export interface WikiNoteTrust {
-  /** The harness's ordering rank; higher ranks first. */
-  readonly rank: number | null
   readonly claims: ReadonlyMap<string, WikiClaimVerdict>
 }
 
@@ -127,15 +130,14 @@ const claimSchema = z.object({
   overlays: z.array(z.string()).optional(),
   text_sha256: sha256Hex,
   evaluated_at: isoDay,
-  score: z.number().finite().optional(),
   reasons: z.array(reasonSchema).optional(),
   next: z.string().optional(),
   sources: z.array(z.string()).optional(),
 })
 
 const noteSchema = z.object({
-  rank: z.number().finite().optional(),
-  claims: z.record(claimIdSchema, z.unknown()),
+  // Keys are checked one by one below, so a bad id drops only its own entry.
+  claims: z.record(z.string(), z.unknown()),
 })
 
 const sourceSchema = z.object({
@@ -211,7 +213,7 @@ export function parseWikiTrustReport(text: string): WikiTrustReportParse {
     const claims = new Map<string, WikiClaimVerdict>()
     for (const [id, claimValue] of Object.entries(note.data.claims)) {
       const claim = claimSchema.safeParse(claimValue)
-      if (!claim.success) {
+      if (!claimIdSchema.safeParse(id).success || !claim.success) {
         ignored += 1
         continue
       }
@@ -220,13 +222,12 @@ export function parseWikiTrustReport(text: string): WikiTrustReportParse {
         overlays: (claim.data.overlays ?? []).filter(isOverlay),
         textSha256: claim.data.text_sha256,
         evaluatedAt: claim.data.evaluated_at,
-        score: claim.data.score ?? null,
         reasons: reasonsOf(claim.data.reasons),
         next: claim.data.next ?? null,
         sources: claim.data.sources ?? [],
       })
     }
-    notes.set(path, { rank: note.data.rank ?? null, claims })
+    notes.set(path.normalize('NFC'), { claims })
   }
   const sources = new Map<string, WikiSourceStanding>()
   for (const [origin, value] of Object.entries(envelope.data.sources ?? {})) {
@@ -257,11 +258,13 @@ export function parseWikiTrustReport(text: string): WikiTrustReportParse {
 }
 
 /**
- * The hash a verdict is keyed to: SHA-256 of the claim text's UTF-8 bytes
- * (the range between its markers, or a legacy claim's body), lowercase hex.
+ * The hash a verdict is keyed to: SHA-256, lowercase hex, of the UTF-8 bytes
+ * of the claim text between its markers, with CRLF and lone CR read as LF
+ * (Reflect holds notes with LF line endings whatever the file uses).
  */
 export async function wikiClaimTextSha256(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  const lines = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(lines))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
@@ -283,7 +286,7 @@ export function wikiClaimStanding(
   claimId: string,
   textSha256: string,
 ): WikiClaimStanding {
-  const verdict = report.notes.get(path)?.claims.get(claimId)
+  const verdict = report.notes.get(path.normalize('NFC'))?.claims.get(claimId)
   if (verdict === undefined) return { state: 'unevaluated' }
   return verdict.textSha256 === textSha256
     ? { state: 'current', verdict }

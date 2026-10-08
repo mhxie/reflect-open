@@ -353,9 +353,7 @@ mod tests {
             .managed_content
             .contains("git -C \"/graphs/Personal\""));
         assert!(!context.managed_content.contains("{{"));
-        assert!(context
-            .managed_content
-            .contains("/graphs/Personal/.harness/wiki-trust.json"));
+        assert!(context.managed_content.contains("reflect trust-report"));
     }
 
     #[test]

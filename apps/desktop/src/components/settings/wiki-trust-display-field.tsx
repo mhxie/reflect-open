@@ -12,8 +12,8 @@ interface DisplayOption {
 }
 
 const OPTIONS: readonly DisplayOption[] = [
-  { value: 'inline', label: 'Inline', hint: 'On each claim’s citations' },
-  { value: 'margin', label: 'Margin', hint: 'Beside each paragraph' },
+  { value: 'inline', label: 'Inline', hint: 'After each claim' },
+  { value: 'margin', label: 'Margin', hint: 'Beside the paragraph' },
   { value: 'on-demand', label: 'On demand', hint: 'While you hold ⌥' },
   { value: 'off', label: 'Off', hint: 'No marks' },
 ]
@@ -25,9 +25,9 @@ interface PreviewProps {
 /** Two lines of placeholder prose with the option's mark, drawn in CSS. */
 function Preview({ value }: PreviewProps): ReactElement {
   return (
-    <span aria-hidden className="relative flex w-full flex-col gap-1 py-1 pl-3">
+    <span aria-hidden className="relative flex w-full flex-col gap-1 py-1 pr-3">
       {value === 'margin' ? (
-        <span className="absolute top-0.5 left-0 size-1.5 rounded-full border border-dashed border-trust-needs-work" />
+        <span className="absolute top-0.5 right-0 size-1.5 rounded-full border border-dashed border-trust-needs-work" />
       ) : null}
       <span className="flex items-center gap-1">
         <span
@@ -37,7 +37,7 @@ function Preview({ value }: PreviewProps): ReactElement {
           )}
         />
         {value === 'inline' ? (
-          <span className="h-2 w-2.5 rounded-full border border-dashed border-trust-needs-work" />
+          <span className="size-1.5 shrink-0 rounded-full border border-dashed border-trust-needs-work" />
         ) : null}
       </span>
       <span className="h-1 w-3/4 rounded-full bg-border-strong" />

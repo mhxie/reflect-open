@@ -27,6 +27,7 @@ import {
 import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { WikiClaimToggle } from '@/editor/wiki-anchors/wiki-claim-toggle.tsx'
+import { WikiTrustSummary } from '@/editor/wiki-anchors/wiki-trust-summary.tsx'
 
 const numberFormat = new Intl.NumberFormat()
 
@@ -170,6 +171,7 @@ export function NoteStatusBar({
           </DropdownMenuContent>
         </DropdownMenu>
         <WikiClaimToggle path={path} />
+        <WikiTrustSummary path={path} />
       </div>
       {state.isProtected && status.protection !== null && scope !== null ? (
         <Popover

@@ -26,6 +26,9 @@ import {
   type WikiArticleProjection,
 } from './wiki-article-projection.ts'
 import type { WikiEvidenceOptions } from './wiki-evidence.ts'
+import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
+import { wikiStandingLabel, wikiStandingStyle } from './wiki-trust-labels.ts'
+import type { WikiTrustView } from './wiki-trust-view.ts'
 import {
   copyWikiProse,
   cutWikiClaim,
@@ -47,6 +50,8 @@ interface WikiArticlePluginOptions {
   readonly evidence: WikiEvidenceOptions
   readonly onUpdate: () => void
   readonly noteIdentity?: (title: string) => string | null
+  /** The harness's verdicts, matched to the current text; null shows no trust. */
+  readonly trust?: () => WikiTrustView | null
 }
 
 /** View-only transactions use this key; they never enter undo history. */
@@ -134,6 +139,10 @@ function decorations(
   const { index, map } = projection
   if (!index.article) return DecorationSet.empty
   const result: Decoration[] = []
+  const trustView = options.trust?.() ?? null
+  const claimTrust = (id: string | null | undefined): WikiClaimTrust | null =>
+    trustView === null || id === null || id === undefined ? null : trustView.claim(id)
+  const margin = new Map<number, WikiClaimTrust[]>()
   for (const marker of index.markers) {
     if (!marker.valid) continue
     const range = wikiEditorRange(map, marker)
@@ -144,19 +153,27 @@ function decorations(
     if (claim.kind !== 'range') continue
     const range = wikiEditorRange(map, claim)
     if (range === null) continue
+    const trust = claimTrust(claim.id)
+    let block: number | null = null
     state.doc.nodesBetween(range.from, range.to, (node, position) => {
       if (!node.isTextblock || node.type.spec.code) return true
       const from = Math.max(position + 1, range.from)
       const to = Math.min(position + node.nodeSize - 1, range.to)
+      block ??= position
       if (from < to)
         result.push(
           Decoration.inline(from, to, {
             'data-wiki-claim': claim.id,
             ...(showRanges ? { 'data-wiki-claim-visible': '' } : {}),
+            ...(trust === null ? {} : { 'data-wiki-trust': wikiStandingStyle(trust.standing) }),
           }),
         )
       return false
     })
+    if (trust !== null && trustView?.display === 'inline')
+      result.push(trustWidget(range.to, `claim-trust:${revision}:${claim.id}`, [trust], 'inline'))
+    if (trust !== null && trustView?.display === 'margin' && block !== null)
+      margin.set(block, [...(margin.get(block) ?? []), trust])
     if (showRanges) {
       const position = TextSelection.near(state.doc.resolve(range.from), 1).from
       result.push(
@@ -231,6 +248,21 @@ function decorations(
             },
           }}
         />,
+      ),
+    )
+  }
+  for (const [position, claims] of margin) {
+    const node = state.doc.nodeAt(position)
+    if (node === null) continue
+    result.push(
+      Decoration.node(position, position + node.nodeSize, { class: 'wiki-trust-margin-host' }),
+    )
+    result.push(
+      trustWidget(
+        position + 1,
+        `trust-margin:${revision}:${claims.map((trust) => trust.claimId).join(',')}`,
+        claims,
+        'margin',
       ),
     )
   }
@@ -384,6 +416,46 @@ function decorations(
 
 const articleViews = new WeakMap<object, EditorView>()
 
+/**
+ * A claim's trust mark: a plain button, so a redraw never tears down a live
+ * popover. The bridge opens the claim's card from a click on it; CSS draws
+ * the tier's shape from `data-wiki-trust`.
+ */
+function trustMark(trust: WikiClaimTrust): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'wiki-trust-mark'
+  button.dataset['wikiTrustClaim'] = trust.claimId
+  button.dataset['wikiTrust'] = wikiStandingStyle(trust.standing)
+  button.setAttribute('aria-haspopup', 'dialog')
+  button.setAttribute(
+    'aria-label',
+    `Claim ${trust.claimId.toUpperCase()}: ${wikiStandingLabel(trust.standing)}`,
+  )
+  return button
+}
+
+/** One claim's mark after its text, or a paragraph's marks in a margin column. */
+function trustWidget(
+  position: number,
+  key: string,
+  marks: readonly WikiClaimTrust[],
+  layout: 'inline' | 'margin',
+): Decoration {
+  return Decoration.widget(
+    position,
+    () => {
+      const node = document.createElement('span')
+      node.className = layout === 'margin' ? 'wiki-trust-margin' : 'wiki-trust-inline'
+      node.contentEditable = 'false'
+      node.append(...marks.map(trustMark))
+      return node
+    },
+    // After the claim's citations (drawn at side 1), so the mark closes the claim.
+    { key, side: 2, ignoreSelection: true, stopEvent: () => true },
+  )
+}
+
 /** Render the source projection without replacing prose or storing citation numbers. */
 export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExtension {
   return withPriority(
@@ -409,7 +481,10 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
               asOf !== previous.asOf ||
               transaction.getMeta(wikiArticleKey) === 'identities'
             const projection = refresh ? wikiArticleProjection(state.doc, asOf, options) : previous
-            const revision = previous.revision + (refresh ? 1 : 0)
+            // New verdicts redraw the marks but keep the projection, whose
+            // identity the trust view itself depends on.
+            const redraw = refresh || transaction.getMeta(wikiArticleKey) === 'trust'
+            const revision = previous.revision + (redraw ? 1 : 0)
             const meta: unknown = transaction.getMeta(wikiArticleKey)
             const showRanges = meta === 'toggle' ? !previous.showRanges : previous.showRanges
             return {

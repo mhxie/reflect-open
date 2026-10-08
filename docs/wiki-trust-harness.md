@@ -21,11 +21,22 @@ whole contract; [Plan 30](plans/30-claim-trust.md) records the design.
 
 ## Where the report lives
 
-Settings → Wiki → **Trust report** holds the graph-relative path. The default
-is `.harness/wiki-trust.json`. Any `.json` path inside the graph works except
-under `.reflect/` (Reflect's rebuildable state) and `.git/`. Keep the file
-where your sync carries it (Git backup, iCloud) if you want Reflect on other
-devices, including iOS, to show trust without the harness running there.
+Settings → Wiki → **Trust report** holds the graph-relative path. Ask for it
+rather than assuming the default:
+
+    reflect --graph <graph> trust-report        # prints the absolute path
+
+The default is `.harness/wiki-trust.json`. A path is valid when every segment
+is plain (no empty, `.`, or `..` segment), it ends in `.json`, and it is not
+under `.reflect/` (Reflect's rebuildable state) or `.git/`; the cases are in
+[`fixtures/wiki-trust-report-paths.json`](../fixtures/wiki-trust-report-paths.json).
+Prefer a hidden folder: a report under a visible folder is listed among the
+graph's attachments.
+
+The report syncs wherever the graph syncs, so Reflect on other devices,
+including iOS, shows trust without the harness running there. With Git backup
+each new report is committed; write it when verdicts change rather than on a
+timer.
 
 ## The format
 
@@ -40,8 +51,7 @@ from the reader, so it cannot drift). A complete example:
 | `version` | `1`. Reflect refuses a version it does not read and says so in Settings. |
 | `generated_at` | When the report was written (RFC 3339). |
 | `harness` | `{ "name", "version"? }`, shown in Settings. |
-| `notes` | Entries by graph-relative note path (`wiki/memory/Spacing effect.md`). |
-| `notes.<path>.rank` | Optional ordering rank for the Wiki screen; higher first. |
+| `notes` | Entries by graph-relative note path (`wiki/memory/Spacing effect.md`); Reflect compares paths in Unicode NFC. |
 | `notes.<path>.claims` | Verdicts by claim id (`c1`, `c2`, …). |
 | `sources` | Optional standings by origin key (below). |
 | `source_threshold` | Optional weight a source needs to count as trusted, 0–1. |
@@ -54,7 +64,6 @@ A claim verdict:
 | `overlays` | Optional: `"disputed"`, `"edited"`. Unknown values are ignored. |
 | `text_sha256` | SHA-256 of the claim text you evaluated, lowercase hex (below). |
 | `evaluated_at` | The day you evaluated it, `YYYY-MM-DD`. |
-| `score` | Optional number; shown as is, never interpreted. |
 | `reasons` | Optional `[{ "text", "kind"? }]`, shown in order. Write `text` for a reader. |
 | `next` | Optional sentence: what would raise the tier. |
 | `sources` | Optional origin keys the verdict rests on, linking to `sources`. |
@@ -65,18 +74,23 @@ How you normalize and where the threshold sits are yours to decide; keep the
 scale independent of corpus size, or a fixed threshold drifts as the wiki
 grows.
 
-Reflect drops a note, claim, or source entry that does not validate and
-counts it in Settings, so one bad entry never blanks the whole wiki.
+Reflect drops a note, claim, or source entry that does not validate, or a
+claim whose id is not `c` and a positive number, and counts it in Settings, so
+one bad entry never blanks the whole wiki. Keys it does not know are ignored,
+so later versions can add optional fields.
 
 ## The claim text hash
 
 A verdict only shows while the claim reads as it did when you evaluated it.
-Hash the claim's text exactly as it sits in the file: the UTF-8 bytes between
-the end of `<!-- claim:cN -->` and the start of `<!-- /claim:cN -->`, which is
-the schema parser's `range_utf8`. A legacy `### [Cn]` claim hashes its
-`range_utf8` the same way. No normalization: line endings and Unicode stay as
-written. When the text changes, Reflect shows the claim as **changed
-since its last evaluation** until a report carries the new hash.
+Take the note's text with CRLF and lone CR turned into LF (Reflect holds every
+note that way), then hash the UTF-8 bytes between the end of
+`<!-- claim:cN -->` and the start of `<!-- /claim:cN -->`: SHA-256, lowercase
+hex. No other normalization. Legacy `### [Cn]` claims carry their ledger
+inside their own range, so Reflect shows no trust for them. Test vectors:
+[`fixtures/wiki-claim-text-hashes.json`](../fixtures/wiki-claim-text-hashes.json).
+
+When the text changes, Reflect shows the claim as **changed since its last
+evaluation** until a report carries the new hash.
 
 ## Records Reflect writes back
 

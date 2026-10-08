@@ -71,6 +71,8 @@ enum Command {
         #[arg(long)]
         print: bool,
     },
+    /// Print where agent harnesses publish this graph's wiki trust report
+    TrustReport,
 }
 
 /// `--limit`: a whole number of at least 1. Semantic and hybrid searches are
@@ -111,6 +113,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Show { note } => commands::show::run(&graph, cli.json, note),
         Command::Path { note } => commands::path::run(&graph, cli.json, note),
         Command::Open { note, print } => commands::open::run(&graph, cli.json, note, *print),
+        Command::TrustReport => commands::trust_report::run(&graph, cli.json),
     }
 }
 

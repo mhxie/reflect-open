@@ -30,6 +30,17 @@ pub struct PathJson<'a> {
     pub exists: bool,
 }
 
+/// `trust-report`: where agent harnesses publish this graph's wiki trust report.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustReportJson<'a> {
+    pub path: &'a str,
+    pub absolute_path: String,
+    /// Whether the path comes from Reflect's settings rather than the default.
+    pub configured: bool,
+    pub exists: bool,
+}
+
 /// `open`: the deep link handed to the OS opener (or just printed).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

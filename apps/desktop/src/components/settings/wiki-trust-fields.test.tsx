@@ -28,7 +28,7 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/graphs/Personal', name: 'Personal', generation: 3 } }),
 }))
 
-let report: { modifiedMs: number; contents: string } | null
+let report: { stamp: string; contents: string } | null
 let reads: Record<string, unknown>[]
 let queryClient: QueryClient
 
@@ -62,14 +62,14 @@ async function renderFields(): Promise<void> {
 
 describe('Settings → Wiki trust', () => {
   it('summarizes the report the harness wrote', async () => {
-    report = { modifiedMs: 1, contents: JSON.stringify(exampleReport) }
+    report = { stamp: '1:1', contents: JSON.stringify(exampleReport) }
     await renderFields()
     await expect
       .element(page.getByText(/example-harness 1\.0\.0 · written .* · 2 claims in 1 note/))
       .toBeVisible()
     expect(reads[0]).toEqual({
       path: '.harness/wiki-trust.json',
-      knownModifiedMs: null,
+      knownStamp: null,
       generation: 3,
     })
   })
@@ -80,7 +80,7 @@ describe('Settings → Wiki trust', () => {
   })
 
   it('names a report that does not validate', async () => {
-    report = { modifiedMs: 1, contents: JSON.stringify({ ...exampleReport, version: 9 }) }
+    report = { stamp: '1:1', contents: JSON.stringify({ ...exampleReport, version: 9 }) }
     await renderFields()
     await expect
       .element(page.getByRole('alert'))
@@ -101,7 +101,7 @@ describe('Settings → Wiki trust', () => {
 
   it('switches the reading style', async () => {
     await renderFields()
-    await page.getByText('Beside each paragraph').click()
+    await page.getByText('Beside the paragraph').click()
     expect(settingsState.updates).toEqual([{ wikiTrustDisplay: 'margin' }])
   })
 })

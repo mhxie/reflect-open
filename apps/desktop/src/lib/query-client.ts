@@ -38,6 +38,10 @@ export const queryKeys = {
         languages.map((language) => language.folder),
       ] as const
     },
+    /** A wiki note's claim text hashes, matched against the harness's trust report. */
+    wikiClaimHashes(root: GraphRoot, path: string) {
+      return [...this.graph(root), 'wiki-claim-hashes', path] as const
+    },
     hasWiki(root: GraphRoot, sourceFolder: string) {
       return [...this.graph(root), 'has-wiki', sourceFolder] as const
     },

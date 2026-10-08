@@ -35,6 +35,11 @@ const settingsStore = vi.hoisted(() => {
   }
 })
 
+// The trust report row has its own test (wiki-trust-fields.test.tsx).
+vi.mock('@/hooks/use-wiki-trust-report.ts', () => ({
+  useWikiTrustReport: () => ({ status: 'off' }),
+}))
+
 vi.mock('@/providers/settings-provider.tsx', async () => {
   const { useSyncExternalStore } = await import('react')
   const { DEFAULT_SETTINGS } = await import('@reflect/core')

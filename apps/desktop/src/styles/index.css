@@ -387,6 +387,118 @@ html:root {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Claim trust (Plan 30): marks drawn from the agent harness's report. Shape
+   carries each tier (filled, ring, dashed, dotted); color only reinforces it. */
+.wiki-trust-inline {
+  white-space: nowrap;
+}
+.wiki-trust-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  margin-inline-start: 0.05em;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.72em;
+  vertical-align: super;
+  cursor: pointer;
+}
+.wiki-trust-mark::before {
+  content: '';
+  box-sizing: border-box;
+  width: 0.7em;
+  height: 0.7em;
+  border: 1.5px solid var(--color-trust-supported);
+  border-radius: 999px;
+}
+.wiki-trust-mark[data-wiki-trust='solid']::before {
+  border-color: var(--color-trust-solid);
+  background: var(--color-trust-solid);
+}
+.wiki-trust-mark[data-wiki-trust='needs-work']::before {
+  border-style: dashed;
+  border-color: var(--color-trust-needs-work);
+}
+.wiki-trust-mark[data-wiki-trust='disputed']::before {
+  border-style: dashed;
+  border-color: var(--color-trust-disputed);
+}
+.wiki-trust-mark[data-wiki-trust='pending']::before {
+  border-style: dotted;
+  border-color: var(--color-text-muted);
+}
+.wiki-trust-mark:hover {
+  background: var(--color-surface-hover);
+}
+.wiki-trust-mark:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Inline: only the prose that needs work is marked; sound prose stays clean. */
+[data-wiki-trust-display='inline'] [data-wiki-claim][data-wiki-trust='needs-work'] {
+  text-decoration: underline dotted var(--color-trust-needs-work);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.3em;
+}
+[data-wiki-trust-display='inline'] [data-wiki-claim][data-wiki-trust='disputed'] {
+  text-decoration: underline dotted var(--color-trust-disputed);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.3em;
+}
+
+/* Margin: marks beside the paragraph, prose untouched. */
+.wiki-trust-margin-host {
+  position: relative;
+}
+/* The right margin, clear of the block handle, reads like a sidenote. */
+.wiki-trust-margin {
+  position: absolute;
+  top: 0.35em;
+  right: -1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  line-height: 1;
+}
+.wiki-trust-margin .wiki-trust-mark {
+  font-size: 0.8rem;
+  vertical-align: baseline;
+}
+
+/* Reveal (the claim lens, or Option held): every claim tinted by its tier. */
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust],
+[data-wiki-claim-visible][data-wiki-trust] {
+  border-radius: 2px;
+  box-decoration-break: clone;
+  text-decoration: none;
+}
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='solid'],
+[data-wiki-claim-visible][data-wiki-trust='solid'] {
+  background: color-mix(in srgb, var(--color-trust-solid) 14%, transparent);
+}
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='supported'],
+[data-wiki-claim-visible][data-wiki-trust='supported'] {
+  background: color-mix(in srgb, var(--color-trust-supported) 12%, transparent);
+}
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='needs-work'],
+[data-wiki-claim-visible][data-wiki-trust='needs-work'] {
+  background: color-mix(in srgb, var(--color-trust-needs-work) 18%, transparent);
+}
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='disputed'],
+[data-wiki-claim-visible][data-wiki-trust='disputed'] {
+  background: color-mix(in srgb, var(--color-trust-disputed) 14%, transparent);
+}
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust='pending'],
+[data-wiki-claim-visible][data-wiki-trust='pending'] {
+  background: color-mix(in srgb, var(--color-text-muted) 10%, transparent);
+}
+
 .wiki-article-ledger,
 .wiki-article-revision,
 .wiki-article-bibliography,
