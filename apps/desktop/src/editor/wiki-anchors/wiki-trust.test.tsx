@@ -193,6 +193,34 @@ describe('claim trust from the harness report', () => {
     expect(document.elementFromPoint(box.right + 3, y)?.closest('.wiki-trust-mark')).toBeNull()
   })
 
+  it('adds nothing to a sound article but one silent mark per claim', async () => {
+    const sound = JSON.parse(report.contents) as {
+      notes: Record<string, { claims: Record<string, { tier: string; next?: string }> }>
+    }
+    const c2 = sound.notes[PATH]!.claims['c2']!
+    c2.tier = 'solid'
+    delete c2.next
+    report = { stamp: '2:2', contents: JSON.stringify(sound) }
+    const { container } = await editorFixture()
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
+      ).toBe('solid'),
+    )
+    // One mark per claim, carrying meaning by shape alone: no text in the prose.
+    const marks = [...container.querySelectorAll<HTMLElement>('.wiki-trust-mark')]
+    expect(marks).toHaveLength(2)
+    for (const mark of marks) expect(mark.textContent).toBe('')
+    // Sound prose stays clean: no underline, no tint.
+    for (const claim of container.querySelectorAll<HTMLElement>('[data-wiki-claim]')) {
+      const style = getComputedStyle(claim)
+      expect(style.textDecorationLine).toBe('none')
+      expect(style.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    }
+    // And the footer says nothing.
+    expect(container.textContent).not.toMatch(/needs? work|not yet evaluated/)
+  })
+
   it('steps to the claim that needs work from the footer summary', async () => {
     const { editor } = await editorFixture()
     await page.getByRole('button', { name: '1 needs work' }).click()
