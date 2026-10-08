@@ -64,16 +64,19 @@ contract, with a generated JSON Schema and shared fixtures.
 - **Identity.** Claims keyed by graph-relative note path (compared in NFC) and
   claim id; sources keyed by the harness's origin key.
 - **Freshness.** Each verdict carries the SHA-256 of the claim text it was
-  computed for, with CRLF and CR read as LF. A mismatch shows the claim as
-  changed since evaluation instead of an outdated verdict. Legacy heading
+  computed for, with CRLF and CR read as LF. Reflect hashes the saved file,
+  as the harness reads it, never its own re-serialization. A mismatch shows
+  the claim as changed since evaluation instead of an outdated verdict. Legacy heading
   claims carry no trust: their ledger sits inside their own range.
-- **Verdicts.** Per claim: tier, overlays, reasons as display text with an
-  optional `kind`, and what would raise the tier.
+- **Verdicts.** Per claim: tier, overlays, reasons as display text, and what
+  would raise the tier.
 - **Sources.** Per origin: normalized weight, whether it clears the harness's
   threshold, and reasons.
 - **Version.** `reflect-wiki-trust` version 1. Reflect refuses another version
-  and says so; within version 1, one malformed entry drops alone and unknown
-  keys are ignored, so optional fields (a rank, say) can be added later.
+  and says so; within version 1, one malformed entry drops alone, an
+  optional field may be null, and unknown keys are ignored, so optional
+  fields (a rank, say) can be added later. While a new report fails to read,
+  Reflect keeps the last valid one on screen and Settings says why.
 
 ### Source reputation
 
@@ -100,17 +103,19 @@ Off:
   (Disputed), dotted (changed since evaluation). Only prose that needs work
   is underlined, dotted; sound prose stays clean.
 - **Margin.** The same marks in the right margin beside each paragraph, so the
-  prose is untouched; hovering or focusing a mark lights up its claim.
+  prose is untouched.
 - **On demand.** No marks while reading; holding Option, or the claim lens,
-  tints every claim by tier.
+  tints every claim by tier and shows its mark.
 
 In every style:
 
-- **Trust card.** A mark opens the claim's card: tier, reasons, what would
-  raise it, and the sources it rests on with their weights.
+- **Trust card.** A mark opens the claim's card: the claim it judges, tier,
+  reasons, what would raise it, and the sources it rests on with their
+  weights against the harness's threshold.
 - **Question this claim.** Appends `@pass: reader | status: flagged | at:
-  <today>` to the claim's ledger, creating the ledger when there is none. The
-  harness decides what resolves it.
+  <today>` to the claim's ledger, creating the ledger when there is none, at
+  most once a day per claim and only where the note is editable. The harness
+  decides what resolves it.
 - **Footer.** The note footer says how many claims need work and steps through
   them; it stays silent when nothing needs attention.
 - **Translations** show the source entry's verdicts, checked against the
@@ -159,7 +164,8 @@ Translation-ledger removal in atelier waits for step 4.
   the same claim from the same report.
 - An agent edit on disk, reloaded into an open note, writes no `editor`
   pending record.
-- A report Reflect cannot validate leaves every claim unmarked and says why.
+- A report Reflect cannot validate never replaces the last valid one, and
+  Settings says why; with no valid report, claims are unmarked.
 
 ## Open questions for atelier-wiki
 
