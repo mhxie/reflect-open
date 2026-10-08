@@ -430,6 +430,23 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() =>
       expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2),
     )
+    // Stacked marks' hit areas do not overlap: just inside each one's 24px area hits it.
+    // A right gutter, as the app has, keeps the column in the viewport.
+    ;(container as HTMLElement).style.cssText = 'width: 560px; padding-right: 64px'
+    const [upper, lower] = [
+      ...container.querySelectorAll<HTMLElement>('.wiki-trust-margin .wiki-trust-mark'),
+    ]
+    const top = upper!.getBoundingClientRect()
+    const bottom = lower!.getBoundingClientRect()
+    const x = top.left + top.width / 2
+    expect(
+      document.elementFromPoint(x, top.top + top.height / 2 + 11)?.closest('.wiki-trust-mark'),
+    ).toBe(upper)
+    expect(
+      document
+        .elementFromPoint(x, bottom.top + bottom.height / 2 - 11)
+        ?.closest('.wiki-trust-mark'),
+    ).toBe(lower)
     // The paragraph reserves the column's height, so the next one's marks cannot overlap.
     const column = container.querySelector('.wiki-trust-margin')!.getBoundingClientRect()
     const host = container.querySelector('.wiki-trust-margin-host')!.getBoundingClientRect()
