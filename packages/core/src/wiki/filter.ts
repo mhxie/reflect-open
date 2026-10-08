@@ -1,10 +1,10 @@
 import { foldTag } from '../markdown/index.ts'
 import { wikiReviewState } from './entry-summary.ts'
-import { isWikiGuide } from './group.ts'
+import { isWikiIndex } from './hierarchy.ts'
 import type { WikiEntry } from './list.ts'
 
 /**
- * What the Wiki screen is narrowed to: knowledge entries, index guides,
+ * What the Wiki screen is narrowed to: knowledge entries, index notes,
  * entries with a flagged claim, with no reviewer verification yet, with a
  * claim lacking a source, without a copy in one translation folder, or
  * carrying a tag.
@@ -38,32 +38,29 @@ export function wikiFiltersEqual(left: WikiFilter | null, right: WikiFilter | nu
 }
 
 /**
- * Whether `entry` passes `filter`. Guides make no claims, so only the index
- * and tag filters select them. Unread entries pass only the translation and
- * tag filters; their role stays unknown until their contents can be read.
+ * Whether `entry` passes `filter`. The index filter reads the role from the
+ * file name (see `isWikiIndex`); claim filters read only claims, so an index
+ * with claims is knowledge too. The translation filter matches exactly the rows
+ * marked "not in <language> yet", indexes included.
  */
 export function matchesWikiFilter(entry: WikiEntry, filter: WikiFilter): boolean {
   if (filter.kind === 'index') {
-    return isWikiGuide(entry)
-  }
-  if (filter.kind === 'knowledge') {
-    return entry.summary !== null && entry.summary.claims > 0
+    return isWikiIndex(entry)
   }
   if (filter.kind === 'tag') {
     const key = foldTag(filter.tag)
     return entry.tags.some((tag) => foldTag(tag) === key)
   }
-  if (isWikiGuide(entry)) {
-    return false
-  }
   if (filter.kind === 'untranslated') {
     return !entry.translations.has(filter.folder)
   }
   const { summary } = entry
-  if (summary === null) {
+  if (summary === null || summary.claims === 0) {
     return false
   }
   switch (filter.kind) {
+    case 'knowledge':
+      return true
     case 'flagged':
       return wikiReviewState(summary) === 'flagged'
     case 'unreviewed':

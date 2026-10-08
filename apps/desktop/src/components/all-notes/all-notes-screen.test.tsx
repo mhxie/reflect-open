@@ -104,6 +104,7 @@ const noteRows = [
   {
     is_private: 0,
     has_conflict: 0,
+    is_pinned: 0,
     path: 'notes/health.md',
     title: 'Health Stacked',
     mtime: HEALTH_MTIME,
@@ -112,6 +113,7 @@ const noteRows = [
   {
     is_private: 0,
     has_conflict: 0,
+    is_pinned: 0,
     path: 'notes/tokyo.md',
     title: 'Tokyo Gâteau',
     mtime: TOKYO_MTIME,
@@ -121,6 +123,7 @@ const noteRows = [
 const taggedDailyRow = {
   is_private: 0,
   has_conflict: 0,
+  is_pinned: 0,
   path: 'daily/2026-06-09.md',
   title: 'June 9, 2026',
   mtime: TOKYO_MTIME,
@@ -1315,6 +1318,37 @@ describe('AllNotesScreen — selection and bulk trash', () => {
       .element(view.getByRole('button', { name: 'Updated, sorted oldest first' }))
       .toBeInTheDocument()
     expect(order()).toBe(-1)
+    await view.unmount()
+  })
+
+  it('marks pinned notes, which lead the list whatever their age', async () => {
+    mockInvoke.mockImplementation(async (command, args) => {
+      if (command !== 'db_query') {
+        return null
+      }
+      const sql = String(args['sql'])
+      if (sql.includes('group by')) {
+        return facetRows
+      }
+      if (sql.includes('"preview"')) {
+        return sql.includes('from "tags"')
+          ? []
+          : [noteRows[0], { ...noteRows[1], is_pinned: 1, pinned_order: 1024 }]
+      }
+      return sql.includes('from "tags"') ? tagRows : []
+    })
+    const view = await renderScreen()
+    await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
+
+    const text = view.container.textContent ?? ''
+    // Tokyo is older, yet its pin puts it first.
+    expect(text.indexOf('Tokyo Gâteau')).toBeLessThan(text.indexOf('Health Stacked'))
+    await expectLocatorToHaveCount(view.getByRole('img', { name: 'Pinned' }), 1)
+    // The marker sits beside the subject it marks.
+    const subjectCell = view.getByRole('img', { name: 'Pinned' }).element().parentElement
+    expect(subjectCell?.textContent).toContain('Tokyo Gâteau')
+    // The subject keeps its plain name.
+    await expect.element(view.getByRole('button', { name: 'Tokyo Gâteau' })).toBeInTheDocument()
     await view.unmount()
   })
 

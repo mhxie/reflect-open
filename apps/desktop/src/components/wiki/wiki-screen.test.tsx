@@ -277,10 +277,14 @@ async function expectRoute(
   await vi.waitFor(() => expect(probedRoute(view)).toEqual(route))
 }
 
-/** Entry subjects in render order (the gutter toggle is the row's pressed button). */
+/**
+ * Entry subjects in render order (the gutter toggle is the row's pressed
+ * button; an index tree row's expander is its expanded one).
+ */
 function rowTitles(view: Awaited<ReturnType<typeof renderScreen>>): string[] {
   return [...view.container.querySelectorAll('[data-row-index]')].map(
-    (row) => row.querySelector('button:not([aria-pressed])')?.textContent ?? '',
+    (row) =>
+      row.querySelector('button:not([aria-pressed]):not([aria-expanded])')?.textContent ?? '',
   )
 }
 
@@ -303,9 +307,14 @@ describe('WikiScreen', () => {
       expect(filter.getBoundingClientRect().right).toBeLessThanOrEqual(window.innerWidth)
       expect(filter.scrollWidth).toBeGreaterThan(filter.clientWidth)
 
-      await view.getByRole('button', { name: 'Missing Français 3' }).click()
+      await view.getByRole('button', { name: 'Missing Français 4' }).click()
       await expectRoute(view, wikiRoute({ filter: { kind: 'untranslated', folder: 'wiki-fr' } }))
-      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Spacing Effect', 'Zeigarnik Effect'])
+      expect(rowTitles(view)).toEqual([
+        'Retrieval Practice',
+        'Spacing Effect',
+        'Wiki Index',
+        'Zeigarnik Effect',
+      ])
     } finally {
       await view.unmount()
       await page.viewport(previousViewport.width, previousViewport.height)
@@ -394,13 +403,14 @@ describe('WikiScreen', () => {
     await expectRoute(view, wikiRoute({ filter: { kind: 'index' }, language: 'wiki-cn' }))
     expect(rowTitles(view)).toEqual(['Wiki Index (中文)'])
     await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
-
-    await header.getByRole('button', { name: 'Topics' }).click()
-    await expect.element(view.getByRole('region', { name: 'Overview' })).toBeInTheDocument()
-    await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
+    // The index tree is the Indexes layout; flat and topic views would contradict it.
+    expect(header.getByRole('group', { name: 'Layout' }).query()).toBeNull()
 
     await header.getByRole('button', { name: 'All 4' }).click()
     await expectRoute(view, wikiRoute({ language: 'wiki-cn' }))
+    await header.getByRole('button', { name: 'Topics' }).click()
+    await expect.element(view.getByRole('region', { name: 'Overview' })).toBeInTheDocument()
+    await expect.element(view.getByText('Index', { exact: true })).toBeInTheDocument()
     expect(rowTitles(view)).toEqual([
       'Wiki Index (中文)',
       'Retrieval Practice',
@@ -412,6 +422,101 @@ describe('WikiScreen', () => {
     view.container.querySelector<HTMLElement>('[aria-label="Wiki"]')?.focus()
     await userEvent.keyboard('{ArrowDown}{Enter}')
     await expectRoute(view, { kind: 'note', path: 'wiki-cn/index.md' })
+    await view.unmount()
+  })
+
+  it('lays indexes out as a tree that collapses, sorts siblings, and skips hidden rows', async () => {
+    const indexes = [
+      ['wiki/memory/index.md', 'Memory Index'],
+      ['wiki/memory/sleep/index.md', 'Sleep Index'],
+      ['wiki/motivation/index.md', 'Motivation Index'],
+    ] as const
+    fixture = {
+      notes: [
+        ...WIKI.notes,
+        ...indexes.map(([path, title]) => ({ path, title, mtime: 1, file_hash: path })),
+      ],
+      files: {
+        ...WIKI.files,
+        ...Object.fromEntries(indexes.map(([path, title]) => [path, `# ${title}\n`])),
+      },
+    }
+    const view = await renderScreen()
+    const header = view.getByRole('banner')
+
+    await header.getByRole('button', { name: 'Indexes 4' }).click()
+    await expectRoute(view, wikiRoute({ filter: { kind: 'index' } }))
+    expect(rowTitles(view)).toEqual([
+      'Wiki Index',
+      'Memory Index',
+      'Sleep Index',
+      'Motivation Index',
+    ])
+    await expect
+      .element(view.getByRole('button', { name: 'Indexes under Wiki Index' }))
+      .toHaveAttribute('aria-expanded', 'true')
+    // A leaf has nothing to expand.
+    expect(view.getByRole('button', { name: 'Indexes under Sleep Index' }).query()).toBeNull()
+    // Each level nests in its parent's list item, so assistive tech hears the depth.
+    const itemOf = (title: string): Element | null | undefined =>
+      [...view.container.querySelectorAll('[data-row-index]')]
+        .find(
+          (row) =>
+            row.querySelector('button:not([aria-pressed]):not([aria-expanded])')?.textContent ===
+            title,
+        )
+        ?.closest('li')
+    expect(itemOf('Memory Index')?.contains(itemOf('Sleep Index') ?? null)).toBe(true)
+    expect(itemOf('Wiki Index')?.contains(itemOf('Motivation Index') ?? null)).toBe(true)
+    expect(itemOf('Motivation Index')?.contains(itemOf('Sleep Index') ?? null)).toBe(false)
+
+    // Sorting reorders siblings; parents still lead their children.
+    await view.getByRole('button', { name: 'Subject, sorted A to Z' }).click()
+    expect(rowTitles(view)).toEqual([
+      'Wiki Index',
+      'Motivation Index',
+      'Memory Index',
+      'Sleep Index',
+    ])
+    await view.getByRole('button', { name: 'Subject, sorted Z to A' }).click()
+
+    await view.getByRole('button', { name: 'Indexes under Memory Index' }).click()
+    await expect
+      .element(view.getByRole('button', { name: 'Indexes under Memory Index' }))
+      .toHaveAttribute('aria-expanded', 'false')
+    expect(rowTitles(view)).toEqual(['Wiki Index', 'Memory Index', 'Motivation Index'])
+    expect(probedRoute(view)).toEqual(wikiRoute({ filter: { kind: 'index' } }))
+
+    // What is collapsed survives reading the list in another language.
+    await header.getByRole('button', { name: '简体中文', exact: true }).click()
+    await expectRoute(view, wikiRoute({ filter: { kind: 'index' }, language: 'wiki-cn' }))
+    expect(rowTitles(view)).toEqual(['Wiki Index', 'Memory Index', 'Motivation Index'])
+
+    // Return on the focused toggle expands it rather than opening a note.
+    view.getByRole('button', { name: 'Indexes under Memory Index' }).element().focus()
+    await userEvent.keyboard('{Enter}')
+    await expect
+      .element(view.getByRole('button', { name: 'Indexes under Memory Index' }))
+      .toHaveAttribute('aria-expanded', 'true')
+    expect(probedRoute(view)).toEqual(wikiRoute({ filter: { kind: 'index' }, language: 'wiki-cn' }))
+
+    // The keyboard walks only the visible rows.
+    await view.getByRole('button', { name: 'Indexes under Memory Index' }).click()
+    view.container.querySelector<HTMLElement>('[aria-label="Wiki"]')?.focus()
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{Enter}')
+    await expectRoute(view, { kind: 'note', path: 'wiki/motivation/index.md' })
+    await view.unmount()
+  })
+
+  it('restores the layout switch after leaving the Indexes filter', async () => {
+    const view = await renderScreen()
+    const header = view.getByRole('banner')
+
+    await header.getByRole('button', { name: 'Indexes 1' }).click()
+    expect(header.getByRole('group', { name: 'Layout' }).query()).toBeNull()
+    await header.getByRole('button', { name: 'All 4' }).click()
+
+    await expect.element(header.getByRole('group', { name: 'Layout' })).toBeInTheDocument()
     await view.unmount()
   })
 
@@ -431,6 +536,10 @@ describe('WikiScreen', () => {
       'Zeigarnik Effect',
     ])
     await expectLocatorToHaveCount(view.getByRole('img', { name: 'Not in 简体中文 yet' }), 3)
+    // The Missing filter lists exactly the rows marked, the index among them.
+    await expect
+      .element(view.getByRole('button', { name: 'Missing 简体中文 3' }))
+      .toBeInTheDocument()
 
     await view.getByRole('button', { name: 'Spacing Effect (中文)' }).click()
     await expectRoute(view, { kind: 'note', path: 'wiki-cn/memory/Spacing Effect.md' })
@@ -475,7 +584,7 @@ describe('WikiScreen', () => {
     await expect
       .element(view.getByRole('button', { name: 'Claims, sorted most first' }))
       .toBeInTheDocument()
-    // Guides make no claims, so they follow the rest.
+    // Entries without claims follow the rest.
     expect(rowTitles(view)).toEqual([
       'Spacing Effect',
       'Retrieval Practice',
@@ -536,13 +645,13 @@ describe('WikiScreen', () => {
     await expectRoute(view, { kind: 'wiki', filter: { kind: 'flagged' }, language: null })
     expect(rowTitles(view)).toEqual(['Retrieval Practice'])
 
-    await header.getByRole('button', { name: 'Missing 简体中文 2' }).click()
+    await header.getByRole('button', { name: 'Missing 简体中文 3' }).click()
     await expectRoute(view, {
       kind: 'wiki',
       filter: { kind: 'untranslated', folder: 'wiki-cn' },
       language: null,
     })
-    expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Zeigarnik Effect'])
+    expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect'])
 
     await header.getByRole('button', { name: 'Unreviewed 1' }).click()
     await expectRoute(view, { kind: 'wiki', filter: { kind: 'unreviewed' }, language: null })
@@ -555,9 +664,9 @@ describe('WikiScreen', () => {
   it('reads a missing-translation filter for a removed language as no filter', async () => {
     const view = await renderScreen()
     const header = view.getByRole('banner')
-    await header.getByRole('button', { name: 'Missing 简体中文 2' }).click()
+    await header.getByRole('button', { name: 'Missing 简体中文 3' }).click()
     await vi.waitFor(() =>
-      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Zeigarnik Effect']),
+      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect']),
     )
 
     settingsStore.set({
@@ -586,23 +695,28 @@ describe('WikiScreen', () => {
     const view = await renderScreen()
     const header = view.getByRole('banner')
 
-    await header.getByRole('button', { name: 'Missing 中文 2' }).click()
+    await header.getByRole('button', { name: 'Missing 中文 3' }).click()
 
     await expectRoute(view, {
       kind: 'wiki',
       filter: { kind: 'untranslated', folder: 'wiki-cn' },
       language: null,
     })
-    expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Zeigarnik Effect'])
+    expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect'])
 
-    await header.getByRole('button', { name: 'Missing 中文 3' }).click()
+    await header.getByRole('button', { name: 'Missing 中文 4' }).click()
 
     await expectRoute(view, {
       kind: 'wiki',
       filter: { kind: 'untranslated', folder: 'wiki-tw' },
       language: null,
     })
-    expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Spacing Effect', 'Zeigarnik Effect'])
+    expect(rowTitles(view)).toEqual([
+      'Retrieval Practice',
+      'Spacing Effect',
+      'Wiki Index',
+      'Zeigarnik Effect',
+    ])
     await view.unmount()
   })
 

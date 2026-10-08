@@ -132,6 +132,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
     settings: {
       statusBarEnabled: statusBarPreferences.enabled,
       editorMarkdownSyntax: 'hide',
+      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
       dateFormat: 'mdy',
       weekStartDay: 'monday',
       aiProviders: [],

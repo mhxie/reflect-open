@@ -9,7 +9,9 @@ export { wikiReviewState, type WikiEntrySummary } from '../wiki/entry-summary.ts
 export {
   hasWikiEntries,
   listWikiEntries,
+  wikiAncestors,
   wikiCopies,
+  type WikiAncestor,
   type WikiCopyState,
   type WikiEntry,
   type WikiEntryCopy,
@@ -43,13 +45,15 @@ export {
   type WikiReferenceOccurrence,
 } from '../wiki/article-references.ts'
 export { readWikiSourceLinks, type WikiSourceLinks } from '../wiki/source-links.ts'
+export { groupWikiEntries, wikiTopicKey, wikiTotals, type WikiTopicGroup } from '../wiki/group.ts'
 export {
-  groupWikiEntries,
-  isWikiGuide,
-  wikiTopicKey,
-  wikiTotals,
-  type WikiTopicGroup,
-} from '../wiki/group.ts'
+  buildWikiIndexTree,
+  isWikiIndex,
+  visibleWikiIndexRows,
+  wikiAncestorIndexPaths,
+  type WikiIndexNode,
+  type WikiIndexRow,
+} from '../wiki/hierarchy.ts'
 export { type WikiSort, type WikiSortKey } from '../wiki/sort-keys.ts'
 export { chooseWikiSort, sortWikiEntries } from '../wiki/sort.ts'
 export {

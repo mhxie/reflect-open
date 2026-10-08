@@ -6,10 +6,10 @@ import type { WikiEntry, WikiEntryCopy } from './list.ts'
 function entry(
   title: string,
   summary: Partial<WikiEntrySummary> | null,
-  extra: Partial<Pick<WikiEntry, 'tags' | 'translations'>> = {},
+  extra: Partial<Pick<WikiEntry, 'path' | 'tags' | 'translations'>> = {},
 ): WikiEntry {
   return {
-    path: `wiki/topic/${title}.md`,
+    path: extra.path ?? `wiki/topic/${title}.md`,
     title,
     topic: 'topic',
     mtime: 0,
@@ -61,8 +61,15 @@ const ENTRIES = [
   ),
   entry('Flagged', { flaggedClaims: 1, verifiedClaims: 1 }, { tags: ['Memory'] }),
   entry('Unreviewed', { verifiedClaims: 0, unsourcedClaims: 1 }),
-  entry('Guide', { claims: 0, verifiedClaims: 0 }, { tags: ['memory', 'meta'] }),
+  entry(
+    'Guide',
+    { claims: 0, verifiedClaims: 0 },
+    { path: 'wiki/topic/index.md', tags: ['memory', 'meta'] },
+  ),
   entry('Unread', null),
+  entry('Hub', { claims: 1, verifiedClaims: 0, flaggedClaims: 1 }, { path: 'wiki/index.md' }),
+  entry('Unread Index', null, { path: 'wiki/other/index.md' }),
+  entry('Draft', { claims: 0, verifiedClaims: 0 }),
 ]
 
 function titlesFor(filter: WikiFilter | null): string[] {
@@ -70,34 +77,34 @@ function titlesFor(filter: WikiFilter | null): string[] {
 }
 
 describe('filterWikiEntries', () => {
-  it('separates knowledge from index guides without assigning unread entries a role', () => {
-    expect(titlesFor({ kind: 'knowledge' })).toEqual(['Verified', 'Flagged', 'Unreviewed'])
-    expect(titlesFor({ kind: 'index' })).toEqual(['Guide'])
+  it('reads indexes from the file name and knowledge from claims', () => {
+    // An index that makes claims is knowledge too; an unread index is still an index.
+    expect(titlesFor({ kind: 'knowledge' })).toEqual(['Verified', 'Flagged', 'Unreviewed', 'Hub'])
+    expect(titlesFor({ kind: 'index' })).toEqual(['Guide', 'Hub', 'Unread Index'])
   })
 
-  it('narrows to review states and unsourced claims, never selecting guides or unread entries', () => {
-    expect(titlesFor({ kind: 'flagged' })).toEqual(['Flagged'])
+  it('narrows to review states and unsourced claims, never selecting claimless or unread entries', () => {
+    expect(titlesFor({ kind: 'flagged' })).toEqual(['Flagged', 'Hub'])
     expect(titlesFor({ kind: 'unreviewed' })).toEqual(['Unreviewed'])
     expect(titlesFor({ kind: 'unsourced' })).toEqual(['Unreviewed'])
   })
 
-  it('finds entries missing a translation, unread ones included', () => {
+  it('finds entries missing a translation, indexes and unread ones included', () => {
     expect(titlesFor({ kind: 'untranslated', folder: 'wiki-cn' })).toEqual([
       'Flagged',
       'Unreviewed',
+      'Guide',
       'Unread',
+      'Hub',
+      'Unread Index',
+      'Draft',
     ])
 
     // A folder named like an object built-in is still just a folder.
-    expect(titlesFor({ kind: 'untranslated', folder: 'constructor' })).toEqual([
-      'Verified',
-      'Flagged',
-      'Unreviewed',
-      'Unread',
-    ])
+    expect(titlesFor({ kind: 'untranslated', folder: 'constructor' })).toHaveLength(ENTRIES.length)
   })
 
-  it('matches tags case-insensitively, guides included', () => {
+  it('matches tags case-insensitively, indexes included', () => {
     expect(titlesFor({ kind: 'tag', tag: 'memory' })).toEqual(['Flagged', 'Guide'])
   })
 

@@ -1,6 +1,11 @@
 import { memo, type MouseEvent, type ReactElement } from 'react'
-import { isWikiGuide, type WikiEntry } from '@reflect/core'
-import { Languages, Waypoints } from 'lucide-react'
+import {
+  isWikiIndex,
+  noteTitlePresentation,
+  type WikiEntry,
+  type WikiIndexRow,
+} from '@reflect/core'
+import { ChevronDown, ChevronRight, Languages, Waypoints } from 'lucide-react'
 import { ListRow } from '@/components/all-notes/list-row.tsx'
 import { ListRowSubject } from '@/components/all-notes/list-row-subject.tsx'
 import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
@@ -33,7 +38,14 @@ interface WikiEntryRowProps {
   onSelect: (path: string, event: Pick<MouseEvent, 'metaKey' | 'ctrlKey' | 'shiftKey'>) => void
   onToggle: (path: string, event: Pick<MouseEvent, 'shiftKey'>) => void
   onOpen: (path: string, event?: ModClickEvent) => void
+  /** The row's place in the index tree; omitted outside the tree layout. */
+  treeRow?: WikiIndexRow | undefined
+  /** Expand or collapse the tree row with this key. */
+  onToggleExpanded?: ((key: string) => void) | undefined
 }
+
+/** How far each tree level indents a row's subject. */
+const TREE_INDENT_REM = 0.875
 
 /** What the snippet cell says for the copy a row shows. */
 function snippetOf(entry: WikiEntry): string {
@@ -51,7 +63,8 @@ function snippetOf(entry: WikiEntry): string {
  * One wiki entry, laid out like an All Notes row: subject, the shown copy's
  * opening paragraph, tags, and when it was last updated — its newest
  * revision-log day, else its file's modification time — then the wiki's own
- * columns.
+ * columns. In the index tree the subject indents by depth, after a toggle
+ * for the row's children (or a spacer, for a leaf).
  */
 export const WikiEntryRow = memo(function WikiEntryRow({
   entry,
@@ -61,9 +74,11 @@ export const WikiEntryRow = memo(function WikiEntryRow({
   onSelect,
   onToggle,
   onOpen,
+  treeRow,
+  onToggleExpanded,
 }: WikiEntryRowProps): ReactElement {
   const { settings } = useSettings()
-  const isIndex = isWikiGuide(entry)
+  const isIndex = isWikiIndex(entry)
   let updated = '—'
   if (entry.revised !== null) {
     updated = formatDayRecencyLabel(entry.revised, settings)
@@ -83,7 +98,35 @@ export const WikiEntryRow = memo(function WikiEntryRow({
       onToggle={onToggle}
       onOpen={onOpen}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div
+        className="flex min-w-0 items-center gap-1.5"
+        style={
+          treeRow === undefined
+            ? undefined
+            : { paddingInlineStart: `${treeRow.depth * TREE_INDENT_REM}rem` }
+        }
+      >
+        {treeRow === undefined ? null : treeRow.hasChildren ? (
+          <button
+            type="button"
+            aria-expanded={treeRow.expanded}
+            aria-label={`Indexes under ${noteTitlePresentation(entry.title, entry).text}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleExpanded?.(treeRow.key)
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="flex size-4 flex-none items-center justify-center rounded-sm text-text-muted hover:text-text focus-visible:text-text focus-visible:outline-none"
+          >
+            {treeRow.expanded ? (
+              <ChevronDown aria-hidden strokeWidth={2} className="size-3.5" />
+            ) : (
+              <ChevronRight aria-hidden strokeWidth={2} className="size-3.5" />
+            )}
+          </button>
+        ) : (
+          <span aria-hidden className="size-4 flex-none" />
+        )}
         <ListRowSubject
           path={entry.path}
           onOpen={onOpen}

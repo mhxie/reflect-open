@@ -1,8 +1,10 @@
-import { useCallback, type MouseEvent, type ReactElement } from 'react'
+import { useCallback, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { BadgeCheck, BookOpen, Link, ListOrdered } from 'lucide-react'
 import {
   wikiTopicKey,
   type WikiEntry,
+  type WikiIndexNode,
+  type WikiIndexRow,
   type WikiLanguage,
   type WikiSort,
   type WikiSortKey,
@@ -16,10 +18,18 @@ import { WIKI_GRID, WikiEntryRow } from './wiki-entry-row.tsx'
 import { WIKI_SIGNALS_GRID } from './wiki-signals.tsx'
 import { WikiTopicHeader } from './wiki-topic-header.tsx'
 
-/** What the table lays out: topic sections, or every entry in one list. */
+/**
+ * What the table lays out: topic sections, every entry in one list, or the
+ * index tree with its visible rows (what collapsing leaves showing).
+ */
 export type WikiTableLayout =
   | { readonly kind: 'grouped'; readonly groups: readonly WikiTopicGroup[] }
   | { readonly kind: 'flat'; readonly entries: readonly WikiEntry[] }
+  | {
+      readonly kind: 'tree'
+      readonly nodes: readonly WikiIndexNode[]
+      readonly rows: readonly WikiIndexRow[]
+    }
 
 interface WikiTableProps {
   /** The entries as listed in the open language (see `wikiEntryIn`). */
@@ -28,6 +38,8 @@ interface WikiTableProps {
   folded: ReadonlySet<string>
   /** Fold or unfold one topic, or — `all` — every topic to that topic's new state. */
   onToggleFold: (key: string, all: boolean) => void
+  /** Expand or collapse one index tree row, by its key. */
+  onToggleExpanded: (key: string) => void
   sort: WikiSort
   onSort: (key: WikiSortKey) => void
   /** The translation the rows are read in, or null for the source language. */
@@ -43,13 +55,14 @@ const FEWEST_MOST = { asc: 'fewest first', desc: 'most first' } as const
 
 /**
  * The Wiki screen's table — All Notes' sticky header of sortable columns,
- * then the wiki's own as icons — over one flat list or foldable topic
- * sections (the wiki root's entries under "Overview").
+ * then the wiki's own as icons — over one flat list, foldable topic
+ * sections (the wiki root's entries under "Overview"), or the index tree.
  */
 export function WikiTable({
   layout,
   folded,
   onToggleFold,
+  onToggleExpanded,
   sort,
   onSort,
   language,
@@ -68,7 +81,7 @@ export function WikiTable({
       ),
     [onSelect],
   )
-  const row = (entry: WikiEntry): ReactElement => (
+  const row = (entry: WikiEntry, treeRow?: WikiIndexRow, children?: ReactNode): ReactElement => (
     <li key={entry.path}>
       <WikiEntryRow
         entry={entry}
@@ -80,9 +93,25 @@ export function WikiTable({
         onSelect={onSelect}
         onToggle={handleToggle}
         onOpen={onOpen}
+        treeRow={treeRow}
+        onToggleExpanded={onToggleExpanded}
       />
+      {children}
     </li>
   )
+  // Children nest inside their parent's item, so assistive tech hears each level.
+  const treeRows = new Map(
+    layout.kind === 'tree' ? layout.rows.map((item) => [item.key, item]) : [],
+  )
+  const branch = (nodes: readonly WikiIndexNode[]): ReactElement[] =>
+    nodes.flatMap((node) => {
+      const treeRow = treeRows.get(node.key)
+      if (treeRow === undefined) {
+        return []
+      }
+      const children = treeRow.expanded ? <ul>{branch(node.children)}</ul> : null
+      return [row(node.entry, treeRow, children)]
+    })
 
   return (
     <>
@@ -145,8 +174,10 @@ export function WikiTable({
           />
         </div>
       </div>
-      {layout.kind === 'flat' ? (
-        <ul aria-label="Entries">{layout.entries.map(row)}</ul>
+      {layout.kind === 'tree' ? (
+        <ul aria-label="Indexes">{branch(layout.nodes)}</ul>
+      ) : layout.kind === 'flat' ? (
+        <ul aria-label="Entries">{layout.entries.map((entry) => row(entry))}</ul>
       ) : (
         layout.groups.map((group) => {
           const key = wikiTopicKey(group.topic)
@@ -160,7 +191,7 @@ export function WikiTable({
                 folded={isFolded}
                 onToggle={(all) => onToggleFold(key, all)}
               />
-              {isFolded ? null : <ul>{group.entries.map(row)}</ul>}
+              {isFolded ? null : <ul>{group.entries.map((entry) => row(entry))}</ul>}
             </section>
           )
         })
