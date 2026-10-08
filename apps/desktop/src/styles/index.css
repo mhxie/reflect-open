@@ -440,7 +440,21 @@ html:root {
 .wiki-trust-mark[data-wiki-trust='pending']::before,
 .wiki-trust-glyph[data-wiki-trust='pending'] {
   border-style: dotted;
-  border-color: var(--color-text-muted);
+  /* Secondary, not muted: a mark needs 3:1 against the page. */
+  border-color: var(--color-text-secondary);
+}
+/* A 24px hit area (WCAG 2.5.8) around a glyph kept small for reading. */
+.wiki-trust-mark {
+  position: relative;
+}
+.wiki-trust-mark::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
 }
 .wiki-trust-mark:hover {
   background: var(--color-surface-hover);

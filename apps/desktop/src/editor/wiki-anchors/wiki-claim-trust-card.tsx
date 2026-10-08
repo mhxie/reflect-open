@@ -68,7 +68,7 @@ function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
             />
           )}
         </span>
-        <span className="w-8 text-right text-text-muted tabular-nums">
+        <span className="w-8 text-right text-text-secondary tabular-nums">
           {source.weight.toFixed(2)}
           <span className="sr-only">
             {source.trusted ? ', trusted' : ', below the trust threshold'}
@@ -76,7 +76,9 @@ function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
         </span>
       </div>
       {source.reasons.length > 0 ? (
-        <p className="text-text-muted">{source.reasons.map((reason) => reason.text).join(' · ')}</p>
+        <p className="text-text-secondary">
+          {source.reasons.map((reason) => reason.text).join(' · ')}
+        </p>
       ) : null}
     </li>
   )
@@ -103,20 +105,20 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
           />
           <span className="font-medium">{wikiStandingLabel(standing)}</span>
           {verdict?.overlays.includes('edited') === true && standing.state === 'current' ? (
-            <span className="text-text-muted">· edited since review</span>
+            <span className="text-text-secondary">· edited since review</span>
           ) : null}
         </p>
         {trust.excerpt === '' ? null : (
-          <p className="line-clamp-2 text-text-muted">{trust.excerpt}</p>
+          <p className="line-clamp-2 text-text-secondary">{trust.excerpt}</p>
         )}
       </header>
       {standing.state === 'changed' ? (
-        <p className="text-text-muted">
+        <p className="text-text-secondary">
           Saved after your harness evaluated it on {standing.verdict.evaluatedAt}.
         </p>
       ) : null}
       {standing.state === 'unevaluated' ? (
-        <p className="text-text-muted">Your harness has not evaluated this text yet.</p>
+        <p className="text-text-secondary">Your harness has not evaluated this text yet.</p>
       ) : null}
       {standing.state === 'current' && standing.verdict.reasons.length > 0 ? (
         <ul className="space-y-0.5 text-text-secondary">
@@ -126,7 +128,7 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
         </ul>
       ) : null}
       {standing.state === 'current' && standing.verdict.next !== null ? (
-        <p className="text-text-muted">{standing.verdict.next}</p>
+        <p className="text-text-secondary">{standing.verdict.next}</p>
       ) : null}
       {trust.sources.length > 0 ? (
         <ul className="space-y-1.5">
@@ -137,9 +139,9 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
       ) : null}
       {question === undefined || !editable ? null : trust.questionedToday ||
         asked === 'recorded' ? (
-        <p className="text-text-muted">You questioned this claim today.</p>
+        <p className="text-text-secondary">You questioned this claim today.</p>
       ) : asked === 'refused' ? (
-        <p className="text-text-muted">
+        <p className="text-text-secondary">
           This claim’s evidence ledger needs fixing before it can take a question; the article lists
           the problem.
         </p>

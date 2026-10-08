@@ -183,6 +183,17 @@ describe('claim trust from the harness report', () => {
     expect(noteArticleFor(PATH)?.trust?.needsWork).toEqual(['c2'])
   })
 
+  it('gives each mark a 24px hit area around its small glyph', async () => {
+    const { container } = await editorFixture()
+    const mark = container.querySelector<HTMLElement>('[data-wiki-trust-claim="c2"]')!
+    const box = mark.getBoundingClientRect()
+    expect(box.width).toBeLessThan(24)
+    const x = box.left + box.width / 2
+    const y = box.top + box.height / 2
+    expect(document.elementFromPoint(x + 10, y)?.closest('.wiki-trust-mark')).toBe(mark)
+    expect(document.elementFromPoint(x, y + 10)?.closest('.wiki-trust-mark')).toBe(mark)
+  })
+
   it('steps to the claim that needs work from the footer summary', async () => {
     const { editor } = await editorFixture()
     await page.getByRole('button', { name: '1 needs work' }).click()
