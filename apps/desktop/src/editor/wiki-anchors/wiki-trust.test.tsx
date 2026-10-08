@@ -90,23 +90,32 @@ let disk: string
 let report: { stamp: string; contents: string }
 /** Holds note reads until it resolves, when a test sets it. */
 let readGate: Promise<void> | null
+/** Note reads still to fail. */
+let readFailures: number
 
 beforeEach(async () => {
   settingsState.settings.wikiTrustDisplay = 'inline'
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   disk = SOURCE
   readGate = null
+  readFailures = 0
   report = { stamp: '1:1', contents: await reportText() }
   setBridge({
     invoke: async (command) =>
       command === 'wiki_trust_report_read'
         ? report
         : command === 'note_read_local'
-          ? await (readGate ?? Promise.resolve()).then(() => ({
-              kind: 'content',
-              content: disk,
-              localOnly: false,
-            }))
+          ? await (readGate ?? Promise.resolve()).then(() => {
+              if (readFailures > 0) {
+                readFailures -= 1
+                throw new Error('read failed')
+              }
+              return {
+                kind: 'content',
+                content: disk,
+                localOnly: false,
+              }
+            })
           : null,
     listen: async () => () => {},
   })
@@ -301,6 +310,24 @@ describe('claim trust from the harness report', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(ref.current!.getMarkdown()).not.toContain('@pass: reader')
     await expect.element(page.getByText(/evidence ledger needs fixing/)).toBeVisible()
+  })
+
+  it('retries a saved-file read that failed', async () => {
+    readFailures = 1
+    const { container } = await render(
+      <QueryClientProvider client={queryClient}>
+        <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+        </MeowdownEditor>
+      </QueryClientProvider>,
+    )
+    await vi.waitFor(
+      () =>
+        expect(
+          container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
+        ).toBe('solid'),
+      { timeout: 8000 },
+    )
   })
 
   it('keeps the last report while a new one fails to parse', async () => {

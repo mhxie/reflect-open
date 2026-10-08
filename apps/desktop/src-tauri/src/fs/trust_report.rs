@@ -19,7 +19,7 @@ const MAX_REPORT_BYTES: u64 = 16 * 1024 * 1024;
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrustReportRead {
-    /// Identifies this version of the file: its modification time and size.
+    /// Identifies this version of the file (see [`version_stamp`]).
     pub stamp: String,
     /// The file's text; `None` when the stamp equals the caller's
     /// `known_stamp`, so polling never re-sends an unchanged report.
@@ -46,18 +46,22 @@ fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
     super::device::read_bounded_source(&root.canonicalize()?, Path::new(rel), MAX_REPORT_BYTES)
 }
 
-#[cfg(not(unix))]
-fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
-    use std::io::Read;
-    // Without a no-follow walk, re-check where the path really lands: inside
-    // the root and outside Reflect's and Git's state, links resolved.
+/// Where `abs` really lands, links and the filesystem's own name folding
+/// resolved (a case-insensitive volume reads `.Reflect` or `.reﬂect` as
+/// `.reflect`): it must still be a report path inside the graph.
+fn ensure_landing(root: &Path, abs: &Path, rel: &str) -> AppResult<()> {
     let canonical_root = root.canonicalize()?;
-    let target = resolve(root, rel)?.canonicalize()?;
+    let target = abs.canonicalize()?;
     let landed = target.strip_prefix(&canonical_root).map_err(|_| {
         AppError::traversal(format!("trust report resolves outside the graph: {rel:?}"))
     })?;
-    let landed = landed.to_string_lossy().replace('\\', "/");
-    ensure_report_path(&landed)?;
+    ensure_report_path(&landed.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(not(unix))]
+fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
+    use std::io::Read;
+    let target = resolve(root, rel)?.canonicalize()?;
     let mut bytes = Vec::new();
     std::fs::File::open(&target)?
         .take(MAX_REPORT_BYTES + 1)
@@ -135,6 +139,7 @@ fn read_report(
         crate::icloud::storage::request_download(&abs);
         return Err(downloading());
     }
+    ensure_landing(root, &abs, rel)?;
     let contents = String::from_utf8(read_bounded(root, rel)?)
         .map_err(|_| AppError::invalid(format!("the trust report is not UTF-8: {rel:?}")))?;
     Ok(Some(TrustReportRead {
@@ -253,6 +258,18 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(again.contents.as_deref(), Some("{\"a\":2}"));
+    }
+
+    #[test]
+    fn refuses_a_name_the_volume_folds_into_reflect_state() {
+        let dir = graph();
+        fs::create_dir_all(dir.path().join(".reflect")).unwrap();
+        fs::write(dir.path().join(".reflect/trust.json"), "{}").unwrap();
+        // `ﬂ` passes the path rules; a case-insensitive volume (the macOS
+        // default) folds it to `fl`. Elsewhere the file simply is not there.
+        let ligature = ".re\u{FB02}ect/trust.json";
+        assert!(reflect_graph_paths::is_wiki_trust_report_path(ligature));
+        assert!(read_report(dir.path(), ligature, None).map_or(true, |read| read.is_none()));
     }
 
     #[test]

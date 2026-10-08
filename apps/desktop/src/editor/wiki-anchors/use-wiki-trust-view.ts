@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { skipToken, useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo } from 'react'
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   icloudRequestDownloads,
   readNoteLocal,
@@ -36,8 +36,8 @@ interface TrustViewResult {
   readonly summary: WikiNoteTrustSummary | null
 }
 
-/** How often a source note iCloud has not downloaded yet is checked again. */
-const EVICTED_RETRY_MS = 5000
+/** How often a note that is not local yet, or failed to read, is tried again. */
+const RETRY_MS = 5000
 
 /** The longest claim excerpt the trust card quotes. */
 const EXCERPT_CHARS = 160
@@ -76,6 +76,7 @@ function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
 function questionedOn(index: WikiArticleIndex, claimId: string, today: string): boolean {
   return index.ledgers.some(
     (ledger) =>
+      ledger.valid &&
       ledger.owner === claimId &&
       ledger.block.passes.some(
         (pass) => pass.agent === 'reader' && pass.status === 'flagged' && pass.at === today,
@@ -147,8 +148,21 @@ export function useWikiTrustView(
             return 'evicted' as const
           }
         : skipToken,
-    refetchInterval: (query) => (query.state.data === 'evicted' ? EVICTED_RETRY_MS : false),
+    // Keep asking while the file is not local or a read failed.
+    refetchInterval: (query) =>
+      query.state.data === 'evicted' || query.state.status === 'error' ? RETRY_MS : false,
   })
+  // A new report rereads the file too, so freshness never hangs on the index
+  // lifecycle (which may be unavailable while editing still works).
+  const client = useQueryClient()
+  const root = graph?.root
+  useEffect(() => {
+    if (!active || report === null) return
+    void client.refetchQueries(
+      { queryKey: queryKeys.index.wikiClaimHashes(root, sourcePath), exact: true },
+      { cancelRefetch: false },
+    )
+  }, [client, active, report, root, sourcePath])
   // A failed reread (the source deleted or unreadable) keeps the old data in
   // the cache; trust nothing from it.
   const saved = savedQuery.isError ? undefined : savedQuery.data
