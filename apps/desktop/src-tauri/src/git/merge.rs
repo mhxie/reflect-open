@@ -68,7 +68,7 @@ use std::path::Path;
 
 use git2::build::CheckoutBuilder;
 use git2::{Index, IndexEntry, IndexTime, MergeOptions, Repository};
-use reflect_graph_paths::LocalOnlyFolders;
+use reflect_graph_paths::{to_slash_lossy, LocalOnlyFolders};
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
@@ -247,7 +247,8 @@ fn fast_forward(
     policy: &PullPolicy<'_>,
     displaced: &mut Vec<DisplacedFile>,
 ) -> AppResult<MergeOutcome> {
-    // Capture the outgoing tree before the ref moves (None on unborn).
+    // Capture the outgoing commit and tree before anything moves (None on unborn).
+    let old_oid = repo.head().ok().and_then(|head| head.target());
     let old_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
     let new_tree = repo.find_commit(remote_oid)?.tree()?;
     let plan = plan_pull(
@@ -280,6 +281,8 @@ fn fast_forward(
         Displacement::Deferred => return Ok(MergeOutcome::nothing(MergeKind::Deferred)),
     };
     let landed = seam::after_displacement().and_then(|()| {
+        #[cfg(test)]
+        super::fault::trip(super::fault::FaultPoint::BeforeFastForwardCheckout)?;
         checkout_paths(repo, &new_tree, &plan.allowed)?;
         let mut follow: Vec<String> = plan
             .allowed
@@ -292,8 +295,18 @@ fn fast_forward(
         stamp_index_stats(&mut index, root, &plan.allowed)?;
         index.write()?;
         let refname = format!("refs/heads/{branch}");
-        repo.reference(&refname, remote_oid, true, "reflect sync: fast-forward")?;
-        repo.set_head(&refname)?;
+        #[cfg(test)]
+        super::fault::trip(super::fault::FaultPoint::BeforeFastForwardRefMove)?;
+        let message = "reflect sync: fast-forward";
+        match old_oid {
+            // Guarded: the branch must still be where this pull started.
+            Some(old_oid) => {
+                repo.reference_matching(&refname, remote_oid, true, old_oid, message)?
+            }
+            None => repo.reference(&refname, remote_oid, true, message)?,
+        };
+        // HEAD already points at the branch (`current_branch` checked), so no
+        // `set_head`: it only added a `HEAD.lock` dependency to every pull.
         Ok(())
     });
     let ((), copies) = settle(moves, landed, displaced)?;
@@ -803,6 +816,8 @@ fn complete_merge(
     followed: &[String],
     policy: &PullPolicy<'_>,
 ) -> AppResult<(Vec<String>, Vec<ChangedFile>, Vec<String>)> {
+    #[cfg(test)]
+    super::fault::trip(super::fault::FaultPoint::AfterMergeBeforeCommit)?;
     let mut index = repo.index()?;
     let local_commit = repo.head()?.peel_to_commit()?;
     let remote_commit = repo.find_commit(remote_oid)?;
@@ -902,7 +917,7 @@ fn changes_in(diff: &git2::Diff<'_>) -> Vec<ChangedFile> {
         };
         if let Some(path) = file.path() {
             out.push(ChangedFile {
-                path: path.to_string_lossy().replace('\\', "/"),
+                path: to_slash_lossy(path),
                 kind: if removed {
                     ChangeKind::Remove
                 } else {

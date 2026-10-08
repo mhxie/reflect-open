@@ -263,7 +263,7 @@ fn a_held_tracked_path_the_remote_writes_is_displaced_and_restored() {
             }]
         );
         assert_eq!(
-            head_blob(root, "notes/plan.md"),
+            head_blob_bytes(root, "notes/plan.md"),
             b"# Plan\n\nfrom the phone\n"
         );
         assert_eq!(index_tree(root), head_tree(root));
@@ -1056,7 +1056,7 @@ fn line_ending_filters_decide_what_counts_as_changed() {
         write(root, "notes/crlf.md", "# CRLF\r\n\r\nline\r\n");
         assert!(device.commit());
         push(root, None, &[]).unwrap();
-        assert_eq!(head_blob(root, "notes/crlf.md"), b"# CRLF\n\nline\n");
+        assert_eq!(head_blob_bytes(root, "notes/crlf.md"), b"# CRLF\n\nline\n");
         push_from_b(
             &device,
             &[("notes/crlf.md", "# CRLF\n\nline\n\nfrom the phone\n")],

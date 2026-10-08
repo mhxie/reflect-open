@@ -3,8 +3,9 @@
 //! Rust owns the *capabilities* — init/adopt, commit, fetch, merge, push —
 //! while the sync **policy** (debounce cadence, retry loop, product states,
 //! GitHub specifics) lives in `@reflect/core` `sync/`. Nothing here is
-//! GitHub-specific: remotes are URLs, credentials arrive per call through a
-//! callback (never embedded in the URL, so never on disk).
+//! GitHub-specific: remotes are URLs, and an HTTPS sign-in arrives per call
+//! as a [`GitCredential`] presented through a callback (never embedded in
+//! the URL, so never on disk).
 //!
 //! All operations run on blocking threads (network fetches/pushes take
 //! seconds) and are **generation-gated** like file writes: every command takes
@@ -18,12 +19,16 @@
 mod commit;
 mod commit_message;
 mod displace;
+#[cfg(test)]
+mod fault;
 mod history_roots;
 mod max_file_size;
 mod merge;
 mod note_version;
 mod remote;
 mod repo;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
 
@@ -39,7 +44,7 @@ use crate::fs::GraphState;
 
 use self::commit::CommitOutcome;
 use self::merge::MergeOutcome;
-use self::remote::{PushOutcome, RemoteDelta};
+use self::remote::{GitCredential, PushOutcome, RemoteDelta};
 
 /// The open graph's accepted history roots, loaded at graph open
 /// (`fs::activate`).
@@ -177,8 +182,12 @@ pub async fn git_disconnect(generation: u64, state: State<'_, GraphState>) -> Ap
 /// before any graph is open, so it takes an absolute destination rather than
 /// a graph-relative path; the caller opens the result as a graph afterwards.
 #[tauri::command]
-pub async fn git_clone(url: String, path: String, token: Option<String>) -> AppResult<()> {
-    run_blocking(move || remote::clone(&url, Path::new(&path), token)).await
+pub async fn git_clone(
+    url: String,
+    path: String,
+    credential: Option<GitCredential>,
+) -> AppResult<()> {
+    run_blocking(move || remote::clone(&url, Path::new(&path), credential)).await
 }
 
 /// Commit every pending change (no-op when clean), never staging the graph's
@@ -212,12 +221,12 @@ pub async fn git_commit_all(
 /// Fetch `origin` and report ahead/behind for the current branch.
 #[tauri::command]
 pub async fn git_fetch(
-    token: Option<String>,
+    credential: Option<GitCredential>,
     generation: u64,
     state: State<'_, GraphState>,
 ) -> AppResult<RemoteDelta> {
     let root = crate::fs::root_for_generation(&state, generation)?;
-    run_blocking(move || remote::fetch(&root, token)).await
+    run_blocking(move || remote::fetch(&root, credential)).await
 }
 
 /// Broadcast fired for every entry a pull moved out of a path it wrote and
@@ -288,11 +297,11 @@ pub async fn git_merge_remote<R: tauri::Runtime>(
 /// the graph has not accepted (see [`history_roots`]).
 #[tauri::command]
 pub async fn git_push(
-    token: Option<String>,
+    credential: Option<GitCredential>,
     generation: u64,
     state: State<'_, GraphState>,
 ) -> AppResult<PushOutcome> {
     let root = crate::fs::root_for_generation(&state, generation)?;
     let accepted = crate::fs::accepted_history_roots(&state, generation)?;
-    run_blocking(move || remote::push(&root, token, &accepted)).await
+    run_blocking(move || remote::push(&root, credential, &accepted)).await
 }
