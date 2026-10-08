@@ -1,7 +1,7 @@
 import { createRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MeowdownEditor, type EditorHandle } from '@meowdown/react'
-import { setBridge, wikiClaimTextSha256 } from '@reflect/core'
+import { emitFileChanges, setBridge, wikiClaimTextSha256 } from '@reflect/core'
 import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -343,6 +343,17 @@ describe('claim trust from the harness report', () => {
     expect(reads).toBe(settled)
     report = { stamp: '7:7', contents: await reportText() }
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    await vi.waitFor(() => expect(reads).toBe(settled + 1))
+  })
+
+  it('rereads the saved file when that file changes, not when another does', async () => {
+    await editorFixture()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const settled = reads
+    emitFileChanges([{ path: 'wiki/Other.md', kind: 'upsert' }], 'own-write')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(reads).toBe(settled)
+    emitFileChanges([{ path: PATH, kind: 'upsert' }], 'own-write')
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 

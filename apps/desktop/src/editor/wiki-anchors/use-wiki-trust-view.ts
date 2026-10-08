@@ -4,6 +4,7 @@ import {
   icloudRequestDownloads,
   readNoteLocal,
   readWikiArticle,
+  subscribeFileChanges,
   wikiClaimStanding,
   wikiClaimTextHashes,
   wikiLocation,
@@ -174,6 +175,24 @@ export function useWikiTrustView(
     if (!active || report === null) return
     void client.refetchQueries({ queryKey: savedKey, exact: true }, { cancelRefetch: false })
   }, [client, active, report, savedKey])
+  // A change to the file itself (a save here, an edit elsewhere) rereads it
+  // without waiting for the index, which may be unavailable.
+  useEffect(() => {
+    if (!active) return
+    let live = true
+    let unlisten: (() => void) | null = null
+    void subscribeFileChanges((changes) => {
+      if (changes.some((change) => change.path === sourcePath))
+        void client.refetchQueries({ queryKey: savedKey, exact: true }, { cancelRefetch: false })
+    }).then((stop) => {
+      if (live) unlisten = stop
+      else stop()
+    })
+    return () => {
+      live = false
+      unlisten?.()
+    }
+  }, [client, active, savedKey, sourcePath])
   // Returning to the window rereads too: a source edited in another app
   // reaches no index invalidation while the index is unavailable.
   useEffect(() => {

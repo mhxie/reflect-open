@@ -181,6 +181,20 @@ describe('MobileSettings', () => {
     expect(updateSettings).toHaveBeenCalledWith({ transcriptionFormat: false })
   })
 
+  it('sets claim trust and its report path for this device', async () => {
+    const user = userEvent
+    await mount()
+
+    await user.click(page.getByRole('radio', { name: 'Margin' }))
+    expect(updateSettings).toHaveBeenCalledWith({ wikiTrustDisplay: 'margin' })
+
+    await user.click(page.getByRole('button', { name: /Trust report/ }))
+    const field = page.getByRole('textbox', { name: 'Trust report path' })
+    await user.fill(field, ' ./_meta/wiki-trust.json ')
+    await user.click(page.getByRole('button', { name: 'Save' }))
+    expect(updateSettings).toHaveBeenCalledWith({ wikiTrustReportPath: '_meta/wiki-trust.json' })
+  })
+
   it('edits the AI chat system prompt', async () => {
     const user = userEvent
     await mount()
