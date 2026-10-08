@@ -444,8 +444,10 @@ html:root {
   /* Secondary, not muted: a mark needs 3:1 against the page. */
   border-color: var(--color-text-secondary);
 }
-/* A 24px hit area (WCAG 2.5.8) around a glyph kept small for reading. */
-.wiki-trust-mark::after {
+/* A margin mark gets a 24px hit area (WCAG 2.5.8) around its small glyph. An
+   inline mark sits in a sentence, which 2.5.8 exempts: its area stays the
+   glyph's, so it never covers the prose beside it. */
+.wiki-trust-margin .wiki-trust-mark::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -488,8 +490,8 @@ html:root {
 /* Margin: marks beside the paragraph, prose untouched. */
 .wiki-trust-margin-host {
   position: relative;
-  /* Room for the mark column: its top offset plus one 1.55rem row per mark. */
-  min-height: calc(0.35em + var(--wiki-trust-marks, 1) * 1.55rem);
+  /* Room for the mark column: its top offset plus one 24px row per mark. */
+  min-height: calc(0.35em + var(--wiki-trust-marks, 1) * 24px);
 }
 /* The right margin, clear of the block handle, reads like a sidenote. */
 .wiki-trust-margin {
@@ -498,20 +500,19 @@ html:root {
   right: -1.75rem;
   display: flex;
   flex-direction: column;
-  /* Marks sit 24px apart center to center, so their hit areas never overlap. */
-  gap: 0.6rem;
+  font-size: 0.8rem;
+  /* Marks (1.15em tall) sit 24px apart center to center at any font size,
+     so their hit areas never overlap. */
+  gap: calc(24px - 1.15em);
   line-height: 1;
 }
 .wiki-trust-margin .wiki-trust-mark {
-  font-size: 0.8rem;
+  font-size: 1em;
   vertical-align: baseline;
 }
 /* A phone's gutter is 1rem: the column sits inside it. */
 .reflect-mobile-content-gutter .wiki-trust-margin {
   right: -1rem;
-  gap: 0.65rem;
-}
-.reflect-mobile-content-gutter .wiki-trust-margin .wiki-trust-mark {
   font-size: 0.75rem;
 }
 

@@ -183,15 +183,14 @@ describe('claim trust from the harness report', () => {
     expect(noteArticleFor(PATH)?.trust?.needsWork).toEqual(['c2'])
   })
 
-  it('gives each mark a 24px hit area around its small glyph', async () => {
+  it('keeps an inline mark from covering the prose beside it', async () => {
     const { container } = await editorFixture()
     const mark = container.querySelector<HTMLElement>('[data-wiki-trust-claim="c2"]')!
     const box = mark.getBoundingClientRect()
-    expect(box.width).toBeLessThan(24)
-    const x = box.left + box.width / 2
     const y = box.top + box.height / 2
-    expect(document.elementFromPoint(x + 10, y)?.closest('.wiki-trust-mark')).toBe(mark)
-    expect(document.elementFromPoint(x, y + 10)?.closest('.wiki-trust-mark')).toBe(mark)
+    // WCAG 2.5.8 exempts a target in a sentence; a press beside it places the caret.
+    expect(document.elementFromPoint(box.left - 3, y)?.closest('.wiki-trust-mark')).toBeNull()
+    expect(document.elementFromPoint(box.right + 3, y)?.closest('.wiki-trust-mark')).toBeNull()
   })
 
   it('steps to the claim that needs work from the footer summary', async () => {
@@ -438,7 +437,17 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() =>
       expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2),
     )
-    // Stacked marks' hit areas do not overlap: just inside each one's 24px area hits it.
+    // Stacked marks sit 24px apart at any root size, so their 24px hit areas
+    // tile without overlap: just inside each one's area hits it.
+    for (const root of ['16px', '13px']) {
+      document.documentElement.style.fontSize = root
+      const [first, second] = [
+        ...container.querySelectorAll<HTMLElement>('.wiki-trust-margin .wiki-trust-mark'),
+      ].map((item) => item.getBoundingClientRect())
+      const pitch = second!.top + second!.height / 2 - (first!.top + first!.height / 2)
+      expect(pitch).toBeGreaterThanOrEqual(23.5)
+    }
+    document.documentElement.style.fontSize = ''
     // A right gutter, as the app has, keeps the column in the viewport.
     ;(container as HTMLElement).style.cssText = 'width: 560px; padding-right: 64px'
     const [upper, lower] = [
@@ -448,11 +457,11 @@ describe('claim trust from the harness report', () => {
     const bottom = lower!.getBoundingClientRect()
     const x = top.left + top.width / 2
     expect(
-      document.elementFromPoint(x, top.top + top.height / 2 + 11)?.closest('.wiki-trust-mark'),
+      document.elementFromPoint(x, top.top + top.height / 2 + 10)?.closest('.wiki-trust-mark'),
     ).toBe(upper)
     expect(
       document
-        .elementFromPoint(x, bottom.top + bottom.height / 2 - 11)
+        .elementFromPoint(x, bottom.top + bottom.height / 2 - 10)
         ?.closest('.wiki-trust-mark'),
     ).toBe(lower)
     // The paragraph reserves the column's height, so the next one's marks cannot overlap.
