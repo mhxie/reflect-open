@@ -90,24 +90,32 @@ const citationSchema = z
   .refine((dates) => dates.invalid_at === undefined || dates.invalid_at > dates.valid_at)
 const citationMetadataSchema = z.object({ citation: citationSchema })
 
+const MARKER_FIELD_RE = /^[a-z][a-z0-9_]*:/
+const WEIGHT_RE = /^\d+(?:\.\d+)?$/
+
+/**
+ * Whether a marker line is malformed. Fields the schema does not name (a
+ * writer's `title` or `locator`) are retained and pass; a field that is not
+ * `key: value`, a repeated key, and invalid dates or `weight` do not.
+ */
 function markerNeedsAttention(marker: WikiMarker, line: string, asOf: string): boolean {
-  const allowed =
-    marker.kind === 'pass'
-      ? new Set(['status', 'at', 'valid_at', 'invalid_at', 'ref'])
-      : new Set(['valid_at', 'invalid_at', 'readwise'])
   const seen = new Set<string>()
   for (const pair of line.split(' | ').slice(1)) {
-    const key = pair.slice(0, pair.indexOf(':')).trim()
-    if (!allowed.has(key) || seen.has(key)) return true
+    const field = pair.trim()
+    if (!MARKER_FIELD_RE.test(field)) return true
+    const key = field.slice(0, field.indexOf(':'))
+    if (seen.has(key)) return true
     seen.add(key)
   }
   const date = wikiMarkerDate(marker)
   const invalidAt = marker.fields.get('invalid_at')
+  const weight = marker.fields.get('weight')
   return (
     date === undefined ||
     !isIsoDate(date) ||
     date > asOf ||
     (invalidAt !== undefined && (!isIsoDate(invalidAt) || invalidAt <= date)) ||
+    (weight !== undefined && !WEIGHT_RE.test(weight)) ||
     (marker.kind === 'pass' && (marker.head === '' || !marker.fields.get('status')))
   )
 }
@@ -294,8 +302,9 @@ export function wikiSourceLabel(type: string, id: string): string {
 /**
  * The sources and reviews one fenced `anchors` block records, as of `asOf`
  * (ISO `YYYY-MM-DD`). Sources and passes that no longer hold stay listed,
- * marked not current, for the evidence history disclosure. Unknown or malformed
- * lines are retained for the evidence disclosure.
+ * marked not current, for the evidence history disclosure. Blank lines and `#`
+ * comment lines carry nothing; unknown or malformed lines are retained for the
+ * evidence disclosure.
  */
 export function readWikiAnchorsBlock(text: string, asOf: string): WikiAnchorsBlock {
   const sources: WikiSource[] = []
@@ -303,7 +312,7 @@ export function readWikiAnchorsBlock(text: string, asOf: string): WikiAnchorsBlo
   const citations: WikiCitation[] = []
   const unparsed: string[] = []
   for (const line of text.split(/\r?\n/)) {
-    if (line.trim() === '') continue
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue
     const marker = parseWikiMarker(line)
     if (marker === null) {
       unparsed.push(line)

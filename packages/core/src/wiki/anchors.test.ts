@@ -132,6 +132,37 @@ describe('wiki citation evidence', () => {
     expect(block.passes[0]).toMatchObject({ current: true, ref: 'Review Note' })
   })
 
+  it('accepts writer fields the schema does not name, and a numeric weight', () => {
+    const block = readWikiAnchorsBlock(
+      [
+        '@anchor: url:https://example.org/a | valid_at: 2026-01-02 | title: A study | section: 3.2',
+        '@anchor: arxiv:2501.13956 | valid_at: 2026-01-02 | weight: 0.5 | locator: Table 2',
+      ].join('\n'),
+      '2026-03-01',
+    )
+    expect(block.unparsed).toEqual([])
+    expect(block.sources.map((source) => source.current)).toEqual([true, true])
+  })
+
+  it('skips comment lines, as the trust engine does', () => {
+    const block = readWikiAnchorsBlock(
+      '# local source: a reading note\n@anchor: arxiv:2501.13956 | valid_at: 2026-01-02',
+      '2026-03-01',
+    )
+    expect(block.unparsed).toEqual([])
+    expect(block.sources).toHaveLength(1)
+  })
+
+  it('flags fields that are not key: value, repeated keys, and a non-numeric weight', () => {
+    const raw = [
+      '@anchor: url:https://example.org/a | valid_at: 2026-01-02 | a note',
+      '@anchor: url:https://example.org/b | valid_at: 2026-01-02 | title: A | title: B',
+      '@anchor: url:https://example.org/c | valid_at: 2026-01-02 | weight: high',
+      '@pass: reviewer | status: verified | at: 2026-01-02 | Title: Shouted',
+    ]
+    expect(readWikiAnchorsBlock(raw.join('\n'), '2026-03-01').unparsed).toEqual(raw)
+  })
+
   it('requires a same-line metadata comment, including its surrounding whitespace', () => {
     const json = '{"metadata":{"citation":{"valid_at":"2026-01-02"}}}'
     expect(readWikiCitationComment(`<!-- ${json} -->`)).toEqual({ validAt: '2026-01-02' })
