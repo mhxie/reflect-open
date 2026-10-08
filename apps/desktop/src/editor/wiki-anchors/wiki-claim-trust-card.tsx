@@ -63,7 +63,7 @@ function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
           />
           {threshold === null ? null : (
             <span
-              className="absolute -top-0.5 h-2 w-px bg-text-muted"
+              className="absolute -top-0.5 h-2 w-px bg-text-secondary"
               style={{ left: `${Math.round(threshold * 100)}%` }}
             />
           )}

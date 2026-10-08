@@ -395,6 +395,7 @@ html:root {
   white-space: nowrap;
 }
 .wiki-trust-mark {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -444,9 +445,6 @@ html:root {
   border-color: var(--color-text-secondary);
 }
 /* A 24px hit area (WCAG 2.5.8) around a glyph kept small for reading. */
-.wiki-trust-mark {
-  position: relative;
-}
 .wiki-trust-mark::after {
   content: '';
   position: absolute;
