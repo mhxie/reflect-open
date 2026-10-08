@@ -337,6 +337,7 @@ pub fn run() {
             fs::device::note_read_for_device,
             fs::device::asset_read_for_device,
             fs::device::asset_ocr_cache_read,
+            fs::trust_report::wiki_trust_report_read,
             fs::device::asset_ocr_cache_keys,
             fs::device::asset_ocr_cache_write,
             fs::pdf_render::pdf_page_read_for_device,

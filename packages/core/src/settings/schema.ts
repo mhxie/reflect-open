@@ -12,6 +12,11 @@ import {
   SORT_DIRECTIONS,
 } from '../indexing/note-list-sort.ts'
 import { normalizeWikiLanguages } from '../wiki/languages.ts'
+import {
+  DEFAULT_WIKI_TRUST_REPORT_PATH,
+  normalizeWikiTrustReportPath,
+  WIKI_TRUST_DISPLAYS,
+} from '../wiki/trust-report.ts'
 import { DEFAULT_WIKI_SORT, WIKI_SORT_KEYS } from '../wiki/sort-keys.ts'
 
 /**
@@ -238,6 +243,19 @@ export const wikiGroupByTopicSchema = z.boolean().catch(false)
 
 /** Topic folders folded on the Wiki screen's grouped view. */
 export const wikiFoldedTopicsSchema = z.array(z.string()).catch([])
+
+/**
+ * How claim trust from the harness's report shows while reading a wiki
+ * article: inline marks on each claim's citations, marks in the margin, only
+ * on demand, or off. Inline by default.
+ */
+export const wikiTrustDisplaySchema = z.enum(WIKI_TRUST_DISPLAYS).catch('inline')
+
+/** Where the agent harness writes the wiki trust report, graph-relative. */
+export const wikiTrustReportPathSchema = z
+  .string()
+  .catch(DEFAULT_WIKI_TRUST_REPORT_PATH)
+  .transform((path) => normalizeWikiTrustReportPath(path) ?? DEFAULT_WIKI_TRUST_REPORT_PATH)
 
 /** Show the journaling heatmap in the daily sidebar. On by default. */
 export const activityHeatmapEnabledSchema = z.boolean().catch(true)
@@ -762,6 +780,8 @@ export const settingsSchema = z.looseObject({
   wikiSort: wikiSortSchema,
   wikiGroupByTopic: wikiGroupByTopicSchema,
   wikiFoldedTopics: wikiFoldedTopicsSchema,
+  wikiTrustDisplay: wikiTrustDisplaySchema,
+  wikiTrustReportPath: wikiTrustReportPathSchema,
   activityHeatmapEnabled: activityHeatmapEnabledSchema,
   statusBarEnabled: statusBarEnabledSchema,
   calendarEnabled: calendarEnabledSchema,

@@ -241,6 +241,13 @@ export const queryKeys = {
       return [...this.all, root, 'pending-notes'] as const
     },
   },
+  wikiTrust: {
+    all: ['wiki-trust'] as const,
+    /** The harness's trust report at `path`; outside `index` so note edits never refetch it. */
+    report(root: GraphRoot, path: string) {
+      return [...this.all, root, 'report', path] as const
+    },
+  },
   agentSkill: {
     all: ['agent-skill'] as const,
     status(root: GraphRoot) {

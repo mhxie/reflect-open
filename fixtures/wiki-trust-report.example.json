@@ -1,0 +1,56 @@
+{
+  "format": "reflect-wiki-trust",
+  "version": 1,
+  "generated_at": "2026-10-08T09:00:00Z",
+  "harness": { "name": "example-harness", "version": "1.0.0" },
+  "source_threshold": 0.6,
+  "notes": {
+    "wiki/cognition/Anchoring effect.md": {
+      "rank": 0.82,
+      "claims": {
+        "c1": {
+          "tier": "solid",
+          "text_sha256": "2d393e0b58526a6424e1842cb03a4da0955ef0d360c0f4d1d824af8aa4ff54d9",
+          "evaluated_at": "2026-10-08",
+          "score": 0.91,
+          "reasons": [
+            { "kind": "evidence", "text": "2 independent primary sources" },
+            { "kind": "review", "text": "Challenger verified on 2026-09-30, after the last edit" }
+          ],
+          "sources": ["doi:10.1126/science.185.4157.1124", "doi:10.1027/1864-9335/a000178"]
+        },
+        "c5": {
+          "tier": "needs-work",
+          "overlays": ["disputed"],
+          "text_sha256": "d5f10e04bb2bb0680876c0b5c23df4ebe98a25edcd35396a7907bdab644f4c33",
+          "evaluated_at": "2026-10-08",
+          "reasons": [
+            { "kind": "evidence", "text": "1 secondary source" },
+            { "kind": "review", "text": "A reader questioned it on 2026-10-08" }
+          ],
+          "next": "Adding a primary source would make it Supported.",
+          "sources": ["host:en.wikipedia.org"]
+        }
+      }
+    }
+  },
+  "sources": {
+    "doi:10.1126/science.185.4157.1124": {
+      "label": "Tversky & Kahneman (1974), Science",
+      "weight": 0.94,
+      "trusted": true,
+      "url": "https://doi.org/10.1126/science.185.4157.1124"
+    },
+    "doi:10.1027/1864-9335/a000178": {
+      "label": "Klein et al. (2014), Social Psychology",
+      "weight": 0.88,
+      "trusted": true
+    },
+    "host:en.wikipedia.org": {
+      "label": "en.wikipedia.org",
+      "weight": 0.41,
+      "trusted": false,
+      "reasons": [{ "text": "Tertiary source; below the threshold for primary support" }]
+    }
+  }
+}

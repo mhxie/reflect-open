@@ -49,6 +49,11 @@ here as the fork grows; the [README](../README.md#this-fork) remains a short ove
   review signals and links to specific headings. Index notes are told apart
   from articles and can be filtered by role, and articles render with compact
   citations and their native-language titles.
+- **Claim trust from your agent harness:** an agent harness (atelier or any
+  other) publishes a trust report into the graph, and Reflect shows its
+  verdicts on wiki claims. Reflect computes no trust itself. Settings → Wiki
+  picks how trust shows while reading and where the report lives; the
+  [harness guide](wiki-trust-harness.md) is the whole contract.
 
 ## Local search and private work
 

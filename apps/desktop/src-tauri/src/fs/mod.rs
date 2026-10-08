@@ -21,6 +21,7 @@ pub mod pdf_render;
 mod preview_cache;
 pub mod recovery;
 mod resolve;
+pub mod trust_report;
 pub mod x_archive;
 mod x_archive_store;
 mod x_download;

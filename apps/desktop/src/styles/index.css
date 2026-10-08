@@ -50,6 +50,11 @@ Cascade layer order, low to high priority.
   --color-note-state-local-only: var(--note-state-local-only);
   --color-note-state-protected: var(--note-state-protected);
 
+  --color-trust-solid: var(--trust-solid);
+  --color-trust-supported: var(--trust-supported);
+  --color-trust-needs-work: var(--trust-needs-work);
+  --color-trust-disputed: var(--trust-disputed);
+
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-input-bg: var(--input-bg);

@@ -74,3 +74,27 @@ export {
   type WikiReviewPass,
   type WikiSource,
 } from '../wiki/anchors.ts'
+export {
+  DEFAULT_WIKI_TRUST_REPORT_PATH,
+  WIKI_TRUST_DISPLAYS,
+  WIKI_TRUST_REPORT_FORMAT,
+  WIKI_TRUST_REPORT_VERSION,
+  normalizeWikiTrustReportPath,
+  parseWikiTrustReport,
+  wikiClaimStanding,
+  wikiClaimTextSha256,
+  wikiTrustCounts,
+  wikiTrustReportJsonSchema,
+  type WikiClaimStanding,
+  type WikiClaimVerdict,
+  type WikiNoteTrust,
+  type WikiSourceStanding,
+  type WikiTrustCounts,
+  type WikiTrustDisplay,
+  type WikiTrustOverlay,
+  type WikiTrustReason,
+  type WikiTrustReport,
+  type WikiTrustReportParse,
+  type WikiTrustTier,
+} from '../wiki/trust-report.ts'
+export { readWikiTrustReportFile, type WikiTrustReportFile } from '../wiki/trust-report-file.ts'
