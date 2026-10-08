@@ -75,7 +75,7 @@ describe('sortWikiEntries', () => {
     ])
   })
 
-  it('sorts counts, keeping guides and unread entries last either way', () => {
+  it('sorts counts, keeping claimless and unread entries last either way', () => {
     expect(titles(sortWikiEntries(ENTRIES, { key: 'claims', direction: 'desc' }))).toEqual([
       'Beta',
       'Item 10',

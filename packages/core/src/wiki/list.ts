@@ -4,6 +4,7 @@ import { isAppError } from '../errors.ts'
 import { readNoteLocal } from '../graph/commands.ts'
 import { db } from '../indexing/db.ts'
 import { summarizeWikiEntry, type WikiEntrySummary } from './entry-summary.ts'
+import { wikiAncestorIndexPaths } from './hierarchy.ts'
 import {
   wikiLocation,
   wikiPathIn,
@@ -321,6 +322,41 @@ export async function wikiCopies(
     language,
     path: existing.has(candidate) ? candidate : null,
   }))
+}
+
+/** An index above a wiki note: what its breadcrumb shows and opens. */
+export interface WikiAncestor {
+  readonly path: string
+  readonly title: string
+  readonly displayTitle: string | null
+  readonly lang: string | null
+}
+
+/**
+ * The indexes above the wiki note at `path` that exist, root first (see
+ * `wikiAncestorIndexPaths`): a folder without an index is skipped, and the
+ * search stays in the note's own language. Empty outside the wiki, for a root
+ * index, and for a note with no index above it.
+ */
+export async function wikiAncestors(
+  path: string,
+  languages: readonly WikiLanguage[],
+): Promise<WikiAncestor[]> {
+  const candidates = wikiAncestorIndexPaths(path, languages)
+  if (candidates.length === 0) {
+    return []
+  }
+  const rows = await db
+    .selectFrom('notes')
+    .select(['notes.path', 'notes.title', 'notes.displayTitle', 'notes.lang'])
+    .where('notes.kind', '=', 'note')
+    .where('notes.path', 'in', candidates)
+    .execute()
+  const byPath = new Map(rows.map((row) => [row.path, row]))
+  return candidates
+    .map((candidate) => byPath.get(candidate))
+    .filter(isNotNullish)
+    .reverse()
 }
 
 /** Whether the open graph has any wiki entries (the sidebar shows Wiki only then). */

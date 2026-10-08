@@ -62,6 +62,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
     settings: {
       editorMarkdownSyntax: 'hide',
+      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
       editorDefaultBullet: false,
       aiProviders: [],
       defaultAiProviderId: null,

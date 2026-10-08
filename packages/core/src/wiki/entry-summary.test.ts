@@ -91,7 +91,7 @@ describe('summarizeWikiEntry', () => {
     expect(earlier.flaggedClaims).toBe(2)
   })
 
-  it('treats a note without a claims section as a guide with nothing to count', () => {
+  it('counts nothing for a note without a claims section', () => {
     const guide = summarizeWikiEntry(
       '# Reading Guide\n\n## Reading order\n\n- [[Anchoring]]\n',
       '2026-03-01',

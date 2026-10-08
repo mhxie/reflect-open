@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WikiEntrySummary } from './entry-summary.ts'
-import { groupWikiEntries, isWikiGuide, wikiTotals } from './group.ts'
+import { groupWikiEntries, wikiTotals } from './group.ts'
 import type { WikiEntry } from './list.ts'
 
 function summary(claims: number): WikiEntrySummary {
@@ -47,21 +47,15 @@ const ENTRIES = [
 ]
 
 describe('groupWikiEntries', () => {
-  it('puts the root first, then topics A–Z, with guides leading each topic', () => {
+  it('puts the root first, then topics A–Z, with indexes leading each topic', () => {
     const groups = groupWikiEntries(ENTRIES)
 
-    // Inside a topic the given order holds (here, the fixture's), after its guides.
+    // Inside a topic the given order holds (here, the fixture's), after its index.
     expect(groups.map((group) => [group.topic, group.entries.map((item) => item.title)])).toEqual([
       [null, ['Wiki Index']],
       ['attention', ['Inattentional Blindness']],
       ['memory', ['Memory: Reading Guide', 'Spacing Effect', 'retrieval practice']],
     ])
-  })
-})
-
-describe('isWikiGuide', () => {
-  it('marks read entries without claims, not entries whose file was unavailable', () => {
-    expect(ENTRIES.map(isWikiGuide)).toEqual([false, true, false, true, false])
   })
 })
 

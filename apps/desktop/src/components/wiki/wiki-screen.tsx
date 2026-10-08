@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { useQuery } from '@tanstack/react-query'
 import { isModEvent } from '@meowdown/core'
 import {
+  buildWikiIndexTree,
   chooseWikiSort,
   errorMessage,
   filterWikiEntries,
   groupWikiEntries,
   listWikiEntries,
   sortWikiEntries,
+  visibleWikiIndexRows,
   wikiEntryIn,
   wikiSourceLanguage,
   wikiTopicKey,
@@ -32,6 +34,18 @@ import { WikiLanguageTabs } from './wiki-language-tabs.tsx'
 import { WikiLayoutTabs } from './wiki-layout-tabs.tsx'
 import { WikiTable, type WikiTableLayout } from './wiki-table.tsx'
 
+/** Whether a layout has no rows to show. */
+function layoutIsEmpty(layout: WikiTableLayout): boolean {
+  switch (layout.kind) {
+    case 'tree':
+      return layout.rows.length === 0
+    case 'flat':
+      return layout.entries.length === 0
+    case 'grouped':
+      return layout.groups.length === 0
+  }
+}
+
 interface WikiScreenProps {
   /** The active filter, from the route (`null` = every entry). */
   filter: WikiFilter | null
@@ -42,8 +56,11 @@ interface WikiScreenProps {
 /**
  * The Wiki screen (a routed view, like All Notes): every entry in the source
  * language's folder. The filter and the language it is read in live on the
- * route; order, grouping, and folded topics are settings. Keyboard follows
- * All Notes, without trash: wiki entries are maintained by their own pipeline.
+ * route; order, grouping, and folded topics are settings. The Indexes filter
+ * lays its rows out as the index tree instead, each index under the nearest
+ * one above it, with what is collapsed kept only while the screen is open.
+ * Keyboard follows All Notes, without trash: wiki entries are maintained by
+ * their own pipeline.
  */
 export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): ReactElement {
   const { graph } = useGraph()
@@ -58,6 +75,8 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
   const { wikiLanguages: languages, wikiSort: sort, wikiGroupByTopic: grouped } = settings
   const source = wikiSourceLanguage(languages)
   const folded = useMemo(() => new Set(settings.wikiFoldedTopics), [settings.wikiFoldedTopics])
+  // Tree rows collapsed in this view, by their path inside the language folder.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   // A language removed from settings since the route was pushed reads the source.
   const translation =
     languages.find((candidate) => candidate !== source && candidate.folder === language) ?? null
@@ -86,10 +105,14 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
     }
     const listed = entries.map((entry) => wikiEntryIn(entry, openLanguage))
     const visible = sortWikiEntries(filterWikiEntries(listed, filter), sort)
+    if (filter?.kind === 'index') {
+      const nodes = buildWikiIndexTree(visible, languages)
+      return { kind: 'tree', nodes, rows: visibleWikiIndexRows(nodes, collapsed) }
+    }
     return grouped
       ? { kind: 'grouped', groups: groupWikiEntries(visible) }
       : { kind: 'flat', entries: visible }
-  }, [entries, openLanguage, filter, sort, grouped])
+  }, [entries, openLanguage, filter, sort, grouped, languages, collapsed])
   const totals = useMemo(() => wikiTotals(entries ?? []), [entries])
   const { onScroll } = useScrollRestoration(scrollElement, layout !== undefined)
 
@@ -98,6 +121,9 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
   const orderedPaths = useMemo(() => {
     if (layout === undefined) {
       return []
+    }
+    if (layout.kind === 'tree') {
+      return layout.rows.map((row) => row.entry.path)
     }
     if (layout.kind === 'flat') {
       return layout.entries.map((entry) => entry.path)
@@ -142,6 +168,18 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
     [updateSettingsWith, layout],
   )
 
+  const handleToggleExpanded = useCallback(
+    (key: string) =>
+      setCollapsed((current) => {
+        const next = new Set(current)
+        if (!next.delete(key)) {
+          next.add(key)
+        }
+        return next
+      }),
+    [],
+  )
+
   const scrollToIndex = useCallback((index: number) => {
     rootRef.current
       ?.querySelector(`[data-row-index="${CSS.escape(String(index))}"]`)
@@ -156,10 +194,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
   }, [])
 
   const isEmpty = entries !== undefined && entries.length === 0
-  const nothingMatches =
-    !isEmpty &&
-    layout !== undefined &&
-    (layout.kind === 'flat' ? layout.entries.length === 0 : layout.groups.length === 0)
+  const nothingMatches = !isEmpty && layout !== undefined && layoutIsEmpty(layout)
 
   return (
     <div
@@ -191,10 +226,13 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
             language={openLanguage}
             onSelect={(next) => navigate(wikiRoute({ filter, language: next }))}
           />
-          <WikiLayoutTabs
-            grouped={grouped}
-            onChange={(next) => updateSettingsWith(() => ({ wikiGroupByTopic: next }))}
-          />
+          {/* The index tree is the Indexes layout; flat and topic views would contradict it. */}
+          {filter?.kind === 'index' ? null : (
+            <WikiLayoutTabs
+              grouped={grouped}
+              onChange={(next) => updateSettingsWith(() => ({ wikiGroupByTopic: next }))}
+            />
+          )}
         </div>
       </header>
       <div
@@ -221,6 +259,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
             layout={layout}
             folded={folded}
             onToggleFold={handleToggleFold}
+            onToggleExpanded={handleToggleExpanded}
             sort={sort}
             onSort={handleSort}
             language={translation}
