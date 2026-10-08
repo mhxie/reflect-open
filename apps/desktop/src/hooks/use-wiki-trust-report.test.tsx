@@ -78,3 +78,19 @@ describe('useWikiTrustReport and backup', () => {
     expect(fileChanged).toHaveBeenCalledTimes(4)
   })
 })
+
+describe('useWikiTrustReport with an idle observer', () => {
+  it('still refetches on window focus for the active one', async () => {
+    // Display is off, so the first observer idles; the second always watches.
+    const { result } = await renderHook(
+      // The idle observer renders last, so its options are the query's latest.
+      () => ({ watching: useWikiTrustReport(true), idle: useWikiTrustReport() }),
+      { wrapper },
+    )
+    await vi.waitFor(() => expect(result.current.watching.status).toBe('ready'))
+    expect(result.current.idle.status).toBe('off')
+    file = null
+    window.dispatchEvent(new Event('focus'))
+    await vi.waitFor(() => expect(result.current.watching.status).toBe('missing'))
+  })
+})

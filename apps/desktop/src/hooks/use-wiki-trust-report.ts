@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { skipToken, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   errorMessage,
   parseWikiTrustReport,
@@ -127,10 +127,13 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   }, [enabled, client, root, path])
   const { data } = useQuery({
     queryKey: key,
-    queryFn:
-      enabled && generation !== undefined
-        ? () => loadReport(client, key, path, generation, () => sync?.fileChanged())
-        : skipToken,
+    // A real fetcher even when this observer is idle: the always-on watcher
+    // and a display-off editor share the key.
+    queryFn: () =>
+      generation === undefined
+        ? Promise.reject(new Error('No graph is open.'))
+        : loadReport(client, key, path, generation, () => sync?.fileChanged()),
+    enabled: enabled && generation !== undefined,
     refetchInterval: (query) =>
       query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS,
     refetchOnWindowFocus: 'always',

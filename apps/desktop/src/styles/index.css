@@ -476,6 +476,8 @@ html:root {
 /* Margin: marks beside the paragraph, prose untouched. */
 .wiki-trust-margin-host {
   position: relative;
+  /* Room for the mark column: its top offset plus one 1.1rem row per mark. */
+  min-height: calc(0.35em + var(--wiki-trust-marks, 1) * 1.1rem);
 }
 /* The right margin, clear of the block handle, reads like a sidenote. */
 .wiki-trust-margin {
@@ -490,6 +492,13 @@ html:root {
 .wiki-trust-margin .wiki-trust-mark {
   font-size: 0.8rem;
   vertical-align: baseline;
+}
+/* A phone's gutter is 1rem: the column sits inside it. */
+.reflect-mobile-content-gutter .wiki-trust-margin {
+  right: -1rem;
+}
+.reflect-mobile-content-gutter .wiki-trust-margin .wiki-trust-mark {
+  font-size: 0.75rem;
 }
 
 /* Reveal (the claim lens, or Option held): every claim tinted by its tier. */

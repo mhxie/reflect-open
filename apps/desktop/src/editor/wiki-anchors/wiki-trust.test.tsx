@@ -419,6 +419,10 @@ describe('claim trust from the harness report', () => {
     await vi.waitFor(() =>
       expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2),
     )
+    // The paragraph reserves the column's height, so the next one's marks cannot overlap.
+    const column = container.querySelector('.wiki-trust-margin')!.getBoundingClientRect()
+    const host = container.querySelector('.wiki-trust-margin-host')!.getBoundingClientRect()
+    expect(column.bottom).toBeLessThanOrEqual(host.bottom + 0.5)
     expect(container.querySelector('.ProseMirror')?.getAttribute('data-wiki-trust-display')).toBe(
       'margin',
     )

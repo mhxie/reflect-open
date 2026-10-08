@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   icloudRequestDownloads,
   readNoteLocal,
@@ -149,20 +149,21 @@ export function useWikiTrustView(
   )
   const savedQuery = useQuery({
     queryKey: savedKey,
-    queryFn:
-      active && graph !== null
-        ? async () => {
-            const read = await readNoteLocal(sourcePath, graph.generation)
-            if (read.kind === 'content')
-              return {
-                content: read.content,
-                hashes: await wikiClaimTextHashes(read.content, todayIso()),
-              }
-            // Materializing an unchanged file reindexes nothing, so poll for it.
-            await icloudRequestDownloads([sourcePath])
-            return 'evicted' as const
-          }
-        : skipToken,
+    // A real fetcher even when this observer is idle: a translation and its
+    // source share the key, and an idle observer must not strip the other's.
+    queryFn: async () => {
+      if (graph === null) throw new Error('No graph is open.')
+      const read = await readNoteLocal(sourcePath, graph.generation)
+      if (read.kind === 'content')
+        return {
+          content: read.content,
+          hashes: await wikiClaimTextHashes(read.content, todayIso()),
+        }
+      // Materializing an unchanged file reindexes nothing, so poll for it.
+      await icloudRequestDownloads([sourcePath])
+      return 'evicted' as const
+    },
+    enabled: active && graph !== null,
     refetchInterval: (query) => savedFileRetryMs(query.state),
   })
   // A new report rereads the file too, so freshness never hangs on the index

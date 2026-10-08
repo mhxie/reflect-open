@@ -263,7 +263,12 @@ function decorations(
     const node = state.doc.nodeAt(position)
     if (node === null) continue
     result.push(
-      Decoration.node(position, position + node.nodeSize, { class: 'wiki-trust-margin-host' }),
+      // The mark count reserves the column's height, so a short paragraph's
+      // marks never overlap the next one's.
+      Decoration.node(position, position + node.nodeSize, {
+        class: 'wiki-trust-margin-host',
+        style: `--wiki-trust-marks: ${claims.length}`,
+      }),
     )
     result.push(trustWidget(position + 1, claims, 'margin'))
   }
