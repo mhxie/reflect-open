@@ -132,9 +132,13 @@ export function MarkdownPreview({
     [],
   )
   const noteIdentity = useWikiArticleIdentities(content)
-  const articleProjection = useMemo(
-    () => createWikiArticleProjectionReader({ noteIdentity }),
-    [noteIdentity],
+  // Article blocks read the whole document (citation numbers, claim ranges),
+  // which MarkdownView's per-block memo does not compare. `source` ties the
+  // reader, and so renderBlock, to the document; the React Compiler ignores
+  // the deps list, so without it article blocks would go stale.
+  const articleReader = useMemo(
+    () => ({ source: content, project: createWikiArticleProjectionReader({ noteIdentity }) }),
+    [noteIdentity, content],
   )
   const renderBlock = useCallback<MarkdownBlockRenderer>(
     (context) => {
@@ -160,7 +164,7 @@ export function MarkdownPreview({
         )
       }
       const asOf = todayIso()
-      const projection = articleProjection(doc, asOf)
+      const projection = articleReader.project(doc, asOf)
       const article = renderWikiArticleBlock(
         context,
         projection,
@@ -201,7 +205,7 @@ export function MarkdownPreview({
       navigates,
       onLinkClick,
       openExternalLink,
-      articleProjection,
+      articleReader,
       showClaimRanges,
       claimFragment,
       titleMetadata,
