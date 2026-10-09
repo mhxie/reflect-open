@@ -93,7 +93,8 @@ Off:
 
 - **Inline** (default). A small mark after each claim that needs a look,
   after its citations: dashed (Needs work), dashed red (Disputed), dotted
-  (changed since evaluation, or not yet evaluated). Its prose is underlined.
+  (changed since evaluation, or not yet evaluated). Prose that needs work or
+  is disputed is underlined.
   Supported (ring) and Solid (filled) claims stay unmarked.
 - **Margin.** Marks in the right margin beside the line each claim ends on,
   so the prose is untouched; Solid claims stay unmarked.
@@ -125,7 +126,8 @@ mark; the pill became the mark after the claim.
 
 ## Interfaces Reflect provides
 
-- **Display** of the report on every wiki surface, with freshness.
+- **Display** of the report in articles and translations, with freshness;
+  the Wiki screen follows in step 3.
 - **Records** a person makes while reading or editing, in schema syntax:
   `editor | pending` for substantive edits made in the editor (never for host
   reloads), `reader | flagged` for a question.
