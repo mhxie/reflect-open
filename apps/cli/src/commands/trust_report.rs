@@ -7,7 +7,8 @@ use std::fs;
 use std::path::Path;
 
 use reflect_graph_paths::{
-    normalize_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY,
+    is_wiki_trust_report_path, normalize_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH,
+    WIKI_TRUST_REPORT_PATH_KEY,
 };
 use serde_json::Value;
 
@@ -35,12 +36,48 @@ fn configured_in(path: &Path) -> Option<String> {
     normalize_wiki_trust_report_path(document.get(WIKI_TRUST_REPORT_PATH_KEY)?.as_str()?)
 }
 
+/// Whether `rel` really lands at a report path inside the graph once the
+/// links among its existing folders resolve, as Reflect reads it: a linked
+/// `.harness/` must not send the harness's write outside the graph or into
+/// Reflect's own state. A dangling link lands nowhere.
+fn lands_in_graph(root: &Path, rel: &str) -> bool {
+    let (Ok(canonical_root), joined) = (root.canonicalize(), root.join(rel)) else {
+        return false;
+    };
+    let mut existing = joined.as_path();
+    let mut missing = Vec::new();
+    while existing.symlink_metadata().is_err() {
+        match (existing.file_name(), existing.parent()) {
+            (Some(name), Some(parent)) => {
+                missing.push(name);
+                existing = parent;
+            }
+            _ => return false,
+        }
+    }
+    let Ok(landed) = existing.canonicalize() else {
+        return false;
+    };
+    let Ok(landed) = landed.strip_prefix(&canonical_root) else {
+        return false;
+    };
+    let mut landed = landed.to_path_buf();
+    landed.extend(missing.iter().rev());
+    is_wiki_trust_report_path(&landed.to_string_lossy().replace('\\', "/"))
+}
+
 pub fn run(graph: &Graph, json: bool) -> Result<(), CliError> {
     let configured = settings_path().and_then(|path| configured_in(&path));
     let rel = configured
         .clone()
         .unwrap_or_else(|| DEFAULT_WIKI_TRUST_REPORT_PATH.to_owned());
     let absolute = graph.root.join(&rel);
+    if !lands_in_graph(&graph.root, &rel) {
+        return Err(CliError::Private(format!(
+            "{rel} leads outside the graph or into Reflect's own folders through a link, \
+             so no harness should write there: point it at a plain folder in the graph"
+        )));
+    }
     if json {
         // Unknown local-only folders refuse (exit 3) rather than read as none.
         let index = super::open_index_for_resolution(&graph.root)?;

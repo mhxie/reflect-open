@@ -216,8 +216,8 @@ Prints where an agent harness publishes this graph's wiki trust report: the
 path set in Settings → Wiki → Trust report, or `.harness/wiki-trust.json`
 when none is set. The setting lives outside the graph, so a harness asks here
 instead of assuming the default. With `--json` it also lists the graph's
-local-only folders, whose notes a report must leave out, and exits 3 when they
-cannot be read. See [wiki-trust-harness.md](wiki-trust-harness.md).
+local-only folders, whose notes a report must leave out. It exits 3 when they
+cannot be read, or when a link on the path leads out of the graph. See [wiki-trust-harness.md](wiki-trust-harness.md).
 
 ```jsonc
 // reflect trust-report --json

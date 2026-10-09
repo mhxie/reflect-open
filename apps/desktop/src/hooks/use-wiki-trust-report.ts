@@ -142,6 +142,9 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
     enabled: enabled && generation !== undefined,
     refetchInterval: (query) =>
       query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS,
+    // The backup watcher polls with the window hidden too: the file watcher
+    // skips the report's folder, so nothing else tells backup it changed.
+    refetchIntervalInBackground: always,
     refetchOnWindowFocus: 'always',
     structuralSharing: false,
   })

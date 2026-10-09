@@ -1280,6 +1280,35 @@ fn local_only_rows_never_read_as_stale_or_surface_in_search() {
     assert_eq!(value["stale"], true);
 }
 
+/// A report folder that links out of the graph, or into Reflect's own state,
+/// is refused (exit 3) rather than advertised to a harness.
+#[cfg(unix)]
+#[test]
+fn trust_report_refuses_a_linked_folder_that_leaves_the_graph() {
+    let fixture = graph();
+    let outside = TempDir::new().unwrap();
+    std::os::unix::fs::symlink(outside.path(), fixture.root().join(".harness")).unwrap();
+    let output = reflect(&fixture, &["trust-report"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stdout(&output));
+
+    let inside = graph();
+    std::os::unix::fs::symlink(
+        inside.root().join(".reflect"),
+        inside.root().join(".harness"),
+    )
+    .unwrap();
+    assert_eq!(
+        reflect(&inside, &["trust-report", "--json"]).status.code(),
+        Some(3)
+    );
+
+    // Control: a plain folder, present or not yet created, is advertised.
+    let plain = graph();
+    assert_eq!(reflect(&plain, &["trust-report"]).status.code(), Some(0));
+    fs::create_dir_all(plain.root().join(".harness")).unwrap();
+    assert_eq!(reflect(&plain, &["trust-report"]).status.code(), Some(0));
+}
+
 /// A harness learns which folders to leave out of the trust report, and
 /// an unreadable record refuses rather than reading as none.
 #[cfg(unix)]

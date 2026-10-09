@@ -32,7 +32,8 @@ is plain (not empty, `.`, or `..`, and without `\` or `:`), it ends in `.json`, 
 under `.reflect/` (Reflect's rebuildable state) or `.git/`; the cases are in
 [`fixtures/wiki-trust-report-paths.json`](../fixtures/wiki-trust-report-paths.json).
 Prefer a hidden folder: a report under a visible folder is listed among the
-graph's attachments.
+graph's attachments. If a folder on the path is a link leading out of the graph or
+into those folders, the command refuses (exit 3): write nothing then.
 
 The report syncs wherever the graph syncs, so Reflect on other devices,
 including iOS, shows trust without the harness running there. With Git backup,
