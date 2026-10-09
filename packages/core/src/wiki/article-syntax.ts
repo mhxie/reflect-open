@@ -35,7 +35,8 @@ function wikiMarkdownNodes(source: string): [string, number, number][] {
   parseBody(body).iterate({
     enter: (node) => {
       if (node.name === 'Comment' || node.name === 'CommentBlock') return false
-      if (node.name !== 'Document') nodes.push([node.name, node.from + bodyOffset, node.to + bodyOffset])
+      if (node.name !== 'Document')
+        nodes.push([node.name, node.from + bodyOffset, node.to + bodyOffset])
     },
   })
   return nodes
