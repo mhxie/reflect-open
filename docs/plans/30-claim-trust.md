@@ -1,13 +1,14 @@
 # 30: Claim-level trust
 
-Status: proposed on `docs/claim-trust-plan`. Baseline: `b914fd4a`.
+Status: steps 1–2 implemented (PRs #26, #27, #29, #31); step 3 proposed.
+Baseline: `b914fd4a`.
 
 ## Product goal
 
 While reading a wiki article, a person can tell at a glance which claims are
-solid and which still need work, and why. The same verdict appears in the
-editor, the Wiki screen, translations, and the `reflect` CLI, so agents and
-people act on one signal.
+solid and which still need work, and why. The editor, translations, and
+later the Wiki screen show the verdicts of the report the harness writes, so
+agents and people act on one signal.
 
 ## Ownership
 
@@ -24,7 +25,7 @@ score, a rank, or a source weight.
 | Claim tiers, overlays, reasons, scores | Renders them; marks results stale when text changed |
 | Ranking (note and claim) | Orders lists and search by the published rank |
 | Source reputation: continuous weights, global normalization, trust threshold | Shows each source's weight and whether it clears the threshold |
-| Writes the trust report | Validates and projects the report; exposes it to the CLI |
+| Writes the trust report | Validates and projects the report; tells the harness where to write it |
 | Conformance fixtures for its rules | Fixtures for parsing and report reading only |
 
 ## Baseline behavior
@@ -36,11 +37,11 @@ score, a rank, or a source weight.
   trust verdict from `@pass` records inside Reflect
   (`packages/core/src/wiki/entry-summary.ts:51`). That is a trust rule living
   on the wrong side, and the schema says passes never accumulate trust.
-- External reloads (`setMarkdown`) were ordinary `docChanged` transactions, so
-  `appendTransaction` could stamp `@pass: editor | status: pending` on claim
+- External reloads (`setMarkdown`) are ordinary `docChanged` transactions, so
+  `appendTransaction` can stamp `@pass: editor | status: pending` on claim
   text an agent changed on disk (`wiki-article-plugin.tsx:426`).
-- The marker whitelist (`packages/core/src/wiki/anchors.ts:97`) was stricter
-  than the schema; locator fields agents write landed in `unparsed`.
+- The marker whitelist (`packages/core/src/wiki/anchors.ts:97`) is stricter
+  than the schema; locator fields agents write land in `unparsed`.
 - Translations carry their own copies of every ledger, though the schema says
   shadows are outside the trust graph.
 - Claim data is not projected; the CLI has no wiki commands.
@@ -53,30 +54,22 @@ stay meaningful as the wiki grows (see "Source reputation").
 ## Trust report
 
 The harness publishes one report; Reflect reads nothing else for trust.
-Reflect defines the format so any harness can plug in, atelier or another:
-[`docs/wiki-trust-harness.md`](../wiki-trust-harness.md) is the whole
-contract, with a generated JSON Schema and shared fixtures.
+Reflect defines the format so any harness can plug in, atelier or another.
+[`docs/wiki-trust-harness.md`](../wiki-trust-harness.md) is the contract, with
+a generated JSON Schema and shared fixtures; this plan keeps only the
+decisions behind it:
 
-- **Location.** A file inside the graph at the path set in Settings → Wiki
-  (default `.harness/wiki-trust.json`), so it syncs with the notes and mobile
-  Reflect shows it without the harness. `reflect trust-report` prints the
-  configured path for the harness.
-- **Identity.** Claims keyed by graph-relative note path (compared in NFC) and
-  claim id; sources keyed by the harness's origin key.
-- **Freshness.** Each verdict carries the SHA-256 of the claim text it was
-  computed for, with CRLF and CR read as LF. Reflect hashes the saved file,
-  as the harness reads it, never its own re-serialization. A mismatch shows
-  the claim as changed since evaluation instead of an outdated verdict. Legacy heading
-  claims carry no trust: their ledger sits inside their own range.
-- **Verdicts.** Per claim: tier, overlays, reasons as display text, and what
-  would raise the tier.
-- **Sources.** Per origin: normalized weight, whether it clears the harness's
-  threshold, and reasons.
-- **Version.** `reflect-wiki-trust` version 1. Reflect refuses another version
-  and says so; within version 1, one malformed entry drops alone, an
-  optional field may be null, and unknown keys are ignored, so optional
-  fields (a rank, say) can be added later. While a new report fails to read,
-  Reflect keeps the last valid one on screen and Settings says why.
+- **The report lives in the graph** (default `.harness/wiki-trust.json`), so
+  it syncs with the notes and mobile Reflect shows it without the harness.
+  The path setting is per device: a custom path must be set on each device.
+  `reflect trust-report` prints this device's path for the harness.
+- **Freshness comes from the saved file.** Each verdict carries a hash of the
+  claim text it judged; Reflect hashes the file as the harness reads it,
+  never its own re-serialization, and shows a mismatch as changed since
+  evaluation rather than an outdated verdict.
+- **A bad report never blanks the screen.** Reflect keeps the last valid
+  report and Settings says why; within version 1, one malformed entry drops
+  alone and unknown keys are ignored, so the harness can add fields.
 
 ### Source reputation
 
@@ -98,16 +91,18 @@ Settled from the canvas mockup "Claim trust reading demo", then iterated on
 the real editor. Settings → Wiki → Claim trust picks one of three styles, or
 Off:
 
-- **Inline** (default). A small mark after each claim, after its citations:
-  filled (Solid), ring (Supported), dashed (Needs work), dashed red
-  (Disputed), dotted (changed since evaluation). Only prose that needs work
-  is underlined, dotted; sound prose stays clean.
-- **Margin.** The same marks in the right margin beside each paragraph, so the
-  prose is untouched.
-- **On demand.** No marks while reading; holding Option, or the claim lens,
-  tints every claim by tier and shows its mark.
+- **Inline** (default). A small mark after each claim that needs a look,
+  after its citations: dashed (Needs work), dashed red (Disputed), dotted
+  (changed since evaluation, or not yet evaluated). Its prose is underlined.
+  Supported (ring) and Solid (filled) claims stay unmarked.
+- **Margin.** Marks in the right margin beside the line each claim ends on,
+  so the prose is untouched; Solid claims stay unmarked.
+- **On demand.** No marks while reading.
 
 In every style:
+
+- **Reveal.** Holding Option, or the claim lens, tints every claim by tier and
+  shows every mark, so unmarked claims can be opened too.
 
 - **Trust card.** A mark opens the claim's card: the claim it judges, tier,
   reasons, what would raise it, and the sources it rests on with their
@@ -117,7 +112,8 @@ In every style:
   most once a day per claim and only where the note is editable. The harness
   decides what resolves it.
 - **Footer.** The note footer says how many claims need work and steps through
-  them; it stays silent when nothing needs attention.
+  them; when none do, it says how many are not yet evaluated, and otherwise
+  stays silent.
 - **Translations** show the source entry's verdicts, checked against the
   source's text.
 - **Wiki screen** (next). A per-entry tier distribution in place of the
@@ -140,28 +136,28 @@ mark; the pill became the mark after the claim.
 ## Implementation
 
 1. **Prerequisite fixes.**
-   - Accept well-formed fields the schema does not name and its `weight`
-     field; skip `#` comment lines in fences (#26).
-   - Check every claim's formatting in one parse pair (#27): a 100-claim
-     article went from about 700 ms to about 19 ms per index rebuild.
-   - Skip host content transactions in `pendingEdits` (mhxie/meowdown#4, #29).
+   - Judge ledger fields by the trust engine's rules; skip `#` comment lines
+     in fences (PR #26).
+   - Make the claim formatting check cheap enough for every keystroke (PR #27).
+   - Skip host content transactions in `pendingEdits` (mhxie/meowdown#4,
+     PR #29).
 2. **Contract and reading UI** (one PR): the report reader, shared path
    rules and hash vectors, `reflect trust-report`, the agent skill section,
    Settings, the three reading styles, the trust card, the question action,
-   and the footer. #30 (tier rules inside Reflect) closes; atelier owns its
-   corpus.
+   and the footer (PR #31). PR #30, which computed tiers inside Reflect, was
+   closed unmerged; atelier owns its corpus.
 3. **Wiki screen.** Per-entry tier distribution and filters from the report;
    retire the pass-based `wikiReviewState` and the legacy line scanner.
 
-Translation-ledger removal in atelier waits for step 4.
+Removing translation ledgers is atelier's work; see the open questions.
 
 ## Observable completion criteria
 
 - No module in Reflect computes a tier or a source weight.
 - Editing a claim's text shows it as awaiting evaluation until the harness
   publishes a report for the new text.
-- The editor, Wiki screen, translation copy, and CLI show the same verdict for
-  the same claim from the same report.
+- The editor and the translation copy, and after step 3 the Wiki screen, show
+  the same verdict for the same claim from the same report.
 - An agent edit on disk, reloaded into an open note, writes no `editor`
   pending record.
 - A report Reflect cannot validate never replaces the last valid one, and
@@ -173,3 +169,5 @@ Translation-ledger removal in atelier waits for step 4.
 - How a reader's question is resolved (a pass that names it, an adversarial
   pass, or any later pass).
 - Whether claims in `index.md` notes are evaluated.
+- When translation copies drop their own ledgers, now that translations read
+  the source entry's verdicts.
