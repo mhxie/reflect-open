@@ -23,6 +23,7 @@ import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
+import { wikiClaimPending } from './wiki-article-pending.ts'
 import { wikiStandingStyle } from './wiki-trust-labels.ts'
 import type { WikiTrustView } from './wiki-trust-view.ts'
 
@@ -88,27 +89,6 @@ function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
 }
 
 /** Whether the reader questioned the claim on `today`: a guard against repeats, not a trust rule. */
-/**
- * Whether a translation's own ledger records an edit to the claim on or
- * after `since`: its text has moved on from the source the verdict judged,
- * until the harness evaluates again. The record is written as the person
- * types, so it covers unsaved edits too.
- */
-function editedSince(index: WikiArticleIndex, claimId: string, since: string): boolean {
-  return index.ledgers.some(
-    (ledger) =>
-      ledger.valid &&
-      ledger.owner === claimId &&
-      ledger.block.passes.some(
-        (pass) =>
-          pass.agent === 'editor' &&
-          pass.status === 'pending' &&
-          pass.at !== null &&
-          pass.at >= since,
-      ),
-  )
-}
-
 function questionedOn(index: WikiArticleIndex, claimId: string, today: string): boolean {
   return index.ledgers.some(
     (ledger) =>
@@ -140,8 +120,8 @@ function sourcesOf(
  * serialization never decides freshness. `asEditor` turns the saved file
  * into the editor's own Markdown, so a claim whose editor text differs from
  * it has an unsaved edit and shows as changed at once. A translation copy
- * shows its source entry's verdicts, as changed once it records an edit
- * since, and offers no question (the record belongs in the source's ledger). `question` is absent where the note is
+ * shows its source entry's verdicts, as changed while its own ledger holds
+ * an unreviewed edit, and offers no question (the record belongs in the source's ledger). `question` is absent where the note is
  * read-only. Null while trust display is off, no report loaded, or the
  * report leaves the note out.
  */
@@ -232,8 +212,7 @@ export function useWikiTrustView(
   const loaded = file?.hashes ?? null
 
   // The saved claims as the editor would hold them; editor text that differs
-  // is an unsaved edit. A translation's text never matches its source's, so
-  // its own edit records decide instead (`editedSince`).
+  // is an unsaved edit. Translations are judged by their own ledgers below.
   const texts = useMemo(() => claimTexts(index), [index])
   const content = translation ? null : (file?.content ?? null)
   const savedTexts = useMemo(
@@ -253,8 +232,12 @@ export function useWikiTrustView(
         hash === undefined
           ? { state: 'unevaluated' }
           : wikiClaimStanding(report, sourcePath, claim.id, hash)
+      // A translation's text never matches its source's hash: its own ledger
+      // says whether an edit there still awaits review.
       const edited = translation
-        ? standing.state === 'current' && editedSince(index, claim.id, standing.verdict.evaluatedAt)
+        ? index.ledgers.some(
+            (ledger) => ledger.valid && ledger.owner === claim.id && wikiClaimPending(ledger),
+          )
         : savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
       if (edited && standing.state === 'current')
         standing = { state: 'changed', verdict: standing.verdict }

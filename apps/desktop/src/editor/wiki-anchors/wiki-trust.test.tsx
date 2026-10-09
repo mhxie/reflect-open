@@ -403,6 +403,24 @@ describe('claim trust from the harness report', () => {
     expect(style('c2')).toBe('needs-work')
   })
 
+  it('keeps an earlier unreviewed edit in a translation as changed', async () => {
+    settingsState.settings.wikiLanguages = [
+      { label: 'English', folder: 'wiki' },
+      { label: '中文', folder: 'wiki-zh' },
+    ]
+    // Pending since before the verdict: later edits add no newer record.
+    const source = SOURCE.replace(
+      '@anchor: url:https://example.org/one | valid_at: 2020-01-02\n',
+      '@anchor: url:https://example.org/one | valid_at: 2020-01-02\n@pass: editor | status: pending | at: 2026-10-01\n',
+    )
+    const { container } = await editorFixture(source, 'wiki-zh/Example.md')
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
+      ).toBe('pending'),
+    )
+  })
+
   it('shows a claim as changed as soon as its text moves on from the evaluated text', async () => {
     const { editor, container, ref } = await editorFixture()
     const projection = wikiArticleKey.getState(editor.state)!

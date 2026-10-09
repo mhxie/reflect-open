@@ -111,9 +111,9 @@ evaluation** until a report carries the new hash.
 
 A translation (a note in a wiki language folder other than the source's)
 shows its source entry's verdicts. Its text never matches the source's hash,
-so its own ledger decides instead: once it records `@pass: editor | status:
-pending` for a claim on or after the verdict's `evaluated_at`, that claim
-reads changed until a newer evaluation.
+so its own ledger decides instead: while its latest editor or reviewer pass
+for a claim is `@pass: editor | status: pending`, that claim reads changed.
+A reviewer pass in the translation's ledger clears it.
 
 ### What is not a claim
 

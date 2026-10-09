@@ -107,10 +107,14 @@ fn version_stamp(
     #[cfg(not(unix))]
     let identity = {
         use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        if meta.len() <= MAX_REPORT_BYTES {
-            std::fs::read(path).unwrap_or_default().hash(&mut hasher);
+        use std::io::Read;
+        // Bounded: the file may be replaced by a larger one since `meta`.
+        let mut bytes = Vec::new();
+        if let Ok(file) = std::fs::File::open(path) {
+            let _ = file.take(MAX_REPORT_BYTES + 1).read_to_end(&mut bytes);
         }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
         hasher.finish()
     };
     format!("{nanos}:{}:{identity}", meta.len())
