@@ -7,7 +7,7 @@ import { wikiClaimNumber } from './claims.ts'
 import {
   isWikiBibliographyHeading,
   isWikiRevisionHeading,
-  wikiClaimFormattingPreserved,
+  wikiClaimFormattingCheck,
   wikiLedgerOwner,
 } from './article-syntax.ts'
 
@@ -292,17 +292,11 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
     }
     pairs.push({ id, first, last })
   }
-  // One parse pair checks every claim at once, as the trust engine does; only
-  // when that fails does each claim get its own check, so a single bad
-  // boundary invalidates its claim alone.
-  const allPreserved =
-    pairs.length === 0 ||
-    wikiClaimFormattingPreserved(
-      source,
-      pairs.flatMap(({ first, last }) => [first, last]),
-    )
+  // Each claim is checked alone, so one bad boundary invalidates its claim
+  // and no other claim's markers can mask it.
+  const formattingPreserved = pairs.length === 0 ? null : wikiClaimFormattingCheck(source)
   for (const { id, first, last } of pairs) {
-    if (!allPreserved && !wikiClaimFormattingPreserved(source, [first, last])) {
+    if (formattingPreserved?.([first, last]) === false) {
       invalidIds.add(id)
       diagnostic(first.from, last.to, `${id} changes Markdown formatting at its boundaries.`, id)
       continue
