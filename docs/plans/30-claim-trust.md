@@ -131,7 +131,8 @@ mark; the pill became the mark after the claim.
 - **Records** a person makes while reading or editing, in schema syntax:
   `editor | pending` for substantive edits made in the editor (never for host
   reloads), `reader | flagged` for a question.
-- **`reflect trust-report`** prints where to publish the report.
+- **`reflect trust-report`** prints where to publish the report and, with
+  `--json`, which local-only folders' notes to leave out of it.
 - **The graph's agent skill** (Settings → Agents) teaches any coding agent the
   contract.
 
