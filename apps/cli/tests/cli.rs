@@ -1280,11 +1280,12 @@ fn local_only_rows_never_read_as_stale_or_surface_in_search() {
     assert_eq!(value["stale"], true);
 }
 
-/// A report folder that links out of the graph, or into Reflect's own state,
-/// is refused (exit 3) rather than advertised to a harness.
+/// A report folder reached through a link (out of the graph, into Reflect's
+/// own state, or elsewhere inside it, all unreadable to Reflect) is refused
+/// (exit 3) rather than advertised to a harness.
 #[cfg(unix)]
 #[test]
-fn trust_report_refuses_a_linked_folder_that_leaves_the_graph() {
+fn trust_report_refuses_a_linked_report_folder() {
     let fixture = graph();
     let outside = TempDir::new().unwrap();
     std::os::unix::fs::symlink(outside.path(), fixture.root().join(".harness")).unwrap();
@@ -1299,6 +1300,17 @@ fn trust_report_refuses_a_linked_folder_that_leaves_the_graph() {
     .unwrap();
     assert_eq!(
         reflect(&inside, &["trust-report", "--json"]).status.code(),
+        Some(3)
+    );
+
+    let elsewhere = graph();
+    std::os::unix::fs::symlink(
+        elsewhere.root().join("notes"),
+        elsewhere.root().join(".harness"),
+    )
+    .unwrap();
+    assert_eq!(
+        reflect(&elsewhere, &["trust-report"]).status.code(),
         Some(3)
     );
 

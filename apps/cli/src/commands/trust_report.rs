@@ -36,14 +36,23 @@ fn configured_in(path: &Path) -> Option<String> {
     normalize_wiki_trust_report_path(document.get(WIKI_TRUST_REPORT_PATH_KEY)?.as_str()?)
 }
 
-/// Whether `rel` really lands at a report path inside the graph once the
-/// links among its existing folders resolve, as Reflect reads it: a linked
-/// `.harness/` must not send the harness's write outside the graph or into
-/// Reflect's own state. A dangling link lands nowhere.
+/// Whether Reflect can read a report at `rel`: no link on the way (its
+/// reader follows none, so a linked `.harness/` would hide the report or
+/// send the harness's write out of the graph), and the existing folders,
+/// with the filesystem's own name folding, land at a report path.
 fn lands_in_graph(root: &Path, rel: &str) -> bool {
     let (Ok(canonical_root), joined) = (root.canonicalize(), root.join(rel)) else {
         return false;
     };
+    let mut prefix = root.to_path_buf();
+    for component in Path::new(rel).components() {
+        prefix.push(component);
+        match prefix.symlink_metadata() {
+            Ok(meta) if meta.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
     let mut existing = joined.as_path();
     let mut missing = Vec::new();
     while existing.symlink_metadata().is_err() {
@@ -74,8 +83,9 @@ pub fn run(graph: &Graph, json: bool) -> Result<(), CliError> {
     let absolute = graph.root.join(&rel);
     if !lands_in_graph(&graph.root, &rel) {
         return Err(CliError::Private(format!(
-            "{rel} leads outside the graph or into Reflect's own folders through a link, \
-             so no harness should write there: point it at a plain folder in the graph"
+            "{rel} goes through a link, which Reflect does not follow, or into Reflect's \
+             own folders, so no harness should write there: point it at a plain folder \
+             in the graph"
         )));
     }
     if json {
