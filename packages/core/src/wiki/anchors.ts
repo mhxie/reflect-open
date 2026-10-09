@@ -94,10 +94,10 @@ const WEIGHT_RE = /^\d+(?:\.\d+)?$/
 const ANCHOR_KINDS = new Set(['primary', 'secondary'])
 
 /**
- * Whether an `@anchor` or `@pass` line is malformed, by the trust engine's
- * rules. Fields the schema does not name (a writer's `title` or `locator`)
- * are retained and pass; a field without `:`, a repeated key, invalid dates,
- * `weight`, or anchor `kind` do not. `@cite` lines keep their strict fields.
+ * Whether an `@anchor` or `@pass` line is malformed. As in the trust engine,
+ * fields the schema does not name (a writer's `title` or `locator`) pass and
+ * a field needs only a colon; a repeated key, invalid dates, `weight`, or
+ * anchor `kind` fail. `@cite` lines keep their strict fields.
  */
 function markerNeedsAttention(marker: WikiMarker, line: string, asOf: string): boolean {
   const seen = new Set<string>()
