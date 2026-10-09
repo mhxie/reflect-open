@@ -23,6 +23,7 @@ import { SyncProvider } from '@/providers/sync-provider.tsx'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { RouterProvider } from '@/routing/router.tsx'
 import { PeekProvider } from '@/components/peek/peek-provider.tsx'
+import { WikiTrustReportWatcher } from '@/components/wiki-trust-report-watcher.tsx'
 
 interface GraphWorkspaceProps {
   graph: GraphInfo
@@ -45,6 +46,7 @@ export function GraphWorkspace({ graph }: GraphWorkspaceProps): ReactElement {
   return (
     <RouterProvider key={graph.root} {...(initialRoute !== null ? { initialRoute } : {})}>
       <SyncProvider graph={graph}>
+        {isMainWindow() ? <WikiTrustReportWatcher /> : null}
         <PaletteProvider>
           <ShortcutsProvider>
             <NoteTemplatesProvider>

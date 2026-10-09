@@ -38,6 +38,10 @@ export const queryKeys = {
         languages.map((language) => language.folder),
       ] as const
     },
+    /** A wiki note's claim text hashes, matched against the harness's trust report. */
+    wikiClaimHashes(root: GraphRoot, path: string) {
+      return [...this.graph(root), 'wiki-claim-hashes', path] as const
+    },
     hasWiki(root: GraphRoot, sourceFolder: string) {
       return [...this.graph(root), 'has-wiki', sourceFolder] as const
     },
@@ -239,6 +243,13 @@ export const queryKeys = {
     },
     pendingNotes(root: GraphRoot) {
       return [...this.all, root, 'pending-notes'] as const
+    },
+  },
+  wikiTrust: {
+    all: ['wiki-trust'] as const,
+    /** The harness's trust report at `path`; outside `index` so note edits never refetch it. */
+    report(root: GraphRoot, path: string) {
+      return [...this.all, root, 'report', path] as const
     },
   },
   agentSkill: {

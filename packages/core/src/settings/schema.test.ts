@@ -45,6 +45,8 @@ describe('settingsSchema', () => {
       wikiSort: { key: 'title', direction: 'asc' },
       wikiGroupByTopic: false,
       wikiFoldedTopics: [],
+      wikiTrustDisplay: 'inline',
+      wikiTrustReportPath: '.harness/wiki-trust.json',
       activityHeatmapEnabled: true,
       statusBarEnabled: true,
       calendarEnabled: false,
@@ -241,6 +243,14 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ wikiFoldedTopics: ['memory'] }).wikiFoldedTopics).toEqual([
       'memory',
     ])
+    expect(settingsSchema.parse({ wikiTrustDisplay: 'margin' }).wikiTrustDisplay).toBe('margin')
+    expect(settingsSchema.parse({ wikiTrustDisplay: 'loud' }).wikiTrustDisplay).toBe('inline')
+    expect(
+      settingsSchema.parse({ wikiTrustReportPath: '_meta/wiki-trust.json' }).wikiTrustReportPath,
+    ).toBe('_meta/wiki-trust.json')
+    expect(
+      settingsSchema.parse({ wikiTrustReportPath: '../outside.json' }).wikiTrustReportPath,
+    ).toBe('.harness/wiki-trust.json')
     expect(settingsSchema.parse({ activityHeatmapEnabled: false }).activityHeatmapEnabled).toBe(
       false,
     )
@@ -401,6 +411,8 @@ describe('settingsSchema', () => {
       wikiSort: { key: 'title', direction: 'asc' },
       wikiGroupByTopic: false,
       wikiFoldedTopics: [],
+      wikiTrustDisplay: 'inline',
+      wikiTrustReportPath: '.harness/wiki-trust.json',
       activityHeatmapEnabled: true,
       statusBarEnabled: true,
       calendarEnabled: false,

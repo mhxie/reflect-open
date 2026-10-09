@@ -1,0 +1,99 @@
+{
+  "description": "Graph-relative paths a wiki trust report may live at. The Rust reader (fs/trust_report.rs) and the TypeScript settings check (wiki/trust-report.ts isWikiTrustReportPath) both read this corpus, so the two sides cannot drift. `default` is the path both use when none is set, and `settings_key` the settings entry that holds it, read by the CLI.",
+  "cases": [
+    {
+      "path": ".harness/wiki-trust.json",
+      "valid": true
+    },
+    {
+      "path": "_meta/wiki-trust.JSON",
+      "valid": true
+    },
+    {
+      "path": "trust.json",
+      "valid": true
+    },
+    {
+      "path": "a/b/c/trust.json",
+      "valid": true
+    },
+    {
+      "path": "",
+      "valid": false
+    },
+    {
+      "path": "/abs.json",
+      "valid": false
+    },
+    {
+      "path": "./trust.json",
+      "valid": false
+    },
+    {
+      "path": "./.reflect/meta.json",
+      "valid": false
+    },
+    {
+      "path": "a/./b.json",
+      "valid": false
+    },
+    {
+      "path": "../out.json",
+      "valid": false
+    },
+    {
+      "path": "a/../b.json",
+      "valid": false
+    },
+    {
+      "path": "a//b.json",
+      "valid": false
+    },
+    {
+      "path": "a\\b.json",
+      "valid": false
+    },
+    {
+      "path": "trust.json/",
+      "valid": false
+    },
+    {
+      "path": ".reflect/x.json",
+      "valid": false
+    },
+    {
+      "path": ".Reflect/x.json",
+      "valid": false
+    },
+    {
+      "path": ".git/x.json",
+      "valid": false
+    },
+    {
+      "path": ".GIT/config.json",
+      "valid": false
+    },
+    {
+      "path": "notes/trust.md",
+      "valid": false
+    },
+    {
+      "path": "trust",
+      "valid": false
+    },
+    {
+      "path": "D:/outside/trust.json",
+      "valid": false
+    },
+    {
+      "path": "C:trust.json",
+      "valid": false
+    },
+    {
+      "path": "a/trust.json:stream.json",
+      "valid": false
+    }
+  ],
+  "default": ".harness/wiki-trust.json",
+  "settings_key": "wikiTrustReportPath"
+}

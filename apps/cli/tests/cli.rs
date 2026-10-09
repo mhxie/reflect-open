@@ -1280,6 +1280,62 @@ fn local_only_rows_never_read_as_stale_or_surface_in_search() {
     assert_eq!(value["stale"], true);
 }
 
+/// A report folder reached through a link (out of the graph, into Reflect's
+/// own state, or elsewhere inside it, all unreadable to Reflect) is refused
+/// (exit 3) rather than advertised to a harness.
+#[cfg(unix)]
+#[test]
+fn trust_report_refuses_a_linked_report_folder() {
+    let fixture = graph();
+    let outside = TempDir::new().unwrap();
+    std::os::unix::fs::symlink(outside.path(), fixture.root().join(".harness")).unwrap();
+    let output = reflect(&fixture, &["trust-report"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stdout(&output));
+
+    let inside = graph();
+    std::os::unix::fs::symlink(
+        inside.root().join(".reflect"),
+        inside.root().join(".harness"),
+    )
+    .unwrap();
+    assert_eq!(
+        reflect(&inside, &["trust-report", "--json"]).status.code(),
+        Some(3)
+    );
+
+    let elsewhere = graph();
+    std::os::unix::fs::symlink(
+        elsewhere.root().join("notes"),
+        elsewhere.root().join(".harness"),
+    )
+    .unwrap();
+    assert_eq!(
+        reflect(&elsewhere, &["trust-report"]).status.code(),
+        Some(3)
+    );
+
+    // Control: a plain folder, present or not yet created, is advertised.
+    let plain = graph();
+    assert_eq!(reflect(&plain, &["trust-report"]).status.code(), Some(0));
+    fs::create_dir_all(plain.root().join(".harness")).unwrap();
+    assert_eq!(reflect(&plain, &["trust-report"]).status.code(), Some(0));
+}
+
+/// A harness learns which folders to leave out of the trust report, and
+/// an unreadable record refuses rather than reading as none.
+#[cfg(unix)]
+#[test]
+fn trust_report_lists_the_local_only_folders_to_leave_out() {
+    let (fixture, _raw) = graph_with_local_only_note(Some(SECURE));
+    let value = json(&reflect(&fixture, &["trust-report", "--json"]));
+    assert_eq!(value["localOnlyFolders"], serde_json::json!(["secure"]));
+    assert_eq!(value["path"], ".harness/wiki-trust.json");
+
+    let (unreadable, _raw) = graph_with_local_only_note(Some("not json"));
+    let output = reflect(&unreadable, &["trust-report", "--json"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+}
+
 /// Answers from the app's socket pass the same re-check: a note in a
 /// local-only folder never prints, whatever the app sends back.
 #[cfg(unix)]

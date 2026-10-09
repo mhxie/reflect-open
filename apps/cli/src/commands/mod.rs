@@ -1,4 +1,4 @@
-//! The five commands. Shared rules live here: stdout carries only data,
+//! The six commands. Shared rules live here: stdout carries only data,
 //! warnings go to stderr, and `show`/`path`/`open` degrade to a file scan
 //! when the index is missing (`search` is the one command that requires
 //! it), taking the local-only folders from the desktop's settings then. An
@@ -9,6 +9,7 @@ pub mod path;
 pub mod search;
 pub mod show;
 pub mod today;
+pub mod trust_report;
 
 mod output;
 
@@ -21,7 +22,7 @@ use crate::error::CliError;
 use crate::index::{local_only_folders, open_read_only, IndexOpen, OpenIndex};
 use crate::local_only_settings::configured_local_only_folders;
 
-fn warn(message: impl Display) {
+pub(crate) fn warn(message: impl Display) {
     eprintln!("reflect: warning: {message}");
 }
 

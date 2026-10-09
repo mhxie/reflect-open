@@ -9,7 +9,7 @@ use super::{ensure_shareable_note_path, graph_for, io, resolve_read, GraphState}
 use crate::error::{AppError, AppResult};
 
 #[cfg(unix)]
-fn read_bounded_source(
+pub(super) fn read_bounded_source(
     base: &std::path::Path,
     rest: &std::path::Path,
     max_bytes: u64,

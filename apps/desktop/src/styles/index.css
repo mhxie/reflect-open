@@ -50,6 +50,11 @@ Cascade layer order, low to high priority.
   --color-note-state-local-only: var(--note-state-local-only);
   --color-note-state-protected: var(--note-state-protected);
 
+  --color-trust-solid: var(--trust-solid);
+  --color-trust-supported: var(--trust-supported);
+  --color-trust-needs-work: var(--trust-needs-work);
+  --color-trust-disputed: var(--trust-disputed);
+
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-input-bg: var(--input-bg);
@@ -382,6 +387,173 @@ html:root {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Claim trust: marks drawn from the agent harness's report. Shape carries
+   each tier (filled, ring, dashed, dotted); color only reinforces it. The
+   card's glyph and the marks share these rules. */
+.wiki-trust-inline {
+  white-space: nowrap;
+}
+.wiki-trust-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  margin-inline-start: 0.05em;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.72em;
+  vertical-align: super;
+  cursor: pointer;
+}
+.wiki-trust-mark::before,
+.wiki-trust-glyph {
+  content: '';
+  flex-shrink: 0;
+  box-sizing: border-box;
+  /* At least 10px at reading size, so dashes and dots stay distinct. */
+  width: max(0.85em, 10px);
+  height: max(0.85em, 10px);
+  border: 1.5px solid var(--color-trust-supported);
+  border-radius: 999px;
+}
+.wiki-trust-glyph {
+  display: inline-block;
+}
+.wiki-trust-mark[data-wiki-trust='solid']::before,
+.wiki-trust-glyph[data-wiki-trust='solid'] {
+  border-color: var(--color-trust-solid);
+  background: var(--color-trust-solid);
+  /* A filled dot reads heavier than a ring: smaller, so sound claims stay quiet. */
+  scale: 0.7;
+}
+.wiki-trust-mark[data-wiki-trust='needs-work']::before,
+.wiki-trust-glyph[data-wiki-trust='needs-work'] {
+  border-style: dashed;
+  border-color: var(--color-trust-needs-work);
+}
+.wiki-trust-mark[data-wiki-trust='disputed']::before,
+.wiki-trust-glyph[data-wiki-trust='disputed'] {
+  border-style: dashed;
+  border-color: var(--color-trust-disputed);
+}
+.wiki-trust-mark[data-wiki-trust='pending']::before,
+.wiki-trust-glyph[data-wiki-trust='pending'] {
+  border-style: dotted;
+  /* Secondary, not muted: a mark needs 3:1 against the page. */
+  border-color: var(--color-text-secondary);
+}
+/* A margin mark gets a 24px hit area (WCAG 2.5.8) around its small glyph. An
+   inline mark sits in a sentence, which 2.5.8 exempts: its area stays the
+   glyph's, so it never covers the prose beside it. */
+.wiki-trust-margin .wiki-trust-mark::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}
+.wiki-trust-mark:hover {
+  background: var(--color-surface-hover);
+}
+.wiki-trust-mark:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+/* Waiting marks (every mark on demand, a Solid claim's in any style) show on
+   the reveal, so the card stays one press away. They collapse to nothing but
+   stay focusable: Tab or a closing card can focus one, which shows it; the
+   open card's own mark stays shown as its anchor. */
+[data-wiki-trust-display]:not([data-wiki-trust-reveal])
+  .wiki-trust-on-demand:not(:focus-within, :has([aria-expanded='true'])) {
+  display: inline-block;
+  /* Zero by zero, so the line keeps its height (an inline-block with hidden
+     overflow sits on its bottom edge); still focusable. */
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* Inline: only the prose that needs work is marked; sound prose stays clean. */
+[data-wiki-trust-display='inline'] [data-wiki-claim][data-wiki-trust='needs-work'] {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-trust-needs-work);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.3em;
+}
+[data-wiki-trust-display='inline'] [data-wiki-claim][data-wiki-trust='disputed'] {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-trust-disputed);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.3em;
+}
+
+/* Margin: each mark beside the line its claim ends on, prose untouched. A
+   layout pass (wiki-trust-margin.ts) nudges a mark down when it would sit
+   within 24px of the one above, so their 24px hit areas never overlap. */
+.wiki-trust-margin-host {
+  position: relative;
+}
+.wiki-trust-margin {
+  /* No top: the static position keeps it on its claim's last line, and the
+     paragraph's own line height centres the mark on that line. */
+  position: absolute;
+  right: -1.75rem;
+  translate: 0 var(--wiki-trust-nudge, 0px);
+  /* The line-tall box is layout only; presses belong to the mark. */
+  pointer-events: none;
+}
+.wiki-trust-margin .wiki-trust-mark {
+  font-size: 0.8rem;
+  vertical-align: middle;
+  pointer-events: auto;
+}
+/* A phone's gutter is 1rem: the mark sits inside it. */
+.reflect-mobile-content-gutter .wiki-trust-margin {
+  right: -1rem;
+}
+.reflect-mobile-content-gutter .wiki-trust-margin .wiki-trust-mark {
+  font-size: 0.75rem;
+}
+
+/* Reveal (the claim lens, or Option held): every claim tinted by its tier. */
+[data-wiki-claim][data-wiki-trust] {
+  --wiki-trust-tint: transparent 0%;
+}
+[data-wiki-claim][data-wiki-trust='supported'] {
+  --wiki-trust-tint: var(--color-trust-supported) 12%;
+}
+[data-wiki-claim][data-wiki-trust='solid'] {
+  --wiki-trust-tint: var(--color-trust-solid) 14%;
+}
+[data-wiki-claim][data-wiki-trust='needs-work'] {
+  --wiki-trust-tint: var(--color-trust-needs-work) 18%;
+}
+[data-wiki-claim][data-wiki-trust='disputed'] {
+  --wiki-trust-tint: var(--color-trust-disputed) 14%;
+}
+[data-wiki-claim][data-wiki-trust='pending'] {
+  --wiki-trust-tint: var(--color-text-muted) 10%;
+}
+[data-wiki-trust-reveal] [data-wiki-claim][data-wiki-trust],
+[data-wiki-claim-visible][data-wiki-trust],
+[data-wiki-claim][data-wiki-trust][data-wiki-trust-open] {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--wiki-trust-tint), transparent);
+  box-decoration-break: clone;
+  text-decoration: none;
+}
+
 .wiki-article-ledger,
 .wiki-article-revision,
 .wiki-article-bibliography,

@@ -6,8 +6,10 @@ import {
   errorMessage,
   listNotes,
   CHAT_SYSTEM_PROMPT_MAX_LENGTH,
+  DEFAULT_WIKI_TRUST_REPORT_PATH,
   TRANSCRIPTION_PROMPT_MAX_LENGTH,
   normalizeChatSystemPrompt,
+  normalizeWikiTrustReportPath,
   normalizeTranscriptionPrompt,
   presentOfferCodeRedeemSheet,
   syncAppStore,
@@ -15,6 +17,7 @@ import {
   type AiProviderConfig,
   type EditorTextSize,
   type ThemePreference,
+  type WikiTrustDisplay,
 } from '@reflect/core'
 import { useAiPrompts } from '@/hooks/use-ai-prompts.ts'
 import { useAiProviders } from '@/hooks/use-ai-providers.ts'
@@ -57,6 +60,13 @@ import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useSyncContext } from '@/providers/sync-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
+
+const TRUST_DISPLAY_OPTIONS: readonly SegmentedOption<WikiTrustDisplay>[] = [
+  { value: 'inline', label: 'Inline' },
+  { value: 'margin', label: 'Margin' },
+  { value: 'on-demand', label: 'On demand' },
+  { value: 'off', label: 'Off' },
+]
 
 const THEME_OPTIONS: readonly SegmentedOption<ThemePreference>[] = [
   { value: 'system', label: 'System' },
@@ -146,6 +156,7 @@ export function MobileSettings(): ReactElement {
     useAiProviders()
   const [addProviderOpen, setAddProviderOpen] = useState(false)
   const [systemPromptOpen, setSystemPromptOpen] = useState(false)
+  const [trustReportOpen, setTrustReportOpen] = useState(false)
   const [transcriptionPromptOpen, setTranscriptionPromptOpen] = useState(false)
   const { prompts, addPrompt, updatePrompt, removePrompt } = useAiPrompts()
   // The edited prompt sticks around after close so the exit animation has
@@ -255,6 +266,23 @@ export function MobileSettings(): ReactElement {
               onCheckedChange={(editorBulletAfterHeading) =>
                 updateSettings({ editorBulletAfterHeading })
               }
+            />
+          </SettingsGroup>
+
+          <SettingsGroup
+            header="Wiki"
+            footer="Claim trust comes from your agent harness’s report; this device keeps its own path."
+          >
+            <SettingsSegmentedRow
+              label="Claim trust"
+              value={settings.wikiTrustDisplay}
+              options={TRUST_DISPLAY_OPTIONS}
+              onChange={(wikiTrustDisplay) => updateSettings({ wikiTrustDisplay })}
+            />
+            <SettingsNavRow
+              label="Trust report"
+              value={settings.wikiTrustReportPath}
+              onPress={() => setTrustReportOpen(true)}
             />
           </SettingsGroup>
 
@@ -484,6 +512,23 @@ export function MobileSettings(): ReactElement {
         onMakeDefault={makeDefault}
         onSetDefaultModel={setDefaultModel}
         onRemove={removeProvider}
+      />
+      <TextSettingDrawer
+        title="Trust report"
+        description="Where your agent harness writes claim trust: a .json file inside the graph, outside .reflect/ and .git/. Clear, or a path Reflect may not read, restores the default."
+        ariaLabel="Trust report path"
+        placeholder={DEFAULT_WIKI_TRUST_REPORT_PATH}
+        maxLength={512}
+        rows={1}
+        normalize={(path) => normalizeWikiTrustReportPath(path) ?? ''}
+        value={settings.wikiTrustReportPath}
+        open={trustReportOpen}
+        onOpenChange={setTrustReportOpen}
+        onSave={(path) =>
+          updateSettings({
+            wikiTrustReportPath: path === '' ? DEFAULT_WIKI_TRUST_REPORT_PATH : path,
+          })
+        }
       />
       <TextSettingDrawer
         title="System prompt"

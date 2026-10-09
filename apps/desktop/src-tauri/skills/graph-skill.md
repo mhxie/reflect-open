@@ -51,6 +51,7 @@ or exposing its current or historical content unless the user explicitly asks.
     reflect show <note>        # print a note by date, path, title, or alias
     reflect path <note>        # resolve a note to its absolute path
     reflect open <note>        # open the note in the Reflect app
+    reflect trust-report       # where to publish wiki trust verdicts (below)
 
 - Add `--json` to any command for stable machine-readable output — the field
   names and exit codes are the supported automation contract.
@@ -81,3 +82,27 @@ or exposing its current or historical content unless the user explicitly asks.
    CLI resolves (`reflect path <note>`); the running app picks the edit up.
 3. **Prefer search over enumeration.** `reflect search` uses the app's own
    ranked index; don't grep the whole graph when a search will do.
+
+## Wiki trust (for agent harnesses)
+
+If you evaluate the graph's wiki claims, Reflect can show your verdicts while
+the user reads. Reflect computes nothing; you publish a trust report and it
+displays it.
+
+- Write one JSON file, format `reflect-wiki-trust` version 1, atomically
+  (temporary file, then rename), at the path `reflect trust-report` prints.
+  The user can change it in Settings → Wiki, so ask each time rather than
+  assuming the default.
+- Key each verdict by graph-relative note path and claim id (`c3`), with the
+  SHA-256 of the claim text you evaluated: the saved file's UTF-8 bytes
+  between `<!-- claim:c3 -->` and `<!-- /claim:c3 -->`, with `\r\n` and `\r`
+  turned into `\n`. When the text changes, Reflect shows the claim as awaiting
+  evaluation until your next report.
+- Reflect writes back only `@pass: editor | status: pending` (the user edited
+  a claim) and `@pass: reader | status: flagged` (the user questioned one)
+  into the claim's `anchors cN` ledger. Read those on your next pass.
+- Leave notes in local-only folders (`reflect trust-report --json` lists
+  them as `localOnlyFolders`), and private notes, out of the report.
+
+The format, an example, and a JSON Schema are in Reflect's repository under
+`docs/wiki-trust-harness.md`.

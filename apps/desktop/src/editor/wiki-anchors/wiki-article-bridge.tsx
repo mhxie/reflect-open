@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import {
   markdownToDoc,
   createMarkdownSourceMap,
@@ -14,6 +14,8 @@ import { openUrlSync } from '@/lib/open-url.ts'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
 import { clearNoteArticle, publishNoteArticle, useNoteArticle } from './wiki-article-store.ts'
 import { useWikiArticleIdentities } from './use-wiki-article-identities.ts'
+import { useWikiArticleTrust } from './use-wiki-article-trust.tsx'
+import type { WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 import { defineWikiArticle, wikiArticleKey } from './wiki-article-plugin.tsx'
 import { wikiEditorRange } from './wiki-article-projection.ts'
 import type { WikiEvidenceOptions } from './wiki-evidence.ts'
@@ -24,13 +26,18 @@ interface WikiArticleBridgeProps {
 }
 
 /** Hosts the note's shared claim projection and its local authoring action. */
-export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgeProps): null {
+export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgeProps): ReactElement {
   const editor = useEditor<EditorExtension>()
   const article = useNoteArticle(path)
   const noteIdentity = useWikiArticleIdentities(article?.index.source ?? '')
   const identitiesRef = useRef(noteIdentity)
   const updateRef = useRef<() => void>(() => {})
   const navigateRef = useRef(onWikiLinkClick)
+  const {
+    view: trustView,
+    summary: trustSummaryOf,
+    card: trustCard,
+  } = useWikiArticleTrust(editor, path, article?.index ?? null, updateRef)
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
   }, [onWikiLinkClick])
@@ -44,6 +51,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       },
       onUpdate: () => updateRef.current(),
       noteIdentity: (title) => identitiesRef.current(title),
+      trust: trustView,
     }),
   )
   useExtension(extension)
@@ -56,7 +64,11 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
   }, [editor, noteIdentity])
   useEffect(() => {
     const owner = Symbol('wiki-article')
-    let previous: { index: WikiArticleIndex; showRanges: boolean } | null = null
+    let previous: {
+      index: WikiArticleIndex
+      showRanges: boolean
+      trust: WikiNoteTrustSummary | null
+    } | null = null
     function markSelection(from: number, to: number, id?: string): void {
       if (!editor.mounted || !editor.view.editable) return
       const value = wikiArticleKey.getState(editor.state)
@@ -98,15 +110,40 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
     function publish(): void {
       if (!editor.mounted) return
       const value = wikiArticleKey.getState(editor.state)
+      const trustSummary = trustSummaryOf()
       if (
         value === undefined ||
-        (previous?.index === value.index && previous.showRanges === value.showRanges)
+        (previous?.index === value.index &&
+          previous.showRanges === value.showRanges &&
+          previous.trust === trustSummary)
       )
         return
-      previous = { index: value.index, showRanges: value.showRanges }
+      previous = { index: value.index, showRanges: value.showRanges, trust: trustSummary }
       publishNoteArticle(path, owner, {
         index: value.index,
         showRanges: value.showRanges,
+        trust: trustSummary,
+        focusClaim: (id) => {
+          const current = wikiArticleKey.getState(editor.state)
+          const claim = current?.index.claims.find((item) => item.id === id)
+          const range =
+            current === undefined || claim === undefined
+              ? null
+              : wikiEditorRange(current.map, claim)
+          if (range === null) return
+          editor.view.dispatch(
+            editor.state.tr
+              .setSelection(
+                TextSelection.create(
+                  editor.state.doc,
+                  TextSelection.near(editor.state.doc.resolve(range.from), 1).from,
+                  TextSelection.near(editor.state.doc.resolve(range.to), -1).to,
+                ),
+              )
+              .scrollIntoView(),
+          )
+          editor.focus()
+        },
         toggleRanges: () => {
           if (editor.mounted)
             editor.view.dispatch(
@@ -165,6 +202,6 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       updateRef.current = () => {}
       clearNoteArticle(path, owner)
     }
-  }, [editor, path])
-  return null
+  }, [editor, path, trustSummaryOf])
+  return <>{trustCard}</>
 }

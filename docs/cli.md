@@ -13,6 +13,7 @@ reflect search <query>     # ranked full-text search over the index
 reflect show <note>        # print a note by date, path, title, or alias
 reflect path <note>        # resolve a note to its absolute path
 reflect open <note>        # open a note in the app (reflect:// deep link)
+reflect trust-report       # where agent harnesses publish wiki trust verdicts
 ```
 
 Built from `apps/cli` (`cargo build -p reflect-cli`); bundled with the desktop
@@ -209,9 +210,23 @@ CLI surface, before their address leaks.
 { "path": "notes/project-x.md", "url": "reflect://note/01hzy3…", "launched": false }
 ```
 
+### `reflect trust-report [--json]`
+
+Prints where an agent harness publishes this graph's wiki trust report: the
+path set in Settings → Wiki → Trust report, or `.harness/wiki-trust.json`
+when none is set. The setting lives outside the graph, so a harness asks here
+instead of assuming the default. With `--json` it also lists the graph's
+local-only folders, whose notes a report must leave out. It exits 3 when they
+cannot be read, or when a folder on the path is a link, which Reflect does not follow. See [wiki-trust-harness.md](wiki-trust-harness.md).
+
+```jsonc
+// reflect trust-report --json
+{ "path": ".harness/wiki-trust.json", "absolutePath": "/graphs/Personal/.harness/wiki-trust.json", "configured": false, "exists": true, "localOnlyFolders": ["secure"] }
+```
+
 ## For agents
 
-The five commands plus `--json` are the supported automation surface (e.g.
+The six commands plus `--json` are the supported automation surface (e.g.
 `~/.agents` discovery workflows). The JSON field names and exit codes above
 are stable; new fields may be added, existing ones won't change meaning.
 Reading a private note is not possible through this surface by design — don't

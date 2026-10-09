@@ -4,15 +4,18 @@ import { X } from 'lucide-react'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsSection } from './section.tsx'
+import { WikiTrustDisplayField } from './wiki-trust-display-field.tsx'
+import { WikiTrustReportField } from './wiki-trust-report-field.tsx'
 
 const INPUT_CLASS =
   'w-full rounded-[7px] border border-border-strong bg-input-bg px-2.5 py-1.5 text-sm text-text shadow-input placeholder:text-text-muted'
 
 /**
- * The wiki's languages: the source first, whose folder holds the entries,
- * then each translation and the folder holding its copies at the same paths.
- * The Wiki screen's language tabs and "Missing" filters, and the note
- * sidebar's language switch, all read this list.
+ * The wiki's languages (the source first, whose folder holds the entries,
+ * then each translation and the folder holding its copies at the same paths),
+ * and how the agent harness's claim verdicts show. The Wiki screen's language
+ * tabs and "Missing" filters, and the note sidebar's language switch, all
+ * read the language list.
  */
 export function WikiSection(): ReactElement {
   const { settings, updateSettingsWith } = useSettings()
@@ -131,6 +134,8 @@ export function WikiSection(): ReactElement {
           </p>
         ) : null}
       </SettingsField>
+      <WikiTrustDisplayField />
+      <WikiTrustReportField />
     </SettingsSection>
   )
 }

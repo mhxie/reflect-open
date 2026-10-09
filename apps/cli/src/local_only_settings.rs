@@ -21,7 +21,7 @@ use crate::error::CliError;
 
 /// The desktop's settings document, or `None` when this platform has no
 /// config directory.
-fn settings_path() -> Option<PathBuf> {
+pub(crate) fn settings_path() -> Option<PathBuf> {
     dirs::config_dir().map(|base| base.join("reflect-open").join("settings.json"))
 }
 

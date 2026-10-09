@@ -83,6 +83,13 @@
   --note-state-local-only: #3f7a94;
   --note-state-protected: #b4504b;
 
+  /* Wiki claim trust, as an agent harness judged it. Shape carries
+     the tier too, so these never stand alone; each clears 4.5:1 on surface. */
+  --trust-solid: var(--indigo-700);
+  --trust-supported: var(--coolgray-500);
+  --trust-needs-work: #b45309;
+  --trust-disputed: #b91c1c;
+
   --border: var(--coolgray-100); /* hairline dividers           */
   --border-strong: rgba(11, 19, 36, 0.15); /* input outlines              */
   --input-bg: #ffffff;
@@ -119,6 +126,10 @@
   --note-state-private: #b49ad8;
   --note-state-local-only: #7fb0c6;
   --note-state-protected: #d9827c;
+  --trust-solid: var(--indigo-400);
+  --trust-supported: var(--coolgray-400);
+  --trust-needs-work: #fbbf24;
+  --trust-disputed: #f87171;
 }
 
 .dark {

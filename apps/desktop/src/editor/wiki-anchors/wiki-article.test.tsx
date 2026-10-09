@@ -1,4 +1,5 @@
 import { createRef } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MeowdownEditor, type EditorHandle } from '@meowdown/react'
 import { createMarkdownSourceMap } from '@meowdown/core'
 import { AllSelection, TextSelection } from '@prosekit/pm/state'
@@ -17,6 +18,15 @@ import { wikiEditorRange } from './wiki-article-projection.ts'
 
 vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => ({ graph: null }) }))
 vi.mock('@/lib/open-url.ts', () => ({ openUrlSync: vi.fn() }))
+vi.mock('@/providers/settings-provider.tsx', () => ({
+  useSettings: () => ({
+    settings: {
+      wikiTrustDisplay: 'inline',
+      wikiTrustReportPath: '.harness/wiki-trust.json',
+      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+    },
+  }),
+}))
 
 const SOURCE = [
   '# Example',
@@ -64,16 +74,18 @@ async function editorFixture(source = SOURCE, path = 'wiki/Example.md') {
   const ref = createRef<EditorHandle>()
   const onDocChange = vi.fn()
   const rendered = await render(
-    <MeowdownEditor
-      initialMarkdown={source}
-      mode="hide"
-      handleRef={ref}
-      onDocChange={onDocChange}
-      resolveWikilink={resolveWikilink}
-    >
-      <WikiAnchorsBridge onWikiLinkClick={vi.fn()} />
-      <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
-    </MeowdownEditor>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MeowdownEditor
+        initialMarkdown={source}
+        mode="hide"
+        handleRef={ref}
+        onDocChange={onDocChange}
+        resolveWikilink={resolveWikilink}
+      >
+        <WikiAnchorsBridge onWikiLinkClick={vi.fn()} />
+        <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
+      </MeowdownEditor>
+    </QueryClientProvider>,
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
   const editor = ref.current!.getEditor()!

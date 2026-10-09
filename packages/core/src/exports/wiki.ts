@@ -2,8 +2,11 @@ export {
   isWikiPath,
   normalizeWikiFolder,
   normalizeWikiLanguages,
+  wikiLocation,
+  wikiPathIn,
   wikiSourceLanguage,
   type WikiLanguage,
+  type WikiLocation,
 } from '../wiki/languages.ts'
 export { wikiReviewState, type WikiEntrySummary } from '../wiki/entry-summary.ts'
 export {
@@ -74,3 +77,27 @@ export {
   type WikiReviewPass,
   type WikiSource,
 } from '../wiki/anchors.ts'
+export {
+  DEFAULT_WIKI_TRUST_REPORT_PATH,
+  WIKI_TRUST_DISPLAYS,
+  WIKI_TRUST_REPORT_FORMAT,
+  WIKI_TRUST_REPORT_VERSION,
+  isWikiTrustReportPath,
+  normalizeWikiTrustReportPath,
+  parseWikiTrustReport,
+  wikiClaimStanding,
+  wikiClaimTextSha256,
+  wikiTrustReportJsonSchema,
+  type WikiClaimStanding,
+  type WikiClaimVerdict,
+  type WikiNoteTrust,
+  type WikiSourceStanding,
+  type WikiTrustDisplay,
+  type WikiTrustOverlay,
+  type WikiTrustReason,
+  type WikiTrustReport,
+  type WikiTrustReportParse,
+  type WikiTrustTier,
+} from '../wiki/trust-report.ts'
+export { readWikiTrustReportFile, type WikiTrustReportFile } from '../wiki/commands.ts'
+export { wikiClaimTextHashes } from '../wiki/claim-hashes.ts'

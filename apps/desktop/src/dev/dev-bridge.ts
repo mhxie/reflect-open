@@ -267,6 +267,9 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         }
         return contents
       }
+      case 'wiki_trust_report_read':
+        // No agent harness runs in the browser preview, so there is no report.
+        return null
       case 'asset_open':
         return null
       case 'asset_reveal':
