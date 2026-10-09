@@ -351,6 +351,26 @@ describe('NoteEmbedReader', () => {
     await view.unmount()
   })
 
+  it('previews only the named section under the source title while collapsed', async () => {
+    mocks.sources.set(
+      'notes/Original.md',
+      '# Original\n\n## Coverage\n\nBookkeeping text\n\n## Findings\n\nFinding text\n\n## Gaps\n\nGap text',
+    )
+    const view = await render(
+      <MarkdownPreview
+        content={'![[Original#Findings]]'}
+        resolveWikiEmbed={resolveWikiEmbed}
+        renderNoteEmbed={(payload) => <NoteEmbedReader {...OPTIONS} {...payload} />}
+      />,
+    )
+    const preview = view.getByTestId('note-embed-preview')
+    await expect.element(preview.getByText('Finding text')).toBeVisible()
+    await expect.element(preview.getByRole('heading', { name: 'Original', level: 2 })).toBeVisible()
+    expect(preview.element().textContent).not.toContain('Bookkeeping text')
+    expect(preview.element().textContent).not.toContain('Gap text')
+    await view.unmount()
+  })
+
   it('bounds the passive preview and loads no media, attachments, or nested readers before activation', async () => {
     mocks.sources.set(
       'notes/Original.md',

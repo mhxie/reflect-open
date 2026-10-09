@@ -4,6 +4,7 @@ import {
   readEmbeddedOutlineBlocks,
   readOutlineWithEmbeds,
   registerOutlineEmbed,
+  sectionOutlineBlocks,
 } from './outline-embeds.ts'
 import { outlineHeadingsEqual } from './outline-headings.ts'
 
@@ -100,5 +101,28 @@ describe('embedded outline collection', () => {
     })
     first[0]?.embedded?.reveal()
     expect(reveal).toHaveBeenCalledWith(0)
+  })
+})
+
+describe('section outline', () => {
+  const blocks = readEmbeddedOutlineBlocks(
+    '# Report\n\n## Coverage\n\n### Audit\n\n## Findings\n\n### Detail\n\n![[Child]]\n\n## Gaps',
+    1,
+  )
+  const names = (list: ReturnType<typeof sectionOutlineBlocks>) =>
+    list.map((block) => (block.kind === 'heading' ? block.heading.text : `embed:${block.target}`))
+
+  it('keeps the title and the named section, as the preview does', () => {
+    const section = sectionOutlineBlocks(blocks, 'findings')
+    expect(names(section)).toEqual(['Report', 'Findings', 'Detail', 'embed:Child'])
+    expect(section.map((block) => (block.kind === 'heading' ? block.ordinal : -1))).toEqual([
+      0, 3, 4, -1,
+    ])
+  })
+
+  it('keeps every block without a matching heading fragment', () => {
+    for (const fragment of [null, '^c1', 'Missing']) {
+      expect(sectionOutlineBlocks(blocks, fragment)).toBe(blocks)
+    }
   })
 })
