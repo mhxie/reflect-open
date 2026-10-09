@@ -88,6 +88,27 @@ function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
 }
 
 /** Whether the reader questioned the claim on `today`: a guard against repeats, not a trust rule. */
+/**
+ * Whether a translation's own ledger records an edit to the claim on or
+ * after `since`: its text has moved on from the source the verdict judged,
+ * until the harness evaluates again. The record is written as the person
+ * types, so it covers unsaved edits too.
+ */
+function editedSince(index: WikiArticleIndex, claimId: string, since: string): boolean {
+  return index.ledgers.some(
+    (ledger) =>
+      ledger.valid &&
+      ledger.owner === claimId &&
+      ledger.block.passes.some(
+        (pass) =>
+          pass.agent === 'editor' &&
+          pass.status === 'pending' &&
+          pass.at !== null &&
+          pass.at >= since,
+      ),
+  )
+}
+
 function questionedOn(index: WikiArticleIndex, claimId: string, today: string): boolean {
   return index.ledgers.some(
     (ledger) =>
@@ -119,8 +140,8 @@ function sourcesOf(
  * serialization never decides freshness. `asEditor` turns the saved file
  * into the editor's own Markdown, so a claim whose editor text differs from
  * it has an unsaved edit and shows as changed at once. A translation copy
- * shows its source entry's verdicts and offers no question (the record
- * belongs in the source's ledger). `question` is absent where the note is
+ * shows its source entry's verdicts, as changed once it records an edit
+ * since, and offers no question (the record belongs in the source's ledger). `question` is absent where the note is
  * read-only. Null while trust display is off, no report loaded, or the
  * report leaves the note out.
  */
@@ -211,7 +232,8 @@ export function useWikiTrustView(
   const loaded = file?.hashes ?? null
 
   // The saved claims as the editor would hold them; editor text that differs
-  // is an unsaved edit. Translations are compared through their source.
+  // is an unsaved edit. A translation's text never matches its source's, so
+  // its own edit records decide instead (`editedSince`).
   const texts = useMemo(() => claimTexts(index), [index])
   const content = translation ? null : (file?.content ?? null)
   const savedTexts = useMemo(
@@ -231,7 +253,9 @@ export function useWikiTrustView(
         hash === undefined
           ? { state: 'unevaluated' }
           : wikiClaimStanding(report, sourcePath, claim.id, hash)
-      const edited = savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
+      const edited = translation
+        ? standing.state === 'current' && editedSince(index, claim.id, standing.verdict.evaluatedAt)
+        : savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
       if (edited && standing.state === 'current')
         standing = { state: 'changed', verdict: standing.verdict }
       trusts.set(claim.id, {

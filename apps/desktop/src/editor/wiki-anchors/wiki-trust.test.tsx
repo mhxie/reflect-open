@@ -98,6 +98,7 @@ let reads: number
 
 beforeEach(async () => {
   settingsState.settings.wikiTrustDisplay = 'inline'
+  settingsState.settings.wikiLanguages = [{ label: 'English', folder: 'wiki' }]
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   disk = SOURCE
   readGate = null
@@ -138,7 +139,7 @@ afterEach(async () => {
   queryClient.clear()
 })
 
-async function editorFixture(source = SOURCE) {
+async function editorFixture(source = SOURCE, path = PATH) {
   disk = source
   const ref = createRef<EditorHandle>()
   const rendered = await render(
@@ -149,9 +150,9 @@ async function editorFixture(source = SOURCE) {
         handleRef={ref}
         resolveWikilink={resolveWikilink}
       >
-        <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+        <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
       </MeowdownEditor>
-      <WikiTrustSummary path={PATH} />
+      <WikiTrustSummary path={path} />
     </QueryClientProvider>,
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
@@ -379,6 +380,27 @@ describe('claim trust from the harness report', () => {
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }))
     await expect.element(page.getByText('2 independent primary sources')).toBeVisible()
     await expect.element(page.getByText('example.org', { exact: true })).toBeVisible()
+  })
+
+  it("shows a translation's edited claim as changed, not with its source's verdict", async () => {
+    settingsState.settings.wikiLanguages = [
+      { label: 'English', folder: 'wiki' },
+      { label: '中文', folder: 'wiki-zh' },
+    ]
+    const { editor, container } = await editorFixture(SOURCE, 'wiki-zh/Example.md')
+    const style = (id: string): string | null | undefined =>
+      container
+        .querySelector(`[data-wiki-claim="${CSS.escape(id)}"]`)
+        ?.getAttribute('data-wiki-trust')
+    // The source's verdict, checked against the source's saved text.
+    await vi.waitFor(() => expect(style('c1')).toBe('solid'))
+    const projection = wikiArticleKey.getState(editor.state)!
+    const claim = projection.index.claims.find((item) => item.id === 'c1')!
+    editor.view.dispatch(
+      editor.state.tr.insertText('Edited ', wikiEditorRange(projection.map, claim)!.from),
+    )
+    await vi.waitFor(() => expect(style('c1')).toBe('pending'))
+    expect(style('c2')).toBe('needs-work')
   })
 
   it('shows a claim as changed as soon as its text moves on from the evaluated text', async () => {

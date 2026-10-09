@@ -107,6 +107,12 @@ Reflect hashes the note as saved, as you read it, and an edit not yet saved
 shows at once. Either way the claim reads **changed since its last
 evaluation** until a report carries the new hash.
 
+A translation (a note in a wiki language folder other than the source's)
+shows its source entry's verdicts. Its text never matches the source's hash,
+so its own ledger decides instead: once it records `@pass: editor | status:
+pending` for a claim on or after the verdict's `evaluated_at`, that claim
+reads changed until a newer evaluation.
+
 ### What is not a claim
 
 Reflect shows no verdict for a claim its editor flags; the parser
