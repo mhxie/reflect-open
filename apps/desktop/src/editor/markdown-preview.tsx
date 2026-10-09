@@ -133,9 +133,9 @@ export function MarkdownPreview({
   )
   const noteIdentity = useWikiArticleIdentities(content)
   // Article blocks read the whole document (citation numbers, claim ranges),
-  // which MarkdownView's per-block memo does not compare, so the reader is
-  // bound to its document: a new document redraws every block, as before
-  // that memo.
+  // which MarkdownView's per-block memo does not compare. `source` ties the
+  // reader, and so renderBlock, to the document; the React Compiler ignores
+  // the deps list, so without it article blocks would go stale.
   const articleReader = useMemo(
     () => ({ source: content, project: createWikiArticleProjectionReader({ noteIdentity }) }),
     [noteIdentity, content],
