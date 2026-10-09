@@ -137,11 +137,12 @@ describe('wiki citation evidence', () => {
       [
         '@anchor: url:https://example.org/a | valid_at: 2026-01-02 | title: A study | section: 3.2',
         '@anchor: arxiv:2501.13956 | valid_at: 2026-01-02 | weight: 0.5 | locator: Table 2',
+        '@anchor: doi:10.1/x | valid_at: 2026-01-02 | kind: secondary | Page No: 3',
       ].join('\n'),
       '2026-03-01',
     )
     expect(block.unparsed).toEqual([])
-    expect(block.sources.map((source) => source.current)).toEqual([true, true])
+    expect(block.sources.map((source) => source.current)).toEqual([true, true, true])
   })
 
   it('skips comment lines, as the trust engine does', () => {
@@ -153,12 +154,14 @@ describe('wiki citation evidence', () => {
     expect(block.sources).toHaveLength(1)
   })
 
-  it('flags fields that are not key: value, repeated keys, and a non-numeric weight', () => {
+  it('flags fields without a colon, repeated keys, a non-numeric weight, and an unknown kind', () => {
     const raw = [
       '@anchor: url:https://example.org/a | valid_at: 2026-01-02 | a note',
       '@anchor: url:https://example.org/b | valid_at: 2026-01-02 | title: A | title: B',
       '@anchor: url:https://example.org/c | valid_at: 2026-01-02 | weight: high',
-      '@pass: reviewer | status: verified | at: 2026-01-02 | Title: Shouted',
+      '@anchor: url:https://example.org/d | valid_at: 2026-01-02 | kind: tertiary',
+      // A pipe inside a value splits the field, as the trust engine reads it.
+      '@pass: reviewer | status: verified | at: 2026-01-02 | title: Foo | Bar',
     ]
     expect(readWikiAnchorsBlock(raw.join('\n'), '2026-03-01').unparsed).toEqual(raw)
   })

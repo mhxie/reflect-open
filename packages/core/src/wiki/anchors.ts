@@ -90,32 +90,35 @@ const citationSchema = z
   .refine((dates) => dates.invalid_at === undefined || dates.invalid_at > dates.valid_at)
 const citationMetadataSchema = z.object({ citation: citationSchema })
 
-const MARKER_FIELD_RE = /^[a-z][a-z0-9_]*:/
 const WEIGHT_RE = /^\d+(?:\.\d+)?$/
+const ANCHOR_KINDS = new Set(['primary', 'secondary'])
 
 /**
- * Whether a marker line is malformed. Fields the schema does not name (a
- * writer's `title` or `locator`) are retained and pass; a field that is not
- * `key: value`, a repeated key, and invalid dates or `weight` do not.
+ * Whether an `@anchor` or `@pass` line is malformed, by the trust engine's
+ * rules. Fields the schema does not name (a writer's `title` or `locator`)
+ * are retained and pass; a field without `:`, a repeated key, invalid dates,
+ * `weight`, or anchor `kind` do not. `@cite` lines keep their strict fields.
  */
 function markerNeedsAttention(marker: WikiMarker, line: string, asOf: string): boolean {
   const seen = new Set<string>()
   for (const pair of line.split(' | ').slice(1)) {
-    const field = pair.trim()
-    if (!MARKER_FIELD_RE.test(field)) return true
-    const key = field.slice(0, field.indexOf(':'))
+    const colon = pair.indexOf(':')
+    if (colon === -1) return true
+    const key = pair.slice(0, colon).trim()
     if (seen.has(key)) return true
     seen.add(key)
   }
   const date = wikiMarkerDate(marker)
   const invalidAt = marker.fields.get('invalid_at')
   const weight = marker.fields.get('weight')
+  const kind = marker.kind === 'anchor' ? marker.fields.get('kind') : undefined
   return (
     date === undefined ||
     !isIsoDate(date) ||
     date > asOf ||
     (invalidAt !== undefined && (!isIsoDate(invalidAt) || invalidAt <= date)) ||
     (weight !== undefined && !WEIGHT_RE.test(weight)) ||
+    (kind !== undefined && !ANCHOR_KINDS.has(kind)) ||
     (marker.kind === 'pass' && (marker.head === '' || !marker.fields.get('status')))
   )
 }
