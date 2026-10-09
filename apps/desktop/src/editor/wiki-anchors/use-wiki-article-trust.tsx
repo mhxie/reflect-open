@@ -51,7 +51,7 @@ function editorMarkdown(editor: Editor, markdown: string): string {
   return createMarkdownSourceMap(markdownToDoc(markdown, { nodes: editor.nodes })).markdown
 }
 
-/** The claim's trust mark in the editor, if drawn. */
+/** ⌘Z or Ctrl+Z, without Shift or Option. */
 function isUndoKey(event: KeyboardEvent | ReactKeyboardEvent): boolean {
   return (
     (event.metaKey || event.ctrlKey) &&
@@ -67,6 +67,7 @@ function undoInEditor(editor: Editor): boolean {
   return view !== null && undo(view.state, view.dispatch)
 }
 
+/** The claim's trust mark in the editor, if drawn. */
 function markOf(editor: Editor, claimId: string): HTMLElement | null {
   return editor.mounted
     ? editor.view.dom.querySelector<HTMLElement>(`[data-wiki-trust-claim="${CSS.escape(claimId)}"]`)
