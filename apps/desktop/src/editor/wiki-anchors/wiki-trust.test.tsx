@@ -1,6 +1,6 @@
 import { createRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MeowdownEditor, type EditorHandle } from '@meowdown/react'
+import { MarkdownEditor, type EditorHandle } from '@meowdown/react'
 import { emitFileChanges, setBridge, wikiClaimTextSha256 } from '@reflect/core'
 import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
@@ -144,14 +144,14 @@ async function editorFixture(source = SOURCE, path = PATH) {
   const ref = createRef<EditorHandle>()
   const rendered = await render(
     <QueryClientProvider client={queryClient}>
-      <MeowdownEditor
+      <MarkdownEditor
         initialMarkdown={source}
         mode="hide"
         handleRef={ref}
         resolveWikilink={resolveWikilink}
       >
         <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
-      </MeowdownEditor>
+      </MarkdownEditor>
       <WikiTrustSummary path={path} />
     </QueryClientProvider>,
   )
@@ -200,9 +200,9 @@ describe('claim trust from the harness report', () => {
       settingsState.settings.wikiTrustDisplay = display
       const { container } = await render(
         <QueryClientProvider client={queryClient}>
-          <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+          <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
             <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-          </MeowdownEditor>
+          </MarkdownEditor>
         </QueryClientProvider>,
       )
       await vi.waitFor(() =>
@@ -487,14 +487,14 @@ describe('claim trust from the harness report', () => {
     const ref = createRef<EditorHandle>()
     const { container } = await render(
       <QueryClientProvider client={queryClient}>
-        <MeowdownEditor
+        <MarkdownEditor
           initialMarkdown={SOURCE}
           mode="hide"
           handleRef={ref}
           resolveWikilink={resolveWikilink}
         >
           <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MeowdownEditor>
+        </MarkdownEditor>
       </QueryClientProvider>,
     )
     await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
@@ -532,14 +532,14 @@ describe('claim trust from the harness report', () => {
     const ref = createRef<EditorHandle>()
     await render(
       <QueryClientProvider client={queryClient}>
-        <MeowdownEditor
+        <MarkdownEditor
           initialMarkdown={disk}
           mode="hide"
           handleRef={ref}
           resolveWikilink={resolveWikilink}
         >
           <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MeowdownEditor>
+        </MarkdownEditor>
       </QueryClientProvider>,
     )
     await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
@@ -579,9 +579,9 @@ describe('claim trust from the harness report', () => {
     })
     await render(
       <QueryClientProvider client={queryClient}>
-        <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+        <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
           <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MeowdownEditor>
+        </MarkdownEditor>
       </QueryClientProvider>,
     )
     await vi.waitFor(() => expect(reads).toBe(0))
@@ -672,9 +672,9 @@ describe('claim trust from the harness report', () => {
     }
     const { container } = await render(
       <QueryClientProvider client={queryClient}>
-        <MeowdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+        <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
           <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MeowdownEditor>
+        </MarkdownEditor>
         <WikiTrustSummary path={PATH} />
       </QueryClientProvider>,
     )

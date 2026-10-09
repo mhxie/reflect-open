@@ -39,7 +39,7 @@ import type {
   YouTubeVideoResolver,
 } from '@meowdown/core'
 import {
-  MeowdownEditor,
+  MarkdownEditor,
   useLightbox,
   WikilinkHoverCard,
   type EditorHandle,
@@ -71,7 +71,7 @@ const YOUTUBE_RELAY_URL = 'https://youtube-relay-reflect.vercel.app/'
 
 /**
  * Reflect's note editor: a thin wrapper over `@meowdown/react`'s
- * `<MeowdownEditor>`. meowdown owns the editing surface (wiki-link clicks,
+ * `<MarkdownEditor>`. meowdown owns the editing surface (wiki-link clicks,
  * image rendering/persistence, headings, placeholder, the `[[` menu); this
  * wrapper only adapts Reflect's prop shapes and exposes the imperative handle
  * the document pipeline binds to.
@@ -582,7 +582,7 @@ export function NoteEditor({
 
   return (
     <>
-      <MeowdownEditor
+      <MarkdownEditor
         resolveXPost={handleResolveXPost}
         resolveYouTubeVideo={handleResolveYouTubeVideo}
         mediaUrlProtocols={X_MEDIA_URL_PROTOCOLS}
@@ -649,7 +649,7 @@ export function NoteEditor({
           <WikilinkHoverCard>{renderWikilinkHoverCard}</WikilinkHoverCard>
         ) : null}
         {children}
-      </MeowdownEditor>
+      </MarkdownEditor>
       <MediaLightbox lightbox={lightbox} onOpenImage={openLightboxImage} />
     </>
   )

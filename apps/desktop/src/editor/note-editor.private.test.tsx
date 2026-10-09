@@ -8,7 +8,7 @@ import { NoteEditor } from './note-editor.tsx'
 const editorProps = vi.hoisted((): EditorProps[] => [])
 vi.mock('@meowdown/react', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@meowdown/react')>()),
-  MeowdownEditor: (props: EditorProps) => {
+  MarkdownEditor: (props: EditorProps) => {
     editorProps.push(props)
     return null
   },

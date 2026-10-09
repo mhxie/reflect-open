@@ -1,6 +1,6 @@
 import { createRef } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MeowdownEditor, type EditorHandle } from '@meowdown/react'
+import { MarkdownEditor, type EditorHandle } from '@meowdown/react'
 import { createMarkdownSourceMap } from '@meowdown/core'
 import { AllSelection, TextSelection } from '@prosekit/pm/state'
 import { undo, redo } from '@prosekit/pm/history'
@@ -75,7 +75,7 @@ async function editorFixture(source = SOURCE, path = 'wiki/Example.md') {
   const onDocChange = vi.fn()
   const rendered = await render(
     <QueryClientProvider client={new QueryClient()}>
-      <MeowdownEditor
+      <MarkdownEditor
         initialMarkdown={source}
         mode="hide"
         handleRef={ref}
@@ -84,7 +84,7 @@ async function editorFixture(source = SOURCE, path = 'wiki/Example.md') {
       >
         <WikiAnchorsBridge onWikiLinkClick={vi.fn()} />
         <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
-      </MeowdownEditor>
+      </MarkdownEditor>
     </QueryClientProvider>,
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
