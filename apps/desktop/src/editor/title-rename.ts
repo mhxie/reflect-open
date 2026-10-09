@@ -65,12 +65,18 @@ export interface TitleRenameTracker {
 
 const DEFAULT_QUIET_MS = 5000
 
+/** A note's title (what links resolve to) and its first H1, which may differ. */
+interface Titles {
+  readonly title: string
+  readonly heading: string | null
+}
+
 export function createTitleRenameTracker(options: TitleRenameTrackerOptions): TitleRenameTracker {
   const { path, onRename, canFire } = options
   const quietMs = options.quietMs ?? DEFAULT_QUIET_MS
 
-  let baselineTitle: string | null = null
-  let pending: string | null = null
+  let baselineTitles: Titles | null = null
+  let pending: Titles | null = null
   let previousAutoAlias: string | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
@@ -83,9 +89,11 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
   // make a fresh lazy note's first heading look like a rename from its ULID
   // filename, spraying a junk alias (and potentially rewrites) on every new
   // note. Untitled is `null` here.
-  const titleOf = (content: string): string | null => {
+  const titlesOf = (content: string): Titles | null => {
     const parsed = parseNote({ path, source: content })
-    return hasAuthoredTitle(parsed) ? parsed.title : null
+    if (!hasAuthoredTitle(parsed)) return null
+    const h1 = parsed.headings.find((heading) => heading.level === 1 && heading.text)
+    return { title: parsed.title, heading: h1?.text ?? null }
   }
 
   function cancelTimer(): void {
@@ -103,16 +111,17 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     if (canFire !== undefined && !canFire()) {
       return // blocked (conflict parked): keep pending, mutate nothing
     }
+    const from = baselineTitles?.title ?? null
     const rename: TitleRename = {
-      from: baselineTitle,
-      to: pending,
-      previousAutoAlias: baselineTitle === null ? null : previousAutoAlias,
+      from,
+      to: pending.title,
+      previousAutoAlias: from === null ? null : previousAutoAlias,
     }
     // The title we just renamed away from marks the chain: a follow-up rename
     // prunes what this one added instead of accreting one alias per edit. A
     // birth (`from: null`) leaves no alias behind, so the chain stays empty.
-    previousAutoAlias = baselineTitle
-    baselineTitle = pending
+    previousAutoAlias = from
+    baselineTitles = pending
     pending = null
     onRename(rename)
   }
@@ -120,7 +129,7 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
   function baseline(content: string): void {
     cancelTimer()
     pending = null
-    baselineTitle = titleOf(content)
+    baselineTitles = titlesOf(content)
     // External content is a new ground truth: the alias chain this session was
     // building no longer describes it, so pruning stops here.
     previousAutoAlias = null
@@ -130,8 +139,8 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     if (disposed) {
       return
     }
-    const title = titleOf(content)
-    if (title === null) {
+    const current = titlesOf(content)
+    if (current === null) {
       // The title was removed mid-edit (or the note is still untitled): there
       // is nothing to rename *to*. Clear any pending rename but keep the
       // baseline — re-titling later still compares against the old title.
@@ -139,25 +148,36 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
       pending = null
       return
     }
-    if (baselineTitle === null) {
+    if (baselineTitles === null) {
       // The first authored title on an untitled note is a **birth**, not a
       // rename — nothing links to a title that never existed, so no rewrite.
       // It still settles through the quiet timer: the birth event is what
       // moves the file onto its slug name (Plan 17), and firing it per save
       // would rename the file under a half-typed title.
-      pending = title
+      pending = current
       cancelTimer()
       timer = setTimeout(fire, quietMs)
       return
     }
-    if (foldKey(title) === foldKey(baselineTitle)) {
+    // The H1 is what the person edits, so an edit to it renames the note even
+    // under a frontmatter `title:`, which the rename then rewrites to match.
+    // Saved content never changes frontmatter on its own, so while the note
+    // has an H1 only the H1 is followed.
+    const to =
+      current.heading === null
+        ? current.title
+        : baselineTitles.heading === null ||
+            foldKey(current.heading) !== foldKey(baselineTitles.heading)
+          ? current.heading
+          : baselineTitles.title
+    if (foldKey(to) === foldKey(baselineTitles.title)) {
       // Same key: resolution is case-insensitive, so a pure case tweak is not
       // a rename — and a reverted edit clears whatever was pending.
       cancelTimer()
       pending = null
       return
     }
-    pending = title
+    pending = { title: to, heading: current.heading }
     cancelTimer()
     timer = setTimeout(fire, quietMs)
   }

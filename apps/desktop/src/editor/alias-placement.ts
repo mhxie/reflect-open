@@ -6,6 +6,7 @@ import {
   ReflectError,
   upsertFrontmatter,
 } from '@reflect/core'
+import { frontmatterPatchToYaml, type FrontmatterPatch } from './note-session-frontmatter.ts'
 import { openSession } from './open-documents.ts'
 
 /**
@@ -32,6 +33,33 @@ export interface SettledRename {
   previousAutoAliases: readonly string[]
 }
 
+/**
+ * What a settled rename writes to the note's frontmatter: the old title as an
+ * alias (unless `alias` is off, as when another note holds that title), and,
+ * in a note that declares `title:`, the new title there too: the explicit
+ * title outranks the H1, so without it the rewritten links would resolve
+ * nowhere. Null when nothing changes.
+ */
+function renamePatch(
+  path: string,
+  source: string,
+  rename: SettledRename,
+  alias: boolean,
+): { patch: FrontmatterPatch; added: string[] } | null {
+  const { frontmatter } = parseNote({ path, source })
+  const aliases = alias ? nextAliases(frontmatter.aliases, rename) : null
+  const declared: unknown = (frontmatter as Record<string, unknown>)['title']
+  const title = typeof declared === 'string' && declared.trim() !== rename.to ? rename.to : null
+  if (aliases === null && title === null) return null
+  return {
+    patch: {
+      ...(aliases === null ? {} : { aliases }),
+      ...(title === null ? {} : { title }),
+    },
+    added: aliases === null ? [] : addedAliases(frontmatter.aliases, aliases),
+  }
+}
+
 /** The entries of `next` that `current` did not already carry. */
 function addedAliases(current: readonly string[], next: readonly string[]): string[] {
   const kept = new Set(current.map((alias) => foldKey(alias)))
@@ -39,7 +67,8 @@ function addedAliases(current: readonly string[], next: readonly string[]): stri
 }
 
 /**
- * Record `rename.from` as an alias on the note at `path`, returning the
+ * Record `rename.from` as an alias on the note at `path` (skipped with
+ * `alias: false`), and move a declared `title:` to `rename.to`, returning the
  * aliases that were added (empty when nothing changed) so the next rename in
  * the chain can prune exactly those. Aliases are computed against the note's
  * **current** frontmatter at placement time — `aliases` replaces the whole
@@ -51,8 +80,9 @@ export async function placeOldTitleAlias(
   path: string,
   rename: SettledRename,
   generation: number,
+  options: { alias?: boolean } = {},
 ): Promise<string[]> {
-  const aliasesOf = (source: string): string[] => parseNote({ path, source }).frontmatter.aliases
+  const alias = options.alias ?? true
   const owner = openSession(path, generation)
   let placed = false
   let added: string[] = []
@@ -61,11 +91,10 @@ export async function placeOldTitleAlias(
     // session. Through its frontmatter channel — the editor view never
     // churns — and flushed rather than riding the debounce: a settle is
     // exactly the moment to persist, and quit-time teardown awaits this.
-    const current = aliasesOf(owner.content())
-    const aliases = nextAliases(current, rename)
-    placed = aliases === null || owner.updateFrontmatter({ aliases })
-    if (placed && aliases !== null) {
-      added = addedAliases(current, aliases)
+    const change = renamePatch(path, owner.content(), rename, alias)
+    placed = change === null || owner.updateFrontmatter(change.patch)
+    if (placed && change !== null) {
+      added = change.added
       await owner.flush()
     }
   }
@@ -76,10 +105,11 @@ export async function placeOldTitleAlias(
         if (content === null) {
           throw new ReflectError('notFound', `${path} does not exist`)
         }
-        const current = aliasesOf(content)
-        const aliases = nextAliases(current, rename)
-        added = aliases === null ? [] : addedAliases(current, aliases)
-        return aliases === null ? null : upsertFrontmatter(content, { aliases })
+        const change = renamePatch(path, content, rename, alias)
+        added = change?.added ?? []
+        return change === null
+          ? null
+          : upsertFrontmatter(content, frontmatterPatchToYaml(change.patch))
       },
       generation,
     )

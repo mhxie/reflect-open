@@ -11,6 +11,11 @@ export interface FrontmatterPatch {
   /** Alternative wiki-link titles for this note (the Plan 07b auto-alias). */
   aliases?: string[]
   /**
+   * The explicit title, which outranks the H1. A settled rename of the H1
+   * rewrites it, so the heading the person edited stays the note's title.
+   */
+  title?: string
+  /**
    * Sidebar pin. `true` pins; a number pins with an explicit order (what the
    * pinned shelf reorder writes); `false` deletes the key rather than writing
    * `pinned: false` — unpinned is the absence of the flag, and a note whose
@@ -49,6 +54,9 @@ export function frontmatterPatchToYaml(patch: FrontmatterPatch): Record<string, 
   }
   if (patch.aliases !== undefined) {
     yaml['aliases'] = patch.aliases
+  }
+  if (patch.title !== undefined) {
+    yaml['title'] = patch.title
   }
   if (patch.pinned !== undefined) {
     yaml['pinned'] = patch.pinned === false ? undefined : patch.pinned

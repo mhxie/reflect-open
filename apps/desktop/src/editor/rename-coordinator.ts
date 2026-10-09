@@ -201,17 +201,18 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
         // the user authored.
         const previousAutoAliases = rename.previousAutoAlias === null ? [] : autoAliases
         autoAliases = []
-        if (!collision) {
-          try {
-            autoAliases = await placeOldTitleAlias(
-              currentPath,
-              { from, to: rename.to, previousAutoAliases },
-              gen,
-            )
-          } catch (cause) {
-            failures.alias = errorMessage(cause)
-            console.error('rename alias placement failed:', cause)
-          }
+        // Another note holding the old title gets no alias here, but a
+        // declared `title:` still follows the edited heading.
+        try {
+          autoAliases = await placeOldTitleAlias(
+            currentPath,
+            { from, to: rename.to, previousAutoAliases },
+            gen,
+            { alias: !collision },
+          )
+        } catch (cause) {
+          failures.alias = errorMessage(cause)
+          console.error('rename alias placement failed:', cause)
         }
         // Link maintenance applies to every editable note. Filename projection
         // is a separate capability: stable-path and adopted notes stay put.

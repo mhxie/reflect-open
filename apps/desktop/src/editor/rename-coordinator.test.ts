@@ -247,12 +247,29 @@ describe('rename coordinator', () => {
       destinationBlocked: false,
       keptInBackup: [],
     })
+    io.readNote.mockResolvedValue('# New Title\n')
     const coordinator = makeCoordinator()
     await renameOnce(coordinator, 'Old Title', 'New Title')
 
-    expect(io.readNote).not.toHaveBeenCalled()
     expect(io.writeNote).not.toHaveBeenCalled()
     expect(operationLog.records[0]!.outcome).toBe('done')
+  })
+
+  it('a collision still moves a declared frontmatter title, with no alias', async () => {
+    io.rewriteLinksForTitleChange.mockResolvedValue({
+      rewritten: [],
+      failed: [],
+      collision: true,
+      destinationBlocked: false,
+      keptInBackup: [],
+    })
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+    const coordinator = makeCoordinator()
+    await renameOnce(coordinator, 'Old Title', 'New Title')
+
+    const written = io.writeNote.mock.calls[0]?.[1] as string
+    expect(written).toContain('title: New Title')
+    expect(written).not.toContain('aliases')
   })
 
   it('a blocked destination skips the rewrite but still places the old-title alias', async () => {
@@ -482,6 +499,7 @@ describe('rename coordinator', () => {
       keptInBackup: [],
     })
     io.slugPathForTitle.mockResolvedValue('notes/new-title.md')
+    io.readNote.mockResolvedValue('# New Title\n')
     const coordinator = makeCoordinator()
     await renameOnce(coordinator, 'Old Title', 'New Title')
 
