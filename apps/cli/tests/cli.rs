@@ -1280,6 +1280,21 @@ fn local_only_rows_never_read_as_stale_or_surface_in_search() {
     assert_eq!(value["stale"], true);
 }
 
+/// A harness learns which folders to leave out of the trust report, and
+/// an unreadable record refuses rather than reading as none.
+#[cfg(unix)]
+#[test]
+fn trust_report_lists_the_local_only_folders_to_leave_out() {
+    let (fixture, _raw) = graph_with_local_only_note(Some(SECURE));
+    let value = json(&reflect(&fixture, &["trust-report", "--json"]));
+    assert_eq!(value["localOnlyFolders"], serde_json::json!(["secure"]));
+    assert_eq!(value["path"], ".harness/wiki-trust.json");
+
+    let (unreadable, _raw) = graph_with_local_only_note(Some("not json"));
+    let output = reflect(&unreadable, &["trust-report", "--json"]);
+    assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
+}
+
 /// Answers from the app's socket pass the same re-check: a note in a
 /// local-only folder never prints, whatever the app sends back.
 #[cfg(unix)]

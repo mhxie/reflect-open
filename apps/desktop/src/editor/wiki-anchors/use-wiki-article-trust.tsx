@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+} from 'react'
 import { createMarkdownSourceMap, markdownToDoc, type EditorExtension } from '@meowdown/core'
 import type { useEditor } from '@meowdown/react'
+import { undo } from '@prosekit/pm/history'
 import type { WikiArticleIndex } from '@reflect/core'
 import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { todayIso } from '@/lib/dates.ts'
@@ -44,6 +52,21 @@ function editorMarkdown(editor: Editor, markdown: string): string {
 }
 
 /** The claim's trust mark in the editor, if drawn. */
+function isUndoKey(event: KeyboardEvent | ReactKeyboardEvent): boolean {
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.key.toLowerCase() === 'z'
+  )
+}
+
+/** The editor's own undo, when the note is editable. */
+function undoInEditor(editor: Editor): boolean {
+  const view = editableView(editor)
+  return view !== null && undo(view.state, view.dispatch)
+}
+
 function markOf(editor: Editor, claimId: string): HTMLElement | null {
   return editor.mounted
     ? editor.view.dom.querySelector<HTMLElement>(`[data-wiki-trust-claim="${CSS.escape(claimId)}"]`)
@@ -90,6 +113,8 @@ export function useWikiArticleTrust(
   const viewRef = useRef(trust.view)
   const summaryRef = useRef(trust.summary)
   const [cardFor, setCardFor] = useState<string | null>(null)
+  // Undos taken from the card, which redraw it from the ledger.
+  const [undos, setUndos] = useState(0)
   const openClaim = cardFor !== null && trust.view?.claim(cardFor) != null ? cardFor : null
   useEffect(() => {
     viewRef.current =
@@ -105,11 +130,6 @@ export function useWikiArticleTrust(
       editor.view.dispatch(
         editor.state.tr.setMeta(wikiArticleKey, 'trust').setMeta('addToHistory', false),
       )
-      // The open card's mark says so, and stays shown while it is open. Set
-      // after the redraw, which replaces a mark whose standing changed.
-      for (const mark of editor.view.dom.querySelectorAll('.wiki-trust-mark[aria-expanded]'))
-        mark.removeAttribute('aria-expanded')
-      if (openClaim !== null) markOf(editor, openClaim)?.setAttribute('aria-expanded', 'true')
       published.current()
     })
     return () => {
@@ -181,9 +201,17 @@ export function useWikiArticleTrust(
           side="top"
           align="start"
           className="max-h-[min(var(--available-height),28rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto text-xs"
+          // Focus sits in the card after a question, out of the editor's
+          // keymap, so the card passes its undo on.
+          onKeyDown={(event) => {
+            if (isUndoKey(event) && undoInEditor(editor)) {
+              event.preventDefault()
+              setUndos((count) => count + 1)
+            }
+          }}
         >
           <WikiClaimTrustCard
-            key={open.claimId}
+            key={`${open.claimId}:${undos}`}
             trust={open}
             // Checked as the card renders: the note may have turned read-only since.
             editable={editableView(editor) !== null}

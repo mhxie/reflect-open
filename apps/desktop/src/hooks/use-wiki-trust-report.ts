@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   errorMessage,
@@ -108,7 +108,13 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   const bridgeReady = useBridgeReady()
   const { settings } = useSettings()
   const client = useQueryClient()
-  const sync = useSyncContext()
+  // Read when a report arrives, not when its read began: backup may start
+  // while a read is still in flight.
+  const syncContext = useSyncContext()
+  const sync = useRef(syncContext)
+  useEffect(() => {
+    sync.current = syncContext
+  })
   const path = settings.wikiTrustReportPath
   const enabled = graph !== null && bridgeReady && (always || settings.wikiTrustDisplay !== 'off')
   const generation = graph?.generation
@@ -132,7 +138,7 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
     queryFn: () =>
       generation === undefined
         ? Promise.reject(new Error('No graph is open.'))
-        : loadReport(client, key, path, generation, () => sync?.fileChanged()),
+        : loadReport(client, key, path, generation, () => sync.current?.fileChanged()),
     enabled: enabled && generation !== undefined,
     refetchInterval: (query) =>
       query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS,

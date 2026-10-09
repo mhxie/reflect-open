@@ -186,8 +186,11 @@ function decorations(
       const to = last?.to ?? range.to
       if (waits) result.push(trustWidget(to, [trust], 'on-demand'))
       else if (trustView.display === 'margin' && !quiet) {
-        // Beside the line the claim ends on, positioned by that textblock.
+        // Beside the line the claim ends on, positioned by that textblock
+        // (a code block, for a claim of code alone).
+        const end = state.doc.resolve(range.to)
         if (last !== null) marginHosts.add(last.block)
+        else if (end.parent.isTextblock) marginHosts.add(end.before())
         result.push(trustWidget(to, [trust], 'margin'))
       } else result.push(trustWidget(to, [trust], 'inline'))
     }
@@ -635,14 +638,26 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
               space()
             }, 250)
           }
+          // The open card's mark says so, and stays shown while it is open,
+          // after every redraw: one may replace it (a new standing, the lens).
+          const markOpen = (): void => {
+            const open = options.trust?.()?.open ?? null
+            for (const mark of view.dom.querySelectorAll<HTMLElement>('.wiki-trust-mark')) {
+              if (mark.dataset['wikiTrustClaim'] === open)
+                mark.setAttribute('aria-expanded', 'true')
+              else mark.removeAttribute('aria-expanded')
+            }
+          }
           const resize = new ResizeObserver(spaceSoon)
           resize.observe(view.dom)
           document.fonts.addEventListener('loadingdone', spaceSoon)
           spaceSoon()
+          markOpen()
           return {
             update: (current) => {
               articleViews.set(current.state.doc, current)
               options.onUpdate()
+              markOpen()
               spaceSoon()
             },
             destroy: () => {

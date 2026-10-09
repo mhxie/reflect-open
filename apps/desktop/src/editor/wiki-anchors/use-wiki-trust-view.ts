@@ -23,7 +23,10 @@ import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
+import { wikiStandingStyle } from './wiki-trust-labels.ts'
 import type { WikiTrustView } from './wiki-trust-view.ts'
+
+const NEEDS_WORK_STYLES = new Set(['needs-work', 'disputed'])
 
 /** What the note footer says about a note's claims. */
 export interface WikiNoteTrustSummary {
@@ -245,11 +248,9 @@ export function useWikiTrustView(
     return {
       view: { display, claim: (claimId) => trusts.get(claimId) ?? null },
       summary: {
+        // Every claim the reading styles mark as needing work, disputes included.
         needsWork: all
-          .filter(
-            (trust) =>
-              trust.standing.state === 'current' && trust.standing.verdict.tier === 'needs-work',
-          )
+          .filter((trust) => NEEDS_WORK_STYLES.has(wikiStandingStyle(trust.standing)))
           .map((trust) => trust.claimId),
         pending: all.filter((trust) => trust.standing.state !== 'current').length,
       },

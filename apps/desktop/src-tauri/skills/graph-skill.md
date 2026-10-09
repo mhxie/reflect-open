@@ -101,7 +101,8 @@ displays it.
 - Reflect writes back only `@pass: editor | status: pending` (the user edited
   a claim) and `@pass: reader | status: flagged` (the user questioned one)
   into the claim's `anchors cN` ledger. Read those on your next pass.
-- Leave notes in local-only folders, and private notes, out of the report.
+- Leave notes in local-only folders (`reflect trust-report --json` lists
+  them as `localOnlyFolders`), and private notes, out of the report.
 
 The format, an example, and a JSON Schema are in Reflect's repository under
 `docs/wiki-trust-harness.md`.

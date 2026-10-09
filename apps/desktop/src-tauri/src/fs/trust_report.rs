@@ -90,19 +90,30 @@ fn read_bounded(root: &Path, rel: &str) -> AppResult<Vec<u8>> {
 }
 
 /// Identifies one version of the report: modification time in nanoseconds,
-/// size, and (on Unix) the inode, so an atomic replace reads as new even
-/// within the clock's resolution or on a coarse-timestamp filesystem.
-fn version_stamp(meta: &std::fs::Metadata) -> String {
+/// size, and what tells an atomic replace apart within the clock's
+/// resolution or on a coarse-timestamp filesystem: the inode on Unix, and
+/// elsewhere, with no stable file identity, a hash of the bytes.
+fn version_stamp(
+    meta: &std::fs::Metadata,
+    #[cfg_attr(unix, allow(unused_variables))] path: &Path,
+) -> String {
     let nanos = meta
         .modified()
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |since| since.as_nanos());
     #[cfg(unix)]
-    let inode = std::os::unix::fs::MetadataExt::ino(meta);
+    let identity = std::os::unix::fs::MetadataExt::ino(meta);
     #[cfg(not(unix))]
-    let inode = 0_u64;
-    format!("{nanos}:{}:{inode}", meta.len())
+    let identity = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        if meta.len() <= MAX_REPORT_BYTES {
+            std::fs::read(path).unwrap_or_default().hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    format!("{nanos}:{}:{identity}", meta.len())
 }
 
 /// A report whose bytes are not on this device yet; the next poll reads it.
@@ -139,7 +150,7 @@ fn read_report(
             "the trust report is not a regular file: {rel:?}"
         )));
     }
-    let stamp = version_stamp(&meta);
+    let stamp = version_stamp(&meta, &abs);
     if known_stamp == Some(stamp.as_str()) {
         return Ok(Some(TrustReportRead {
             stamp,

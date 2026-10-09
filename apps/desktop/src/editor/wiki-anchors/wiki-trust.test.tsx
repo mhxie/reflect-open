@@ -266,6 +266,39 @@ describe('claim trust from the harness report', () => {
     expect(editor.state.selection.empty).toBe(false)
   })
 
+  it('counts a disputed claim as needing work in the footer', async () => {
+    const disputed = JSON.parse(report.contents) as {
+      notes: Record<string, { claims: Record<string, { tier: string; overlays?: string[] }> }>
+    }
+    disputed.notes[PATH]!.claims['c1'] = {
+      ...disputed.notes[PATH]!.claims['c1']!,
+      tier: 'supported',
+      overlays: ['disputed'],
+    }
+    report = { stamp: '8:8', contents: JSON.stringify(disputed) }
+    await editorFixture()
+    await expect.element(page.getByRole('button', { name: '2 need work' })).toBeVisible()
+  })
+
+  it("keeps the open card's mark shown when the claim lens turns off", async () => {
+    settingsState.settings.wikiTrustDisplay = 'on-demand'
+    const { container, editor } = await editorFixture()
+    const lens = (): void => {
+      editor.view.dispatch(editor.state.tr.setMeta(wikiArticleKey, 'toggle'))
+    }
+    lens()
+    await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
+    await expect.element(page.getByText('Add a primary source.')).toBeVisible()
+    // The lens redraws every mark as waiting; the open one stays shown.
+    lens()
+    await vi.waitFor(() => {
+      const mark = container.querySelector('[data-wiki-trust-claim="c2"]')!
+      expect(mark.parentElement!.className).toContain('wiki-trust-on-demand')
+      expect(mark.getAttribute('aria-expanded')).toBe('true')
+      expect(mark.parentElement!.getBoundingClientRect().width).toBeGreaterThan(0)
+    })
+  })
+
   it("keeps only the open card's mark shown", async () => {
     const { container } = await editorFixture()
     await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
@@ -399,10 +432,11 @@ describe('claim trust from the harness report', () => {
     )
     expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
     await expect.element(page.getByText('You questioned this claim today.')).toBeVisible()
-    // An ordinary edit: undo takes the flag back out, as the button's tooltip says.
-    const editor = ref.current!.getEditor()!
-    ;(editor.commands as unknown as { undo: () => boolean }).undo()
+    // An ordinary edit: ⌘Z from the card takes the flag back out, as the
+    // button's tooltip says, and the card offers the question again.
+    await userEvent.keyboard('{Control>}z{/Control}')
     await vi.waitFor(() => expect(ref.current!.getMarkdown()).not.toContain('@pass: reader'))
+    await expect.element(page.getByRole('button', { name: 'Question this claim' })).toBeVisible()
   })
 
   it('marks a claim edited while the saved file is still being read', async () => {

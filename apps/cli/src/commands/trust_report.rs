@@ -42,11 +42,15 @@ pub fn run(graph: &Graph, json: bool) -> Result<(), CliError> {
         .unwrap_or_else(|| DEFAULT_WIKI_TRUST_REPORT_PATH.to_owned());
     let absolute = graph.root.join(&rel);
     if json {
+        // Unknown local-only folders refuse (exit 3) rather than read as none.
+        let index = super::open_index_for_resolution(&graph.root)?;
+        let local_only = super::local_only_of(&graph.root, index.as_ref())?;
         return print_json(&TrustReportJson {
             path: &rel,
             absolute_path: absolute.display().to_string(),
             configured: configured.is_some(),
             exists: absolute.is_file(),
+            local_only_folders: local_only.as_ref().map_or(&[], |folders| folders.names()),
         });
     }
     println!("{}", absolute.display());

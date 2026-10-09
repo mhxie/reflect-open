@@ -6,7 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useWikiTrustReport } from './use-wiki-trust-report.ts'
 
 const fileChanged = vi.hoisted(() => vi.fn())
-vi.mock('@/providers/sync-provider.tsx', () => ({ useSyncContext: () => ({ fileChanged }) }))
+/** The sync context the provider hands out; null before backup starts. */
+const sync = vi.hoisted(() => ({ context: null as { fileChanged: () => void } | null }))
+vi.mock('@/providers/sync-provider.tsx', () => ({ useSyncContext: () => sync.context }))
 vi.mock('@/hooks/use-bridge-ready.ts', () => ({ useBridgeReady: () => true }))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
@@ -28,6 +30,8 @@ const VALID = JSON.stringify({
 /** The report file: absent when null. */
 let file: { stamp: string; contents: string } | null
 let client: QueryClient
+/** Holds report reads until it resolves, when a test sets it. */
+let readGate: Promise<void> | null
 
 function wrapper({ children }: { children: ReactNode }): ReactNode {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -35,10 +39,13 @@ function wrapper({ children }: { children: ReactNode }): ReactNode {
 
 beforeEach(() => {
   fileChanged.mockClear()
+  sync.context = { fileChanged }
+  readGate = null
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   file = { stamp: '1:1', contents: VALID }
   setBridge({
     invoke: async (command, args) => {
+      await readGate
       if (command !== 'wiki_trust_report_read' || file === null) return null
       const known = (args as { knownStamp: string | null }).knownStamp
       return { stamp: file.stamp, contents: known === file.stamp ? null : file.contents }
@@ -76,6 +83,20 @@ describe('useWikiTrustReport and backup', () => {
     await poll()
     await vi.waitFor(() => expect(result.current.status).toBe('missing'))
     expect(fileChanged).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('useWikiTrustReport and a backup that starts mid-read', () => {
+  it('tells the backup running when the report arrives', async () => {
+    sync.context = null
+    let release = (): void => {}
+    readGate = new Promise((resolve) => (release = resolve))
+    const { result, rerender } = await renderHook(() => useWikiTrustReport(true), { wrapper })
+    sync.context = { fileChanged }
+    await rerender()
+    release()
+    await vi.waitFor(() => expect(result.current.status).toBe('ready'))
+    expect(fileChanged).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -39,6 +39,9 @@ pub struct TrustReportJson<'a> {
     /// Whether the path comes from Reflect's settings rather than the default.
     pub configured: bool,
     pub exists: bool,
+    /// Folder names whose notes the report must leave out: it syncs and is
+    /// backed up wherever the graph is, and these never leave the device.
+    pub local_only_folders: &'a [String],
 }
 
 /// `open`: the deep link handed to the OS opener (or just printed).

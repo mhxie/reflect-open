@@ -25,6 +25,7 @@ Settings → Wiki → **Trust report** holds the graph-relative path. Ask for it
 rather than assuming the default:
 
     reflect --graph <graph> trust-report        # prints the absolute path
+    reflect --graph <graph> trust-report --json # also the local-only folders
 
 The default is `.harness/wiki-trust.json`. A path is valid when every segment
 is plain (not empty, `.`, or `..`, and without `\` or `:`), it ends in `.json`, and it is not
@@ -51,7 +52,7 @@ Fields not marked optional are required.
 | Field | Meaning |
 |---|---|
 | `format` | Always `"reflect-wiki-trust"`. |
-| `version` | `1`. Reflect refuses a version it does not read and says so in Settings. |
+| `version` | `1`. Adding optional fields keeps version 1; a new version is for changes Reflect would misread. Reflect refuses a version it does not read and says so in Settings. |
 | `generated_at` | When the report was written (RFC 3339). |
 | `harness` | `{ "name", "version"? }`, shown in Settings. |
 | `notes` | Entries by graph-relative note path (`wiki/memory/Spacing effect.md`); Reflect compares paths in Unicode NFC. |
@@ -145,9 +146,13 @@ The records:
 ## Privacy
 
 The report is read on this device and drawn on screen; Reflect sends it
-nowhere. It does sync wherever your graph syncs, so leave out notes under
-local-only folders and notes marked `private: true`: no verdicts for them,
-and no reasons quoting their text.
+nowhere. It does sync, and Git backup commits it, wherever your graph goes,
+so leave out notes marked `private: true` and notes under local-only folders:
+no verdicts for them, and no reasons quoting their text. Only Reflect knows
+which folders are local-only: `trust-report --json` lists their names as
+`localOnlyFolders`, and a note is under one when any folder in its path has
+one of those names (compared ignoring ASCII case). When Reflect cannot tell,
+the command exits 3; write no report then.
 
 ## Checking your report
 
