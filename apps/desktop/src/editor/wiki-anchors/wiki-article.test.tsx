@@ -190,6 +190,14 @@ describe('article source projection', () => {
     expect(ref.current!.getMarkdown()).toContain('@pass: editor | status: pending')
   })
 
+  it('records no review work when the file is reloaded with changed claim text', async () => {
+    const { ref } = await editorFixture()
+    const reloaded = SOURCE.replace('**first**', '**first, revised on disk**')
+    ref.current!.setMarkdown(reloaded)
+    expect(ref.current!.getMarkdown()).toContain('revised on disk')
+    expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
+  })
+
   it('copies prose without ownership, cuts a whole range with endpoints, and blocks a partial cut', async () => {
     const { editor, ref } = await editorFixture()
     const projection = wikiArticleKey.getState(editor.state)!

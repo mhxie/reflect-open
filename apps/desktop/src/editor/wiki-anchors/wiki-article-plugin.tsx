@@ -6,6 +6,7 @@ import {
   type EditorState,
   type Transaction,
 } from '@prosekit/pm/state'
+import { isHostContentTransaction } from '@meowdown/react'
 import { isHistoryTransaction } from '@prosekit/pm/history'
 import { Decoration, DecorationSet, type EditorView } from '@prosekit/pm/view'
 import { createRoot, type Root } from 'react-dom/client'
@@ -522,7 +523,11 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
             !transactions.some((transaction) => transaction.docChanged) ||
             transactions.some(
               (transaction) =>
-                transaction.getMeta('wiki-review-pending') || isHistoryTransaction(transaction),
+                transaction.getMeta('wiki-review-pending') ||
+                isHistoryTransaction(transaction) ||
+                // A reload of the file (a sync pull, an agent's write) is not
+                // an edit made here, so it records no review work.
+                isHostContentTransaction(transaction),
             )
           )
             return null

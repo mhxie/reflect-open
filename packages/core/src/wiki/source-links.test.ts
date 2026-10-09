@@ -25,6 +25,14 @@ it('groups exact current sources and preserves author/page labels and the origin
   expect(cluster!.block.sources[0]).toBe(block.sources[0])
 })
 
+it('folds links whose anchors carry writer fields such as a title or section', () => {
+  const titled = readWikiAnchorsBlock(
+    '@anchor: url:https://example.org/a | valid_at: 2020-01-01 | title: Study A | section: 2',
+    '2026-01-01',
+  )
+  expect(readWikiSourceLinks('A claim. [Author A](https://example.org/a).', titled)).not.toBeNull()
+})
+
 it.each([
   'Read [Author A](https://example.org/a).',
   'Claim. [Author A](https://example.org/a) disagrees.',

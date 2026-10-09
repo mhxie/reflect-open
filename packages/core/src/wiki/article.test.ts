@@ -155,6 +155,25 @@ describe('article claim ranges', () => {
     expect(readWikiClaimIndex('A <!--claim:c1-->good<!--/claim:c1-->.', DAY).claims).toHaveLength(1)
   })
 
+  it('invalidates only the claim whose boundary changes formatting', () => {
+    const source = `foo*${pair('c1', 'bar* baz')}\n\nOther ${pair('c2', 'good')} text.`
+    const index = readWikiClaimIndex(source, DAY)
+    expect(index.claims.map((claim) => claim.id)).toEqual(['c2'])
+    expect(index.diagnostics.map((item) => item.message)).toEqual([
+      'c1 changes Markdown formatting at its boundaries.',
+    ])
+  })
+
+  it("judges each claim's boundaries alone, whatever its neighbor's markers do", () => {
+    // Removing every marker keeps the emphasis; removing only c1's breaks it.
+    const source = `x ${pair('c1', 'foo')}*${pair('c2', 'bar* baz')}`
+    const index = readWikiClaimIndex(source, DAY)
+    expect(index.claims.map((claim) => claim.id)).not.toContain('c1')
+    expect(index.diagnostics.map((item) => item.message)).toContain(
+      'c1 changes Markdown formatting at its boundaries.',
+    )
+  })
+
   it('diagnoses incomplete tokens and overlapping legacy ownership', () => {
     const invalid = readWikiClaimIndex(`A ${pair('c1', 'good')} after <!-- claim:c2`, DAY)
     expect(

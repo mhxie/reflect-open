@@ -89,7 +89,7 @@ describe('article reference projection', () => {
     ])
   })
 
-  it('keeps PDF locators, historical records and unsupported fields separate from numbering', () => {
+  it('keeps PDF locators, historical records and writer fields separate from numbering', () => {
     const records =
       '@anchor: arxiv:1234.56789 | valid_at: 2026-01-01 | title: Historical title | invalid_at: 2026-02-01'
     const source =
@@ -105,7 +105,11 @@ describe('article reference projection', () => {
       dates: null,
     })
     expect(index.ledgers[0]?.raw).toBe(records)
-    expect(index.ledgers[0]?.block.unparsed).toEqual([records])
+    expect(index.ledgers[0]?.block.unparsed).toEqual([])
+    expect(index.ledgers[0]?.block.sources[0]).toMatchObject({
+      current: false,
+      invalidAt: '2026-02-01',
+    })
     expect(index.source).toBe(source)
   })
 

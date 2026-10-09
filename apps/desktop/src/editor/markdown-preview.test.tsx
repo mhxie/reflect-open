@@ -2,9 +2,9 @@ import { render } from 'vitest-browser-react'
 import { describe, expect, it, vi } from 'vitest'
 import { MarkdownPreview } from './markdown-preview.tsx'
 
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 } }),
-}))
+// One graph object, as the app holds it, so render identities stay stable.
+const graphState = vi.hoisted(() => ({ graph: { root: '/g', name: 'g', generation: 7 } }))
+vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => graphState }))
 
 describe('MarkdownPreview wiki-link chips', () => {
   it('labels chips through the host resolver and reports the full target', async () => {
@@ -102,6 +102,34 @@ describe('MarkdownPreview wiki-link chips', () => {
     await vi.waitFor(() =>
       expect(view.container.querySelector('p')?.textContent).toContain('Author, p2'),
     )
+    await view.unmount()
+  })
+
+  it('renumbers a distant citation when an earlier one changes', async () => {
+    const article = (first: string): string =>
+      [
+        '# Example',
+        '',
+        `One <!-- claim:c1 -->first [ref][${first}]<!-- /claim:c1 -->.`,
+        '',
+        'Between.',
+        '',
+        'Later <!-- claim:c2 -->claim [ref][two]<!-- /claim:c2 -->.',
+        '',
+        '## Evidence',
+        '',
+        '[one]: https://example.org/one "Study one"',
+        '[two]: https://example.org/two "Study two"',
+      ].join('\n')
+    const later = (): string | undefined =>
+      [...view.container.querySelectorAll('p')]
+        .find((paragraph) => paragraph.textContent.startsWith('Later'))
+        ?.querySelector('.wiki-article-reference')?.textContent
+    const view = await render(<MarkdownPreview content={article('one')} />)
+    await vi.waitFor(() => expect(later()).toBe('[2]'))
+    // Now the earlier claim cites `two` first, so the later citation is [1].
+    await view.rerender(<MarkdownPreview content={article('two')} />)
+    await vi.waitFor(() => expect(later()).toBe('[1]'))
     await view.unmount()
   })
 

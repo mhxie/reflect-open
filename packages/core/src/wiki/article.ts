@@ -7,7 +7,7 @@ import { wikiClaimNumber } from './claims.ts'
 import {
   isWikiBibliographyHeading,
   isWikiRevisionHeading,
-  wikiClaimFormattingPreserved,
+  wikiClaimFormattingCheck,
   wikiLedgerOwner,
 } from './article-syntax.ts'
 
@@ -264,6 +264,7 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
   const claims: WikiClaimRange[] = []
   const invalidIds = new Set<string>()
   const ids = new Set(markers.flatMap((marker) => (marker.id === null ? [] : marker.id)))
+  const pairs: { id: string; first: WikiClaimMarker; last: WikiClaimMarker }[] = []
   for (const id of ids) {
     const own = markers.filter((marker) => marker.id === id)
     const open = own.filter((marker) => !marker.closing)
@@ -289,7 +290,13 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
       )
       continue
     }
-    if (!wikiClaimFormattingPreserved(source, [first, last])) {
+    pairs.push({ id, first, last })
+  }
+  // Each claim is checked alone, so one bad boundary invalidates its claim
+  // and no other claim's markers can mask it.
+  const formattingPreserved = pairs.length === 0 ? null : wikiClaimFormattingCheck(source)
+  for (const { id, first, last } of pairs) {
+    if (formattingPreserved?.([first, last]) === false) {
       invalidIds.add(id)
       diagnostic(first.from, last.to, `${id} changes Markdown formatting at its boundaries.`, id)
       continue
