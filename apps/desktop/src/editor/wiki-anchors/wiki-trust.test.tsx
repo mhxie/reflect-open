@@ -318,6 +318,24 @@ describe('claim trust from the harness report', () => {
     },
   )
 
+  it('keeps a Supported mark silent inline until the reveal', async () => {
+    const supported = JSON.parse(report.contents) as {
+      notes: Record<string, { claims: Record<string, { tier: string }> }>
+    }
+    supported.notes[PATH]!.claims['c1']!.tier = 'supported'
+    report = { stamp: '7:7', contents: JSON.stringify(supported) }
+    const { container } = await editorFixture()
+    const wrapper = (): HTMLElement =>
+      container.querySelector('[data-wiki-trust-claim="c1"]')!.parentElement!
+    await vi.waitFor(() => expect(wrapper().className).toContain('wiki-trust-on-demand'))
+    expect(wrapper().getBoundingClientRect().width).toBe(0)
+    // The claim to check keeps its mark.
+    await expect.element(page.getByRole('button', { name: 'Claim C2: Needs work' })).toBeVisible()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }))
+    await expect.element(page.getByRole('button', { name: 'Claim C1: Supported' })).toBeVisible()
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }))
+  })
+
   it("opens a sound claim's verdict and its weighted sources on reveal", async () => {
     const { container } = await editorFixture()
     // A Solid claim's mark stays silent until the reveal.

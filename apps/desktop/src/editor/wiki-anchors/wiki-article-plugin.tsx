@@ -175,9 +175,12 @@ function decorations(
       }
       return false
     })
-    // Sound claims stay silent: a Solid mark, like every mark on demand, waits
-    // for the reveal (Option or the claim lens) after its claim.
-    const quiet = trust !== null && wikiStandingStyle(trust.standing) === 'solid'
+    // Sound claims stay silent: a Solid mark, and inline a Supported one too,
+    // waits like every mark on demand for the reveal (Option or the claim
+    // lens), so the prose carries marks only where a claim needs a look.
+    const style = trust === null ? null : wikiStandingStyle(trust.standing)
+    const quiet =
+      style === 'solid' || (style === 'supported' && trustView?.display === 'inline')
     const waits = !showRanges && (trustView?.display === 'on-demand' || quiet)
     if (trust !== null && trustView !== null) {
       const to = last?.to ?? range.to
