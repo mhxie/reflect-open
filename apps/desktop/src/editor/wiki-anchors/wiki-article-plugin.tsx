@@ -156,13 +156,14 @@ function decorations(
     const range = wikiEditorRange(map, claim)
     if (range === null) continue
     const trust = claimTrust(claim.id)
-    let block: number | null = null
+    // Where the claim's prose ends, which a closing marker on its own line follows.
+    let last = null as { to: number; block: number } | null
     state.doc.nodesBetween(range.from, range.to, (node, position) => {
       if (!node.isTextblock || node.type.spec.code) return true
       const from = Math.max(position + 1, range.from)
       const to = Math.min(position + node.nodeSize - 1, range.to)
-      block ??= position
-      if (from < to)
+      if (from < to) {
+        last = { to, block: position }
         result.push(
           Decoration.inline(from, to, {
             'data-wiki-claim': claim.id,
@@ -171,6 +172,7 @@ function decorations(
             ...(trustView?.open === claim.id ? { 'data-wiki-trust-open': '' } : {}),
           }),
         )
+      }
       return false
     })
     // Sound claims stay silent: a Solid mark, like every mark on demand, waits
@@ -178,14 +180,13 @@ function decorations(
     const quiet = trust !== null && wikiStandingStyle(trust.standing) === 'solid'
     const waits = !showRanges && (trustView?.display === 'on-demand' || quiet)
     if (trust !== null && trustView !== null) {
-      if (waits) result.push(trustWidget(range.to, [trust], 'on-demand'))
+      const to = last?.to ?? range.to
+      if (waits) result.push(trustWidget(to, [trust], 'on-demand'))
       else if (trustView.display === 'margin' && !quiet) {
         // Beside the line the claim ends on, positioned by that textblock.
-        const end = state.doc.resolve(range.to)
-        if (end.parent.isTextblock) marginHosts.add(end.before())
-        result.push(trustWidget(range.to, [trust], 'margin'))
-      } else if (trustView.display !== 'margin' || quiet)
-        result.push(trustWidget(range.to, [trust], 'inline'))
+        if (last !== null) marginHosts.add(last.block)
+        result.push(trustWidget(to, [trust], 'margin'))
+      } else result.push(trustWidget(to, [trust], 'inline'))
     }
     if (showRanges) {
       const position = TextSelection.near(state.doc.resolve(range.from), 1).from

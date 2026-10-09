@@ -105,6 +105,11 @@ export function useWikiArticleTrust(
       editor.view.dispatch(
         editor.state.tr.setMeta(wikiArticleKey, 'trust').setMeta('addToHistory', false),
       )
+      // The open card's mark says so, and stays shown while it is open. Set
+      // after the redraw, which replaces a mark whose standing changed.
+      for (const mark of editor.view.dom.querySelectorAll('.wiki-trust-mark[aria-expanded]'))
+        mark.removeAttribute('aria-expanded')
+      if (openClaim !== null) markOf(editor, openClaim)?.setAttribute('aria-expanded', 'true')
       published.current()
     })
     return () => {
@@ -153,20 +158,6 @@ export function useWikiArticleTrust(
   }, [editor, display])
 
   const open = cardFor === null ? null : (trust.view?.claim(cardFor) ?? null)
-  // The open card's mark says so, and stays shown while it is open.
-  const openId = open?.claimId ?? null
-  useEffect(() => {
-    if (openId === null) return
-    let mark: HTMLElement | null = null
-    const cancel = whenEditorMounted(editor, () => {
-      mark = markOf(editor, openId)
-      mark?.setAttribute('aria-expanded', 'true')
-    })
-    return () => {
-      cancel()
-      mark?.removeAttribute('aria-expanded')
-    }
-  }, [editor, openId])
   const card =
     open === null ? null : (
       <Popover

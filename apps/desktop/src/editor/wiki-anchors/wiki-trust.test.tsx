@@ -138,12 +138,13 @@ afterEach(async () => {
   queryClient.clear()
 })
 
-async function editorFixture() {
+async function editorFixture(source = SOURCE) {
+  disk = source
   const ref = createRef<EditorHandle>()
   const rendered = await render(
     <QueryClientProvider client={queryClient}>
       <MeowdownEditor
-        initialMarkdown={SOURCE}
+        initialMarkdown={source}
         mode="hide"
         handleRef={ref}
         resolveWikilink={resolveWikilink}
@@ -281,6 +282,41 @@ describe('claim trust from the harness report', () => {
       expect(getComputedStyle(claim).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
     })
   })
+
+  it("keeps the open card's mark shown when a new report changes its tier", async () => {
+    const { container } = await editorFixture()
+    await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
+    await expect.element(page.getByText('Add a primary source.')).toBeVisible()
+    const next = JSON.parse(await reportText()) as {
+      notes: Record<string, { claims: Record<string, { tier: string }> }>
+    }
+    next.notes[PATH]!.claims['c2']!.tier = 'solid'
+    report = { stamp: '6:6', contents: JSON.stringify(next) }
+    await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
+    // A Solid mark waits for the reveal, except while its card is open.
+    await vi.waitFor(() => {
+      const mark = container.querySelector('[data-wiki-trust-claim="c2"]')!
+      expect(mark.getAttribute('aria-label')).toBe('Claim C2: Solid')
+      expect(mark.getAttribute('aria-expanded')).toBe('true')
+      expect(mark.parentElement!.getBoundingClientRect().width).toBeGreaterThan(0)
+    })
+  })
+
+  it.each(['inline', 'margin'] as const)(
+    'ends the claim with its %s mark when the closing marker sits on its own line',
+    async (display) => {
+      settingsState.settings.wikiTrustDisplay = display
+      const { container } = await editorFixture(
+        SOURCE.replace('<!-- /claim:c2 -->.', '.\n\n<!-- /claim:c2 -->'),
+      )
+      await vi.waitFor(() => {
+        const mark = container.querySelector(`.wiki-trust-${display} [data-wiki-trust-claim="c2"]`)
+        const prose = container.querySelector('[data-wiki-claim="c2"]')?.closest('p')
+        expect(prose).toBeDefined()
+        expect(mark?.closest('p')).toBe(prose)
+      })
+    },
+  )
 
   it("opens a sound claim's verdict and its weighted sources on reveal", async () => {
     const { container } = await editorFixture()
