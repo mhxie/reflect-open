@@ -42,6 +42,12 @@ pub const ATTACHMENT_EXTENSIONS: [&str; 50] = [
     "tiff", "tsv", "txt", "wav", "webm", "webp", "xls", "xlsx", "xml", "yaml", "yml", "zip",
 ];
 
+/// Pages Reflect never reads, renders, or serves (they can carry scripts), but
+/// hands to the OS default app, a browser, when a link to one is clicked.
+/// Deliberately not attachments. Must stay identical to the TypeScript list in
+/// `packages/core/src/graph/paths.ts` and `fixtures/gen-path-classification.mjs`.
+pub const EXTERNAL_OPEN_EXTENSIONS: [&str; 2] = ["htm", "html"];
+
 /// The kind of graph content represented by a safe relative wire path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphPathKind {
@@ -77,6 +83,20 @@ pub fn is_note(path: &str) -> bool {
 /// Whether a wire path is a supported local attachment.
 pub fn is_attachment(path: &str) -> bool {
     classify(path) == Some(GraphPathKind::Attachment)
+}
+
+/// Whether the OS default app may open a wire path: a supported attachment,
+/// or a page in [`EXTERNAL_OPEN_EXTENSIONS`], which nothing else accepts.
+pub fn is_openable(path: &str) -> bool {
+    is_attachment(path)
+        || wire_components(path)
+            .and_then(|components| components.last().copied())
+            .and_then(|file_name| file_name.rsplit_once('.'))
+            .is_some_and(|(_, extension)| {
+                EXTERNAL_OPEN_EXTENSIONS
+                    .iter()
+                    .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+            })
 }
 
 /// Whether every component of a wire path is a visible, normal relative
@@ -253,7 +273,7 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        classify, evicted_logical_path, eviction_placeholder, is_safe_visible,
+        classify, evicted_logical_path, eviction_placeholder, is_openable, is_safe_visible,
         normalize_line_endings, to_slash, to_slash_lossy, wire_path, GraphPathKind,
     };
     use serde::Deserialize;
@@ -263,6 +283,7 @@ mod tests {
     struct Fixture {
         path: String,
         kind: Option<String>,
+        openable: bool,
     }
 
     #[test]
@@ -277,6 +298,12 @@ mod tests {
                 Some(other) => panic!("unknown fixture kind {other}"),
             };
             assert_eq!(classify(&fixture.path), expected, "{}", fixture.path);
+            assert_eq!(
+                is_openable(&fixture.path),
+                fixture.openable,
+                "{}",
+                fixture.path
+            );
         }
     }
 

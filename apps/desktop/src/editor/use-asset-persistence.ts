@@ -13,6 +13,7 @@ import {
   errorMessage,
   isLocalOnlyPath,
   isSafeVisibleGraphPath,
+  pageLinkPath,
   resolveAttachmentLink,
 } from '@reflect/core'
 import { createPdfEmbedResolver } from '@/editor/pdf-embed-resolver.ts'
@@ -151,8 +152,12 @@ export function useAssetPersistence(
     (source: string): string | null =>
       generation === null
         ? null
-        : (resolveAttachmentPath(source) ?? (isManagedAssetPath(source) ? source : null)),
-    [generation, resolveAttachmentPath],
+        : // A page opens in the browser, so it is read as the browser reads a
+          // relative link: from the note's folder.
+          (pageLinkPath(path, source) ??
+          resolveAttachmentPath(source) ??
+          (isManagedAssetPath(source) ? source : null)),
+    [generation, path, resolveAttachmentPath],
   )
   const resolveFileLink = useCallback<FileLinkResolver>(
     ({ href }) => isManagedAssetPath(href) || resolveAttachmentLink(path, href, null) !== null,

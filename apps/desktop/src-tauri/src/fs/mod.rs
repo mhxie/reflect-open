@@ -512,6 +512,17 @@ fn ensure_readable_attachment_path(path: &str) -> AppResult<()> {
     )))
 }
 
+/// Paths the OS default app may open: supported attachments, plus pages
+/// (`.html`) that Reflect never reads or serves itself but a browser may run.
+fn ensure_openable_path(path: &str) -> AppResult<()> {
+    if reflect_graph_paths::is_openable(path) {
+        return Ok(());
+    }
+    Err(AppError::traversal(format!(
+        "not a supported attachment path: {path}"
+    )))
+}
+
 // ---- commands --------------------------------------------------------------
 
 /// Create a new graph at `path` (scaffolds the layout) and open it.
@@ -1115,6 +1126,7 @@ pub fn asset_read(path: String, generation: u64, state: State<GraphState>) -> Ap
 /// Open a graph asset in the OS default application. The frontend supplies the
 /// graph-relative `assets/...` path from markdown; Rust resolves it inside the
 /// generation-pinned graph so the JS opener never gets broad filesystem access.
+/// A page (`.html`) opens here too, in the browser, and nowhere in Reflect.
 #[tauri::command]
 pub fn asset_open(
     path: String,
@@ -1122,7 +1134,7 @@ pub fn asset_open(
     app: tauri::AppHandle,
     state: State<GraphState>,
 ) -> AppResult<()> {
-    ensure_readable_attachment_path(&path)?;
+    ensure_openable_path(&path)?;
     let (root, local_only) = graph_for(&state, Some(generation))?;
     let abs = resolve_read(&root, &path, local_only.as_deref())?.path();
     if !abs.is_file() {
@@ -1990,8 +2002,8 @@ mod note_create_tests {
 #[cfg(test)]
 mod move_tests {
     use super::{
-        asset_file_url, ensure_readable_attachment_path, ensure_revealable_path, move_note_file,
-        note_write_guard,
+        asset_file_url, ensure_openable_path, ensure_readable_attachment_path,
+        ensure_revealable_path, move_note_file, note_write_guard,
     };
     use std::fs;
 
@@ -2062,6 +2074,19 @@ mod move_tests {
         )
         .is_err());
         assert!(root.path().join("notes/a.md").exists());
+    }
+
+    #[test]
+    fn a_page_opens_externally_but_is_never_read_or_served() {
+        assert!(ensure_openable_path("assets/explainer.html").is_ok());
+        assert!(ensure_openable_path("career/2027 Job Hunting/assets/q07.HTM").is_ok());
+        assert!(ensure_openable_path("assets/cat.png").is_ok());
+        // Reads (`asset_read`, the asset protocol) keep refusing it.
+        assert!(ensure_readable_attachment_path("assets/explainer.html").is_err());
+        assert!(ensure_openable_path("notes/secret.md").is_err());
+        assert!(ensure_openable_path("tools/script.sh").is_err());
+        assert!(ensure_openable_path(".hidden/page.html").is_err());
+        assert!(ensure_openable_path("../page.html").is_err());
     }
 
     #[test]

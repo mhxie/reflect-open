@@ -15,6 +15,7 @@ import {
   isSafeVisibleGraphPath,
   isTemplatePath,
   mayContainNotes,
+  isOpenablePath,
   notePath,
   templatePath,
 } from './paths.ts'
@@ -23,6 +24,7 @@ const fixtureSchema = z.array(
   z.object({
     path: z.string(),
     kind: z.enum(['note', 'attachment']).nullable(),
+    openable: z.boolean(),
   }),
 )
 
@@ -76,6 +78,7 @@ describe('graph paths', () => {
   it('matches the shared Rust classification corpus', () => {
     for (const fixture of classificationFixtures) {
       expect(classifyGraphPath(fixture.path), fixture.path).toBe(fixture.kind)
+      expect(isOpenablePath(fixture.path), fixture.path).toBe(fixture.openable)
     }
   })
 
