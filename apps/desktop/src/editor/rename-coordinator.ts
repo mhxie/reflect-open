@@ -183,7 +183,7 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
       // Moving `title:` re-projects the note, so the rewrite reads the graph
       // as it stood before: where the old title resolved and what linked here.
       let pinned: { target: string; from: Resolution; backlinks: RenameBacklink[] } | null = null
-      if (typeof declared === 'string') {
+      if (typeof declared === 'string' && declared.trim() !== '') {
         let moved: boolean
         try {
           const target = wikiLinkTargetForTitle(from)
@@ -199,7 +199,7 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
           )
         } catch (cause) {
           console.error('rename title update failed:', cause)
-          tracker.restore(from)
+          tracker.restore()
           operation.fail(
             `${errorMessage(cause)} — the note keeps the title "${from}", so no links were changed`,
           )

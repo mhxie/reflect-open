@@ -125,6 +125,23 @@ describe('createTitleRenameTracker', () => {
     expect(renames).toEqual([])
   })
 
+  it('restore puts back the state before a rename that did not land', () => {
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: Canonical\n---\n# Original heading\n')
+    tracker.saved('---\ntitle: Canonical\n---\n# New heading\n')
+    tracker.settle()
+    expect(renames).toHaveLength(1)
+    tracker.restore()
+    // Reverting the edit is not a rename…
+    tracker.saved('---\ntitle: Canonical\n---\n# Original heading\n')
+    vi.advanceTimersByTime(10_000)
+    expect(renames).toHaveLength(1)
+    // …and redoing it renames again, still at the start of the chain.
+    tracker.saved('---\ntitle: Canonical\n---\n# New heading\n')
+    tracker.settle()
+    expect(renames[1]).toEqual({ from: 'Canonical', to: 'New heading', previousAutoAlias: null })
+  })
+
   it('a blocked fire keeps the rename pending until the gate opens', () => {
     let conflictParked = true
     const { tracker, renames } = tracked({ canFire: () => !conflictParked })

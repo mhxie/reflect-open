@@ -37,10 +37,13 @@ beforeEach(() => {
   docs.openSession.mockReset().mockReturnValue(null)
 })
 
-function fakeSession(options?: { content?: string; takesPatch?: boolean }) {
+function fakeSession(options?: { content?: string | null; takesPatch?: boolean }) {
+  const content = options?.content === undefined ? '# Old Title\n\nbody\n' : options.content
   return {
-    content: () => options?.content ?? '# Old Title\n\nbody\n',
+    content: () => content ?? '',
+    liveContent: () => content,
     updateFrontmatter: vi.fn().mockReturnValue(options?.takesPatch ?? true),
+    commitFrontmatter: vi.fn().mockResolvedValue(options?.takesPatch ?? true),
     flush: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -129,7 +132,8 @@ describe('placeOldTitleAlias', () => {
     docs.openSession.mockReturnValue(session)
 
     expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(true)
-    expect(session.updateFrontmatter).toHaveBeenCalledWith({ title: 'New Title' })
+    // Waits for the write to land: links are rewritten to this title next.
+    expect(session.commitFrontmatter).toHaveBeenCalledWith({ title: 'New Title' })
     await placeOldTitleAlias(PATH, RENAME, 7)
     expect(session.updateFrontmatter).toHaveBeenLastCalledWith({ aliases: ['Old Title'] })
   })
@@ -145,6 +149,21 @@ describe('placeOldTitleAlias', () => {
     io.readNote.mockResolvedValue('# New Title\n')
     expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(false)
     expect(io.writeNote).not.toHaveBeenCalled()
+  })
+
+  it('fails when an open note cannot persist the title', async () => {
+    const session = fakeSession({ content: '---\ntitle: Old Title\n---\n# New Title\n' })
+    session.commitFrontmatter.mockRejectedValue(new Error('disk full'))
+    docs.openSession.mockReturnValue(session)
+    await expect(moveDeclaredTitle(PATH, RENAME, 7)).rejects.toThrow('disk full')
+  })
+
+  it('reads the disk while a reopened session is still loading', async () => {
+    const session = fakeSession({ content: null })
+    docs.openSession.mockReturnValue(session)
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+    expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(true)
+    expect(io.writeNote.mock.calls[0]?.[1]).toContain('title: New Title')
   })
 
   it('leaves a title retitled meanwhile alone', async () => {

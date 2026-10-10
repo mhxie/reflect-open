@@ -56,6 +56,7 @@ function renamePatch(
   }
   const declared: unknown = (frontmatter as Record<string, unknown>)['title']
   return typeof declared === 'string' &&
+    declared.trim() !== '' &&
     foldKey(declared.trim()) === foldKey(rename.from) &&
     declared.trim() !== rename.to
     ? { patch: { title: rename.to }, added: [] }
@@ -106,17 +107,24 @@ async function patchForRename(
   part: 'alias' | 'title',
 ): Promise<{ changed: boolean; added: string[] }> {
   const owner = openSession(path, generation)
+  // A session still loading has no content yet: the disk decides then.
+  const live = owner?.liveContent() ?? null
   let placed = false
   let change: ReturnType<typeof renamePatch> = null
-  if (owner !== null) {
+  if (owner !== null && live !== null) {
     // Read and patch in the same tick (no await between): atomic against the
     // session. Through its frontmatter channel — the editor view never
-    // churns — and flushed rather than riding the debounce: a settle is
+    // churns. A title waits for its write to land (links are rewritten to it
+    // next); an alias is flushed rather than riding the debounce: a settle is
     // exactly the moment to persist, and quit-time teardown awaits this.
-    change = renamePatch(path, owner.content(), rename, part)
-    placed = change === null || owner.updateFrontmatter(change.patch)
-    if (placed && change !== null) {
-      await owner.flush()
+    change = renamePatch(path, live, rename, part)
+    if (change === null) {
+      placed = true
+    } else if (part === 'title') {
+      placed = await owner.commitFrontmatter(change.patch)
+    } else {
+      placed = owner.updateFrontmatter(change.patch)
+      if (placed) await owner.flush()
     }
   }
   if (!placed) {

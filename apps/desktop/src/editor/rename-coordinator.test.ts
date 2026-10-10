@@ -361,6 +361,18 @@ describe('rename coordinator', () => {
     )
   })
 
+  it('a blank declared title renames like any H1 note', async () => {
+    io.readNote.mockResolvedValue('---\ntitle: ""\n---\n# New Title\n')
+    const coordinator = makeCoordinator()
+    coordinator.content(managed('---\ntitle: ""\n---\n# Old Title\n'), 'load')
+    coordinator.content(managed('---\ntitle: ""\n---\n# New Title\n'), 'saved')
+    coordinator.settle()
+    await coordinator.settled()
+    expect(io.rewriteLinksForTitleChange).toHaveBeenCalledWith(
+      expect.objectContaining({ from: 'Old Title', to: 'New Title' }),
+    )
+  })
+
   it('a chained rename keeps the title the person wrote as an alias', async () => {
     const coordinator = makeCoordinator()
     io.readNote.mockResolvedValue('---\ntitle: Paper\n---\n# T1\n')

@@ -61,10 +61,10 @@ export interface TitleRenameTracker {
   /** A settle point (blur, teardown): fire any pending rename now. */
   settle(): void
   /**
-   * A fired rename did not land and the note still has the title `from`:
-   * the next save renames from it again, toward whatever its H1 says then.
+   * The last fired rename did not land: back to the state before it, so the
+   * next save renames again if the H1 still differs, and not if reverted.
    */
-  restore(from: string): void
+  restore(): void
   dispose(): void
 }
 
@@ -83,6 +83,8 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
   let baselineTitles: Titles | null = null
   let pending: Titles | null = null
   let previousAutoAlias: string | null = null
+  /** The state the last fired rename replaced, for {@link restore}. */
+  let beforeFire: { titles: Titles | null; previousAutoAlias: string | null } | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
 
@@ -125,6 +127,7 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     // The title we just renamed away from marks the chain: a follow-up rename
     // prunes what this one added instead of accreting one alias per edit. A
     // birth (`from: null`) leaves no alias behind, so the chain stays empty.
+    beforeFire = { titles: baselineTitles, previousAutoAlias }
     previousAutoAlias = from
     baselineTitles = pending
     pending = null
@@ -135,6 +138,7 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     cancelTimer()
     pending = null
     baselineTitles = titlesOf(content)
+    beforeFire = null
     // External content is a new ground truth: the alias chain this session was
     // building no longer describes it, so pruning stops here.
     previousAutoAlias = null
@@ -196,8 +200,11 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     }
   }
 
-  function restore(from: string): void {
-    if (baselineTitles !== null) baselineTitles = { title: from, heading: from }
+  function restore(): void {
+    if (beforeFire === null) return
+    baselineTitles = beforeFire.titles
+    previousAutoAlias = beforeFire.previousAutoAlias
+    beforeFire = null
   }
 
   function dispose(): void {
