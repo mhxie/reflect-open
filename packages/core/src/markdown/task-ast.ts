@@ -1,19 +1,22 @@
 import {
   isMarkdownAstEqual,
   parseMarkdownAst,
-  resolveMarkdownAstPath,
   serializeMarkdownAst,
   walkMarkdownAst,
   type MarkdownAstPath,
   type MarkdownBlock,
   type MarkdownBlockquote,
   type MarkdownDocument,
+  type MarkdownHeading,
   type MarkdownListItem,
   type MarkdownNode,
   type MarkdownTableCell,
 } from '@meowdown/markdown'
 import { DefaultMap } from '@ocavue/utils'
+import { appendBlock } from './append-section.ts'
 import { splitFrontmatter } from './frontmatter.ts'
+import { renderInlineText } from './inline-text.ts'
+import { foldKey } from './keys.ts'
 import { normalizeWikiTarget } from './resolve.ts'
 import { scanInlineWikiLinks } from './scan.ts'
 import { isSameTaskPath } from './task-path.ts'
@@ -63,22 +66,45 @@ export function getFirstParagraphMarkdown(item: MarkdownListItem): string {
 export interface TaskEntry extends TaskSnapshot {
   node: MarkdownListItem
   parent: BlockParent
+  /** The item's index in `parent.children`, valid until the tree is edited. */
+  index: number
+}
+
+/** One heading a document-level block sits under. */
+interface Section {
+  level: number
+  label: string
+}
+
+/** The labels of the open sections, outermost first; an empty heading labels nothing. */
+function sectionLabels(sections: readonly Section[]): string[] {
+  return sections.map((section) => section.label).filter((label) => label !== '')
 }
 
 export function getRoundTasks(document: MarkdownDocument): TaskEntry[] {
   const breadcrumbsOf = new DefaultMap<MarkdownNode, readonly string[]>(() => [])
   const entries: TaskEntry[] = []
-  for (const { node, parent, path } of walkMarkdownAst(document)) {
-    if (parent === undefined) {
+  // The headings above the current document-level block, like an outline.
+  const sections: Section[] = []
+  for (const { node, parent, path, index } of walkMarkdownAst(document)) {
+    if (parent === undefined || index === undefined) {
       continue
     }
-    const inherited = breadcrumbsOf.get(parent)
+    if (parent === document && node.type === 'heading') {
+      // A heading closes every section of its own level or deeper.
+      while ((sections.at(-1)?.level ?? 0) >= node.level) {
+        sections.pop()
+      }
+      sections.push({ level: node.level, label: node.value.trim() })
+    }
+    const inherited = parent === document ? sectionLabels(sections) : breadcrumbsOf.get(parent)
     const label = node.type === 'listItem' ? getFirstParagraphMarkdown(node) : ''
     breadcrumbsOf.set(node, label === '' ? inherited : [...inherited, label])
     if (isRoundTask(node) && isBlockParent(parent)) {
       entries.push({
         node,
         parent,
+        index,
         astPath: path,
         markdown: label,
         breadcrumbs: inherited,
@@ -100,23 +126,40 @@ export function getTaskDueDate(markdown: string): string | null {
   return null
 }
 
-export interface ParsedTask {
-  astPath: MarkdownAstPath
-  /** The task's first paragraph, marker excluded. */
-  markdown: string
-  /** Ancestor list items' first paragraphs, outermost first. */
-  breadcrumbs: readonly string[]
-  checked: boolean
+/** A round task as the projection stores it: its snapshot plus its explicit due date. */
+export interface ParsedTask extends TaskSnapshot {
   dueDate: string | null
 }
 
 /** The round tasks of a note body, in document order. */
 export function projectTasks(body: string): ParsedTask[] {
-  return getRoundTasks(parseMarkdownAst(body)).map(toParsedTask)
+  return getRoundTasks(parseMarkdownAst(body)).map((entry) => ({
+    ...toTaskSnapshot(entry),
+    dueDate: getTaskDueDate(entry.markdown),
+  }))
 }
 
-function toParsedTask(entry: TaskEntry): ParsedTask {
-  return { ...toTaskSnapshot(entry), dueDate: getTaskDueDate(entry.markdown) }
+/** A task row's own fields: its snapshot plus what the view derives from the Markdown. */
+export interface TaskRow extends TaskSnapshot {
+  /** `markdown` rendered to plain text, for search and labels. */
+  text: string
+  /** The headings above the task, then its ancestor list items' labels, outermost first, rendered to plain text. */
+  breadcrumbs: readonly string[]
+  /** The task's explicit `[[YYYY-MM-DD]]` due date, or null. */
+  dueDate: string | null
+}
+
+/**
+ * Derive a row's display fields from a task snapshot: the one rendering the
+ * index read, an optimistic insert, and a cache relocation all share.
+ */
+export function renderTaskSnapshot(snapshot: TaskSnapshot): TaskRow {
+  return {
+    ...snapshot,
+    text: renderInlineText(snapshot.markdown),
+    breadcrumbs: snapshot.breadcrumbs.map((label) => renderInlineText(label)),
+    dueDate: getTaskDueDate(snapshot.markdown),
+  }
 }
 
 /** Where a task was last seen; `markdown` and `checked` are the staleness guard. */
@@ -128,11 +171,10 @@ export interface TaskLocator {
 
 export type InsertPosition =
   | { kind: 'documentEnd' }
-  /** The end of the task's parent list item; refused when the task is at the root. */
+  /** The end of the task's context: its parent list item, or at the root the end of its own list. */
   | { kind: 'contextEnd'; task: TaskLocator }
-  | { kind: 'afterTask'; task: TaskLocator }
-  /** After any block, for example the last item of the list under a heading. */
-  | { kind: 'afterBlock'; astPath: MarkdownAstPath }
+  /** The end of the first `+` list in the top-level `## Tasks` section, created after the note's last content when missing. */
+  | { kind: 'tasksSection' }
 
 /** An edit of one existing round task. */
 export type TaskEditItem =
@@ -151,7 +193,7 @@ export type TaskEdit = TaskEditItem | TaskEditInsert
 
 /** A round task as it stands in a note body. */
 export interface TaskSnapshot extends TaskLocator {
-  /** Ancestor list items' first paragraphs, outermost first. */
+  /** The headings above the task, then its ancestor list items' first paragraphs, outermost first. */
   breadcrumbs: readonly string[]
 }
 
@@ -185,6 +227,8 @@ export function findTaskMove(moves: readonly TaskMove[], task: TaskLocator): Tas
 type SlotTarget =
   | { kind: 'after'; anchor: MarkdownBlock }
   | { kind: 'end'; container: MarkdownDocument | MarkdownListItem }
+  /** A new section after the document's last content, holding the item. */
+  | { kind: 'newSection'; heading: string }
 
 /**
  * Apply `edits` to a note and serialize its body once. Every locator describes
@@ -193,12 +237,7 @@ type SlotTarget =
  * toggle it, or resolve a task and insert next to it, with one locator each.
  */
 export function applyTaskEdits(source: string, edits: readonly TaskEdit[]): TaskEditResult {
-  const { body, bodyOffset } = splitFrontmatter(source)
-  const document = parseMarkdownAst(body)
-  if (body === '') {
-    document.children = []
-  }
-  assertSerializable(document)
+  const { document, bodyOffset } = parseEditable(source)
 
   const before = getRoundTasks(document)
   const created: MarkdownListItem[] = []
@@ -208,7 +247,7 @@ export function applyTaskEdits(source: string, edits: readonly TaskEdit[]): Task
       const slot = resolveInsertPosition(document, before, edit.at)
       const markdown = requireParagraphMarkdown(edit.markdown)
       return () => {
-        created.push(insertTaskItem(document, slot, markdown))
+        created.push(insertItem(document, slot, createListItem('task', '+', markdown)))
       }
     }
     const { node } = locateTask(before, edit.task)
@@ -234,7 +273,7 @@ export function applyTaskEdits(source: string, edits: readonly TaskEdit[]): Task
     return snapshot
   })
 
-  const nextBody = document.children.length === 0 ? '' : serializeMarkdownAst(document)
+  const nextBody = serializeBody(document)
   assertTasksSurvive(nextBody, after)
   return {
     source: source.slice(0, bodyOffset) + nextBody,
@@ -248,16 +287,30 @@ function toTaskSnapshot({ astPath, markdown, breadcrumbs, checked }: TaskEntry):
   return { astPath, markdown, breadcrumbs, checked }
 }
 
-function assertSerializable(document: MarkdownDocument): void {
-  if (document.children.length === 0) {
-    return
+/**
+ * The note body as a tree the serializer can write back faithfully, or a
+ * {@link NoteNotSerializableError}. An empty body has no blocks (the parser
+ * gives it one empty paragraph).
+ */
+function parseEditable(source: string): { document: MarkdownDocument; bodyOffset: number } {
+  const { body, bodyOffset } = splitFrontmatter(source)
+  const document = parseMarkdownAst(body)
+  if (body === '') {
+    document.children = []
   }
-  const reparsed = parseMarkdownAst(serializeMarkdownAst(document))
-  if (!isMarkdownAstEqual(reparsed, document)) {
+  if (
+    document.children.length > 0 &&
+    !isMarkdownAstEqual(parseMarkdownAst(serializeMarkdownAst(document)), document)
+  ) {
     throw new NoteNotSerializableError(
-      'This note cannot be rewritten faithfully. Edit the task in the note itself.',
+      'This note cannot be rewritten faithfully. Edit it in the note itself.',
     )
   }
+  return { document, bodyOffset }
+}
+
+function serializeBody(document: MarkdownDocument): string {
+  return document.children.length === 0 ? '' : serializeMarkdownAst(document)
 }
 
 function hasSameContent(entry: TaskLocator, locator: TaskLocator): boolean {
@@ -306,32 +359,256 @@ function resolveInsertPosition(
 ): SlotTarget {
   switch (at.kind) {
     case 'documentEnd': {
-      return { kind: 'end', container: document }
+      return bodyEndSlot(document)
     }
     case 'contextEnd': {
-      const { parent } = locateTask(before, at.task)
-      if (parent.type !== 'listItem') {
-        throw new TaskStaleError('task no longer has a parent list context')
+      const { parent, index } = locateTask(before, at.task)
+      if (parent.type === 'listItem') {
+        return { kind: 'end', container: parent }
       }
-      return { kind: 'end', container: parent }
+      return { kind: 'after', anchor: parent.children[endOfListRun(parent.children, index)]! }
     }
-    case 'afterTask': {
-      const { node } = locateTask(before, at.task)
-      return { kind: 'after', anchor: node }
-    }
-    case 'afterBlock': {
-      const found = resolveMarkdownAstPath(document, at.astPath)
-      if (found?.parent === undefined || !isBlockParent(found.parent)) {
-        throw new TaskStaleError('insert position is gone')
-      }
-      const target = found.node
-      const anchor = found.parent.children.find((child) => child === target)
-      if (anchor === undefined) {
-        throw new TaskStaleError('insert position is gone')
-      }
-      return { kind: 'after', anchor }
+    case 'tasksSection': {
+      return sectionSlot(document, TASKS_SECTION, 'task')
     }
   }
+}
+
+/** The character an item is written with; meowdown leaves it unset on a folded bullet, which it writes as `+`. */
+function markerOf(item: MarkdownListItem): string | undefined {
+  return item.marker ?? (item.kind === 'bullet' && item.collapsed ? '+' : undefined)
+}
+
+/** The index of the last item of the list that starts at `children[start]`: same marker, nothing else between. */
+function endOfListRun(children: readonly MarkdownBlock[], start: number): number {
+  const first = children[start]
+  const marker = first?.type === 'listItem' ? markerOf(first) : undefined
+  let end = start
+  for (let i = start + 1; i < children.length; i++) {
+    const block = children[i]
+    if (block?.type !== 'listItem' || markerOf(block) !== marker) {
+      break
+    }
+    end = i
+  }
+  return end
+}
+
+/** How an appended line renders: a plain bullet, the square GFM checkbox, or Reflect's round `+ [ ]` task. */
+export type ListItemKind = 'bullet' | 'checkbox' | 'task'
+
+type BulletMarker = '-' | '*' | '+'
+
+/**
+ * Where an automatic entry lands: the first list it can join under a
+ * top-level H1 or H2 that names the section, created after the note's last
+ * content when missing.
+ */
+export interface SectionTarget {
+  /** The titles the heading may read as; the first one names a new heading. */
+  readonly titles: readonly string[]
+  /** Write the heading as `## [[Title]]`, upgrading a plain `## Title` in place. */
+  readonly linked: boolean
+}
+
+/** The section the Tasks view and task captures file new tasks in. */
+const TASKS_SECTION: SectionTarget = { titles: ['Tasks'], linked: false }
+
+/**
+ * Whether a heading names one of `titles`: by the text it renders as, or by
+ * the target of a wiki link in it (`## [[Links|Saved links]]` is the Links
+ * section).
+ */
+function headingNames(heading: MarkdownHeading, titles: readonly string[]): boolean {
+  const keys = titles.map((title) => foldKey(title))
+  return (
+    keys.includes(foldKey(renderInlineText(heading.value))) ||
+    scanInlineWikiLinks(heading.value).some((link) => keys.includes(foldKey(link.target)))
+  )
+}
+
+/** The index of the first top-level H1 or H2 that names the section. */
+function findSectionHeading(
+  children: readonly MarkdownBlock[],
+  section: SectionTarget,
+): number | undefined {
+  const index = children.findIndex(
+    (block) => block.type === 'heading' && block.level <= 2 && headingNames(block, section.titles),
+  )
+  return index === -1 ? undefined : index
+}
+
+/**
+ * The marker a `kind` item takes to join the list `item` starts, or undefined
+ * when it must not: a bullet joins any bullet list; a checkbox joins `-` and
+ * `*` but never `+`, because `+ [ ]` IS a task; a task joins only `+`.
+ */
+function joinMarker(kind: ListItemKind, item: MarkdownListItem): BulletMarker | undefined {
+  const marker = markerOf(item)
+  if (marker !== '-' && marker !== '*' && marker !== '+') {
+    return undefined
+  }
+  if (kind === 'task') {
+    return marker === '+' ? '+' : undefined
+  }
+  if (kind === 'checkbox') {
+    return marker === '+' ? undefined : marker
+  }
+  return marker
+}
+
+/**
+ * The index of the first list between the heading at `heading` and the next
+ * heading of any level that a `kind` item can join, or undefined when the
+ * section has none.
+ */
+function findSectionList(
+  children: readonly MarkdownBlock[],
+  heading: number,
+  kind: ListItemKind,
+): number | undefined {
+  for (let i = heading + 1; i < children.length; i++) {
+    const block = children[i]
+    if (block?.type === 'heading') {
+      return undefined
+    }
+    if (block?.type === 'listItem' && joinMarker(kind, block) !== undefined) {
+      return i
+    }
+  }
+  return undefined
+}
+
+/** After the section's list, else right under its heading, else in a new section after the last content. */
+function sectionSlot(
+  document: MarkdownDocument,
+  section: SectionTarget,
+  kind: ListItemKind,
+): SlotTarget {
+  const { children } = document
+  const heading = findSectionHeading(children, section)
+  if (heading === undefined) {
+    const title = section.titles[0] ?? ''
+    return { kind: 'newSection', heading: section.linked ? `[[${title}]]` : title }
+  }
+  const list = findSectionList(children, heading, kind)
+  return {
+    kind: 'after',
+    anchor: children[list === undefined ? heading : endOfListRun(children, list)]!,
+  }
+}
+
+/** The index after the last block that is not a blank line: `children.length` without the trailing blank lines. */
+function contentEnd(children: readonly MarkdownBlock[]): number {
+  for (let i = children.length - 1; i >= 0; i--) {
+    const block = children[i]
+    if (block !== undefined && !(block.type === 'paragraph' && block.value === '')) {
+      return i + 1
+    }
+  }
+  return 0
+}
+
+/** After the last block that is not a blank line, so trailing blank lines stay below the entry. */
+function bodyEndSlot(document: MarkdownDocument): SlotTarget {
+  const anchor = document.children[contentEnd(document.children) - 1]
+  return anchor === undefined ? { kind: 'end', container: document } : { kind: 'after', anchor }
+}
+
+/** The marker a new item is written with: the list it joins, else the kind's own. */
+function markerFor(kind: ListItemKind, slot: SlotTarget): BulletMarker {
+  const joined =
+    slot.kind === 'after' && slot.anchor.type === 'listItem'
+      ? joinMarker(kind, slot.anchor)
+      : undefined
+  return joined ?? (kind === 'task' ? '+' : '-')
+}
+
+function createListItem(
+  kind: ListItemKind,
+  marker: BulletMarker,
+  markdown: string,
+): MarkdownListItem {
+  const item: MarkdownListItem = {
+    type: 'listItem',
+    kind: kind === 'bullet' ? 'bullet' : 'task',
+    checked: false,
+    collapsed: false,
+    children: [{ type: 'paragraph', value: markdown }],
+  }
+  // meowdown writes a folded bullet as `+` and keeps its marker unset.
+  if (kind === 'bullet' && marker === '+') {
+    item.collapsed = true
+  } else {
+    item.marker = marker
+  }
+  return item
+}
+
+/** One list item to file: its kind, its Markdown, and the section it belongs in (the end of the note when absent). */
+export interface ListItemInsert {
+  readonly kind: ListItemKind
+  readonly markdown: string
+  readonly section?: SectionTarget | undefined
+}
+
+/**
+ * Append one list item to a note the way captures, meetings, and audio memos
+ * file their entries: into the section's first joinable list, directly under
+ * its heading when it has none, or in a new section after the note's last
+ * content; without a section, after the note's last content too. Trailing
+ * blank lines stay below the entry. The serializer decides the other blank
+ * lines and keeps a list of another marker separate.
+ */
+export function appendListItem(source: string, insert: ListItemInsert): string {
+  let editable: ReturnType<typeof parseEditable>
+  try {
+    editable = parseEditable(source)
+  } catch (cause) {
+    if (!(cause instanceof NoteNotSerializableError)) {
+      throw cause
+    }
+    // A note the serializer would alter still takes the entry: as a fresh
+    // list at the end, the way captures were always filed. Nothing is lost,
+    // and no capture, meeting, or memo stalls on one unusual note.
+    const marker = insert.kind === 'task' ? '+' : '-'
+    const payload =
+      insert.kind === 'bullet' ? insert.markdown.trim() : `[ ] ${insert.markdown.trim()}`
+    return appendBlock(source, `${marker} ${payload}`)
+  }
+  const { document, bodyOffset } = editable
+  if (insert.section?.linked) {
+    linkHeading(document, insert.section)
+  }
+  const slot =
+    insert.section === undefined
+      ? bodyEndSlot(document)
+      : sectionSlot(document, insert.section, insert.kind)
+  const marker = markerFor(insert.kind, slot)
+  insertItem(document, slot, createListItem(insert.kind, marker, insert.markdown.trim()))
+  return source.slice(0, bodyOffset) + serializeBody(document)
+}
+
+/**
+ * Write the section's heading as `## [[Title]]` when the note has it as a
+ * plain `## Title`; a missing or already linked section is left alone.
+ */
+export function linkSectionHeading(source: string, section: SectionTarget): string {
+  const { document, bodyOffset } = parseEditable(source)
+  return linkHeading(document, section)
+    ? source.slice(0, bodyOffset) + serializeBody(document)
+    : source
+}
+
+/** Rewrite a plain section heading as `[[Title]]`; false when there is none to rewrite. */
+function linkHeading(document: MarkdownDocument, section: SectionTarget): boolean {
+  const index = findSectionHeading(document.children, section)
+  const heading = index === undefined ? undefined : document.children[index]
+  if (heading?.type !== 'heading' || scanInlineWikiLinks(heading.value).length > 0) {
+    return false
+  }
+  heading.value = `[[${section.titles[0] ?? ''}]]`
+  return true
 }
 
 /**
@@ -339,15 +616,23 @@ function resolveInsertPosition(
  * resolved: an earlier edit in the batch may have shifted the siblings or
  * lifted the node out of a removed parent.
  */
-function insertTaskItem(
+function insertItem(
   document: MarkdownDocument,
   slot: SlotTarget,
-  markdown: string,
+  item: MarkdownListItem,
 ): MarkdownListItem {
-  const item = createTaskItem(markdown)
   if (slot.kind === 'after') {
     const { parent, index } = requireAttached(document, slot.anchor)
     parent.children.splice(index + 1, 0, item)
+  } else if (slot.kind === 'newSection') {
+    // Trailing blank lines stay below the new section.
+    const { children } = document
+    children.splice(
+      contentEnd(children),
+      0,
+      { type: 'heading', level: 2, value: slot.heading },
+      item,
+    )
   } else {
     if (slot.container.type === 'listItem') {
       requireAttached(document, slot.container)
@@ -418,17 +703,6 @@ function setFirstParagraph(item: MarkdownListItem, markdown: string): void {
     first.value = markdown
   } else {
     item.children.unshift({ type: 'paragraph', value: markdown })
-  }
-}
-
-function createTaskItem(markdown: string): MarkdownListItem {
-  return {
-    type: 'listItem',
-    kind: 'task',
-    marker: '+',
-    checked: false,
-    collapsed: false,
-    children: [{ type: 'paragraph', value: markdown }],
   }
 }
 

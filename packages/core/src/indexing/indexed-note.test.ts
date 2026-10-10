@@ -9,8 +9,8 @@ import {
 } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
-  it('carries the projection version for AI summary previews', () => {
-    expect(PROJECTION_VERSION).toBe(32)
+  it('carries the projection version that rebuilds heading-chain task breadcrumbs', () => {
+    expect(PROJECTION_VERSION).toBe(33)
   })
 
   it('indexes presentation metadata without changing the canonical title or its claims', () => {
@@ -421,8 +421,14 @@ describe('buildIndexedNote', () => {
       source,
     })
     expect(indexed.tasks).toEqual([
-      { astPath: '[1]', markdown: 'buy milk', breadcrumbs: [], checked: false, dueDate: null },
-      { astPath: '[5]', markdown: 'call mum', breadcrumbs: [], checked: true, dueDate: null },
+      {
+        astPath: '[1]',
+        markdown: 'buy milk',
+        breadcrumbs: ['Todo'],
+        checked: false,
+        dueDate: null,
+      },
+      { astPath: '[5]', markdown: 'call mum', breadcrumbs: ['Todo'], checked: true, dueDate: null },
     ])
   })
 

@@ -28,8 +28,10 @@ vi.mock('@/lib/use-today.ts', () => ({ useToday: () => TODAY }))
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({ settings: { dateFormat: 'iso' } }),
 }))
-const toggleTask = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/note-task.ts', () => ({ toggleTask }))
+const writeTask = vi.hoisted(() => vi.fn())
+const insertTask = vi.hoisted(() => vi.fn())
+const continueTaskInContext = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/note-task.ts', () => ({ writeTask, insertTask, continueTaskInContext }))
 
 /** The result of a write that changed nothing the cache needs to re-address. */
 const WRITTEN = { source: '', moved: [], inserted: [], tasks: [] }
@@ -58,7 +60,7 @@ function renderSection(date: string) {
 beforeEach(() => {
   window.sessionStorage.clear()
   getOpenTasks.mockReset().mockResolvedValue([])
-  toggleTask.mockReset().mockResolvedValue(WRITTEN)
+  writeTask.mockReset().mockResolvedValue(WRITTEN)
   resetRecentlyCompleted()
 })
 
@@ -111,7 +113,12 @@ describe('DayTasksSection', () => {
 
     await userEvent.click(page.getByRole('button', { name: 'Complete: write the review' }))
 
-    expect(toggleTask).toHaveBeenCalledTimes(1)
+    expect(writeTask).toHaveBeenCalledTimes(1)
+    expect(writeTask).toHaveBeenCalledWith(
+      expect.objectContaining({ markdown: 'write the review' }),
+      [{ kind: 'toggle' }],
+      1,
+    )
     await expect
       .element(page.getByRole('button', { name: 'Reopen: write the review' }))
       .toBeVisible()
@@ -144,7 +151,7 @@ describe('DayTasksSection', () => {
     await renderSection(TODAY)
 
     await userEvent.click(page.getByRole('button', { name: 'Complete: rotate keys' }))
-    await vi.waitFor(() => expect(toggleTask).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(writeTask).toHaveBeenCalledTimes(1))
   })
 
   it('caps the list and links to the Tasks view', async () => {

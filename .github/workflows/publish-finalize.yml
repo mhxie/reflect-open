@@ -71,22 +71,19 @@ jobs:
       - name: Write the updater manifest
         run: pnpm release:manifest --tag="$TAG"
 
-      # Keep the changelog release-please wrote and add the download guide.
+      # Keep the changelog release-please wrote and add the download badges.
       - name: Write the release notes
         env:
           ASSET: ${{ steps.release.outputs.asset }}
         run: |
-          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
-          if ! grep -qF '## Which Mac download should I choose?' "$RUNNER_TEMP/release-notes.md"; then
-            cat >> "$RUNNER_TEMP/release-notes.md" <<EOF
-
-          ## Which Mac download should I choose?
-
-          - **Apple Silicon (M-series Macs):** download \`${ASSET}_aarch64.dmg\`.
-          - **Intel Macs:** download \`${ASSET}_x86_64.dmg\`.
-
-          To check your Mac, open **Apple menu -> About This Mac**. If it shows **Chip** with M1, M2, M3, M4, or newer, choose Apple Silicon. If it shows **Processor** with Intel, choose Intel.
-          EOF
+          notes="$RUNNER_TEMP/release-notes.md"
+          gh release view "$TAG" --json body --jq .body > "$notes"
+          if ! grep -qxF -e '## Download' -e '## Which Mac download should I choose?' "$notes"; then
+            mapfile -t assets < <(gh release view "$TAG" --json assets --jq '.assets[].name')
+            echo >> "$notes"
+            node apps/desktop/scripts/release-downloads.ts \
+              --repo="$GITHUB_REPOSITORY" --tag="$TAG" --asset="$ASSET" \
+              "${assets[@]}" >> "$notes"
           fi
 
       - name: Publish the release

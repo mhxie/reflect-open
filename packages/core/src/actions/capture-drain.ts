@@ -14,15 +14,14 @@ import {
 import { patchNote } from '../graph/patch-note.ts'
 import { dailyPath, notePath } from '../graph/paths.ts'
 import { hashContent } from '../indexing/hash.ts'
+import { parseNote } from '../markdown/extract.ts'
 import {
   appendListItem,
-  appendListItemUnderBacklinkedHeading,
-  headingMatchesBacklinkedTitle,
-  upgradeSectionHeadingBacklink,
-  type ListItemKind,
-} from '../markdown/edit.ts'
-import { parseNote } from '../markdown/extract.ts'
-import { sectionEnd, topLevelHeadings } from '../markdown/heading-blocks.ts'
+  applyTaskEdits,
+  linkSectionHeading,
+  type SectionTarget,
+} from '../markdown/task-ast.ts'
+import { headingNamesSection, sectionEnd, topLevelHeadings } from '../markdown/heading-blocks.ts'
 import { parseFrontmatter, splitFrontmatter } from '../markdown/frontmatter.ts'
 import type { ReconcileStop } from './audio-memo.ts'
 import { ensureBacklinkTarget } from './backlink-target.ts'
@@ -110,11 +109,7 @@ async function findSameDayCapture(
   const { headings, wikiLinks } = parseNote({ path: '', source: dailySource })
   const sectionHeadings = topLevelHeadings(headings)
   const linkSections = sectionHeadings.filter(
-    (heading) =>
-      heading.level === 2 &&
-      sectionTitles.some((title) =>
-        headingMatchesBacklinkedTitle(dailySource, heading, wikiLinks, title),
-      ),
+    (heading) => heading.level <= 2 && headingNamesSection(heading, wikiLinks, sectionTitles),
   )
   if (linkSections.length === 0) {
     return null
@@ -295,16 +290,17 @@ export async function drainCaptureInbox(
               freshTitle,
             )
           }
-          updatedDaily = upgradeSectionHeadingBacklink(updatedDaily, linksNoteTitle, [
-            LINKS_NOTE_TITLE,
-          ])
+          const section: SectionTarget = {
+            titles: [linksNoteTitle, LINKS_NOTE_TITLE],
+            linked: true,
+          }
+          updatedDaily = linkSectionHeading(updatedDaily, section)
           if (!updatedDaily.includes(`[[${identity.base}`)) {
-            updatedDaily = appendListItemUnderBacklinkedHeading(
-              updatedDaily,
-              linksNoteTitle,
-              `[[${identity.base}|${freshTitle}]]`,
-              [LINKS_NOTE_TITLE],
-            )
+            updatedDaily = appendListItem(updatedDaily, {
+              kind: 'bullet',
+              markdown: `[[${identity.base}|${freshTitle}]]`,
+              section,
+            })
           }
           return updatedDaily === (current ?? '') ? null : updatedDaily
         },
@@ -355,11 +351,21 @@ function parseEnvelope(raw: string): InboxEnvelope | null {
 async function drainTextCapture(envelope: TextCaptureEnvelope, generation: number): Promise<void> {
   const daily = dailyPath(captureLocalDate(new Date(envelope.capturedAt)))
   // `task` is Reflect's round `+` checkbox, the only marker the Tasks
-  // projection reads; `checkbox` is the square `- [ ]`, an inert daily item.
-  const kind: ListItemKind = envelope.kind === 'append' ? 'bullet' : envelope.kind
+  // projection reads, and lands in the `## Tasks` section; `checkbox` is the
+  // square `- [ ]`, an inert daily item appended at the end.
   await patchNote(
     daily,
-    (dailySource) => appendListItem(dailySource ?? '', envelope.text, kind),
+    (current) => {
+      const dailySource = current ?? ''
+      return envelope.kind === 'task'
+        ? applyTaskEdits(dailySource, [
+            { kind: 'insert', at: { kind: 'tasksSection' }, markdown: envelope.text },
+          ]).source
+        : appendListItem(dailySource, {
+            kind: envelope.kind === 'append' ? 'bullet' : 'checkbox',
+            markdown: envelope.text,
+          })
+    },
     generation,
   )
 }

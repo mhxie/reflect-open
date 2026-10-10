@@ -370,8 +370,9 @@ describe('useTaskKeyboard', () => {
     })
     const other = task({ notePath: 'notes/z.md', noteTitle: 'Z' })
     const insert = vi.fn().mockResolvedValue(null)
+    const insertAfter = vi.fn().mockResolvedValue(null)
     // Two notes selected; the pivot ('a') is the row last touched even though 'z'
-    // renders later — the new task must join 'a', not 'z'.
+    // renders later — the new task must follow 'a', not 'z'.
     const selection = makeSelection({
       selected: new Set(['a', 'z']),
       selectedCount: 2,
@@ -379,7 +380,7 @@ describe('useTaskKeyboard', () => {
     })
     await mount({
       selection,
-      actions: makeActions({ insert }),
+      actions: makeActions({ insert, insertAfter }),
       tasksByKey: new Map([
         ['a', pinned],
         ['z', other],
@@ -387,13 +388,8 @@ describe('useTaskKeyboard', () => {
     })
 
     press(root, 'Enter')
-    expect(insert).toHaveBeenCalledWith({
-      notePath: 'notes/a.md',
-      noteTitle: 'A',
-      dailyDate: null,
-      isPinned: true,
-      pinnedOrder: 3,
-    })
+    expect(insertAfter).toHaveBeenCalledWith(pinned, null)
+    expect(insert).not.toHaveBeenCalled()
   })
 
   it('Return continues a grouped Current row inside its task context', async () => {
@@ -417,13 +413,33 @@ describe('useTaskKeyboard', () => {
     })
 
     press(root, 'Enter')
-    expect(insertAfter).toHaveBeenCalledWith(grouped, null, {
-      notePath: 'notes/a.md',
-      noteTitle: 'A',
-      dailyDate: null,
-      isPinned: false,
-      pinnedOrder: null,
+    expect(insertAfter).toHaveBeenCalledWith(grouped, null)
+    expect(insert).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'an undated row in a past daily note',
+      task({ notePath: 'daily/2026-06-01.md', noteTitle: '2026-06-01', dailyDate: '2026-06-01' }),
+    ],
+    ['an overdue row', task({ notePath: 'notes/a.md', noteTitle: 'A', dueDate: '2026-06-01' })],
+    ['an upcoming row', task({ notePath: 'notes/a.md', noteTitle: 'A', dueDate: '2026-06-20' })],
+  ])('Return continues %s instead of picking a bucket target', async (_name, row) => {
+    const insert = vi.fn().mockResolvedValue(null)
+    const insertAfter = vi.fn().mockResolvedValue(null)
+    const selection = makeSelection({
+      selected: new Set(['row']),
+      selectedCount: 1,
+      activeKey: () => 'row',
     })
+    await mount({
+      selection,
+      actions: makeActions({ insert, insertAfter }),
+      tasksByKey: new Map([['row', row]]),
+    })
+
+    press(root, 'Enter')
+    expect(insertAfter).toHaveBeenCalledWith(row, null)
     expect(insert).not.toHaveBeenCalled()
   })
 

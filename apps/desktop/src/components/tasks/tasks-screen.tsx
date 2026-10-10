@@ -135,7 +135,7 @@ export function TasksScreen(): ReactElement {
       scrollTaskIntoView(rootRef.current, key)
     }
   }, [])
-  const editHandlers = useTaskRowHandlers({ selection, actions, orderedTasks, today, scrollToKey })
+  const editHandlers = useTaskRowHandlers({ selection, actions, orderedTasks, scrollToKey })
   const selectedTaskKeys = selection.selected
   const activeTaskKey = selection.activeKey
   // Selection opens the focused task's inline editor, often after an async insert
@@ -330,6 +330,7 @@ export function TasksScreen(): ReactElement {
                 selection={selection}
                 editHandlers={editHandlers}
                 taskActionPending={actions.isPending}
+                onCheckboxToggle={actions.checkboxToggle}
                 onSelectionCheckboxToggle={onSelectionCheckboxToggle}
                 today={today}
                 onAdd={onAdd}

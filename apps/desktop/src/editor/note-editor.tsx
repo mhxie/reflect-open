@@ -156,6 +156,13 @@ interface NoteEditorProps {
   readOnly?: boolean
   /** Called with the current markdown whenever the user edits the document. */
   onChange?: (markdown: string) => void
+  /**
+   * Edit one paragraph of inline Markdown (the task editors). A typed block
+   * prefix (`+ [ ] `, `# `, `- `, a fence) stays text, pasted blocks flatten
+   * into the paragraph, and `onChange` reports paragraph Markdown. Off by
+   * default: a note is a whole document.
+   */
+  singleParagraph?: boolean
   /** How markdown syntax characters are shown. */
   markMode?: MarkMode
   /** Whether the browser underlines misspelled words (default on). */
@@ -172,6 +179,13 @@ interface NoteEditorProps {
    * (the `editorBulletAfterHeading` setting). Off by default.
    */
   bulletAfterHeading?: boolean
+  /**
+   * Whether Backspace in an empty first paragraph deletes that paragraph, so
+   * the rest of the note moves up one line. Off by default. Daily notes opt
+   * in on every surface: the day's heading sits outside the editor, so nothing
+   * else can remove a leading empty line.
+   */
+  backspaceDeletesEmptyFirstBlock?: boolean
   /**
    * Whether to show meowdown's per-block gutter handle: a grip to drag-reorder
    * blocks and a "+" to insert a paragraph below. Off by default. The main note
@@ -297,12 +311,14 @@ export function NoteEditor({
   initialContent,
   privateNote,
   readOnly = false,
+  singleParagraph = false,
   onChange,
   markMode = 'hide',
   spellCheck = true,
   smoothCaretAnimation = true,
   timeFormat = '12h',
   bulletAfterHeading = false,
+  backspaceDeletesEmptyFirstBlock = false,
   blockHandle = false,
   resolveImageUrl,
   resolveEmbed,
@@ -592,6 +608,7 @@ export function NoteEditor({
         handleRef={innerRef}
         mode={markMode}
         initialMarkdown={initialContent}
+        singleParagraph={singleParagraph}
         // On the touch surface spellcheck is pinned off regardless of the
         // setting: iOS derives the keyboard's smart-quotes/smart-dashes traits
         // from it at focus time, and smart punctuation corrupts markdown
@@ -605,6 +622,7 @@ export function NoteEditor({
         timeFormat={timeFormat === '24h' ? '24' : '12'}
         caretGlide={smoothCaretAnimation}
         bulletAfterHeading={bulletAfterHeading}
+        backspaceDeletesEmptyFirstBlock={backspaceDeletesEmptyFirstBlock}
         // Pinned off on the touch surface regardless of the caller: the grip is
         // revealed on hover and drag-reorders blocks with a pointer, neither of
         // which a touch webview can express. Turning it off also drops the drop

@@ -221,6 +221,7 @@ export function TaskEditor({
       <NoteEditor
         initialContent={initial}
         privateNote={privateNote}
+        singleParagraph
         onChange={onChange}
         markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
         spellCheck={settings.editorSpellCheck}

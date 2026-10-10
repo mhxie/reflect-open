@@ -133,8 +133,10 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * in with a summary before this version must reproject to show it.
  * 31 - display_title/lang presentation metadata is indexed separately from identity.
  * 32 - localized notes derive display titles from the H1 when no override is authored.
+ * 33 - task breadcrumbs start with the chain of headings above the task (the
+ * `Tasks` heading included), so every note's tasks must reproject.
  */
-export const PROJECTION_VERSION = 32
+export const PROJECTION_VERSION = 33
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -219,7 +221,7 @@ export const indexedTaskSchema = z.object({
   astPath: z.string(),
   /** The task's first paragraph as Markdown, marker excluded. */
   markdown: z.string(),
-  /** Ancestor list items' first paragraphs as Markdown, outermost first. */
+  /** The headings above the task, then its ancestor list items' first paragraphs, as Markdown, outermost first. */
   breadcrumbs: taskBreadcrumbsSchema,
   checked: z.boolean(),
   /** Explicit due date (first `[[YYYY-MM-DD]]` in the item), or null — drives Overdue. */

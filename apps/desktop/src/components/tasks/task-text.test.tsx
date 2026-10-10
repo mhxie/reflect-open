@@ -3,17 +3,25 @@ import { render } from 'vitest-browser-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoteRow } from '@reflect/core'
 import { makeOpenTask as task } from '@/lib/tasks/open-task-fixture.ts'
+import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { TaskText } from './task-text.tsx'
 
 /** The props each rendered preview received. */
 const previews = vi.hoisted((): Array<{ content: string; remoteEmbeds?: boolean }> => [])
 const getNote = vi.hoisted(() => vi.fn<(path: string) => Promise<NoteRow | undefined>>())
-vi.mock('@/editor/markdown-preview.tsx', () => ({
-  MarkdownPreview: (props: { content: string; remoteEmbeds?: boolean }) => {
-    previews.push(props)
-    return <span data-testid="markdown-preview">{props.content}</span>
-  },
-}))
+vi.mock('@/editor/markdown-preview.tsx', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/editor/markdown-preview.tsx')>()
+  return {
+    MarkdownPreview: (props: Parameters<typeof original.MarkdownPreview>[0]) => {
+      previews.push(props)
+      return (
+        <span data-testid="markdown-preview">
+          <original.MarkdownPreview {...props} />
+        </span>
+      )
+    },
+  }
+})
 vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
@@ -78,5 +86,23 @@ describe('TaskText', () => {
     await renderFor('notes/unindexed.md')
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(previews.every((props) => props.remoteEmbeds === false)).toBe(true)
+  })
+
+  it('renders a task marker at the start of the text as text, not a checkbox', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = await render(
+      <QueryClientProvider client={client}>
+        <TaskText task={task({ notePath: 'notes/plan.md', markdown: '+ [ ] task' })} />
+      </QueryClientProvider>,
+    )
+    expect(view.container.textContent).toContain('+ [ ] task')
+    expect(view.container.querySelector('input[type="checkbox"]')).toBeNull()
+    await view.unmount()
+  })
+
+  it('would render that marker as a checkbox without single-paragraph mode', async () => {
+    const view = await render(<MarkdownPreview content="+ [ ] task" />)
+    expect(view.container.querySelector('input[type="checkbox"]')).not.toBeNull()
+    await view.unmount()
   })
 })

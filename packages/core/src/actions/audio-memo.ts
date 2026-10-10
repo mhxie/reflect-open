@@ -32,7 +32,8 @@ import {
   type SegmentTranscriber,
 } from './audio-memo-session.ts'
 import { AUDIO_MEMOS_DIR, audioMemoPath, dailyPath, notePath } from '../graph/paths.ts'
-import { appendListItemUnderBacklinkedHeading, wikiLinkSafe } from '../markdown/edit.ts'
+import { wikiLinkSafe } from '../markdown/edit.ts'
+import { appendListItem } from '../markdown/task-ast.ts'
 import { getSecret } from '../secrets/keychain.ts'
 import { localModelStatus } from '../ai/local-transcription.ts'
 import type { LocalTranscriptionModelId } from '../ai/local-transcription-models.ts'
@@ -435,9 +436,11 @@ async function ensureDailyBacklink(
       (source) =>
         source !== null && hasBacklink(source, memo)
           ? null
-          : appendListItemUnderBacklinkedHeading(source ?? '', memosNoteTitle, entry, [
-              AUDIO_MEMOS_NOTE_TITLE,
-            ]),
+          : appendListItem(source ?? '', {
+              kind: 'bullet',
+              markdown: entry,
+              section: { titles: [memosNoteTitle, AUDIO_MEMOS_NOTE_TITLE], linked: true },
+            }),
       generation,
       { attempts: 2 },
     )
