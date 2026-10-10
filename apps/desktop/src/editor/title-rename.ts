@@ -60,6 +60,11 @@ export interface TitleRenameTracker {
   saved(content: string): void
   /** A settle point (blur, teardown): fire any pending rename now. */
   settle(): void
+  /**
+   * The last fired rename did not land: back to the state before it, so the
+   * next save renames again if the H1 still differs, and not if reverted.
+   */
+  restore(): void
   dispose(): void
 }
 
@@ -78,6 +83,8 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
   let baselineTitles: Titles | null = null
   let pending: Titles | null = null
   let previousAutoAlias: string | null = null
+  /** The state the last fired rename replaced, for {@link restore}. */
+  let beforeFire: { titles: Titles | null; previousAutoAlias: string | null } | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
 
@@ -120,6 +127,7 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     // The title we just renamed away from marks the chain: a follow-up rename
     // prunes what this one added instead of accreting one alias per edit. A
     // birth (`from: null`) leaves no alias behind, so the chain stays empty.
+    beforeFire = { titles: baselineTitles, previousAutoAlias }
     previousAutoAlias = from
     baselineTitles = pending
     pending = null
@@ -130,6 +138,7 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     cancelTimer()
     pending = null
     baselineTitles = titlesOf(content)
+    beforeFire = null
     // External content is a new ground truth: the alias chain this session was
     // building no longer describes it, so pruning stops here.
     previousAutoAlias = null
@@ -161,15 +170,18 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     }
     // The H1 is what the person edits, so an edit to it renames the note even
     // under a frontmatter `title:`, which the rename then rewrites to match.
-    // Saved content never changes frontmatter on its own, so while the note
-    // has an H1 only the H1 is followed.
-    const to =
-      current.heading === null
+    // Only an H1 the note had when loaded counts: one typed under a `title:`
+    // may be a section heading. Saved content never changes frontmatter on
+    // its own, so while the note has an H1 only the H1 is followed.
+    const headingEdited =
+      current.heading !== null &&
+      baselineTitles.heading !== null &&
+      foldKey(current.heading) !== foldKey(baselineTitles.heading)
+    const to = headingEdited
+      ? current.heading
+      : current.heading === null
         ? current.title
-        : baselineTitles.heading === null ||
-            foldKey(current.heading) !== foldKey(baselineTitles.heading)
-          ? current.heading
-          : baselineTitles.title
+        : baselineTitles.title
     if (foldKey(to) === foldKey(baselineTitles.title)) {
       // Same key: resolution is case-insensitive, so a pure case tweak is not
       // a rename — and a reverted edit clears whatever was pending.
@@ -188,11 +200,18 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     }
   }
 
+  function restore(): void {
+    if (beforeFire === null) return
+    baselineTitles = beforeFire.titles
+    previousAutoAlias = beforeFire.previousAutoAlias
+    beforeFire = null
+  }
+
   function dispose(): void {
     disposed = true
     cancelTimer()
     pending = null
   }
 
-  return { baseline, saved, settle, dispose }
+  return { baseline, saved, settle, restore, dispose }
 }

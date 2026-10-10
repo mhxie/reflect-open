@@ -105,6 +105,43 @@ describe('createTitleRenameTracker', () => {
     expect(renames[0]).toMatchObject({ from: 'Real Title', to: 'Renamed' })
   })
 
+  it('an H1 typed under a frontmatter title this session renames nothing', () => {
+    // It may be a section heading: only an H1 the note had when loaded counts.
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: Paper\n---\nBody\n')
+    tracker.saved('---\ntitle: Paper\n---\n# S\n\nBody\n')
+    tracker.saved('---\ntitle: Paper\n---\n# Summary\n\nBody\n')
+    vi.advanceTimersByTime(10_000)
+    tracker.settle()
+    expect(renames).toEqual([])
+  })
+
+  it('follows only the H1 while there is one, not a frontmatter change', () => {
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: A\n---\n# A\n')
+    tracker.saved('---\ntitle: B\n---\n# A\n')
+    vi.advanceTimersByTime(10_000)
+    tracker.settle()
+    expect(renames).toEqual([])
+  })
+
+  it('restore puts back the state before a rename that did not land', () => {
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: Canonical\n---\n# Original heading\n')
+    tracker.saved('---\ntitle: Canonical\n---\n# New heading\n')
+    tracker.settle()
+    expect(renames).toHaveLength(1)
+    tracker.restore()
+    // Reverting the edit is not a rename…
+    tracker.saved('---\ntitle: Canonical\n---\n# Original heading\n')
+    vi.advanceTimersByTime(10_000)
+    expect(renames).toHaveLength(1)
+    // …and redoing it renames again, still at the start of the chain.
+    tracker.saved('---\ntitle: Canonical\n---\n# New heading\n')
+    tracker.settle()
+    expect(renames[1]).toEqual({ from: 'Canonical', to: 'New heading', previousAutoAlias: null })
+  })
+
   it('a blocked fire keeps the rename pending until the gate opens', () => {
     let conflictParked = true
     const { tracker, renames } = tracked({ canFire: () => !conflictParked })
