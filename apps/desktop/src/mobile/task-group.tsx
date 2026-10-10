@@ -22,6 +22,10 @@ interface MobileTaskGroupProps {
   onAdd: (target: InsertTaskTarget) => void
   /** Open the quick-edit sheet for a tapped row. */
   onEdit: (task: OpenTask) => void
+  /** Toggle one task's checkbox. */
+  onToggle: (task: OpenTask) => void
+  /** Whether a Tasks write is in flight; checkboxes wait for it. */
+  togglePending: boolean
   /** Open a note group's source note from its header, or a row's from its swipe action. */
   onOpen: (notePath: string) => void
   /** Delete a task from its swipe action. */
@@ -44,6 +48,8 @@ export function MobileTaskGroup({
   today,
   onAdd,
   onEdit,
+  onToggle,
+  togglePending,
   onOpen,
   onDelete,
   revealedTaskKey,
@@ -105,6 +111,8 @@ export function MobileTaskGroup({
                   task={task}
                   showSource={showSource}
                   onEdit={onEdit}
+                  onToggle={() => onToggle(task)}
+                  togglePending={togglePending}
                   revealed={revealedTaskKey === key}
                   onReveal={() => setRevealedTaskKey(key)}
                   onClose={() => setRevealedTaskKey(null)}

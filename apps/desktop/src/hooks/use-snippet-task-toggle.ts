@@ -7,7 +7,7 @@ import {
   type TaskLocator,
 } from '@reflect/core'
 import type { TaskClickHandler, TaskClickPayload } from '@meowdown/react'
-import { toggleTask } from '@/lib/note-task.ts'
+import { writeTask } from '@/lib/note-task.ts'
 import { startOperation } from '@/lib/operations.ts'
 import { mutationKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
@@ -37,7 +37,7 @@ function anchorFor(tasks: readonly SnippetTask[], payload: TaskClickPayload): Sn
 /**
  * Write a backlink-snippet checkbox click through to the source note — old
  * Reflect's `toggleListChecked` behavior for checkboxes in a backlink's
- * context. Routes through {@link toggleTask}: the same session-aware,
+ * context. Routes through {@link writeTask}: the same session-aware,
  * per-note-serialized, staleness-guarded path the Tasks view uses, so an open
  * source note keeps its live buffer and a drifted note refuses instead of
  * toggling the wrong task. Only round `+ [ ]` Reflect tasks carry a locator
@@ -55,7 +55,7 @@ export function useSnippetTaskToggle(
   const { mutate, isPending } = useMutation({
     mutationKey: mutationKeys.tasks.snippetToggle(graph?.root),
     mutationFn: ({ notePath: path, locator, generation }: SnippetToggleInput) =>
-      toggleTask({ notePath: path, ...locator }, generation),
+      writeTask({ notePath: path, ...locator }, [{ kind: 'toggle' }], generation),
     onError: (cause, { checked }) => {
       startOperation(checked ? 'Reopening task' : 'Completing task').fail(errorMessage(cause))
     },

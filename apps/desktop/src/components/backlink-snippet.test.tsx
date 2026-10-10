@@ -6,8 +6,8 @@ import { setBridge, type SnippetTask } from '@reflect/core'
 import { queryClient } from '@/lib/query-client.ts'
 import { BacklinkSnippet } from './backlink-snippet.tsx'
 
-const toggleTask = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/note-task.ts', () => ({ toggleTask }))
+const writeTask = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/note-task.ts', () => ({ writeTask }))
 
 const operationFail = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/operations.ts', () => ({
@@ -68,8 +68,8 @@ function renderSnippet(tasks: SnippetTask[] = anchors()) {
 }
 
 beforeEach(() => {
-  toggleTask.mockReset()
-  toggleTask.mockResolvedValue(undefined)
+  writeTask.mockReset()
+  writeTask.mockResolvedValue(undefined)
   operationFail.mockReset()
 })
 
@@ -79,9 +79,10 @@ describe('BacklinkSnippet task checkboxes', () => {
     const boxes = view.container.querySelectorAll('input[type="checkbox"]')
     expect(boxes).toHaveLength(3)
     await userEvent.click(boxes[0]!)
-    await vi.waitFor(() => expect(toggleTask).toHaveBeenCalledTimes(1))
-    expect(toggleTask).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(writeTask).toHaveBeenCalledTimes(1))
+    expect(writeTask).toHaveBeenCalledWith(
       { notePath: 'notes/meeting.md', astPath: [0, 1], markdown: 'prep agenda', checked: false },
+      [{ kind: 'toggle' }],
       7,
     )
     await view.unmount()
@@ -91,9 +92,10 @@ describe('BacklinkSnippet task checkboxes', () => {
     const view = await renderSnippet()
     const boxes = view.container.querySelectorAll('input[type="checkbox"]')
     await userEvent.click(boxes[2]!)
-    await vi.waitFor(() => expect(toggleTask).toHaveBeenCalledTimes(1))
-    expect(toggleTask).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(writeTask).toHaveBeenCalledTimes(1))
+    expect(writeTask).toHaveBeenCalledWith(
       { notePath: 'notes/meeting.md', astPath: [0, 3], markdown: 'send invite', checked: true },
+      [{ kind: 'toggle' }],
       7,
     )
     await view.unmount()
@@ -104,7 +106,7 @@ describe('BacklinkSnippet task checkboxes', () => {
     const boxes = view.container.querySelectorAll('input[type="checkbox"]')
     expect((boxes[1] as HTMLInputElement).checked).toBe(true)
     await userEvent.click(boxes[1]!, { force: true })
-    expect(toggleTask).not.toHaveBeenCalled()
+    expect(writeTask).not.toHaveBeenCalled()
     expect(operationFail).not.toHaveBeenCalled()
     await view.unmount()
   })
@@ -116,7 +118,7 @@ describe('BacklinkSnippet task checkboxes', () => {
     const view = await renderSnippet(drifted)
     const boxes = view.container.querySelectorAll('input[type="checkbox"]')
     await userEvent.click(boxes[0]!)
-    expect(toggleTask).not.toHaveBeenCalled()
+    expect(writeTask).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(operationFail).toHaveBeenCalled())
     await view.unmount()
   })
@@ -160,7 +162,7 @@ describe('BacklinkSnippet task checkboxes', () => {
     )
     const box = view.container.querySelector('input[type="checkbox"]')!
     await userEvent.click(box, { force: true })
-    expect(toggleTask).not.toHaveBeenCalled()
+    expect(writeTask).not.toHaveBeenCalled()
     await view.unmount()
   })
 })

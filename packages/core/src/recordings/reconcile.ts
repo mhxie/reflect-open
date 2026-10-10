@@ -18,11 +18,8 @@ import { errorMessage, isAppError, toAppError } from '../errors.ts'
 import { createNoteIfAbsent, readNote } from '../graph/commands.ts'
 import { patchNote } from '../graph/patch-note.ts'
 import { dailyPath } from '../graph/paths.ts'
-import {
-  appendListItemUnderBacklinkedHeading,
-  appendListItemUnderHeading,
-  wikiLinkSafe,
-} from '../markdown/edit.ts'
+import { wikiLinkSafe } from '../markdown/edit.ts'
+import { appendListItem } from '../markdown/task-ast.ts'
 import { parseNote } from '../markdown/extract.ts'
 import { sectionEnd, topLevelHeadings } from '../markdown/heading-blocks.ts'
 import {
@@ -265,11 +262,11 @@ async function writeRecording(
     (source) =>
       source !== null && hasTranscriptLink(source, identity)
         ? null
-        : appendListItemUnderHeading(
-            source ?? '',
-            MEETINGS_HEADING,
-            `[[${identity.base}|${eventTitle} transcript]]`,
-          ),
+        : appendListItem(source ?? '', {
+            kind: 'bullet',
+            markdown: `[[${identity.base}|${eventTitle} transcript]]`,
+            section: { titles: [MEETINGS_HEADING], linked: false },
+          }),
     input.generation,
   )
   return 'written'
@@ -288,9 +285,11 @@ async function linkMemo(
     (source) =>
       source !== null && hasTranscriptLink(source, identity)
         ? null
-        : appendListItemUnderBacklinkedHeading(source ?? '', memosNoteTitle, entry, [
-            AUDIO_MEMOS_NOTE_TITLE,
-          ]),
+        : appendListItem(source ?? '', {
+            kind: 'bullet',
+            markdown: entry,
+            section: { titles: [memosNoteTitle, AUDIO_MEMOS_NOTE_TITLE], linked: true },
+          }),
     generation,
   )
 }

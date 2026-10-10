@@ -81,6 +81,12 @@ interface MarkdownPreviewProps {
    * graph attachments load.
    */
   remoteEmbeds?: boolean
+  /**
+   * Render `content` as one paragraph of inline Markdown. A block prefix at
+   * the start (`+ [ ] `, `# `, `> `) stays text instead of opening a block.
+   * Task rows pass this: their content is one paragraph by definition.
+   */
+  singleParagraph?: boolean
   /** Extra classes for the rendered root. */
   className?: string
   /** Reveal exact claim extents without changing the source document. */
@@ -93,6 +99,7 @@ export function MarkdownPreview({
   content,
   titleMetadata,
   headingOffset = 0,
+  singleParagraph = false,
   resolveImageUrl,
   resolveWikiEmbed,
   renderNoteEmbed,
@@ -221,6 +228,7 @@ export function MarkdownPreview({
       remoteMedia={remoteEmbeds}
       markdown={content}
       headingOffset={headingOffset}
+      singleParagraph={singleParagraph}
       markMode="hide"
       interactive={interactive}
       resolveWikilink={resolveWikilink}

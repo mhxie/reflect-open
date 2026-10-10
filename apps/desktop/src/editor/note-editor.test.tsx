@@ -950,3 +950,35 @@ describe('NoteEditor private note policy', () => {
     expect(pmRoot.element()).toBe(editable)
   })
 })
+
+describe('NoteEditor single paragraph', () => {
+  it('keeps a typed task marker as text and reports paragraph markdown', async () => {
+    const handleRef = createRef<NoteEditorHandle>()
+    await render(
+      <NoteEditor privateNote={false} initialContent="" singleParagraph handleRef={handleRef} />,
+    )
+
+    await pmRoot.click()
+    // `[` is escaped by doubling it in `userEvent.keyboard`.
+    await userEvent.keyboard('+ [[ ] task')
+
+    await vi.waitFor(() => {
+      expect(handleRef.current?.getMarkdown()).toBe('+ [ ] task')
+    })
+    expect(pmRoot.element().querySelector('input[type="checkbox"]')).toBeNull()
+  })
+
+  it('turns the same keystrokes into a task item in a note', async () => {
+    const handleRef = createRef<NoteEditorHandle>()
+    await render(<NoteEditor privateNote={false} initialContent="" handleRef={handleRef} />)
+
+    await pmRoot.click()
+    await userEvent.keyboard('+ [[ ] task')
+
+    // `+ ` opens the circle task; the `[ ] ` typed inside it stays text.
+    await vi.waitFor(() => {
+      expect(handleRef.current?.getMarkdown()).toMatch(/^\+ \[ \] /)
+    })
+    expect(pmRoot.element().querySelector('input[type="checkbox"]')).not.toBeNull()
+  })
+})

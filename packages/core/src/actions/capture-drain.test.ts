@@ -238,6 +238,23 @@ describe('drainCaptureInbox', () => {
     expect(files.get(DAILY)).not.toContain('## Links\n')
   })
 
+  it('deduplicates under an H1 or formatted Links heading, as insertion files there', async () => {
+    addSpool(
+      envelope({
+        id: '00000000-0000-4000-8000-000000000001',
+        capturedAt: new Date(2026, 5, 11, 9, 30, 0, 0).toISOString(),
+      }),
+    )
+    await drain()
+    files.set(DAILY, (files.get(DAILY) ?? '').replace('## [[Links]]', '# **Links**'))
+
+    addSpool(envelope())
+    const outcome = await drain()
+
+    expect(outcome.deduped).toBe(1)
+    expect(files.has(IDENTITY.notePath)).toBe(false)
+  })
+
   it('deduplicates across every matching Links section', async () => {
     addSpool(
       envelope({
@@ -602,12 +619,22 @@ describe('drainCaptureInbox (text captures)', () => {
     expect(spool.size).toBe(0)
   })
 
-  it('appends a task envelope as a round (+) task the Tasks view projects', async () => {
+  it('puts a task envelope in a new Tasks section as a round (+) task', async () => {
     addTextSpool(textEnvelope({ kind: 'task', text: 'buy milk' }))
 
     await drain()
 
-    expect(files.get(DAILY)).toBe('+ [ ] buy milk\n')
+    expect(files.get(DAILY)).toBe('## Tasks\n\n+ [ ] buy milk\n')
+  })
+
+  it('places a task capture in the existing Tasks section without creating a note', async () => {
+    files.set(DAILY, '## Tasks\n\n+ [ ] old\n\n## Later\n\nprose\n')
+    addTextSpool(textEnvelope({ kind: 'task', text: 'buy milk' }))
+
+    await drain()
+
+    expect(files.get(DAILY)).toBe('## Tasks\n\n+ [ ] old\n+ [ ] buy milk\n\n## Later\n\nprose\n')
+    expect([...files.keys()].filter((path) => path !== DAILY)).toEqual([])
   })
 
   it('appends a checkbox envelope as a square GFM checkbox', async () => {
@@ -714,7 +741,7 @@ describe('drainCaptureInbox (text captures)', () => {
 
     await drain()
 
-    expect(files.get(DAILY)).toBe('+ [ ] buy milk\n\n- [ ] pack a bag\n')
+    expect(files.get(DAILY)).toBe('+ [ ] buy milk\n- [ ] pack a bag\n')
   })
 
   it('still appends to a private daily — the write is entirely local', async () => {

@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import type { OpenTask } from '@reflect/core'
 import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import { useDayTasks } from '@/lib/tasks/use-day-tasks.ts'
+import { useTaskActions } from '@/lib/tasks/use-task-actions.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
@@ -44,6 +45,7 @@ export function DayTasksSection({ date }: DayTasksSectionProps): ReactElement | 
   const { navigate } = useRouter()
   const navigateNoteLink = usePeekNavigation(date)
   const { overdue, due } = useDayTasks(date, today)
+  const actions = useTaskActions()
   const total = overdue.length + due.length
   if (total === 0) {
     return null
@@ -73,6 +75,8 @@ export function DayTasksSection({ date }: DayTasksSectionProps): ReactElement | 
                   task={task}
                   day={date}
                   onNavigate={navigateNoteLink}
+                  onToggle={() => actions.checkboxToggle(task)}
+                  togglePending={actions.isPending}
                 />
               ))}
             </ul>

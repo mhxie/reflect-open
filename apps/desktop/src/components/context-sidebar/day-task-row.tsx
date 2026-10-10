@@ -4,7 +4,6 @@ import { displayNoteTitle, isLocalOnlyReadOnlyPath, type OpenTask } from '@refle
 import { isModEvent } from '@meowdown/core'
 import type { NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { formatShortDate } from '@/lib/dates.ts'
-import { useTaskCheckboxToggle } from '@/lib/tasks/use-task-checkbox-toggle.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
@@ -15,6 +14,10 @@ interface DayTaskRowProps {
   /** The sidebar's day — a task written in that day's note needs no source label. */
   day: string
   onNavigate: NoteLinkNavigation
+  /** Toggle this task's checkbox through the Tasks view's edit-and-toggle write. */
+  onToggle: () => void
+  /** Whether a task write is already in flight. */
+  togglePending: boolean
 }
 
 /**
@@ -22,9 +25,14 @@ interface DayTaskRowProps {
  * write-back and, as there, stays inert for a task in a read-only local-only
  * note.
  */
-export function DayTaskRow({ task, day, onNavigate }: DayTaskRowProps): ReactElement {
+export function DayTaskRow({
+  task,
+  day,
+  onNavigate,
+  onToggle,
+  togglePending,
+}: DayTaskRowProps): ReactElement {
   const { settings } = useSettings()
-  const { toggle, isPending } = useTaskCheckboxToggle(task)
   const label = task.text || 'Empty task'
   const source =
     task.dailyDate === day
@@ -38,8 +46,8 @@ export function DayTaskRow({ task, day, onNavigate }: DayTaskRowProps): ReactEle
       <button
         type="button"
         aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
-        disabled={isPending || isLocalOnlyReadOnlyPath(task.notePath)}
-        onClick={toggle}
+        disabled={togglePending || isLocalOnlyReadOnlyPath(task.notePath)}
+        onClick={onToggle}
         className="flex h-5 shrink-0 items-center text-text-muted transition-colors hover:text-text focus-visible:text-text focus-visible:outline-none disabled:cursor-default"
       >
         {task.checked ? (
