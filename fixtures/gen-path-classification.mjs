@@ -64,10 +64,15 @@ const ATTACHMENTS = new Set([
   'zip',
 ])
 
+// Pages Reflect never reads, renders, or serves (they can carry scripts) but
+// hands to the OS default app, a browser, when a link to one is clicked.
+const EXTERNAL = new Set(['htm', 'html'])
+
 // ASCII-only lowering — the shared policy never folds beyond ASCII.
 const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32))
 
-function expected(path) {
+/** The first component and extension of a safe, visible path; null otherwise. */
+function parts(path) {
   if (path === '' || path.startsWith('/') || path.includes('\\') || /^[A-Za-z]:/.test(path)) {
     return null
   }
@@ -75,17 +80,32 @@ function expected(path) {
   if (!components.every((c) => c !== '' && !c.startsWith('.'))) {
     return null
   }
-  const first = components[0]
   const filename = components.at(-1)
   const dot = filename.lastIndexOf('.')
   if (dot < 0 || dot === filename.length - 1) {
     return null
   }
-  const extension = filename.slice(dot + 1)
+  return { first: components[0], extension: filename.slice(dot + 1) }
+}
+
+function expected(path) {
+  const found = parts(path)
+  if (found === null) {
+    return null
+  }
+  const { first, extension } = found
   if (extension === 'md' && !RESERVED.has(asciiLower(first))) {
     return 'note'
   }
   return ATTACHMENTS.has(asciiLower(extension)) ? 'attachment' : null
+}
+
+/** May the OS default app open it: an attachment, or an external page. */
+function openable(path) {
+  const found = parts(path)
+  return (
+    expected(path) === 'attachment' || (found !== null && EXTERNAL.has(asciiLower(found.extension)))
+  )
 }
 
 /** Hand-picked regressions, kept verbatim for readability in review. */
@@ -131,6 +151,13 @@ const SEEDS = [
   'tools/binary.exe',
   '.assets/photo.png',
   'Media/.private/photo.png',
+  'assets/explainer.html',
+  'career/2027 Job Hunting/assets/q07.HTML',
+  'notes/page.htm',
+  'notes/page.html.md',
+  '.hidden/page.html',
+  'notes/../page.html',
+  'notes/page.xhtml',
 ]
 
 /** The generated sweep: directories × stems × extension mutations. */
@@ -166,6 +193,8 @@ const EXTS = [
   'pdf',
   'svg',
   'zip',
+  'html',
+  'HTM',
 ]
 
 const paths = new Set(SEEDS)
@@ -177,10 +206,13 @@ for (const dir of DIRS) {
   }
 }
 
-const rows = [...paths].map((path) => ({ path, kind: expected(path) }))
+const rows = [...paths].map((path) => ({ path, kind: expected(path), openable: openable(path) }))
 const json = `[\n${rows
   .map((row) => `  ${JSON.stringify(row.path)}`)
-  .map((p, i) => `{ "path": ${p.trim()}, "kind": ${JSON.stringify(rows[i].kind)} }`)
+  .map(
+    (p, i) =>
+      `{ "path": ${p.trim()}, "kind": ${JSON.stringify(rows[i].kind)}, "openable": ${rows[i].openable} }`,
+  )
   .map((line) => `  ${line}`)
   .join(',\n')}\n]\n`
 

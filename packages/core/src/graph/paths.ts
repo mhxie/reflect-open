@@ -75,6 +75,14 @@ const ATTACHMENT_EXTENSIONS = new Set([
   'zip',
 ])
 
+/**
+ * Pages Reflect never reads, renders, or serves (they can carry scripts), but
+ * hands to the OS default app, a browser, when a link to one is clicked.
+ * Deliberately not attachments. Must stay identical to the Rust list in
+ * `crates/graph-paths/src/lib.rs` and `fixtures/gen-path-classification.mjs`.
+ */
+const EXTERNAL_OPEN_EXTENSIONS = new Set(['htm', 'html'])
+
 /** A supported content kind at a safe, visible graph-relative path. */
 export type GraphPathKind = 'note' | 'attachment'
 
@@ -242,6 +250,23 @@ export function isNotePath(path: string): boolean {
 /** Is this graph-relative path a supported local attachment? */
 export function isAttachmentPath(path: string): boolean {
   return classifyGraphPath(path) === 'attachment'
+}
+
+/**
+ * May the OS default app open this graph-relative path: a supported
+ * attachment, or a page in {@link EXTERNAL_OPEN_EXTENSIONS}, which nothing
+ * else accepts.
+ */
+export function isOpenablePath(path: string): boolean {
+  if (isAttachmentPath(path)) {
+    return true
+  }
+  if (!isSafeVisibleGraphPath(path)) {
+    return false
+  }
+  const filename = path.split('/').at(-1) ?? ''
+  const dot = filename.lastIndexOf('.')
+  return dot >= 0 && EXTERNAL_OPEN_EXTENSIONS.has(asciiLowerCase(filename.slice(dot + 1)))
 }
 
 /**

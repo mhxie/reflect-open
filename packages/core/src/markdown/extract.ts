@@ -117,6 +117,11 @@ function isAssetHref(href: string): boolean {
  * An explicit `/x`, `./x`, or `../x` has one meaning and gets one candidate.
  */
 export function attachmentReferenceCandidates(sourcePath: string, reference: string): string[] {
+  return keepAttachments(linkReferenceCandidates(sourcePath, reference))
+}
+
+/** Every graph path `reference` may name from `sourcePath`, most local first. */
+export function linkReferenceCandidates(sourcePath: string, reference: string): (string | null)[] {
   if (/^[a-z][a-z0-9+.-]*:/i.test(reference) || reference.startsWith('//')) {
     return []
   }
@@ -125,15 +130,12 @@ export function attachmentReferenceCandidates(sourcePath: string, reference: str
     return []
   }
   if (authored.startsWith('/')) {
-    return keepAttachments([resolveSegments([], authored.slice(1))])
+    return [resolveSegments([], authored.slice(1))]
   }
   if (authored.startsWith('./') || authored.startsWith('../')) {
-    return keepAttachments([resolveSegments(parentSegments(sourcePath), authored)])
+    return [resolveSegments(parentSegments(sourcePath), authored)]
   }
-  return keepAttachments([
-    resolveSegments(parentSegments(sourcePath), authored),
-    resolveSegments([], authored),
-  ])
+  return [resolveSegments(parentSegments(sourcePath), authored), resolveSegments([], authored)]
 }
 
 /** Strip the fragment and query, then percent-decode. */

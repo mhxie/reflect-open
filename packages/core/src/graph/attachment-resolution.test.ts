@@ -5,6 +5,7 @@ import {
   createAttachmentCatalog,
   isImageAttachmentPath,
   isPdfAttachmentPath,
+  pageLinkPath,
   resolveAttachmentLink,
   resolveWikiEmbedTarget,
   type AttachmentCatalog,
@@ -36,6 +37,29 @@ describe('createAttachmentCatalog', () => {
     expect(catalog.size('c/photo.png')).toBeUndefined()
     expect(catalog.named('photo.png')).toEqual(['a/photo.png', 'b/photo.png'])
     expect(catalog.named('missing.png')).toEqual([])
+  })
+})
+
+describe('pageLinkPath', () => {
+  const note = 'career/2027 Job Hunting/AI Infra Interview Question Explainers.md'
+
+  it('reads a page link from the note folder, as a browser does', () => {
+    expect(pageLinkPath(note, 'assets/q07-realtime-serving-100k-rps.html')).toBe(
+      'career/2027 Job Hunting/assets/q07-realtime-serving-100k-rps.html',
+    )
+    expect(pageLinkPath(note, 'assets/Q%2008.HTM#top')).toBe(
+      'career/2027 Job Hunting/assets/Q 08.HTM',
+    )
+    expect(pageLinkPath(note, '../shared/page.html')).toBe('career/shared/page.html')
+    expect(pageLinkPath(note, '/assets/page.html')).toBe('assets/page.html')
+  })
+
+  it('names nothing but a page inside the vault', () => {
+    expect(pageLinkPath(note, 'assets/cat.png')).toBeNull()
+    expect(pageLinkPath(note, 'Other note.md')).toBeNull()
+    expect(pageLinkPath(note, 'https://example.com/page.html')).toBeNull()
+    expect(pageLinkPath(note, '../../../outside.html')).toBeNull()
+    expect(pageLinkPath(note, '.hidden/page.html')).toBeNull()
   })
 })
 

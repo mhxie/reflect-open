@@ -1,8 +1,10 @@
 import {
   attachmentReferenceCandidates,
   isAttachmentEmbedTarget,
+  linkReferenceCandidates,
   wikiEmbedAssetPath,
 } from '../markdown/extract.ts'
+import { isAttachmentPath, isOpenablePath } from './paths.ts'
 import type { FileMeta } from './schemas.ts'
 
 /**
@@ -105,6 +107,17 @@ export function resolveAttachmentLink(
     }
   }
   return fallback
+}
+
+/**
+ * Where a link to a page (`.html`) in `sourcePath` points, read as a browser
+ * reads a relative link: from the note's folder, or the vault root after a
+ * leading `/`. Null for anything that is not a page; a page opens only in the
+ * OS default app, never in Reflect.
+ */
+export function pageLinkPath(sourcePath: string, destination: string): string | null {
+  const path = linkReferenceCandidates(sourcePath, destination)[0] ?? null
+  return path !== null && !isAttachmentPath(path) && isOpenablePath(path) ? path : null
 }
 
 /**

@@ -247,6 +247,15 @@ describe('useAssetPersistence resolveImageUrl', () => {
     )
   })
 
+  it("opens a linked page from the note's own folder", async () => {
+    installUploadBridge()
+    await renderPersistence({ generation: 3, path: 'career/Hunt/Explainers.md' })
+
+    expect(persistence!.resolveAssetOpenPath('assets/q07.html')).toBe('career/Hunt/assets/q07.html')
+    // A page is opened, never rendered: no in-app URL for it.
+    expect(await persistence!.resolveImageUrl('assets/q07.html')).toBeUndefined()
+  })
+
   it('declines unsafe paths, notes, and missing sessions', async () => {
     installUploadBridge()
     await renderPersistence({ generation: 3 })
