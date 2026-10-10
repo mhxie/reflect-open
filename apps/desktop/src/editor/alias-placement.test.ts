@@ -25,7 +25,7 @@ vi.mock('./open-documents', () => ({
   openSession: docs.openSession,
 }))
 
-const { placeOldTitleAlias } = await import('./alias-placement.ts')
+const { moveDeclaredTitle, placeOldTitleAlias } = await import('./alias-placement.ts')
 
 const PATH = 'notes/subject.md'
 const RENAME = { from: 'Old Title', to: 'New Title', previousAutoAliases: [] }
@@ -124,27 +124,34 @@ describe('placeOldTitleAlias', () => {
     expect(io.writeNote).toHaveBeenCalledTimes(1)
   })
 
-  it('moves a declared frontmatter title to the new title with the alias', async () => {
+  it('moves a declared frontmatter title on its own, leaving the alias to its own step', async () => {
     const session = fakeSession({ content: '---\ntitle: Old Title\n---\n# New Title\n' })
     docs.openSession.mockReturnValue(session)
 
+    expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(true)
+    expect(session.updateFrontmatter).toHaveBeenCalledWith({ title: 'New Title' })
     await placeOldTitleAlias(PATH, RENAME, 7)
-
-    expect(session.updateFrontmatter).toHaveBeenCalledWith({
-      aliases: ['Old Title'],
-      title: 'New Title',
-    })
+    expect(session.updateFrontmatter).toHaveBeenLastCalledWith({ aliases: ['Old Title'] })
   })
 
-  it('still moves a declared title when the alias is skipped, on disk too', async () => {
+  it('moves a declared title on disk, and reports none to move without one', async () => {
     io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
-
-    const added = await placeOldTitleAlias(PATH, RENAME, 7, { alias: false })
-
-    expect(added).toEqual([])
+    expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(true)
     const written = io.writeNote.mock.calls[0]?.[1] as string
     expect(written).toContain('title: New Title')
     expect(written).not.toContain('aliases')
+
+    io.writeNote.mockClear()
+    io.readNote.mockResolvedValue('# New Title\n')
+    expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(false)
+    expect(io.writeNote).not.toHaveBeenCalled()
+  })
+
+  it('leaves a title retitled meanwhile alone', async () => {
+    // Another edit renamed the note while links were rewritten: it stands.
+    io.readNote.mockResolvedValue('---\ntitle: External\n---\n# External\n')
+    expect(await moveDeclaredTitle(PATH, RENAME, 7)).toBe(false)
+    expect(io.writeNote).not.toHaveBeenCalled()
   })
 
   it('writes nothing when the alias would be redundant', async () => {

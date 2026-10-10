@@ -105,6 +105,26 @@ describe('createTitleRenameTracker', () => {
     expect(renames[0]).toMatchObject({ from: 'Real Title', to: 'Renamed' })
   })
 
+  it('an H1 typed under a frontmatter title this session renames nothing', () => {
+    // It may be a section heading: only an H1 the note had when loaded counts.
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: Paper\n---\nBody\n')
+    tracker.saved('---\ntitle: Paper\n---\n# S\n\nBody\n')
+    tracker.saved('---\ntitle: Paper\n---\n# Summary\n\nBody\n')
+    vi.advanceTimersByTime(10_000)
+    tracker.settle()
+    expect(renames).toEqual([])
+  })
+
+  it('follows only the H1 while there is one, not a frontmatter change', () => {
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: A\n---\n# A\n')
+    tracker.saved('---\ntitle: B\n---\n# A\n')
+    vi.advanceTimersByTime(10_000)
+    tracker.settle()
+    expect(renames).toEqual([])
+  })
+
   it('a blocked fire keeps the rename pending until the gate opens', () => {
     let conflictParked = true
     const { tracker, renames } = tracked({ canFire: () => !conflictParked })

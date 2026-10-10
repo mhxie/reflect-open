@@ -1,18 +1,23 @@
 import { startOperation } from '@/lib/operations.ts'
 import {
   errorMessage,
+  foldKey,
   getBacklinks,
   getLinkSources,
   getPathLinkSources,
   isReflectManagedNote,
+  parseNote,
   readNote,
   resolveWikiTarget,
   rewriteLinksForTitleChange,
   rewritePathLinksForMove,
   slugPathForTitle,
+  wikiLinkTargetForTitle,
   writeNote,
+  type RenameBacklink,
+  type Resolution,
 } from '@reflect/core'
-import { placeOldTitleAlias } from './alias-placement.ts'
+import { moveDeclaredTitle, placeOldTitleAlias } from './alias-placement.ts'
 import { moveNoteCarryingSession } from './move-note.ts'
 import type { NoteContentOrigin } from './note-session.ts'
 import {
@@ -30,8 +35,10 @@ import { createTitleRenameTracker } from './title-rename.ts'
  * (`docs/readable-filenames.md`). Adopted and stable-path notes participate in
  * link maintenance but keep their paths.
  *
- * A settled rename can run three phases, each failing independently with an
- * honest report (see `rename-failure.ts`):
+ * A settled rename first moves a declared frontmatter `title:` to the new
+ * title (`moveDeclaredTitle`); if that fails, or the title changed elsewhere
+ * meanwhile, nothing else runs. Then three phases, each failing independently
+ * with an honest report (see `rename-failure.ts`):
  *
  * 1. **Rewrite** inbound title targets and title-mirroring displays;
  * 2. **Alias** the old title onto this note (`alias-placement.ts`) — the
@@ -82,7 +89,7 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
   let currentPath = options.path
   /** Serializes rewrites — a second settle waits for the first. */
   let chain: Promise<void> = Promise.resolve()
-  /** Latest source saved or adopted by this session, used only for move ownership. */
+  /** Latest source saved or adopted by this session: move ownership and declared titles. */
   let latestSource = ''
   /** Aliases the previous rename in this session added, for the next one to prune. */
   let autoAliases: string[] = []
@@ -164,6 +171,49 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
       }
       const from = rename.from
       const operation = startOperation(`Renaming "${from}" → "${rename.to}"`)
+      // A declared `title:` outranks the H1, so it takes the new title before
+      // any link is rewritten to it; if it can't, nothing else changes and the
+      // tracker goes back to the note as it stands.
+      const declared: unknown = (
+        parseNote({ path: currentPath, source: latestSource }).frontmatter as Record<
+          string,
+          unknown
+        >
+      )['title']
+      // Moving `title:` re-projects the note, so the rewrite reads the graph
+      // as it stood before: where the old title resolved and what linked here.
+      let pinned: { target: string; from: Resolution; backlinks: RenameBacklink[] } | null = null
+      if (typeof declared === 'string') {
+        let moved: boolean
+        try {
+          const target = wikiLinkTargetForTitle(from)
+          pinned = {
+            target,
+            from: await resolveWikiTarget(target),
+            backlinks: await getBacklinks(currentPath),
+          }
+          moved = await moveDeclaredTitle(
+            currentPath,
+            { from, to: rename.to, previousAutoAliases: [] },
+            gen,
+          )
+        } catch (cause) {
+          console.error('rename title update failed:', cause)
+          tracker.restore(from)
+          operation.fail(
+            `${errorMessage(cause)} — the note keeps the title "${from}", so no links were changed`,
+          )
+          return
+        }
+        if (!moved) {
+          // Retitled elsewhere meanwhile: that title stands, and links to it
+          // must not be rewritten to this rename's.
+          operation.warn(`"${from}" was retitled elsewhere meanwhile; no links were changed`)
+          return
+        }
+      }
+      const view = pinned
+      const titleMoved = view !== null
       // The phases fail independently and the report says what held — the
       // permutations live in `composeRenameFailure`.
       const failures: RenamePhaseFailures = { rewrite: null, alias: null, move: null }
@@ -178,10 +228,16 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
             to: rename.to,
             io: {
               sources: getLinkSources,
-              backlinks: getBacklinks,
+              backlinks: view === null ? getBacklinks : () => Promise.resolve(view.backlinks),
               read: readNote,
               write: (forPath, contents, expected) => writeNote(forPath, contents, gen, expected),
-              resolve: resolveWikiTarget,
+              resolve:
+                view === null
+                  ? resolveWikiTarget
+                  : (target) =>
+                      target === view.target
+                        ? Promise.resolve(view.from)
+                        : resolveWikiTarget(target),
             },
             onProgress: operation.progress,
           })
@@ -201,18 +257,23 @@ export function createRenameCoordinator(options: RenameCoordinatorOptions): Rena
         // the user authored.
         const previousAutoAliases = rename.previousAutoAlias === null ? [] : autoAliases
         autoAliases = []
-        // Another note holding the old title gets no alias here, but a
-        // declared `title:` still follows the edited heading.
-        try {
-          autoAliases = await placeOldTitleAlias(
-            currentPath,
-            { from, to: rename.to, previousAutoAliases },
-            gen,
-            { alias: !collision },
-          )
-        } catch (cause) {
-          failures.alias = errorMessage(cause)
-          console.error('rename alias placement failed:', cause)
+        if (!collision) {
+          try {
+            const added = await placeOldTitleAlias(
+              currentPath,
+              { from, to: rename.to, previousAutoAliases },
+              gen,
+            )
+            // The title the person wrote into `title:` is theirs: a chained
+            // rename may prune intermediate titles, never that one.
+            const authored = titleMoved && rename.previousAutoAlias === null
+            autoAliases = authored
+              ? added.filter((alias) => foldKey(alias) !== foldKey(from))
+              : added
+          } catch (cause) {
+            failures.alias = errorMessage(cause)
+            console.error('rename alias placement failed:', cause)
+          }
         }
         // Link maintenance applies to every editable note. Filename projection
         // is a separate capability: stable-path and adopted notes stay put.

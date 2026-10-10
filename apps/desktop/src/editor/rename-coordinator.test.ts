@@ -103,6 +103,18 @@ async function renameOnce(
   await coordinator.settled()
 }
 
+/** {@link renameOnce} for a note whose frontmatter declares `title: from`. */
+async function renameDeclared(
+  coordinator: ReturnType<typeof makeCoordinator>,
+  from: string,
+  to: string,
+): Promise<void> {
+  coordinator.content(managed(`---\ntitle: ${from}\n---\n# ${from}\n`), 'load')
+  coordinator.content(managed(`---\ntitle: ${from}\n---\n# ${to}\n`), 'saved')
+  coordinator.settle()
+  await coordinator.settled()
+}
+
 function fakeSession(content: string): NoteSession & {
   updateFrontmatter: ReturnType<typeof vi.fn>
   flush: ReturnType<typeof vi.fn>
@@ -265,11 +277,108 @@ describe('rename coordinator', () => {
     })
     io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
     const coordinator = makeCoordinator()
-    await renameOnce(coordinator, 'Old Title', 'New Title')
+    await renameDeclared(coordinator, 'Old Title', 'New Title')
 
     const written = io.writeNote.mock.calls[0]?.[1] as string
     expect(written).toContain('title: New Title')
     expect(written).not.toContain('aliases')
+  })
+
+  it('moves a declared title before rewriting links to the new one', async () => {
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+    const coordinator = makeCoordinator()
+    await renameDeclared(coordinator, 'Old Title', 'New Title')
+
+    const titleWrite = io.writeNote.mock.calls.findIndex((call) =>
+      String(call[1]).includes('title: New Title'),
+    )
+    expect(titleWrite).toBeGreaterThanOrEqual(0)
+    expect(io.writeNote.mock.invocationCallOrder[titleWrite]).toBeLessThan(
+      io.rewriteLinksForTitleChange.mock.invocationCallOrder[0]!,
+    )
+  })
+
+  it('changes no link when the declared title cannot move', async () => {
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+    io.writeNote.mockRejectedValue(new Error('disk full'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const coordinator = makeCoordinator()
+    await renameDeclared(coordinator, 'Old Title', 'New Title')
+
+    expect(io.rewriteLinksForTitleChange).not.toHaveBeenCalled()
+    expect(operationLog.records[0]).toMatchObject({ outcome: 'failed' })
+    expect(operationLog.records[0]!.message).toContain('no links were changed')
+  })
+
+  it('rewrites against where the old title resolved before the title moved', async () => {
+    // Once the note re-projects, another note's alias of the old title would
+    // win it: the rewrite must still see the old title as this note's.
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+    io.resolveWikiTarget
+      .mockResolvedValueOnce({ kind: 'resolved', ref: PATH })
+      .mockResolvedValue({ kind: 'resolved', ref: 'notes/other.md' })
+    io.getBacklinks.mockResolvedValueOnce([{ sourcePath: 'notes/a.md' }]).mockResolvedValue([])
+    const coordinator = makeCoordinator()
+    await renameDeclared(coordinator, 'Old Title', 'New Title')
+
+    const { io: rewriteIo } = io.rewriteLinksForTitleChange.mock.calls[0]![0] as {
+      io: {
+        resolve: (target: string) => Promise<unknown>
+        backlinks: (path: string) => Promise<unknown>
+      }
+    }
+    expect(await rewriteIo.resolve('Old Title')).toEqual({ kind: 'resolved', ref: PATH })
+    expect(await rewriteIo.resolve('Elsewhere')).toEqual({
+      kind: 'resolved',
+      ref: 'notes/other.md',
+    })
+    expect(await rewriteIo.backlinks(PATH)).toEqual([{ sourcePath: 'notes/a.md' }])
+  })
+
+  it('leaves links alone when the title was changed elsewhere meanwhile', async () => {
+    io.readNote.mockResolvedValue('---\ntitle: External\n---\n# External\n')
+    const coordinator = makeCoordinator()
+    await renameDeclared(coordinator, 'Old Title', 'New Title')
+
+    expect(io.rewriteLinksForTitleChange).not.toHaveBeenCalled()
+    expect(io.writeNote).not.toHaveBeenCalled()
+    expect(operationLog.records[0]).toMatchObject({ outcome: 'warning' })
+  })
+
+  it('retries a rename whose title could not move on the next save', async () => {
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+    io.writeNote.mockRejectedValueOnce(new Error('disk full'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const coordinator = makeCoordinator()
+    await renameDeclared(coordinator, 'Old Title', 'New Title')
+    expect(io.rewriteLinksForTitleChange).not.toHaveBeenCalled()
+
+    coordinator.content(managed('---\ntitle: Old Title\n---\n# New Title\n'), 'saved')
+    coordinator.settle()
+    await coordinator.settled()
+    expect(io.rewriteLinksForTitleChange).toHaveBeenCalledWith(
+      expect.objectContaining({ from: 'Old Title', to: 'New Title' }),
+    )
+  })
+
+  it('a chained rename keeps the title the person wrote as an alias', async () => {
+    const coordinator = makeCoordinator()
+    io.readNote.mockResolvedValue('---\ntitle: Paper\n---\n# T1\n')
+    coordinator.content(managed('---\ntitle: Paper\n---\n# Paper\n'), 'load')
+    coordinator.content(managed('---\ntitle: Paper\n---\n# T1\n'), 'saved')
+    coordinator.settle()
+    await coordinator.settled()
+
+    // The note after the first leg: `title:` moved, `Paper` kept as an alias.
+    const afterFirst = '---\ntitle: T1\naliases:\n  - Paper\n---\n# T2\n'
+    io.readNote.mockResolvedValue(afterFirst)
+    coordinator.content(managed('---\ntitle: T1\naliases:\n  - Paper\n---\n# T2\n'), 'saved')
+    coordinator.settle()
+    await coordinator.settled()
+
+    const lastWrite = io.writeNote.mock.calls.findLast((call) => call[0] === PATH)
+    expect(lastWrite?.[1]).toContain('- Paper')
+    expect(lastWrite?.[1]).toContain('- T1')
   })
 
   it('a blocked destination skips the rewrite but still places the old-title alias', async () => {

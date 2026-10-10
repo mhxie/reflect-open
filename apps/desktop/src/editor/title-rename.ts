@@ -60,6 +60,11 @@ export interface TitleRenameTracker {
   saved(content: string): void
   /** A settle point (blur, teardown): fire any pending rename now. */
   settle(): void
+  /**
+   * A fired rename did not land and the note still has the title `from`:
+   * the next save renames from it again, toward whatever its H1 says then.
+   */
+  restore(from: string): void
   dispose(): void
 }
 
@@ -161,15 +166,18 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     }
     // The H1 is what the person edits, so an edit to it renames the note even
     // under a frontmatter `title:`, which the rename then rewrites to match.
-    // Saved content never changes frontmatter on its own, so while the note
-    // has an H1 only the H1 is followed.
-    const to =
-      current.heading === null
+    // Only an H1 the note had when loaded counts: one typed under a `title:`
+    // may be a section heading. Saved content never changes frontmatter on
+    // its own, so while the note has an H1 only the H1 is followed.
+    const headingEdited =
+      current.heading !== null &&
+      baselineTitles.heading !== null &&
+      foldKey(current.heading) !== foldKey(baselineTitles.heading)
+    const to = headingEdited
+      ? current.heading
+      : current.heading === null
         ? current.title
-        : baselineTitles.heading === null ||
-            foldKey(current.heading) !== foldKey(baselineTitles.heading)
-          ? current.heading
-          : baselineTitles.title
+        : baselineTitles.title
     if (foldKey(to) === foldKey(baselineTitles.title)) {
       // Same key: resolution is case-insensitive, so a pure case tweak is not
       // a rename — and a reverted edit clears whatever was pending.
@@ -188,11 +196,15 @@ export function createTitleRenameTracker(options: TitleRenameTrackerOptions): Ti
     }
   }
 
+  function restore(from: string): void {
+    if (baselineTitles !== null) baselineTitles = { title: from, heading: from }
+  }
+
   function dispose(): void {
     disposed = true
     cancelTimer()
     pending = null
   }
 
-  return { baseline, saved, settle, dispose }
+  return { baseline, saved, settle, restore, dispose }
 }
