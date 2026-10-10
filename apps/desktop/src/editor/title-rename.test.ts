@@ -97,10 +97,10 @@ describe('createTitleRenameTracker', () => {
     ])
   })
 
-  it('derives the title from frontmatter when present', () => {
+  it('derives the title from frontmatter when the note has no H1', () => {
     const { tracker, renames } = tracked()
-    tracker.baseline('---\ntitle: Real Title\n---\n# Heading\n')
-    tracker.saved('---\ntitle: Renamed\n---\n# Heading\n')
+    tracker.baseline('---\ntitle: Real Title\n---\nBody\n')
+    tracker.saved('---\ntitle: Renamed\n---\nBody\n')
     tracker.settle()
     expect(renames[0]).toMatchObject({ from: 'Real Title', to: 'Renamed' })
   })
@@ -120,16 +120,36 @@ describe('createTitleRenameTracker', () => {
     expect(renames).toEqual([{ from: 'A', to: 'B', previousAutoAlias: null }])
   })
 
-  it('an H1 edit under an explicit frontmatter title is not a rename', () => {
-    // `title:` is authoritative (deriveTitle precedence, same as the indexer):
-    // the heading isn't the title, links resolve against `title:` regardless,
-    // so there is nothing to rewrite.
+  it('an H1 edit under a frontmatter title renames from that title to the H1', () => {
+    // Links resolve against `title:`, so that is what they are rewritten from;
+    // the rename then writes the new H1 into `title:`.
     const { tracker, renames } = tracked()
-    tracker.baseline('---\ntitle: Canonical\n---\n# Old Heading\n')
+    tracker.baseline('---\ntitle: Canonical\n---\n# Canonical\n')
     tracker.saved('---\ntitle: Canonical\n---\n# New Heading\n')
+    vi.advanceTimersByTime(5000)
+    expect(renames).toEqual([{ from: 'Canonical', to: 'New Heading', previousAutoAlias: null }])
+    // Once `title:` follows, the next save is the settled state, not a rename back.
+    tracker.saved('---\ntitle: New Heading\n---\n# New Heading\n')
     vi.advanceTimersByTime(10_000)
-    tracker.settle()
+    expect(renames).toHaveLength(1)
+  })
+
+  it('an H1 that already differs from the frontmatter title renames only when edited', () => {
+    const { tracker, renames } = tracked()
+    tracker.baseline('---\ntitle: Paper Title\n---\n# Reading notes\n')
+    // Editing the body leaves the title alone.
+    tracker.saved('---\ntitle: Paper Title\n---\n# Reading notes\n\nMore.\n')
+    vi.advanceTimersByTime(10_000)
     expect(renames).toEqual([])
+    // A case-only touch to the H1 is not an edit of it.
+    tracker.saved('---\ntitle: Paper Title\n---\n# Reading Notes\n')
+    vi.advanceTimersByTime(10_000)
+    expect(renames).toEqual([])
+    tracker.saved('---\ntitle: Paper Title\n---\n# Notes on the paper\n')
+    tracker.settle()
+    expect(renames).toEqual([
+      { from: 'Paper Title', to: 'Notes on the paper', previousAutoAlias: null },
+    ])
   })
 
   it('the first authored title on an untitled note is a birth (from: null), settled like a rename', () => {

@@ -4,6 +4,7 @@ import {
   type OutlineHeading,
   type OutlineSourceDoc,
 } from './outline-headings.ts'
+import { headingMatcher } from '../note-embed-excerpt.ts'
 
 /** Bubbling DOM event a reader dispatches when its outline entries change. */
 export const OUTLINE_EMBED_CHANGE = 'reflect-outline-embed-change'
@@ -68,6 +69,29 @@ export function readEmbeddedOutlineBlocks(body: string, headingOffset: number): 
     }
   })
   return blocks
+}
+
+/**
+ * A `#Heading` reader's outline, matching its preview: the source title, then that section
+ * through its subsections and nested embeds. Other fragments keep every block.
+ */
+export function sectionOutlineBlocks(
+  blocks: readonly SourceBlock[],
+  fragment: string | null,
+): readonly SourceBlock[] {
+  const matches = headingMatcher(fragment)
+  const start =
+    matches === null ? -1 : blocks.findIndex((b) => b.kind === 'heading' && matches(b.heading.text))
+  const section = blocks[start]
+  if (section?.kind !== 'heading') return blocks
+  const rest = blocks.slice(start + 1)
+  const stop = rest.findIndex(
+    (b) => b.kind === 'heading' && b.heading.level <= section.heading.level,
+  )
+  const title = blocks.find((b) => b.kind === 'heading')
+  const head =
+    title?.kind === 'heading' && title !== section && title.heading.level < section.heading.level
+  return [...(head ? [title] : []), section, ...(stop === -1 ? rest : rest.slice(0, stop))]
 }
 
 /** The `ordinal`th rendered heading owned by `root`, not by a nested reader. */

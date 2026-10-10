@@ -146,8 +146,8 @@ later surface), daily notes (untouched in every respect — `daily/YYYY-MM-DD.md
    never existed; the 07b birth/rename distinction already encodes this). Case-
    or punctuation-only retitles often produce the same slug — same-slug means
    no move, by design. The 07b parked-conflict gate applies unchanged. Notes
-   with an explicit frontmatter `title:` keep 07b's recorded edge (no editor
-   rename surface yet) and therefore never move from the editor.
+   with an explicit frontmatter `title:` rename and move when their H1 is
+   edited (07b).
 
 8. ~~**Migration** (17c)~~ — removed; see the delivery split note. Notes
    born before slugs landed convert through step 7's birth/rename path the
@@ -223,8 +223,8 @@ later surface), daily notes (untouched in every respect — `daily/YYYY-MM-DD.md
   notes. Accepted: rare, surfaced by the existing conflict UI, recoverable from
   git history; `id:` divergence makes a future auto-split tractable. Recorded
   trade-off, not an oversight.
-- **Filename drift** remains possible where renames can't fire (explicit
-  `title:` frontmatter notes, refused moves, external retitles). Drift is
+- **Filename drift** remains possible where renames can't fire (refused
+  moves, external retitles). Drift is
   cosmetic by design — resolution never reads filenames — but ⌘K's title
   display must never fall back to the basename for a drifted note (it shows the
   indexed title; the ULID-garbage failure mode from the non-daily-notes review

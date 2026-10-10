@@ -52,10 +52,10 @@ link UX (create-from-unresolved largely subsumes the failure case).
   stream chrome, not content). Filenames stay put in the first wave — the
   title lives in content, and `note_move` filename-sync joins later in
   [Plan 17](17-readable-filenames.md).
-  Two recorded edges: a note with an explicit frontmatter `title:` cannot be
-  renamed from the editor yet (the heading isn't its title — `title:` is
-  authoritative and the editor doesn't edit frontmatter; a title field editor
-  is a later surface), and a rename pending while a conflict is parked stays
+  A note with an explicit frontmatter `title:` renames when its H1 is edited:
+  links are rewritten from the `title:` value, which the rename then sets to
+  the new H1 (with the alias), even when another note holds the old title.
+  Recorded edge: a rename pending while a conflict is parked stays
   pending until the conflict resolves ("keep mine" re-arms it, "load theirs"
   cancels it) — rewriting the graph for a title the user may discard would
   strand every rewritten link.

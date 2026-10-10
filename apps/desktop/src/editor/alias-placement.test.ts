@@ -124,6 +124,29 @@ describe('placeOldTitleAlias', () => {
     expect(io.writeNote).toHaveBeenCalledTimes(1)
   })
 
+  it('moves a declared frontmatter title to the new title with the alias', async () => {
+    const session = fakeSession({ content: '---\ntitle: Old Title\n---\n# New Title\n' })
+    docs.openSession.mockReturnValue(session)
+
+    await placeOldTitleAlias(PATH, RENAME, 7)
+
+    expect(session.updateFrontmatter).toHaveBeenCalledWith({
+      aliases: ['Old Title'],
+      title: 'New Title',
+    })
+  })
+
+  it('still moves a declared title when the alias is skipped, on disk too', async () => {
+    io.readNote.mockResolvedValue('---\ntitle: Old Title\n---\n# New Title\n')
+
+    const added = await placeOldTitleAlias(PATH, RENAME, 7, { alias: false })
+
+    expect(added).toEqual([])
+    const written = io.writeNote.mock.calls[0]?.[1] as string
+    expect(written).toContain('title: New Title')
+    expect(written).not.toContain('aliases')
+  })
+
   it('writes nothing when the alias would be redundant', async () => {
     // A case-only retitle: the old title folds to the new one, so keeping it
     // as an alias would alias a note to its own title.

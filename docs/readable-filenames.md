@@ -177,9 +177,8 @@ tests in `src-tauri/src/git/tests.rs`):
 - **No md-style link rewriting** — `[text](notes/foo.md)` links (an
   external-tool shape; Reflect writes wiki links) dangle after a rename. The
   `links` table records `kind = 'md'`, so a later pass can find them.
-- A note with explicit frontmatter `title:` can't be retitled from the editor
-  (the H1 isn't its title), so its filename only changes via external renames
-  — which heal by id like any other.
+- A note with explicit frontmatter `title:` is retitled by editing its H1:
+  the rename sets `title:` to the new H1, so the file follows like any other.
 
 ## Code map
 

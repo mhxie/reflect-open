@@ -12,6 +12,7 @@ import type { NoteEmbedPayload, NoteEmbedRenderer } from '@meowdown/react'
 import { ArrowUpRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { splitFrontmatter, splitWikiLinkTarget } from '@reflect/core'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
+import { noteEmbedExcerpt } from '@/editor/note-embed-excerpt.ts'
 import { NoteEmbedBody } from '@/editor/note-embed-body.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import { useNoteEmbedNavigation } from '@/editor/use-note-embed-navigation.ts'
@@ -23,6 +24,7 @@ import {
   embeddedHeadingElement,
   notifyOutlineEmbed,
   readEmbeddedOutlineBlocks,
+  sectionOutlineBlocks,
   registerOutlineEmbed,
 } from '@/editor/outline/outline-embeds.ts'
 
@@ -102,8 +104,12 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
   const label = display || target
   const body = source.kind === 'ready' ? splitFrontmatter(source.source).body : ''
   const outlineBlocks = useMemo(
-    () => readEmbeddedOutlineBlocks(body, ancestors.length),
-    [body, ancestors.length],
+    () =>
+      sectionOutlineBlocks(
+        readEmbeddedOutlineBlocks(body, ancestors.length),
+        splitWikiLinkTarget(target).fragment,
+      ),
+    [body, ancestors.length, target],
   )
   const requestOutlineReveal = useCallback((ordinal: number) => {
     outlineReveal.current = ordinal
@@ -148,7 +154,10 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
     }
     notifyOutlineEmbed(root)
   }, [expanded, source])
-  const preview = body.slice(0, 4096)
+  const preview = useMemo(
+    () => noteEmbedExcerpt(body, splitWikiLinkTarget(target).fragment),
+    [body, target],
+  )
   const previewAttachments = useMemo(
     () => createNoteAttachments(generation, path),
     [generation, path],
