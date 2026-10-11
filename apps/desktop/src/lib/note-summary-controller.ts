@@ -4,8 +4,10 @@ import {
   isSilentStop,
   reconcileNoteSummaries,
   subscribeIndexApplied,
+  type AiProviderId,
   type AiProvidersState,
   type AiSummaryMode,
+  type NoteSummaryConsent,
   type ReconcileStop,
 } from '@reflect/core'
 import { openSession } from '@/editor/open-documents.ts'
@@ -23,7 +25,8 @@ import { providerFetch } from '@/lib/provider-fetch.ts'
  * for the session, so a refusal is never re-sent until the note changes. A
  * missing model (`config`) holds the loop off for {@link CONFIG_BACKOFF_MS}
  * unless the providers or the mode change, so saves don't re-probe a local
- * server that isn't running.
+ * server that isn't running. A cloud pass the user hasn't agreed to yet asks
+ * through `onConsentNeeded`, once per controller and provider.
  */
 export interface NoteSummaryController {
   /** Attach the triggers and run the launch pass. */
@@ -39,6 +42,10 @@ export interface NoteSummaryControllerOptions {
   getProviders: () => AiProvidersState
   /** The `aiSummaries` setting, read at the start of every pass. */
   getMode: () => AiSummaryMode
+  /** `aiSummariesCloudConfirmed` when the controller was built; a change rebuilds it. */
+  cloudConfirmed: boolean
+  /** A cloud pass is waiting for the user's go-ahead; called once per controller and provider. */
+  onConsentNeeded: (consent: NoteSummaryConsent) => void
 }
 
 /** How long a `config` stop (no usable model) holds the loop off. */
@@ -57,6 +64,8 @@ export function createNoteSummaryController(
   /** A `config` stop: the snapshot it held for, and until when. */
   let blocked: { snapshot: string; until: number } | null = null
   let loggedStop: string | null = null
+  /** The provider the open ask names; a pass naming another asks again. */
+  let askedProvider: AiProviderId | null = null
 
   function snapshot(): string {
     return JSON.stringify([options.getMode(), options.getProviders()])
@@ -101,6 +110,7 @@ export function createNoteSummaryController(
     const outcome = await reconcileNoteSummaries({
       providers: options.getProviders(),
       mode,
+      cloudConfirmed: options.cloudConfirmed,
       generation: options.generation,
       fetchFn: providerFetch,
       isStale: passIsStale,
@@ -109,6 +119,10 @@ export function createNoteSummaryController(
     })
     for (const key of outcome.settled) settled.add(key)
     surfaceStop(outcome.stopped)
+    if (outcome.consent !== null && outcome.consent.provider !== askedProvider && !isStale()) {
+      askedProvider = outcome.consent.provider
+      options.onConsentNeeded(outcome.consent)
+    }
     if (outcome.nextDueAt !== null && !isStale()) {
       scheduleAt(outcome.nextDueAt)
     }

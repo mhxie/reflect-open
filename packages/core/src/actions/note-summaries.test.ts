@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
 import { MockLanguageModelV3 } from '@reflect/modules/ai/test'
 import type { LanguageModelV3CallOptions, LanguageModelV3Usage } from '@ai-sdk/provider'
 import { languageModelFor } from '../ai/language-model.ts'
+import type { AiProvidersState } from '../ai/provider-config.ts'
 import { aiApiKeyForConfig } from '../ai/secrets.ts'
 import { readNoteLocal, writeNoteKeepingModified } from '../graph/commands.ts'
+import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import {
   applyProjection,
   connectIndex,
@@ -77,6 +79,7 @@ function input(overrides: Partial<ReconcileNoteSummariesInput> = {}): ReconcileN
   return {
     providers: { providers: [LOCAL, CLOUD], defaultProviderId: CLOUD.id },
     mode: 'local',
+    cloudConfirmed: true,
     generation: 1,
     now: () => NOW,
     ...overrides,
@@ -86,6 +89,14 @@ function input(overrides: Partial<ReconcileNoteSummariesInput> = {}): ReconcileN
 function writtenPaths(): string[] {
   return vi.mocked(writeNoteKeepingModified).mock.calls.map(([path]) => path)
 }
+
+function readPaths(): string[] {
+  return vi.mocked(readNoteLocal).mock.calls.map(([path]) => path)
+}
+
+afterEach(() => {
+  setLocalOnlyFolders([])
+})
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -133,6 +144,8 @@ describe('reconcileNoteSummaries', () => {
     expect(outcome.summarized).toBe(2)
     expect(writtenPaths().sort()).toEqual([PRIVATE, PUBLIC])
     expect(outcome.nextDueAt).toBe(NOW - 1_000 + SUMMARY_QUIET_MS)
+    // An on-device read is not sharing: it never waits on the sharing pause.
+    expect(readNoteLocal).toHaveBeenCalledWith(PUBLIC, 1, { sharing: false })
 
     const [path, written, generation, expected] = vi.mocked(writeNoteKeepingModified).mock.calls[0]!
     expect(generation).toBe(1)
@@ -154,18 +167,71 @@ describe('reconcileNoteSummaries', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('falls back to the cloud small model for public notes only, when opted in', async () => {
-    vi.mocked(verifyOnDeviceServer).mockResolvedValue({ kind: 'refused', reason: 'down' })
-    const outcome = await reconcileNoteSummaries(input({ mode: 'local-and-cloud' }))
+  it('summarizes public notes only with the cloud small model in cloud mode', async () => {
+    const outcome = await reconcileNoteSummaries(input({ mode: 'cloud' }))
 
     expect(outcome.summarized).toBe(1)
     expect(writtenPaths()).toEqual([PUBLIC])
-    expect(readNoteLocal).not.toHaveBeenCalledWith(PRIVATE, 1)
-    const cloudTarget = vi.mocked(languageModelFor).mock.calls[0]![0]
-    expect(cloudTarget).toMatchObject({
-      kind: 'cloud',
-      config: { provider: 'anthropic', model: 'claude-haiku-4-5' },
-    })
+    // The private note is never read, and the read bound for the cloud
+    // refuses while sharing is paused.
+    expect(readPaths()).toEqual([PUBLIC])
+    expect(readNoteLocal).toHaveBeenCalledWith(PUBLIC, 1, { sharing: true })
+    // The configured on-device model is `local` mode's: cloud mode never probes it.
+    expect(verifyOnDeviceServer).not.toHaveBeenCalled()
+    expect(vi.mocked(languageModelFor).mock.calls.map(([target]) => target)).toEqual([
+      expect.objectContaining({
+        kind: 'cloud',
+        config: expect.objectContaining({ provider: 'anthropic', model: 'claude-haiku-4-5' }),
+      }),
+    ])
+  })
+
+  it('asks before the first cloud note leaves, counting from the index alone', async () => {
+    const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConfirmed: false }))
+    // PUBLIC and RECENT wait; the private note is not counted.
+    expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic' })
+    expect(asked.stopped).toBeNull()
+    expect(readNoteLocal).not.toHaveBeenCalled()
+    expect(writeNoteKeepingModified).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
+
+    // On this Mac sends nothing, so it needs no go-ahead.
+    const local = await reconcileNoteSummaries(input({ cloudConfirmed: false }))
+    expect(local.consent).toBeNull()
+    expect(local.summarized).toBe(2)
+  })
+
+  it('never reads device-only or local-only notes in cloud mode', async () => {
+    const deviceOnly = 'notes/device-only.md'
+    const localOnly = 'vault/local-only.md'
+    addNote(deviceOnly, LONG_BODY)
+    addNote(localOnly, LONG_BODY)
+    // Pin each exclusion to its own mechanism, not the private flag.
+    database.exec(`UPDATE notes SET has_device_only_content = 1 WHERE path = '${deviceOnly}'`)
+    database.exec(`UPDATE notes SET is_private = 0 WHERE path = '${localOnly}'`)
+    setLocalOnlyFolders(['vault'])
+
+    const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConfirmed: false }))
+    expect(asked.consent?.notes).toBe(2)
+    const outcome = await reconcileNoteSummaries(input({ mode: 'cloud' }))
+    expect(outcome.summarized).toBe(1)
+    expect(readPaths()).toEqual([PUBLIC])
+  })
+
+  it('stops in cloud mode without a cloud provider', async () => {
+    const cases: [AiProvidersState, RegExp][] = [
+      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, /choose On this Mac/],
+      // A cloud entry behind an on-device default is not picked silently.
+      [{ providers: [LOCAL, CLOUD], defaultProviderId: LOCAL.id }, /choose On this Mac/],
+      [{ providers: [], defaultProviderId: null }, /No AI provider/],
+    ]
+    for (const [providers, message] of cases) {
+      const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', providers }))
+      expect(outcome.stopped).toEqual({ reason: 'config', message: expect.stringMatching(message) })
+    }
+    expect(verifyOnDeviceServer).not.toHaveBeenCalled()
+    expect(writeNoteKeepingModified).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
   })
 
   it('never overwrites an aiSummary key of another shape', async () => {

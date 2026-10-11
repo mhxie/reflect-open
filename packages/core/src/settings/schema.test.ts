@@ -16,7 +16,8 @@ describe('settingsSchema', () => {
       semanticSearchEnabled: false,
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
-      aiSummaries: 'local',
+      aiSummaries: 'cloud',
+      aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',
@@ -138,9 +139,15 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ describeAssets: true }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: false }).describeAssets).toBe(false)
     expect(settingsSchema.parse({ aiSummaries: 'off' }).aiSummaries).toBe('off')
-    expect(settingsSchema.parse({ aiSummaries: 'local-and-cloud' }).aiSummaries).toBe(
-      'local-and-cloud',
-    )
+    // A `local` saved by this build, which always writes the confirmed flag, is a choice.
+    expect(
+      settingsSchema.parse({ aiSummaries: 'local', aiSummariesCloudConfirmed: false }).aiSummaries,
+    ).toBe('local')
+    // Earlier builds' on-device-then-cloud mode is the cloud engine now.
+    expect(settingsSchema.parse({ aiSummaries: 'local-and-cloud' }).aiSummaries).toBe('cloud')
+    expect(
+      settingsSchema.parse({ aiSummariesCloudConfirmed: true }).aiSummariesCloudConfirmed,
+    ).toBe(true)
     expect(settingsSchema.parse({ transcriptionEngine: 'local' }).transcriptionEngine).toBe('local')
     expect(settingsSchema.parse({ transcriptionEngine: 'whisper' }).transcriptionEngine).toBe(
       'cloud',
@@ -331,7 +338,8 @@ describe('settingsSchema', () => {
     // back to the default rather than failing the whole settings load.
     expect(settingsSchema.parse({ describeAssets: 'yes' }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: 0 }).describeAssets).toBe(true)
-    expect(settingsSchema.parse({ aiSummaries: 'cloud' }).aiSummaries).toBe('local')
+    expect(settingsSchema.parse({ aiSummaries: 'sideways' }).aiSummaries).toBe('cloud')
+    expect(settingsSchema.parse({ aiSummaries: 1 }).aiSummaries).toBe('cloud')
     expect(settingsSchema.parse({ transcriptionFormat: 'yes' }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionFormat: 0 }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionPrompt: 42 }).transcriptionPrompt).toBe('')
@@ -355,6 +363,28 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ mobileStorage: 'dropbox' }).mobileStorage).toBe('local')
     expect(settingsSchema.parse({ mobileStorage: 1 }).mobileStorage).toBe('local')
     expect(settingsSchema.parse({ chatSystemPrompt: 42 }).chatSystemPrompt).toBe('')
+  })
+
+  it('reads an earlier build’s saved on-device default as the cloud default', () => {
+    // Earlier builds saved every key, so `local` without the confirmed flag is
+    // usually their old default; with no attested on-device model it never
+    // summarized anything.
+    const upgraded = settingsSchema.parse({ aiSummaries: 'local' })
+    expect(upgraded.aiSummaries).toBe('cloud')
+    // Nothing is agreed on the user's behalf: the cloud engine still asks first.
+    expect(upgraded.aiSummariesCloudConfirmed).toBe(false)
+
+    const attested = {
+      id: 'ollama',
+      provider: 'openai-compatible',
+      model: 'llama:latest',
+      baseUrl: 'http://localhost:11434/v1',
+      keyHint: '',
+      onDevice: { model: 'llama:latest', baseUrl: 'http://localhost:11434/v1', server: 'ollama' },
+    }
+    expect(
+      settingsSchema.parse({ aiSummaries: 'local', aiProviders: [attested] }).aiSummaries,
+    ).toBe('local')
   })
 
   it('carries the Rust-owned localOnlyFolders key through verbatim, typos included', () => {
@@ -382,7 +412,8 @@ describe('settingsSchema', () => {
       semanticSearchEnabled: false,
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
-      aiSummaries: 'local',
+      aiSummaries: 'cloud',
+      aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',

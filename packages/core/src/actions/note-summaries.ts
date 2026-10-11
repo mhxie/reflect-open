@@ -20,11 +20,12 @@ import { cloudSafeNoteContent, isPrivateNote } from '../privacy/checkers.ts'
 import {
   modelTarget,
   pickOnDeviceProvider,
+  resolveOnDeviceTarget,
   verifyModelTarget,
   type CloudTarget,
   type VerifiedOnDeviceTarget,
 } from '../privacy/on-device.ts'
-import type { AiSummaryMode } from '../settings/schema.ts'
+import type { AiProviderConfig, AiProviderId, AiSummaryMode } from '../settings/schema.ts'
 import type { ReconcileStop } from './audio-memo.ts'
 
 /**
@@ -33,11 +34,12 @@ import type { ReconcileStop } from './audio-memo.ts'
  * model for a one-sentence summary and record it with the hash of the body it
  * describes. The index then shows it as the note's row preview.
  *
- * Local first: an attested on-device model, verified once per pass, takes
- * every note. Only in `local-and-cloud` mode, and only when no on-device
- * model answers, does a public note go to the default provider's small model,
- * through the `cloudSafeNoteContent` gate on the note as read now. A private
- * note is summarized on-device or not at all.
+ * One engine per pass, as for audio-memo transcription. In `cloud` mode a
+ * public note goes to the default provider's small model, through the
+ * `cloudSafeNoteContent` gate on the note as read now, and a private note
+ * keeps its snippet; until the user agrees once (`cloudConfirmed`), a cloud
+ * pass only counts what it would send. In `local` mode an attested on-device
+ * model, verified once per pass, takes every note, private ones included.
  *
  * The write keeps the file's modification time (a summary is not an edit) and
  * is checked against the bytes that were summarized: a note edited meanwhile
@@ -61,8 +63,14 @@ const MAX_SUMMARIES_PER_PASS = 10
 export interface ReconcileNoteSummariesInput {
   /** The configured-providers state, read once per pass. */
   providers: AiProvidersState
-  /** Which models may summarize (`off` makes the pass a no-op). */
+  /** Which engine summarizes (`off` makes the pass a no-op). */
   mode: AiSummaryMode
+  /**
+   * Whether the user has agreed to send public notes to the AI provider
+   * (`aiSummariesCloudConfirmed`). Until then a `cloud` pass reads nothing and
+   * reports what it would send as {@link ReconcileNoteSummariesOutcome.consent}.
+   */
+  cloudConfirmed: boolean
   /** `GraphInfo.generation` — pins every read and write to the issuing graph. */
   generation: number
   /** Host transport for cloud calls (the Tauri HTTP plugin's fetch). */
@@ -99,6 +107,17 @@ export interface ReconcileNoteSummariesOutcome {
   nextDueAt: number | null
   /** Why the pass ended early, or `null` when it handled every eligible note. */
   stopped: ReconcileStop | null
+  /**
+   * A `cloud` pass the user has not agreed to yet: how many public notes are
+   * waiting and which provider would receive them. Nothing was read.
+   */
+  consent: NoteSummaryConsent | null
+}
+
+/** What a `cloud` pass asks the user before its first note leaves the Mac. */
+export interface NoteSummaryConsent {
+  notes: number
+  provider: AiProviderId
 }
 
 /** The `settled` key for a note: its path at one indexed revision. */
@@ -106,64 +125,86 @@ export function noteSummaryKey(path: string, fileHash: string): string {
   return `${fileHash}:${path}`
 }
 
-/** The models a pass may use, resolved once: on-device first, cloud as the opt-in fallback. */
-interface SummaryModels {
-  local: TargetModel<VerifiedOnDeviceTarget> | null
-  cloud: TargetModel<CloudTarget> | null
-  /** Why neither model is usable, when that is the case. */
-  unavailable: string
-}
+/** The engine a pass summarizes with, resolved once for its mode. */
+type SummaryEngine =
+  | { kind: 'local'; model: TargetModel<VerifiedOnDeviceTarget> }
+  | { kind: 'cloud'; model: TargetModel<CloudTarget>; provider: AiProviderId }
 
-async function resolveLocalModel(
+type ResolvedEngine = SummaryEngine | { kind: 'unavailable'; message: string }
+
+async function resolveLocalEngine(
   providers: AiProvidersState,
   fetchFn: typeof fetch,
-): Promise<TargetModel<VerifiedOnDeviceTarget> | string> {
+): Promise<ResolvedEngine> {
   const target = pickOnDeviceProvider(providers)
   if (target === null) {
-    return 'No on-device model is configured for note summaries.'
+    return { kind: 'unavailable', message: 'No on-device model is configured for note summaries.' }
   }
   const apiKey = await aiApiKeyForConfig(target.config)
   if (apiKey === null) {
-    return 'The on-device model is missing its API key.'
+    return { kind: 'unavailable', message: 'The on-device model is missing its API key.' }
   }
   try {
     const verified = await verifyModelTarget(target, apiKey)
     if (verified.kind !== 'on-device') {
-      return 'The on-device model could not be verified.'
+      return { kind: 'unavailable', message: 'The on-device model could not be verified.' }
     }
-    return await languageModelFor(verified, apiKey, fetchFn)
+    return { kind: 'local', model: await languageModelFor(verified, apiKey, fetchFn) }
   } catch (cause) {
-    return errorMessage(cause)
+    return { kind: 'unavailable', message: errorMessage(cause) }
   }
 }
 
-async function resolveCloudModel(
+/**
+ * The provider config `cloud` mode summarizes with: the default provider's
+ * small model, `'on-device'` when that runs on this Mac (`local` mode's to
+ * use, verified first, so never reached here unverified), or `null` when no
+ * provider offers one. The Settings hint and the go-ahead ask read it too.
+ */
+export function cloudSummaryConfig(
   providers: AiProvidersState,
-  fetchFn: typeof fetch,
-): Promise<TargetModel<CloudTarget> | null> {
+): AiProviderConfig | 'on-device' | null {
   const config = pickSmallModelConfig(providers)
   if (config === null) {
     return null
   }
-  const target = modelTarget(config)
-  // An on-device entry was the local model's to answer for, verified; it is
-  // never reached here unverified.
-  if (target.kind !== 'cloud') {
-    return null
-  }
-  const apiKey = await aiApiKeyForConfig(config)
-  return apiKey === null ? null : await languageModelFor(target, apiKey, fetchFn)
+  return resolveOnDeviceTarget(config) === null ? config : 'on-device'
 }
 
-async function resolveModels(input: ReconcileNoteSummariesInput): Promise<SummaryModels> {
-  const fetchFn = input.fetchFn ?? fetch
-  const local = await resolveLocalModel(input.providers, fetchFn)
-  if (typeof local !== 'string') {
-    return { local, cloud: null, unavailable: '' }
+async function resolveCloudEngine(
+  providers: AiProvidersState,
+  fetchFn: typeof fetch,
+): Promise<ResolvedEngine> {
+  const config = cloudSummaryConfig(providers)
+  if (config === null) {
+    return {
+      kind: 'unavailable',
+      message: 'No AI provider with a small model is configured for note summaries.',
+    }
   }
-  const cloud =
-    input.mode === 'local-and-cloud' ? await resolveCloudModel(input.providers, fetchFn) : null
-  return { local: null, cloud, unavailable: local }
+  const target = config === 'on-device' ? null : modelTarget(config)
+  if (target?.kind !== 'cloud') {
+    return {
+      kind: 'unavailable',
+      message: 'The default AI provider is on-device; choose On this Mac for note summaries.',
+    }
+  }
+  const apiKey = await aiApiKeyForConfig(target.config)
+  if (apiKey === null) {
+    return { kind: 'unavailable', message: 'The AI provider is missing its API key.' }
+  }
+  return {
+    kind: 'cloud',
+    model: await languageModelFor(target, apiKey, fetchFn),
+    provider: target.config.provider,
+  }
+}
+
+async function resolveEngine(input: ReconcileNoteSummariesInput): Promise<ResolvedEngine> {
+  const fetchFn = input.fetchFn ?? fetch
+  return input.mode === 'local'
+    ? await resolveLocalEngine(input.providers, fetchFn)
+    : await resolveCloudEngine(input.providers, fetchFn)
 }
 
 interface SummaryCandidate {
@@ -202,13 +243,16 @@ const STALE: ReconcileStop = { reason: 'stale', message: 'the graph session ende
 
 async function summarizeCandidate(
   candidate: SummaryCandidate,
-  models: SummaryModels,
+  engine: SummaryEngine,
   input: ReconcileNoteSummariesInput,
 ): Promise<NoteStep> {
   const isStale = input.isStale ?? (() => false)
   let read: Awaited<ReturnType<typeof readNoteLocal>>
   try {
-    read = await readNoteLocal(candidate.path, input.generation)
+    // Bytes bound for the cloud refuse while sharing is paused.
+    read = await readNoteLocal(candidate.path, input.generation, {
+      sharing: engine.kind === 'cloud',
+    })
   } catch (cause) {
     if (isAppError(cause) && cause.kind === 'notFound') {
       return { kind: 'settled' } // deleted since it was indexed
@@ -234,9 +278,9 @@ async function summarizeCandidate(
 
   const content = body.slice(0, MAX_SUMMARY_SOURCE_CHARS)
   let text: string | null
-  if (models.local !== null) {
-    text = await summarizeNote({ model: models.local, note: { title: parsed.title, content } })
-  } else if (models.cloud !== null) {
+  if (engine.kind === 'local') {
+    text = await summarizeNote({ model: engine.model, note: { title: parsed.title, content } })
+  } else {
     // The live flag, re-read with the source: the index can lag a note
     // marked private moments ago.
     if (parsed.frontmatter.private || isPrivateNote(candidate)) {
@@ -250,9 +294,7 @@ async function summarizeCandidate(
       content,
       truncated: content.length < body.length,
     })
-    text = await summarizeNote({ model: models.cloud, note })
-  } else {
-    return { kind: 'settled' }
+    text = await summarizeNote({ model: engine.model, note })
   }
   if (isStale()) {
     return { kind: 'stop', stopped: STALE }
@@ -289,6 +331,7 @@ export async function reconcileNoteSummaries(
     remaining: false,
     nextDueAt: null,
     stopped: null,
+    consent: null,
   }
   if (input.mode === 'off') {
     return outcome
@@ -306,7 +349,7 @@ export async function reconcileNoteSummaries(
       return outcome
     }
 
-    let models: SummaryModels | null = null
+    let engine: SummaryEngine | null = null
     let handled = 0
     for (const candidate of candidates) {
       if (isStale()) {
@@ -320,14 +363,22 @@ export async function reconcileNoteSummaries(
         outcome.nextDueAt = Math.min(outcome.nextDueAt ?? retryAt, retryAt)
         continue
       }
-      models ??= await resolveModels(input)
-      if (models.local === null && models.cloud === null) {
-        outcome.stopped = { reason: 'config', message: models.unavailable }
-        return outcome
+      if (engine === null) {
+        const resolved = await resolveEngine(input)
+        if (resolved.kind === 'unavailable') {
+          outcome.stopped = { reason: 'config', message: resolved.message }
+          return outcome
+        }
+        if (resolved.kind === 'cloud' && !input.cloudConfirmed) {
+          // Counted from the index alone: nothing is read before the user agrees.
+          const notes = candidates.filter((waiting) => !isPrivateNote(waiting)).length
+          outcome.consent = notes > 0 ? { notes, provider: resolved.provider } : null
+          return outcome
+        }
+        engine = resolved
       }
-      // Without an on-device model a private note has nowhere to go; it is
-      // not even read.
-      if (models.local === null && isPrivateNote(candidate)) {
+      // In `cloud` mode a private note has nowhere to go; it is not even read.
+      if (engine.kind === 'cloud' && isPrivateNote(candidate)) {
         continue
       }
       if (handled >= MAX_SUMMARIES_PER_PASS) {
@@ -335,7 +386,7 @@ export async function reconcileNoteSummaries(
         return outcome
       }
       handled += 1
-      const step = await summarizeCandidate(candidate, models, input)
+      const step = await summarizeCandidate(candidate, engine, input)
       if (step.kind === 'stop') {
         outcome.stopped = step.stopped
         return outcome

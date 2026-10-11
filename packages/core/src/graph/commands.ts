@@ -186,9 +186,20 @@ export type LocalNoteRead = z.infer<typeof localNoteReadSchema>
  * while the OS materializes it on demand, and a whole-graph pass over an
  * evicted iCloud graph becomes thousands of serial blocking downloads.
  * Missing files still reject with `notFound`, exactly like {@link readNote}.
+ * `sharing` marks bytes about to leave the device (the cloud summary engine):
+ * the read then refuses while sharing is paused, as {@link readNoteShareable}
+ * does.
  */
-export async function readNoteLocal(path: string, generation?: number): Promise<LocalNoteRead> {
-  return await call('note_read_local', { path, generation }, localNoteReadSchema)
+export async function readNoteLocal(
+  path: string,
+  generation?: number,
+  options: { sharing?: boolean } = {},
+): Promise<LocalNoteRead> {
+  return await call(
+    'note_read_local',
+    { path, generation, sharing: options.sharing },
+    localNoteReadSchema,
+  )
 }
 
 const shareableNoteReadSchema = z.discriminatedUnion('kind', [

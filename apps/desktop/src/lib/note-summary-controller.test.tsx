@@ -39,19 +39,24 @@ function outcome(
     remaining: false,
     nextDueAt: null,
     stopped: null,
+    consent: null,
     ...overrides,
   }
 }
 
 let onApplied: ((changes: readonly FileChange[], generation: number) => void) | null = null
 let controller: NoteSummaryController | null = null
-let mode: AiSummaryMode = 'local'
+let mode: AiSummaryMode = 'cloud'
+let cloudConfirmed = true
+const onConsentNeeded = vi.fn()
 
 function create(): NoteSummaryController {
   controller = createNoteSummaryController({
     generation: GEN,
     getProviders: () => PROVIDERS,
     getMode: () => mode,
+    cloudConfirmed,
+    onConsentNeeded,
   })
   return controller
 }
@@ -73,7 +78,9 @@ beforeEach(() => {
       onApplied = null
     }
   })
-  mode = 'local'
+  mode = 'cloud'
+  cloudConfirmed = true
+  onConsentNeeded.mockReset()
 })
 
 afterEach(() => {
@@ -87,7 +94,11 @@ describe('createNoteSummaryController', () => {
     create().start()
     await settle()
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(1)
-    expect(reconcileNoteSummaries.mock.calls[0]![0]).toMatchObject({ generation: GEN, mode })
+    expect(reconcileNoteSummaries.mock.calls[0]![0]).toMatchObject({
+      generation: GEN,
+      mode,
+      cloudConfirmed,
+    })
 
     onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
     await settle()
@@ -130,7 +141,7 @@ describe('createNoteSummaryController', () => {
     await settle()
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(1)
 
-    mode = 'local-and-cloud'
+    mode = 'local'
     onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
     await settle()
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(2)
@@ -141,5 +152,28 @@ describe('createNoteSummaryController', () => {
     create().start()
     await settle()
     expect(reconcileNoteSummaries).not.toHaveBeenCalled()
+  })
+
+  it('asks once per controller while a cloud pass waits for the go-ahead', async () => {
+    cloudConfirmed = false
+    const consent = { notes: 12, provider: 'openai' as const }
+    reconcileNoteSummaries.mockResolvedValue(outcome({ pending: 12, consent }))
+    create().start()
+    await settle()
+    expect(reconcileNoteSummaries.mock.calls[0]![0]).toMatchObject({ cloudConfirmed: false })
+    expect(onConsentNeeded).toHaveBeenCalledWith(consent)
+
+    onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
+    await settle()
+    expect(reconcileNoteSummaries).toHaveBeenCalledTimes(2)
+    expect(onConsentNeeded).toHaveBeenCalledTimes(1)
+
+    // A new default provider asks again, naming it.
+    const anthropic = { notes: 12, provider: 'anthropic' as const }
+    reconcileNoteSummaries.mockResolvedValue(outcome({ pending: 12, consent: anthropic }))
+    onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
+    await settle()
+    expect(onConsentNeeded).toHaveBeenLastCalledWith(anthropic)
+    expect(onConsentNeeded).toHaveBeenCalledTimes(2)
   })
 })
