@@ -17,6 +17,7 @@ describe('settingsSchema', () => {
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
       aiSummaries: 'cloud',
+      aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',
@@ -138,9 +139,15 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ describeAssets: true }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: false }).describeAssets).toBe(false)
     expect(settingsSchema.parse({ aiSummaries: 'off' }).aiSummaries).toBe('off')
-    expect(settingsSchema.parse({ aiSummaries: 'local' }).aiSummaries).toBe('local')
+    // A `local` saved by this build, which always writes the confirmed flag, is a choice.
+    expect(
+      settingsSchema.parse({ aiSummaries: 'local', aiSummariesCloudConfirmed: false }).aiSummaries,
+    ).toBe('local')
     // Earlier builds' on-device-then-cloud mode is the cloud engine now.
     expect(settingsSchema.parse({ aiSummaries: 'local-and-cloud' }).aiSummaries).toBe('cloud')
+    expect(
+      settingsSchema.parse({ aiSummariesCloudConfirmed: true }).aiSummariesCloudConfirmed,
+    ).toBe(true)
     expect(settingsSchema.parse({ transcriptionEngine: 'local' }).transcriptionEngine).toBe('local')
     expect(settingsSchema.parse({ transcriptionEngine: 'whisper' }).transcriptionEngine).toBe(
       'cloud',
@@ -358,6 +365,28 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ chatSystemPrompt: 42 }).chatSystemPrompt).toBe('')
   })
 
+  it('reads an earlier build’s saved on-device default as the cloud default', () => {
+    // Earlier builds saved every key, so `local` without the confirmed flag is
+    // usually their old default; with no attested on-device model it never
+    // summarized anything.
+    const upgraded = settingsSchema.parse({ aiSummaries: 'local' })
+    expect(upgraded.aiSummaries).toBe('cloud')
+    // Nothing is agreed on the user's behalf: the cloud engine still asks first.
+    expect(upgraded.aiSummariesCloudConfirmed).toBe(false)
+
+    const attested = {
+      id: 'ollama',
+      provider: 'openai-compatible',
+      model: 'llama:latest',
+      baseUrl: 'http://localhost:11434/v1',
+      keyHint: '',
+      onDevice: { model: 'llama:latest', baseUrl: 'http://localhost:11434/v1', server: 'ollama' },
+    }
+    expect(
+      settingsSchema.parse({ aiSummaries: 'local', aiProviders: [attested] }).aiSummaries,
+    ).toBe('local')
+  })
+
   it('carries the Rust-owned localOnlyFolders key through verbatim, typos included', () => {
     // Git exclusion and privacy hang off this key: a load-then-save must
     // never normalize it, drop an entry, or default it away.
@@ -384,6 +413,7 @@ describe('settingsSchema', () => {
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
       aiSummaries: 'cloud',
+      aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',
