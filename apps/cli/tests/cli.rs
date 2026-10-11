@@ -571,6 +571,35 @@ fn search_keeps_tokenizer_normalized_title_matches_above_body_matches() {
 }
 
 #[test]
+fn search_ranks_a_title_match_by_bm25_only_when_its_body_matched_too() {
+    let fixture = graph();
+    // Both titles hold the term at a word start; only the older note's body does.
+    fixture.write_note("notes/Big Alpha.md", "nothing to see here\n");
+    fixture.write_note("notes/Old Alpha.md", "alpha and alpha again\n");
+    fixture.build_index();
+    let conn = rusqlite::Connection::open(fixture.root().join(".reflect/index.sqlite")).unwrap();
+    conn.execute(
+        "UPDATE notes SET mtime = 200 WHERE path = 'notes/Big Alpha.md'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE notes SET mtime = 100 WHERE path = 'notes/Old Alpha.md'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let value = json(&reflect(&fixture, &["search", "alpha", "--json"]));
+    assert_eq!(value["results"][0]["path"], "notes/Old Alpha.md");
+    assert_eq!(value["results"][0]["snippet"], "alpha and alpha again\n");
+    assert!(value["results"][0]["score"].as_f64().unwrap() < 0.0);
+    assert_eq!(value["results"][1]["path"], "notes/Big Alpha.md");
+    assert_eq!(value["results"][1]["snippet"], "");
+    assert_eq!(value["results"][1]["score"].as_f64().unwrap(), 0.0);
+}
+
+#[test]
 fn search_breaks_title_prefix_ties_by_pinned_then_recency() {
     let fixture = graph();
     fixture.write_note(

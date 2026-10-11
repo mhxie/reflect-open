@@ -251,11 +251,13 @@ const RANK_EXPR: &str = "bm25(search_fts, 0, 10.0, 1.0, 1.0)";
 /// materialized CTE runs MATCH once because SQLite rejects it beneath a plain
 /// OR and otherwise flattens a derived FTS join into one scan per note. The
 /// LEFT JOIN admits title-recall-only rows. Matches already covered by title
-/// recall keep an empty snippet and score `0`, while tokenizer-normalized title
-/// matches retain their lexical rank. A CJK run matched through the `cjk`
-/// column gets a marked body fragment ([`cjk_snippet_sql`]). The caller
-/// re-checks each hit's file frontmatter (the index row may lag a
-/// just-flagged note).
+/// recall score `0` unless the body also matched, while tokenizer-normalized
+/// title matches retain their lexical rank. Ranking reads bm25 alone; the
+/// snippets come from a second MATCH over just the ranked page, since
+/// `snippet()` re-tokenizes a whole body and a short prefix matches most of a
+/// graph. A CJK run matched through the `cjk` column gets a marked body
+/// fragment ([`cjk_snippet_sql`]). The caller re-checks each hit's file
+/// frontmatter (the index row may lag a just-flagged note).
 pub fn search_index(
     conn: &Connection,
     match_expr: &str,
@@ -281,36 +283,47 @@ pub fn search_index(
         cjk_snippet_sql(&format!("?{}", limit_parameter + 1))
     };
     let public_predicate = public_note_predicate(conn)?;
+    // `body_rank` is non-zero exactly when the body holds a match: the case
+    // where `snippet()` over the body would carry a highlight.
     let mut statement = conn.prepare(&format!(
         "WITH lexical AS MATERIALIZED (
-           SELECT path, snippet(search_fts, 2, char(1), char(2), '…', 12) AS snippet,
-                  {cjk_snippet} AS cjk_snippet, {RANK_EXPR} AS rank
+           SELECT path, {RANK_EXPR} AS rank, bm25(search_fts, 0, 0.0, 1.0, 0.0) AS body_rank
            FROM search_fts
            WHERE search_fts MATCH ?1
-         )
-         SELECT notes.path, notes.title, coalesce(lexical.snippet, ''),
-                CASE
-                  WHEN instr(coalesce(lexical.snippet, ''), char(1)) > 0
-                    OR NOT ({title_term_predicate})
-                    THEN coalesce(lexical.rank, 0)
-                  ELSE 0
-                END AS effective_rank,
-                lexical.cjk_snippet
-         FROM notes
-         LEFT JOIN lexical ON lexical.path = notes.path
-         WHERE (lexical.path IS NOT NULL OR ({title_term_predicate}))
-           AND {public_predicate} AND notes.kind != 'template'
-         ORDER BY CASE
+         ),
+         ranked AS MATERIALIZED (
+           SELECT notes.path, notes.title, notes.is_pinned, notes.mtime,
+                  CASE
                     WHEN notes.title_key = ?2 THEN 0
                     WHEN instr(notes.title_key, ?2) = 1 THEN 1
                     WHEN {title_term_predicate} THEN 2
                     ELSE 3
-                  END,
-                  effective_rank,
-                  notes.is_pinned DESC,
-                  notes.mtime DESC,
-                  notes.path ASC
-         LIMIT ?{limit_parameter}",
+                  END AS title_rank,
+                  CASE
+                    WHEN lexical.body_rank != 0 OR NOT ({title_term_predicate})
+                      THEN coalesce(lexical.rank, 0)
+                    ELSE 0
+                  END AS effective_rank
+           FROM notes
+           LEFT JOIN lexical ON lexical.path = notes.path
+           WHERE (lexical.path IS NOT NULL OR ({title_term_predicate}))
+             AND {public_predicate} AND notes.kind != 'template'
+           ORDER BY title_rank, effective_rank, notes.is_pinned DESC, notes.mtime DESC,
+                    notes.path ASC
+           LIMIT ?{limit_parameter}
+         ),
+         display AS MATERIALIZED (
+           SELECT path, snippet(search_fts, 2, char(1), char(2), '…', 12) AS snippet,
+                  {cjk_snippet} AS cjk_snippet
+           FROM search_fts
+           WHERE search_fts MATCH ?1 AND path IN (SELECT path FROM ranked)
+         )
+         SELECT ranked.path, ranked.title, coalesce(display.snippet, ''), ranked.effective_rank,
+                display.cjk_snippet
+         FROM ranked
+         LEFT JOIN display ON display.path = ranked.path
+         ORDER BY ranked.title_rank, ranked.effective_rank, ranked.is_pinned DESC,
+                  ranked.mtime DESC, ranked.path ASC",
     ))?;
     let mut parameters = vec![Value::Text(match_expr.to_owned()), Value::Text(title_key)];
     parameters.extend(needles.into_iter().map(Value::Text));

@@ -528,3 +528,41 @@ describe('searchWithFilters over a CJK clause', () => {
     expect(hit).toMatchObject({ path: 'notes/kyoto.md', snippet: null })
   })
 })
+
+describe('searchWithFilters ranking over a real index', () => {
+  beforeEach(() => {
+    const database = openMigratedIndex()
+    // Both titles hold the term at a word start (the all-terms title tier);
+    // only the older note's body holds it too.
+    const notes = [
+      { path: 'notes/new.md', title: 'Big Alpha', body: 'nothing to see here', mtime: 2000 },
+      { path: 'notes/old.md', title: 'Old Alpha', body: 'alpha and alpha again', mtime: 1000 },
+      { path: 'notes/body.md', title: 'Gamma', body: 'one alpha', mtime: 3000 },
+    ]
+    for (const note of notes) {
+      applyProjection(database, project(note.path, `# ${note.title}\n${note.body}\n`, note.mtime))
+      database
+        .prepare('INSERT INTO search_fts(path, title, body, cjk) VALUES (?, ?, ?, ?)')
+        .run(note.path, note.title, note.body, '')
+    }
+    connectIndex(database)
+  })
+
+  it('keeps bm25 for a title match whose body matched too, and 0 for a title-only match', async () => {
+    const hits = await searchWithFilters(parseSearchQuery('alpha'))
+    // The body match's negative bm25 sorts ahead of the title-only row's 0,
+    // although the title-only note is newer.
+    expect(hits.map((hit) => [hit.path, hit.snippet])).toEqual([
+      ['notes/old.md', '\u{1}alpha\u{2} and \u{1}alpha\u{2} again'],
+      ['notes/new.md', null],
+      ['notes/body.md', 'one \u{1}alpha\u{2}'],
+    ])
+  })
+
+  it('snippets exactly the ranked page under a limit', async () => {
+    const hits = await searchWithFilters(parseSearchQuery('alpha'), { limit: 1 })
+    expect(hits.map((hit) => [hit.path, hit.snippet, hit.highlightedTitle])).toEqual([
+      ['notes/old.md', '\u{1}alpha\u{2} and \u{1}alpha\u{2} again', 'Old \u{1}Alpha\u{2}'],
+    ])
+  })
+})
