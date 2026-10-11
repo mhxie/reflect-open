@@ -203,6 +203,13 @@ describe('parseNote — tasks', () => {
     })
   })
 
+  it('projects tasks from a body with bare carriage-return line endings', () => {
+    const note = parse('Intro\r+ [ ] later\r')
+    expect(note.tasks).toEqual([
+      { astPath: [1], markdown: 'later', breadcrumbs: [], checked: false, dueDate: null },
+    ])
+  })
+
   it('addresses tasks relative to the body, past frontmatter', () => {
     const note = parse('---\nid: abc\n---\n\nIntro\n\n+ [ ] later\n')
     expect(note.tasks.map((task) => task.astPath)).toEqual([[1]])
