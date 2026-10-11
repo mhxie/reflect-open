@@ -85,10 +85,7 @@ export interface TranscribeLocallyInput {
   /** Pins the read to the issuing graph session. */
   generation: number
   model: LocalTranscriptionModelId
-  /**
-   * Spoken languages as ISO 639 codes: none detects any language per
-   * recording, one is always used, several limit detection to themselves.
-   */
+  /** Spoken languages as ISO 639 codes; empty detects any. */
   languages: readonly string[]
   /** User transcription hint, used as the model's initial prompt. */
   prompt: string

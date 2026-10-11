@@ -287,12 +287,9 @@ fn thread_count() -> i32 {
         .unwrap_or(4)
 }
 
-/// The language whisper decodes `samples` in, from the user's `languages`
-/// (ISO 639 codes). Listing none that whisper knows leaves detection to it
-/// (`None`), and one is forced. Among several, whisper's own detection picks
-/// the likeliest listed one: a short reply it would hear as Japanese or
-/// Russian still comes out in one of the user's languages. This costs what
-/// whisper's built-in detection does, one encoder pass over the first window.
+/// The language whisper decodes `samples` in: `None` (detect any) when it
+/// knows none of `languages`, else the only one, else the listed one its own
+/// detection rates likeliest (the same encoder pass its auto-detect costs).
 fn decode_language(
     state: &mut WhisperState,
     samples: &[f32],

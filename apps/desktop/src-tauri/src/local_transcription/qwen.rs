@@ -303,21 +303,39 @@ fn known_languages(languages: &[String]) -> Vec<&'static str> {
     known
 }
 
-/// The listed language a region heard as an unlisted one is transcribed in
-/// again: `fallback` when it is listed, else the first; `None` when nothing
-/// is listed.
-fn retry_language(listed: &[&'static str], fallback: Option<&str>) -> Option<&'static str> {
-    fallback
-        .and_then(|code| listed.iter().copied().find(|listed| *listed == code))
-        .or_else(|| listed.first().copied())
+/// What to do with a region transcribed in the language Qwen3-ASR detected.
+#[derive(Debug, PartialEq)]
+enum Decision {
+    /// Keep it; the listed language it is in, if any.
+    Keep(Option<&'static str>),
+    /// Transcribe it again in this listed language.
+    Retry(&'static str),
 }
 
-/// Which of `listed` the language Qwen3-ASR reported (`Chinese`, or `None`
-/// over silence) names.
-fn reported_language(reported: &str, listed: &[&'static str]) -> Option<&'static str> {
-    listed.iter().copied().find(|code| {
-        language_name(code).is_some_and(|name| name.eq_ignore_ascii_case(reported.trim()))
-    })
+/// Keep a region reported (`Chinese`, or `None` over silence) in a listed
+/// language, one with no text, or any when nothing is listed; retry the rest
+/// in `fallback` when it is listed, else in the first listed language.
+fn decide(
+    listed: &[&'static str],
+    reported: &str,
+    has_text: bool,
+    fallback: Option<&str>,
+) -> Decision {
+    let reported = reported.trim();
+    if let Some(language) = listed
+        .iter()
+        .copied()
+        .find(|code| language_name(code).is_some_and(|name| name.eq_ignore_ascii_case(reported)))
+    {
+        return Decision::Keep(Some(language));
+    }
+    let retry = fallback
+        .and_then(|code| listed.iter().copied().find(|listed| *listed == code))
+        .or_else(|| listed.first().copied());
+    match retry {
+        Some(target) if has_text => Decision::Retry(target),
+        _ => Decision::Keep(None),
+    }
 }
 
 /// Speech runs about 3 to 8 characters a second; a region that produced far
@@ -388,12 +406,9 @@ pub struct QwenTranscript {
 pub struct QwenEngine(Arc<Mutex<Slot>>);
 
 impl QwenEngine {
-    /// Transcribe one region of 16 kHz mono audio in one of `languages` (ISO
-    /// 639 codes). Listing none that Qwen3-ASR knows lets it detect any
-    /// language, and one is forced. With several it identifies the language
-    /// first, and a region it hears as an unlisted one is transcribed again
-    /// as `fallback` when that is listed, else as the first listed language:
-    /// unlike whisper, it reports no likelihoods to choose by. Blocking.
+    /// Transcribe one region of 16 kHz mono audio in one of `languages`; with
+    /// several listed, a region heard as another language is transcribed
+    /// again ([`decide`]). Blocking.
     pub fn transcribe(
         &self,
         dir: &Path,
@@ -410,18 +425,12 @@ impl QwenEngine {
             [only] => forced(&inference, samples, only)?,
             _ => {
                 let (detected, reported) = detect(&inference, samples)?;
-                if let Some(language) = reported_language(&reported, &listed) {
-                    QwenTranscript {
-                        language: Some(language),
+                match decide(&listed, &reported, !detected.text.is_empty(), fallback) {
+                    Decision::Keep(language) => QwenTranscript {
+                        language,
                         ..detected
-                    }
-                } else if let Some(target) =
-                    retry_language(&listed, fallback).filter(|_| !detected.text.is_empty())
-                {
-                    forced(&inference, samples, target)?
-                } else {
-                    // Any language is allowed, or nothing was said.
-                    detected
+                    },
+                    Decision::Retry(target) => forced(&inference, samples, target)?,
                 }
             }
         };
@@ -533,26 +542,33 @@ mod tests {
     }
 
     #[test]
-    fn matches_reported_languages_against_the_listed_ones() {
+    fn keeps_listed_or_silent_regions_and_retries_the_rest() {
         let languages: Vec<String> = ["en", "xx", "zh", "en"]
             .iter()
             .map(|code| code.to_string())
             .collect();
         let listed = known_languages(&languages);
         assert_eq!(listed, vec!["en", "zh"]);
-        assert_eq!(reported_language("Chinese", &listed), Some("zh"));
-        assert_eq!(reported_language(" english ", &listed), Some("en"));
-        assert_eq!(reported_language("Japanese", &listed), None);
-        assert_eq!(reported_language("None", &listed), None);
-        assert_eq!(reported_language("Chinese", &[]), None);
-    }
-
-    #[test]
-    fn retries_in_the_language_heard_last_else_the_first_listed() {
-        assert_eq!(retry_language(&["en", "zh"], Some("zh")), Some("zh"));
-        assert_eq!(retry_language(&["en", "zh"], Some("ja")), Some("en"));
-        assert_eq!(retry_language(&["en", "zh"], None), Some("en"));
-        assert_eq!(retry_language(&[], Some("zh")), None);
+        let keep = |language| Decision::Keep(language);
+        assert_eq!(decide(&listed, "Chinese", true, None), keep(Some("zh")));
+        assert_eq!(
+            decide(&listed, " english ", true, Some("zh")),
+            keep(Some("en"))
+        );
+        assert_eq!(
+            decide(&listed, "Japanese", true, Some("zh")),
+            Decision::Retry("zh")
+        );
+        assert_eq!(
+            decide(&listed, "Japanese", true, Some("ja")),
+            Decision::Retry("en")
+        );
+        assert_eq!(
+            decide(&listed, "Japanese", true, None),
+            Decision::Retry("en")
+        );
+        assert_eq!(decide(&listed, "None", false, Some("zh")), keep(None));
+        assert_eq!(decide(&[], "Japanese", true, None), keep(None));
     }
 
     #[test]

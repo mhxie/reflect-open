@@ -49,9 +49,8 @@ export interface TranscriptionRequest {
   /** User transcription hint, if any. */
   prompt?: string | undefined
   /**
-   * Spoken languages as ISO 639 codes; absent or empty lets the provider
-   * detect any. OpenAI takes a single language only, so with several it
-   * detects on its own; Gemini is told the set.
+   * Spoken languages as ISO 639 codes; empty detects any. OpenAI takes only
+   * one (several detect any there); Gemini is told the set.
    */
   languages?: readonly string[] | undefined
   /**

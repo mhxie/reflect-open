@@ -375,10 +375,9 @@ export function normalizeTranscriptionLanguages(entries: readonly unknown[]): st
 }
 
 /**
- * The languages spoken in audio memos and recordings, as ISO 639 codes sent
- * to either engine. None (the default) detects any language per recording;
- * one is always used; several limit detection to themselves, so speech the
- * model would hear as a third language comes out in a listed one instead.
+ * The languages spoken in audio memos and recordings, as ISO 639 codes. None
+ * (the default) detects any language; one is always used; several limit
+ * detection to themselves, except on OpenAI, which takes only one.
  */
 export const transcriptionLanguagesSchema = z
   .array(z.unknown())
@@ -750,10 +749,8 @@ export const aiPromptsSchema = z
   )
 
 /**
- * Seed `transcriptionLanguages` from the single `transcriptionLanguage` (a
- * code, or empty to detect) that earlier versions wrote, so a chosen language
- * survives the upgrade. The old key stays, like any unknown key: every build
- * shares this document, and an older one still reads its own.
+ * Seed `transcriptionLanguages` from the legacy `transcriptionLanguage`, which
+ * stays for older builds; see docs/contributing/adding-a-setting.md.
  */
 function upgradeLegacySettings(input: unknown): unknown {
   if (

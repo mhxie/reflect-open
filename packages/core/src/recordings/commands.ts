@@ -84,10 +84,7 @@ export interface TranscribeRecordingInput {
   sessionId: string
   /** An on-device model id (`LocalTranscriptionModelId`). */
   model: string
-  /**
-   * Spoken languages as ISO 639 codes: none detects any per stretch of
-   * speech, one is always used, several limit detection to themselves.
-   */
+  /** Spoken languages as ISO 639 codes; empty detects any per stretch of speech. */
   languages: readonly string[]
   /** Vocabulary hint: the user's helper text plus a meeting's names. */
   prompt: string

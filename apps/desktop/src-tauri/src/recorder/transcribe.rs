@@ -37,8 +37,7 @@ pub struct ModelChoice<'a> {
     pub model: &'a LocalModel,
     /// The settings id, recorded with the cached transcript.
     pub id: &'a str,
-    /// The spoken languages (ISO 639): none detects any per region, one is
-    /// forced, several limit each region's detection to themselves.
+    /// Spoken languages, see `local_transcription::spoken_languages`.
     pub languages: &'a [String],
     /// Vocabulary hint: the user's prompt plus the meeting's names, if any.
     pub prompt: Option<&'a str>,

@@ -31,11 +31,7 @@ const LANGUAGE_OPTIONS: LanguageOption[] = [
   { value: 'hi', label: 'Hindi' },
 ]
 
-/**
- * The spoken languages, shared by the cloud and on-device engines: none
- * detects any language, one is always used, and several limit detection to
- * themselves.
- */
+/** The spoken languages, shared by the cloud and on-device engines. */
 export function TranscriptionLanguagesField(): ReactElement {
   const { settings, updateSettingsWith } = useSettings()
   const selected = settings.transcriptionLanguages
@@ -66,8 +62,8 @@ export function TranscriptionLanguagesField(): ReactElement {
       legend="Spoken languages"
       description={
         settings.transcriptionEngine === 'cloud'
-          ? 'Transcripts stay in the languages you pick (OpenAI enforces only a single pick). Pick none to detect any language.'
-          : 'Transcripts stay in the languages you pick. Pick none to detect any language.'
+          ? 'Transcripts stay in the languages you pick (with several picked, OpenAI still detects any language). Pick none to detect any language.'
+          : 'Transcripts stay in the languages you pick (a Whisper audio memo uses one of them throughout). Pick none to detect any language.'
       }
     >
       <div className="mt-3">
