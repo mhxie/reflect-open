@@ -42,7 +42,8 @@ here as the fork grows; the [README](../README.md#this-fork) remains a short ove
   without leaving the host note.
 - **All Notes:** sort by title or last updated, filter by attachment type, and
   read a one-sentence AI summary in place of the opening text of long notes
-  (Settings → All Notes → AI summaries; on-device only by default).
+  (Settings → All Notes → AI summaries; your AI provider by default, private
+  notes never sent).
 - **Attachment browsing:** an attachment library with image/PDF previews,
   type/tag filters, and source-note links; image/PDF galleries in All Notes.
 - **Wiki browser:** browse entries by topic and language, with claim and

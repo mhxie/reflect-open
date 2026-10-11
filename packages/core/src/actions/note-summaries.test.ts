@@ -154,18 +154,33 @@ describe('reconcileNoteSummaries', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('falls back to the cloud small model for public notes only, when opted in', async () => {
-    vi.mocked(verifyOnDeviceServer).mockResolvedValue({ kind: 'refused', reason: 'down' })
-    const outcome = await reconcileNoteSummaries(input({ mode: 'local-and-cloud' }))
+  it('summarizes public notes only with the cloud small model in cloud mode', async () => {
+    const outcome = await reconcileNoteSummaries(input({ mode: 'cloud' }))
 
     expect(outcome.summarized).toBe(1)
     expect(writtenPaths()).toEqual([PUBLIC])
     expect(readNoteLocal).not.toHaveBeenCalledWith(PRIVATE, 1)
-    const cloudTarget = vi.mocked(languageModelFor).mock.calls[0]![0]
-    expect(cloudTarget).toMatchObject({
-      kind: 'cloud',
-      config: { provider: 'anthropic', model: 'claude-haiku-4-5' },
-    })
+    // The configured on-device model is `local` mode's: cloud mode never probes it.
+    expect(verifyOnDeviceServer).not.toHaveBeenCalled()
+    expect(vi.mocked(languageModelFor).mock.calls.map(([target]) => target)).toEqual([
+      expect.objectContaining({
+        kind: 'cloud',
+        config: expect.objectContaining({ provider: 'anthropic', model: 'claude-haiku-4-5' }),
+      }),
+    ])
+  })
+
+  it('stops in cloud mode without a cloud provider', async () => {
+    for (const providers of [
+      { providers: [LOCAL], defaultProviderId: LOCAL.id },
+      { providers: [], defaultProviderId: null },
+    ]) {
+      const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', providers }))
+      expect(outcome.stopped?.reason).toBe('config')
+    }
+    expect(verifyOnDeviceServer).not.toHaveBeenCalled()
+    expect(writeNoteKeepingModified).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
   })
 
   it('never overwrites an aiSummary key of another shape', async () => {

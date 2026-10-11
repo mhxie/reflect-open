@@ -3,6 +3,8 @@ import {
   AI_SUMMARY_MODES,
   aiSummariesSchema,
   pickOnDeviceProvider,
+  pickSmallModelConfig,
+  resolveOnDeviceTarget,
   type AiSummaryMode,
 } from '@reflect/core'
 import {
@@ -16,33 +18,40 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 
 const MODE_LABELS: Readonly<Record<AiSummaryMode, string>> = {
+  cloud: 'Cloud provider',
+  local: 'On this Mac',
   off: 'Off · show the opening text',
-  local: 'On-device model only',
-  'local-and-cloud': 'On-device model, then AI provider',
 }
 
 const MODE_DESCRIPTIONS: Readonly<Record<AiSummaryMode, string>> = {
-  off: 'Long notes show their opening text in the All Notes list.',
+  cloud:
+    'Long notes are summarized by your AI provider’s small model. Private notes are never sent and keep their opening text.',
   local:
-    'Long notes are summarized by your on-device model, private notes included. Nothing leaves this Mac.',
-  'local-and-cloud':
-    'Long notes are summarized by your on-device model. When none answers, public notes go to your AI provider; private notes are never sent.',
+    'Long notes are summarized by an on-device model from AI providers, private notes included. Nothing leaves this Mac.',
+  off: 'Long notes show their opening text in the All Notes list.',
 }
 
 const MODE_OPTIONS = AI_SUMMARY_MODES.map((value) => ({ value, label: MODE_LABELS[value] }))
 
 /**
- * Settings → All Notes → AI summaries: who may write the one-sentence summary
- * a long note shows in the All Notes list (its `aiSummary` frontmatter).
+ * Settings → All Notes → AI summaries: which engine writes the one-sentence
+ * summary a long note shows in the All Notes list (its `aiSummary`
+ * frontmatter). As for audio-memo transcription, the default is the AI
+ * provider set up in Reflect; a model on this Mac is the opt-in.
  */
 export function AiSummariesField(): ReactElement {
   const { settings, updateSettings } = useSettings()
-  const hasOnDeviceModel =
-    pickOnDeviceProvider({
-      providers: settings.aiProviders,
-      defaultProviderId: settings.defaultAiProviderId,
-    }) !== null
+  const providers = {
+    providers: settings.aiProviders,
+    defaultProviderId: settings.defaultAiProviderId,
+  }
   const mode = settings.aiSummaries
+  // The model each engine summarizes with, picked as the summary pass picks it.
+  const cloudModel = pickSmallModelConfig(providers)
+  const hasModel =
+    mode === 'local'
+      ? pickOnDeviceProvider(providers) !== null
+      : cloudModel !== null && resolveOnDeviceTarget(cloudModel) === null
 
   return (
     <SettingsField legend="AI summaries" description={MODE_DESCRIPTIONS[mode]}>
@@ -64,11 +73,11 @@ export function AiSummariesField(): ReactElement {
           </SelectContent>
         </Select>
       </div>
-      {mode !== 'off' && !hasOnDeviceModel ? (
+      {mode !== 'off' && !hasModel ? (
         <p className="mt-2 text-xs text-text-muted">
           {mode === 'local'
             ? 'Add an on-device model in AI providers to start summarizing.'
-            : 'No on-device model is set up, so public notes are summarized by your AI provider.'}
+            : 'Add an OpenAI, Anthropic, or Google provider in AI providers to start summarizing.'}
         </p>
       ) : null}
     </SettingsField>

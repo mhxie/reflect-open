@@ -300,19 +300,24 @@ export const semanticModelSchema = z.enum(SEMANTIC_MODEL_IDS).catch(DEFAULT_SEMA
  */
 export const describeAssetsSchema = z.boolean().catch(true)
 
-/** Who may write a note's AI summary (see {@link aiSummariesSchema}). */
-export const AI_SUMMARY_MODES = ['off', 'local', 'local-and-cloud'] as const
+/** Which engine writes a note's AI summary (see {@link aiSummariesSchema}). */
+export const AI_SUMMARY_MODES = ['cloud', 'local', 'off'] as const
 export type AiSummaryMode = (typeof AI_SUMMARY_MODES)[number]
 
 /**
  * AI note summaries — the All Notes row preview of a long note, written into
- * its `aiSummary` frontmatter. `local` (the default) summarizes only with an
- * attested on-device model, so nothing leaves the Mac; `local-and-cloud` falls
- * back to the default provider's small model for public notes when no
- * on-device model answers (private notes stay on-device-only either way);
- * `off` writes nothing and keeps the plain snippet.
+ * its `aiSummary` frontmatter. The engines mirror audio-memo transcription:
+ * `cloud` (the default) summarizes public notes with the default provider's
+ * small model, so it runs once a provider is set up in Reflect, and never
+ * sends a private note; `local` summarizes only with an attested on-device
+ * model, private notes included, so nothing leaves the Mac; `off` writes
+ * nothing and keeps the plain snippet. The `local-and-cloud` mode of earlier
+ * builds reads as `cloud`.
  */
-export const aiSummariesSchema = z.enum(AI_SUMMARY_MODES).catch('local')
+export const aiSummariesSchema = z
+  .enum([...AI_SUMMARY_MODES, 'local-and-cloud'])
+  .transform((mode) => (mode === 'local-and-cloud' ? 'cloud' : mode))
+  .catch('cloud')
 
 /**
  * Whether audio-memo transcripts receive a best-effort AI formatting pass

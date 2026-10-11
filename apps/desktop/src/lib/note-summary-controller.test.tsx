@@ -45,7 +45,7 @@ function outcome(
 
 let onApplied: ((changes: readonly FileChange[], generation: number) => void) | null = null
 let controller: NoteSummaryController | null = null
-let mode: AiSummaryMode = 'local'
+let mode: AiSummaryMode = 'cloud'
 
 function create(): NoteSummaryController {
   controller = createNoteSummaryController({
@@ -73,7 +73,7 @@ beforeEach(() => {
       onApplied = null
     }
   })
-  mode = 'local'
+  mode = 'cloud'
 })
 
 afterEach(() => {
@@ -130,7 +130,7 @@ describe('createNoteSummaryController', () => {
     await settle()
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(1)
 
-    mode = 'local-and-cloud'
+    mode = 'local'
     onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
     await settle()
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(2)

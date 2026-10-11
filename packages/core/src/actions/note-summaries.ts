@@ -33,11 +33,11 @@ import type { ReconcileStop } from './audio-memo.ts'
  * model for a one-sentence summary and record it with the hash of the body it
  * describes. The index then shows it as the note's row preview.
  *
- * Local first: an attested on-device model, verified once per pass, takes
- * every note. Only in `local-and-cloud` mode, and only when no on-device
- * model answers, does a public note go to the default provider's small model,
- * through the `cloudSafeNoteContent` gate on the note as read now. A private
- * note is summarized on-device or not at all.
+ * One engine per pass, as for audio-memo transcription. In `cloud` mode a
+ * public note goes to the default provider's small model, through the
+ * `cloudSafeNoteContent` gate on the note as read now, and a private note
+ * keeps its snippet. In `local` mode an attested on-device model, verified
+ * once per pass, takes every note, private ones included.
  *
  * The write keeps the file's modification time (a summary is not an edit) and
  * is checked against the bytes that were summarized: a note edited meanwhile
@@ -61,7 +61,7 @@ const MAX_SUMMARIES_PER_PASS = 10
 export interface ReconcileNoteSummariesInput {
   /** The configured-providers state, read once per pass. */
   providers: AiProvidersState
-  /** Which models may summarize (`off` makes the pass a no-op). */
+  /** Which engine summarizes (`off` makes the pass a no-op). */
   mode: AiSummaryMode
   /** `GraphInfo.generation` — pins every read and write to the issuing graph. */
   generation: number
@@ -106,7 +106,7 @@ export function noteSummaryKey(path: string, fileHash: string): string {
   return `${fileHash}:${path}`
 }
 
-/** The models a pass may use, resolved once: on-device first, cloud as the opt-in fallback. */
+/** The model a pass uses, resolved once for its mode: at most one is set. */
 interface SummaryModels {
   local: TargetModel<VerifiedOnDeviceTarget> | null
   cloud: TargetModel<CloudTarget> | null
@@ -140,30 +140,36 @@ async function resolveLocalModel(
 async function resolveCloudModel(
   providers: AiProvidersState,
   fetchFn: typeof fetch,
-): Promise<TargetModel<CloudTarget> | null> {
+): Promise<TargetModel<CloudTarget> | string> {
   const config = pickSmallModelConfig(providers)
   if (config === null) {
-    return null
+    return 'No AI provider with a small model is configured for note summaries.'
   }
   const target = modelTarget(config)
-  // An on-device entry was the local model's to answer for, verified; it is
-  // never reached here unverified.
+  // An on-device entry is `local` mode's to use, verified first; it is never
+  // reached here unverified.
   if (target.kind !== 'cloud') {
-    return null
+    return 'The default AI provider is on-device; choose On this Mac for note summaries.'
   }
   const apiKey = await aiApiKeyForConfig(config)
-  return apiKey === null ? null : await languageModelFor(target, apiKey, fetchFn)
+  if (apiKey === null) {
+    return 'The AI provider is missing its API key.'
+  }
+  return await languageModelFor(target, apiKey, fetchFn)
 }
 
 async function resolveModels(input: ReconcileNoteSummariesInput): Promise<SummaryModels> {
   const fetchFn = input.fetchFn ?? fetch
-  const local = await resolveLocalModel(input.providers, fetchFn)
-  if (typeof local !== 'string') {
-    return { local, cloud: null, unavailable: '' }
+  if (input.mode === 'local') {
+    const local = await resolveLocalModel(input.providers, fetchFn)
+    return typeof local === 'string'
+      ? { local: null, cloud: null, unavailable: local }
+      : { local, cloud: null, unavailable: '' }
   }
-  const cloud =
-    input.mode === 'local-and-cloud' ? await resolveCloudModel(input.providers, fetchFn) : null
-  return { local: null, cloud, unavailable: local }
+  const cloud = await resolveCloudModel(input.providers, fetchFn)
+  return typeof cloud === 'string'
+    ? { local: null, cloud: null, unavailable: cloud }
+    : { local: null, cloud, unavailable: '' }
 }
 
 interface SummaryCandidate {
@@ -325,8 +331,7 @@ export async function reconcileNoteSummaries(
         outcome.stopped = { reason: 'config', message: models.unavailable }
         return outcome
       }
-      // Without an on-device model a private note has nowhere to go; it is
-      // not even read.
+      // In `cloud` mode a private note has nowhere to go; it is not even read.
       if (models.local === null && isPrivateNote(candidate)) {
         continue
       }
