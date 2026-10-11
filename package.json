@@ -8,6 +8,7 @@
     "build": "turbo run build",
     "typecheck": "tsc -b",
     "test": "vitest",
+    "bench": "pnpm --filter @reflect/core bench",
     "lint": "pnpm run lint:oxfmt && pnpm run lint:oxlint && pnpm run lint:eslint",
     "lint:oxfmt": "oxfmt --check",
     "lint:oxlint": "oxlint --max-warnings 0 apps packages",
