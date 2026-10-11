@@ -518,8 +518,10 @@ pub async fn recorder_sessions(
 pub struct TranscribeRequest {
     session_id: String,
     model: String,
-    /// ISO 639 code; absent, empty, or `auto` detects it per region.
-    language: Option<String>,
+    /// The spoken languages, see `local_transcription::spoken_languages`;
+    /// detection runs per region.
+    #[serde(default)]
+    languages: Vec<String>,
     /// The vocabulary hint: the user's prompt plus the meeting's names, if any.
     prompt: Option<String>,
 }
@@ -564,9 +566,7 @@ pub async fn recorder_transcribe(
         Err(err) => return cached.ok_or(err),
     };
     let dir = store.dir(&id).map_err(AppError::io)?;
-    let language = request
-        .language
-        .filter(|code| !code.is_empty() && code != "auto");
+    let languages = crate::local_transcription::spoken_languages(request.languages);
     let prompt = request.prompt.filter(|hint| !hint.trim().is_empty());
     let model_id = request.model;
 
@@ -579,7 +579,7 @@ pub async fn recorder_transcribe(
             &ModelChoice {
                 model: &model,
                 id: &model_id,
-                language: language.as_deref(),
+                languages: &languages,
                 prompt: prompt.as_deref(),
             },
         )

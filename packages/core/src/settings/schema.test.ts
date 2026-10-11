@@ -23,7 +23,7 @@ describe('settingsSchema', () => {
       transcriptionPrompt: '',
       transcriptionEngine: 'cloud',
       localTranscriptionModel: 'large-v3-turbo',
-      transcriptionLanguage: '',
+      transcriptionLanguages: [],
       localTranscriptionUpdateChecks: true,
       recordingMenuBar: true,
       recordingShortcut: 'Control+Option+Command+M',
@@ -161,12 +161,13 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ localTranscriptionModel: 'tiny' }).localTranscriptionModel).toBe(
       'large-v3-turbo',
     )
-    expect(settingsSchema.parse({ transcriptionLanguage: ' ZH ' }).transcriptionLanguage).toBe('zh')
-    expect(settingsSchema.parse({ transcriptionLanguage: 'yue' }).transcriptionLanguage).toBe('yue')
-    expect(settingsSchema.parse({ transcriptionLanguage: 'Chinese' }).transcriptionLanguage).toBe(
-      '',
+    expect(
+      settingsSchema.parse({ transcriptionLanguages: ['en', ' ZH ', 'zh', 'Chinese', 7, 'yue'] })
+        .transcriptionLanguages,
+    ).toEqual(['en', 'zh', 'yue'])
+    expect(settingsSchema.parse({ transcriptionLanguages: 'zh' }).transcriptionLanguages).toEqual(
+      [],
     )
-    expect(settingsSchema.parse({ transcriptionLanguage: 7 }).transcriptionLanguage).toBe('')
     expect(
       settingsSchema.parse({ localTranscriptionUpdateChecks: false })
         .localTranscriptionUpdateChecks,
@@ -365,6 +366,23 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ chatSystemPrompt: 42 }).chatSystemPrompt).toBe('')
   })
 
+  it('seeds the spoken languages from the single language earlier versions stored', () => {
+    const legacy = settingsSchema.parse({ transcriptionLanguage: ' ZH ' })
+    expect(legacy.transcriptionLanguages).toEqual(['zh'])
+    // Kept for older builds that share the document.
+    expect(legacy).toHaveProperty('transcriptionLanguage', ' ZH ')
+    expect(settingsSchema.parse({ transcriptionLanguage: '' }).transcriptionLanguages).toEqual([])
+    expect(settingsSchema.parse({ transcriptionLanguage: 7 }).transcriptionLanguages).toEqual([])
+    expect(
+      settingsSchema.parse({ transcriptionLanguage: 'ja', transcriptionLanguages: ['en', 'zh'] })
+        .transcriptionLanguages,
+    ).toEqual(['en', 'zh'])
+    expect(
+      settingsSchema.parse({ transcriptionLanguage: 'ja', transcriptionLanguages: [] })
+        .transcriptionLanguages,
+    ).toEqual([])
+  })
+
   it('reads an earlier build’s saved on-device default as the cloud default', () => {
     // Earlier builds saved every key, so `local` without the confirmed flag is
     // usually their old default; with no attested on-device model it never
@@ -385,6 +403,23 @@ describe('settingsSchema', () => {
     expect(
       settingsSchema.parse({ aiSummaries: 'local', aiProviders: [attested] }).aiSummaries,
     ).toBe('local')
+  })
+
+  it('runs both legacy steps on one document, each leaving the other keys alone', () => {
+    const upgraded = settingsSchema.parse({ transcriptionLanguage: 'zh', aiSummaries: 'local' })
+    expect(upgraded.transcriptionLanguages).toEqual(['zh'])
+    expect(upgraded).toHaveProperty('transcriptionLanguage', 'zh')
+    expect(upgraded.aiSummaries).toBe('cloud')
+
+    // A document this build wrote is left as it is by both steps.
+    const current = settingsSchema.parse({
+      transcriptionLanguage: 'ja',
+      transcriptionLanguages: ['en'],
+      aiSummaries: 'local',
+      aiSummariesCloudConfirmed: false,
+    })
+    expect(current.transcriptionLanguages).toEqual(['en'])
+    expect(current.aiSummaries).toBe('local')
   })
 
   it('carries the Rust-owned localOnlyFolders key through verbatim, typos included', () => {
@@ -419,7 +454,7 @@ describe('settingsSchema', () => {
       transcriptionPrompt: '',
       transcriptionEngine: 'cloud',
       localTranscriptionModel: 'large-v3-turbo',
-      transcriptionLanguage: '',
+      transcriptionLanguages: [],
       localTranscriptionUpdateChecks: true,
       recordingMenuBar: true,
       recordingShortcut: 'Control+Option+Command+M',

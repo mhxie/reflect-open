@@ -7,7 +7,7 @@ import { SettingsSection } from './section.tsx'
 import { SettingsSwitchField } from './switch-field.tsx'
 import { SettingsTextareaField } from './textarea-field.tsx'
 import { TranscriptionEngineField } from './transcription-engine-field.tsx'
-import { TranscriptionLanguageField } from './transcription-language-field.tsx'
+import { TranscriptionLanguagesField } from './transcription-languages-field.tsx'
 
 /**
  * Preferences for recording enrichment after the raw audio is safely stored.
@@ -20,7 +20,7 @@ export function AudioMemosSection(): ReactElement {
     <SettingsSection id="audio-memos">
       {isMacosDesktop ? <TranscriptionEngineField /> : null}
       {isMacosDesktop && settings.transcriptionEngine === 'local' ? <LocalModelField /> : null}
-      <TranscriptionLanguageField />
+      <TranscriptionLanguagesField />
       {settings.transcriptionEngine === 'cloud' ? (
         <SettingsSwitchField
           legend="Transcription auto-format"

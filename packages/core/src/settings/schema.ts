@@ -320,7 +320,7 @@ export const aiSummariesSchema = z
  * Whether the user has agreed, once, to send public notes to the AI provider
  * for `cloud` summaries. Until then the pass sends nothing and Reflect asks,
  * naming how many notes are waiting. Its presence also marks a document this
- * build has written (see `upgradeLegacySettings`).
+ * build has written (see `upgradeLegacyAiSummaries`).
  */
 export const aiSummariesCloudConfirmedSchema = z.boolean().catch(false)
 
@@ -370,21 +370,29 @@ export const localTranscriptionModelSchema = z
   .enum(LOCAL_TRANSCRIPTION_MODEL_IDS)
   .catch(DEFAULT_LOCAL_TRANSCRIPTION_MODEL)
 
-/** Canonicalize a spoken-language choice: an ISO 639-1/2 code, or empty. */
+/** Canonicalize a spoken-language choice: an ISO 639-1/2/3 code, or empty. */
 export function normalizeTranscriptionLanguage(value: string): string {
   const code = value.trim().toLowerCase()
   return /^[a-z]{2,3}$/.test(code) ? code : ''
 }
 
+/** Canonicalize spoken-language choices: valid ISO 639 codes, each once, in order. */
+export function normalizeTranscriptionLanguages(entries: readonly unknown[]): string[] {
+  const codes = entries
+    .map((entry) => (typeof entry === 'string' ? normalizeTranscriptionLanguage(entry) : ''))
+    .filter((code) => code !== '')
+  return [...new Set(codes)]
+}
+
 /**
- * The spoken language of audio memos, as an ISO 639 code sent to either
- * engine. Empty (the default) detects it per recording — the better choice
- * when one memo mixes languages.
+ * The languages spoken in audio memos and recordings, as ISO 639 codes. None
+ * (the default) detects any language; one is always used; several limit
+ * detection to themselves, except on OpenAI, which takes only one.
  */
-export const transcriptionLanguageSchema = z
-  .string()
-  .catch('')
-  .transform(normalizeTranscriptionLanguage)
+export const transcriptionLanguagesSchema = z
+  .array(z.unknown())
+  .catch([])
+  .transform((entries) => normalizeTranscriptionLanguages(entries))
 
 /**
  * Whether the on-device model's upstream is checked (at most daily) for newer
@@ -750,6 +758,22 @@ export const aiPromptsSchema = z
     }),
   )
 
+/**
+ * Seed `transcriptionLanguages` from the legacy `transcriptionLanguage`, which
+ * stays for older builds; see docs/contributing/adding-a-setting.md.
+ */
+function upgradeLegacyTranscriptionLanguage(input: unknown): unknown {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    'transcriptionLanguages' in input ||
+    !('transcriptionLanguage' in input)
+  ) {
+    return input
+  }
+  return { ...input, transcriptionLanguages: [input.transcriptionLanguage] }
+}
+
 /** Whether a raw `aiProviders` value attests any entry as running on this Mac. */
 function attestsOnDeviceProvider(providers: unknown): boolean {
   return (
@@ -772,7 +796,7 @@ function attestsOnDeviceProvider(providers: unknown): boolean {
  * anything, reads as the `cloud` default; beside an attested on-device model
  * `local` stays. An explicit `local` saved by this build is never touched.
  */
-function upgradeLegacySettings(input: unknown): unknown {
+function upgradeLegacyAiSummaries(input: unknown): unknown {
   if (
     typeof input !== 'object' ||
     input === null ||
@@ -784,6 +808,11 @@ function upgradeLegacySettings(input: unknown): unknown {
     return input
   }
   return { ...input, aiSummaries: 'cloud' }
+}
+
+/** Read a document earlier builds wrote into the current shape, one step per change. */
+function upgradeLegacySettings(input: unknown): unknown {
+  return upgradeLegacyAiSummaries(upgradeLegacyTranscriptionLanguage(input))
 }
 
 const settingsObjectSchema = z.looseObject({
@@ -807,7 +836,7 @@ const settingsObjectSchema = z.looseObject({
   transcriptionPrompt: transcriptionPromptSchema,
   transcriptionEngine: transcriptionEngineSchema,
   localTranscriptionModel: localTranscriptionModelSchema,
-  transcriptionLanguage: transcriptionLanguageSchema,
+  transcriptionLanguages: transcriptionLanguagesSchema,
   localTranscriptionUpdateChecks: localTranscriptionUpdateChecksSchema,
   recordingMenuBar: recordingMenuBarSchema,
   recordingShortcut: recordingShortcutSchema,

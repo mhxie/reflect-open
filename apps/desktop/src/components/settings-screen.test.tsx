@@ -226,6 +226,35 @@ describe('SettingsScreen', () => {
     )
   })
 
+  it('picks several spoken languages and persists them in order', async () => {
+    await renderScreen()
+    const trigger = page.getByRole('combobox', { name: 'Spoken languages' })
+    await expect.element(trigger).toMatchTextContent('Any language')
+
+    await trigger.click()
+    await page.getByRole('option', { name: 'English' }).click()
+    await page.getByRole('option', { name: 'Chinese' }).click()
+
+    await expect.element(trigger).toMatchTextContent('English, Chinese')
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({ transcriptionLanguages: ['en', 'zh'] }),
+    )
+
+    await page.getByRole('option', { name: 'English' }).click()
+
+    await expect.element(trigger).toMatchTextContent('Chinese')
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ transcriptionLanguages: ['zh'] }))
+  })
+
+  it('reflects the spoken language an earlier version stored', async () => {
+    stored = { transcriptionLanguage: 'zh' }
+    await renderScreen()
+
+    await expect
+      .element(page.getByRole('combobox', { name: 'Spoken languages' }))
+      .toMatchTextContent('Chinese')
+  })
+
   it('confirms before forgetting the open graph from saved graphs', async () => {
     graph.current = {
       root: '/graphs/work',
@@ -318,7 +347,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -395,7 +424,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -486,7 +515,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -584,7 +613,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -661,7 +690,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -731,7 +760,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -810,7 +839,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -886,7 +915,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -990,7 +1019,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1078,7 +1107,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1233,7 +1262,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1335,7 +1364,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1476,7 +1505,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1564,7 +1593,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1644,7 +1673,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1767,7 +1796,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -1927,7 +1956,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -2013,7 +2042,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',
@@ -2090,7 +2119,7 @@ describe('SettingsScreen', () => {
           transcriptionPrompt: '',
           transcriptionEngine: 'cloud',
           localTranscriptionModel: 'large-v3-turbo',
-          transcriptionLanguage: '',
+          transcriptionLanguages: [],
           localTranscriptionUpdateChecks: true,
           recordingMenuBar: true,
           recordingShortcut: 'Control+Option+Command+M',

@@ -37,8 +37,8 @@ pub struct ModelChoice<'a> {
     pub model: &'a LocalModel,
     /// The settings id, recorded with the cached transcript.
     pub id: &'a str,
-    /// ISO 639-1, or `None` to detect per region.
-    pub language: Option<&'a str>,
+    /// Spoken languages, see `local_transcription::spoken_languages`.
+    pub languages: &'a [String],
     /// Vocabulary hint: the user's prompt plus the meeting's names, if any.
     pub prompt: Option<&'a str>,
 }
@@ -112,7 +112,7 @@ fn transcribe_channel(
 ) -> Result<Vec<TranscriptSegment>, String> {
     Ok(choice
         .model
-        .transcribe_regions(samples, choice.language, choice.prompt)?
+        .transcribe_regions(samples, choice.languages, choice.prompt)?
         .into_iter()
         .map(|segment| TranscriptSegment {
             start_ms: offset_ms + segment.start_ms,
@@ -162,11 +162,14 @@ mod tests {
                 path: model.into(),
             }
         };
-        let language = std::env::var("REFLECT_RECORDING_TEST_LANGUAGE").ok();
+        // Comma-separated ISO 639 codes, e.g. `en,zh`.
+        let languages: Vec<String> = std::env::var("REFLECT_RECORDING_TEST_LANGUAGES")
+            .map(|codes| codes.split(',').map(str::to_string).collect())
+            .unwrap_or_default();
         let choice = ModelChoice {
             model: &model,
             id: "test",
-            language: language.as_deref(),
+            languages: &crate::local_transcription::spoken_languages(languages),
             prompt: None,
         };
         let mut transcript = RecordingTranscript {

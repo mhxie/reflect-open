@@ -57,7 +57,8 @@ export interface TranscriptionReconcilerOptions {
 export interface TranscriptionChoice {
   engine: TranscriptionEngine
   localModel: LocalTranscriptionModelId
-  language: string
+  /** Spoken languages as ISO 639 codes; empty detects any. */
+  languages: readonly string[]
 }
 
 /** Build the reconciler for one graph session. `dispose()` is terminal. */
@@ -110,7 +111,7 @@ export function createTranscriptionReconciler(
       transcriptionPrompt: options.getTranscriptionPrompt(),
       engine: choice.engine,
       localModel: choice.localModel,
-      transcriptionLanguage: choice.language,
+      transcriptionLanguages: choice.languages,
       fetchFn: providerFetch,
       isStale,
       onPending: (count) => setTranscribing(count > 0),

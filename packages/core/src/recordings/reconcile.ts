@@ -68,8 +68,8 @@ export interface ReconcileRecordingsInput {
   graphRoot: string | null
   /** The on-device model; recordings always transcribe on the device. */
   localModel: LocalTranscriptionModelId
-  /** Spoken language as an ISO 639 code; empty detects it. */
-  transcriptionLanguage: string
+  /** Spoken languages as ISO 639 codes; empty detects any. */
+  transcriptionLanguages: readonly string[]
   /** The user's transcription helper text. */
   transcriptionPrompt: string
   /** The calendar integration's switch and enabled calendars. */
@@ -206,7 +206,7 @@ async function writeRecording(
   const channels = await transcribeRecording({
     sessionId: meeting.id,
     model: input.localModel,
-    language: input.transcriptionLanguage,
+    languages: input.transcriptionLanguages,
     prompt: transcriptionHint(input.transcriptionPrompt, event, attendees),
   })
   if (stale()) {

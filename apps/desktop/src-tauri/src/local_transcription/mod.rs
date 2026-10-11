@@ -162,55 +162,69 @@ impl LocalModel {
         }
     }
 
-    /// Transcribe one speech region; segment times are relative to it.
-    /// Text the model probably invented (whisper's no-speech test, or more
-    /// characters than the region could hold) is dropped. Blocking.
-    pub(crate) fn transcribe_region(
+    /// Transcribe one speech region; segment times are relative to it, and
+    /// text the model probably invented is dropped. `heard` is the listed
+    /// language Qwen3-ASR last heard in this audio, its retry target. Blocking.
+    fn transcribe_region(
         &self,
         samples: &[f32],
-        language: Option<&str>,
+        languages: &[String],
+        heard: Option<&str>,
         prompt: Option<&str>,
-    ) -> Result<Vec<TranscriptSegment>, String> {
+    ) -> Result<RegionTranscript, String> {
         match self {
-            Self::Whisper { engine, path } => Ok(engine
-                .transcribe_scored(path, samples, language, prompt)?
-                .into_iter()
-                .filter(|scored| !scored.is_probably_invented())
-                .map(|scored| TranscriptSegment {
-                    text: scored.segment.text.trim().to_string(),
-                    ..scored.segment
-                })
-                .filter(|segment| !segment.text.is_empty())
-                .collect()),
-            Self::Qwen { engine, dir } => {
-                let text = engine.transcribe(dir, samples, language)?;
-                let seconds = samples.len() as f32 / audio::SAMPLE_RATE as f32;
-                let plausible = qwen::is_plausible(&text, seconds);
-                Ok(plausible
-                    .then_some(TranscriptSegment {
-                        start_ms: 0,
-                        end_ms: (seconds * 1_000.0) as u64,
-                        text,
-                    })
+            Self::Whisper { engine, path } => {
+                let segments = engine
+                    .transcribe_scored(path, samples, languages, prompt)?
                     .into_iter()
-                    .collect())
+                    .filter(|scored| !scored.is_probably_invented())
+                    .map(|scored| TranscriptSegment {
+                        text: scored.segment.text.trim().to_string(),
+                        ..scored.segment
+                    })
+                    .filter(|segment| !segment.text.is_empty())
+                    .collect();
+                Ok(RegionTranscript {
+                    segments,
+                    heard: None,
+                })
+            }
+            Self::Qwen { engine, dir } => {
+                let transcript = engine.transcribe(dir, samples, languages, heard)?;
+                let seconds = samples.len() as f32 / audio::SAMPLE_RATE as f32;
+                let plausible = qwen::is_plausible(&transcript.text, seconds);
+                Ok(RegionTranscript {
+                    heard: transcript.language.filter(|_| plausible),
+                    segments: plausible
+                        .then_some(TranscriptSegment {
+                            start_ms: 0,
+                            end_ms: (seconds * 1_000.0) as u64,
+                            text: transcript.text,
+                        })
+                        .into_iter()
+                        .collect(),
+                })
             }
         }
     }
 
-    /// Cut `samples` into speech regions and transcribe each, timing every
-    /// segment from the start of `samples`.
+    /// Cut `samples` into speech regions and transcribe each in one of
+    /// `languages`, timing every segment from the start of `samples`.
     pub(crate) fn transcribe_regions(
         &self,
         samples: &[f32],
-        language: Option<&str>,
+        languages: &[String],
         prompt: Option<&str>,
     ) -> Result<Vec<TranscriptSegment>, String> {
         let mut segments = Vec::new();
+        let mut heard = None;
         for region in speech_regions(samples, self.plan()) {
             let start_ms = region.start as u64 * 1_000 / u64::from(audio::SAMPLE_RATE);
             let end_ms = region.end as u64 * 1_000 / u64::from(audio::SAMPLE_RATE);
-            for segment in self.transcribe_region(&samples[region], language, prompt)? {
+            let region_transcript =
+                self.transcribe_region(&samples[region], languages, heard, prompt)?;
+            heard = region_transcript.heard.or(heard);
+            for segment in region_transcript.segments {
                 segments.push(TranscriptSegment {
                     start_ms: start_ms + segment.start_ms,
                     end_ms: (start_ms + segment.end_ms).min(end_ms),
@@ -220,6 +234,42 @@ impl LocalModel {
         }
         Ok(segments)
     }
+
+    /// Transcribe a whole audio memo: whisper in one pass, which settles on
+    /// one language from the first 30 s; Qwen3-ASR region by region, since it
+    /// has no timestamps and decodes short stretches.
+    pub(crate) fn transcribe_memo(
+        &self,
+        samples: &[f32],
+        languages: &[String],
+        prompt: Option<&str>,
+    ) -> Result<Vec<TranscriptSegment>, String> {
+        match self {
+            Self::Whisper { engine, path } => engine.transcribe(path, samples, languages, prompt),
+            Self::Qwen { .. } => self.transcribe_regions(samples, languages, prompt),
+        }
+    }
+}
+
+/// One region's kept segments and, from Qwen3-ASR, the listed language heard.
+struct RegionTranscript {
+    segments: Vec<TranscriptSegment>,
+    heard: Option<&'static str>,
+}
+
+/// The settings' spoken languages (none = any, one = forced, several =
+/// restricted), well-formed and once each: a NUL byte panics whisper's binding.
+pub(crate) fn spoken_languages(codes: Vec<String>) -> Vec<String> {
+    let mut languages: Vec<String> = Vec::with_capacity(codes.len());
+    for code in codes {
+        let code = code.trim().to_ascii_lowercase();
+        let well_formed =
+            (2..=3).contains(&code.len()) && code.bytes().all(|byte| byte.is_ascii_lowercase());
+        if well_formed && !languages.contains(&code) {
+            languages.push(code);
+        }
+    }
+    languages
 }
 
 /// The downloaded model with settings id `model`, sharing the process-wide
@@ -530,8 +580,9 @@ pub struct TranscribeRequest {
     /// Pins the read to the issuing graph session.
     generation: u64,
     model: String,
-    /// ISO 639 code; absent, empty, or `auto` detects it per recording.
-    language: Option<String>,
+    /// The spoken languages, see [`spoken_languages`].
+    #[serde(default)]
+    languages: Vec<String>,
     /// The user's hint, used as the model's initial prompt.
     prompt: Option<String>,
 }
@@ -561,12 +612,12 @@ pub async fn local_transcription_transcribe(
         path,
         generation,
         model,
-        language,
+        languages,
         prompt,
     } = request;
     let recording = recording_path(&graph, generation, &path)?;
     let model = local_model(&app, &state, &model)?;
-    let language = language.filter(|code| !code.is_empty() && code != "auto");
+    let languages = spoken_languages(languages);
     let prompt = prompt.filter(|hint| !hint.trim().is_empty());
     tauri::async_runtime::spawn_blocking(move || {
         let samples = match audio::decode_channels(&recording) {
@@ -580,15 +631,7 @@ pub async fn local_transcription_transcribe(
                 return Err(format!("the recording couldn't be read ({detail})"))
             }
         };
-        let segments = match &model {
-            LocalModel::Whisper { engine, path } => {
-                engine.transcribe(path, &samples, language.as_deref(), prompt.as_deref())?
-            }
-            // No timestamps and short decodes: transcribe speech regions.
-            LocalModel::Qwen { .. } => {
-                model.transcribe_regions(&samples, language.as_deref(), prompt.as_deref())?
-            }
-        };
+        let segments = model.transcribe_memo(&samples, &languages, prompt.as_deref())?;
         Ok(LocalTranscript::Transcribed {
             text: engine::join_segments(&segments),
             segments: segments
@@ -646,7 +689,7 @@ mod tests {
             "path": "audio-memos/audio-memo-2026-06-11-153022-845.m4a",
             "generation": 3,
             "model": "large-v3-turbo",
-            "language": null,
+            "languages": ["en", "zh"],
             "prompt": "Names: Ocavue",
         }))
         .unwrap();
@@ -656,8 +699,18 @@ mod tests {
         );
         assert_eq!(request.generation, 3);
         assert_eq!(request.model, "large-v3-turbo");
-        assert_eq!(request.language, None);
+        assert_eq!(request.languages, vec!["en", "zh"]);
         assert_eq!(request.prompt.as_deref(), Some("Names: Ocavue"));
+    }
+
+    #[test]
+    fn keeps_well_formed_spoken_languages_once() {
+        let codes = [" ZH", "en", "zh", "", "auto", "e\0", "yue", "english"]
+            .iter()
+            .map(|code| code.to_string())
+            .collect();
+        assert_eq!(spoken_languages(codes), vec!["zh", "en", "yue"]);
+        assert!(spoken_languages(Vec::new()).is_empty());
     }
 
     /// The shapes `localTranscriptSchema` (`packages/core`) parses.
@@ -725,9 +778,10 @@ mod tests {
         }
     }
 
-    /// Decode → resample → whisper on a real recording. Needs
+    /// Decode → resample → whisper on a real recording, as an audio memo. Needs
     /// `REFLECT_WHISPER_TEST_MODEL` (a ggml model) and `REFLECT_WHISPER_TEST_AUDIO`
-    /// (m4a, WebM, or WAV speech); `REFLECT_WHISPER_TEST_EXPECT` optionally
+    /// (m4a, WebM, or WAV speech); `REFLECT_WHISPER_TEST_LANGUAGES` optionally
+    /// lists spoken languages (e.g. `en,zh`), and `REFLECT_WHISPER_TEST_EXPECT`
     /// names a phrase the transcript must contain.
     #[test]
     #[ignore = "needs REFLECT_WHISPER_TEST_MODEL and REFLECT_WHISPER_TEST_AUDIO"]
@@ -735,10 +789,17 @@ mod tests {
         prepare_process_environment();
         let model = PathBuf::from(std::env::var("REFLECT_WHISPER_TEST_MODEL").expect("model"));
         let recording = PathBuf::from(std::env::var("REFLECT_WHISPER_TEST_AUDIO").expect("audio"));
+        let languages = spoken_languages(
+            std::env::var("REFLECT_WHISPER_TEST_LANGUAGES")
+                .map(|codes| codes.split(',').map(str::to_string).collect())
+                .unwrap_or_default(),
+        );
         let samples = audio::downmix(audio::decode_channels(&recording).unwrap());
-        let segments = Engine::default()
-            .transcribe(&model, &samples, None, None)
-            .unwrap();
+        let model = LocalModel::Whisper {
+            engine: Engine::default(),
+            path: model,
+        };
+        let segments = model.transcribe_memo(&samples, &languages, None).unwrap();
         let text = engine::join_segments(&segments);
         println!("{text}\n{segments:#?}");
         assert!(!segments.is_empty());

@@ -10,13 +10,13 @@ const INPUT = {
   path: 'audio-memos/audio-memo-2026-06-11-153022-845.webm',
   generation: 3,
   model: 'large-v3-turbo',
-  language: '',
+  languages: ['en', 'zh'],
   prompt: 'Names: Ocavue',
 } as const
 
 /** The Rust side pins the same shapes in `local_transcription::tests`. */
 describe('transcribeLocally', () => {
-  it('sends empty settings as null and parses a transcript', async () => {
+  it('sends the spoken languages and parses a transcript', async () => {
     const invoke = vi.fn().mockResolvedValue({
       outcome: 'transcribed',
       text: 'Hello.',
@@ -29,8 +29,16 @@ describe('transcribeLocally', () => {
       text: 'Hello.',
       segments: [{ startMs: 0, endMs: 1200, text: 'Hello.' }],
     })
+    expect(invoke).toHaveBeenCalledWith('local_transcription_transcribe', { request: INPUT })
+  })
+
+  it('sends an empty hint as null', async () => {
+    const invoke = vi.fn().mockResolvedValue({ outcome: 'transcribed', text: '', segments: [] })
+    setBridge({ invoke, listen: async () => () => {} })
+
+    await transcribeLocally({ ...INPUT, languages: [], prompt: '' })
     expect(invoke).toHaveBeenCalledWith('local_transcription_transcribe', {
-      request: { ...INPUT, language: null },
+      request: { ...INPUT, languages: [], prompt: null },
     })
   })
 

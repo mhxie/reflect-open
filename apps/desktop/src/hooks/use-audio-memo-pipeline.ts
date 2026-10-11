@@ -160,13 +160,13 @@ export function useAudioMemoPipeline(
   const transcriptionChoiceRef = useRef<TranscriptionChoice>({
     engine: settings.transcriptionEngine,
     localModel: settings.localTranscriptionModel,
-    language: settings.transcriptionLanguage,
+    languages: settings.transcriptionLanguages,
   })
   useEffect(() => {
     transcriptionChoiceRef.current = {
       engine: settings.transcriptionEngine,
       localModel: settings.localTranscriptionModel,
-      language: settings.transcriptionLanguage,
+      languages: settings.transcriptionLanguages,
     }
   })
 

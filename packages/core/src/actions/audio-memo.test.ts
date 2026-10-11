@@ -122,7 +122,7 @@ function reconcile(overrides: Partial<ReconcileAudioMemosInput> = {}) {
     transcriptionPrompt: '',
     engine: 'cloud',
     localModel: 'large-v3-turbo',
-    transcriptionLanguage: '',
+    transcriptionLanguages: [],
     ...overrides,
   })
 }
@@ -325,7 +325,7 @@ describe('reconcileAudioMemos', () => {
 
     const outcome = await reconcile({
       engine: 'local',
-      transcriptionLanguage: 'zh',
+      transcriptionLanguages: ['en', 'zh'],
       transcriptionPrompt: 'Names: Ocavue',
       formatTranscript: true,
     })
@@ -335,7 +335,7 @@ describe('reconcileAudioMemos', () => {
       path: MEMO.audioPath,
       generation: 3,
       model: 'large-v3-turbo',
-      language: 'zh',
+      languages: ['en', 'zh'],
       prompt: 'Names: Ocavue',
     })
     expect(readAssetMock).not.toHaveBeenCalled()
@@ -381,9 +381,9 @@ describe('reconcileAudioMemos', () => {
   it('sends the spoken-language choice to the cloud provider', async () => {
     listDirMock.mockResolvedValue([fileMeta(MEMO.audioPath)])
 
-    await reconcile({ transcriptionLanguage: 'ja' })
+    await reconcile({ transcriptionLanguages: ['ja'] })
 
-    expect(transcribeMock).toHaveBeenCalledWith(expect.objectContaining({ language: 'ja' }))
+    expect(transcribeMock).toHaveBeenCalledWith(expect.objectContaining({ languages: ['ja'] }))
     expect(localModelStatusMock).not.toHaveBeenCalled()
   })
 

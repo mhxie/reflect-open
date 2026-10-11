@@ -240,7 +240,7 @@ export function RecorderProvider({ graph, children }: RecorderProviderProps): Re
         const lookupContacts = current.contactsEnabled && (await canReadContacts())
         return {
           localModel: current.localTranscriptionModel,
-          transcriptionLanguage: current.transcriptionLanguage,
+          transcriptionLanguages: current.transcriptionLanguages,
           transcriptionPrompt: current.transcriptionPrompt,
           calendarEnabled: current.calendarEnabled,
           calendarIds: current.calendarIds,

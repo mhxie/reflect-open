@@ -51,7 +51,7 @@ let onFileChanges: ((changes: FileChange[]) => void) | null = null
 const unlisten = vi.fn()
 let reconciler: TranscriptionReconciler | null = null
 
-const CLOUD: TranscriptionChoice = { engine: 'cloud', localModel: 'large-v3-turbo', language: '' }
+const CLOUD: TranscriptionChoice = { engine: 'cloud', localModel: 'large-v3-turbo', languages: [] }
 
 function create(
   providers: AiProvidersState = PROVIDERS,
@@ -159,7 +159,7 @@ describe('createTranscriptionReconciler', () => {
     let choice: TranscriptionChoice = {
       engine: 'local',
       localModel: 'large-v3-turbo-q8_0',
-      language: 'zh',
+      languages: ['en', 'zh'],
     }
     const subject = create(
       NO_PROVIDERS,
@@ -174,7 +174,7 @@ describe('createTranscriptionReconciler', () => {
       expect.objectContaining({
         engine: 'local',
         localModel: 'large-v3-turbo-q8_0',
-        transcriptionLanguage: 'zh',
+        transcriptionLanguages: ['en', 'zh'],
       }),
     )
 

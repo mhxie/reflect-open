@@ -489,8 +489,8 @@ export interface ReconcileAudioMemosInput {
   engine: TranscriptionEngine
   /** The on-device model, used when `engine` is `local`. */
   localModel: LocalTranscriptionModelId
-  /** Spoken language as an ISO 639 code; empty detects it. */
-  transcriptionLanguage: string
+  /** Spoken languages as ISO 639 codes; empty detects any. */
+  transcriptionLanguages: readonly string[]
   /** Host transport for the provider call (the Tauri HTTP plugin's fetch). */
   fetchFn?: typeof fetch
   /** Abort gate, checked between memos (graph switch / unmount). */
@@ -535,7 +535,7 @@ async function resolveTranscriptionEngine(
       transcriber: localSegmentTranscriber({
         model: input.localModel,
         prompt: input.transcriptionPrompt,
-        language: input.transcriptionLanguage,
+        languages: input.transcriptionLanguages,
         generation: input.generation,
       }),
       enrichmentCredentials: null,
@@ -580,7 +580,7 @@ async function resolveTranscriptionEngine(
       provider: config.provider,
       apiKey,
       prompt: input.transcriptionPrompt,
-      language: input.transcriptionLanguage,
+      languages: input.transcriptionLanguages,
       generation: input.generation,
       fetchFn: input.fetchFn,
       isStale,
