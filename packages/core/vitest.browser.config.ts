@@ -7,6 +7,7 @@ export default defineProject({
   test: {
     name: 'core-browser',
     include: ['src/**/*.test.tsx'],
+    benchmark: { include: [] },
     sequence: { groupOrder: 100 },
     retry: process.env.CI ? 3 : 0,
     browser: {

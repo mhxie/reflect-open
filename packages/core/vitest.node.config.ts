@@ -7,5 +7,6 @@ export default defineProject({
     include: ['src/**/*.test.ts'],
     sequence: { groupOrder: 200 },
     retry: process.env.CI ? 3 : 0,
+    benchmark: { include: ['src/bench/**/*.bench.ts'] },
   },
 })
