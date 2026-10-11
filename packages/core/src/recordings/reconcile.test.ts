@@ -112,7 +112,7 @@ function input(overrides: Partial<ReconcileRecordingsInput> = {}): ReconcileReco
     generation: 4,
     graphRoot: '/Users/someone/Notes',
     localModel: 'large-v3-turbo',
-    transcriptionLanguage: '',
+    transcriptionLanguages: [],
     transcriptionPrompt: 'Reflect',
     calendarEnabled: true,
     calendarIds: ['work'],
@@ -155,13 +155,13 @@ beforeEach(() => {
 
 describe('reconcileRecordings', () => {
   it('writes the transcript, links the meeting and its attendees, then archives', async () => {
-    const outcome = await reconcileRecordings(input())
+    const outcome = await reconcileRecordings(input({ transcriptionLanguages: ['en', 'zh'] }))
 
     expect(outcome).toEqual({ written: [`inbox/recordings/${BASE}.md`], stopped: null })
     expect(transcribeMock).toHaveBeenCalledWith({
       sessionId: MEETING.id,
       model: 'large-v3-turbo',
-      language: '',
+      languages: ['en', 'zh'],
       prompt: 'Reflect\nWeekly sync, Ada Lovelace',
     })
     const [notePath, note, generation] = createNoteMock.mock.calls[0]!

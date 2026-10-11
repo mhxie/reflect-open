@@ -48,8 +48,12 @@ export interface TranscriptionRequest {
   mimeType: string
   /** User transcription hint, if any. */
   prompt?: string | undefined
-  /** Spoken language as an ISO 639 code; absent or empty lets the provider detect it. */
-  language?: string | undefined
+  /**
+   * Spoken languages as ISO 639 codes; absent or empty lets the provider
+   * detect any. OpenAI takes a single language only, so with several it
+   * detects on its own; Gemini is told the set.
+   */
+  languages?: readonly string[] | undefined
   /**
    * Host transport — the desktop app passes the Tauri HTTP plugin's fetch
    * (CORS-free); `@reflect/core` itself stays platform-agnostic.
@@ -117,8 +121,9 @@ async function transcribeWithOpenAi(request: TranscriptionRequest): Promise<stri
     if (request.prompt) {
       form.append('prompt', request.prompt)
     }
-    if (request.language) {
-      form.append('language', request.language)
+    const [language, ...others] = request.languages ?? []
+    if (language !== undefined && others.length === 0) {
+      form.append('language', language)
     }
     return send(
       fetchFn,
@@ -170,6 +175,19 @@ const geminiResponseSchema = z.object({
 const GEMINI_INSTRUCTION =
   'Transcribe this audio recording verbatim. Return only the transcribed text, with no commentary or formatting.'
 
+/** The instruction line naming the spoken languages; empty when any is allowed. */
+function spokenLanguagesInstruction(languages: readonly string[]): string {
+  const codes = languages.map((code) => `"${code}"`).join(', ')
+  switch (languages.length) {
+    case 0:
+      return ''
+    case 1:
+      return `The spoken language is ISO 639 ${codes}.`
+    default:
+      return `The spoken languages are ISO 639 ${codes}; write each part in the language it is spoken in.`
+  }
+}
+
 /**
  * Raw-audio budget for a Gemini inline request: the whole JSON body must
  * stay under Gemini's ~20 MB request cap, and inline audio rides it
@@ -189,7 +207,7 @@ async function transcribeWithGemini(request: TranscriptionRequest): Promise<stri
   const data = bytesToBase64(new Uint8Array(await request.audio.arrayBuffer()))
   const instruction = [
     GEMINI_INSTRUCTION,
-    request.language ? `The spoken language is ISO 639 "${request.language}".` : '',
+    spokenLanguagesInstruction(request.languages ?? []),
     request.prompt ?? '',
   ]
     .filter((line) => line !== '')

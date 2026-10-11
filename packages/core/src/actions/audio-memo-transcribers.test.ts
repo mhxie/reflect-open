@@ -50,13 +50,13 @@ beforeEach(() => {
 })
 
 describe('cloudSegmentTranscriber', () => {
-  it('uploads the generation-pinned bytes with the hint and language', async () => {
+  it('uploads the generation-pinned bytes with the hint and languages', async () => {
     const isStale = (): boolean => false
     const transcriber = cloudSegmentTranscriber({
       provider: 'google',
       apiKey: 'key',
       prompt: 'Names: Ocavue',
-      language: 'zh',
+      languages: ['en', 'zh'],
       generation: 7,
       isStale,
     })
@@ -69,7 +69,7 @@ describe('cloudSegmentTranscriber', () => {
         provider: 'google',
         apiKey: 'key',
         prompt: 'Names: Ocavue',
-        language: 'zh',
+        languages: ['en', 'zh'],
         mimeType: 'audio/mp4',
         isStale,
       }),
@@ -82,7 +82,7 @@ describe('localSegmentTranscriber', () => {
     const transcriber = localSegmentTranscriber({
       model: 'large-v3-turbo-q8_0',
       prompt: '',
-      language: '',
+      languages: ['en', 'zh'],
       generation: 7,
     })
 
@@ -95,7 +95,7 @@ describe('localSegmentTranscriber', () => {
       path: MEMO.audioPath,
       generation: 7,
       model: 'large-v3-turbo-q8_0',
-      language: '',
+      languages: ['en', 'zh'],
       prompt: '',
     })
     expect(readAssetMock).not.toHaveBeenCalled()
@@ -106,7 +106,7 @@ describe('localSegmentTranscriber', () => {
     const transcriber = localSegmentTranscriber({
       model: 'large-v3-turbo',
       prompt: '',
-      language: '',
+      languages: [],
       generation: 7,
     })
 
@@ -121,7 +121,7 @@ describe('localSegmentTranscriber', () => {
     const transcriber = localSegmentTranscriber({
       model: 'large-v3-turbo',
       prompt: '',
-      language: '',
+      languages: [],
       generation: 7,
     })
 

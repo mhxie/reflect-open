@@ -28,8 +28,8 @@ export interface CloudSegmentTranscriberInput {
   apiKey: string
   /** User transcription hint, if any. */
   prompt: string
-  /** ISO 639 code, or empty to let the provider detect it. */
-  language: string
+  /** Spoken languages as ISO 639 codes; empty lets the provider detect any. */
+  languages: readonly string[]
   generation: number
   fetchFn?: typeof fetch | undefined
   /** Consulted by the provider call before it bills anything. */
@@ -48,7 +48,7 @@ export function cloudSegmentTranscriber(input: CloudSegmentTranscriberInput): Se
         provider: input.provider,
         apiKey: input.apiKey,
         prompt: input.prompt,
-        language: input.language,
+        languages: input.languages,
         audio: new Blob([bytes], { type: part.memo.mimeType }),
         mimeType: part.memo.mimeType,
         fetchFn: input.fetchFn,
@@ -62,7 +62,8 @@ export function cloudSegmentTranscriber(input: CloudSegmentTranscriberInput): Se
 export interface LocalSegmentTranscriberInput {
   model: LocalTranscriptionModelId
   prompt: string
-  language: string
+  /** Spoken languages as ISO 639 codes; empty detects any. */
+  languages: readonly string[]
   generation: number
 }
 
@@ -75,7 +76,7 @@ export function localSegmentTranscriber(input: LocalSegmentTranscriberInput): Se
         path: part.path,
         generation: input.generation,
         model: input.model,
-        language: input.language,
+        languages: input.languages,
         prompt: input.prompt,
       })
       if (transcript.outcome === 'undecodable') {

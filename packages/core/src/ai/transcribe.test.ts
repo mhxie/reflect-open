@@ -76,15 +76,17 @@ describe('transcribeAudio (openai)', () => {
     expect((calls[2]!.body as FormData).get('prompt')).toBeNull()
   })
 
-  it('sends the spoken language when set and omits it otherwise', async () => {
+  it('sends a single spoken language and lets several be detected', async () => {
     const calls: RecordedCall[] = []
     const fetchFn = recordingFetch(calls, () => jsonResponse(200, { text: 'ok' }))
 
-    await transcribeAudio(request({ fetchFn, language: 'zh' }))
-    await transcribeAudio(request({ fetchFn, language: '' }))
+    await transcribeAudio(request({ fetchFn, languages: ['zh'] }))
+    await transcribeAudio(request({ fetchFn, languages: [] }))
+    await transcribeAudio(request({ fetchFn, languages: ['en', 'zh'] }))
 
     expect((calls[0]!.body as FormData).get('language')).toBe('zh')
     expect((calls[1]!.body as FormData).get('language')).toBeNull()
+    expect((calls[2]!.body as FormData).get('language')).toBeNull()
   })
 
   it('names webm recordings .webm', async () => {
@@ -230,19 +232,23 @@ describe('transcribeAudio (google)', () => {
     expect(text(1)).not.toContain('Ocavue')
   })
 
-  it('names the spoken language in the instruction, before the hint', async () => {
+  it('names the spoken languages in the instruction, before the hint', async () => {
     const calls: RecordedCall[] = []
     const fetchFn = recordingFetch(calls, () => geminiResponse('ok'))
 
     await transcribeAudio(
-      request({ provider: 'google', fetchFn, language: 'zh', prompt: 'Names: Ocavue' }),
+      request({ provider: 'google', fetchFn, languages: ['zh'], prompt: 'Names: Ocavue' }),
     )
+    await transcribeAudio(request({ provider: 'google', fetchFn, languages: ['en', 'zh'] }))
 
-    const body = JSON.parse(String(calls[0]!.body)) as {
-      contents: { parts: { text?: string }[] }[]
-    }
-    expect(body.contents[0]!.parts[0]!.text).toBe(
+    const text = (index: number): string | undefined =>
+      (JSON.parse(String(calls[index]!.body)) as { contents: { parts: { text?: string }[] }[] })
+        .contents[0]!.parts[0]!.text
+    expect(text(0)).toBe(
       'Transcribe this audio recording verbatim. Return only the transcribed text, with no commentary or formatting.\nThe spoken language is ISO 639 "zh".\nNames: Ocavue',
+    )
+    expect(text(1)).toBe(
+      'Transcribe this audio recording verbatim. Return only the transcribed text, with no commentary or formatting.\nThe spoken languages are ISO 639 "en", "zh"; write each part in the language it is spoken in.',
     )
   })
 

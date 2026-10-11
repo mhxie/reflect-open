@@ -84,8 +84,11 @@ export interface TranscribeRecordingInput {
   sessionId: string
   /** An on-device model id (`LocalTranscriptionModelId`). */
   model: string
-  /** ISO 639 code; empty detects the language per stretch of speech. */
-  language: string
+  /**
+   * Spoken languages as ISO 639 codes: none detects any per stretch of
+   * speech, one is always used, several limit detection to themselves.
+   */
+  languages: readonly string[]
   /** Vocabulary hint: the user's helper text plus a meeting's names. */
   prompt: string
 }
@@ -98,7 +101,7 @@ export function transcribeRecording(input: TranscribeRecordingInput): Promise<Re
       request: {
         sessionId: input.sessionId,
         model: input.model,
-        language: input.language === '' ? null : input.language,
+        languages: input.languages,
         prompt: input.prompt === '' ? null : input.prompt,
       },
     },

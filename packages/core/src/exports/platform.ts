@@ -307,7 +307,7 @@ export {
   normalizeTranscriptionPrompt,
   transcriptionEngineSchema,
   localTranscriptionModelSchema,
-  transcriptionLanguageSchema,
+  transcriptionLanguagesSchema,
   localTranscriptionUpdateChecksSchema,
   recordingMenuBarSchema,
   recordingShortcutSchema,

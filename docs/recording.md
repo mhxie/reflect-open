@@ -61,7 +61,13 @@ Raw first, like audio memos: nothing is lost if a later step fails.
    probably invented (its own no-speech test and stock sign-offs such as
    "Thanks for watching" written over music), or Qwen3-ASR, which gets shorter
    regions because their edges are its only timestamps and drops output too
-   long for its region. The result is cached per model in staging.
+   long for its region. Each region is transcribed in one of the spoken
+   languages chosen there (any, when none is): with several, whisper decodes
+   in the one its own language detection rates likeliest, and Qwen3-ASR
+   transcribes a region it hears as an unlisted language again, in the listed
+   one it heard last (at first, the first listed). Short replies are where
+   unrestricted detection lands on a third language. The result is cached per
+   model in staging.
 4. **Notes** (`packages/core/src/recordings/reconcile.ts`). Residual echo that
    survived the gate is dropped by text (`dropEchoRepeats`: a Me segment that
    restates overlapping Them speech; short replies are kept), segments merge
@@ -89,5 +95,6 @@ Raw first, like audio memos: nothing is lost if a later step fails.
 - A one-off event already listed in the day's Meetings section is recognized
   by its title appearing there, so a similar title can suppress the line.
 - To compare models or debug labeling on a real recording, run the ignored
-  `transcribes_a_real_recording` test with `REFLECT_MEETING_TEST_AUDIO` (a
-  capture part or an archived m4a) and `REFLECT_WHISPER_TEST_MODEL`.
+  `transcribes_a_real_recording` test with `REFLECT_RECORDING_TEST_AUDIO` (a
+  capture part or an archived m4a), `REFLECT_WHISPER_TEST_MODEL`, and
+  optionally `REFLECT_RECORDING_TEST_LANGUAGES` (e.g. `en,zh`).

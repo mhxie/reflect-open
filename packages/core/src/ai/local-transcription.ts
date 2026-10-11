@@ -85,8 +85,11 @@ export interface TranscribeLocallyInput {
   /** Pins the read to the issuing graph session. */
   generation: number
   model: LocalTranscriptionModelId
-  /** ISO 639-1 code; empty detects the language per recording. */
-  language: string
+  /**
+   * Spoken languages as ISO 639 codes: none detects any language per
+   * recording, one is always used, several limit detection to themselves.
+   */
+  languages: readonly string[]
   /** User transcription hint, used as the model's initial prompt. */
   prompt: string
 }
@@ -100,7 +103,7 @@ export function transcribeLocally(input: TranscribeLocallyInput): Promise<LocalT
         path: input.path,
         generation: input.generation,
         model: input.model,
-        language: input.language === '' ? null : input.language,
+        languages: input.languages,
         prompt: input.prompt === '' ? null : input.prompt,
       },
     },

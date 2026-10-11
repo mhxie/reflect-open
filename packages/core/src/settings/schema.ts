@@ -360,21 +360,30 @@ export const localTranscriptionModelSchema = z
   .enum(LOCAL_TRANSCRIPTION_MODEL_IDS)
   .catch(DEFAULT_LOCAL_TRANSCRIPTION_MODEL)
 
-/** Canonicalize a spoken-language choice: an ISO 639-1/2 code, or empty. */
+/** Canonicalize a spoken-language choice: an ISO 639-1/2/3 code, or empty. */
 export function normalizeTranscriptionLanguage(value: string): string {
   const code = value.trim().toLowerCase()
   return /^[a-z]{2,3}$/.test(code) ? code : ''
 }
 
+/** Canonicalize spoken-language choices: valid ISO 639 codes, each once, in order. */
+export function normalizeTranscriptionLanguages(entries: readonly unknown[]): string[] {
+  const codes = entries
+    .map((entry) => (typeof entry === 'string' ? normalizeTranscriptionLanguage(entry) : ''))
+    .filter((code) => code !== '')
+  return [...new Set(codes)]
+}
+
 /**
- * The spoken language of audio memos, as an ISO 639 code sent to either
- * engine. Empty (the default) detects it per recording — the better choice
- * when one memo mixes languages.
+ * The languages spoken in audio memos and recordings, as ISO 639 codes sent
+ * to either engine. None (the default) detects any language per recording;
+ * one is always used; several limit detection to themselves, so speech the
+ * model would hear as a third language comes out in a listed one instead.
  */
-export const transcriptionLanguageSchema = z
-  .string()
-  .catch('')
-  .transform(normalizeTranscriptionLanguage)
+export const transcriptionLanguagesSchema = z
+  .array(z.unknown())
+  .catch([])
+  .transform((entries) => normalizeTranscriptionLanguages(entries))
 
 /**
  * Whether the on-device model's upstream is checked (at most daily) for newer
@@ -740,7 +749,25 @@ export const aiPromptsSchema = z
     }),
   )
 
-export const settingsSchema = z.looseObject({
+/**
+ * Seed `transcriptionLanguages` from the single `transcriptionLanguage` (a
+ * code, or empty to detect) that earlier versions wrote, so a chosen language
+ * survives the upgrade. The old key stays, like any unknown key: every build
+ * shares this document, and an older one still reads its own.
+ */
+function upgradeLegacySettings(input: unknown): unknown {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    'transcriptionLanguages' in input ||
+    !('transcriptionLanguage' in input)
+  ) {
+    return input
+  }
+  return { ...input, transcriptionLanguages: [input.transcriptionLanguage] }
+}
+
+const settingsObjectSchema = z.looseObject({
   editorMarkdownSyntax: editorMarkdownSyntaxSchema,
   editorSpellCheck: editorSpellCheckSchema,
   editorDefaultBullet: editorDefaultBulletSchema,
@@ -760,7 +787,7 @@ export const settingsSchema = z.looseObject({
   transcriptionPrompt: transcriptionPromptSchema,
   transcriptionEngine: transcriptionEngineSchema,
   localTranscriptionModel: localTranscriptionModelSchema,
-  transcriptionLanguage: transcriptionLanguageSchema,
+  transcriptionLanguages: transcriptionLanguagesSchema,
   localTranscriptionUpdateChecks: localTranscriptionUpdateChecksSchema,
   recordingMenuBar: recordingMenuBarSchema,
   recordingShortcut: recordingShortcutSchema,
@@ -793,6 +820,8 @@ export const settingsSchema = z.looseObject({
   chatSystemPrompt: chatSystemPromptSchema,
   aiPrompts: aiPromptsSchema,
 })
+
+export const settingsSchema = z.preprocess(upgradeLegacySettings, settingsObjectSchema)
 
 export type Settings = z.infer<typeof settingsSchema>
 

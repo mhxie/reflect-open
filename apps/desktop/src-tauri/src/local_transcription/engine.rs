@@ -7,7 +7,11 @@ use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+};
+
+use super::audio::SAMPLE_RATE;
 
 /// One transcribed stretch of the recording, in milliseconds from its start.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,6 +87,9 @@ impl ScoredSegment {
 const IDLE_RELEASE: Duration = Duration::from_secs(10 * 60);
 const IDLE_POLL: Duration = Duration::from_secs(60);
 
+/// Whisper identifies the language from its first 30-second window.
+const DETECTION_SAMPLES: usize = 30 * SAMPLE_RATE as usize;
+
 struct Loaded {
     model_path: PathBuf,
     context: Arc<WhisperContext>,
@@ -103,18 +110,18 @@ struct Slot {
 pub struct Engine(Arc<Mutex<Slot>>, Arc<Mutex<()>>);
 
 impl Engine {
-    /// Transcribe 16 kHz mono `samples` with the model at `model_path`.
-    /// `language` is an ISO 639-1 code, or `None` to detect it. Blocking:
+    /// Transcribe 16 kHz mono `samples` with the model at `model_path` in one
+    /// of `languages` (ISO 639 codes, see [`decode_language`]). Blocking:
     /// callers run it on a worker thread.
     pub fn transcribe(
         &self,
         model_path: &Path,
         samples: &[f32],
-        language: Option<&str>,
+        languages: &[String],
         prompt: Option<&str>,
     ) -> Result<Vec<TranscriptSegment>, String> {
         Ok(self
-            .transcribe_scored(model_path, samples, language, prompt)?
+            .transcribe_scored(model_path, samples, languages, prompt)?
             .into_iter()
             .filter(|scored| !scored.is_probably_invented())
             .map(|scored| scored.segment)
@@ -127,7 +134,7 @@ impl Engine {
         &self,
         model_path: &Path,
         samples: &[f32],
-        language: Option<&str>,
+        languages: &[String],
         prompt: Option<&str>,
     ) -> Result<Vec<ScoredSegment>, String> {
         // A recording stopped before any audio has nothing to say, and
@@ -143,7 +150,7 @@ impl Engine {
             beam_size: 5,
             patience: -1.0,
         });
-        params.set_language(language);
+        params.set_language(decode_language(&mut state, samples, languages));
         if let Some(prompt) = prompt.filter(|prompt| !prompt.is_empty()) {
             params.set_initial_prompt(prompt);
         }
@@ -280,6 +287,76 @@ fn thread_count() -> i32 {
         .unwrap_or(4)
 }
 
+/// The language whisper decodes `samples` in, from the user's `languages`
+/// (ISO 639 codes). Listing none that whisper knows leaves detection to it
+/// (`None`), and one is forced. Among several, whisper's own detection picks
+/// the likeliest listed one: a short reply it would hear as Japanese or
+/// Russian still comes out in one of the user's languages. This costs what
+/// whisper's built-in detection does, one encoder pass over the first window.
+fn decode_language(
+    state: &mut WhisperState,
+    samples: &[f32],
+    languages: &[String],
+) -> Option<&'static str> {
+    let ids = listed_language_ids(languages);
+    let id = match ids.as_slice() {
+        [] => return None,
+        [only] => *only,
+        [first, ..] => detect_among(state, samples, &ids).unwrap_or_else(|err| {
+            tracing::warn!(%err, "local transcription: language detection failed; using the first listed language");
+            *first
+        }),
+    };
+    whisper_rs::get_lang_str(id)
+}
+
+/// Whisper's ids for the `languages` it knows, deduplicated in order.
+fn listed_language_ids(languages: &[String]) -> Vec<i32> {
+    let mut ids = Vec::with_capacity(languages.len());
+    for id in languages
+        .iter()
+        .filter_map(|code| whisper_rs::get_lang_id(code))
+    {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// The language of `ids` whisper rates likeliest for the first window of
+/// `samples`.
+fn detect_among(state: &mut WhisperState, samples: &[f32], ids: &[i32]) -> Result<i32, String> {
+    let threads = thread_count() as usize;
+    let window = &samples[..samples.len().min(DETECTION_SAMPLES)];
+    state
+        .pcm_to_mel(window, threads)
+        .map_err(|err| err.to_string())?;
+    let (_, probabilities) = state
+        .lang_detect(0, threads)
+        .map_err(|err| err.to_string())?;
+    likeliest(ids, &probabilities).ok_or_else(|| "no language listed".to_string())
+}
+
+/// The id in `ids` that `probabilities` (indexed by language id) rates
+/// highest; the earlier one on a tie.
+fn likeliest(ids: &[i32], probabilities: &[f32]) -> Option<i32> {
+    let probability = |id: i32| {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| probabilities.get(index))
+            .copied()
+            .unwrap_or(0.0)
+    };
+    ids.iter().copied().reduce(|best, id| {
+        if probability(id) > probability(best) {
+            id
+        } else {
+            best
+        }
+    })
+}
+
 fn mean_log_probability(segment: &whisper_rs::WhisperSegment<'_>) -> f32 {
     let count = segment.n_tokens();
     if count <= 0 {
@@ -394,9 +471,43 @@ mod tests {
     #[test]
     fn an_empty_recording_needs_no_model() {
         let segments = Engine::default()
-            .transcribe(Path::new("/nonexistent/model.bin"), &[], None, None)
+            .transcribe(Path::new("/nonexistent/model.bin"), &[], &[], None)
             .unwrap();
         assert!(segments.is_empty());
+    }
+
+    fn codes(codes: &[&str]) -> Vec<String> {
+        codes.iter().map(|code| code.to_string()).collect()
+    }
+
+    #[test]
+    fn maps_listed_languages_to_whisper_ids() {
+        let english = whisper_rs::get_lang_id("en").unwrap();
+        let chinese = whisper_rs::get_lang_id("zh").unwrap();
+        assert_eq!(
+            listed_language_ids(&codes(&["en", "xx", "zh", "en"])),
+            vec![english, chinese]
+        );
+        assert!(listed_language_ids(&codes(&["xx"])).is_empty());
+        assert_eq!(whisper_rs::get_lang_str(chinese), Some("zh"));
+    }
+
+    #[test]
+    fn picks_the_likeliest_listed_language_over_an_unlisted_one() {
+        let english = whisper_rs::get_lang_id("en").unwrap();
+        let chinese = whisper_rs::get_lang_id("zh").unwrap();
+        let japanese = whisper_rs::get_lang_id("ja").unwrap();
+        let mut probabilities = vec![0.0; whisper_rs::get_lang_max_id() as usize + 1];
+        probabilities[japanese as usize] = 0.6;
+        probabilities[chinese as usize] = 0.3;
+        probabilities[english as usize] = 0.1;
+        assert_eq!(
+            likeliest(&[english, chinese], &probabilities),
+            Some(chinese)
+        );
+        assert_eq!(likeliest(&[english, -1], &probabilities), Some(english));
+        assert_eq!(likeliest(&[chinese, english], &[]), Some(chinese));
+        assert_eq!(likeliest(&[], &probabilities), None);
     }
 
     #[test]
@@ -407,7 +518,7 @@ mod tests {
             std::env::var("REFLECT_WHISPER_TEST_MODEL").expect("REFLECT_WHISPER_TEST_MODEL");
         let engine = Engine::default();
         let segments = engine
-            .transcribe(Path::new(&model), &vec![0.0; 16_000 * 2], None, None)
+            .transcribe(Path::new(&model), &vec![0.0; 16_000 * 2], &[], None)
             .unwrap();
         assert!(
             join_segments(&segments).chars().count() < 20,

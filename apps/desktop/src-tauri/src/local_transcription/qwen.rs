@@ -8,7 +8,8 @@
 //!
 //! Qwen3-ASR returns one text per call and no timestamps; callers cut audio
 //! into speech regions first (`utterances::QWEN_PLAN`) and time each region
-//! by its edges.
+//! by its edges. It names the language it heard but reports no likelihoods,
+//! so a region heard outside the user's languages is transcribed again.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -244,23 +245,78 @@ fn tokenizer_json(vocab: &str, merges: &str, config: &str) -> Result<Vec<u8>, St
     serde_json::to_vec(&tokenizer).map_err(|err| err.to_string())
 }
 
+/// The languages Qwen3-ASR identifies and transcribes: ISO 639 codes and the
+/// names its prompt takes and its output reports (capitalized there).
+const LANGUAGES: [(&str, &str); 30] = [
+    ("zh", "chinese"),
+    ("en", "english"),
+    ("yue", "cantonese"),
+    ("ar", "arabic"),
+    ("de", "german"),
+    ("fr", "french"),
+    ("es", "spanish"),
+    ("pt", "portuguese"),
+    ("id", "indonesian"),
+    ("it", "italian"),
+    ("ko", "korean"),
+    ("ru", "russian"),
+    ("th", "thai"),
+    ("vi", "vietnamese"),
+    ("ja", "japanese"),
+    ("tr", "turkish"),
+    ("hi", "hindi"),
+    ("ms", "malay"),
+    ("nl", "dutch"),
+    ("sv", "swedish"),
+    ("da", "danish"),
+    ("fi", "finnish"),
+    ("pl", "polish"),
+    ("cs", "czech"),
+    ("fil", "filipino"),
+    ("fa", "persian"),
+    ("el", "greek"),
+    ("hu", "hungarian"),
+    ("mk", "macedonian"),
+    ("ro", "romanian"),
+];
+
+/// The [`LANGUAGES`] entry for an ISO 639 code.
+fn language(code: &str) -> Option<&'static (&'static str, &'static str)> {
+    LANGUAGES.iter().find(|(known, _)| *known == code)
+}
+
 /// The language name Qwen3-ASR's prompt takes for an ISO 639 code, or `None`
-/// to let it detect the language.
+/// for a language it doesn't know.
 pub fn language_name(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "zh" => "chinese",
-        "yue" => "cantonese",
-        "en" => "english",
-        "ja" => "japanese",
-        "ko" => "korean",
-        "de" => "german",
-        "fr" => "french",
-        "es" => "spanish",
-        "it" => "italian",
-        "pt" => "portuguese",
-        "ru" => "russian",
-        "ar" => "arabic",
-        _ => return None,
+    language(code).map(|(_, name)| *name)
+}
+
+/// The listed `languages` Qwen3-ASR knows, as its own static codes,
+/// deduplicated in order.
+fn known_languages(languages: &[String]) -> Vec<&'static str> {
+    let mut known = Vec::with_capacity(languages.len());
+    for (code, _) in languages.iter().filter_map(|code| language(code)) {
+        if !known.contains(code) {
+            known.push(*code);
+        }
+    }
+    known
+}
+
+/// The listed language a region heard as an unlisted one is transcribed in
+/// again: `fallback` when it is listed, else the first; `None` when nothing
+/// is listed.
+fn retry_language(listed: &[&'static str], fallback: Option<&str>) -> Option<&'static str> {
+    fallback
+        .and_then(|code| listed.iter().copied().find(|listed| *listed == code))
+        .or_else(|| listed.first().copied())
+}
+
+/// Which of `listed` the language Qwen3-ASR reported (`Chinese`, or `None`
+/// over silence) names.
+fn reported_language(reported: &str, listed: &[&'static str]) -> Option<&'static str> {
+    listed.iter().copied().find(|code| {
+        language_name(code).is_some_and(|name| name.eq_ignore_ascii_case(reported.trim()))
     })
 }
 
@@ -277,6 +333,35 @@ pub fn is_plausible(text: &str, seconds: f32) -> bool {
     characters > 0 && characters as f32 <= MAX_CHARS_PER_SECOND * seconds.max(1.0)
 }
 
+/// Transcribe `samples` as `language`, a code from [`LANGUAGES`].
+fn forced(
+    inference: &AsrInference,
+    samples: &[f32],
+    language: &'static str,
+) -> Result<QwenTranscript, String> {
+    let name = language_name(language).unwrap_or(language);
+    let result = inference
+        .transcribe_samples(samples, TranscribeOptions::default().with_language(name))
+        .map_err(|err| format!("transcribing: {err}"))?;
+    Ok(QwenTranscript {
+        text: result.text.trim().to_string(),
+        language: Some(language),
+    })
+}
+
+/// Transcribe `samples` in the language Qwen3-ASR identifies, returned with
+/// the name it reported.
+fn detect(inference: &AsrInference, samples: &[f32]) -> Result<(QwenTranscript, String), String> {
+    let result = inference
+        .transcribe_samples(samples, TranscribeOptions::default())
+        .map_err(|err| format!("transcribing: {err}"))?;
+    let transcript = QwenTranscript {
+        text: result.text.trim().to_string(),
+        language: None,
+    };
+    Ok((transcript, result.language))
+}
+
 struct Loaded {
     dir: PathBuf,
     inference: Arc<AsrInference>,
@@ -290,31 +375,58 @@ struct Slot {
     epoch: u64,
 }
 
+/// What Qwen3-ASR made of one region.
+#[derive(Debug, Default)]
+pub struct QwenTranscript {
+    pub text: String,
+    /// The listed language the text is in; `None` when any was allowed.
+    pub language: Option<&'static str>,
+}
+
 /// The process-wide Qwen model slot, released after a quiet spell.
 #[derive(Default, Clone)]
 pub struct QwenEngine(Arc<Mutex<Slot>>);
 
 impl QwenEngine {
-    /// Transcribe one region of 16 kHz mono audio. Blocking.
+    /// Transcribe one region of 16 kHz mono audio in one of `languages` (ISO
+    /// 639 codes). Listing none that Qwen3-ASR knows lets it detect any
+    /// language, and one is forced. With several it identifies the language
+    /// first, and a region it hears as an unlisted one is transcribed again
+    /// as `fallback` when that is listed, else as the first listed language:
+    /// unlike whisper, it reports no likelihoods to choose by. Blocking.
     pub fn transcribe(
         &self,
         dir: &Path,
         samples: &[f32],
-        language: Option<&str>,
-    ) -> Result<String, String> {
+        languages: &[String],
+        fallback: Option<&str>,
+    ) -> Result<QwenTranscript, String> {
         if samples.is_empty() {
-            return Ok(String::new());
+            return Ok(QwenTranscript::default());
         }
         let inference = self.inference(dir)?;
-        let mut options = TranscribeOptions::default();
-        if let Some(name) = language.and_then(language_name) {
-            options = options.with_language(name);
-        }
-        let result = inference
-            .transcribe_samples(samples, options)
-            .map_err(|err| format!("transcribing: {err}"))?;
+        let listed = known_languages(languages);
+        let transcript = match *listed.as_slice() {
+            [only] => forced(&inference, samples, only)?,
+            _ => {
+                let (detected, reported) = detect(&inference, samples)?;
+                if let Some(language) = reported_language(&reported, &listed) {
+                    QwenTranscript {
+                        language: Some(language),
+                        ..detected
+                    }
+                } else if let Some(target) =
+                    retry_language(&listed, fallback).filter(|_| !detected.text.is_empty())
+                {
+                    forced(&inference, samples, target)?
+                } else {
+                    // Any language is allowed, or nothing was said.
+                    detected
+                }
+            }
+        };
         self.touch();
-        Ok(result.text.trim().to_string())
+        Ok(transcript)
     }
 
     /// Drop the loaded model (after a delete). An in-flight call keeps its
@@ -421,8 +533,32 @@ mod tests {
     }
 
     #[test]
+    fn matches_reported_languages_against_the_listed_ones() {
+        let languages: Vec<String> = ["en", "xx", "zh", "en"]
+            .iter()
+            .map(|code| code.to_string())
+            .collect();
+        let listed = known_languages(&languages);
+        assert_eq!(listed, vec!["en", "zh"]);
+        assert_eq!(reported_language("Chinese", &listed), Some("zh"));
+        assert_eq!(reported_language(" english ", &listed), Some("en"));
+        assert_eq!(reported_language("Japanese", &listed), None);
+        assert_eq!(reported_language("None", &listed), None);
+        assert_eq!(reported_language("Chinese", &[]), None);
+    }
+
+    #[test]
+    fn retries_in_the_language_heard_last_else_the_first_listed() {
+        assert_eq!(retry_language(&["en", "zh"], Some("zh")), Some("zh"));
+        assert_eq!(retry_language(&["en", "zh"], Some("ja")), Some("en"));
+        assert_eq!(retry_language(&["en", "zh"], None), Some("en"));
+        assert_eq!(retry_language(&[], Some("zh")), None);
+    }
+
+    #[test]
     fn maps_languages_and_rejects_runaway_text() {
         assert_eq!(language_name("zh"), Some("chinese"));
+        assert_eq!(language_name("hi"), Some("hindi"));
         assert_eq!(language_name("xx"), None);
         assert!(is_plausible("我们下周发布。", 2.0));
         assert!(!is_plausible("", 2.0));
