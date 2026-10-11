@@ -86,3 +86,25 @@ The rules:
   real.
 - Platform-specific skips need a stated engine difference, not a convenience
   skip.
+
+## Benchmarks
+
+`pnpm bench` runs the `@reflect/core` benchmarks (`packages/core/src/bench/*.bench.ts`)
+in the `core-node` project, through Vitest's benchmark mode:
+
+- **`search.bench.ts`**: the search palette's per-keystroke reads,
+  `searchWithFilters` and `suggestWikiTargets`, for prefixes from one letter
+  to a whole word. They run the exact SQL the app sends, against SQLite.
+- **`indexing.bench.ts`**: the CPU half of an index pass, `parseNote` then
+  `buildIndexedNote`.
+
+By default the benchmarks build a deterministic synthetic graph
+(`corpus.ts`): 6,000 notes shaped like a large personal graph, with dailies,
+a long tail of note lengths, wiki links, tags, tasks, and CJK prose. Set
+`REFLECT_BENCH_GRAPH=<graph directory>` to run the search benchmarks against
+a real graph's `.reflect/index.sqlite` instead, opened read-only. Results
+from a real graph stay on your machine; quote aggregate numbers only.
+
+The numbers are node-side. They leave out the Tauri IPC hop and the WebKit
+JavaScript engine the app runs in, so compare runs with each other rather
+than reading them as in-app latency.

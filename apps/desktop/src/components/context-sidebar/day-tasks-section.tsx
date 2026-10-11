@@ -38,17 +38,30 @@ function capRuns(runs: readonly TaskRun[], limit: number): TaskRun[] {
 
 /**
  * Daily-sidebar Tasks section ({@link tasksForDay}), capped with a link to the
- * Tasks view. Renders nothing when the day has no open tasks.
+ * Tasks view. Rendered for every day, saying so when the day has no open
+ * tasks, so it keeps a fixed place under the calendar rather than letting the
+ * sections below shift up into that place from one day to the next.
  */
-export function DayTasksSection({ date }: DayTasksSectionProps): ReactElement | null {
+export function DayTasksSection({ date }: DayTasksSectionProps): ReactElement {
   const today = useToday()
   const { navigate } = useRouter()
   const navigateNoteLink = usePeekNavigation(date)
-  const { overdue, due } = useDayTasks(date, today)
+  const dayTasks = useDayTasks(date, today)
   const actions = useTaskActions()
+  if (dayTasks === undefined) {
+    // The header alone holds the place while the tasks load: the empty state
+    // here would flash before the list arrives.
+    return <SidebarSection storageKey="tasks" title="Tasks" />
+  }
+
+  const { overdue, due } = dayTasks
   const total = overdue.length + due.length
   if (total === 0) {
-    return null
+    return (
+      <SidebarSection storageKey="tasks" title="Tasks">
+        <p className="px-3 py-1 text-xs leading-5 text-text-muted">No tasks for this day</p>
+      </SidebarSection>
+    )
   }
 
   const labeled = overdue.length > 0 && due.length > 0

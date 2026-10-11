@@ -10,7 +10,8 @@
     "./x-archive": "./src/x-archive.ts"
   },
   "scripts": {
-    "test": "vitest run --config ../../vitest.config.ts --project core-browser --project core-node"
+    "test": "vitest run --config ../../vitest.config.ts --project core-browser --project core-node",
+    "bench": "vitest bench --run --config vitest.node.config.ts --reporter=verbose"
   },
   "dependencies": {
     "@meowdown/markdown": "^0.76.0",

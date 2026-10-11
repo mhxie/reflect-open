@@ -3,7 +3,7 @@ import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, type ReactNode } from 'react'
-import type { NoteRow } from '@reflect/core'
+import type { DailyActivity, DailyEditCount, NoteRow, OpenTask } from '@reflect/core'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { monthLabel, monthOf } from '@/lib/month-grid.ts'
@@ -14,6 +14,9 @@ import '@/test-utils/locator.ts'
 import { DailyContextSidebar } from './daily-context-sidebar.tsx'
 
 const dailyDatesInRange = vi.hoisted(() => vi.fn())
+const getOpenTasks = vi.hoisted(() => vi.fn<() => Promise<OpenTask[]>>())
+const listDailyActivity = vi.hoisted(() => vi.fn<() => Promise<DailyActivity[]>>())
+const listDailyEditCounts = vi.hoisted(() => vi.fn<() => Promise<DailyEditCount[]>>())
 const relatedNotes = vi.hoisted(() => vi.fn())
 const readNote = vi.hoisted(() => vi.fn())
 const useNoteRow = vi.hoisted(() => vi.fn<(path: string) => NoteRow | null>(() => null))
@@ -22,6 +25,9 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   hasBridge: () => true,
   dailyDatesInRange,
+  getOpenTasks,
+  listDailyActivity,
+  listDailyEditCounts,
   readNote,
   relatedNotes,
 }))
@@ -35,7 +41,12 @@ vi.mock('@/providers/graph-provider.tsx', () => ({
 }))
 vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
-    settings: { semanticSearchEnabled: true, dateFormat: 'mdy', weekStartDay: 'monday' },
+    settings: {
+      semanticSearchEnabled: true,
+      activityHeatmapEnabled: true,
+      dateFormat: 'mdy',
+      weekStartDay: 'monday',
+    },
     updateSettings: () => {},
   }),
 }))
@@ -75,6 +86,9 @@ function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
 beforeEach(() => {
   window.sessionStorage.clear()
   dailyDatesInRange.mockReset().mockResolvedValue([])
+  getOpenTasks.mockReset().mockResolvedValue([])
+  listDailyActivity.mockReset().mockResolvedValue([])
+  listDailyEditCounts.mockReset().mockResolvedValue([])
   readNote.mockReset().mockResolvedValue('- daily entry\n')
   relatedNotes.mockReset().mockResolvedValue([])
   useNoteRow.mockReset().mockReturnValue(null)
@@ -250,6 +264,19 @@ describe('DailyContextSidebar sections', () => {
       .element(page.getByRole('button', { name: /Note actions/ }))
       .toHaveAttribute('aria-expanded', 'false')
     await reopened.unmount()
+  })
+
+  it("keeps the day's tasks directly under the calendar, above the graph-wide activity", async () => {
+    listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
+    const view = await renderSidebar('2026-06-09')
+    await expect.element(page.getByText('No tasks for this day')).toBeVisible()
+    await expect.element(page.getByRole('button', { name: /Activity/ })).toBeVisible()
+
+    const headers = [...view.container.querySelectorAll('button[aria-expanded]')].map(
+      (header) => header.textContent,
+    )
+    expect(headers).toEqual(['Tasks', 'Note actions', 'Activity'])
+    await view.unmount()
   })
 
   it('the calendar is not collapsible', async () => {

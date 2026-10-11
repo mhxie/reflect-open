@@ -168,10 +168,20 @@ describe('DayTasksSection', () => {
       .toHaveTextContent(JSON.stringify({ kind: 'tasks' }))
   })
 
-  it('renders nothing when the day has no open tasks', async () => {
+  it('keeps its place with an empty state when the day has no open tasks', async () => {
+    getOpenTasks.mockResolvedValue([dailyTask(TODAY, 'write the review')])
+    await renderSection('2026-10-05')
+
+    await expect.element(page.getByText('Tasks', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('No tasks for this day')).toBeVisible()
+  })
+
+  it('shows only the header while the open tasks load', async () => {
+    getOpenTasks.mockReturnValue(new Promise(() => {}))
     const view = await renderSection(TODAY)
 
+    await expect.element(page.getByText('Tasks', { exact: true })).toBeVisible()
     await vi.waitFor(() => expect(getOpenTasks).toHaveBeenCalled())
-    expect(view.container.textContent).not.toContain('Tasks')
+    expect(view.container.textContent).not.toContain('No tasks for this day')
   })
 })

@@ -300,19 +300,29 @@ export const semanticModelSchema = z.enum(SEMANTIC_MODEL_IDS).catch(DEFAULT_SEMA
  */
 export const describeAssetsSchema = z.boolean().catch(true)
 
-/** Who may write a note's AI summary (see {@link aiSummariesSchema}). */
-export const AI_SUMMARY_MODES = ['off', 'local', 'local-and-cloud'] as const
+/** Which engine writes a note's AI summary (see {@link aiSummariesSchema}). */
+export const AI_SUMMARY_MODES = ['cloud', 'local', 'off'] as const
 export type AiSummaryMode = (typeof AI_SUMMARY_MODES)[number]
 
 /**
  * AI note summaries — the All Notes row preview of a long note, written into
- * its `aiSummary` frontmatter. `local` (the default) summarizes only with an
- * attested on-device model, so nothing leaves the Mac; `local-and-cloud` falls
- * back to the default provider's small model for public notes when no
- * on-device model answers (private notes stay on-device-only either way);
- * `off` writes nothing and keeps the plain snippet.
+ * its `aiSummary` frontmatter. `cloud` (the default) sends public notes to the
+ * default provider's small model; `local` uses an attested on-device model
+ * only; `off` keeps the plain snippet. Earlier builds' `local-and-cloud`
+ * reads as `cloud`.
  */
-export const aiSummariesSchema = z.enum(AI_SUMMARY_MODES).catch('local')
+export const aiSummariesSchema = z
+  .enum([...AI_SUMMARY_MODES, 'local-and-cloud'])
+  .transform((mode) => (mode === 'local-and-cloud' ? 'cloud' : mode))
+  .catch('cloud')
+
+/**
+ * Whether the user has agreed, once, to send public notes to the AI provider
+ * for `cloud` summaries. Until then the pass sends nothing and Reflect asks,
+ * naming how many notes are waiting. Its presence also marks a document this
+ * build has written (see `upgradeLegacyAiSummaries`).
+ */
+export const aiSummariesCloudConfirmedSchema = z.boolean().catch(false)
 
 /**
  * Whether audio-memo transcripts receive a best-effort AI formatting pass
@@ -752,7 +762,7 @@ export const aiPromptsSchema = z
  * Seed `transcriptionLanguages` from the legacy `transcriptionLanguage`, which
  * stays for older builds; see docs/contributing/adding-a-setting.md.
  */
-function upgradeLegacySettings(input: unknown): unknown {
+function upgradeLegacyTranscriptionLanguage(input: unknown): unknown {
   if (
     typeof input !== 'object' ||
     input === null ||
@@ -762,6 +772,47 @@ function upgradeLegacySettings(input: unknown): unknown {
     return input
   }
   return { ...input, transcriptionLanguages: [input.transcriptionLanguage] }
+}
+
+/** Whether a raw `aiProviders` value attests any entry as running on this Mac. */
+function attestsOnDeviceProvider(providers: unknown): boolean {
+  return (
+    Array.isArray(providers) &&
+    providers.some(
+      (entry: unknown) =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        'onDevice' in entry &&
+        entry.onDevice != null,
+    )
+  )
+}
+
+/**
+ * Earlier builds saved every key, so an `aiSummaries: 'local'` they wrote is
+ * usually their old on-device default, not a choice. A document without
+ * `aiSummariesCloudConfirmed` (which this build always writes) that says
+ * `local` while no provider is attested on-device, so it never summarized
+ * anything, reads as the `cloud` default; beside an attested on-device model
+ * `local` stays. An explicit `local` saved by this build is never touched.
+ */
+function upgradeLegacyAiSummaries(input: unknown): unknown {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    'aiSummariesCloudConfirmed' in input ||
+    !('aiSummaries' in input) ||
+    input.aiSummaries !== 'local' ||
+    ('aiProviders' in input && attestsOnDeviceProvider(input.aiProviders))
+  ) {
+    return input
+  }
+  return { ...input, aiSummaries: 'cloud' }
+}
+
+/** Read a document earlier builds wrote into the current shape, one step per change. */
+function upgradeLegacySettings(input: unknown): unknown {
+  return upgradeLegacyAiSummaries(upgradeLegacyTranscriptionLanguage(input))
 }
 
 const settingsObjectSchema = z.looseObject({
@@ -778,6 +829,7 @@ const settingsObjectSchema = z.looseObject({
   semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
   aiSummaries: aiSummariesSchema,
+  aiSummariesCloudConfirmed: aiSummariesCloudConfirmedSchema,
   /** Explicit local vision provider; null retains public-attachment descriptions via the default provider. */
   localOcrProviderId: z.string().nullable().catch(null),
   transcriptionFormat: transcriptionFormatSchema,

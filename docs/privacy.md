@@ -117,18 +117,30 @@ reads currently return unsupported.
   fifteen minutes. Recording other people may require their consent where you
   are.
 
-## AI summaries in All Notes (on-device only by default)
+## AI summaries in All Notes (your AI provider by default)
 
-Settings → All Notes → AI summaries decides who writes the one-sentence summary
-that replaces a long note's opening text in All Notes:
+Settings → All Notes → AI summaries decides which engine writes the one-sentence
+summary that replaces a long note's opening text in All Notes. As with audio-memo
+transcription, the default needs nothing beyond a provider set up in Reflect:
 
-- **On-device model only** (the default): only an attested, verified on-device
-  model summarizes, private notes included. Nothing leaves the Mac.
-- **On-device model, then AI provider:** when no on-device model answers, public notes fall
-  back to the default provider's small model through the same cloud privacy gate
-  as AI chat. Private notes, device-only content, and local-only folders are
-  never sent; local-only notes are never summarized at all.
+- **Cloud provider** (the default): the default provider's small model summarizes
+  public notes through the same cloud privacy gate as AI chat. Nothing is sent
+  until you agree once: when a provider is set up and long public notes are
+  waiting, Reflect asks *Summarize N notes with <provider>?* (Settings has the
+  same Start button). From then on it works through the graph's existing long
+  notes in the background and keeps edited notes summarized. Private notes,
+  device-only content, and local-only folders are never sent; private notes keep
+  their opening text, and local-only notes are never summarized at all. When the
+  default provider runs on this Mac, this engine does not turn to another
+  provider; choose *On this Mac* instead.
+- **On this Mac:** only an attested, verified on-device model (an
+  OpenAI-compatible server on this Mac, added in AI providers) summarizes,
+  private notes included. Nothing leaves the Mac.
 - **Off · show the opening text:** nothing is summarized and the plain snippet stays.
+
+Earlier builds saved *On-device model only*, their default, whether or not you
+chose it. A settings file from them with no attested on-device model reads as
+*Cloud provider*, which still asks before sending anything.
 
 The summary is written into the note's `aiSummary` frontmatter, so it travels
 with the note — including to Git backup, like the rest of the note's text.
@@ -309,14 +321,15 @@ sit inside the synced graph.
   example), that folder stays private and read-only, and Reflect pauses Git
   sync, the iCloud conflict sweep and move-in, and every path that sends a
   note's or attachment's content off the device (the AI chat's note and
-  attachment reads, transcription, asset descriptions, capture enrichment,
-  gist publishing) until the configuration lists it again. Two of those
-  pauses are partial: on-device transcription keeps running (its recordings
-  stay on the Mac, and it never transcribes one inside a local-only folder),
-  and so does enrichment of captures without a screenshot, which reads no
-  attachment. The editor's AI selection menu and the chat's graph statistics
-  keep working: neither can carry content from those folders, which open
-  read-only (without that menu) and are left out of the statistics.
+  attachment reads, cloud AI summaries, transcription, asset descriptions,
+  capture enrichment, gist publishing) until the configuration lists it again.
+  Cloud summaries may still ask to start; no note is read for them while the
+  pause lasts. Two of those pauses are partial: on-device transcription keeps
+  running (its recordings stay on the Mac, and it never transcribes one inside a
+  local-only folder), and so does enrichment of captures without a screenshot,
+  which reads no attachment. The editor's AI selection menu and the chat's graph
+  statistics keep working: neither can carry content from those folders, which
+  open read-only (without that menu) and are left out of the statistics.
 - **If that memory cannot be read,** Reflect pauses the same way. While it
   is damaged (it no longer parses, or is not text), the `reflect` CLI
   refuses every note (`reflect today` aside: daily notes are never
@@ -441,7 +454,7 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | Call | Destination | Carries note content? | Off by default? |
 | --- | --- | --- | --- |
 | AI chat | Your chosen provider or verified local model | Yes — cloud tools block private and device-only sources | Yes (needs configuration) |
-| AI summaries | Your verified local model; optionally your default provider for public notes | Yes — private notes stay on-device | No (on-device only by default) |
+| AI summaries | Your default provider's small model for public notes; your verified local model when *On this Mac* is chosen | Yes — private notes are never sent to the cloud | Asks once — nothing is sent until you start it, then existing public long notes are read in the background |
 | Local image/PDF OCR | Your verified local vision model | Yes — stays on your machine | Yes (explicit model selection) |
 | Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
 | On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |

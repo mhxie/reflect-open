@@ -358,10 +358,14 @@ export function parseNote(input: { path: string; source: string }): ParsedNote {
   const cuts: Span[] = [] // body coords — syntax to drop from plain text
   const tagExcluded: Span[] = [] // body coords — regions that don't yield tags
   const literalPlainText: Span[] = [] // body coords — regions that render backslashes literally
+  let hasTask = false
 
   tree.iterate({
     enter: (node) => {
       const { name, from, to } = node
+      if (name === 'Task') {
+        hasTask = true
+      }
 
       if (name === 'Comment') {
         const previous = node.node.prevSibling
@@ -465,7 +469,12 @@ export function parseNote(input: { path: string; source: string }): ParsedNote {
     tags: [...tags.values()],
     headings,
     assets,
-    tasks: projectTasks(body),
+    // Task items are block structure, which this tree shares with the
+    // block-only parse `projectTasks` runs: no `Task` node here means no
+    // tasks there, so most notes skip that second parse. A `\r` makes the
+    // two parses read lines differently (`projectTasks` normalizes it), so
+    // such a body always takes the full path.
+    tasks: hasTask || body.includes('\r') ? projectTasks(body) : [],
     displayText: buildPlainText(body, cuts, literalPlainText),
   }
 }

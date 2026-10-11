@@ -737,14 +737,21 @@ pub enum LocalNoteRead {
 /// ([`io::NoMaterialize`], per TN3150), so an eviction racing the stat
 /// reports `Evicted` instead of blocking on a download; engaging the policy
 /// is best-effort, and on the rare refusal a narrow stat-then-read race
-/// remains (see the call-site comment).
+/// remains (see the call-site comment). `sharing` marks bytes about to leave
+/// this device (the cloud note-summary engine): like [`note_read_shareable`],
+/// the read then refuses while sharing is paused ([`graph_for_sharing`]).
 #[tauri::command]
 pub async fn note_read_local(
     path: String,
     generation: Option<u64>,
+    sharing: Option<bool>,
     state: State<'_, GraphState>,
 ) -> AppResult<LocalNoteRead> {
-    let (root, local_only) = graph_for(&state, generation)?;
+    let (root, local_only) = if sharing.unwrap_or(false) {
+        graph_for_sharing(&state, generation)?
+    } else {
+        graph_for(&state, generation)?
+    };
     let target = resolve_read(&root, &path, local_only.as_deref())?;
     let abs = target.path();
     crate::blocking::run_blocking(move || {
@@ -3145,6 +3152,7 @@ mod local_only_command_tests {
         let local = |path: &str| match tauri::async_runtime::block_on(note_read_local(
             path.to_string(),
             None,
+            None,
             session.app.state(),
         )) {
             Ok(LocalNoteRead::Content { local_only, .. }) => local_only,
@@ -3229,8 +3237,10 @@ mod local_only_command_tests {
     }
 
     /// With the configuration unknown, nothing leaves the device: shareable
-    /// note reads and asset reads refuse, even for an ordinary note; the
-    /// control session with the configuration known serves them.
+    /// note reads, local reads marked `sharing`, and asset reads refuse, even
+    /// for an ordinary note; the control session with the configuration known
+    /// serves them. An unmarked local read stays on the device and is served
+    /// either way.
     #[test]
     fn sharing_pauses_while_the_configuration_is_unknown() {
         for unknown in [true, false] {
@@ -3249,11 +3259,25 @@ mod local_only_command_tests {
                 None,
                 session.app.state(),
             ));
+            let read_local = |sharing| {
+                tauri::async_runtime::block_on(note_read_local(
+                    "people/plan.md".to_string(),
+                    None,
+                    sharing,
+                    session.app.state(),
+                ))
+            };
+            let shared_local = read_local(Some(true));
             let asset = asset_read("people/photo.png".to_string(), 1, session.app.state());
             let binary = asset_read_binary("people/photo.png".to_string(), 1, session.app.state());
+            assert!(matches!(
+                read_local(None),
+                Ok(LocalNoteRead::Content { .. })
+            ));
             if unknown {
                 for message in [
                     format!("{:?}", note.expect_err("note")),
+                    format!("{:?}", shared_local.expect_err("shared local")),
                     format!("{:?}", asset.expect_err("asset")),
                     format!("{:?}", binary.err().expect("binary")),
                 ] {
@@ -3261,6 +3285,7 @@ mod local_only_command_tests {
                 }
             } else {
                 assert!(matches!(note.unwrap(), ShareableNoteRead::Content { .. }));
+                assert!(matches!(shared_local, Ok(LocalNoteRead::Content { .. })));
                 assert!(asset.is_ok() && binary.is_ok());
             }
         }

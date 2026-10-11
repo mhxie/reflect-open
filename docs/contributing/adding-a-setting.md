@@ -42,17 +42,18 @@ The resilience contract (it mirrors the frontmatter schema):
 - **`z.looseObject` keeps unknown keys.** A document written by a newer app
   version round-trips through an older one without losing fields. This is also
   why saves always write the *full merged document*, never a single key.
-- **Renaming a key is the one migration.** A new key would otherwise start at
-  its default and silently drop the user's choice. Seed it from the old key in
-  `upgradeLegacySettings`, only when the new key is absent, and leave the old
-  key in place: every build (Reflect, Beta, Dev) shares the document, and an
-  older one still reads its own. From the new build's first save the two keys
-  are independent, so an older build keeps the value it had.
-  `transcriptionLanguage` → `transcriptionLanguages` is the example. A type
-  change needs a new key name too, or an older build's `.catch` rewrites it to
-  the default on its next save. `upgradeLegacyReadPart` in `ai/chat/store.ts`
-  is the same `z.preprocess` hook for chat history, but it drops its old
-  field; the shared settings document must not.
+- **Migrations are named steps run by `upgradeLegacySettings`.** Each one
+  leaves keys it doesn't own alone. Renaming a key is the usual one, because a
+  new key would otherwise start at its default and silently drop the user's
+  choice: seed it from the old key only when the new key is absent, and leave
+  the old key in place. Every build (Reflect, Beta, Dev) shares the document,
+  and an older one still reads its own; from the new build's first save the
+  two keys are independent, so an older build keeps the value it had.
+  `upgradeLegacyTranscriptionLanguage` is the example. A type change needs a
+  new key name too, or an older build's `.catch` rewrites it to the default on
+  its next save. `upgradeLegacyReadPart` in `ai/chat/store.ts` is the same
+  `z.preprocess` hook for chat history, but it drops its old field; the shared
+  settings document must not.
 - **Name the persisted key implementation-neutrally.** The document outlives
   any one library: `editorMarkdownSyntax`, not `meowdownMarkMode` — map to the
   library's vocabulary at the consuming boundary instead.
@@ -146,5 +147,5 @@ the common shapes). Add the test at the narrowest useful level:
       `settings-screen.tsx` if it adds a group
 - [ ] Screen/provider test for persistence, plus focused section tests for
       section-specific behavior where needed
-- [ ] No Rust changes, no per-key save logic, and no migration beyond seeding
-      a renamed key in `upgradeLegacySettings`
+- [ ] No Rust changes, no per-key save logic, and no migration outside a
+      named step in `upgradeLegacySettings`

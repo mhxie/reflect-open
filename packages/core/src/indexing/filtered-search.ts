@@ -308,69 +308,119 @@ export async function searchWithFilters(
   // SQLite rejects `MATCH ... OR title_key LIKE ...`, and flattening an FTS
   // subquery under this notes-first join reruns MATCH for every note. An
   // explicitly materialized CTE computes lexical hits once, while the outer
-  // join safely admits title-recall-only rows and preserves FTS snippets.
-  // The admission OR can't use an index, so the ranked path scans the
-  // (filtered) notes table once per query — `instr` over titles is cheap at
-  // graph scale, and the FTS pass stays a single MATCH.
-  const lexicalDb = db.with(
-    (cte) => cte('lexical').materialized(),
-    (queryDb) =>
-      queryDb
-        .selectFrom('searchFts')
-        .select([
-          'searchFts.path',
-          sql<string>`highlight(search_fts, 1, ${HIGHLIGHT_START}, ${HIGHLIGHT_END})`.as(
-            'ftsHighlightedTitle',
-          ),
-          sql<string>`snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10)`.as(
-            'snippet',
-          ),
-          cjkSnippetSql(parsed.text, HIGHLIGHT_START, HIGHLIGHT_END).as('cjkSnippet'),
-          sql<number>`bm25(search_fts, 0, 10.0, 1.0, 1.0)`.as('rank'),
-        ])
-        .where(sql<boolean>`search_fts MATCH ${match}`),
-  )
-  const filteredNotes = query.select('notes.titleKey').as('filteredNotes')
+  // join safely admits title-recall-only rows. The admission OR can't use an
+  // index, so the ranked path scans the (filtered) notes table once per
+  // query — `instr` over titles is cheap at graph scale.
+  //
+  // Ranking reads only bm25 scores; the display columns (`snippet()` above
+  // all, which re-tokenizes a note's whole body) are built in a second MATCH
+  // for just the ranked page. A short prefix matches most of a graph, and
+  // snippeting every match first made those queries ~10× slower.
   const titleMatch = buildTitleMatchSql(sql.ref<string>('filteredNotes.titleKey'), parsed.text)
-  let rankedQuery = lexicalDb
-    .selectFrom(filteredNotes)
-    .leftJoin('lexical', 'lexical.path', 'filteredNotes.path')
-    .select([
-      'filteredNotes.path',
-      'filteredNotes.title',
-      'filteredNotes.displayTitle',
-      'filteredNotes.lang',
-      'filteredNotes.isPrivate',
-      'filteredNotes.hasDeviceOnlyContent',
-      'filteredNotes.assetTextHash',
-      'filteredNotes.dailyDate',
-      'filteredNotes.preview',
-      'filteredNotes.mtime',
-      'filteredNotes.isPinned',
-      'filteredNotes.hasConflict',
-      'lexical.ftsHighlightedTitle',
-      'lexical.snippet',
-      'lexical.cjkSnippet',
-    ])
-    .where(sql<boolean>`("lexical"."path" is not null or ${titleMatch.containsAllTerms})`)
-    .orderBy(titleMatch.rank)
-    // A title-only prefix already admitted by manual recall keeps its
-    // historical rank (`0`). Tokenizer-only title matches such as
-    // `cafe` -> `Café` retain lexical bm25 so they still outrank body hits.
-    .orderBy(
-      sql`case
-        when instr(coalesce("lexical"."snippet", ''), ${HIGHLIGHT_START}) > 0
-          or not (${titleMatch.containsAllTerms})
-        then coalesce("lexical"."rank", 0)
-        else 0
-      end`,
+  const rankedDb = db
+    .with(
+      (cte) => cte('lexical').materialized(),
+      (queryDb) =>
+        queryDb
+          .selectFrom('searchFts')
+          .select([
+            'searchFts.path',
+            sql<number>`bm25(search_fts, 0, 10.0, 1.0, 1.0)`.as('rank'),
+            // Non-zero exactly when the body holds a match: the case where
+            // `snippet()` over the body would carry a highlight.
+            sql<number>`bm25(search_fts, 0, 0.0, 1.0, 0.0)`.as('bodyRank'),
+          ])
+          .where(sql<boolean>`search_fts MATCH ${match}`),
     )
-    .orderBy('filteredNotes.isPinned', 'desc')
-    .orderBy('filteredNotes.mtime', 'desc')
-    .orderBy('filteredNotes.path', 'asc')
-  if (limit !== null) {
-    rankedQuery = rankedQuery.limit(limit)
-  }
+    .with(
+      (cte) => cte('ranked').materialized(),
+      (queryDb) => {
+        let rankedQuery = queryDb
+          .selectFrom(query.select('notes.titleKey').as('filteredNotes'))
+          .leftJoin('lexical', 'lexical.path', 'filteredNotes.path')
+          .select([
+            'filteredNotes.path',
+            'filteredNotes.title',
+            'filteredNotes.displayTitle',
+            'filteredNotes.lang',
+            'filteredNotes.isPrivate',
+            'filteredNotes.hasDeviceOnlyContent',
+            'filteredNotes.assetTextHash',
+            'filteredNotes.dailyDate',
+            'filteredNotes.preview',
+            'filteredNotes.mtime',
+            'filteredNotes.isPinned',
+            'filteredNotes.hasConflict',
+            titleMatch.rank.as('titleRank'),
+            // A title-only prefix already admitted by manual recall keeps its
+            // historical rank (`0`). Tokenizer-only title matches such as
+            // `cafe` -> `Café` retain lexical bm25 so they still outrank body
+            // hits.
+            sql<number>`case
+              when ${sql.ref('lexical.bodyRank')} != 0 or not (${titleMatch.containsAllTerms})
+              then coalesce(${sql.ref('lexical.rank')}, 0)
+              else 0
+            end`.as('lexicalRank'),
+          ])
+          .where(
+            sql<boolean>`(${sql.ref('lexical.path')} is not null or ${titleMatch.containsAllTerms})`,
+          )
+          .orderBy('titleRank')
+          .orderBy('lexicalRank')
+          .orderBy('filteredNotes.isPinned', 'desc')
+          .orderBy('filteredNotes.mtime', 'desc')
+          .orderBy('filteredNotes.path', 'asc')
+        if (limit !== null) {
+          rankedQuery = rankedQuery.limit(limit)
+        }
+        return rankedQuery
+      },
+    )
+    .with(
+      (cte) => cte('display').materialized(),
+      (queryDb) =>
+        queryDb
+          .selectFrom('searchFts')
+          .select([
+            'searchFts.path',
+            sql<string>`highlight(search_fts, 1, ${HIGHLIGHT_START}, ${HIGHLIGHT_END})`.as(
+              'ftsHighlightedTitle',
+            ),
+            sql<string>`snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10)`.as(
+              'snippet',
+            ),
+            cjkSnippetSql(parsed.text, HIGHLIGHT_START, HIGHLIGHT_END).as('cjkSnippet'),
+          ])
+          .where(sql<boolean>`search_fts MATCH ${match}`)
+          .where('searchFts.path', 'in', queryDb.selectFrom('ranked').select('ranked.path')),
+    )
+  const rankedQuery = rankedDb
+    .selectFrom('ranked')
+    .leftJoin('display', 'display.path', 'ranked.path')
+    .select([
+      'ranked.path',
+      'ranked.title',
+      'ranked.displayTitle',
+      'ranked.lang',
+      'ranked.isPrivate',
+      'ranked.hasDeviceOnlyContent',
+      'ranked.assetTextHash',
+      'ranked.dailyDate',
+      'ranked.preview',
+      'ranked.mtime',
+      'ranked.isPinned',
+      'ranked.hasConflict',
+      'display.ftsHighlightedTitle',
+      'display.snippet',
+      'display.cjkSnippet',
+    ])
+    // The CTE's order doesn't survive the join: restate it. `path` is unique,
+    // so the order is total and matches the ranked page exactly.
+    .orderBy('ranked.titleRank')
+    .orderBy('ranked.lexicalRank')
+    .orderBy('ranked.isPinned', 'desc')
+    .orderBy('ranked.mtime', 'desc')
+    .orderBy('ranked.path', 'asc')
   const rows = await rankedQuery.execute()
   return rows.map(({ ftsHighlightedTitle, snippet, cjkSnippet, ...row }) => ({
     ...row,

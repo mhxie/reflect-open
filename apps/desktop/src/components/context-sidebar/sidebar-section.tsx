@@ -6,7 +6,8 @@ interface SidebarSectionProps {
   /** Session-storage key suffix persisting this section's open state. */
   storageKey: string
   title: string
-  children: ReactNode
+  /** The section body; omitted, the header alone holds the section's place. */
+  children?: ReactNode
 }
 
 const STORAGE_PREFIX = 'reflect.context-sidebar.'
@@ -45,7 +46,7 @@ export function SidebarSection({ storageKey, title, children }: SidebarSectionPr
           <Chevron aria-hidden className="size-3" />
         </span>
       </button>
-      {open ? <div className="px-2">{children}</div> : null}
+      {open && children !== undefined ? <div className="px-2">{children}</div> : null}
     </section>
   )
 }
