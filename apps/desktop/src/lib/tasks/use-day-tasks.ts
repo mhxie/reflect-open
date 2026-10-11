@@ -7,13 +7,13 @@ import { useRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
 import { withStruckRows } from '@/lib/tasks/task-visibility.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 
-const NO_TASKS: DayTasks = { overdue: [], due: [] }
-
 /**
  * {@link tasksForDay} over the shared open-tasks query, merged with this
  * session's completions so a task checked here stays struck and reopenable.
+ * `undefined` until the open tasks have loaded, so a caller can tell a day
+ * with no tasks from one whose tasks are still being read.
  */
-export function useDayTasks(day: string, today: string): DayTasks {
+export function useDayTasks(day: string, today: string): DayTasks | undefined {
   const { graph } = useGraph()
   const bridgeReady = useBridgeReady()
   const { data: open } = useQuery({
@@ -22,7 +22,7 @@ export function useDayTasks(day: string, today: string): DayTasks {
   })
   const struck = useRecentlyCompleted(graph?.root ?? null, open)
   return useMemo(
-    () => (open === undefined ? NO_TASKS : tasksForDay(withStruckRows(open, struck), day, today)),
+    () => (open === undefined ? undefined : tasksForDay(withStruckRows(open, struck), day, today)),
     [open, struck, day, today],
   )
 }
