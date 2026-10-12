@@ -7,6 +7,7 @@ import { errorMessage, isAppError, toAppError } from '../errors.ts'
 import { readNoteLocal, writeNoteKeepingModified } from '../graph/commands.ts'
 import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { db } from '../indexing/db.ts'
+import { echoLocalWrite } from '../indexing/local-write-echo.ts'
 import {
   AI_SUMMARY_KEY,
   aiSummaryOwner,
@@ -273,7 +274,15 @@ async function summarizeCandidate(
   const body = splitFrontmatter(source).body
   const hash = noteBodyHash(body)
   if (parsed.frontmatter.aiSummary?.hash === hash) {
-    return { kind: 'settled' } // already written; the index catches up on the echo
+    // Written, but the index never saw it (an earlier build's write, or a quit
+    // before its echo landed): ask it to re-read the note at its kept time.
+    echoLocalWrite({
+      path: candidate.path,
+      kind: 'upsert',
+      modifiedMs: candidate.mtime,
+      reread: true,
+    })
+    return { kind: 'settled' }
   }
 
   const content = body.slice(0, MAX_SUMMARY_SOURCE_CHARS)

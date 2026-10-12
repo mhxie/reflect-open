@@ -19,6 +19,12 @@ const fileChangeSchema = z.object({
    * path stamps `notes.mtime` from it; removes (and older payloads) omit it.
    */
   modifiedMs: z.number().optional(),
+  /**
+   * Set by a write that kept the file's modification time (the AI summary
+   * block): the indexed mtime still matches, so the re-index path reads the
+   * file anyway. The watcher never sets it.
+   */
+  reread: z.boolean().optional(),
 })
 const fileChangesSchema = z.array(fileChangeSchema)
 

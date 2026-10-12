@@ -224,7 +224,7 @@ export async function applyIndexChanges(
         continue
       }
       const facts = stored.get(change.path)
-      if (matchesTrustedMtime(facts?.mtime, change.modifiedMs, now)) {
+      if (change.reread !== true && matchesTrustedMtime(facts?.mtime, change.modifiedMs, now)) {
         continue // already indexed at this mtime — e.g. the watch's initial gather
       }
       const content = await readNote(change.path)
@@ -246,7 +246,9 @@ export async function applyIndexChanges(
       }
       const projection = await buildNoteProjection(change.path, content, {
         fileHash,
-        mtime: change.modifiedMs ?? Date.now(),
+        // A write that kept the file's time but couldn't report it keeps the row's.
+        mtime:
+          change.modifiedMs ?? (change.reread === true ? facts?.mtime : undefined) ?? Date.now(),
       })
       if (!canApply()) {
         return mutations

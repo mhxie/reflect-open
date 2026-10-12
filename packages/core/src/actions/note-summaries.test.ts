@@ -13,6 +13,7 @@ import {
   openMigratedIndex,
   project,
 } from '../indexing/flow-test-harness.ts'
+import { echoLocalWrite } from '../indexing/local-write-echo.ts'
 import { noteBodyHash, parseNote, splitFrontmatter, upsertFrontmatter } from '../markdown/index.ts'
 import { verifyOnDeviceServer } from '../privacy/on-device.ts'
 import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
@@ -32,6 +33,10 @@ vi.mock('../graph/commands', async (original) => ({
 vi.mock('../ai/language-model', async (original) => ({
   ...(await original<typeof import('../ai/language-model.ts')>()),
   languageModelFor: vi.fn(),
+}))
+vi.mock('../indexing/local-write-echo', async (original) => ({
+  ...(await original<typeof import('../indexing/local-write-echo.ts')>()),
+  echoLocalWrite: vi.fn(),
 }))
 vi.mock('../ai/secrets', () => ({ aiApiKeyForConfig: vi.fn() }))
 vi.mock('../privacy/on-device-verification', () => ({ verifyOnDeviceServer: vi.fn() }))
@@ -246,6 +251,29 @@ describe('reconcileNoteSummaries', () => {
 
     const again = await reconcileNoteSummaries(input({ settled: new Set(outcome.settled) }))
     expect(again.pending).toBe(0)
+  })
+
+  it('asks the index to re-read a note whose summary it never saw', async () => {
+    // An earlier build wrote the block under the note's kept mtime and the
+    // index skipped that write: the file is summarized, its row still stale.
+    const body = splitFrontmatter(LONG_BODY).body
+    files.set(
+      PUBLIC,
+      upsertFrontmatter(LONG_BODY, {
+        aiSummary: { text: 'Written before.', hash: noteBodyHash(body) },
+      }),
+    )
+
+    const outcome = await reconcileNoteSummaries(input())
+
+    expect(writtenPaths()).toEqual([PRIVATE])
+    expect(echoLocalWrite).toHaveBeenCalledExactlyOnceWith({
+      path: PUBLIC,
+      kind: 'upsert',
+      modifiedMs: SETTLED_MTIME,
+      reread: true,
+    })
+    expect(outcome.settled).toEqual([noteSummaryKey(PUBLIC, `hash-${PUBLIC}`)])
   })
 
   it('defers a note with unsaved edits and does nothing when off', async () => {

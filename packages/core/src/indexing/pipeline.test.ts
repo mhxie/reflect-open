@@ -402,6 +402,61 @@ describe('applyIndexChanges (watcher dispatch)', () => {
     expect(commands).not.toContain('index_touch')
   })
 
+  it('re-reads a write that kept the mtime the index already holds', async () => {
+    // The AI summary block lands under the note's old, settled mtime: only the
+    // reread flag tells this write from the watch's re-report of an unchanged file.
+    mockInvoke.mockImplementation(async (command, args) => {
+      const sql = String(args['sql'] ?? '')
+      if (command === 'db_query' && sql.includes('file_hash')) {
+        return [{ path: 'notes/a.md', file_hash: 'stored', mtime: 1_000 }]
+      }
+      if (command === 'db_query') {
+        return []
+      }
+      if (command === 'note_read') {
+        return '---\naiSummary:\n  text: One line.\n  hash: abc\n---\n# a\n'
+      }
+      return null
+    })
+
+    const mutations = await applyIndexChanges(
+      [{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1_000, reread: true }],
+      9,
+    )
+
+    expect(mutations).toBe(1)
+    const apply = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_apply_batch')
+    const notes = (apply![1] as { notes: Array<{ mtime: number }> }).notes
+    expect(notes[0]!.mtime).toBe(1_000)
+  })
+
+  it('keeps the indexed mtime for a reread whose write reported none', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_750_000_000_000)
+    try {
+      mockInvoke.mockImplementation(async (command, args) => {
+        const sql = String(args['sql'] ?? '')
+        if (command === 'db_query' && sql.includes('file_hash')) {
+          return [{ path: 'notes/a.md', file_hash: 'stored', mtime: 1_000 }]
+        }
+        if (command === 'db_query') {
+          return []
+        }
+        if (command === 'note_read') {
+          return '# changed under its kept time\n'
+        }
+        return null
+      })
+
+      await applyIndexChanges([{ path: 'notes/a.md', kind: 'upsert', reread: true }], 9)
+
+      const apply = mockInvoke.mock.calls.find(([cmd]) => cmd === 'index_apply_batch')
+      const notes = (apply![1] as { notes: Array<{ mtime: number }> }).notes
+      expect(notes[0]!.mtime).toBe(1_000)
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
+
   it('re-stamps the stored mtime when content is unchanged but the mtime moved', async () => {
     const content = '# same content\n'
     mockInvoke.mockImplementation(async (command, args) => {
