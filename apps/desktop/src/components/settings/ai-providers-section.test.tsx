@@ -455,6 +455,9 @@ describe('AiProvidersSection on this Mac', () => {
       .element(meaning)
       .toMatchTextContent(`Reflect will treat llama3.2 at ${OLLAMA_URL} as running on this Mac.`)
     expect(meaning.element().textContent).not.toMatch(/never/i)
+    await expect
+      .element(dialog.getByRole('combobox', { name: 'Local inference server' }))
+      .toMatchTextContent('Other local server (e.g. LM Studio)')
     await dialog.getByRole('checkbox', { name: 'Can read images' }).click()
     await dialog.getByLabelText('Context length (tokens)').fill('32,768')
     await dialog.getByRole('button', { name: 'Add provider' }).click()

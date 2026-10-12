@@ -26,6 +26,12 @@ import {
 
 const FIELD_LABEL_CLASS = 'text-xs font-medium text-text-secondary'
 
+/** The local servers the attestation can name; also the closed select's labels. */
+const LOCAL_SERVER_OPTIONS = [
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'openai-compatible', label: 'Other local server (e.g. LM Studio)' },
+] as const
+
 interface AddAiProviderLocalFieldsProps {
   /** A quick fill replaced the endpoint (the key's verification no longer applies). */
   onEndpointChange: () => void
@@ -98,6 +104,7 @@ export function AddAiProviderLocalFields({
         {onDevice && loopback ? (
           <Select
             defaultValue="openai-compatible"
+            items={LOCAL_SERVER_OPTIONS}
             onValueChange={(value) => {
               if (value === 'ollama' || value === 'openai-compatible')
                 setValue('onDeviceServer', value)
@@ -107,8 +114,11 @@ export function AddAiProviderLocalFields({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="ollama">Ollama</SelectItem>
-              <SelectItem value="openai-compatible">Other local server (e.g. LM Studio)</SelectItem>
+              {LOCAL_SERVER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         ) : null}
