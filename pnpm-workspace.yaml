@@ -55,9 +55,9 @@ minimumReleaseAgeExclude:
 #   '@meowdown/markdown': https://pkg.pr.new/@meowdown/markdown@346867e5f1b5336c889e829b146a04fcc0c115c1
 
 # Plan 25: Reflect runs the Meowdown fork (mhxie/meowdown, branch
-# feat/remote-media) from tarballs vendored by
+# master) from tarballs vendored by
 # apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
-  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.0-52a6cfe0d003.tgz
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.80.0-52a6cfe0d003.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.79.0-52a6cfe0d003.tgz
+  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.0-7b1d06d4ea4a.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.80.0-7b1d06d4ea4a.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.79.0-7b1d06d4ea4a.tgz
