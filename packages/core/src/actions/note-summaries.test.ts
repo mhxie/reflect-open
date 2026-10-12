@@ -351,12 +351,19 @@ describe('reconcileNoteSummaries', () => {
       }),
     )
 
+    // At launch the live index subscribes only after its first reconcile: a
+    // request nobody took leaves the note for a later pass, not settled.
+    vi.mocked(requestIndexReread).mockReturnValueOnce(false)
+    const early = await reconcileNoteSummaries(input())
+    expect(early.settled).toEqual([])
+
+    vi.mocked(requestIndexReread).mockReturnValue(true)
     const outcome = await reconcileNoteSummaries(input())
 
-    expect(writtenPaths()).toEqual([PRIVATE])
+    expect(writtenPaths()).toEqual([PRIVATE, PRIVATE])
     // Only the index looks again, at the time it holds: no write is announced,
     // so sync and iCloud never take this for one of this device's writes.
-    expect(requestIndexReread).toHaveBeenCalledExactlyOnceWith([PUBLIC])
+    expect(requestIndexReread).toHaveBeenLastCalledWith([PUBLIC])
     expect(echoLocalWrite).not.toHaveBeenCalled()
     expect(outcome.settled).toEqual([noteSummaryKey(PUBLIC, `hash-${PUBLIC}`)])
   })

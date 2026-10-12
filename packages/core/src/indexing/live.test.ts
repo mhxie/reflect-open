@@ -332,7 +332,7 @@ describe('subscribeIndexChanges', () => {
     const unlisten = await subscribeIndexChanges(1, onApplied)
     const unlistenElsewhere = await subscribeFileChanges(elsewhere)
 
-    requestIndexReread(['notes/a.md'])
+    expect(requestIndexReread(['notes/a.md'])).toBe(true)
     await vi.waitFor(() => {
       expect(onApplied).toHaveBeenCalledTimes(1)
     })

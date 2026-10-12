@@ -220,5 +220,12 @@ describe('createNoteSummaryController', () => {
     await settle()
     expect(onConsentNeeded).toHaveBeenLastCalledWith(mini)
     expect(onConsentNeeded).toHaveBeenCalledTimes(2)
+
+    // Summaries switched away and back: the hook withdrew the open ask, so the
+    // same model is asked about again rather than left waiting in silence.
+    controller!.refresh()
+    await settle()
+    expect(onConsentNeeded).toHaveBeenCalledTimes(3)
+    expect(onConsentNeeded).toHaveBeenLastCalledWith(mini)
   })
 })

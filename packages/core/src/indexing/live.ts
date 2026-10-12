@@ -360,11 +360,14 @@ export function subscribeIndexChanges(
  * Ask the live index to re-read `paths`, keeping each row's indexed time,
  * without announcing a file change: sync, iCloud and open editors never hear
  * it. For a note whose last write the index never saw (one that kept the
- * file's modification time, from a build without the reread echo).
+ * file's modification time, from a build without the reread echo). Returns
+ * whether a live subscription took the request: there is none until the
+ * graph's first reconcile has finished.
  */
-export function requestIndexReread(paths: readonly string[]): void {
+export function requestIndexReread(paths: readonly string[]): boolean {
   const changes = paths.map((path): FileChange => ({ path, kind: 'upsert', reread: true }))
   for (const handleBatch of rereadHandlers) {
     handleBatch(changes)
   }
+  return rereadHandlers.size > 0
 }

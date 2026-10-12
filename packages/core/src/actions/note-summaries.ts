@@ -319,10 +319,11 @@ async function summaryCandidates(): Promise<SummaryCandidate[]> {
   }))
 }
 
-/** What happened to one note; `stop` ends the pass. */
+/** What happened to one note; `stop` ends the pass, and `later` leaves it for another. */
 type NoteStep =
   | { kind: 'summarized' }
   | { kind: 'settled' }
+  | { kind: 'later' }
   | { kind: 'stop'; stopped: ReconcileStop }
 
 const STALE: ReconcileStop = { reason: 'stale', message: 'the graph session ended mid-pass' }
@@ -361,9 +362,9 @@ async function summarizeCandidate(
   if (parsed.frontmatter.aiSummary?.hash === hash) {
     // Written, but the index never saw it (an earlier build's write, or a quit
     // before its echo landed). Only the index is asked to look again: nothing
-    // is written now, so nothing else hears about it.
-    requestIndexReread([candidate.path])
-    return { kind: 'settled' }
+    // is written now, so nothing else hears about it. Before the live index is
+    // up, a later pass asks again.
+    return requestIndexReread([candidate.path]) ? { kind: 'settled' } : { kind: 'later' }
   }
 
   const content = body.slice(0, MAX_SUMMARY_SOURCE_CHARS)
@@ -486,7 +487,7 @@ export async function reconcileNoteSummaries(
       }
       if (step.kind === 'summarized') {
         outcome.summarized += 1
-      } else {
+      } else if (step.kind === 'settled') {
         outcome.settled.push(noteSummaryKey(candidate.path, candidate.fileHash))
       }
     }

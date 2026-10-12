@@ -32,7 +32,11 @@ import { providerFetch } from '@/lib/provider-fetch.ts'
 export interface NoteSummaryController {
   /** Attach the triggers and run the launch pass. */
   start(): void
-  /** A setting the passes read changed (mode, model, providers): run a pass now. */
+  /**
+   * A setting the passes read changed (mode, model, providers): run a pass
+   * now, asking again if a go-ahead is still needed. A change may have
+   * withdrawn the open ask.
+   */
   refresh(): void
   /** Tear down triggers and timers; abort an in-flight pass at its next gate. */
   dispose(): void
@@ -186,6 +190,7 @@ export function createNoteSummaryController(
   }
 
   function refresh(): void {
+    askedChoice = null
     if (started && !loop.isStale()) {
       loop.schedule()
     }
