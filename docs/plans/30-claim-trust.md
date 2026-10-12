@@ -112,6 +112,11 @@ In every style:
   <today>` to the claim's ledger, creating the ledger when there is none, at
   most once a day per claim and only where the note is editable. The harness
   decides what resolves it.
+- **Dismiss the doubt.** On a disputed claim the card offers this instead:
+  it appends `@pass: reader | status: verified | at: <today>` the same way.
+  The harness lets the dismissal resolve the dispute but never raise the
+  tier, and does not check a dismissed source-check flag again until the
+  claim is edited.
 - **Footer.** The note footer says how many claims need work and steps through
   them; when none do, it says how many are not yet evaluated, and otherwise
   stays silent.

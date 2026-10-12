@@ -15,7 +15,7 @@ import { todayIso } from '@/lib/dates.ts'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useWikiTrustView, type WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
-import { wikiQuestionTransaction } from './wiki-claim-question.ts'
+import { wikiReaderTransaction, type WikiReaderStatus } from './wiki-claim-question.ts'
 import { WikiClaimTrustCard } from './wiki-claim-trust-card.tsx'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import type { WikiTrustView } from './wiki-trust-view.ts'
@@ -95,13 +95,15 @@ export function useWikiArticleTrust(
   published: { readonly current: () => void },
 ): WikiArticleTrust {
   const display = useSettings().settings.wikiTrustDisplay
-  const question = useCallback(
-    (claimId: string) => {
+  const record = useCallback(
+    (claimId: string, status: WikiReaderStatus) => {
       const view = editableView(editor)
       if (view === null) return false
       const index = wikiArticleKey.getState(view.state)?.index
       const transaction =
-        index === undefined ? null : wikiQuestionTransaction(view.state, index, claimId, todayIso())
+        index === undefined
+          ? null
+          : wikiReaderTransaction(view.state, index, claimId, status, todayIso())
       if (transaction === null) return false
       view.dispatch(transaction)
       return true
@@ -110,7 +112,7 @@ export function useWikiArticleTrust(
   )
   // A saved file read the way the editor reads it, for spotting unsaved edits.
   const asEditor = useCallback((markdown: string) => editorMarkdown(editor, markdown), [editor])
-  const trust = useWikiTrustView(path, index, question, asEditor)
+  const trust = useWikiTrustView(path, index, record, asEditor)
   const viewRef = useRef(trust.view)
   const summaryRef = useRef(trust.summary)
   const [cardFor, setCardFor] = useState<string | null>(null)
@@ -202,7 +204,7 @@ export function useWikiArticleTrust(
           side="top"
           align="start"
           className="max-h-[min(var(--available-height),28rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto text-xs"
-          // Focus sits in the card after a question, out of the editor's
+          // Focus sits in the card after a reader record, out of the editor's
           // keymap, so the card passes its undo on.
           onKeyDown={(event) => {
             if (isUndoKey(event) && undoInEditor(editor)) {
