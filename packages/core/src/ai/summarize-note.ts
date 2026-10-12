@@ -3,6 +3,7 @@ import { AI_SUMMARY_MAX_CHARS } from '../markdown/ai-summary.ts'
 import type { CloudNoteContent, CloudSafe } from '../privacy/checkers.ts'
 import type { CloudTarget, VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
 import type { TargetModel } from './language-model.ts'
+import { skipsReasoning } from './reasoning.ts'
 import { clipAtWordBoundary } from './text.ts'
 
 /**
@@ -103,6 +104,7 @@ export async function summarizeNote(request: SummarizeNoteRequest): Promise<stri
     const result = await sdk.generateText({
       model: request.model.model,
       prompt: summaryPrompt(request.note),
+      ...(skipsReasoning(request.model.target) ? { reasoning: 'none' } : {}),
       abortSignal: AbortSignal.timeout(SUMMARY_TIMEOUT_MS),
       maxRetries: 0,
     })
