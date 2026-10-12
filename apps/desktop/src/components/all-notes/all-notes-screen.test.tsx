@@ -390,7 +390,7 @@ describe('AllNotesScreen', () => {
     await view.unmount()
   })
 
-  it('lists non-daily notes with subject, snippet, tags, and updated columns', async () => {
+  it('lists non-daily notes with subject, snippet and tags, and updated columns', async () => {
     const view = await renderScreen()
 
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
@@ -399,6 +399,10 @@ describe('AllNotesScreen', () => {
     await expectLocatorToHaveCount(view.getByText('#link'), 2)
     await expect.element(view.getByText('1/15/2020')).toBeInTheDocument()
     await expect.element(view.getByText('1/10/2020')).toBeInTheDocument()
+    // Tags share the snippet's column instead of reserving one of their own.
+    await expect.element(view.getByText('Tags', { exact: true })).not.toBeInTheDocument()
+    const snippetCell = view.getByText('Shop your health goals.').element().parentElement
+    expect(snippetCell?.textContent).toBe('Shop your health goals.#link')
     await view.unmount()
   })
 
@@ -409,7 +413,7 @@ describe('AllNotesScreen', () => {
     const updated = view.getByText('2020-01-15')
     await expect.element(updated).toHaveClass('whitespace-nowrap')
     expect(updated.element().parentElement?.className ?? '').toContain(
-      'grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_minmax(0,8rem)_6rem]',
+      'grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_6rem]',
     )
     await view.unmount()
   })
