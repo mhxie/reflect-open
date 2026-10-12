@@ -12,12 +12,15 @@ import { ListRow } from './list-row.tsx'
 import { ListRowSubject } from './list-row-subject.tsx'
 
 /**
- * The shared column template (Subject · Level · Snippet · Tags · Updated) — the header
+ * The shared column template (Subject · Level · Snippet · Updated) — the header
  * row in {@link AllNotesTable} uses the same classes so the columns line up.
- * The selection indicator is positioned beside the row, outside the column flow.
+ * Tags follow the snippet in its column rather than holding one of their own:
+ * most notes have none, and a fixed tags column left that width empty on
+ * every such row. The selection indicator is positioned beside the row,
+ * outside the column flow.
  */
 export const ALL_NOTES_GRID =
-  'grid grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_minmax(0,8rem)_6rem] items-center gap-4 pl-12 pr-7'
+  'grid grid-cols-[minmax(0,15rem)_3rem_minmax(0,1fr)_6rem] items-center gap-4 pl-12 pr-7'
 
 interface AllNotesRowProps {
   note: NoteListEntry
@@ -32,8 +35,8 @@ interface AllNotesRowProps {
 }
 
 /**
- * One note in the All Notes table: subject, snippet, tags, and when it was
- * last edited. A pinned note, which sorts ahead of the rest, is marked and
+ * One note in the All Notes table: subject, snippet followed by its tags, and
+ * when it was last edited. A pinned note, which sorts ahead of the rest, is marked and
  * tinted so the pinned block doesn't read as out of order.
  */
 export const AllNotesRow = memo(function AllNotesRow({
@@ -80,13 +83,16 @@ export const AllNotesRow = memo(function AllNotesRow({
       <span className="min-w-0" aria-label="Knowledge level">
         <KnowledgeLevelLabel path={note.path} compact />
       </span>
-      <span
-        className={cn('truncate text-[13px]', selected ? 'text-accent' : 'text-text-secondary')}
-      >
-        {note.snippet}
-      </span>
-      <span className="truncate text-right text-[13px] text-text-secondary">
-        {note.tags.map((tag) => `#${tag}`).join(' ')}
+      <span className="flex min-w-0 items-baseline gap-2 text-[13px]">
+        <span className={cn('min-w-0 truncate', selected ? 'text-accent' : 'text-text-secondary')}>
+          {note.snippet}
+        </span>
+        {note.tags.length > 0 ? (
+          // The snippet gives way first; a long tag list is capped, then clipped.
+          <span className="max-w-48 flex-none truncate text-text-muted">
+            {note.tags.map((tag) => `#${tag}`).join(' ')}
+          </span>
+        ) : null}
       </span>
       <span className="whitespace-nowrap text-right text-[13px] tabular-nums text-text-secondary">
         {note.mtime > 0 ? formatRecencyLabel(note.mtime, settings) : '—'}

@@ -94,7 +94,6 @@ export function AllNotesTable({
         />
         <span>Wiki</span>
         <span>Snippet</span>
-        <span className="text-right">Tags</span>
         <SortHeader
           label="Updated"
           sortKey="updated"
