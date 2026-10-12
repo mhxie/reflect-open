@@ -15,6 +15,7 @@ import { WikiArticleBridge } from './wiki-article-bridge.tsx'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import { noteArticleFor } from './wiki-article-store.ts'
 import { wikiEditorRange } from './wiki-article-projection.ts'
+import { RouterProvider } from '@/routing/router.tsx'
 
 vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => ({ graph: null }) }))
 vi.mock('@/lib/open-url.ts', () => ({ openUrlSync: vi.fn() }))
@@ -86,6 +87,7 @@ async function editorFixture(source = SOURCE, path = 'wiki/Example.md') {
         <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
       </MarkdownEditor>
     </QueryClientProvider>,
+    { wrapper: RouterProvider },
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
   const editor = ref.current!.getEditor()!
@@ -99,10 +101,12 @@ describe('article source projection', () => {
     const view = await render(
       <main style={{ width: '272px' }}>
         <MarkdownPreview
+          sourcePath={null}
           content={`# ${title} (中文)\n\nReading prose.`}
           titleMetadata={{ displayTitle: title, lang: 'zh-CN' }}
         />
       </main>,
+      { wrapper: RouterProvider },
     )
     const main = view.container.querySelector('main')!
     expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth + 1)
@@ -126,7 +130,9 @@ describe('article source projection', () => {
         (node) => node.textContent,
       ),
     ).toEqual(['[1]', '[1]', '[2]'])
-    const preview = await render(<MarkdownPreview content={SOURCE} />)
+    const preview = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />, {
+      wrapper: RouterProvider,
+    })
     expect(
       [...preview.container.querySelectorAll('.wiki-article-reference')].map(
         (node) => node.textContent,
@@ -157,14 +163,18 @@ describe('article source projection', () => {
     expect(ref.current!.getMarkdown()).toBe(before)
     expect(onDocChange).not.toHaveBeenCalled()
     expect(undo(editor.state)).toBe(false)
-    const preview = await render(<MarkdownPreview content={SOURCE} />)
+    const preview = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />, {
+      wrapper: RouterProvider,
+    })
     expect(revealPreviewHeading(preview.container, SOURCE, '^c7')).toBe(true)
     expect(preview.container.querySelectorAll('[data-wiki-claim-target]')).toHaveLength(2)
     expect(revealPreviewHeading(preview.container, SOURCE, '^c9')).toBe(false)
   })
 
   it('retains each locator in ascending groups and returns keyboard focus on close', async () => {
-    const view = await render(<MarkdownPreview content={SOURCE} />)
+    const view = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />, {
+      wrapper: RouterProvider,
+    })
     const trigger = view.getByRole('button', { name: 'Reference 1: Study one, p. 7' })
     await trigger.click()
     await expect.element(page.getByText('Study one, p. 7', { exact: true }).last()).toBeVisible()
@@ -244,7 +254,10 @@ describe('article source projection', () => {
   })
 
   it('keeps passive article previews free of controls and preserves a paragraph split inside its ID', async () => {
-    const preview = await render(<MarkdownPreview content={SOURCE} interactive={false} />)
+    const preview = await render(
+      <MarkdownPreview sourcePath={null} content={SOURCE} interactive={false} />,
+      { wrapper: RouterProvider },
+    )
     expect(preview.container.querySelector('a, button, summary, [tabindex]')).toBeNull()
     const { editor, ref } = await editorFixture()
     const map = createMarkdownSourceMap(editor.state.doc)
@@ -260,7 +273,13 @@ describe('article source projection', () => {
     const content =
       '# Title\n\n**before <!-- claim:c3 -->中文 😀 selected<!-- /claim:c3 --> after**\n\n## Evidence\n\n```anchors c3\n```'
     const view = await render(
-      <MarkdownPreview content={content} claimFragment="^c3" interactive={false} />,
+      <MarkdownPreview
+        sourcePath={null}
+        content={content}
+        claimFragment="^c3"
+        interactive={false}
+      />,
+      { wrapper: RouterProvider },
     )
     expect(view.container.textContent).toContain('中文 😀 selected')
     expect(view.container.textContent).not.toContain('before')
@@ -268,7 +287,12 @@ describe('article source projection', () => {
     expect(view.container.querySelector('strong')?.textContent).toContain('中文 😀 selected')
     expect(view.container.querySelector('h1')).toBeNull()
     await view.rerender(
-      <MarkdownPreview content={content} claimFragment="^c9" interactive={false} />,
+      <MarkdownPreview
+        sourcePath={null}
+        content={content}
+        claimFragment="^c9"
+        interactive={false}
+      />,
     )
     expect(view.container.textContent).toBe('')
   })

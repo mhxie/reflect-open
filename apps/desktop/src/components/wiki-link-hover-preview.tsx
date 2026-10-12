@@ -73,8 +73,9 @@ export function WikiLinkHoverPreview({
             content={markdown}
             titleMetadata={titleMetadata}
             claimFragment={claimFragment}
+            sourcePath={path}
             resolveImageUrl={resolveImageUrl}
-            {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
+            resolveWikiEmbed={resolveWikiEmbed}
             interactive={false}
             // A passive card already renders no embed and only local raster
             // images; a private target is kept off the network regardless.

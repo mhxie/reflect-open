@@ -58,7 +58,7 @@ import { useNoteStatusPublisher } from '@/editor/status/use-note-status-publishe
 import { noteProtection } from '@/editor/status/note-protection.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useTemplateSlashItems } from '@/editor/use-template-slash-items.ts'
-import { useMarkdownLinkNavigation } from '@/editor/use-markdown-link-navigation.ts'
+import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { useLinkPreview } from '@/editor/use-link-preview.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
@@ -125,7 +125,7 @@ interface NotePaneProps {
    * Required for {@link registerHandle} and {@link onExitBoundary} to identify
    * which day fired.
    */
-  dailyDate?: string
+  dailyDate?: string | undefined
   /**
    * Register (or, with `null`, unregister) this pane's editor handle with the
    * daily stream, so it can move the caret here from an adjacent day. Keyed by
@@ -260,7 +260,7 @@ export function NotePaneComponent({
   // Without a generation the navigation only resolves: a link from a
   // local-only note must never create a note.
   const followWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
-  const onNoteLinkClick = useMarkdownLinkNavigation(generation, path)
+  const onLinkClick = useMarkdownLinkClick(generation, path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
   const linkPreviewSession = useMemo(
@@ -547,6 +547,7 @@ export function NotePaneComponent({
           <LocalOnlyNotice className="mb-3" />
           <MarkdownPreview
             content={body}
+            sourcePath={path}
             titleMetadata={document.titleMetadata}
             resolveImageUrl={resolveImageUrl}
             resolveWikiEmbed={resolveWikiEmbed}
@@ -658,8 +659,8 @@ export function NotePaneComponent({
         resolveFileLink={resolveFileLink}
         resolveFileInfo={resolveFileInfo}
         onWikiLinkClick={onWikiLinkClick}
-        onNoteLinkClick={onNoteLinkClick}
-        {...(resolveLinkPreview !== undefined ? { resolveLinkPreview } : {})}
+        onLinkClick={onLinkClick}
+        resolveLinkPreview={resolveLinkPreview}
         {...(generation !== null && !isTouchEditorSurface() ? { renderWikilinkHoverCard } : {})}
         onTagClick={onTagClick}
         onWikilinkSearch={onWikilinkSearch}

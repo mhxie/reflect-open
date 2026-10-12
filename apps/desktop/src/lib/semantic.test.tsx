@@ -50,6 +50,17 @@ describe('retryFailedEmbeddings', () => {
 })
 
 describe('ensureEmbeddingsVisibly', () => {
+  it('resolves at once when the platform has no embedding runtime', async () => {
+    setBridge({
+      invoke: async () => ({ status: 'unsupported' }),
+      listen: async () => () => {},
+    })
+
+    await expect(ensureEmbeddingsVisibly('all-MiniLM-L6-v2')).resolves.toEqual({
+      status: 'unsupported',
+    })
+  })
+
   it('resolves only at a terminal status (a racing ensure returns loading)', async () => {
     // Boxed: TS control-flow analysis doesn't track closure assignments and
     // would narrow a plain `let` to `never` at the call site below.

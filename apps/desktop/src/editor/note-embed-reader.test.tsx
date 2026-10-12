@@ -3,7 +3,6 @@ import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { useSyncExternalStore } from 'react'
 import type { PrivateNoteOptions, PrivateNoteState } from '@/hooks/use-private-note.ts'
-import { deferred } from '@/test-utils/deferred.ts'
 import { MarkdownPreview } from './markdown-preview.tsx'
 import { NoteEmbedReader, type NoteEmbedReaderOptions } from './note-embed-reader.tsx'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
@@ -290,7 +289,7 @@ describe('embedded note outline', () => {
   })
 
   it('keeps a host chapter pinned when an earlier embedded source finishes loading', async () => {
-    const source = deferred<string>()
+    const source = Promise.withResolvers<string>()
     mocks.read.mockImplementation(() => source.promise)
     const { view } = await outlinedReader('# Host\n\n![[Original]]\n\n## After\n\nTail')
     await expect.element(view.getByRole('button', { name: 'After', exact: true })).toBeVisible()
@@ -317,6 +316,7 @@ describe('NoteEmbedReader', () => {
   it('previews the source without frontmatter and expands without reading it again', async () => {
     const view = await render(
       <MarkdownPreview
+        sourcePath={null}
         content={'## News\n\n![[Original|Read original]]'}
         resolveWikiEmbed={resolveWikiEmbed}
         renderNoteEmbed={(payload) => <NoteEmbedReader {...OPTIONS} {...payload} />}
@@ -330,7 +330,9 @@ describe('NoteEmbedReader', () => {
     expect(mocks.resolveWiki).toHaveBeenCalledWith('Original', 7, 'notes/Summary.md')
     expect(mocks.read).toHaveBeenCalledTimes(1)
     expect(mocks.privacy).not.toHaveBeenCalled()
-    expect(mocks.attachments).not.toHaveBeenCalled()
+    // Link activation builds a source-less resolver (empty path); no note's
+    // attachments are resolved before the reader opens.
+    expect(mocks.attachments).not.toHaveBeenCalledWith(7, expect.stringMatching(/./))
     expect(view.container.textContent).not.toContain('title: Original')
     expect(view.getByTestId('note-embed').element().closest('p')).toBeNull()
     await toggle.click()
@@ -358,6 +360,7 @@ describe('NoteEmbedReader', () => {
     )
     const view = await render(
       <MarkdownPreview
+        sourcePath={null}
         content={'![[Original#Findings]]'}
         resolveWikiEmbed={resolveWikiEmbed}
         renderNoteEmbed={(payload) => <NoteEmbedReader {...OPTIONS} {...payload} />}
@@ -395,7 +398,9 @@ describe('NoteEmbedReader', () => {
     expect(view.container.textContent).not.toContain('End of full note')
     expect(view.container.querySelectorAll('[data-testid="note-embed"]')).toHaveLength(1)
     expect(mocks.read).toHaveBeenCalledTimes(1)
-    expect(mocks.attachments).not.toHaveBeenCalled()
+    // Link activation builds a source-less resolver (empty path); no note's
+    // attachments are resolved before the reader opens.
+    expect(mocks.attachments).not.toHaveBeenCalledWith(7, expect.stringMatching(/./))
     expect(mocks.privacy).not.toHaveBeenCalled()
     expect(mocks.loadCatalog).not.toHaveBeenCalled()
     expect(mocks.navigate).not.toHaveBeenCalled()
@@ -517,7 +522,7 @@ describe('NoteEmbedReader', () => {
       'notes/Original.md',
       '# Original\n\n![[bundle.zip]]\n\n[Archive](attachments/bundle.zip)',
     )
-    const catalog = deferred<void>()
+    const catalog = Promise.withResolvers<void>()
     let loaded = false
     mocks.loadCatalog.mockReturnValue(catalog.promise)
     mocks.attachments.mockImplementation(() => ({
@@ -556,7 +561,7 @@ describe('NoteEmbedReader', () => {
     'retires a pending attachment catalog lookup after %s',
     async (change) => {
       mocks.sources.set('notes/Original.md', '# Original\n\n[Archive](attachments/bundle.zip)')
-      const catalog = deferred<void>()
+      const catalog = Promise.withResolvers<void>()
       mocks.loadCatalog.mockReturnValue(catalog.promise)
       mocks.attachments.mockImplementation(() => ({
         resolveImageUrl: () => IMAGE,
@@ -585,7 +590,7 @@ describe('NoteEmbedReader', () => {
       'notes/Original.md',
       '# Original\n\n[Archive](attachments/bundle.zip)\n\n[Site](https://example.com)',
     )
-    const catalog = deferred<void>()
+    const catalog = Promise.withResolvers<void>()
     mocks.loadCatalog.mockReturnValue(catalog.promise)
     mocks.attachments.mockImplementation(() => ({
       resolveImageUrl: () => IMAGE,
@@ -662,7 +667,7 @@ describe('NoteEmbedReader', () => {
     const view = await render(reader())
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
     await expect.element(view.getByText('Other', { exact: true })).toBeVisible()
-    const link = deferred<{ kind: 'resolved'; path: string }>()
+    const link = Promise.withResolvers<{ kind: 'resolved'; path: string }>()
     mocks.resolveWiki.mockReturnValueOnce(link.promise)
     await view.getByText('Other', { exact: true }).click()
     await view.rerender(reader({ graphKey: '/graph-b', generation: 8 }))
@@ -696,7 +701,7 @@ describe('NoteEmbedReader', () => {
       const view = await render(reader())
       await view.getByRole('button', { name: 'Read original', exact: true }).click()
       await expect.element(view.getByText('Other', { exact: true })).toBeVisible()
-      const pending = deferred<{ kind: 'resolved'; path: string }>()
+      const pending = Promise.withResolvers<{ kind: 'resolved'; path: string }>()
       mocks.resolveWiki.mockReturnValueOnce(pending.promise)
       await view.getByText('Other', { exact: true }).click()
       if (kind === 'wiki') await view.getByText('Jump details', { exact: true }).click()

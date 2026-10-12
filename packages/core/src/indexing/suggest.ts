@@ -38,7 +38,7 @@ export interface WikiSuggestion {
   /** Set on daily-note suggestions. */
   date: string | null
   /** Set only on rows the date generator synthesised; see {@link GeneratedDate}. */
-  generated?: GeneratedDate
+  generated?: GeneratedDate | undefined
   /** Indexed note flags; absent when a generated date has no indexed file. */
   isPrivate?: boolean
   hasConflict?: boolean
@@ -288,7 +288,7 @@ export function mergeDateSuggestions(
       title: date,
       alias: null,
       date,
-      ...(generated === undefined ? {} : { generated }),
+      generated,
     }
   })
 

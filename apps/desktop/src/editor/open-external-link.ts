@@ -31,11 +31,11 @@ export function isOpenableExternalUrl(href: string): boolean {
 }
 
 /**
- * Open a rendered Markdown link in its OS default app instead of letting the
- * click navigate the app's WebView frame. The static `MarkdownView` surfaces
- * aren't contenteditable, so an `<a href>` click would otherwise unload the
- * whole app. A `reflect://` link routes through the in-app deep-link pipeline
- * instead — the OS opener denies the scheme.
+ * Open a link that needs no source note: a `reflect://` link through the
+ * deep-link pipeline, any other allowed scheme through the OS opener. A
+ * reader that resolves note links itself (an embedded note's) takes this
+ * instead of `useMarkdownLinkClick`, which also builds the source's
+ * attachment resolver.
  */
 export function useOpenExternalLink(): LinkClickHandler {
   const followDeepLink = useFollowDeepLink()

@@ -166,6 +166,7 @@ so AI-written text doesn't feed back into AI context.
 - Enabling it downloads the chosen model (91 MB or 1.3 GB) **from Hugging Face, once**;
   choosing another model downloads that one. These requests carry no user data; models
   are cached locally afterwards.
+- It is not available on Intel Macs or on iOS, which have no embedding runtime.
 
 ## Backup & sync (off until you connect)
 

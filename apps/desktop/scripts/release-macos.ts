@@ -8,15 +8,7 @@
 //   --no-sign               Unsigned app only, to check that it compiles and bundles
 
 import { randomBytes } from 'node:crypto'
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { apply as applyMergePatch } from 'tiny-merge-patch'
@@ -37,12 +29,12 @@ import {
 } from './helpers.ts'
 
 const INTEL_TARGET = 'x86_64-apple-darwin'
+const UNIVERSAL_TARGET = 'universal-apple-darwin'
 const ARCHS: Record<string, string> = {
   'aarch64-apple-darwin': 'aarch64',
   [INTEL_TARGET]: 'x86_64',
+  [UNIVERSAL_TARGET]: 'universal',
 }
-const ONNX_RUNTIME = 'onnxruntime-osx-x86_64-1.23.2'
-const ONNX_RUNTIME_FILES = ['lib/libonnxruntime.dylib', 'LICENSE', 'ThirdPartyNotices.txt']
 const PROFILE_IDENTITY_KEYS = [
   'com.apple.application-identifier',
   'com.apple.developer.team-identifier',
@@ -129,35 +121,8 @@ function resolveNotaryArgs(identity: string, tempDir: string): string[] {
   return ['--apple-id', APPLE_ID, '--password', APPLE_PASSWORD, '--team-id', teamId]
 }
 
-/** Upstream ONNX Runtime 1.24 dropped macOS x86_64, so Intel builds bundle the 1.23 dylib. */
-async function stageIntelOnnxRuntime(): Promise<string> {
-  const resourceDir = join(TAURI_SRC_DIR, 'resources', 'onnxruntime')
-  const staged = ONNX_RUNTIME_FILES.map((file) => join(resourceDir, basename(file)))
-  if (!staged.every((path) => existsSync(path))) {
-    await runWithTempDir(async (tempDir) => {
-      const archive = join(tempDir, `${ONNX_RUNTIME}.tgz`)
-      const url = `https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/${ONNX_RUNTIME}.tgz`
-      await exec('curl', ['-fL', '--retry', '3', '-o', archive, url], INHERIT)
-      await exec('tar', ['-xzf', archive, '-C', tempDir], INHERIT)
-      mkdirSync(resourceDir, { recursive: true })
-      for (const file of ONNX_RUNTIME_FILES) {
-        copyFileSync(join(tempDir, ONNX_RUNTIME, file), join(resourceDir, basename(file)))
-      }
-    })
-  }
-  const resources = {
-    'resources/onnxruntime/libonnxruntime.dylib': 'libonnxruntime.dylib',
-    'resources/onnxruntime/LICENSE': 'onnxruntime/LICENSE',
-    'resources/onnxruntime/ThirdPartyNotices.txt': 'onnxruntime/ThirdPartyNotices.txt',
-  }
-  return JSON.stringify({ bundle: { resources } })
-}
-
 async function buildApp(target: string): Promise<void> {
   const args = ['build', '--target', target, '--bundles', 'app', ...getFlavorConfigArgs()]
-  if (target === INTEL_TARGET) {
-    args.push('--config', await stageIntelOnnxRuntime())
-  }
   // Tauri notarizes whenever these are set, but notarization must wait until
   // the sidecars are re-signed.
   for (const name of ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_API_KEY', 'APPLE_API_ISSUER']) {
@@ -381,11 +346,20 @@ async function verifyProfileIdentity(bundle: Bundle): Promise<void> {
 
 /** A sidecar with a bad signature passes `codesign --verify` and dies at launch, so launch them. */
 async function verifySidecarsLaunch(bundle: Bundle): Promise<void> {
-  if (bundle.target !== INTEL_TARGET && process.arch !== 'arm64') {
+  if (bundle.target === 'aarch64-apple-darwin' && process.arch !== 'arm64') {
     return
   }
+  const slices =
+    bundle.target === UNIVERSAL_TARGET && process.arch === 'arm64' ? ['-arm64', '-x86_64'] : [null]
   for (const sidecar of bundle.sidecars) {
-    await expectOutput(sidecar, basename(sidecar) === 'reflect' ? ['--version'] : [], [])
+    const args = basename(sidecar) === 'reflect' ? ['--version'] : []
+    for (const slice of slices) {
+      if (slice) {
+        await expectOutput('arch', [slice, sidecar, ...args], [])
+      } else {
+        await expectOutput(sidecar, args, [])
+      }
+    }
   }
 }
 

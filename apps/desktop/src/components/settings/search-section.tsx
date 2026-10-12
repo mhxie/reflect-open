@@ -29,7 +29,11 @@ export function SearchSection(): ReactElement {
   const indexProgress = useSemanticIndexProgress()
 
   let control: ReactNode
-  if (!settings.semanticSearchEnabled) {
+  if (status.status === 'unsupported') {
+    control = (
+      <p className="text-xs text-text-muted">Semantic search is not available on this device.</p>
+    )
+  } else if (!settings.semanticSearchEnabled) {
     // Disabling takes effect immediately — every semantic consumer gates on
     // the setting, so the still-loaded model just idles. No caveat needed.
     control = (

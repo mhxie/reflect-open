@@ -46,13 +46,14 @@ mod wake;
 mod web_fetch;
 mod windows;
 
-// The watcher and the embedding runtime are desktop capabilities (Plan 19):
-// mobile swaps in stand-ins with the identical command surface, so the
-// `invoke_handler` list below needs no platform branches.
-#[cfg(desktop)]
+// The watcher and the embedding runtime are desktop capabilities (Plan 19),
+// and Intel macOS has no embedding runtime either: other platforms swap in
+// stand-ins with the identical command surface, so
+// the `invoke_handler` list below needs no platform branches.
+#[cfg(all(desktop, not(all(target_os = "macos", target_arch = "x86_64"))))]
 mod embed;
-#[cfg(mobile)]
-#[path = "embed_mobile.rs"]
+#[cfg(any(mobile, all(target_os = "macos", target_arch = "x86_64")))]
+#[path = "embed_unsupported.rs"]
 mod embed;
 #[cfg(desktop)]
 mod watcher;

@@ -7,12 +7,12 @@ import type {
   ChatModelSelection,
   ChatStreamEvent,
   ChatTurn,
+  EmbedStatus,
   GraphInfo,
   Settings,
   StreamChatOptions,
 } from '@reflect/core'
 import { NO_REPLY_NOTICE } from '@reflect/core'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
 import { ChatProvider, useChatSession } from '@/providers/chat-provider.tsx'
 
 /**
@@ -38,6 +38,9 @@ vi.mock('@reflect/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@reflect/core')>()),
   ...core,
 }))
+
+const embedState = vi.hoisted(() => ({ status: { status: 'uninitialized' } as EmbedStatus }))
+vi.mock('@/lib/use-embed-status.ts', () => ({ useEmbedStatus: () => embedState.status }))
 
 const settingsState = vi.hoisted(() => ({
   models: [] as AiProviderConfig[],
@@ -134,6 +137,7 @@ function scriptTurn(events: ChatStreamEvent[]) {
 }
 
 beforeEach(() => {
+  embedState.status = { status: 'uninitialized' }
   vi.clearAllMocks()
   settingsState.models = [MODEL]
   settingsState.defaultId = 'm1'
@@ -282,6 +286,7 @@ describe('ChatProvider persistence', () => {
 
   it('passes the semantic search setting into chat turns', async () => {
     settingsState.semanticSearchEnabled = true
+    embedState.status = { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
     scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
     const { act } = await renderProvider()
     await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
@@ -309,23 +314,31 @@ describe('ChatProvider persistence', () => {
     )
   })
 
-  it('forces lexical search on the mobile surface, over an enabled setting', async () => {
-    settingsState.semanticSearchEnabled = true
-    setPlatformSurface({ mobileApp: true })
-    try {
-      scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-      const { act } = await renderProvider()
-      await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
+  it.each<EmbedStatus>([
+    { status: 'unsupported' },
+    { status: 'uninitialized' },
+    { status: 'loading' },
+    { status: 'failed', message: 'offline' },
+  ])(
+    'forces lexical search while the runtime is $status, over an enabled setting',
+    async (status) => {
+      settingsState.semanticSearchEnabled = true
+      embedState.status = status
+      try {
+        scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
+        const { act } = await renderProvider()
+        await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
 
-      await act(() => session?.send('hello'))
+        await act(() => session?.send('hello'))
 
-      expect(core.streamChat).toHaveBeenCalledWith(
-        expect.objectContaining({ semanticSearchEnabled: false }),
-      )
-    } finally {
-      setPlatformSurface({ mobileApp: false })
-    }
-  })
+        expect(core.streamChat).toHaveBeenCalledWith(
+          expect.objectContaining({ semanticSearchEnabled: false }),
+        )
+      } finally {
+        embedState.status = { status: 'uninitialized' }
+      }
+    },
+  )
 
   it('holds the composer draft and clears it when a send goes through', async () => {
     scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
@@ -356,13 +369,8 @@ describe('ChatProvider persistence', () => {
     // is already clear when the rows arrive, but the switch must still be
     // abandoned: swapping the transcript would hide the turn the user just
     // streamed into the on-screen conversation.
-    let releaseLoad: (turns: ChatTurn[]) => void = () => {}
-    core.loadChatMessages.mockImplementation(
-      () =>
-        new Promise<ChatTurn[]>((resolve) => {
-          releaseLoad = resolve
-        }),
-    )
+    const pendingLoad = Promise.withResolvers<ChatTurn[]>()
+    core.loadChatMessages.mockImplementation(() => pendingLoad.promise)
     scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
     const { act } = await renderProvider()
     await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
@@ -376,7 +384,7 @@ describe('ChatProvider persistence', () => {
     await act(() => session?.send('hello'))
     expect(session?.turns.at(-1)?.status).toBe('done')
 
-    releaseLoad([RESTORED_TURN])
+    pendingLoad.resolve([RESTORED_TURN])
     await act(async () => {
       await openDone
     })
@@ -398,14 +406,11 @@ describe('ChatProvider persistence', () => {
   })
 
   it('never saves into a conversation deleted mid-stream', async () => {
-    let releaseStream: () => void = () => {}
-    const gate = new Promise<void>((resolve) => {
-      releaseStream = resolve
-    })
+    const gate = Promise.withResolvers<void>()
     core.streamChat.mockImplementation(function script() {
       return (async function* () {
         yield { type: 'text-delta', text: 'Half…' } satisfies ChatStreamEvent
-        await gate
+        await gate.promise
         yield {
           type: 'complete',
           messages: [{ role: 'assistant', content: 'Done.' }],
@@ -425,7 +430,7 @@ describe('ChatProvider persistence', () => {
     // Delete the conversation while the turn is streaming, then let it settle:
     // the settle-time save must not resurrect the deleted row.
     await act(() => session?.deleteConversation(sentInto.conversation.id))
-    releaseStream()
+    gate.resolve()
     await act(async () => {
       await sendDone
     })
@@ -437,13 +442,8 @@ describe('ChatProvider persistence', () => {
     // The delete and a dispatched save are independent IPC commands with no
     // ordering guarantee — the provider must hold the delete until the
     // conversation's save chain settles, or the upsert could resurrect it.
-    let releaseSave: () => void = () => {}
-    core.saveChatMessage.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          releaseSave = resolve
-        }),
-    )
+    const pendingSave = Promise.withResolvers<void>()
+    core.saveChatMessage.mockImplementation(() => pendingSave.promise)
     scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
     const { act } = await renderProvider()
     await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
@@ -458,7 +458,7 @@ describe('ChatProvider persistence', () => {
     })
     expect(core.deleteChatConversation).not.toHaveBeenCalled()
 
-    releaseSave()
+    pendingSave.resolve()
     await act(async () => {
       await deleteDone
     })

@@ -302,7 +302,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const credentialGate: { release: () => void } = { release: () => {} }
+    const credentialGate = Promise.withResolvers<void>()
     let credentials = 0
     let canStartCycle = true
     const engine = createSyncEngine({
@@ -310,9 +310,7 @@ describe('createSyncEngine', () => {
       getCredential: async () => {
         credentials += 1
         if (credentials === 2) {
-          await new Promise<void>((resolve) => {
-            credentialGate.release = resolve
-          })
+          await credentialGate.promise
         }
         return CRED
       },
@@ -329,7 +327,7 @@ describe('createSyncEngine', () => {
     await vi.waitFor(() => expect(credentials).toBe(2))
     expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(3)
     canStartCycle = false
-    credentialGate.release()
+    credentialGate.resolve()
     await flushed
     await second
     expect(commandsOf(calls).filter((command) => command === 'git_push')).toHaveLength(1) // the first sync only
@@ -666,7 +664,7 @@ describe('createSyncEngine', () => {
           }
         : defaultResponses(command),
     )
-    const remoteChangesGate: { resolve: (() => void) | null } = { resolve: null }
+    const remoteChangesGate = Promise.withResolvers<void>()
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -674,10 +672,7 @@ describe('createSyncEngine', () => {
       onStatus: (status) => {
         statuses.push(status)
       },
-      onRemoteChanges: () =>
-        new Promise<void>((resolve) => {
-          remoteChangesGate.resolve = resolve
-        }),
+      onRemoteChanges: () => remoteChangesGate.promise,
     })
 
     const syncing = engine.syncNow()
@@ -694,7 +689,7 @@ describe('createSyncEngine', () => {
     ])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
-    remoteChangesGate.resolve?.()
+    remoteChangesGate.resolve()
     await syncing
 
     expect(statuses.map((status) => status.state)).toEqual(['syncing', 'idle'])
@@ -719,7 +714,7 @@ describe('createSyncEngine', () => {
       }
       return defaultResponses(command)
     })
-    const firstBatchGate: { resolve: (() => void) | null } = { resolve: null }
+    const firstBatchGate = Promise.withResolvers<void>()
     const started: string[] = []
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -731,9 +726,7 @@ describe('createSyncEngine', () => {
       onRemoteChanges: (changes) => {
         started.push(changes[0]!.path)
         if (started.length === 1) {
-          return new Promise<void>((resolve) => {
-            firstBatchGate.resolve = resolve
-          })
+          return firstBatchGate.promise
         }
       },
     })
@@ -757,7 +750,7 @@ describe('createSyncEngine', () => {
     expect(started).toEqual(['notes/remote-1.md', 'notes/remote-2.md'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
-    firstBatchGate.resolve?.()
+    firstBatchGate.resolve()
     await syncing
 
     expect(statuses.map((status) => status.state)).toEqual(['syncing', 'idle'])
@@ -774,7 +767,7 @@ describe('createSyncEngine', () => {
           }
         : defaultResponses(command),
     )
-    const remoteChangesGate: { resolve: (() => void) | null } = { resolve: null }
+    const remoteChangesGate = Promise.withResolvers<void>()
     const statuses: SyncStatus[] = []
     let canStartCycle = true
     const engine = createSyncEngine({
@@ -784,10 +777,7 @@ describe('createSyncEngine', () => {
         statuses.push(status)
       },
       canStartCycle: () => canStartCycle,
-      onRemoteChanges: () =>
-        new Promise<void>((resolve) => {
-          remoteChangesGate.resolve = resolve
-        }),
+      onRemoteChanges: () => remoteChangesGate.promise,
     })
 
     const syncing = engine.syncNow()
@@ -802,7 +792,7 @@ describe('createSyncEngine', () => {
 
     canStartCycle = false
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
-    remoteChangesGate.resolve?.()
+    remoteChangesGate.resolve()
     await syncing
 
     expect(commandsOf(calls)).toEqual([
@@ -817,7 +807,7 @@ describe('createSyncEngine', () => {
   })
 
   it('surfaces an async remote-change failure only after the push finishes', async () => {
-    const pushGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
+    const pushGate = Promise.withResolvers<unknown>()
     const calls = fakeGit((command) => {
       if (command === 'git_merge_remote') {
         return {
@@ -827,9 +817,7 @@ describe('createSyncEngine', () => {
         }
       }
       if (command === 'git_push') {
-        return new Promise((resolve) => {
-          pushGate.resolve = resolve
-        })
+        return pushGate.promise
       }
       return defaultResponses(command)
     })
@@ -859,7 +847,7 @@ describe('createSyncEngine', () => {
     ])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
-    pushGate.resolve?.(PUSHED)
+    pushGate.resolve(PUSHED)
     await syncing
 
     expect(statuses.at(-1)).toMatchObject({
@@ -871,12 +859,10 @@ describe('createSyncEngine', () => {
   })
 
   it('stop while merge is in flight never starts its remote-change callback', async () => {
-    const mergeGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
+    const mergeGate = Promise.withResolvers<unknown>()
     const calls = fakeGit((command) => {
       if (command === 'git_merge_remote') {
-        return new Promise((resolve) => {
-          mergeGate.resolve = resolve
-        })
+        return mergeGate.promise
       }
       return defaultResponses(command)
     })
@@ -901,7 +887,7 @@ describe('createSyncEngine', () => {
     ])
 
     engine.stop()
-    mergeGate.resolve?.({
+    mergeGate.resolve({
       kind: 'merged',
       conflictedPaths: [],
       changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
@@ -928,7 +914,7 @@ describe('createSyncEngine', () => {
           }
         : defaultResponses(command),
     )
-    const remoteChangesGate: { resolve: (() => void) | null } = { resolve: null }
+    const remoteChangesGate = Promise.withResolvers<void>()
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -936,10 +922,7 @@ describe('createSyncEngine', () => {
       onStatus: (status) => {
         statuses.push(status)
       },
-      onRemoteChanges: () =>
-        new Promise<void>((resolve) => {
-          remoteChangesGate.resolve = resolve
-        }),
+      onRemoteChanges: () => remoteChangesGate.promise,
     })
 
     const syncing = engine.syncNow()
@@ -955,7 +938,7 @@ describe('createSyncEngine', () => {
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
     engine.stop()
-    remoteChangesGate.resolve?.()
+    remoteChangesGate.resolve()
     await syncing
 
     expect(commandsOf(calls)).toEqual(commandsBeforeStop)
@@ -1301,12 +1284,10 @@ describe('createSyncEngine', () => {
 
   it('stops at the next command boundary when cycles become suppressed', async () => {
     let canStartCycle = true
-    const fetchGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
+    const fetchGate = Promise.withResolvers<unknown>()
     const calls = fakeGit((command) => {
       if (command === 'git_fetch') {
-        return new Promise((resolve) => {
-          fetchGate.resolve = resolve
-        })
+        return fetchGate.promise
       }
       return defaultResponses(command)
     })
@@ -1325,7 +1306,7 @@ describe('createSyncEngine', () => {
     expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch'])
 
     canStartCycle = false
-    fetchGate.resolve?.(DELTA)
+    fetchGate.resolve(DELTA)
     await syncing
 
     // Fetch began while allowed, but merge/push must not start after the
@@ -1336,12 +1317,10 @@ describe('createSyncEngine', () => {
   })
 
   it('stop() mid-cycle issues no further commands and emits no further status', async () => {
-    const pushGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
+    const pushGate = Promise.withResolvers<unknown>()
     const calls = fakeGit((command) => {
       if (command === 'git_push') {
-        return new Promise((resolve) => {
-          pushGate.resolve = resolve
-        })
+        return pushGate.promise
       }
       return defaultResponses(command)
     })
@@ -1363,7 +1342,7 @@ describe('createSyncEngine', () => {
     // normally trigger fetch+merge+retry (non-fast-forward) and a status
     // emission — a stopped engine must do neither.
     engine.stop()
-    pushGate.resolve?.(NON_FAST_FORWARD)
+    pushGate.resolve(NON_FAST_FORWARD)
     await vi.runAllTimersAsync()
 
     expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])

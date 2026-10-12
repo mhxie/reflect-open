@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBridge, type SnippetTask } from '@reflect/core'
 import { queryClient } from '@/lib/query-client.ts'
+import { RouterProvider } from '@/routing/router.tsx'
 import { BacklinkSnippet } from './backlink-snippet.tsx'
 
 const writeTask = vi.hoisted(() => vi.fn())
@@ -55,15 +56,17 @@ function anchors(): SnippetTask[] {
 function renderSnippet(tasks: SnippetTask[] = anchors()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={client}>
-      <BacklinkSnippet
-        text={SNIPPET}
-        notePath="notes/meeting.md"
-        sourcePrivate={false}
-        tasks={tasks}
-        onWikilinkClick={() => {}}
-      />
-    </QueryClientProvider>,
+    <RouterProvider>
+      <QueryClientProvider client={client}>
+        <BacklinkSnippet
+          text={SNIPPET}
+          notePath="notes/meeting.md"
+          sourcePrivate={false}
+          tasks={tasks}
+          onWikilinkClick={() => {}}
+        />
+      </QueryClientProvider>
+    </RouterProvider>,
   )
 }
 
@@ -128,17 +131,19 @@ describe('BacklinkSnippet task checkboxes', () => {
     // sliced into the context verbatim; the snippet must still show the
     // mention underneath instead of folding it away.
     const view = await render(
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
-        <BacklinkSnippet
-          text={'+ parent line\n  - mention of [[Roadmap]]'}
-          notePath="notes/meeting.md"
-          sourcePrivate={false}
-          tasks={[]}
-          onWikilinkClick={() => {}}
-        />
-      </QueryClientProvider>,
+      <RouterProvider>
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+        >
+          <BacklinkSnippet
+            text={'+ parent line\n  - mention of [[Roadmap]]'}
+            notePath="notes/meeting.md"
+            sourcePrivate={false}
+            tasks={[]}
+            onWikilinkClick={() => {}}
+          />
+        </QueryClientProvider>
+      </RouterProvider>,
     )
     expect(view.container.querySelector('[data-list-collapsed]')).toBeNull()
     expect(view.container.textContent).toContain('mention of')
@@ -148,17 +153,19 @@ describe('BacklinkSnippet task checkboxes', () => {
   it('renders checkboxes inert when the snippet has no round tasks', async () => {
     const squareOnly: SnippetTask[] = [{ locator: null, checked: true, text: 'square box' }]
     const view = await render(
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
-        <BacklinkSnippet
-          text={'- [[Roadmap]] plan\n  - [x] square box'}
-          notePath="notes/meeting.md"
-          sourcePrivate={false}
-          tasks={squareOnly}
-          onWikilinkClick={() => {}}
-        />
-      </QueryClientProvider>,
+      <RouterProvider>
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+        >
+          <BacklinkSnippet
+            text={'- [[Roadmap]] plan\n  - [x] square box'}
+            notePath="notes/meeting.md"
+            sourcePrivate={false}
+            tasks={squareOnly}
+            onWikilinkClick={() => {}}
+          />
+        </QueryClientProvider>
+      </RouterProvider>,
     )
     const box = view.container.querySelector('input[type="checkbox"]')!
     await userEvent.click(box, { force: true })
@@ -171,17 +178,19 @@ describe('BacklinkSnippet wiki-link chips', () => {
   it('labels chips through the host resolver and reports the full target', async () => {
     const onWikilinkClick = vi.fn()
     const view = await render(
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
-        <BacklinkSnippet
-          text={'- see [[Tim MacCaw // Dad|Dad]] and [[Tim MacCaw // Dad]]'}
-          notePath="notes/meeting.md"
-          sourcePrivate={false}
-          tasks={[]}
-          onWikilinkClick={onWikilinkClick}
-        />
-      </QueryClientProvider>,
+      <RouterProvider>
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+        >
+          <BacklinkSnippet
+            text={'- see [[Tim MacCaw // Dad|Dad]] and [[Tim MacCaw // Dad]]'}
+            notePath="notes/meeting.md"
+            sourcePrivate={false}
+            tasks={[]}
+            onWikilinkClick={onWikilinkClick}
+          />
+        </QueryClientProvider>
+      </RouterProvider>,
     )
     const chips = view.getByTestId('wikilink')
     await expect.element(chips.first()).toMatchTextContent(/^Dad$/)
@@ -232,6 +241,7 @@ describe('BacklinkSnippet saved embed snapshots', () => {
           onWikilinkClick={() => {}}
         />
       </QueryClientProvider>,
+      { wrapper: RouterProvider },
     )
   }
 
@@ -317,7 +327,7 @@ describe('BacklinkSnippet network policy', () => {
   }
 
   it('never looks up embeds or loads remote images for a locked tracked source', async () => {
-    const view = await render(snippet(true))
+    const view = await render(snippet(true), { wrapper: RouterProvider })
     await expect.element(view.getByTestId('embed-link')).toHaveTextContent(X_URL)
     expect(remoteImages(view.container)).toEqual([])
     for (const command of REMOTE_COMMANDS) {
@@ -327,14 +337,14 @@ describe('BacklinkSnippet network policy', () => {
   })
 
   it('looks them up for a public source (control)', async () => {
-    const view = await render(snippet(false))
+    const view = await render(snippet(false), { wrapper: RouterProvider })
     await vi.waitFor(() => expect(commands).toContain('x_archive_resolve'))
     await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
     await view.unmount()
   })
 
   it('drops remote media at once when the source turns private', async () => {
-    const view = await render(snippet(false))
+    const view = await render(snippet(false), { wrapper: RouterProvider })
     await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
 
     await view.rerender(snippet(true))

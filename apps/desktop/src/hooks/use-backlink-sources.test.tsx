@@ -41,10 +41,7 @@ beforeEach(() => {
 describe('useBacklinkSources', () => {
   it('loads source pages, deduplicates overlapping contexts, and preserves indexed metadata', async () => {
     const nextCursor = { recencyMs: 100, sourcePath: 'notes/a.md' }
-    let resolveNextPage: ((page: BacklinkContextPage) => void) | undefined
-    const nextPage = new Promise<BacklinkContextPage>((resolve) => {
-      resolveNextPage = resolve
-    })
+    const nextPage = Promise.withResolvers<BacklinkContextPage>()
     getBacklinksWithContext.mockImplementation(
       (_path: string, options: { cursor: typeof nextCursor | null }) =>
         options.cursor === null
@@ -56,7 +53,7 @@ describe('useBacklinkSources', () => {
               nextCursor,
               indexedLinkCount: 12,
             })
-          : nextPage,
+          : nextPage.promise,
     )
 
     const { result, act } = await renderHook(() => useBacklinkSources('notes/target.md'), {
@@ -83,7 +80,7 @@ describe('useBacklinkSources', () => {
     })
 
     await act(async () => {
-      resolveNextPage?.({
+      nextPage.resolve({
         contexts: [
           context('notes/a.md', 'shared context', 1),
           {
@@ -95,7 +92,7 @@ describe('useBacklinkSources', () => {
         nextCursor: null,
         indexedLinkCount: 99,
       })
-      await nextPage
+      await nextPage.promise
     })
 
     await vi.waitFor(() => expect(result.current.isFetchingNextPage).toBe(false))

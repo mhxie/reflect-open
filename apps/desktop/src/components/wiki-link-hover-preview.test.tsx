@@ -5,6 +5,7 @@ import { setBridge } from '@reflect/core'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { queryClient } from '@/lib/query-client.ts'
 import { WikiLinkHoverPreview } from './wiki-link-hover-preview.tsx'
+import { RouterProvider } from '@/routing/router.tsx'
 
 vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
@@ -99,7 +100,9 @@ describe('wiki-link hover card over a private target', () => {
       useWikiLinkHoverPreview({ generation: 7, graphKey: '/graph', dateFormat: 'mdy' }),
     )
 
-    const screen = await render(<>{await result.current(hoverHit('Target'))}</>)
+    const screen = await render(<>{await result.current(hoverHit('Target'))}</>, {
+      wrapper: RouterProvider,
+    })
     await expect.element(screen.getByText('Body')).toBeVisible()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(remoteElements()).toBeNull()
@@ -118,6 +121,7 @@ describe('wiki-link hover card over a private target', () => {
         dateFormat="mdy"
         resolveImageUrl={resolveImageUrl}
       />,
+      { wrapper: RouterProvider },
     )
     await expect.element(screen.getByText('Body')).toBeVisible()
     expect(remoteElements()).toBeNull()

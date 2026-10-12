@@ -9,6 +9,7 @@ import { markModeFromSyntax } from '@/editor/mark-mode.ts'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
+import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { usePrivateNote } from '@/hooks/use-private-note.ts'
 import { addDaysIso, formatDayLabel } from '@/lib/dates.ts'
@@ -71,6 +72,7 @@ export function MobileTaskEditSheet({
   const localOnly = isLocalOnlyPath(task.notePath)
   const privateNote = usePrivateNote(task.notePath, { sessionEpoch: null, privateHeader: false })
   const navigateWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
+  const onLinkClick = useMarkdownLinkClick(generation, null)
   const navigateTag = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(task.notePath)
   const [showCalendar, setShowCalendar] = useState(false)
@@ -236,6 +238,7 @@ export function MobileTaskEditSheet({
               // A one-line editor has nothing to reorder, so keep the gutter grip off.
               blockHandle={false}
               onWikiLinkClick={openWikiLink}
+              onLinkClick={onLinkClick}
               onTagClick={openTag}
               onWikilinkSearch={onWikilinkSearch}
               onTagSearch={onTagSearch}

@@ -18,6 +18,7 @@ export function TaskText({ task }: { task: OpenTask }): ReactElement {
     <MarkdownPreview
       content={task.markdown}
       remoteEmbeds={!privateNote}
+      sourcePath={task.notePath}
       singleParagraph
       className="reflect-task-preview pointer-events-none text-sm"
     />

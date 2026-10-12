@@ -5,7 +5,6 @@ import { renderHook } from 'vitest-browser-react'
 import { setBridge, type GraphInfo } from '@reflect/core'
 import { queryClient } from '@/lib/query-client.ts'
 import { useAttachmentCatalogSync } from '@/lib/attachment-catalog.ts'
-import { deferred } from '@/test-utils/deferred.ts'
 import {
   createNoteAttachments,
   useNoteAttachments,
@@ -119,7 +118,7 @@ describe('useNoteAttachments', () => {
   })
 
   it('waits for the catalog when it has not loaded yet', async () => {
-    const listing = deferred<void>()
+    const listing = Promise.withResolvers<void>()
     installVault(['attachments/garden-budget.png'], listing.promise)
     await renderAttachments('Home.md')
 

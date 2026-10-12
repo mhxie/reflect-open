@@ -8,25 +8,21 @@ import {
   resolveNoYouTubeVideo,
 } from '@/editor/local-only-render.ts'
 import { MediaLightbox } from '@/editor/media-lightbox.tsx'
-import { isOpenableExternalUrl } from '@/editor/open-external-link.ts'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
-import { isDeepLinkUrl } from '@/lib/deep-links/parse.ts'
-import { useFollowDeepLink } from '@/lib/deep-links/use-follow-deep-link.ts'
-import { openUrlSync } from '@/lib/open-url.ts'
 import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
 import { cn } from '@/lib/utils.ts'
 import type {
   AcceptPendingReplacementOptions,
   EmbedResolver,
   ExitBoundaryHandler,
-  FileClickHandler,
   FileInfoResolver,
   FileLinkResolver,
   ImageClickHandler,
   ImageUrlResolver,
+  LinkClickHandler,
   LinkPreviewResolver,
   MarkMode,
   SearchStatus,
@@ -212,8 +208,8 @@ interface NoteEditorProps {
   /** Source-backed readers for standalone `![[note]]` paragraphs. */
   renderNoteEmbed?: NoteEmbedRenderer
   /**
-   * Vet a source (an image `src` or a link `href`) as a graph-relative asset
-   * path for {@link openAsset}. Returns null for remote or unsafe sources.
+   * Vet an image `src` as a graph-relative asset path for {@link openAsset}.
+   * Returns null for remote or unsafe sources.
    */
   resolveAssetOpenPath?: (src: string) => string | null
   /** Open a vetted graph-relative asset path in the OS default application. */
@@ -223,7 +219,7 @@ interface NoteEditorProps {
    * destination, or null to decline. meowdown inserts `![](dest)` for images
    * and PDFs and `[name](dest)` for everything else.
    */
-  saveFile?: (file: File) => Promise<string | null>
+  saveFile?: ((file: File) => Promise<string | null>) | undefined
   /**
    * Claim a `[label](url)` link as a file attachment, rendered as an inline
    * file pill instead of a plain link. Clicking a pill routes through the
@@ -245,13 +241,12 @@ interface NoteEditorProps {
     peek?: boolean
   }) => void
   /**
-   * Click on a rendered Markdown link whose href is graph-local (scheme-less
-   * and not an asset): a note link like `[Plan](./Plan.md)`. Receives the
-   * authored href; the handler owns source-relative resolution.
+   * Click or Mod-Enter on a rendered Markdown link or file pill. Omitted,
+   * links do nothing.
    */
-  onNoteLinkClick?: (options: { href: string; openInNewWindow: boolean }) => void
+  onLinkClick?: LinkClickHandler
   /** Resolve privacy-gated metadata for an HTTP(S) link popup; unused while `privateNote`. */
-  readonly resolveLinkPreview?: LinkPreviewResolver
+  readonly resolveLinkPreview?: LinkPreviewResolver | undefined
   /**
    * Resolve the passive body of Meowdown's editor-scoped wiki-link hover
    * card. Resolving `null` (missing, ambiguous, or unavailable targets)
@@ -269,7 +264,7 @@ interface NoteEditorProps {
    * Search prompts for the selection AI menu. Omitting it disables the menu
    * and its selection affordance entirely (e.g. for `private: true` notes).
    */
-  onSelectionMenuSearch?: SelectionMenuSearchHandler
+  onSelectionMenuSearch?: SelectionMenuSearchHandler | undefined
   /** Extra controls in the pending-replacement preview footer (e.g. Retry). */
   pendingReplacementActions?: ReactNode
   /** Called when a staged replacement is accepted or discarded. */
@@ -330,7 +325,7 @@ export function NoteEditor({
   resolveFileLink,
   resolveFileInfo,
   onWikiLinkClick,
-  onNoteLinkClick,
+  onLinkClick,
   resolveLinkPreview,
   renderWikilinkHoverCard,
   onTagClick,
@@ -350,7 +345,6 @@ export function NoteEditor({
 }: NoteEditorProps): ReactElement {
   const graphXPostResolver = useXPostResolver()
   const innerRef = useRef<EditorHandle>(null)
-  const followDeepLink = useFollowDeepLink()
 
   // Latest callbacks, read through refs so a changing prop identity never
   // rebuilds meowdown's extensions (the uncontrolled-editor contract).
@@ -362,7 +356,6 @@ export function NoteEditor({
   const privateNoteRef = useRef(privateNote)
   const graphXPostResolverRef = useRef(graphXPostResolver)
   const onWikiLinkClickRef = useRef(onWikiLinkClick)
-  const onNoteLinkClickRef = useRef(onNoteLinkClick)
   const onTagClickRef = useRef(onTagClick)
   const resolveImageUrlRef = useRef(resolveImageUrl)
   const resolveEmbedRef = useRef(resolveEmbed)
@@ -377,7 +370,6 @@ export function NoteEditor({
     privateNoteRef.current = privateNote
     graphXPostResolverRef.current = graphXPostResolver
     onWikiLinkClickRef.current = onWikiLinkClick
-    onNoteLinkClickRef.current = onNoteLinkClick
     onTagClickRef.current = onTagClick
     resolveImageUrlRef.current = resolveImageUrl
     resolveEmbedRef.current = resolveEmbed
@@ -480,46 +472,6 @@ export function NoteEditor({
     async (file: File) => (await saveFileRef.current?.(file)) ?? undefined,
     [],
   )
-  const handleLinkClick = useCallback(
-    // The event may also be the Mod-Enter key press that followed the link
-    // (meowdown ≥0.33).
-    ({ href, mod }: { href: string; event: MouseEvent | KeyboardEvent; mod: boolean }) => {
-      // An attachment href (resolved from the note's folder) opens through
-      // the generation-pinned asset command, never the URL opener — which
-      // would receive a meaningless relative string.
-      const assetPath = resolveAssetOpenPathRef.current?.(href) ?? null
-      if (assetPath !== null) {
-        void Promise.resolve(openAssetRef.current?.(assetPath)).catch((cause) => {
-          console.error('open asset failed:', errorMessage(cause))
-        })
-        return
-      }
-      // A `reflect://` link routes through the in-app deep-link pipeline —
-      // the OS opener would deny the scheme (and a round-trip could land on
-      // another installed flavor). ⌘-click or a spare-`mod` keyboard follow sends an
-      // *addressing* link to a new window instead; a declined open (capture link, browser dev)
-      // degrades to the normal dispatch.
-      if (isDeepLinkUrl(href)) {
-        followDeepLink({ href, openInNewWindow: mod })
-        return
-      }
-      if (!isOpenableExternalUrl(href)) {
-        // A scheme-less local href is a note link; the host resolves it
-        // against this note's own directory.
-        onNoteLinkClickRef.current?.({ href, openInNewWindow: mod })
-        return
-      }
-      openUrlSync(href)
-    },
-    [followDeepLink],
-  )
-  // A file pill is a claimed link, so a click on it routes exactly like a
-  // link click: an attachment through the asset opener, anything else through
-  // the deep-link/URL path.
-  const handleFileClick: FileClickHandler = useCallback(
-    ({ href, event, mod }) => handleLinkClick({ href, event, mod }),
-    [handleLinkClick],
-  )
   const handleResolveFileInfo: FileInfoResolver = useCallback(
     (href) => resolveFileInfoRef.current?.(href),
     [],
@@ -616,7 +568,7 @@ export function NoteEditor({
         // Autocorrect is independent and stays on (EditorInputTraits).
         spellCheck={isTouchEditorSurface() ? false : spellCheck}
         searchQuery={searchQuery ?? ''}
-        {...(onSearchChange !== undefined ? { onSearchChange } : {})}
+        onSearchChange={onSearchChange}
         // Reflect's implementation-neutral `12h`/`24h` maps to meowdown's
         // `12`/`24` here at the boundary, like `markModeFromSyntax`.
         timeFormat={timeFormat === '24h' ? '24' : '12'}
@@ -629,21 +581,22 @@ export function NoteEditor({
         // indicator, which meowdown gates on the same prop.
         blockHandle={isTouchEditorSurface() ? false : blockHandle}
         editorClassName={cn('reflect-editor', className)}
-        {...(titlePlaceholder !== undefined ? { placeholder: titlePlaceholder } : {})}
+        placeholder={titlePlaceholder}
         onDocChange={handleDocChange}
         onWikilinkClick={handleWikilinkClick}
         onTagClick={handleTagClick}
-        onLinkClick={handleLinkClick}
-        {...(resolveLinkPreview !== undefined && !privateNote ? { resolveLinkPreview } : {})}
+        onLinkClick={onLinkClick}
+        onFileClick={onLinkClick}
+        resolveLinkPreview={privateNote ? undefined : resolveLinkPreview}
         onImageClick={handleImageClick}
         onXPostMediaClick={handleXPostMediaClick}
         onYouTubeVideoClick={handleYouTubeVideoClick}
-        {...(onWikilinkSearch !== undefined ? { onWikilinkSearch } : {})}
-        {...(onTagSearch !== undefined ? { onTagSearch } : {})}
-        {...(onSelectionMenuSearch !== undefined ? { onSelectionMenuSearch } : {})}
-        {...(pendingReplacementActions !== undefined ? { pendingReplacementActions } : {})}
-        {...(onPendingReplacementResolve !== undefined ? { onPendingReplacementResolve } : {})}
-        {...(onSlashMenuSearch !== undefined ? { onSlashMenuSearch } : {})}
+        onWikilinkSearch={onWikilinkSearch}
+        onTagSearch={onTagSearch}
+        onSelectionMenuSearch={onSelectionMenuSearch}
+        pendingReplacementActions={pendingReplacementActions}
+        onPendingReplacementResolve={onPendingReplacementResolve}
+        onSlashMenuSearch={onSlashMenuSearch}
         resolveImageUrl={handleResolveImageUrl}
         resolveEmbed={handleResolveEmbed}
         resolveWikiEmbed={handleResolveWikiEmbed}
@@ -652,17 +605,14 @@ export function NoteEditor({
         onFilePaste={handleFilePaste}
         shouldEmbedFile={shouldEmbedFile}
         titleFromFile={noteTitleFromFile}
-        {...(resolveFileLink !== undefined ? { resolveFileLink } : {})}
+        resolveFileLink={resolveFileLink}
         resolveFileInfo={handleResolveFileInfo}
-        onFileClick={handleFileClick}
         onExitBoundary={handleExitBoundary}
       >
         <EditorInputTraits />
         {/* Only a pane that persists files gets the toolbar's attach button;
             `handleFilePaste` is the same handler meowdown pastes through. */}
-        <FormattingToolbarBridge
-          {...(saveFile !== undefined ? { saveFile: handleFilePaste } : {})}
-        />
+        <FormattingToolbarBridge saveFile={saveFile !== undefined ? handleFilePaste : undefined} />
         {renderWikilinkHoverCard !== undefined ? (
           <WikilinkHoverCard>{renderWikilinkHoverCard}</WikilinkHoverCard>
         ) : null}
