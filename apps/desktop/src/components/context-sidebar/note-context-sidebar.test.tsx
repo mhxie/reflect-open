@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { scrollContainerOf } from '@/test-utils/scroll-container.ts'
 import { NoteContextSidebar } from './note-context-sidebar.tsx'
 
 const relatedNotes = vi.hoisted(() => vi.fn())
@@ -66,9 +67,11 @@ describe('NoteContextSidebar', () => {
 
   it('scrolls its sections within the context region', async () => {
     const view = await renderSidebar('notes/rust.md', 80)
-    await expect.element(view.getByText('Pin this note')).toBeVisible()
+    const pin = view.getByText('Pin this note')
+    await expect.element(pin).toBeVisible()
 
-    const panel = view.getByTestId('context-frame').element().firstElementChild!
+    const panel = scrollContainerOf(pin.element())
+    expect(view.getByTestId('context-frame').element().contains(panel)).toBe(true)
     panel.scrollTop = panel.scrollHeight
     expect(panel.scrollTop).toBeGreaterThan(0)
     await view.unmount()

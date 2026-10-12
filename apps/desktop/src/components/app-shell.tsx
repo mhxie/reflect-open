@@ -8,7 +8,10 @@ interface AppShellProps {
   sidebarEdge?: ReactNode
   /** Rendered in the sidebar's place while it is hidden (the hover reveal). */
   hiddenSidebar?: ReactNode
-  /** Right context panel (the AI copilot lands here in Plan 10). */
+  /**
+   * Right context panel (the AI copilot lands here in Plan 10). The region
+   * clips, so the panel mounts its own scroll container.
+   */
   context?: ReactNode
   /** Resize affordance for the context aside's inner edge (a separator). */
   contextEdge?: ReactNode

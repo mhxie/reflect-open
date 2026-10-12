@@ -11,6 +11,7 @@ import type { NoteRoute } from '@/routing/route.ts'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import '@/test-utils/locator.ts'
+import { scrollContainerOf } from '@/test-utils/scroll-container.ts'
 import { DailyContextSidebar } from './daily-context-sidebar.tsx'
 
 const dailyDatesInRange = vi.hoisted(() => vi.fn())
@@ -74,15 +75,6 @@ function renderSidebar(date: string, height?: number) {
       </QueryClientProvider>
     </TooltipProvider>,
   )
-}
-
-/** The nearest ancestor that scrolls its overflow, or null. */
-function scrollContainerOf(element: Element): HTMLElement | null {
-  let node = element.parentElement
-  while (node !== null && getComputedStyle(node).overflowY !== 'auto') {
-    node = node.parentElement
-  }
-  return node
 }
 
 function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
@@ -293,13 +285,18 @@ describe('DailyContextSidebar sections', () => {
   it('keeps the activity heatmap at the bottom of a sidebar taller than its sections', async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
     const view = await renderSidebar('2026-06-09', 1000)
-    await expect.element(page.getByText('No tasks for this day')).toBeVisible()
-    const activity = page.getByRole('button', { name: /Activity/ })
-    await expect.element(activity).toBeVisible()
+    const tasks = page.getByText('No tasks for this day')
+    await expect.element(tasks).toBeVisible()
+    const heatmap = page.getByRole('grid', { name: 'Daily note activity' })
+    await expect.element(heatmap).toBeVisible()
 
+    const scroller = scrollContainerOf(tasks.element())
+    expect(scroller.scrollHeight).toBeLessThanOrEqual(scroller.clientHeight)
     const frame = view.getByTestId('context-frame').element().getBoundingClientRect()
-    const footer = activity.element().closest('section')!.parentElement!.getBoundingClientRect()
-    expect(footer.bottom).toBeCloseTo(frame.bottom, 0)
+    const grid = heatmap.element().getBoundingClientRect()
+    expect(grid.top).toBeGreaterThanOrEqual(scroller.getBoundingClientRect().bottom)
+    // Only the footer's own padding lies between the heatmap and the bottom edge.
+    expect(frame.bottom - grid.bottom).toBeLessThan(20)
     await view.unmount()
   })
 
@@ -311,7 +308,7 @@ describe('DailyContextSidebar sections', () => {
     const activity = page.getByRole('button', { name: /Activity/ })
     await expect.element(activity).toBeVisible()
 
-    const scroller = scrollContainerOf(tasks.element())!
+    const scroller = scrollContainerOf(tasks.element())
     expect(scroller.contains(activity.element())).toBe(false)
     const tasksTop = tasks.element().getBoundingClientRect().top
     const activityTop = activity.element().getBoundingClientRect().top
@@ -319,6 +316,26 @@ describe('DailyContextSidebar sections', () => {
     expect(scroller.scrollTop).toBeGreaterThan(0)
     expect(tasks.element().getBoundingClientRect().top).toBeLessThan(tasksTop)
     expect(activity.element().getBoundingClientRect().top).toBe(activityTop)
+    await view.unmount()
+  })
+
+  it('keeps half of a minimum-height sidebar for the sections, and the heatmap scrolls in the rest', async () => {
+    listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
+    // Tauri's minimum window height.
+    const view = await renderSidebar('2026-06-09', 200)
+    const tasks = page.getByText('No tasks for this day')
+    await expect.element(tasks).toBeInTheDocument()
+    const heatmap = page.getByRole('grid', { name: 'Daily note activity' })
+    await expect.element(heatmap).toBeInTheDocument()
+
+    const frame = view.getByTestId('context-frame').element()
+    const sections = scrollContainerOf(tasks.element())
+    expect(sections.clientHeight).toBeGreaterThanOrEqual(frame.clientHeight / 2)
+    const footer = scrollContainerOf(heatmap.element())
+    expect(frame.contains(footer)).toBe(true)
+    expect(footer.contains(tasks.element())).toBe(false)
+    footer.scrollTop = footer.scrollHeight
+    expect(footer.scrollTop).toBeGreaterThan(0)
     await view.unmount()
   })
 
