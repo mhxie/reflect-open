@@ -1,8 +1,14 @@
 import { APICallError } from '@reflect/modules/ai'
-import { MockLanguageModelV3 } from '@reflect/modules/ai/test'
-import type { LanguageModelV3CallOptions, LanguageModelV3Usage } from '@ai-sdk/provider'
+import { MockLanguageModelV3, MockLanguageModelV4 } from '@reflect/modules/ai/test'
+import type {
+  LanguageModelV3CallOptions,
+  LanguageModelV3Usage,
+  LanguageModelV4CallOptions,
+} from '@ai-sdk/provider'
 import { describe, expect, it, vi } from 'vitest'
+import { modelTarget, verifyModelTarget } from '../privacy/on-device.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
+import { testTargetModel } from '../testing/target-model.ts'
 import {
   describeAsset,
   isAssetDescriptionRejected,
@@ -13,6 +19,7 @@ import { languageModel } from './language-model.ts'
 vi.mock('./language-model', () => ({
   languageModel: vi.fn(),
 }))
+vi.mock('../privacy/on-device-verification', () => ({ verifyOnDeviceServer: async () => 'ok' }))
 
 const languageModelMock = vi.mocked(languageModel)
 
@@ -54,6 +61,20 @@ function modelThrowing(error: unknown): void {
       },
     }),
   )
+}
+
+function recording(calls: LanguageModelV4CallOptions[]): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      calls.push(options)
+      return {
+        content: [{ type: 'text', text: 'A sign.' }],
+        finishReason: { unified: 'stop' as const, raw: undefined },
+        usage: USAGE,
+        warnings: [],
+      }
+    },
+  })
 }
 
 function apiError(statusCode: number): APICallError {
@@ -131,6 +152,33 @@ describe('describeAsset', () => {
     const parts = partsOf(calls)
     expect(parts.every((part) => part.type === 'text')).toBe(true)
     expect(parts.map((part) => part.text).join('\n')).toContain('<title>Logo</title>')
+  })
+
+  it('switches reasoning off for local OCR on an attested Ollama model only', async () => {
+    const baseUrl = 'http://localhost:11434/v1'
+    const target = await verifyModelTarget(
+      modelTarget({
+        id: 'cfg-local',
+        provider: 'openai-compatible',
+        model: 'gemma4:26b',
+        baseUrl,
+        keyHint: '',
+        onDevice: { baseUrl, model: 'gemma4:26b', server: 'ollama' },
+      }),
+      '',
+    )
+    if (target.kind !== 'on-device') {
+      throw new Error('expected an on-device target')
+    }
+    const local: LanguageModelV4CallOptions[] = []
+    const cloud: LanguageModelV4CallOptions[] = []
+    languageModelMock.mockResolvedValue(recording(cloud))
+
+    await request({ localModel: testTargetModel(target, recording(local)) })
+    await request()
+
+    expect(local[0]?.reasoning).toBe('none')
+    expect(cloud[0]?.reasoning).toBeUndefined()
   })
 
   it.each([

@@ -1,8 +1,9 @@
 import { ReflectError } from '../errors.ts'
 import { AI_SUMMARY_MAX_CHARS } from '../markdown/ai-summary.ts'
 import type { CloudNoteContent, CloudSafe } from '../privacy/checkers.ts'
-import type { CloudTarget, ModelTarget, VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
+import type { CloudTarget, VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
 import type { TargetModel } from './language-model.ts'
+import { skipsReasoning } from './reasoning.ts'
 import { clipAtWordBoundary } from './text.ts'
 
 /**
@@ -33,18 +34,6 @@ export type SummarizeNoteRequest =
       readonly model: TargetModel<CloudTarget>
       readonly note: CloudSafe<CloudNoteContent>
     }
-
-/**
- * Whether to switch the model's reasoning off. A one-line preview gains
- * nothing from it, yet Ollama runs a thinking-capable model with reasoning on
- * unless told otherwise, spending several times the answer's tokens on every
- * note of a backlog. Only an attested Ollama server is told: it accepts
- * `reasoning_effort: "none"`; other servers and cloud providers keep their
- * default.
- */
-function skipsReasoning(target: ModelTarget): boolean {
-  return target.kind === 'on-device' && target.config.onDevice?.server === 'ollama'
-}
 
 function summaryPrompt(note: NoteSummarySource): string {
   return [

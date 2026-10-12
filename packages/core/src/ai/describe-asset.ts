@@ -2,6 +2,7 @@ import type { UserContent } from '@reflect/modules/ai'
 import { ReflectError } from '../errors.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import { languageModel, type TargetModel } from './language-model.ts'
+import { skipsReasoning } from './reasoning.ts'
 import type { VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
 
 /**
@@ -134,6 +135,9 @@ export async function describeAsset(request: DescribeAssetRequest): Promise<stri
         request.localModel?.model ??
         (await languageModel(request.config, request.apiKey, request.fetchFn ?? fetch)),
       messages: [{ role: 'user', content }],
+      ...(request.localModel !== undefined && skipsReasoning(request.localModel.target)
+        ? { reasoning: 'none' }
+        : {}),
       abortSignal: AbortSignal.timeout(DESCRIBE_TIMEOUT_MS),
       maxRetries: 0,
     })
