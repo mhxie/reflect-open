@@ -1,6 +1,16 @@
 import { resolveChatModel, type ChatModelOption } from '../ai/chat/model-options.ts'
-import { defaultAiProvider, type AiProvidersState } from '../ai/provider-config.ts'
-import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
+import { normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
+import {
+  defaultAiProvider,
+  withAiProviderAdded,
+  withAiProviderOnDevice,
+  type AiProvidersState,
+} from '../ai/provider-config.ts'
+import type {
+  AiProviderConfig,
+  OnDeviceServerKind,
+  OpenAiCompatibleProviderConfig,
+} from '../settings/schema.ts'
 import { ReflectError } from '../errors.ts'
 import { isLoopbackHttpUrl } from './loopback.ts'
 import { verifyOnDeviceServer } from './on-device-verification.ts'
@@ -167,6 +177,48 @@ export function pickOnDeviceProvider(state: AiProvidersState): OnDeviceTarget | 
     }
   }
   return null
+}
+
+/**
+ * The providers state with an OpenAI-compatible entry attested for `model`
+ * at the loopback `baseUrl`, and that entry's id: an entry already attested
+ * for exactly this base URL and model is used as it is; else an entry at this
+ * base URL with this model is attested; else a keyless entry is added (the
+ * default only when it is the first). No other entry changes, so no other
+ * feature's model or attestation moves. Call it once the user has confirmed
+ * the attestation.
+ */
+export function withOnDeviceModel(
+  state: AiProvidersState,
+  baseUrl: string,
+  model: string,
+  server: OnDeviceServerKind,
+  newId: () => string,
+): { state: AiProvidersState; id: string } {
+  const url = normalizeOpenAICompatibleBaseUrl(baseUrl)
+  const sameModel = state.providers.filter(
+    (entry) =>
+      entry.provider === 'openai-compatible' &&
+      normalizeOpenAICompatibleBaseUrl(entry.baseUrl) === url &&
+      entry.model === model,
+  )
+  const attested = sameModel.find((entry) => resolveOnDeviceTarget(entry) !== null)
+  if (attested !== undefined) {
+    return { state, id: attested.id }
+  }
+  const existing = sameModel[0]
+  if (existing !== undefined) {
+    const providers = withAiProviderOnDevice(state.providers, existing.id, true, server)
+    return { state: { ...state, providers }, id: existing.id }
+  }
+  const id = newId()
+  const added = withAiProviderAdded(
+    state,
+    { id, provider: 'openai-compatible', model, baseUrl: url, keyHint: '' },
+    false,
+  )
+  const providers = withAiProviderOnDevice(added.providers, id, true, server)
+  return { state: { ...added, providers }, id }
 }
 
 /** A refusal from {@link verifyOnDeviceServer}, with the reason to show. */

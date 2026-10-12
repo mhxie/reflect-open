@@ -16,7 +16,11 @@ import {
 import { echoLocalWrite } from '../indexing/local-write-echo.ts'
 import { noteBodyHash, parseNote, splitFrontmatter, upsertFrontmatter } from '../markdown/index.ts'
 import { verifyOnDeviceServer } from '../privacy/on-device.ts'
-import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
+import type {
+  AiProviderConfig,
+  AiSummariesModel,
+  OpenAiCompatibleProviderConfig,
+} from '../settings/schema.ts'
 import { testTargetModel } from '../testing/target-model.ts'
 import {
   noteSummaryKey,
@@ -62,6 +66,9 @@ const CLOUD: AiProviderConfig = {
   keyHint: 'wxyz1',
 }
 
+/** The cloud choice a confirmed go-ahead pinned: the provider's small model. */
+const CLOUD_HAIKU = { configId: CLOUD.id, modelId: 'claude-haiku-4-5' }
+
 const NOW = 2_000_000_000_000
 const SETTLED_MTIME = NOW - 2 * SUMMARY_QUIET_MS
 const LONG_BODY = `# Long\n\n${'A sentence that keeps the note going. '.repeat(30)}\n`
@@ -84,6 +91,8 @@ function input(overrides: Partial<ReconcileNoteSummariesInput> = {}): ReconcileN
   return {
     providers: { providers: [LOCAL, CLOUD], defaultProviderId: CLOUD.id },
     mode: 'local',
+    localModel: null,
+    cloudModel: CLOUD_HAIKU,
     cloudConfirmed: true,
     generation: 1,
     now: () => NOW,
@@ -172,6 +181,35 @@ describe('reconcileNoteSummaries', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('summarizes with the on-device model chosen for summaries', async () => {
+    const gemma: OpenAiCompatibleProviderConfig = {
+      ...LOCAL,
+      id: 'gemma',
+      model: 'gemma4:31b',
+      onDevice: { model: 'gemma4:31b', baseUrl: LOCAL.baseUrl, server: 'ollama' },
+    }
+    const providers = { providers: [LOCAL, gemma, CLOUD], defaultProviderId: CLOUD.id }
+
+    const outcome = await reconcileNoteSummaries(
+      input({ providers, localModel: { configId: 'gemma', modelId: 'gemma4:31b' } }),
+    )
+    expect(outcome.summarized).toBe(2)
+    expect(vi.mocked(languageModelFor).mock.calls.map(([target]) => target.config)).toEqual([
+      expect.objectContaining({ id: 'gemma', model: 'gemma4:31b' }),
+    ])
+
+    // A choice whose entry no longer runs that model stops instead of falling back.
+    vi.mocked(languageModelFor).mockClear()
+    const stale = await reconcileNoteSummaries(
+      input({ providers, localModel: { configId: 'gemma', modelId: 'gemma4:26b' } }),
+    )
+    expect(stale.stopped).toEqual({
+      reason: 'config',
+      message: 'The model chosen for note summaries no longer runs on this Mac.',
+    })
+    expect(languageModelFor).not.toHaveBeenCalled()
+  })
+
   it('summarizes public notes only with the cloud small model in cloud mode', async () => {
     const outcome = await reconcileNoteSummaries(input({ mode: 'cloud' }))
 
@@ -194,7 +232,7 @@ describe('reconcileNoteSummaries', () => {
   it('asks before the first cloud note leaves, counting from the index alone', async () => {
     const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConfirmed: false }))
     // PUBLIC and RECENT wait; the private note is not counted.
-    expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic' })
+    expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic', choice: CLOUD_HAIKU })
     expect(asked.stopped).toBeNull()
     expect(readNoteLocal).not.toHaveBeenCalled()
     expect(writeNoteKeepingModified).not.toHaveBeenCalled()
@@ -204,6 +242,26 @@ describe('reconcileNoteSummaries', () => {
     const local = await reconcileNoteSummaries(input({ cloudConfirmed: false }))
     expect(local.consent).toBeNull()
     expect(local.summarized).toBe(2)
+  })
+
+  it('asks again while no cloud model is pinned, naming the one agreeing pins', async () => {
+    // An earlier build's go-ahead named no model: the default provider can
+    // change under it, so it counts only once a model is pinned.
+    const asked = await reconcileNoteSummaries(
+      input({ mode: 'cloud', cloudConfirmed: true, cloudModel: null }),
+    )
+    expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic', choice: CLOUD_HAIKU })
+    expect(readNoteLocal).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('summarizes with the cloud model chosen for summaries', async () => {
+    const chosen = { configId: CLOUD.id, modelId: 'claude-sonnet-5-5' }
+    const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', cloudModel: chosen }))
+    expect(outcome.summarized).toBe(1)
+    expect(vi.mocked(languageModelFor).mock.calls.map(([target]) => target.config)).toEqual([
+      expect.objectContaining({ id: CLOUD.id, model: 'claude-sonnet-5-5' }),
+    ])
   })
 
   it('never reads device-only or local-only notes in cloud mode', async () => {
@@ -224,14 +282,21 @@ describe('reconcileNoteSummaries', () => {
   })
 
   it('stops in cloud mode without a cloud provider', async () => {
-    const cases: [AiProvidersState, RegExp][] = [
-      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, /choose On this Mac/],
+    const cases: [AiProvidersState, AiSummariesModel | null, RegExp][] = [
+      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, null, /choose On this Mac/],
       // A cloud entry behind an on-device default is not picked silently.
-      [{ providers: [LOCAL, CLOUD], defaultProviderId: LOCAL.id }, /choose On this Mac/],
-      [{ providers: [], defaultProviderId: null }, /No AI provider/],
+      [{ providers: [LOCAL, CLOUD], defaultProviderId: LOCAL.id }, null, /choose On this Mac/],
+      [{ providers: [], defaultProviderId: null }, null, /No AI provider/],
+      // A chosen entry that was removed is not replaced by another.
+      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, CLOUD_HAIKU, /was removed/],
+      [
+        { providers: [LOCAL, CLOUD], defaultProviderId: CLOUD.id },
+        { configId: LOCAL.id, modelId: LOCAL.model },
+        /runs on this Mac/,
+      ],
     ]
-    for (const [providers, message] of cases) {
-      const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', providers }))
+    for (const [providers, cloudModel, message] of cases) {
+      const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', providers, cloudModel }))
       expect(outcome.stopped).toEqual({ reason: 'config', message: expect.stringMatching(message) })
     }
     expect(verifyOnDeviceServer).not.toHaveBeenCalled()

@@ -9,6 +9,7 @@ import type {
 import {
   createNoteSummaryController,
   type NoteSummaryController,
+  type NoteSummaryModels,
 } from './note-summary-controller.ts'
 
 const reconcileNoteSummaries = vi.hoisted(() =>
@@ -48,6 +49,7 @@ let onApplied: ((changes: readonly FileChange[], generation: number) => void) | 
 let controller: NoteSummaryController | null = null
 let mode: AiSummaryMode = 'cloud'
 let cloudConfirmed = true
+let models: NoteSummaryModels = { local: null, cloud: null }
 const onConsentNeeded = vi.fn()
 
 function create(): NoteSummaryController {
@@ -55,6 +57,7 @@ function create(): NoteSummaryController {
     generation: GEN,
     getProviders: () => PROVIDERS,
     getMode: () => mode,
+    getModels: () => models,
     cloudConfirmed,
     onConsentNeeded,
   })
@@ -80,6 +83,7 @@ beforeEach(() => {
   })
   mode = 'cloud'
   cloudConfirmed = true
+  models = { local: null, cloud: null }
   onConsentNeeded.mockReset()
 })
 
@@ -97,6 +101,8 @@ describe('createNoteSummaryController', () => {
     expect(reconcileNoteSummaries.mock.calls[0]![0]).toMatchObject({
       generation: GEN,
       mode,
+      localModel: null,
+      cloudModel: null,
       cloudConfirmed,
     })
 
@@ -145,6 +151,19 @@ describe('createNoteSummaryController', () => {
     onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
     await settle()
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(2)
+
+    // Choosing a model is a settings change too: the next pass tries it at once.
+    reconcileNoteSummaries.mockResolvedValueOnce(
+      outcome({ stopped: { reason: 'config', message: 'no model' } }),
+    )
+    onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
+    await settle()
+    expect(reconcileNoteSummaries).toHaveBeenCalledTimes(3)
+    models = { local: { configId: 'gemma', modelId: 'gemma4:31b' }, cloud: null }
+    onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
+    await settle()
+    expect(reconcileNoteSummaries).toHaveBeenCalledTimes(4)
+    expect(reconcileNoteSummaries.mock.calls[3]![0]).toMatchObject({ localModel: models.local })
   })
 
   it('does nothing while summaries are off', async () => {
@@ -154,9 +173,13 @@ describe('createNoteSummaryController', () => {
     expect(reconcileNoteSummaries).not.toHaveBeenCalled()
   })
 
-  it('asks once per controller while a cloud pass waits for the go-ahead', async () => {
+  it('asks once per model while a cloud pass waits for the go-ahead', async () => {
     cloudConfirmed = false
-    const consent = { notes: 12, provider: 'openai' as const }
+    const consent = {
+      notes: 12,
+      provider: 'openai' as const,
+      choice: { configId: 'work', modelId: 'gpt-5.4-nano' },
+    }
     reconcileNoteSummaries.mockResolvedValue(outcome({ pending: 12, consent }))
     create().start()
     await settle()
@@ -168,12 +191,12 @@ describe('createNoteSummaryController', () => {
     expect(reconcileNoteSummaries).toHaveBeenCalledTimes(2)
     expect(onConsentNeeded).toHaveBeenCalledTimes(1)
 
-    // A new default provider asks again, naming it.
-    const anthropic = { notes: 12, provider: 'anthropic' as const }
-    reconcileNoteSummaries.mockResolvedValue(outcome({ pending: 12, consent: anthropic }))
+    // Another model, even on the same entry, asks again, naming it.
+    const mini = { ...consent, choice: { configId: 'work', modelId: 'gpt-5.4-mini' } }
+    reconcileNoteSummaries.mockResolvedValue(outcome({ pending: 12, consent: mini }))
     onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)
     await settle()
-    expect(onConsentNeeded).toHaveBeenLastCalledWith(anthropic)
+    expect(onConsentNeeded).toHaveBeenLastCalledWith(mini)
     expect(onConsentNeeded).toHaveBeenCalledTimes(2)
   })
 })

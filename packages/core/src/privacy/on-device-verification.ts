@@ -26,15 +26,20 @@ function refused(reason: string): OnDeviceServerVerdict {
   return { kind: 'refused', reason }
 }
 
-function nativeUrl(baseUrl: string, endpoint: string): string {
+/** Ollama's native endpoint (`/api/<endpoint>`) beside an OpenAI-compatible base URL. */
+export function ollamaNativeUrl(baseUrl: string, endpoint: string): string {
   const url = new URL(baseUrl)
   url.pathname = `${url.pathname.replace(/\/v1\/?$/u, '').replace(/\/$/u, '')}/api/${endpoint}`
   return url.href
 }
 
-async function readJson(response: Response, maximumBytes: number): Promise<unknown> {
+/**
+ * Parse a local server's JSON body, refusing one larger than `maximumBytes`.
+ * The body is always released, so the request's transport slot is too.
+ */
+export async function readBoundedJson(response: Response, maximumBytes: number): Promise<unknown> {
   if (response.body === null) {
-    throw new Error('Empty verification response')
+    throw new Error('Empty local server response')
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -48,13 +53,22 @@ async function readJson(response: Response, maximumBytes: number): Promise<unkno
       }
       size += chunk.value.byteLength
       if (size > maximumBytes) {
-        throw new Error('Verification response is too large')
+        throw new Error('Local server response is too large')
       }
       text += decoder.decode(chunk.value, { stream: true })
     }
   } finally {
     await reader.cancel()
   }
+}
+
+/**
+ * Whether an Ollama model name is tagged as a cloud model (`:cloud`,
+ * `:<size>-cloud`): Ollama forwards those off this Mac.
+ */
+export function isOllamaCloudModel(model: string): boolean {
+  const tag = model.trim().split(':').at(-1)?.trim().toLowerCase() ?? ''
+  return model.includes(':') && (tag === 'cloud' || (!tag.includes('/') && tag.endsWith('-cloud')))
 }
 
 /**
@@ -68,11 +82,7 @@ export async function verifyOnDeviceServer(
   target: OnDeviceTarget,
   options: OnDeviceVerificationOptions = {},
 ): Promise<OnDeviceServerVerdict> {
-  const tag = target.config.model.trim().split(':').at(-1)?.trim().toLowerCase() ?? ''
-  if (
-    target.config.model.includes(':') &&
-    (tag === 'cloud' || (!tag.includes('/') && tag.endsWith('-cloud')))
-  ) {
+  if (isOllamaCloudModel(target.config.model)) {
     return refused(
       'This model routes requests to Ollama cloud. Choose a model running on this Mac.',
     )
@@ -85,7 +95,10 @@ export async function verifyOnDeviceServer(
     headers.set('authorization', `Bearer ${options.apiKey}`)
   }
   try {
-    const version = await fetchFn(nativeUrl(target.config.baseUrl, 'version'), { headers, signal })
+    const version = await fetchFn(ollamaNativeUrl(target.config.baseUrl, 'version'), {
+      headers,
+      signal,
+    })
     if (version.status === 404 && target.config.onDevice?.server === 'openai-compatible') {
       await version.body?.cancel()
       return 'ok'
@@ -96,14 +109,14 @@ export async function verifyOnDeviceServer(
         'Cannot verify this local server. Confirm its server type in Settings → AI providers.',
       )
     }
-    const parsedVersion = versionSchema.safeParse(await readJson(version, MAX_VERSION_BYTES))
+    const parsedVersion = versionSchema.safeParse(await readBoundedJson(version, MAX_VERSION_BYTES))
     if (!parsedVersion.success) {
       return refused(
         'The local server returned an unrecognized verification response. Private content was not sent.',
       )
     }
     headers.set('content-type', 'application/json')
-    const response = await fetchFn(nativeUrl(target.config.baseUrl, 'show'), {
+    const response = await fetchFn(ollamaNativeUrl(target.config.baseUrl, 'show'), {
       method: 'POST',
       headers,
       body: JSON.stringify({ model: target.config.model, verbose: false }),
@@ -113,7 +126,7 @@ export async function verifyOnDeviceServer(
       await response.body?.cancel()
       return refused('Ollama could not verify the selected model. Choose an installed local model.')
     }
-    const parsed = showSchema.safeParse(await readJson(response, MAX_SHOW_BYTES))
+    const parsed = showSchema.safeParse(await readBoundedJson(response, MAX_SHOW_BYTES))
     if (!parsed.success) {
       return refused(
         'Ollama returned an unrecognized model description. Private content was not sent.',

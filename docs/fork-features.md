@@ -42,7 +42,8 @@ here as the fork grows; the [README](../README.md#this-fork) remains a short ove
   without leaving the host note.
 - **All Notes:** sort by title or last updated, filter by attachment type, and
   read a one-sentence AI summary in place of the opening text of long notes
-  (Settings → All Notes → AI summaries; your AI provider by default after one
+  (Settings → All Notes → AI summaries: a model on this Mac by default, picked
+  from the ones Ollama has installed, or a cloud provider and model after one
   go-ahead, private notes never sent).
 - **Attachment browsing:** an attachment library with image/PDF previews,
   type/tag filters, and source-note links; image/PDF galleries in All Notes.

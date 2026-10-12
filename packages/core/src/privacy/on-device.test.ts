@@ -9,6 +9,7 @@ import {
   pickOnDeviceProvider,
   resolveOnDeviceTarget,
   verifyOnDeviceServer,
+  withOnDeviceModel,
   type OnDeviceTarget,
 } from './on-device.ts'
 
@@ -150,6 +151,62 @@ describe('pickOnDeviceProvider', () => {
       pickOnDeviceProvider({ providers: [HOSTED, local()], defaultProviderId: null }),
     ).toBeNull()
     expect(pickOnDeviceProvider({ providers: [], defaultProviderId: null })).toBeNull()
+  })
+})
+
+describe('withOnDeviceModel', () => {
+  const ids = (): string => 'new-entry'
+
+  it('reuses an entry already attested for the model, changing nothing', () => {
+    const state: AiProvidersState = {
+      providers: [HOSTED, attested({ id: 'gemma', model: 'gemma4:31b' })],
+      defaultProviderId: HOSTED.id,
+    }
+    const result = withOnDeviceModel(state, `${OLLAMA_URL}/`, 'gemma4:31b', 'ollama', ids)
+    expect(result).toEqual({ state, id: 'gemma' })
+  })
+
+  it('attests an entry that already runs the model there, leaving other entries alone', () => {
+    const other = attested({ id: 'llama' })
+    const state: AiProvidersState = {
+      providers: [other, local({ id: 'qwen', model: 'qwen3.8:27b' })],
+      defaultProviderId: other.id,
+    }
+    const result = withOnDeviceModel(state, OLLAMA_URL, 'qwen3.8:27b', 'ollama', ids)
+    expect(result.id).toBe('qwen')
+    expect(result.state.providers).toEqual([
+      other,
+      {
+        ...local({ id: 'qwen', model: 'qwen3.8:27b' }),
+        onDevice: { baseUrl: OLLAMA_URL, model: 'qwen3.8:27b', server: 'ollama' },
+      },
+    ])
+    expect(result.state.defaultProviderId).toBe('llama')
+  })
+
+  it('adds a keyless attested entry for a model nothing runs yet, not as the default', () => {
+    const other = attested({ id: 'llama' })
+    const result = withOnDeviceModel(
+      { providers: [HOSTED, other], defaultProviderId: HOSTED.id },
+      OLLAMA_URL,
+      'gemma4:31b',
+      'ollama',
+      ids,
+    )
+    expect(result.id).toBe('new-entry')
+    expect(result.state.defaultProviderId).toBe(HOSTED.id)
+    const added = result.state.providers.at(-1)!
+    expect(added).toEqual({
+      id: 'new-entry',
+      provider: 'openai-compatible',
+      model: 'gemma4:31b',
+      baseUrl: OLLAMA_URL,
+      keyHint: '',
+      onDevice: { baseUrl: OLLAMA_URL, model: 'gemma4:31b', server: 'ollama' },
+    })
+    expect(resolveOnDeviceTarget(added)).not.toBeNull()
+    // The other attested entry keeps its model and its attestation.
+    expect(result.state.providers[1]).toBe(other)
   })
 })
 

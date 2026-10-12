@@ -258,6 +258,8 @@ export const queryKeys = {
       return [...this.all, root, 'status'] as const
     },
   },
+  /** The models installed in the Ollama server on this Mac; not graph data. */
+  ollamaModels: ['ollama-models'] as const,
   appStore: {
     all: ['app-store'] as const,
     get environment() {

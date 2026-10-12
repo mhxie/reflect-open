@@ -68,6 +68,7 @@ export {
   isOnDeviceOption,
   pickOnDeviceProvider,
   resolveOnDeviceTarget,
+  withOnDeviceModel,
   type VerifiedModelTarget,
   type VerifiedOnDeviceTarget,
   type CloudTarget,
@@ -81,12 +82,19 @@ export { localOcrAssetTypeFor } from '../actions/asset-description-helpers.ts'
 export { reconcileCachedAssetOcr } from '../actions/asset-ocr-maintenance.ts'
 export {
   cloudSummaryConfig,
+  localSummaryTarget,
   reconcileNoteSummaries,
   type NoteSummaryConsent,
   type ReconcileNoteSummariesInput,
   type ReconcileNoteSummariesOutcome,
 } from '../actions/note-summaries.ts'
 export { pickSmallModelConfig, smallModelConfig } from '../ai/small-model.ts'
+export {
+  listOllamaModels,
+  OLLAMA_BASE_URL,
+  type OllamaModel,
+  type OllamaModels,
+} from '../ai/ollama-models.ts'
 export {
   buildNoteTools,
   MAX_DAILY_NOTE_DAYS,
