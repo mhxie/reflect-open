@@ -1,4 +1,4 @@
-import type { RetrievalHit } from '../embeddings/retrieve.ts'
+import type { RetrievalHit } from '../embeddings/retrieval-hit.ts'
 import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { frontmatterPrivacy } from '../markdown/frontmatter.ts'
 

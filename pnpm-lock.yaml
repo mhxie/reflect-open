@@ -6,9 +6,9 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz
+  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz
 
 importers:
 
@@ -63,14 +63,14 @@ importers:
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.0)
       '@meowdown/core':
-        specifier: file:../../vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz
-        version: file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz(@lezer/common@1.5.3)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(supports-color@7.2.0)(typescript@6.0.3)
+        specifier: file:../../vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz
+        version: file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz(@lezer/common@1.5.3)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(supports-color@7.2.0)(typescript@6.0.3)
       '@meowdown/markdown':
-        specifier: file:../../vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz
-        version: file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz(typescript@6.0.3)
+        specifier: file:../../vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz
+        version: file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz(typescript@6.0.3)
       '@meowdown/react':
-        specifier: file:../../vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz
-        version: file:vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz(@lezer/common@1.5.3)(@lezer/highlight@1.2.5)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(@types/react@19.3.0)(date-fns@4.4.0)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(react-dom@19.3.0)(react@19.3.0)(supports-color@7.2.0)(typescript@6.0.3)
+        specifier: file:../../vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz
+        version: file:vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz(@lezer/common@1.5.3)(@lezer/highlight@1.2.5)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(@types/react@19.3.0)(date-fns@4.4.0)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(react-dom@19.3.0)(react@19.3.0)(supports-color@7.2.0)(typescript@6.0.3)
       '@ocavue/utils':
         specifier: ^1.8.0
         version: 1.8.0
@@ -313,8 +313,8 @@ importers:
   packages/core:
     dependencies:
       '@meowdown/markdown':
-        specifier: file:../../vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz
-        version: file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz(typescript@6.0.3)
+        specifier: file:../../vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz
+        version: file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz(typescript@6.0.3)
       '@ocavue/utils':
         specifier: ^1.8.0
         version: 1.8.0
@@ -1220,20 +1220,20 @@ packages:
   '@marijn/find-cluster-break@1.0.4':
     resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
 
-  '@meowdown/core@file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz':
-    resolution: {integrity: sha512-u3u+ddjWm2PzpD5AujPYcdyiXcG2gz6gyQ6D9nWzrZ+n2Wi/2Yi+QLcwkNvk4JssoHd6t0gG6GpWYh18BuUIjg==, tarball: file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz}
+  '@meowdown/core@file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz':
+    resolution: {integrity: sha512-u3u+ddjWm2PzpD5AujPYcdyiXcG2gz6gyQ6D9nWzrZ+n2Wi/2Yi+QLcwkNvk4JssoHd6t0gG6GpWYh18BuUIjg==, tarball: file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz}
     version: 0.81.0
 
   '@meowdown/embed@0.3.1':
     resolution: {integrity: sha512-wfEo1BZFoxbmGf8AVEyZ7Eo6ZaglD3I6kcSbZ8vpsQ8EJmGtfBGuqZfK/gvkGr0iLn/H73r3zF2YEY7TS0LxEg==}
 
-  '@meowdown/markdown@file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz':
-    resolution: {integrity: sha512-4utKRJlfhxrmGEFT+CwvKPY4sFm09SdGy1vEumHMKmCtbJyiN9GsB4WQlbU/d++3A1MTNn17qp5QGbgmHZmg5Q==, tarball: file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz}
+  '@meowdown/markdown@file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz':
+    resolution: {integrity: sha512-hlN4P1rPqGYj7sjc9fQfZC+JQmm38mN8Zv+RYSnFBp12/vagYhp3CvZ+0j31qQFBrnZ8Pz4YfliGpzBC549ppw==, tarball: file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz}
     version: 0.76.1
 
-  '@meowdown/react@file:vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz':
-    resolution: {integrity: sha512-pP/xGY6rmCXGfFDUCNzClx4O4NnumXuXlQg20PofQsOeOxFh9hd5sPOJpIKuaAyJE2Yl/FSEQ9NUNIqZRjWX5w==, tarball: file:vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz}
-    version: 0.80.0
+  '@meowdown/react@file:vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz':
+    resolution: {integrity: sha512-wcg0vV39+glXPMpMVmvCCWGS+H5U0Do9q4rt7bMQFXd6knd5UW1xaDwOSCetnUfrsAVVTo0ABF56SBTCmI5A3A==, tarball: file:vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz}
+    version: 0.80.1
     peerDependencies:
       react: ^19.3.0
       react-dom: ^19.3.0
@@ -7096,14 +7096,14 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.4': {}
 
-  '@meowdown/core@file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz(@lezer/common@1.5.3)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(supports-color@7.2.0)(typescript@6.0.3)':
+  '@meowdown/core@file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz(@lezer/common@1.5.3)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(supports-color@7.2.0)(typescript@6.0.3)':
     dependencies:
       '@codemirror/language': 6.13.1
       '@codemirror/language-data': 6.5.2
       '@floating-ui/dom': 1.8.0
       '@lezer/highlight': 1.2.5
       '@meowdown/embed': 0.3.1(typescript@6.0.3)
-      '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz(typescript@6.0.3)
+      '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz(typescript@6.0.3)
       '@ocavue/utils': 1.9.0
       '@post-embed/exporter': 0.5.0(typescript@6.0.3)
       '@post-embed/schema': 0.5.2(typescript@6.0.3)
@@ -7154,7 +7154,7 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@meowdown/markdown@file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz(typescript@6.0.3)':
+  '@meowdown/markdown@file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz(typescript@6.0.3)':
     dependencies:
       '@lezer/common': 1.5.3
       '@lezer/markdown': 1.8.0
@@ -7164,12 +7164,12 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@meowdown/react@file:vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz(@lezer/common@1.5.3)(@lezer/highlight@1.2.5)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(@types/react@19.3.0)(date-fns@4.4.0)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(react-dom@19.3.0)(react@19.3.0)(supports-color@7.2.0)(typescript@6.0.3)':
+  '@meowdown/react@file:vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz(@lezer/common@1.5.3)(@lezer/highlight@1.2.5)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(@types/react@19.3.0)(date-fns@4.4.0)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(react-dom@19.3.0)(react@19.3.0)(supports-color@7.2.0)(typescript@6.0.3)':
     dependencies:
       '@base-ui/react': 1.9.0(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0)(react@19.3.0)
-      '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz(@lezer/common@1.5.3)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(supports-color@7.2.0)(typescript@6.0.3)
+      '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz(@lezer/common@1.5.3)(@shikijs/types@4.5.0)(@types/hast@3.0.5)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)(supports-color@7.2.0)(typescript@6.0.3)
       '@meowdown/embed': 0.3.1(typescript@6.0.3)
-      '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz(typescript@6.0.3)
+      '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz(typescript@6.0.3)
       '@ocavue/utils': 1.9.0
       '@post-embed/types': 0.5.0
       '@prosekit/core': 0.13.3(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)

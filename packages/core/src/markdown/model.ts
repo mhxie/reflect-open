@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { FrontmatterPrivacy } from './frontmatter-privacy.ts'
-import type { ParsedTask } from './task-ast.ts'
+import type { ParsedTask } from './task-model.ts'
 
 /**
  * The markdown document model (Plan 03) — the canonical, parser-agnostic shape

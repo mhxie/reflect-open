@@ -8,7 +8,7 @@ import {
   type WikiIndexNode,
 } from './hierarchy.ts'
 import { DEFAULT_WIKI_LANGUAGES, normalizeWikiLanguages } from './languages.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 
 const LANGUAGES = DEFAULT_WIKI_LANGUAGES
 

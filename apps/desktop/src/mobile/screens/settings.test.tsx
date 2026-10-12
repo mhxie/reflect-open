@@ -106,6 +106,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   await cleanup()
   queryClient.clear()
   vi.clearAllMocks()
@@ -149,6 +150,36 @@ describe('MobileSettings', () => {
 
     await user.click(page.getByRole('radio', { name: 'Large' }))
     expect(updateSettings).toHaveBeenCalledWith({ editorTextSize: 'large' })
+  })
+
+  it('offers each date format as today in that format and writes the choice', async () => {
+    const user = userEvent
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 5, 9))
+    await mount()
+
+    const selected = page.getByRole('button', { name: 'June 9th, 2026' })
+    await expect.element(selected).toHaveAttribute('aria-current', 'true')
+
+    await user.click(page.getByRole('button', { name: '9th June, 2026' }))
+    expect(updateSettings).toHaveBeenCalledWith({ dateFormat: 'dmy' })
+
+    await user.click(page.getByRole('button', { name: '2026-06-09' }))
+    expect(updateSettings).toHaveBeenCalledWith({ dateFormat: 'iso' })
+  })
+
+  it('shows the saved week start and time format and writes a new choice', async () => {
+    const user = userEvent
+    await mount()
+
+    await expect.element(page.getByRole('radio', { name: 'Monday' })).toBeChecked()
+    await expect.element(page.getByRole('radio', { name: '12-hour' })).toBeChecked()
+
+    await user.click(page.getByRole('radio', { name: 'Sunday' }))
+    expect(updateSettings).toHaveBeenCalledWith({ weekStartDay: 'sunday' })
+
+    await user.click(page.getByRole('radio', { name: '24-hour' }))
+    expect(updateSettings).toHaveBeenCalledWith({ timeFormat: '24h' })
   })
 
   it('toggles the editor switches', async () => {

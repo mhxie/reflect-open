@@ -108,13 +108,8 @@ export {
   type SearchIpcAnswer,
   type SearchIpcRequest,
 } from '../embeddings/search-ipc.ts'
-export {
-  retrieve,
-  relatedNotes,
-  fuseRanked,
-  type RetrievalHit,
-  type RetrieveOptions,
-} from '../embeddings/retrieve.ts'
+export { retrieve, relatedNotes, fuseRanked, type RetrieveOptions } from '../embeddings/retrieve.ts'
+export type { RetrievalHit } from '../embeddings/retrieval-hit.ts'
 export {
   appErrorSchema,
   errorMessage,

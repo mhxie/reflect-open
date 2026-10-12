@@ -15,8 +15,11 @@ import {
   syncAppStore,
   type AiPrompt,
   type AiProviderConfig,
+  type DateFormat,
   type EditorTextSize,
   type ThemePreference,
+  type TimeFormat,
+  type WeekStartDay,
   type WikiTrustDisplay,
 } from '@reflect/core'
 import { useAiPrompts } from '@/hooks/use-ai-prompts.ts'
@@ -40,6 +43,7 @@ import {
   SettingsGroup,
   SettingsNavRow,
   SettingsSegmentedRow,
+  SettingsSelectRow,
   SettingsSwitchRow,
   SettingsValueRow,
   type SegmentedOption,
@@ -51,12 +55,12 @@ import {
 import { useAppStoreEnvironment } from '@/mobile/use-app-store-environment.ts'
 import {
   classicAccessMessage,
-  formatClassicDate,
   useClassicAccess,
   useClassicSignOut,
 } from '@/mobile/use-classic-access.ts'
 import { useMobileSyncStatus } from '@/mobile/use-sync-status.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { formatFullDate } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useSyncContext } from '@/providers/sync-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
@@ -86,6 +90,19 @@ const TEXT_SIZE_OPTIONS: readonly SegmentedOption<EditorTextSize>[] = [
   { value: 'small', label: 'Small' },
   { value: 'medium', label: 'Medium' },
   { value: 'large', label: 'Large' },
+]
+
+const DATE_FORMATS: readonly DateFormat[] = ['mdy', 'dmy', 'iso']
+
+const WEEK_START_OPTIONS: readonly SegmentedOption<WeekStartDay>[] = [
+  { value: 'sunday', label: 'Sunday' },
+  { value: 'monday', label: 'Monday' },
+  { value: 'saturday', label: 'Saturday' },
+]
+
+const TIME_FORMAT_OPTIONS: readonly SegmentedOption<TimeFormat>[] = [
+  { value: '12h', label: '12-hour' },
+  { value: '24h', label: '24-hour' },
 ]
 
 /**
@@ -141,6 +158,7 @@ export function MobileSettings(): ReactElement {
     }
   }
   const { settings, updateSettings } = useSettings()
+  const [today] = useState(() => new Date())
   const version = useAppVersion()
   const { unlocked: debugUnlocked, tap: versionTap } = useDebugUnlockTap()
   const crashTest = useCrashTest()
@@ -244,6 +262,35 @@ export function MobileSettings(): ReactElement {
               value={settings.editorTextSize}
               options={TEXT_SIZE_OPTIONS}
               onChange={(editorTextSize) => updateSettings({ editorTextSize })}
+            />
+          </SettingsGroup>
+
+          <SettingsGroup
+            header="Date format"
+            footer="The style for dates shown throughout Reflect, including daily note titles."
+          >
+            {DATE_FORMATS.map((dateFormat) => (
+              <SettingsSelectRow
+                key={dateFormat}
+                label={formatFullDate(today, dateFormat)}
+                selected={settings.dateFormat === dateFormat}
+                onPress={() => updateSettings({ dateFormat })}
+              />
+            ))}
+          </SettingsGroup>
+
+          <SettingsGroup header="Week and time">
+            <SettingsSegmentedRow
+              label="Week start"
+              value={settings.weekStartDay}
+              options={WEEK_START_OPTIONS}
+              onChange={(weekStartDay) => updateSettings({ weekStartDay })}
+            />
+            <SettingsSegmentedRow
+              label="Time format"
+              value={settings.timeFormat}
+              options={TIME_FORMAT_OPTIONS}
+              onChange={(timeFormat) => updateSettings({ timeFormat })}
             />
           </SettingsGroup>
 
@@ -396,7 +443,7 @@ export function MobileSettings(): ReactElement {
                     : subscription.value === 'yearly'
                       ? 'Yearly'
                       : classicAccess.active && classicAccess.value !== null
-                        ? `Reflect Classic, until ${formatClassicDate(classicAccess.value.expiresAt)}`
+                        ? `Reflect Classic, until ${formatFullDate(new Date(classicAccess.value.expiresAt), settings.dateFormat)}`
                         : subscription.isLoading || classicAccess.isLoading
                           ? 'Checking…'
                           : 'Not subscribed'

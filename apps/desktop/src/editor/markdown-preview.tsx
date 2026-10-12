@@ -16,7 +16,7 @@ import type {
 } from '@meowdown/core'
 import { MarkdownView, type MarkdownBlockRenderer, type NoteEmbedRenderer } from '@meowdown/react'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
-import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
+import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { cn } from '@/lib/utils.ts'
 import { todayIso } from '@/lib/dates.ts'
 import {
@@ -130,6 +130,7 @@ export function MarkdownPreview({
   // tree).
   const graphXPostResolver = useXPostResolver()
   const resolveXPost = remoteEmbeds ? graphXPostResolver : resolveNoXPost
+  const resolveWikilink = useWikilinkResolver()
   const imageResolver = useMemo(
     () => (remoteEmbeds ? resolveImageUrl : localImagesOnly(resolveImageUrl)),
     [remoteEmbeds, resolveImageUrl],

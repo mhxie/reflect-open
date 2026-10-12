@@ -14,7 +14,7 @@ import {
   SUPPORTS_IMAGES_LABEL,
   parseContextWindowInput,
 } from '@/lib/on-device-settings.ts'
-import type { AddAiProviderValues } from './add-ai-provider-form.tsx'
+import type { AddAiProviderValues } from './add-ai-provider-values.ts'
 import { OnDeviceAttestationCopy } from './on-device-attestation-copy.tsx'
 import {
   Select,

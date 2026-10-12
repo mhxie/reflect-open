@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolExecutionOptions } from '@reflect/modules/ai'
-import type { RetrievalHit, RetrieveOptions } from '../../embeddings/retrieve.ts'
+import type { RetrievalHit } from '../../embeddings/retrieval-hit.ts'
+import type { RetrieveOptions } from '../../embeddings/retrieve.ts'
 import { setLocalOnlyFolders } from '../../graph/local-only.ts'
 import { setBridge } from '../../ipc/bridge.ts'
 import { PrivateNoteError } from '../../privacy/checkers.ts'

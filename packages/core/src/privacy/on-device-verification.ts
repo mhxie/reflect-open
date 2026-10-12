@@ -1,6 +1,15 @@
 import { z } from 'zod'
 import { onDeviceFetch } from '../ai/on-device-fetch.ts'
-import type { OnDeviceServerVerdict, OnDeviceTarget } from './on-device.ts'
+import type { OnDeviceTarget } from './on-device-target.ts'
+
+/** A refusal from {@link verifyOnDeviceServer}, with the reason to show. */
+export interface OnDeviceServerRefusal {
+  readonly kind: 'refused'
+  readonly reason: string
+}
+
+/** What {@link verifyOnDeviceServer} concluded about the server behind a target. */
+export type OnDeviceServerVerdict = 'ok' | OnDeviceServerRefusal
 
 const TIMEOUT_MS = 5_000
 const MAX_VERSION_BYTES = 16_384

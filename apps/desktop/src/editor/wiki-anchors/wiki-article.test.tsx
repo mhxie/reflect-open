@@ -8,7 +8,7 @@ import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
-import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
+import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { WikiAnchorsBridge } from './wiki-anchors-bridge.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
@@ -16,6 +16,8 @@ import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import { noteArticleFor } from './wiki-article-store.ts'
 import { wikiEditorRange } from './wiki-article-projection.ts'
 import { RouterProvider } from '@/routing/router.tsx'
+
+const resolveWikilink = createWikilinkResolver('mdy')
 
 vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => ({ graph: null }) }))
 vi.mock('@/lib/open-url.ts', () => ({ openUrlSync: vi.fn() }))

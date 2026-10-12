@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RetrievalHit } from '../embeddings/retrieve.ts'
+import type { RetrievalHit } from '../embeddings/retrieval-hit.ts'
 import { setLocalOnlyFolders } from '../graph/local-only.ts'
 import {
   assertCloudAllowed,

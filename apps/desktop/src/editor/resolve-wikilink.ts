@@ -1,41 +1,60 @@
-import type { WikilinkPayload, WikilinkResolution } from '@meowdown/core'
+import { useMemo } from 'react'
+import type { WikilinkResolver } from '@meowdown/core'
 import {
   displayNoteTitle,
   isWikiCitationTarget,
   readWikiCitationMetadata,
   splitWikiLinkTarget,
   wikiCitationDescription,
+  type DateFormat,
 } from '@reflect/core'
-import { todayIso } from '@/lib/dates.ts'
+import { formatDayLabel, isIsoDate, todayIso } from '@/lib/dates.ts'
+import { useDateFormat } from '@/hooks/use-date-format.ts'
 
 /**
  * The wiki-link chip rule shared by every meowdown surface: `[[target|alias]]`
  * splits at its first `|` (both halves trimmed) into the target the click and
- * hover handlers receive and the label the chip shows, and a target without an
- * alias (or with a blank one) reads as its display title, so `[[A // B]]` shows
- * its first segment. Pure: meowdown caches the result per parse.
+ * hover handlers receive and the label the chip shows. A target without an
+ * alias (or with a blank one) reads as the note it names: a date as its day
+ * per the date-format setting, anything else as its display title, so
+ * `[[A // B]]` shows its first segment. The resolver is pure: meowdown caches
+ * the result per parse.
  */
-export function resolveWikilink({
-  target,
-  metadata,
-}: WikilinkPayload): WikilinkResolution | undefined {
-  const pipe = target.indexOf('|')
-  const canonical = (pipe === -1 ? target : target.slice(0, pipe)).trim()
-  const alias = pipe === -1 ? '' : target.slice(pipe + 1).trim()
-  const citation =
-    alias === 'ref' && isWikiCitationTarget(canonical) ? readWikiCitationMetadata(metadata) : null
-  if (citation !== null && citation.validAt <= todayIso()) {
-    const { name, fragment } = splitWikiLinkTarget(canonical)
-    return {
-      target: canonical,
-      display: `${displayNoteTitle(name)}${fragment === null ? '' : `#${fragment}`}`,
-      appearance: 'reference',
-      description: wikiCitationDescription(citation),
+export function createWikilinkResolver(dateFormat: DateFormat): WikilinkResolver {
+  return ({ target, metadata }) => {
+    const pipe = target.indexOf('|')
+    const canonical = (pipe === -1 ? target : target.slice(0, pipe)).trim()
+    const alias = pipe === -1 ? '' : target.slice(pipe + 1).trim()
+    const citation =
+      alias === 'ref' && isWikiCitationTarget(canonical) ? readWikiCitationMetadata(metadata) : null
+    if (citation !== null && citation.validAt <= todayIso()) {
+      const { name, fragment } = splitWikiLinkTarget(canonical)
+      return {
+        target: canonical,
+        display: `${displayNoteTitle(name)}${fragment === null ? '' : `#${fragment}`}`,
+        appearance: 'reference',
+        description: wikiCitationDescription(citation),
+      }
     }
+    const display =
+      alias !== ''
+        ? alias
+        : isIsoDate(canonical)
+          ? formatDayLabel(canonical, dateFormat)
+          : displayNoteTitle(canonical)
+    if (pipe === -1 && display === canonical) {
+      return
+    }
+    return { target: canonical, display }
   }
-  const display = alias === '' ? displayNoteTitle(canonical) : alias
-  if (pipe === -1 && display === canonical) {
-    return undefined
-  }
-  return { target: canonical, display }
+}
+
+/**
+ * {@link createWikilinkResolver} bound to the user's date-format setting. The
+ * resolver keeps its identity until the setting changes, because a new
+ * identity makes meowdown resolve every chip again.
+ */
+export function useWikilinkResolver(): WikilinkResolver {
+  const dateFormat = useDateFormat()
+  return useMemo(() => createWikilinkResolver(dateFormat), [dateFormat])
 }

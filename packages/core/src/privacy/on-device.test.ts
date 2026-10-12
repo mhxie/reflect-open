@@ -10,8 +10,8 @@ import {
   resolveOnDeviceTarget,
   verifyOnDeviceServer,
   withOnDeviceModel,
-  type OnDeviceTarget,
 } from './on-device.ts'
+import type { OnDeviceTarget } from './on-device-target.ts'
 
 const OLLAMA_URL = 'http://localhost:11434/v1'
 

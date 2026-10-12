@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WikiEntrySummary } from './entry-summary.ts'
 import { groupWikiEntries, wikiTotals } from './group.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 
 function summary(claims: number): WikiEntrySummary {
   return {

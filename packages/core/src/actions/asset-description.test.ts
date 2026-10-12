@@ -15,8 +15,8 @@ import {
   isEligibleAssetPath,
   readManagedDescription,
   reconcileAssetDescriptions,
-  type ReconcileAssetDescriptionsInput,
 } from './asset-description.ts'
+import type { ReconcileAssetDescriptionsInput } from './asset-description-types.ts'
 
 vi.mock('../graph/commands', () => ({
   createNoteIfAbsent: vi.fn(),
