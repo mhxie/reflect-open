@@ -19,7 +19,7 @@ interface NoteContextSidebarProps {
  */
 export function NoteContextSidebar({ path }: NoteContextSidebarProps): ReactElement {
   return (
-    <div className="flex flex-col py-2 text-text">
+    <div className="flex h-full flex-col overflow-y-auto py-2 text-text">
       <div className="my-4 space-y-4 pb-4">
         <WikiLanguageSwitch path={path} />
         <NoteActionsSection path={path} showTrash />

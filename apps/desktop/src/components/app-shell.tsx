@@ -25,11 +25,12 @@ interface AppShellProps {
  * which the workspace fills with resize handles. The aside widths read the
  * `--sidebar-width` / `--context-sidebar-width` root variables, which
  * `SidebarWidthEffect` derives from the persisted preferences and the
- * viewport. The context edge renders before the panel's scroller so the
- * separator precedes the panel's controls in tab order, matching its visual
- * position on the aside's leading edge. The frame never scrolls: every route
- * mounts its own scroll container, so the center region clips instead of
- * growing a second scrollbar around a route's own.
+ * viewport. The context edge renders before the panel so the separator
+ * precedes the panel's controls in tab order, matching its visual position on
+ * the aside's leading edge. The frame never scrolls: every route and context
+ * panel mounts its own scroll container, so both regions clip instead of
+ * growing a second scrollbar around a panel's own, and a panel can pin
+ * content below its scroller.
  */
 export function AppShell({
   sidebar,
@@ -66,7 +67,7 @@ export function AppShell({
           className="relative hidden w-[var(--context-sidebar-width)] shrink-0 border-l border-border bg-surface-sunken lg:block"
         >
           {contextEdge}
-          <div className="h-full overflow-auto">{context}</div>
+          <div className="h-full overflow-hidden">{context}</div>
         </aside>
       ) : null}
     </div>

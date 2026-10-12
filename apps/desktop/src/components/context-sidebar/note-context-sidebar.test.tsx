@@ -34,13 +34,16 @@ function RouteProbe(): ReactNode {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function renderSidebar(path: string) {
+/** Renders the sidebar in a clipping frame like AppShell's context region, `height` px tall if given. */
+function renderSidebar(path: string, height?: number) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <TooltipProvider>
       <QueryClientProvider client={client}>
         <RouterProvider>
-          <NoteContextSidebar path={path} />
+          <div data-testid="context-frame" className="overflow-hidden" style={{ height }}>
+            <NoteContextSidebar path={path} />
+          </div>
           <RouteProbe />
         </RouterProvider>
       </QueryClientProvider>
@@ -58,6 +61,16 @@ describe('NoteContextSidebar', () => {
     const view = await renderSidebar('notes/rust.md')
     await vi.waitFor(() => expect(relatedNotes).toHaveBeenCalledWith('notes/rust.md', 6))
     expect(view.getByText('Similar notes').query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('scrolls its sections within the context region', async () => {
+    const view = await renderSidebar('notes/rust.md', 80)
+    await expect.element(view.getByText('Pin this note')).toBeVisible()
+
+    const panel = view.getByTestId('context-frame').element().firstElementChild!
+    panel.scrollTop = panel.scrollHeight
+    expect(panel.scrollTop).toBeGreaterThan(0)
     await view.unmount()
   })
 

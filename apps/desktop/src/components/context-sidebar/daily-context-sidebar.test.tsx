@@ -59,18 +59,30 @@ function RouteProbe(): ReactNode {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function renderSidebar(date: string) {
+/** Renders the sidebar in a clipping frame like AppShell's context region, `height` px tall if given. */
+function renderSidebar(date: string, height?: number) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <TooltipProvider>
       <QueryClientProvider client={client}>
         <RouterProvider>
-          <DailyContextSidebar date={date} />
+          <div data-testid="context-frame" className="overflow-hidden" style={{ height }}>
+            <DailyContextSidebar date={date} />
+          </div>
           <RouteProbe />
         </RouterProvider>
       </QueryClientProvider>
     </TooltipProvider>,
   )
+}
+
+/** The nearest ancestor that scrolls its overflow, or null. */
+function scrollContainerOf(element: Element): HTMLElement | null {
+  let node = element.parentElement
+  while (node !== null && getComputedStyle(node).overflowY !== 'auto') {
+    node = node.parentElement
+  }
+  return node
 }
 
 function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
@@ -275,6 +287,38 @@ describe('DailyContextSidebar sections', () => {
       (header) => header.textContent,
     )
     expect(headers).toEqual(['Tasks', 'Note actions', 'Activity'])
+    await view.unmount()
+  })
+
+  it('keeps the activity heatmap at the bottom of a sidebar taller than its sections', async () => {
+    listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
+    const view = await renderSidebar('2026-06-09', 1000)
+    await expect.element(page.getByText('No tasks for this day')).toBeVisible()
+    const activity = page.getByRole('button', { name: /Activity/ })
+    await expect.element(activity).toBeVisible()
+
+    const frame = view.getByTestId('context-frame').element().getBoundingClientRect()
+    const footer = activity.element().closest('section')!.parentElement!.getBoundingClientRect()
+    expect(footer.bottom).toBeCloseTo(frame.bottom, 0)
+    await view.unmount()
+  })
+
+  it('scrolls the calendar and sections while the activity heatmap stays put', async () => {
+    listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
+    const view = await renderSidebar('2026-06-09', 320)
+    const tasks = page.getByText('No tasks for this day')
+    await expect.element(tasks).toBeVisible()
+    const activity = page.getByRole('button', { name: /Activity/ })
+    await expect.element(activity).toBeVisible()
+
+    const scroller = scrollContainerOf(tasks.element())!
+    expect(scroller.contains(activity.element())).toBe(false)
+    const tasksTop = tasks.element().getBoundingClientRect().top
+    const activityTop = activity.element().getBoundingClientRect().top
+    scroller.scrollTop = scroller.scrollHeight
+    expect(scroller.scrollTop).toBeGreaterThan(0)
+    expect(tasks.element().getBoundingClientRect().top).toBeLessThan(tasksTop)
+    expect(activity.element().getBoundingClientRect().top).toBe(activityTop)
     await view.unmount()
   })
 
