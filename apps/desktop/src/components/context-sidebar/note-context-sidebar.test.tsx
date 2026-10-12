@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { scrollContainerOf } from '@/test-utils/scroll-container.ts'
 import { NoteContextSidebar } from './note-context-sidebar.tsx'
 
 const relatedNotes = vi.hoisted(() => vi.fn())
@@ -34,13 +35,16 @@ function RouteProbe(): ReactNode {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function renderSidebar(path: string) {
+/** Renders the sidebar in a clipping frame like AppShell's context region, `height` px tall if given. */
+function renderSidebar(path: string, height?: number) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <TooltipProvider>
       <QueryClientProvider client={client}>
         <RouterProvider>
-          <NoteContextSidebar path={path} />
+          <div data-testid="context-frame" className="overflow-hidden" style={{ height }}>
+            <NoteContextSidebar path={path} />
+          </div>
           <RouteProbe />
         </RouterProvider>
       </QueryClientProvider>
@@ -58,6 +62,18 @@ describe('NoteContextSidebar', () => {
     const view = await renderSidebar('notes/rust.md')
     await vi.waitFor(() => expect(relatedNotes).toHaveBeenCalledWith('notes/rust.md', 6))
     expect(view.getByText('Similar notes').query()).toBeNull()
+    await view.unmount()
+  })
+
+  it('scrolls its sections within the context region', async () => {
+    const view = await renderSidebar('notes/rust.md', 80)
+    const pin = view.getByText('Pin this note')
+    await expect.element(pin).toBeVisible()
+
+    const panel = scrollContainerOf(pin.element())
+    expect(view.getByTestId('context-frame').element().contains(panel)).toBe(true)
+    panel.scrollTop = panel.scrollHeight
+    expect(panel.scrollTop).toBeGreaterThan(0)
     await view.unmount()
   })
 

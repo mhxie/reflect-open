@@ -11,6 +11,8 @@ import { SidebarSection } from './sidebar-section.tsx'
 
 /**
  * Daily-sidebar heatmap of daily notes, as many weeks as the width fits.
+ * Renders as the sidebar's footer under a hairline, capped at half the
+ * sidebar's height so a short window keeps room for the sections above.
  * Hidden when off in settings or before the first daily note.
  */
 export function ActivitySection(): ReactElement | null {
@@ -36,16 +38,18 @@ export function ActivitySection(): ReactElement | null {
   }
 
   return (
-    <SidebarSection storageKey="activity" title="Activity">
-      <div ref={measure} className="px-1.5">
-        <ActivityHeatmap
-          weeks={weeks}
-          characters={characters}
-          editCounts={editCounts}
-          thresholds={thresholds}
-          today={today}
-        />
-      </div>
-    </SidebarSection>
+    <div className="max-h-1/2 flex-none overflow-y-auto border-t border-border py-3">
+      <SidebarSection storageKey="activity" title="Activity">
+        <div ref={measure} className="px-1.5">
+          <ActivityHeatmap
+            weeks={weeks}
+            characters={characters}
+            editCounts={editCounts}
+            thresholds={thresholds}
+            today={today}
+          />
+        </div>
+      </SidebarSection>
+    </div>
   )
 }
