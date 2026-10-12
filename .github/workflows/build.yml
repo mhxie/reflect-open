@@ -29,7 +29,8 @@ jobs:
         include:
           - name: macos
             os: macos-26
-            command: pnpm release:macos --no-sign
+            target: x86_64-apple-darwin
+            command: pnpm release:macos --target=universal-apple-darwin --no-sign
           - name: ios
             os: macos-26
             target: aarch64-apple-ios

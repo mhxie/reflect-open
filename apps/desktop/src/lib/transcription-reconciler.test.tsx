@@ -186,13 +186,8 @@ describe('createTranscriptionReconciler', () => {
   })
 
   it('coalesces triggers landing mid-pass into exactly one follow-up', async () => {
-    let release: (outcome: ReconcileAudioMemosOutcome) => void = () => {}
-    reconcileAudioMemos.mockImplementationOnce(
-      () =>
-        new Promise<ReconcileAudioMemosOutcome>((resolve) => {
-          release = resolve
-        }),
-    )
+    const pending = Promise.withResolvers<ReconcileAudioMemosOutcome>()
+    reconcileAudioMemos.mockImplementationOnce(() => pending.promise)
     const subject = create()
     subject.start()
     await flush()
@@ -202,7 +197,7 @@ describe('createTranscriptionReconciler', () => {
     subject.schedule()
     subject.schedule()
     window.dispatchEvent(new Event('online'))
-    release(DRAINED)
+    pending.resolve(DRAINED)
     await flush()
 
     expect(reconcileAudioMemos).toHaveBeenCalledTimes(2)

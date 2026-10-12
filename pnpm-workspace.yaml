@@ -58,6 +58,6 @@ minimumReleaseAgeExclude:
 # master) from tarballs vendored by
 # apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
-  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.0-7b1d06d4ea4a.tgz
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.80.0-7b1d06d4ea4a.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.79.0-7b1d06d4ea4a.tgz
+  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-3dcd0451b7fa.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.0-3dcd0451b7fa.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.80.0-3dcd0451b7fa.tgz

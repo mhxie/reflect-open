@@ -198,6 +198,8 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
           ) : (
             <MarkdownPreview
               content={preview}
+              // Passive: no link resolves, so no attachment resolver is built.
+              sourcePath={null}
               headingOffset={ancestors.length}
               resolveWikiEmbed={previewAttachments.resolveWikiEmbed}
               interactive={false}

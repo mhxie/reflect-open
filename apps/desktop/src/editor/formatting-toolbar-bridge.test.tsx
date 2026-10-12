@@ -37,7 +37,7 @@ async function setupEditor(
       privateNote={false}
       initialContent={initialContent}
       onWikilinkSearch={async () => []}
-      {...(saveFile !== undefined ? { saveFile } : {})}
+      saveFile={saveFile}
       handleRef={(handle) => {
         grabbed.current = handle
       }}

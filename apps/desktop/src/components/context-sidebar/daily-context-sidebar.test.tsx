@@ -36,6 +36,9 @@ vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
   openRouteInNewWindow,
 }))
+vi.mock('@/lib/use-embed-status.ts', () => ({
+  useEmbedStatus: () => ({ status: 'ready', model: 'all-MiniLM-L6-v2' }),
+}))
 vi.mock('@/providers/graph-provider.tsx', () => ({
   useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
 }))
@@ -142,12 +145,8 @@ describe('DailyContextSidebar calendar', () => {
   })
 
   it('does not fall back after the calendar scope moves to another selected day', async () => {
-    let finishOpen: (opened: boolean) => void = () => {}
-    openRouteInNewWindow.mockReturnValue(
-      new Promise((resolve) => {
-        finishOpen = resolve
-      }),
-    )
+    const pendingOpen = Promise.withResolvers<boolean>()
+    openRouteInNewWindow.mockReturnValue(pendingOpen.promise)
     const view = await renderSidebar('2026-06-09')
     const day = page.getByRole('button', { name: formatDayLabel('2026-06-18', 'mdy') })
 
@@ -167,7 +166,7 @@ describe('DailyContextSidebar calendar', () => {
     )
 
     await act(async () => {
-      finishOpen(false)
+      pendingOpen.resolve(false)
     })
 
     await expect

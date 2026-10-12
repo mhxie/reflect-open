@@ -13,7 +13,7 @@ import { INHERIT, log, runWithTempDir } from './helpers.ts'
 /** The updater looks up `<os>-<arch>` in the manifest. An optional platform without a signature is left out. */
 const PLATFORMS = [
   { platform: 'darwin-aarch64', suffix: '_aarch64.app.tar.gz.sig', required: true },
-  { platform: 'darwin-x86_64', suffix: '_x86_64.app.tar.gz.sig', required: true },
+  { platform: 'darwin-x86_64', suffix: '_universal.app.tar.gz.sig', required: true },
   { platform: 'windows-x86_64', suffix: '_x64-setup.exe.sig', required: false },
   { platform: 'windows-aarch64', suffix: '_arm64-setup.exe.sig', required: false },
 ]

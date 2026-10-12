@@ -46,6 +46,23 @@ function isManagedAssetPath(path: string): boolean {
   return path.startsWith('assets/') && !path.includes('\0') && isSafeVisibleGraphPath(path)
 }
 
+/**
+ * The graph-relative path a link or image source in the note at `notePath`
+ * opens, or null. A page opens in the browser, so it is read as the browser
+ * reads a relative link: from the note's folder.
+ */
+export function resolveAssetOpenPath(
+  source: string,
+  notePath: string,
+  resolveAttachmentPath: (destination: string) => string | null,
+): string | null {
+  return (
+    pageLinkPath(notePath, source) ??
+    resolveAttachmentPath(source) ??
+    (isManagedAssetPath(source) ? source : null)
+  )
+}
+
 /** The failed save the pane reports on: which banner copy, and the cause. */
 export interface AssetSaveError {
   /** 'image' for `image/*` files, 'file' for everything else. */
@@ -148,15 +165,9 @@ export function useAssetPersistence(
     }
   }, [generation])
 
-  const resolveAssetOpenPath = useCallback(
+  const resolveOpenPath = useCallback(
     (source: string): string | null =>
-      generation === null
-        ? null
-        : // A page opens in the browser, so it is read as the browser reads a
-          // relative link: from the note's folder.
-          (pageLinkPath(path, source) ??
-          resolveAttachmentPath(source) ??
-          (isManagedAssetPath(source) ? source : null)),
+      generation === null ? null : resolveAssetOpenPath(source, path, resolveAttachmentPath),
     [generation, path, resolveAttachmentPath],
   )
   const resolveFileLink = useCallback<FileLinkResolver>(
@@ -166,10 +177,9 @@ export function useAssetPersistence(
 
   const openAsset = useCallback(
     async (assetPath: string): Promise<void> => {
-      if (generation === null) {
-        return
+      if (generation !== null) {
+        await openAttachment(assetPath, generation)
       }
-      await openAttachment(assetPath, generation)
     },
     [generation],
   )
@@ -268,7 +278,7 @@ export function useAssetPersistence(
     () => ({
       resolveImageUrl,
       resolveEmbed,
-      resolveAssetOpenPath,
+      resolveAssetOpenPath: resolveOpenPath,
       resolveWikiEmbed,
       resolveFileLink,
       openAsset,
@@ -279,7 +289,7 @@ export function useAssetPersistence(
     [
       resolveImageUrl,
       resolveEmbed,
-      resolveAssetOpenPath,
+      resolveOpenPath,
       resolveWikiEmbed,
       resolveFileLink,
       openAsset,

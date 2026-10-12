@@ -9,7 +9,7 @@ import { useCallback, useMemo, type ReactElement } from 'react'
 import { MarkdownView } from '@meowdown/react'
 import type { WikilinkClickHandler } from '@meowdown/core'
 import { isLocalOnlyPath, type SnippetTask } from '@reflect/core'
-import { useOpenExternalLink } from '@/editor/open-external-link.ts'
+import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
@@ -67,7 +67,7 @@ export function BacklinkSnippet({
   const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(generation, notePath)
   const graphXPostResolver = useXPostResolver()
   const onTaskClick = useSnippetTaskToggle(notePath, tasks)
-  const openExternalLink = useOpenExternalLink()
+  const onLinkClick = useMarkdownLinkClick(generation, notePath)
   const privateSource = sourcePrivate || isLocalOnlyPath(notePath)
   const imageResolver = useMemo(
     () => (privateSource ? localImagesOnly(resolveImageUrl) : resolveImageUrl),
@@ -89,7 +89,7 @@ export function BacklinkSnippet({
         expandCollapsed
         resolveWikilink={resolveWikilink}
         onWikilinkClick={handleWikilinkClick}
-        onLinkClick={openExternalLink}
+        onLinkClick={onLinkClick}
         {...(onTaskClick ? { onTaskClick } : {})}
         resolveImageUrl={imageResolver}
         resolveWikiEmbed={resolveWikiEmbed}

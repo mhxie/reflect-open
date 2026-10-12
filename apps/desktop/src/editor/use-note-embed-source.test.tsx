@@ -2,7 +2,6 @@ import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import type { FileChange } from '@reflect/core'
-import { deferred } from '@/test-utils/deferred.ts'
 import {
   MAX_NOTE_EMBED_DEPTH,
   useNoteEmbedSource,
@@ -127,7 +126,7 @@ describe('useNoteEmbedSource', () => {
   })
 
   it('retires an old body read on a graph switch and hides the previous source immediately', async () => {
-    const old = deferred<string>()
+    const old = Promise.withResolvers<string>()
     mocks.read.mockReturnValueOnce(old.promise).mockResolvedValue('# New graph')
     const view = await render(<Host options={OPTIONS} />)
     await vi.waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(1))
@@ -141,7 +140,7 @@ describe('useNoteEmbedSource', () => {
   })
 
   it('retires target resolution when disabled and re-reads when enabled again', async () => {
-    const old = deferred<{ kind: 'resolved'; path: string }>()
+    const old = Promise.withResolvers<{ kind: 'resolved'; path: string }>()
     mocks.resolve.mockReturnValueOnce(old.promise)
     const view = await render(<Host options={OPTIONS} />)
     await vi.waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1))
@@ -193,7 +192,7 @@ describe('useNoteEmbedSource', () => {
       path: 'notes/Original.md',
       source: '# Original\n\nBody',
     })
-    const pending = deferred<string>()
+    const pending = Promise.withResolvers<string>()
     mocks.read.mockReturnValueOnce(pending.promise)
     for (const handler of mocks.ownWrites) handler('notes/Original.md')
     await vi.waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2))
@@ -221,7 +220,7 @@ describe('useNoteEmbedSource', () => {
       path: 'notes/Original.md',
       source: '# Original\n\nBody',
     })
-    const old = deferred<string>()
+    const old = Promise.withResolvers<string>()
     mocks.read.mockReturnValueOnce(old.promise).mockResolvedValue('# Latest write')
     for (const handler of mocks.ownWrites) handler('notes/Original.md')
     await vi.waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2))

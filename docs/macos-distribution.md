@@ -77,9 +77,6 @@ permissions carry over from build to build.
    `.app` with its entitlement file plus the flavor-specific identity entitlements from
    its embedded provisioning profile, notarizes the finalized `.app` via `notarytool`,
    staples the ticket, and verifies the signed identity entitlements and sidecars.
-   Intel builds also download Microsoft's official ONNX Runtime macOS x86_64 archive
-   into `src-tauri/resources/onnxruntime/` and bundle `libonnxruntime.dylib` as a
-   Tauri resource before signing; that directory is generated and gitignored.
 4. Creates the updater `.app.tar.gz` from the finalized app and signs it with the Tauri
    updater key.
 5. Builds and signs the DMG directly from the notarized app. In CI, the release helper
@@ -95,18 +92,19 @@ permissions carry over from build to build.
 
 Bundles land under `target/<target-triple>/release/bundle/`, for example
 `target/aarch64-apple-darwin/release/bundle/macos/Reflect.app` and
-`target/x86_64-apple-darwin/release/bundle/dmg/Reflect_<version>_x86_64.dmg`.
+`target/universal-apple-darwin/release/bundle/dmg/Reflect_<version>_universal.dmg`.
 
 ## Commands and flags
 
 ```bash
 pnpm release:macos                 # build + notarize + verify
 pnpm release:macos --target=x86_64-apple-darwin  # the same for Intel
+pnpm release:macos --target=universal-apple-darwin  # one app for Apple Silicon and Intel
 pnpm release:macos --no-notarize   # signed-only build (runs locally; Gatekeeper rejects it elsewhere)
 pnpm release:macos --artifact-dir=<dir>  # also copy the release assets to <dir>
 ```
 
-CI runs `--target=<triple> --artifact-dir=<dir>` once per architecture and uploads the
+CI runs `--target=<triple> --artifact-dir=<dir>` once per macOS build and uploads the
 assets into the draft release. After the macOS and Windows builds finish,
 `publish-finalize.yml` writes `latest.json`, publishes the release, and refreshes the
 moving beta downloads. It can be run again by hand for one tag without rebuilding.
@@ -220,12 +218,13 @@ the right version.
 
 Publishing has two parts.
 
-`publish-macos.yml` builds both macOS targets (`aarch64-apple-darwin` for Apple Silicon
-and `x86_64-apple-darwin` for Intel) and uploads their assets into the draft release
+`publish-macos.yml` builds two macOS apps (`aarch64-apple-darwin` for Apple Silicon and
+`universal-apple-darwin`, one app that runs natively on both Intel and Apple Silicon)
+and uploads their assets into the draft release
 tagged `v<version>` (the `version` in `apps/desktop/package.json`), which release-please
 created when the Release PR merged. The release carries two notarized DMGs and two
-updater archives (one per architecture, each with its `.sig`).
-Published DMGs use fixed names (`Reflect_aarch64.dmg` and `Reflect_x86_64.dmg`
+updater archives (one per build, each with its `.sig`).
+Published DMGs use fixed names (`Reflect_aarch64.dmg` and `Reflect_universal.dmg`
 for stable) because the release tag already identifies the version. That keeps
 `releases/latest/download/<asset>` stable across releases. Updater archives remain
 versioned because each manifest points at an immutable release payload.
@@ -235,7 +234,9 @@ macOS build has to succeed. It runs `pnpm release:manifest --tag=<tag>`
 (`apps/desktop/scripts/release-manifest.ts`), which downloads the `.sig` files from the
 release, writes `latest.json` with one entry per platform (`darwin-aarch64`,
 `darwin-x86_64`, plus `windows-x86_64` and `windows-aarch64` when their signatures
-exist), and uploads it.
+exist), and uploads it. `darwin-x86_64` points at the universal archive. The updater
+picks its entry from the architecture it runs as, so a universal app on Apple Silicon
+reads `darwin-aarch64` and moves to the smaller Apple Silicon app at its first update.
 The workflow then appends the Mac download guide to the release notes, sets the
 pre-release and latest flags, and undrafts the release as its last step on the tagged
 release. Nothing is visible to users, and `releases/latest` does not move, until then.
@@ -253,7 +254,7 @@ stable installs never see a beta.
 
 Beta builds use the dedicated `updater-beta` release instead. After it publishes a beta,
 `publish-finalize.yml` replaces the `latest.json`, `Reflect.Beta_aarch64.dmg`, and
-`Reflect.Beta_x86_64.dmg` assets of `updater-beta` with `--clobber`. The fixed DMG names
+`Reflect.Beta_universal.dmg` assets of `updater-beta` with `--clobber`. The fixed DMG names
 give the README permanent fresh-install links, while the manifest still points installed
 apps at the immutable versioned updater archives. The DMGs are replaced before
 `latest.json`; if that step fails, run **Actions → Finalize release → Run workflow** with
@@ -320,13 +321,13 @@ Stable installs are unaffected (same identifier and the shipped icon).
 parallel:
 
 - Apple Silicon: `macos-26`, `--target=aarch64-apple-darwin`
-- Intel: `macos-26`, `--target=x86_64-apple-darwin`
+- Universal (Intel and Apple Silicon): `macos-26`, `--target=universal-apple-darwin`
 
 Each build job runs the same DMG notarization, Gatekeeper checks, and updater artifact
 signing as a local release, then uploads its assets into the draft release.
 `.github/workflows/publish-finalize.yml` then writes the combined `latest.json`, keeps
 the changelog body, appends the Mac download chooser that maps Apple Silicon to
-`Reflect_aarch64.dmg` and Intel to `Reflect_x86_64.dmg` (with `Reflect.Beta` names for
+`Reflect_aarch64.dmg` and Universal to `Reflect_universal.dmg` (with `Reflect.Beta` names for
 beta releases), and undrafts the release. For a beta it then copies the DMGs and the
 manifest from the tagged release to `updater-beta`. Both workflows normally run via
 `workflow_call` from `.github/workflows/release.yml` when a Release PR merges, and both
@@ -374,7 +375,8 @@ on the runner keychain setup.
   launches both sidecars to catch this.
 - **Intel sidecar launch fails on Apple Silicon with `Bad CPU type in executable`** —
   install Rosetta (`softwareupdate --install-rosetta`) or verify the Intel target on an
-  Intel runner.
+  Intel runner. A universal build launches the Intel slice of each sidecar too, so it
+  needs Rosetta as well.
 - **`rejected, source=Unnotarized Developer ID`** — signing worked but the artifact has no
   notarization ticket; rerun without `--no-notarize`.
 - **Notarization hangs** — Apple's service occasionally queues submissions for a long

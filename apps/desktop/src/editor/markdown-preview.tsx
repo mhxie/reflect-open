@@ -15,7 +15,7 @@ import type {
   WikiEmbedResolver,
 } from '@meowdown/core'
 import { MarkdownView, type MarkdownBlockRenderer, type NoteEmbedRenderer } from '@meowdown/react'
-import { useOpenExternalLink } from '@/editor/open-external-link.ts'
+import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
 import { cn } from '@/lib/utils.ts'
 import { todayIso } from '@/lib/dates.ts'
@@ -27,6 +27,7 @@ import { WikiEvidencePreview } from '@/editor/wiki-anchors/wiki-evidence-preview
 import { createWikiArticleProjectionReader } from '@/editor/wiki-anchors/wiki-article-projection.ts'
 import { renderWikiArticleBlock } from '@/editor/wiki-anchors/wiki-article-preview.tsx'
 import { useWikiArticleIdentities } from '@/editor/wiki-anchors/use-wiki-article-identities.ts'
+import { useGraph } from '@/providers/graph-provider.tsx'
 
 /**
  * A read-only rendering of note markdown via @meowdown/react's `<MarkdownView>`
@@ -46,6 +47,12 @@ interface MarkdownPreviewProps {
   /** Demote displayed headings for an embedded source without rewriting its Markdown. */
   headingOffset?: number
   /**
+   * Graph-relative path of the note `content` comes from; relative Markdown
+   * links and attachment links resolve from it. `null` when the content
+   * belongs to no note.
+   */
+  sourcePath: string | null
+  /**
    * Resolve `![…](…)` sources to displayable URLs, possibly later; unresolved
    * images are skipped. Pass a stable function.
    */
@@ -54,7 +61,7 @@ interface MarkdownPreviewProps {
    * Classify Obsidian `![[target]]` embeds (images, file pills, note chips);
    * omitted, embeds stay literal text. Pass a stable function.
    */
-  resolveWikiEmbed?: WikiEmbedResolver
+  resolveWikiEmbed?: WikiEmbedResolver | undefined
   /** Render standalone note embeds through the source note's read-only reader. */
   renderNoteEmbed?: NoteEmbedRenderer
   /**
@@ -99,6 +106,7 @@ export function MarkdownPreview({
   content,
   titleMetadata,
   headingOffset = 0,
+  sourcePath,
   singleParagraph = false,
   resolveImageUrl,
   resolveWikiEmbed,
@@ -112,7 +120,11 @@ export function MarkdownPreview({
   showClaimRanges = false,
   claimFragment,
 }: MarkdownPreviewProps): ReactElement {
-  const openExternalLink = useOpenExternalLink()
+  const generation = useGraph({ optional: true })?.graph?.generation ?? null
+  const markdownLinkClick = useMarkdownLinkClick(generation, sourcePath)
+  // A source-aware surface may take over link activation; otherwise links
+  // follow the Markdown link policy for `sourcePath`.
+  const activateLink = onLinkClick ?? markdownLinkClick
   // The click handler is read through a ref so a changing prop never gives
   // MarkdownView a new callback identity (which would re-render its whole
   // tree).
@@ -178,7 +190,7 @@ export function MarkdownPreview({
         {
           interactive: blockInteractive,
           openUrl: (href, event) =>
-            (onLinkClick ?? openExternalLink)({ href, event, mod: event.metaKey || event.ctrlKey }),
+            activateLink({ href, event, mod: event.metaKey || event.ctrlKey }),
           ...(navigates ? { openWikiLink: (options) => navigateRef.current?.(options) } : {}),
         },
         showClaimRanges,
@@ -198,7 +210,7 @@ export function MarkdownPreview({
           options={{
             interactive: blockInteractive,
             openUrl: (href, event) =>
-              (onLinkClick ?? openExternalLink)({
+              activateLink({
                 href,
                 event,
                 mod: event.metaKey || event.ctrlKey,
@@ -210,8 +222,7 @@ export function MarkdownPreview({
     },
     [
       navigates,
-      onLinkClick,
-      openExternalLink,
+      activateLink,
       articleReader,
       showClaimRanges,
       claimFragment,
@@ -233,10 +244,10 @@ export function MarkdownPreview({
       interactive={interactive}
       resolveWikilink={resolveWikilink}
       renderBlock={renderBlock}
-      {...(imageResolver !== undefined ? { resolveImageUrl: imageResolver } : {})}
-      {...(resolveWikiEmbed !== undefined ? { resolveWikiEmbed } : {})}
+      resolveImageUrl={imageResolver}
+      resolveWikiEmbed={resolveWikiEmbed}
       {...(renderNoteEmbed !== undefined ? { renderNoteEmbed } : {})}
-      {...(interactive ? { onLinkClick: onLinkClick ?? openExternalLink } : {})}
+      {...(interactive ? { onLinkClick: activateLink } : {})}
       {...(interactive && onFileClick !== undefined ? { onFileClick } : {})}
       {...(navigates ? { onWikilinkClick: onWikilinkClickStable } : {})}
       className={cn('reflect-editor', className)}

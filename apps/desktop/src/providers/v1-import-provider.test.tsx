@@ -101,13 +101,8 @@ beforeEach(() => {
 
 describe('V1ImportProvider', () => {
   it('runs the import and reports the outcome in the dialog', async () => {
-    let finish: (value: SummaryFixture) => void = () => {}
-    importReflectV1Zip.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve
-        }),
-    )
+    const pendingImport = Promise.withResolvers<SummaryFixture>()
+    importReflectV1Zip.mockImplementationOnce(() => pendingImport.promise)
     await renderProvider()
 
     await startButton().click()
@@ -122,7 +117,7 @@ describe('V1ImportProvider', () => {
     emitProgress({ stage: 'writing', done: 10, total: 40 })
     await expect.element(page.getByText('Adding notes… 10 of 40')).toBeInTheDocument()
 
-    finish(summary({ mergedFiles: 1, renamedFiles: 1 }))
+    pendingImport.resolve(summary({ mergedFiles: 1, renamedFiles: 1 }))
     await expect.element(page.getByText('Import complete')).toBeInTheDocument()
     await expect
       .element(
@@ -200,13 +195,8 @@ describe('V1ImportProvider', () => {
   })
 
   it('drops the result when the graph switched mid-import', async () => {
-    let finish: (value: SummaryFixture) => void = () => {}
-    importReflectV1Zip.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve
-        }),
-    )
+    const pendingImport = Promise.withResolvers<SummaryFixture>()
+    importReflectV1Zip.mockImplementationOnce(() => pendingImport.promise)
     const view = await renderProvider()
 
     await startButton().click()
@@ -225,7 +215,7 @@ describe('V1ImportProvider', () => {
         <Probe />
       </V1ImportProvider>,
     )
-    finish(summary())
+    pendingImport.resolve(summary())
 
     await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
     expect(markReflectV1ImportOwnWrites).not.toHaveBeenCalled()
@@ -233,13 +223,8 @@ describe('V1ImportProvider', () => {
   })
 
   it('cancels and drops the result when the workspace unmounts mid-import', async () => {
-    let finish: (value: SummaryFixture) => void = () => {}
-    importReflectV1Zip.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve
-        }),
-    )
+    const pendingImport = Promise.withResolvers<SummaryFixture>()
+    importReflectV1Zip.mockImplementationOnce(() => pendingImport.promise)
     const view = await renderProvider()
 
     await startButton().click()
@@ -248,7 +233,7 @@ describe('V1ImportProvider', () => {
     await view.unmount()
     expect(cancelReflectV1Import).toHaveBeenCalledTimes(1)
 
-    finish(summary())
+    pendingImport.resolve(summary())
     await vi.waitFor(() => expect(importReflectV1Zip).toHaveBeenCalledTimes(1))
     expect(markReflectV1ImportOwnWrites).not.toHaveBeenCalled()
     expect(refreshIndex).not.toHaveBeenCalled()

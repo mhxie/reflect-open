@@ -23,10 +23,10 @@
 //     Reflect.Beta_0.15.0-beta.5_arm64-setup.exe.sig \
 //     Reflect.Beta_0.15.0-beta.5_x64-setup.exe \
 //     Reflect.Beta_0.15.0-beta.5_x64-setup.exe.sig \
-//     Reflect.Beta_0.15.0-beta.5_x86_64.app.tar.gz \
-//     Reflect.Beta_0.15.0-beta.5_x86_64.app.tar.gz.sig \
+//     Reflect.Beta_0.15.0-beta.5_universal.app.tar.gz \
+//     Reflect.Beta_0.15.0-beta.5_universal.app.tar.gz.sig \
 //     Reflect.Beta_aarch64.dmg \
-//     Reflect.Beta_x86_64.dmg
+//     Reflect.Beta_universal.dmg
 //
 // A stable release with macOS installers only. The output has no Windows
 // heading:
@@ -38,10 +38,10 @@
 //     latest.json \
 //     Reflect_0.14.0_aarch64.app.tar.gz \
 //     Reflect_0.14.0_aarch64.app.tar.gz.sig \
-//     Reflect_0.14.0_x86_64.app.tar.gz \
-//     Reflect_0.14.0_x86_64.app.tar.gz.sig \
+//     Reflect_0.14.0_universal.app.tar.gz \
+//     Reflect_0.14.0_universal.app.tar.gz.sig \
 //     Reflect_aarch64.dmg \
-//     Reflect_x86_64.dmg
+//     Reflect_universal.dmg
 //
 // The asset names of a published release, read with the GitHub CLI:
 //
@@ -71,7 +71,7 @@ const version = tag.slice(1)
 
 const INSTALLERS = [
   { os: 'macOS', chip: 'Apple Silicon', color: '16A34A', file: `${asset}_aarch64.dmg` },
-  { os: 'macOS', chip: 'Intel', color: 'D97706', file: `${asset}_x86_64.dmg` },
+  { os: 'macOS', chip: 'Universal', color: 'D97706', file: `${asset}_universal.dmg` },
   { os: 'Windows', chip: 'x64', color: '2563EB', file: `${asset}_${version}_x64-setup.exe` },
   { os: 'Windows', chip: 'ARM64', color: '7C3AED', file: `${asset}_${version}_arm64-setup.exe` },
 ]

@@ -111,10 +111,10 @@ function fakeBridge(options: FakeOptions = {}) {
     behind: 0,
     inProgress: false,
   }
-  let releaseListen: (() => void) | null = null
-  let releaseIndexApply: (() => void) | null = null
-  let releaseMerge: (() => void) | null = null
-  let releaseCommit: (() => void) | null = null
+  const listenGate = Promise.withResolvers<void>()
+  const indexApplyGate = Promise.withResolvers<void>()
+  const mergeGate = Promise.withResolvers<void>()
+  const commitGate = Promise.withResolvers<void>()
   let mergeCount = 0
   let commitInvocations = 0
   let indexApplyCount = 0
@@ -148,9 +148,7 @@ function fakeBridge(options: FakeOptions = {}) {
         case 'git_commit_all':
           commitInvocations += 1
           if (commitInvocations === options.gateCommit) {
-            await new Promise<void>((resolve) => {
-              releaseCommit = resolve
-            })
+            await commitGate.promise
           }
           return CLEAN_COMMIT
         case 'git_fetch':
@@ -158,9 +156,7 @@ function fakeBridge(options: FakeOptions = {}) {
         case 'git_merge_remote':
           mergeCount += 1
           if (options.gateMerge === true && mergeCount === 1) {
-            await new Promise<void>((resolve) => {
-              releaseMerge = resolve
-            })
+            await mergeGate.promise
           }
           return mergeOutcomes.shift() ?? options.mergeOutcome ?? UP_TO_DATE
         case 'git_push':
@@ -185,9 +181,7 @@ function fakeBridge(options: FakeOptions = {}) {
             throw { kind: 'io', message: 'index write failed' }
           }
           if (options.gateIndexApply === true && indexApplyCount === 1) {
-            await new Promise<void>((resolve) => {
-              releaseIndexApply = resolve
-            })
+            await indexApplyGate.promise
           }
           return null
         case 'git_disconnect':
@@ -202,9 +196,7 @@ function fakeBridge(options: FakeOptions = {}) {
         throw { kind: 'io', message: 'watcher unavailable' }
       }
       if (options.gateListen === true) {
-        await new Promise<void>((resolve) => {
-          releaseListen = resolve
-        })
+        await listenGate.promise
       }
       return () => {}
     },
@@ -213,10 +205,10 @@ function fakeBridge(options: FakeOptions = {}) {
     calls,
     invocations,
     status,
-    releaseListen: () => releaseListen?.(),
-    releaseIndexApply: () => releaseIndexApply?.(),
-    releaseMerge: () => releaseMerge?.(),
-    releaseCommit: () => releaseCommit?.(),
+    releaseListen: () => listenGate.resolve(),
+    releaseIndexApply: () => indexApplyGate.resolve(),
+    releaseMerge: () => mergeGate.resolve(),
+    releaseCommit: () => commitGate.resolve(),
   }
 }
 

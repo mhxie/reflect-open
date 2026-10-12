@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoteRow } from '@reflect/core'
 import { makeOpenTask as task } from '@/lib/tasks/open-task-fixture.ts'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
+import { RouterProvider } from '@/routing/router.tsx'
 import { TaskText } from './task-text.tsx'
 
 /** The props each rendered preview received. */
@@ -54,7 +55,9 @@ async function renderFor(notePath: string): Promise<void> {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = await render(
     <QueryClientProvider client={client}>
-      <TaskText task={task({ notePath, text: 'watch the talk' })} />
+      <RouterProvider>
+        <TaskText task={task({ notePath, text: 'watch the talk' })} />
+      </RouterProvider>
     </QueryClientProvider>,
   )
   await expect.element(view.getByTestId('markdown-preview')).toBeVisible()
@@ -92,7 +95,9 @@ describe('TaskText', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const view = await render(
       <QueryClientProvider client={client}>
-        <TaskText task={task({ notePath: 'notes/plan.md', markdown: '+ [ ] task' })} />
+        <RouterProvider>
+          <TaskText task={task({ notePath: 'notes/plan.md', markdown: '+ [ ] task' })} />
+        </RouterProvider>
       </QueryClientProvider>,
     )
     expect(view.container.textContent).toContain('+ [ ] task')
@@ -101,7 +106,11 @@ describe('TaskText', () => {
   })
 
   it('would render that marker as a checkbox without single-paragraph mode', async () => {
-    const view = await render(<MarkdownPreview content="+ [ ] task" />)
+    const view = await render(
+      <RouterProvider>
+        <MarkdownPreview content="+ [ ] task" sourcePath={null} />
+      </RouterProvider>,
+    )
     expect(view.container.querySelector('input[type="checkbox"]')).not.toBeNull()
     await view.unmount()
   })

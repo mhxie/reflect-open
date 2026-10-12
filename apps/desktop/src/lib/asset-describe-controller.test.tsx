@@ -67,14 +67,6 @@ function outcome(
   }
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
-    resolve = res
-  })
-  return { promise, resolve }
-}
-
 function upsert(path: string): FileChange {
   return { path, kind: 'upsert', modifiedMs: 1 }
 }
@@ -90,7 +82,7 @@ function create(): AssetDescribeController {
 }
 
 it('retries a source replaced while its OCR pass is in flight', async () => {
-  const pending = deferred<ReconcileAssetDescriptionsOutcome>()
+  const pending = Promise.withResolvers<ReconcileAssetDescriptionsOutcome>()
   reconcileAssetDescriptions.mockReturnValueOnce(pending.promise)
   reconcileAssetDescriptions.mockResolvedValue(outcome({ described: 0 }))
   create().start()
@@ -103,7 +95,7 @@ it('retries a source replaced while its OCR pass is in flight', async () => {
 })
 
 it('keeps a watcher follow-up when the in-flight pass stops', async () => {
-  const pending = deferred<ReconcileAssetDescriptionsOutcome>()
+  const pending = Promise.withResolvers<ReconcileAssetDescriptionsOutcome>()
   reconcileAssetDescriptions.mockReturnValueOnce(pending.promise)
   reconcileAssetDescriptions.mockResolvedValue(outcome({ described: 0 }))
   create().start()
@@ -224,7 +216,7 @@ describe('createAssetDescribeController', () => {
   })
 
   it('coalesces a trigger that lands mid-pass into one follow-up', async () => {
-    const first = deferred<ReconcileAssetDescriptionsOutcome>()
+    const first = Promise.withResolvers<ReconcileAssetDescriptionsOutcome>()
     reconcileAssetDescriptions.mockReturnValueOnce(first.promise)
     create().start()
     await flush()

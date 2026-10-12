@@ -32,9 +32,11 @@ jobs:
           - name: Apple Silicon
             runner: macos-26
             target: aarch64-apple-darwin
-          - name: Intel
+            rust-targets: aarch64-apple-darwin
+          - name: Universal
             runner: macos-26
-            target: x86_64-apple-darwin
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,7 +95,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust-targets }}
           cache-key: ${{ matrix.runner }}-${{ matrix.target }}
 
       # Tauri signs the .app; the script then repairs sidecar signatures,

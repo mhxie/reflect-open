@@ -92,6 +92,7 @@ export function NoteEmbedBody({
   return (
     <MarkdownPreview
       content={splitFrontmatter(source).body}
+      sourcePath={sourcePath}
       headingOffset={headingOffset}
       resolveImageUrl={attachments.resolveImageUrl}
       resolveWikiEmbed={attachments.resolveWikiEmbed}

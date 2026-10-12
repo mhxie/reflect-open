@@ -99,9 +99,7 @@ function harness(options?: {
     applyContent: (markdown) => {
       applied.push(markdown)
     },
-    ...(options?.reconcilePendingEditorInput === undefined
-      ? {}
-      : { reconcilePendingEditorInput: options.reconcilePendingEditorInput }),
+    reconcilePendingEditorInput: options?.reconcilePendingEditorInput,
     onContent: (content, origin) => {
       contents.push({ content, origin })
     },
@@ -1005,13 +1003,10 @@ describe('commitSourceEdit', () => {
     // ⌘D from the Tasks view: the daily note's session is created in the same
     // tick the unmounting task editor flushes its edit into it (#1099).
     const source = '# Todo\n\n+ [ ] buy milk\n'
-    let finishRead = (): void => {}
+    const pendingRead = Promise.withResolvers<void>()
     const h = harness({
       disk: source,
-      beforeRead: () =>
-        new Promise<void>((resolve) => {
-          finishRead = resolve
-        }),
+      beforeRead: () => pendingRead.promise,
     })
     h.session.load()
     expect(h.snapshots.at(-1)?.status).toBe('loading')
@@ -1026,7 +1021,7 @@ describe('commitSourceEdit', () => {
     expect(result).toBeUndefined() // still waiting on the read, not refused
     expect(h.writes).toEqual([])
 
-    finishRead()
+    pendingRead.resolve()
     await commit
     await settled()
     expect(result).toBe(true)
@@ -1040,20 +1035,17 @@ describe('commitSourceEdit', () => {
 
   it('refuses (returns false) a note that loads as protected while the edit waits', async () => {
     // Protection is decided by the load, so the gate must run after the wait.
-    let finishRead = (): void => {}
+    const pendingRead = Promise.withResolvers<void>()
     const h = harness({
       disk: '+ [ ] x\n',
       classify: () => 'lossy',
-      beforeRead: () =>
-        new Promise<void>((resolve) => {
-          finishRead = resolve
-        }),
+      beforeRead: () => pendingRead.promise,
     })
     h.session.load()
 
     const transform = vi.fn(toggleTransform(firstTask('+ [ ] x\n')))
     const commit = h.session.commitSourceEdit(transform)
-    finishRead()
+    pendingRead.resolve()
     expect(await commit).toBe(false)
     expect(h.snapshots.at(-1)?.protected).toBe(true)
     expect(transform).not.toHaveBeenCalled()
