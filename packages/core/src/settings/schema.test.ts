@@ -20,6 +20,7 @@ describe('settingsSchema', () => {
       aiSummariesLocalModel: null,
       aiSummariesCloudModel: null,
       aiSummariesCloudConsent: null,
+      aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',
@@ -408,11 +409,13 @@ describe('settingsSchema', () => {
 
   it('leaves an earlier build’s cloud go-ahead to it: it names no model', () => {
     // Every build shares the document. The old flag stays as written, for the
-    // builds that read it, and grants nothing here; this build never writes it.
+    // builds that read it, and grants nothing here.
     const earlier = settingsSchema.parse({ aiSummaries: 'cloud', aiSummariesCloudConfirmed: true })
-    expect(earlier).toHaveProperty('aiSummariesCloudConfirmed', true)
+    expect(earlier.aiSummariesCloudConfirmed).toBe(true)
     expect(earlier.aiSummariesCloudConsent).toBeNull()
-    expect(DEFAULT_SETTINGS).not.toHaveProperty('aiSummariesCloudConfirmed')
+    // A new document still carries it, as `false`: earlier builds read a
+    // document without it as their own and would move a saved `local` to `cloud`.
+    expect(DEFAULT_SETTINGS.aiSummariesCloudConfirmed).toBe(false)
   })
 
   it('upgrades the spoken language without touching the summary mode', () => {
@@ -451,6 +454,7 @@ describe('settingsSchema', () => {
       aiSummariesLocalModel: null,
       aiSummariesCloudModel: null,
       aiSummariesCloudConsent: null,
+      aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',

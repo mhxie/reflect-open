@@ -324,7 +324,8 @@ export const aiSummariesSchema = z
  * small model. As `aiSummariesCloudConsent` it is the cloud entry and model
  * the user agreed to send public notes to: a cloud pass sends only while it
  * would use exactly these, and otherwise asks, naming them. Earlier builds'
- * `aiSummariesCloudConfirmed` names no model, so it is left to them.
+ * go-ahead, `aiSummariesCloudConfirmed`, names no model: this build never
+ * reads it and never sets it.
  */
 export const aiSummariesModelSchema = z
   .object({
@@ -819,6 +820,13 @@ const settingsObjectSchema = z.looseObject({
   semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
   aiSummaries: aiSummariesSchema,
+  /**
+   * Earlier builds' cloud go-ahead, kept as they wrote it (`false` on a new
+   * document) and never read here. Its presence tells their settings upgrade
+   * this document is not one of theirs, which would otherwise move a saved
+   * `local` to `cloud`.
+   */
+  aiSummariesCloudConfirmed: z.boolean().catch(false),
   aiSummariesLocalModel: aiSummariesModelSchema,
   aiSummariesCloudModel: aiSummariesModelSchema,
   aiSummariesCloudConsent: aiSummariesModelSchema,

@@ -149,7 +149,8 @@ All Notes list:
 A setting saved as *On this Mac* stays there, whether or not a local model is
 set up yet: summaries never switch to a cloud provider on their own. A cloud
 go-ahead given in an earlier build named no model, so this build asks once
-more; it never writes that earlier answer, which those builds still read.
+more. It leaves that earlier answer as it is for those builds, and never gives
+one of its own.
 
 The summary is written into the note's `aiSummary` frontmatter, so it travels
 with the note, including to Git backup, like the rest of the note's text. In
