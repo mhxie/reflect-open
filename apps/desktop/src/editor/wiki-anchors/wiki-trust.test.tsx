@@ -5,13 +5,15 @@ import { emitFileChanges, setBridge, wikiClaimTextSha256 } from '@reflect/core'
 import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
+import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
 import { savedFileRetryMs } from './use-wiki-trust-view.ts'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import { noteArticleFor } from './wiki-article-store.ts'
 import { wikiEditorRange } from './wiki-article-projection.ts'
 import { WikiTrustSummary } from './wiki-trust-summary.tsx'
+
+const resolveWikilink = createWikilinkResolver('mdy')
 
 const settingsState = vi.hoisted(() => ({
   settings: {

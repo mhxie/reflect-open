@@ -3,6 +3,7 @@ import { isNotNullish } from '@ocavue/utils'
 import { isAppError } from '../errors.ts'
 import { readNoteLocal } from '../graph/commands.ts'
 import { db } from '../indexing/db.ts'
+import type { WikiCopyState, WikiEntry, WikiEntryCopy } from './entry-model.ts'
 import { summarizeWikiEntry, type WikiEntrySummary } from './entry-summary.ts'
 import { wikiAncestorIndexPaths } from './hierarchy.ts'
 import {
@@ -12,53 +13,6 @@ import {
   wikiTopic,
   type WikiLanguage,
 } from './languages.ts'
-
-/**
- * Whether a copy's file was read: `local` (read), `evicted` (an iCloud copy
- * not on this device), or `unreadable` (the read failed, or the file vanished
- * since the index saw it).
- */
-export type WikiCopyState = 'local' | 'evicted' | 'unreadable'
-
-/**
- * One language's copy of a wiki entry: what its row shows, and what it opens,
- * when the Wiki screen is read in that language.
- */
-export interface WikiEntryCopy {
-  readonly path: string
-  readonly title: string
-  readonly displayTitle?: string | null
-  readonly lang?: string | null
-  /** File modification time (epoch ms). */
-  readonly mtime: number
-  readonly isPrivate: boolean
-  readonly hasConflict: boolean
-  readonly state: WikiCopyState
-  /** The copy's opening paragraph (see {@link WikiEntrySummary.preview}); null unless read. */
-  readonly preview: string | null
-  /** The newest day in the copy's `## Revision Log` (ISO `YYYY-MM-DD`), or null. */
-  readonly revised: string | null
-}
-
-/**
- * One entry on the Wiki screen: a note in the source language's folder — its
- * copy there, plus what the entry as a whole carries.
- */
-export interface WikiEntry extends WikiEntryCopy {
-  /** The entry's first folder inside the source folder, or null at its root. */
-  readonly topic: string | null
-  /** This entry's translations: translation folder (`wiki-cn`) → its copy there. */
-  readonly translations: ReadonlyMap<string, WikiEntryCopy>
-  /**
-   * Distinct notes linking here, not counting the wiki's hub `index.md` files
-   * (the generated index links every entry) or its translations.
-   */
-  readonly citedBy: number
-  /** The note's body tags (first-seen casing), alphabetical. */
-  readonly tags: readonly string[]
-  /** The source copy's summary; null unless that copy was read. */
-  readonly summary: WikiEntrySummary | null
-}
 
 export interface ListWikiEntriesOptions {
   /** The graph session the reads belong to; a new generation drops cached summaries. */

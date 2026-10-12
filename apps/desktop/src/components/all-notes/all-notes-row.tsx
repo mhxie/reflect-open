@@ -8,6 +8,7 @@ import { useSettings } from '@/providers/settings-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
 import { NoteTitle } from '@/components/note-title.tsx'
+import { useNoteLabel } from '@/hooks/use-note-label.ts'
 import { ListRow } from './list-row.tsx'
 import { ListRowSubject } from './list-row-subject.tsx'
 
@@ -47,6 +48,7 @@ export const AllNotesRow = memo(function AllNotesRow({
   onOpen,
 }: AllNotesRowProps): ReactElement {
   const { settings } = useSettings()
+  const noteLabel = useNoteLabel()
   return (
     <ListRow
       path={note.path}
@@ -72,7 +74,7 @@ export const AllNotesRow = memo(function AllNotesRow({
             selected ? 'text-accent' : 'text-text',
           )}
         >
-          <NoteTitle title={note.title} displayTitle={note.displayTitle} lang={note.lang} />
+          <NoteTitle title={noteLabel(note)} displayTitle={note.displayTitle} lang={note.lang} />
           <NoteStateIndicator
             path={note.path}
             isPrivate={note.isPrivate}

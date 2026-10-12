@@ -1,10 +1,7 @@
-import {
-  addMeetingToDaily,
-  MEETINGS_HEADING,
-  type MeetingAttendee,
-} from '../actions/add-meeting.ts'
+import { addMeetingToDaily, MEETINGS_HEADING } from '../actions/add-meeting.ts'
 import { AUDIO_MEMOS_NOTE_TITLE, type ReconcileStop } from '../actions/audio-memo.ts'
 import { ensureBacklinkTarget } from '../actions/backlink-target.ts'
+import type { MeetingAttendee } from '../actions/resolve-attendees.ts'
 import { localModelStatus } from '../ai/local-transcription.ts'
 import type { LocalTranscriptionModelId } from '../ai/local-transcription-models.ts'
 import {

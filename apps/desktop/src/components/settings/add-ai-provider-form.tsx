@@ -9,8 +9,6 @@ import {
   isHttpBaseUrl,
   isLoopbackHttpUrl,
   isPlainHttpRemoteBaseUrl,
-  type AiProviderId,
-  type OnDeviceServerKind,
 } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
@@ -27,28 +25,13 @@ import { useAddAiProviderSubmit } from '@/hooks/use-add-ai-provider-submit.ts'
 import type { NewAiProvider } from '@/hooks/use-ai-providers.ts'
 import { parseContextWindowInput } from '@/lib/on-device-settings.ts'
 import { AddAiProviderLocalFields } from './add-ai-provider-local-fields.tsx'
+import type { AddAiProviderValues } from './add-ai-provider-values.ts'
 import { ModelCombobox } from './model-combobox.tsx'
 
 interface AddAiProviderFormProps {
   /** Persists the new provider (keychain + settings); rejects on failure. */
   onAdd: (draft: NewAiProvider) => Promise<void>
   onClose: () => void
-}
-
-/** The add form's fields (`AddAiProviderLocalFields` reads them too). */
-export interface AddAiProviderValues {
-  provider: AiProviderId
-  model: string
-  baseUrl: string
-  apiKey: string
-  isDefault: boolean
-  /** OpenAI-compatible only: attest the endpoint runs `model` on this Mac. */
-  onDevice: boolean
-  onDeviceServer: OnDeviceServerKind
-  /** OpenAI-compatible only: the model accepts image input. */
-  supportsImages: boolean
-  /** OpenAI-compatible only: the context length as typed; blank for the server's default. */
-  contextWindow: string
 }
 
 /** The draft to persist; the OpenAI-compatible extras are read only for that provider. */

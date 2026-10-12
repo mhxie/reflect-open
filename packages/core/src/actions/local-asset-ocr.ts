@@ -21,7 +21,7 @@ import { MAX_LOCAL_OCR_CHARS, readLocalAssetOcr, writeLocalAssetOcr } from './as
 import type {
   ReconcileAssetDescriptionsInput,
   ReconcileAssetDescriptionsOutcome,
-} from './asset-description.ts'
+} from './asset-description-types.ts'
 
 const MAX_OCR_PAGES = 100
 

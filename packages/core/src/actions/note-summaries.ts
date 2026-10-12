@@ -24,9 +24,9 @@ import {
   resolveOnDeviceTarget,
   verifyModelTarget,
   type CloudTarget,
-  type OnDeviceTarget,
   type VerifiedOnDeviceTarget,
 } from '../privacy/on-device.ts'
+import type { OnDeviceTarget } from '../privacy/on-device-target.ts'
 import {
   sameSummariesModel,
   type AiProviderConfig,

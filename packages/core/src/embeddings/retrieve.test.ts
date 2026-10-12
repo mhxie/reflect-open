@@ -5,10 +5,10 @@ import {
   type ChunkHitRow,
   fuseRanked,
   mergeNearestFirst,
-  type RetrievalHit,
   retrieve,
   withMatchedBy,
 } from './retrieve.ts'
+import type { RetrievalHit } from './retrieval-hit.ts'
 
 function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
   return {

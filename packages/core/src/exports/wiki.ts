@@ -15,10 +15,8 @@ export {
   wikiAncestors,
   wikiCopies,
   type WikiAncestor,
-  type WikiCopyState,
-  type WikiEntry,
-  type WikiEntryCopy,
 } from '../wiki/list.ts'
+export type { WikiCopyState, WikiEntry, WikiEntryCopy } from '../wiki/entry-model.ts'
 export { wikiEntryIn } from '../wiki/localize.ts'
 export { wikiClaimHeadingText } from '../wiki/claims.ts'
 export { planWikiClaim, planWikiClaimBoundary, type WikiClaimEdit } from '../wiki/article-edit.ts'

@@ -10,7 +10,7 @@ import { MarkdownView } from '@meowdown/react'
 import type { WikilinkClickHandler } from '@meowdown/core'
 import { isLocalOnlyPath, type SnippetTask } from '@reflect/core'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
-import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
+import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import { useSnippetTaskToggle } from '@/hooks/use-snippet-task-toggle.ts'
@@ -66,6 +66,7 @@ export function BacklinkSnippet({
   const generation = useGraph({ optional: true })?.graph?.generation ?? null
   const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(generation, notePath)
   const graphXPostResolver = useXPostResolver()
+  const resolveWikilink = useWikilinkResolver()
   const onTaskClick = useSnippetTaskToggle(notePath, tasks)
   const onLinkClick = useMarkdownLinkClick(generation, notePath)
   const privateSource = sourcePrivate || isLocalOnlyPath(notePath)

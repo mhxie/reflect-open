@@ -1,7 +1,7 @@
 import { foldTag } from '../markdown/index.ts'
 import { wikiReviewState } from './entry-summary.ts'
 import { isWikiIndex } from './hierarchy.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 
 /**
  * What the Wiki screen is narrowed to: knowledge entries, index notes,

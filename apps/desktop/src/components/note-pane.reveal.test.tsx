@@ -33,6 +33,7 @@ vi.mock('@/providers/settings-provider.tsx', () => ({
   useSettings: () => ({
     settings: {
       editorMarkdownSyntax: 'hide',
+      dateFormat: 'mdy',
       allNotesFilterTags: [],
       wikiLanguages: [{ label: 'English', folder: 'wiki' }],
       aiProviders: [],

@@ -2,7 +2,7 @@ import { localDayStartMs } from '../indexing/filter-query.ts'
 import type { SortDirection } from '../indexing/note-list-sort.ts'
 import { noteTitlePresentation } from '../markdown/note-title.ts'
 import { wikiReviewState, type WikiReviewState } from './entry-summary.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 import type { WikiSort, WikiSortKey } from './sort-keys.ts'
 
 /** The direction a column starts in: titles A–Z, flags first, otherwise newest or most first. */

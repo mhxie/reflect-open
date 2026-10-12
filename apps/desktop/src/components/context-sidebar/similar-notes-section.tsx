@@ -6,6 +6,7 @@ import { useSimilarNotes } from '@/lib/use-similar-notes.ts'
 import { routeForPath } from '@/routing/route.ts'
 import { SidebarSection } from './sidebar-section.tsx'
 import { isModEvent } from '@meowdown/core'
+import { useNoteLabel } from '@/hooks/use-note-label.ts'
 
 interface SimilarNotesSectionProps {
   /** Graph-relative path of the note whose semantic neighbors to show. */
@@ -27,6 +28,7 @@ interface SimilarNotesSectionProps {
 export function SimilarNotesSection({ path }: SimilarNotesSectionProps): ReactElement | null {
   const navigateNoteLink = useNoteLinkNavigation(path)
   const related = useSimilarNotes(path)
+  const noteLabel = useNoteLabel()
   if (related.length === 0) {
     return null
   }
@@ -47,7 +49,7 @@ export function SimilarNotesSection({ path }: SimilarNotesSectionProps): ReactEl
               className="flex w-full items-center space-x-1 rounded-md px-3 py-1 leading-5 text-text-secondary hover:bg-surface-hover hover:text-text"
             >
               <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">
-                <NoteTitle title={hit.title} displayTitle={hit.displayTitle} lang={hit.lang} />
+                <NoteTitle title={noteLabel(hit)} displayTitle={hit.displayTitle} lang={hit.lang} />
               </span>
               <span aria-hidden className="flex-none -scale-x-100">
                 <ArrowUturnLeftIcon width={13} height={13} />

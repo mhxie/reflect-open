@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { WikiEntry, WikiEntryCopy } from './list.ts'
+import type { WikiEntry, WikiEntryCopy } from './entry-model.ts'
 import { wikiEntryIn } from './localize.ts'
 
 const COPY: WikiEntryCopy = {

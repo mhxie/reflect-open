@@ -73,10 +73,12 @@ export {
   type VerifiedOnDeviceTarget,
   type CloudTarget,
   type ModelTarget,
-  type OnDeviceServerRefusal,
-  type OnDeviceServerVerdict,
-  type OnDeviceTarget,
 } from '../privacy/on-device.ts'
+export type { OnDeviceTarget } from '../privacy/on-device-target.ts'
+export type {
+  OnDeviceServerRefusal,
+  OnDeviceServerVerdict,
+} from '../privacy/on-device-verification.ts'
 export { languageModelFor, type TargetModel } from '../ai/language-model.ts'
 export { localOcrAssetTypeFor } from '../actions/asset-description-helpers.ts'
 export { reconcileCachedAssetOcr } from '../actions/asset-ocr-maintenance.ts'
@@ -194,7 +196,6 @@ export {
   listAudioMemoSegments,
   listPendingAudioMemoSessions,
   reconcileAudioMemos,
-  type AudioMemoIdentity,
   type AudioMemoSource,
   type CaptureAudioMemoOutcome,
   type CaptureAudioMemoPartInput,
@@ -205,6 +206,7 @@ export {
 export {
   AUDIO_MEMO_REMINDER_MS,
   AUDIO_MEMO_SEGMENT_MS,
+  type AudioMemoIdentity,
   type AudioMemoSession,
 } from '../actions/audio-memo-session.ts'
 export {
@@ -269,7 +271,6 @@ export {
   type AddMeetingInput,
   type AddMeetingOutcome,
   type MeetingLineAttendee,
-  type MeetingAttendee,
 } from '../actions/add-meeting.ts'
 export {
   RECORDING_TRANSCRIPTS_DIR,
@@ -304,6 +305,7 @@ export {
 export {
   resolveMeetingAttendees,
   resolveMeetingAttendeeTargets,
+  type MeetingAttendee,
   type ResolvedMeetingAttendee,
 } from '../actions/resolve-attendees.ts'
 export {
@@ -325,8 +327,10 @@ export {
   reconcileAssetDescriptions,
   readManagedDescription,
   type AssetDescriptionMeta,
-  type AssetDescriptionMode,
   type AssetVerdict,
-  type ReconcileAssetDescriptionsInput,
-  type ReconcileAssetDescriptionsOutcome,
 } from '../actions/asset-description.ts'
+export type {
+  AssetDescriptionMode,
+  ReconcileAssetDescriptionsInput,
+  ReconcileAssetDescriptionsOutcome,
+} from '../actions/asset-description-types.ts'
