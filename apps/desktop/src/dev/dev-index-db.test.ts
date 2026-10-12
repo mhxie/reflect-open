@@ -45,6 +45,7 @@ function sampleNote(overrides: Partial<IndexedNote> = {}): IndexedNote {
     assetText: '',
     hasDeviceOnlyContent: false,
     preview: 'body about local-first sync',
+    summary: '',
     links: [
       {
         kind: 'wiki',

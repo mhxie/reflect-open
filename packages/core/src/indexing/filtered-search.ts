@@ -40,6 +40,11 @@ export interface FilteredSearchHit {
   snippet: string | null
   /** The indexed row preview — the no-text feed's row snippet. */
   preview: string
+  /**
+   * The note's fresh AI summary, or empty. Only the All Notes feed shows it,
+   * in place of `preview`.
+   */
+  summary: string
   /** File modification time (epoch ms) — drives the row's recency label. */
   mtime: number
   isPinned: boolean
@@ -83,6 +88,7 @@ const HIT_COLUMNS = [
   'notes.assetTextHash',
   'notes.dailyDate',
   'notes.preview',
+  'notes.summary',
   'notes.mtime',
   'notes.isPinned',
   'notes.hasConflict',
@@ -348,6 +354,7 @@ export async function searchWithFilters(
             'filteredNotes.assetTextHash',
             'filteredNotes.dailyDate',
             'filteredNotes.preview',
+            'filteredNotes.summary',
             'filteredNotes.mtime',
             'filteredNotes.isPinned',
             'filteredNotes.hasConflict',
@@ -407,6 +414,7 @@ export async function searchWithFilters(
       'ranked.assetTextHash',
       'ranked.dailyDate',
       'ranked.preview',
+      'ranked.summary',
       'ranked.mtime',
       'ranked.isPinned',
       'ranked.hasConflict',

@@ -117,6 +117,7 @@ export interface Notes {
   pathKey: Generated<string>;
   pinnedOrder: number | null;
   preview: Generated<string>;
+  summary: Generated<string>;
   summaryFresh: Generated<number>;
   title: string;
   titleKey: string;

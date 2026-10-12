@@ -70,8 +70,8 @@ export function applyProjection(database: DatabaseSync, indexed: IndexedNote): v
       `INSERT INTO notes(
         path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned,
         pinned_order, mtime, file_hash, preview, has_conflict, gist_url, gist_stale, has_device_only_content,
-        body_chars, summary_fresh
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        body_chars, summary_fresh, summary
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       indexed.path,
@@ -93,6 +93,7 @@ export function applyProjection(database: DatabaseSync, indexed: IndexedNote): v
       Number(indexed.hasDeviceOnlyContent),
       indexed.bodyChars,
       Number(indexed.summaryFresh),
+      indexed.summary,
     )
 
   const insertAlias = database.prepare(

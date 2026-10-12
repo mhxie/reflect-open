@@ -12,6 +12,7 @@ function hit(overrides: Partial<FilteredSearchHit>): FilteredSearchHit {
     dailyDate: null,
     snippet: null,
     preview: '',
+    summary: '',
     mtime: 0,
     isPinned: false,
     hasConflict: false,
@@ -39,6 +40,17 @@ describe('rowForHit', () => {
   it('falls back to the stored preview when no text was searched', () => {
     const row = rowForHit(hit({ preview: 'First line of the note.' }))
     expect(row.snippet).toEqual([{ text: 'First line of the note.', highlighted: false }])
+  })
+
+  it('shows a fresh AI summary in place of the preview, never over a search snippet', () => {
+    const summarized = { preview: 'First line of the note.', summary: 'What the note is about.' }
+    expect(rowForHit(hit(summarized)).snippet).toEqual([
+      { text: 'What the note is about.', highlighted: false },
+    ])
+    expect(rowForHit(hit({ ...summarized, snippet: '\u{1}First\u{2} line' })).snippet).toEqual([
+      { text: 'First', highlighted: true },
+      { text: ' line', highlighted: false },
+    ])
   })
 
   it('renders no snippet line for an empty preview', () => {

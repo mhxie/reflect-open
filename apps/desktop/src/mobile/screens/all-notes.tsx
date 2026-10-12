@@ -35,6 +35,9 @@ import { useRouter } from '@/routing/router.tsx'
 
 /** A search hit resolved into the shared row shape. */
 export function rowForHit(hit: FilteredSearchHit): NoteRowModel {
+  // With no text searched this is the All Notes list, where a fresh AI summary
+  // stands in for the opening text.
+  const preview = hit.summary || hit.preview
   return {
     path: hit.path,
     titleSegments: parseHighlights(hit.highlightedTitle),
@@ -46,9 +49,9 @@ export function rowForHit(hit: FilteredSearchHit): NoteRowModel {
     snippet:
       hit.snippet !== null
         ? parseHighlights(hit.snippet)
-        : hit.preview === ''
+        : preview === ''
           ? []
-          : [{ text: hit.preview, highlighted: false }],
+          : [{ text: preview, highlighted: false }],
   }
 }
 

@@ -137,6 +137,43 @@ describe('listNotes', () => {
     expect(tagArgs['params']).toEqual(['note'])
   })
 
+  it('shows a fresh AI summary in place of the opening text', async () => {
+    mockInvoke
+      .mockResolvedValueOnce([
+        {
+          is_private: 0,
+          has_conflict: 0,
+          path: 'notes/long.md',
+          title: 'Long',
+          mtime: 2000,
+          preview: 'The opening line.',
+          summary: 'What the note is about.',
+          is_pinned: 0,
+          pinned_order: null,
+        },
+        {
+          is_private: 0,
+          has_conflict: 0,
+          path: 'notes/plain.md',
+          title: 'Plain',
+          mtime: 1000,
+          preview: 'Its own first line.',
+          summary: '',
+          is_pinned: 0,
+          pinned_order: null,
+        },
+      ])
+      .mockResolvedValueOnce([])
+
+    const entries = await listNotes()
+
+    expect(entries.map((entry) => entry.snippet)).toEqual([
+      'What the note is about.',
+      'Its own first line.',
+    ])
+    expect(String(mockInvoke.mock.calls[0]![1]['sql'])).toContain('"notes"."summary"')
+  })
+
   it('narrows both queries to one tag and includes tagged daily notes', async () => {
     mockInvoke
       .mockResolvedValueOnce([

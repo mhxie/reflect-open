@@ -10,7 +10,7 @@ import {
 
 describe('buildIndexedNote', () => {
   it('carries the projection version that rebuilds heading-chain task breadcrumbs', () => {
-    expect(PROJECTION_VERSION).toBe(33)
+    expect(PROJECTION_VERSION).toBe(34)
   })
 
   it('indexes presentation metadata without changing the canonical title or its claims', () => {
@@ -376,7 +376,7 @@ describe('buildIndexedNote', () => {
     expect(indexedEdited.gistStale).toBe(true)
   })
 
-  it('shows a fresh AI summary as the preview and falls back to the snippet once stale', () => {
+  it('keeps a fresh AI summary beside the plain preview and drops it once stale', () => {
     const body = '# N\n\nThe opening line of a long note.\n'
     const block = (hash: string): string =>
       `---\naiSummary:\n  text: A short summary.\n  hash: ${hash}\n---\n`
@@ -387,7 +387,9 @@ describe('buildIndexedNote', () => {
       mtime: 0,
       source: fresh,
     })
-    expect(indexedFresh.preview).toBe('A short summary.')
+    // The preview stays the note's own text for every surface but the All Notes row.
+    expect(indexedFresh.preview).toBe('The opening line of a long note.')
+    expect(indexedFresh.summary).toBe('A short summary.')
     expect(indexedFresh.summaryFresh).toBe(true)
 
     const edited = fresh + 'an edit'
@@ -397,6 +399,7 @@ describe('buildIndexedNote', () => {
       source: edited,
     })
     expect(indexedEdited.preview).toBe('The opening line of a long note. an edit')
+    expect(indexedEdited.summary).toBe('')
     expect(indexedEdited.summaryFresh).toBe(false)
   })
 
