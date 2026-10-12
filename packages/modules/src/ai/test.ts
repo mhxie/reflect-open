@@ -1,1 +1,1 @@
-export { convertArrayToReadableStream, MockLanguageModelV3 } from 'ai/test'
+export { convertArrayToReadableStream, MockLanguageModelV3, MockLanguageModelV4 } from 'ai/test'

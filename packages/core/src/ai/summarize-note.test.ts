@@ -1,14 +1,20 @@
 import { APICallError } from '@reflect/modules/ai'
-import { MockLanguageModelV3 } from '@reflect/modules/ai/test'
-import type { LanguageModelV3CallOptions, LanguageModelV3Usage } from '@ai-sdk/provider'
-import { describe, expect, it } from 'vitest'
+import { MockLanguageModelV4 } from '@reflect/modules/ai/test'
+import type { LanguageModelV4CallOptions, LanguageModelV4Usage } from '@ai-sdk/provider'
+import { describe, expect, it, vi } from 'vitest'
 import { cloudSafeNoteContent } from '../privacy/checkers.ts'
-import { modelTarget } from '../privacy/on-device.ts'
-import type { AiProviderConfig } from '../settings/schema.ts'
+import {
+  modelTarget,
+  verifyModelTarget,
+  type VerifiedOnDeviceTarget,
+} from '../privacy/on-device.ts'
+import type { AiProviderConfig, OnDeviceServerKind } from '../settings/schema.ts'
 import { testTargetModel } from '../testing/target-model.ts'
 import { normalizedNoteSummary, summarizeNote } from './summarize-note.ts'
 
-const USAGE: LanguageModelV3Usage = {
+vi.mock('../privacy/on-device-verification', () => ({ verifyOnDeviceServer: async () => 'ok' }))
+
+const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 }
@@ -22,6 +28,25 @@ const CONFIG: AiProviderConfig = {
 
 const CLOUD = modelTarget({ ...CONFIG, provider: 'anthropic' })
 
+async function localTarget(server: OnDeviceServerKind): Promise<VerifiedOnDeviceTarget> {
+  const baseUrl = 'http://localhost:11434/v1'
+  const target = await verifyModelTarget(
+    modelTarget({
+      id: 'cfg-local',
+      provider: 'openai-compatible',
+      model: 'gemma4:26b',
+      baseUrl,
+      keyHint: '',
+      onDevice: { baseUrl, model: 'gemma4:26b', server },
+    }),
+    '',
+  )
+  if (target.kind !== 'on-device') {
+    throw new Error('expected an on-device target')
+  }
+  return target
+}
+
 function note(content: string): ReturnType<typeof cloudSafeNoteContent> {
   return cloudSafeNoteContent({
     path: 'notes/plan.md',
@@ -32,8 +57,8 @@ function note(content: string): ReturnType<typeof cloudSafeNoteContent> {
   })
 }
 
-function answering(text: string, calls: LanguageModelV3CallOptions[] = []): MockLanguageModelV3 {
-  return new MockLanguageModelV3({
+function answering(text: string, calls: LanguageModelV4CallOptions[] = []): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
     doGenerate: async (options) => {
       calls.push(options)
       return {
@@ -46,8 +71,8 @@ function answering(text: string, calls: LanguageModelV3CallOptions[] = []): Mock
   })
 }
 
-function throwing(error: unknown): MockLanguageModelV3 {
-  return new MockLanguageModelV3({
+function throwing(error: unknown): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
     doGenerate: async () => {
       throw error
     },
@@ -81,7 +106,7 @@ describe('normalizedNoteSummary', () => {
 
 describe('summarizeNote', () => {
   it('sends the title and body and returns the normalized answer', async () => {
-    const calls: LanguageModelV3CallOptions[] = []
+    const calls: LanguageModelV4CallOptions[] = []
     const model = testTargetModel(CLOUD, answering('Plans the beta launch.', calls))
     await expect(summarizeNote({ model, note: note('Ship it in May.') })).resolves.toBe(
       'Plans the beta launch.',
@@ -89,6 +114,32 @@ describe('summarizeNote', () => {
     const prompt = JSON.stringify(calls[0]?.prompt)
     expect(prompt).toContain('Title: Plan')
     expect(prompt).toContain('Ship it in May.')
+  })
+
+  it('switches reasoning off for an attested Ollama model only', async () => {
+    const source = { title: 'Plan', content: 'Ship it in May.' }
+    const ollama: LanguageModelV4CallOptions[] = []
+    const otherServer: LanguageModelV4CallOptions[] = []
+    const cloud: LanguageModelV4CallOptions[] = []
+    await summarizeNote({
+      model: testTargetModel(await localTarget('ollama'), answering('Plans it.', ollama)),
+      note: source,
+    })
+    await summarizeNote({
+      model: testTargetModel(
+        await localTarget('openai-compatible'),
+        answering('Plans it.', otherServer),
+      ),
+      note: source,
+    })
+    await summarizeNote({
+      model: testTargetModel(CLOUD, answering('Plans it.', cloud)),
+      note: note('Ship it in May.'),
+    })
+
+    expect(ollama[0]?.reasoning).toBe('none')
+    expect(otherServer[0]?.reasoning).toBeUndefined()
+    expect(cloud[0]?.reasoning).toBeUndefined()
   })
 
   it('resolves null when the provider refuses the note', async () => {
