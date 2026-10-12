@@ -1,4 +1,8 @@
-import { DEFAULT_OPENAI_COMPATIBLE_BASE_URL, MIN_CONTEXT_WINDOW } from '@reflect/core'
+import {
+  DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
+  MIN_CONTEXT_WINDOW,
+  OLLAMA_BASE_URL,
+} from '@reflect/core'
 
 /**
  * Shared pieces of the on-device provider settings (Plan 27): the switch
@@ -29,7 +33,7 @@ export function onDeviceBadgeText(model: string): string {
 
 /** OpenAI-compatible endpoints of common servers on this Mac, offered as quick fills. */
 export const LOCAL_ENDPOINT_PRESETS: ReadonlyArray<{ label: string; baseUrl: string }> = [
-  { label: 'Ollama', baseUrl: 'http://localhost:11434/v1' },
+  { label: 'Ollama', baseUrl: OLLAMA_BASE_URL },
   { label: 'LM Studio', baseUrl: DEFAULT_OPENAI_COMPATIBLE_BASE_URL },
 ]
 

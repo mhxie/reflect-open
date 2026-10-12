@@ -59,8 +59,8 @@ function applyNote(database: DatabaseSync, note: IndexedNote): void {
       `INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private,
         is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at,
         preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh,
-        display_title, lang)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        display_title, lang, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       note.path,
@@ -87,6 +87,7 @@ function applyNote(database: DatabaseSync, note: IndexedNote): void {
       Number(note.summaryFresh),
       note.displayTitle,
       note.lang,
+      note.summary,
     )
   const insertLink = database.prepare(
     `INSERT INTO links(source_path, kind, target_raw, target_key, target_path_key, alias,

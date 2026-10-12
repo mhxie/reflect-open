@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
-import { deleteNote, writeNote } from '../graph/commands.ts'
+import { deleteNote, writeNote, writeNoteKeepingModified } from '../graph/commands.ts'
 import type { NoteDeleteOutcome } from '../graph/schemas.ts'
 import { subscribeFileChanges, type FileChange } from './file-changes.ts'
 import { setLocalWriteEcho } from './local-write-echo.ts'
@@ -78,6 +78,30 @@ describe('local write echo (Plan 19, decision 5)', () => {
     await writeNote('daily/2026-06-12.md', 'hello', 1, null)
 
     expect(handler).not.toHaveBeenCalled()
+    unlisten()
+  })
+
+  it('echoes a write that kept its mtime on desktop too, marked for a reread', async () => {
+    // The watcher reports this write with the mtime the index already holds,
+    // which reads as "unchanged": only the echo gets the summary indexed.
+    let kept: number | null = 1_000
+    setBridge({
+      invoke: async (command) => (command === 'note_write_keep_modified' ? kept : null),
+      listen: async () => () => {},
+    })
+    const seen: FileChange[][] = []
+    const unlisten = await subscribeFileChanges((changes) => {
+      seen.push(changes)
+    })
+
+    await writeNoteKeepingModified('notes/a.md', 'summarized', 1, 'before')
+    kept = null
+    await writeNoteKeepingModified('notes/b.md', 'summarized', 1, 'before')
+
+    expect(seen).toEqual([
+      [{ path: 'notes/a.md', kind: 'upsert', reread: true, modifiedMs: 1_000 }],
+      [{ path: 'notes/b.md', kind: 'upsert', reread: true }],
+    ])
     unlisten()
   })
 

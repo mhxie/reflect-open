@@ -224,7 +224,7 @@ export async function applyIndexChanges(
         continue
       }
       const facts = stored.get(change.path)
-      if (matchesTrustedMtime(facts?.mtime, change.modifiedMs, now)) {
+      if (change.reread !== true && matchesTrustedMtime(facts?.mtime, change.modifiedMs, now)) {
         continue // already indexed at this mtime — e.g. the watch's initial gather
       }
       const content = await readNote(change.path)
@@ -246,7 +246,9 @@ export async function applyIndexChanges(
       }
       const projection = await buildNoteProjection(change.path, content, {
         fileHash,
-        mtime: change.modifiedMs ?? Date.now(),
+        // A write that kept the file's time but couldn't report it keeps the row's.
+        mtime:
+          change.modifiedMs ?? (change.reread === true ? facts?.mtime : undefined) ?? Date.now(),
       })
       if (!canApply()) {
         return mutations
@@ -268,6 +270,9 @@ export async function applyIndexChanges(
   // queries may return different rows and the caller must invalidate.
   return mutations + batch.applied() + touches.applied()
 }
+
+/** The live subscriptions' batch handlers, reachable by {@link requestIndexReread}. */
+const rereadHandlers = new Set<(changes: FileChange[]) => void>()
 
 /**
  * Subscribe to `index:changed` and apply each batch at `generation`. Returns an
@@ -300,7 +305,7 @@ export function subscribeIndexChanges(
   // Serialize batches so overlapping events for the same path can't reorder
   // (e.g. an upsert landing after a later remove, leaving a ghost row).
   let applyQueue: Promise<void> = Promise.resolve()
-  return subscribeFileChanges((changes) => {
+  const handle = (changes: FileChange[]): void => {
     if (!canApply()) {
       return
     }
@@ -337,5 +342,32 @@ export function subscribeIndexChanges(
       .catch((error) => {
         console.error('failed to apply watcher batch:', error)
       })
-  })
+  }
+  rereadHandlers.add(handle)
+  return subscribeFileChanges(handle).then(
+    (unlisten) => () => {
+      rereadHandlers.delete(handle)
+      unlisten()
+    },
+    (error: unknown) => {
+      rereadHandlers.delete(handle)
+      throw error
+    },
+  )
+}
+
+/**
+ * Ask the live index to re-read `paths`, keeping each row's indexed time,
+ * without announcing a file change: sync, iCloud and open editors never hear
+ * it. For a note whose last write the index never saw (one that kept the
+ * file's modification time, from a build without the reread echo). Returns
+ * whether a live subscription took the request: there is none until the
+ * graph's first reconcile has finished.
+ */
+export function requestIndexReread(paths: readonly string[]): boolean {
+  const changes = paths.map((path): FileChange => ({ path, kind: 'upsert', reread: true }))
+  for (const handleBatch of rereadHandlers) {
+    handleBatch(changes)
+  }
+  return rereadHandlers.size > 0
 }

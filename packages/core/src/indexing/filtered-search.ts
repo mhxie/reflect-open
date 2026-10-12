@@ -40,6 +40,12 @@ export interface FilteredSearchHit {
   snippet: string | null
   /** The indexed row preview — the no-text feed's row snippet. */
   preview: string
+  /**
+   * The note's fresh AI summary for the no-text feed, which shows it in place
+   * of `preview`; always empty when free text was searched, so search results
+   * never show AI-written text.
+   */
+  summary: string
   /** File modification time (epoch ms) — drives the row's recency label. */
   mtime: number
   isPinned: boolean
@@ -83,6 +89,7 @@ const HIT_COLUMNS = [
   'notes.assetTextHash',
   'notes.dailyDate',
   'notes.preview',
+  'notes.summary',
   'notes.mtime',
   'notes.isPinned',
   'notes.hasConflict',
@@ -424,6 +431,7 @@ export async function searchWithFilters(
   const rows = await rankedQuery.execute()
   return rows.map(({ ftsHighlightedTitle, snippet, cjkSnippet, ...row }) => ({
     ...row,
+    summary: '',
     // SQLite returns an unmarked body fragment when only the title or the
     // `cjk` column matched. That is not a search snippet; a CJK run found in
     // the body gets its own marked fragment instead.

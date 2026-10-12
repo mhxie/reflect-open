@@ -58,6 +58,7 @@ function setup() {
       dailyDate: null,
       snippet: null,
       preview: '',
+      summary: '',
       mtime: 0,
       isPinned: false,
       hasConflict: false,

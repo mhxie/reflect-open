@@ -13,9 +13,15 @@ import {
   openMigratedIndex,
   project,
 } from '../indexing/flow-test-harness.ts'
+import { requestIndexReread } from '../indexing/live.ts'
+import { echoLocalWrite } from '../indexing/local-write-echo.ts'
 import { noteBodyHash, parseNote, splitFrontmatter, upsertFrontmatter } from '../markdown/index.ts'
 import { verifyOnDeviceServer } from '../privacy/on-device.ts'
-import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
+import type {
+  AiProviderConfig,
+  AiSummariesModel,
+  OpenAiCompatibleProviderConfig,
+} from '../settings/schema.ts'
 import { testTargetModel } from '../testing/target-model.ts'
 import {
   noteSummaryKey,
@@ -32,6 +38,14 @@ vi.mock('../graph/commands', async (original) => ({
 vi.mock('../ai/language-model', async (original) => ({
   ...(await original<typeof import('../ai/language-model.ts')>()),
   languageModelFor: vi.fn(),
+}))
+vi.mock('../indexing/local-write-echo', async (original) => ({
+  ...(await original<typeof import('../indexing/local-write-echo.ts')>()),
+  echoLocalWrite: vi.fn(),
+}))
+vi.mock('../indexing/live', async (original) => ({
+  ...(await original<typeof import('../indexing/live.ts')>()),
+  requestIndexReread: vi.fn(),
 }))
 vi.mock('../ai/secrets', () => ({ aiApiKeyForConfig: vi.fn() }))
 vi.mock('../privacy/on-device-verification', () => ({ verifyOnDeviceServer: vi.fn() }))
@@ -57,6 +71,9 @@ const CLOUD: AiProviderConfig = {
   keyHint: 'wxyz1',
 }
 
+/** The cloud choice a confirmed go-ahead pinned: the provider's small model. */
+const CLOUD_HAIKU = { configId: CLOUD.id, modelId: 'claude-haiku-4-5' }
+
 const NOW = 2_000_000_000_000
 const SETTLED_MTIME = NOW - 2 * SUMMARY_QUIET_MS
 const LONG_BODY = `# Long\n\n${'A sentence that keeps the note going. '.repeat(30)}\n`
@@ -79,7 +96,9 @@ function input(overrides: Partial<ReconcileNoteSummariesInput> = {}): ReconcileN
   return {
     providers: { providers: [LOCAL, CLOUD], defaultProviderId: CLOUD.id },
     mode: 'local',
-    cloudConfirmed: true,
+    localModel: null,
+    cloudModel: CLOUD_HAIKU,
+    cloudConsent: CLOUD_HAIKU,
     generation: 1,
     now: () => NOW,
     ...overrides,
@@ -167,6 +186,35 @@ describe('reconcileNoteSummaries', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('summarizes with the on-device model chosen for summaries', async () => {
+    const gemma: OpenAiCompatibleProviderConfig = {
+      ...LOCAL,
+      id: 'gemma',
+      model: 'gemma4:31b',
+      onDevice: { model: 'gemma4:31b', baseUrl: LOCAL.baseUrl, server: 'ollama' },
+    }
+    const providers = { providers: [LOCAL, gemma, CLOUD], defaultProviderId: CLOUD.id }
+
+    const outcome = await reconcileNoteSummaries(
+      input({ providers, localModel: { configId: 'gemma', modelId: 'gemma4:31b' } }),
+    )
+    expect(outcome.summarized).toBe(2)
+    expect(vi.mocked(languageModelFor).mock.calls.map(([target]) => target.config)).toEqual([
+      expect.objectContaining({ id: 'gemma', model: 'gemma4:31b' }),
+    ])
+
+    // A choice whose entry no longer runs that model stops instead of falling back.
+    vi.mocked(languageModelFor).mockClear()
+    const stale = await reconcileNoteSummaries(
+      input({ providers, localModel: { configId: 'gemma', modelId: 'gemma4:26b' } }),
+    )
+    expect(stale.stopped).toEqual({
+      reason: 'config',
+      message: 'The model chosen for note summaries no longer runs on this Mac.',
+    })
+    expect(languageModelFor).not.toHaveBeenCalled()
+  })
+
   it('summarizes public notes only with the cloud small model in cloud mode', async () => {
     const outcome = await reconcileNoteSummaries(input({ mode: 'cloud' }))
 
@@ -187,18 +235,55 @@ describe('reconcileNoteSummaries', () => {
   })
 
   it('asks before the first cloud note leaves, counting from the index alone', async () => {
-    const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConfirmed: false }))
+    const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConsent: null }))
     // PUBLIC and RECENT wait; the private note is not counted.
-    expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic' })
+    expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic', choice: CLOUD_HAIKU })
     expect(asked.stopped).toBeNull()
     expect(readNoteLocal).not.toHaveBeenCalled()
     expect(writeNoteKeepingModified).not.toHaveBeenCalled()
     expect(calls).toHaveLength(0)
 
     // On this Mac sends nothing, so it needs no go-ahead.
-    const local = await reconcileNoteSummaries(input({ cloudConfirmed: false }))
+    const local = await reconcileNoteSummaries(input({ cloudConsent: null }))
     expect(local.consent).toBeNull()
     expect(local.summarized).toBe(2)
+  })
+
+  it('asks whenever the model it would use is not exactly the one agreed to', async () => {
+    const sonnet = { configId: CLOUD.id, modelId: 'claude-sonnet-5-5' }
+    const work: AiProviderConfig = { ...CLOUD, id: 'work' }
+    const cases: [Partial<ReconcileNoteSummariesInput>, AiSummariesModel][] = [
+      // Nothing agreed: the default provider's small model is named.
+      [{ cloudModel: null, cloudConsent: null }, CLOUD_HAIKU],
+      // Another model on the agreed entry.
+      [{ cloudModel: sonnet, cloudConsent: CLOUD_HAIKU }, sonnet],
+      // The agreed model on another entry.
+      [
+        {
+          providers: { providers: [CLOUD, work], defaultProviderId: CLOUD.id },
+          cloudModel: { configId: 'work', modelId: 'claude-haiku-4-5' },
+          cloudConsent: CLOUD_HAIKU,
+        },
+        { configId: 'work', modelId: 'claude-haiku-4-5' },
+      ],
+    ]
+    for (const [overrides, named] of cases) {
+      const asked = await reconcileNoteSummaries(input({ mode: 'cloud', ...overrides }))
+      expect(asked.consent).toEqual({ notes: 2, provider: 'anthropic', choice: named })
+    }
+    expect(readNoteLocal).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('summarizes with the cloud model chosen for summaries once agreed to', async () => {
+    const chosen = { configId: CLOUD.id, modelId: 'claude-sonnet-5-5' }
+    const outcome = await reconcileNoteSummaries(
+      input({ mode: 'cloud', cloudModel: chosen, cloudConsent: chosen }),
+    )
+    expect(outcome.summarized).toBe(1)
+    expect(vi.mocked(languageModelFor).mock.calls.map(([target]) => target.config)).toEqual([
+      expect.objectContaining({ id: CLOUD.id, model: 'claude-sonnet-5-5' }),
+    ])
   })
 
   it('never reads device-only or local-only notes in cloud mode', async () => {
@@ -211,7 +296,7 @@ describe('reconcileNoteSummaries', () => {
     database.exec(`UPDATE notes SET is_private = 0 WHERE path = '${localOnly}'`)
     setLocalOnlyFolders(['vault'])
 
-    const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConfirmed: false }))
+    const asked = await reconcileNoteSummaries(input({ mode: 'cloud', cloudConsent: null }))
     expect(asked.consent?.notes).toBe(2)
     const outcome = await reconcileNoteSummaries(input({ mode: 'cloud' }))
     expect(outcome.summarized).toBe(1)
@@ -219,14 +304,21 @@ describe('reconcileNoteSummaries', () => {
   })
 
   it('stops in cloud mode without a cloud provider', async () => {
-    const cases: [AiProvidersState, RegExp][] = [
-      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, /choose On this Mac/],
+    const cases: [AiProvidersState, AiSummariesModel | null, RegExp][] = [
+      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, null, /choose On this Mac/],
       // A cloud entry behind an on-device default is not picked silently.
-      [{ providers: [LOCAL, CLOUD], defaultProviderId: LOCAL.id }, /choose On this Mac/],
-      [{ providers: [], defaultProviderId: null }, /No AI provider/],
+      [{ providers: [LOCAL, CLOUD], defaultProviderId: LOCAL.id }, null, /choose On this Mac/],
+      [{ providers: [], defaultProviderId: null }, null, /No AI provider/],
+      // A chosen entry that was removed is not replaced by another.
+      [{ providers: [LOCAL], defaultProviderId: LOCAL.id }, CLOUD_HAIKU, /was removed/],
+      [
+        { providers: [LOCAL, CLOUD], defaultProviderId: CLOUD.id },
+        { configId: LOCAL.id, modelId: LOCAL.model },
+        /runs on this Mac/,
+      ],
     ]
-    for (const [providers, message] of cases) {
-      const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', providers }))
+    for (const [providers, cloudModel, message] of cases) {
+      const outcome = await reconcileNoteSummaries(input({ mode: 'cloud', providers, cloudModel }))
       expect(outcome.stopped).toEqual({ reason: 'config', message: expect.stringMatching(message) })
     }
     expect(verifyOnDeviceServer).not.toHaveBeenCalled()
@@ -246,6 +338,34 @@ describe('reconcileNoteSummaries', () => {
 
     const again = await reconcileNoteSummaries(input({ settled: new Set(outcome.settled) }))
     expect(again.pending).toBe(0)
+  })
+
+  it('asks the index to re-read a note whose summary it never saw', async () => {
+    // An earlier build wrote the block under the note's kept mtime and the
+    // index skipped that write: the file is summarized, its row still stale.
+    const body = splitFrontmatter(LONG_BODY).body
+    files.set(
+      PUBLIC,
+      upsertFrontmatter(LONG_BODY, {
+        aiSummary: { text: 'Written before.', hash: noteBodyHash(body) },
+      }),
+    )
+
+    // At launch the live index subscribes only after its first reconcile: a
+    // request nobody took leaves the note for a later pass, not settled.
+    vi.mocked(requestIndexReread).mockReturnValueOnce(false)
+    const early = await reconcileNoteSummaries(input())
+    expect(early.settled).toEqual([])
+
+    vi.mocked(requestIndexReread).mockReturnValue(true)
+    const outcome = await reconcileNoteSummaries(input())
+
+    expect(writtenPaths()).toEqual([PRIVATE, PRIVATE])
+    // Only the index looks again, at the time it holds: no write is announced,
+    // so sync and iCloud never take this for one of this device's writes.
+    expect(requestIndexReread).toHaveBeenLastCalledWith([PUBLIC])
+    expect(echoLocalWrite).not.toHaveBeenCalled()
+    expect(outcome.settled).toEqual([noteSummaryKey(PUBLIC, `hash-${PUBLIC}`)])
   })
 
   it('defers a note with unsaved edits and does nothing when off', async () => {

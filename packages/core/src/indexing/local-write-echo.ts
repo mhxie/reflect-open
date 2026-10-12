@@ -43,10 +43,11 @@ export function subscribeOwnWrites(handler: (path: string) => void): () => void 
 
 /**
  * Emit `change` to the in-process file-change channel when echoes are
- * enabled; a no-op on desktop. Write commands call this after their write
- * has landed, so a consumer that re-reads the file always sees the new
- * contents. Own-write observers ({@link subscribeOwnWrites}) are notified
- * unconditionally.
+ * enabled; on desktop only a `reread` change, whose kept modification time
+ * makes the watcher's own report of the write read as "already indexed".
+ * Write commands call this after their write has landed, so a consumer that
+ * re-reads the file always sees the new contents. Own-write observers
+ * ({@link subscribeOwnWrites}) are notified unconditionally.
  */
 export function echoLocalWrite(change: FileChange): void {
   for (const handler of ownWriteListeners) {
@@ -57,7 +58,7 @@ export function echoLocalWrite(change: FileChange): void {
       console.error('own-write observer failed:', err)
     }
   }
-  if (echoEnabled) {
+  if (echoEnabled || change.reread === true) {
     emitFileChanges([change], 'own-write')
   }
 }

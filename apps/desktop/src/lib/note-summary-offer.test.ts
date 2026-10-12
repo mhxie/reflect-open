@@ -1,18 +1,27 @@
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
-import type { AiProviderId } from '@reflect/core'
+import type { AiSummariesModel } from '@reflect/core'
 import { getOperations, resetOperations } from '@/lib/operations.ts'
-import { offerNoteSummaries, withdrawNoteSummariesOffer } from './note-summary-offer.ts'
+import {
+  offerNoteSummaries,
+  withdrawNoteSummariesOffer,
+  type NoteSummaryDestination,
+} from './note-summary-offer.ts'
 
 afterEach(() => {
   withdrawNoteSummariesOffer()
   resetOperations()
 })
 
-function handlers(provider: AiProviderId | null): {
-  provider: () => AiProviderId | null
-  start: Mock<() => void>
+const NANO: NoteSummaryDestination = {
+  provider: 'openai',
+  choice: { configId: 'work', modelId: 'gpt-5.4-nano' },
+}
+
+function handlers(destination: NoteSummaryDestination | null): {
+  destination: () => NoteSummaryDestination | null
+  start: Mock<(choice: AiSummariesModel) => void>
 } {
-  return { provider: () => provider, start: vi.fn<() => void>() }
+  return { destination: () => destination, start: vi.fn<(choice: AiSummariesModel) => void>() }
 }
 
 async function pressStart(): Promise<void> {
@@ -22,37 +31,52 @@ async function pressStart(): Promise<void> {
 }
 
 describe('offerNoteSummaries', () => {
-  it('names the waiting notes and the provider; Start records the go-ahead once', async () => {
-    const answer = handlers('openai')
-    offerNoteSummaries({ notes: 12, provider: 'openai' }, answer)
+  it('names the waiting notes, provider and model; Start pins that model once', async () => {
+    const answer = handlers(NANO)
+    offerNoteSummaries({ notes: 12, ...NANO }, answer)
     // A later pass re-raising the ask replaces it rather than stacking a second.
-    offerNoteSummaries({ notes: 12, provider: 'openai' }, answer)
+    offerNoteSummaries({ notes: 12, ...NANO }, answer)
 
     expect(getOperations()).toEqual([
-      expect.objectContaining({ label: 'Summarize 12 notes with OpenAI?', persistent: true }),
+      expect.objectContaining({
+        label: 'Summarize 12 notes with OpenAI (gpt-5.4-nano)?',
+        persistent: true,
+      }),
     ])
     await pressStart()
-    expect(answer.start).toHaveBeenCalledTimes(1)
+    expect(answer.start).toHaveBeenCalledExactlyOnceWith(NANO.choice)
     expect(getOperations()).toEqual([])
   })
 
-  it('asks again instead of agreeing when the default provider changed meanwhile', async () => {
-    let provider: AiProviderId | null = 'anthropic'
-    const start = vi.fn<() => void>()
-    offerNoteSummaries({ notes: 1, provider: 'openai' }, { provider: () => provider, start })
+  it('asks again instead of agreeing when the model changed meanwhile', async () => {
+    let destination: NoteSummaryDestination | null = {
+      provider: 'anthropic',
+      choice: { configId: 'personal', modelId: 'claude-haiku-4-5' },
+    }
+    const start = vi.fn<(choice: AiSummariesModel) => void>()
+    offerNoteSummaries({ notes: 1, ...NANO }, { destination: () => destination, start })
 
     await pressStart()
     expect(start).not.toHaveBeenCalled()
-    expect(getOperations()[0]?.label).toBe('Summarize 1 note with Anthropic?')
+    expect(getOperations()[0]?.label).toBe('Summarize 1 note with Anthropic (claude-haiku-4-5)?')
 
-    provider = null
+    // Another model on the same entry is another destination too.
+    destination = {
+      provider: 'anthropic',
+      choice: { configId: 'personal', modelId: 'claude-opus-4-8' },
+    }
+    await pressStart()
+    expect(start).not.toHaveBeenCalled()
+    expect(getOperations()[0]?.label).toBe('Summarize 1 note with Anthropic (claude-opus-4-8)?')
+
+    destination = null
     await pressStart()
     expect(start).not.toHaveBeenCalled()
     expect(getOperations()).toEqual([])
   })
 
   it('takes back an ask that no longer applies', () => {
-    offerNoteSummaries({ notes: 1, provider: 'anthropic' }, handlers('anthropic'))
+    offerNoteSummaries({ notes: 1, ...NANO }, handlers(NANO))
     withdrawNoteSummariesOffer()
     expect(getOperations()).toEqual([])
   })

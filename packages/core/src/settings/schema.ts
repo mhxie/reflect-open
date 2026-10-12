@@ -301,28 +301,55 @@ export const semanticModelSchema = z.enum(SEMANTIC_MODEL_IDS).catch(DEFAULT_SEMA
 export const describeAssetsSchema = z.boolean().catch(true)
 
 /** Which engine writes a note's AI summary (see {@link aiSummariesSchema}). */
-export const AI_SUMMARY_MODES = ['cloud', 'local', 'off'] as const
+export const AI_SUMMARY_MODES = ['local', 'cloud', 'off'] as const
 export type AiSummaryMode = (typeof AI_SUMMARY_MODES)[number]
 
 /**
  * AI note summaries — the All Notes row preview of a long note, written into
- * its `aiSummary` frontmatter. `cloud` (the default) sends public notes to the
- * default provider's small model; `local` uses an attested on-device model
- * only; `off` keeps the plain snippet. Earlier builds' `local-and-cloud`
- * reads as `cloud`.
+ * its `aiSummary` frontmatter. `local` (the default) uses an attested
+ * on-device model only; `cloud` sends public notes to a cloud provider once
+ * the user agrees; `off` keeps the plain snippet. Earlier builds'
+ * `local-and-cloud` reads as `cloud`.
  */
 export const aiSummariesSchema = z
   .enum([...AI_SUMMARY_MODES, 'local-and-cloud'])
   .transform((mode) => (mode === 'local-and-cloud' ? 'cloud' : mode))
-  .catch('cloud')
+  .catch('local')
 
 /**
- * Whether the user has agreed, once, to send public notes to the AI provider
- * for `cloud` summaries. Until then the pass sends nothing and Reflect asks,
- * naming how many notes are waiting. Its presence also marks a document this
- * build has written (see `upgradeLegacyAiSummaries`).
+ * A configured provider entry and a model within it, for AI summaries. As
+ * `aiSummariesLocalModel` and `aiSummariesCloudModel` it is the model each
+ * mode uses, where `null` picks one: in `local` mode the default entry, then
+ * the first, that runs on this Mac; in `cloud` mode the default provider's
+ * small model. As `aiSummariesCloudConsent` it is the cloud entry and model
+ * the user agreed to send public notes to: a cloud pass sends only while it
+ * would use exactly these, and otherwise asks, naming them. Earlier builds'
+ * go-ahead, `aiSummariesCloudConfirmed`, names no model: this build never
+ * reads it and never sets it.
  */
-export const aiSummariesCloudConfirmedSchema = z.boolean().catch(false)
+export const aiSummariesModelSchema = z
+  .object({
+    configId: z.string().min(1),
+    modelId: z.string().min(1),
+  })
+  .nullable()
+  .catch(null)
+
+/** A summary model choice: a configured provider entry and a model within it. */
+export type AiSummariesModel = NonNullable<z.infer<typeof aiSummariesModelSchema>>
+
+/** Whether two summary model choices name the same entry and model; `null` matches nothing. */
+export function sameSummariesModel(
+  left: AiSummariesModel | null,
+  right: AiSummariesModel | null,
+): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.configId === right.configId &&
+    left.modelId === right.modelId
+  )
+}
 
 /**
  * Whether audio-memo transcripts receive a best-effort AI formatting pass
@@ -774,45 +801,9 @@ function upgradeLegacyTranscriptionLanguage(input: unknown): unknown {
   return { ...input, transcriptionLanguages: [input.transcriptionLanguage] }
 }
 
-/** Whether a raw `aiProviders` value attests any entry as running on this Mac. */
-function attestsOnDeviceProvider(providers: unknown): boolean {
-  return (
-    Array.isArray(providers) &&
-    providers.some(
-      (entry: unknown) =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        'onDevice' in entry &&
-        entry.onDevice != null,
-    )
-  )
-}
-
-/**
- * Earlier builds saved every key, so an `aiSummaries: 'local'` they wrote is
- * usually their old on-device default, not a choice. A document without
- * `aiSummariesCloudConfirmed` (which this build always writes) that says
- * `local` while no provider is attested on-device, so it never summarized
- * anything, reads as the `cloud` default; beside an attested on-device model
- * `local` stays. An explicit `local` saved by this build is never touched.
- */
-function upgradeLegacyAiSummaries(input: unknown): unknown {
-  if (
-    typeof input !== 'object' ||
-    input === null ||
-    'aiSummariesCloudConfirmed' in input ||
-    !('aiSummaries' in input) ||
-    input.aiSummaries !== 'local' ||
-    ('aiProviders' in input && attestsOnDeviceProvider(input.aiProviders))
-  ) {
-    return input
-  }
-  return { ...input, aiSummaries: 'cloud' }
-}
-
 /** Read a document earlier builds wrote into the current shape, one step per change. */
 function upgradeLegacySettings(input: unknown): unknown {
-  return upgradeLegacyAiSummaries(upgradeLegacyTranscriptionLanguage(input))
+  return upgradeLegacyTranscriptionLanguage(input)
 }
 
 const settingsObjectSchema = z.looseObject({
@@ -829,7 +820,16 @@ const settingsObjectSchema = z.looseObject({
   semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
   aiSummaries: aiSummariesSchema,
-  aiSummariesCloudConfirmed: aiSummariesCloudConfirmedSchema,
+  /**
+   * Earlier builds' cloud go-ahead, kept as they wrote it (`false` on a new
+   * document) and never read here. Its presence tells their settings upgrade
+   * this document is not one of theirs, which would otherwise move a saved
+   * `local` to `cloud`.
+   */
+  aiSummariesCloudConfirmed: z.boolean().catch(false),
+  aiSummariesLocalModel: aiSummariesModelSchema,
+  aiSummariesCloudModel: aiSummariesModelSchema,
+  aiSummariesCloudConsent: aiSummariesModelSchema,
   /** Explicit local vision provider; null retains public-attachment descriptions via the default provider. */
   localOcrProviderId: z.string().nullable().catch(null),
   transcriptionFormat: transcriptionFormatSchema,

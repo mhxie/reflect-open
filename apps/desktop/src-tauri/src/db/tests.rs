@@ -72,6 +72,7 @@ fn note(path: &str, title: &str, links: Vec<IndexedLink>) -> IndexedNote {
         text: format!("{title} body"),
         asset_text: String::new(),
         preview: "body".to_string(),
+        summary: String::new(),
         links,
         tags: vec![],
         aliases: vec![],
@@ -221,14 +222,19 @@ fn preview_and_tag_keys_round_trip() {
     let conn = migrated();
     let mut tagged = note("notes/a.md", "A", vec![]);
     tagged.preview = "first body line".to_string();
+    tagged.summary = "One sentence about the note.".to_string();
     tagged.tags = vec![IndexedTag {
         tag: "Café".to_string(),
         tag_key: "café".to_string(),
     }];
     apply_note(&conn, &tagged).unwrap();
 
-    let notes = run_query(&conn, "SELECT preview FROM notes", &[]).unwrap();
+    let notes = run_query(&conn, "SELECT preview, summary FROM notes", &[]).unwrap();
     assert_eq!(notes[0]["preview"], Value::from("first body line"));
+    assert_eq!(
+        notes[0]["summary"],
+        Value::from("One sentence about the note.")
+    );
 
     // Display casing and the TS-folded key are stored side by side — matching
     // happens on tag_key (SQLite's lower() couldn't fold the É).

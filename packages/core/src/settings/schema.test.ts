@@ -16,7 +16,10 @@ describe('settingsSchema', () => {
       semanticSearchEnabled: false,
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
-      aiSummaries: 'cloud',
+      aiSummaries: 'local',
+      aiSummariesLocalModel: null,
+      aiSummariesCloudModel: null,
+      aiSummariesCloudConsent: null,
       aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,
@@ -139,15 +142,20 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ describeAssets: true }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: false }).describeAssets).toBe(false)
     expect(settingsSchema.parse({ aiSummaries: 'off' }).aiSummaries).toBe('off')
-    // A `local` saved by this build, which always writes the confirmed flag, is a choice.
-    expect(
-      settingsSchema.parse({ aiSummaries: 'local', aiSummariesCloudConfirmed: false }).aiSummaries,
-    ).toBe('local')
+    expect(settingsSchema.parse({ aiSummaries: 'cloud' }).aiSummaries).toBe('cloud')
+    expect(settingsSchema.parse({ aiSummaries: 'local' }).aiSummaries).toBe('local')
     // Earlier builds' on-device-then-cloud mode is the cloud engine now.
     expect(settingsSchema.parse({ aiSummaries: 'local-and-cloud' }).aiSummaries).toBe('cloud')
+    const choice = { configId: 'ollama', modelId: 'gemma4:31b' }
+    expect(settingsSchema.parse({ aiSummariesLocalModel: choice }).aiSummariesLocalModel).toEqual(
+      choice,
+    )
+    expect(settingsSchema.parse({ aiSummariesCloudModel: choice }).aiSummariesCloudModel).toEqual(
+      choice,
+    )
     expect(
-      settingsSchema.parse({ aiSummariesCloudConfirmed: true }).aiSummariesCloudConfirmed,
-    ).toBe(true)
+      settingsSchema.parse({ aiSummariesCloudConsent: choice }).aiSummariesCloudConsent,
+    ).toEqual(choice)
     expect(settingsSchema.parse({ transcriptionEngine: 'local' }).transcriptionEngine).toBe('local')
     expect(settingsSchema.parse({ transcriptionEngine: 'whisper' }).transcriptionEngine).toBe(
       'cloud',
@@ -339,8 +347,15 @@ describe('settingsSchema', () => {
     // back to the default rather than failing the whole settings load.
     expect(settingsSchema.parse({ describeAssets: 'yes' }).describeAssets).toBe(true)
     expect(settingsSchema.parse({ describeAssets: 0 }).describeAssets).toBe(true)
-    expect(settingsSchema.parse({ aiSummaries: 'sideways' }).aiSummaries).toBe('cloud')
-    expect(settingsSchema.parse({ aiSummaries: 1 }).aiSummaries).toBe('cloud')
+    expect(settingsSchema.parse({ aiSummaries: 'sideways' }).aiSummaries).toBe('local')
+    expect(settingsSchema.parse({ aiSummaries: 1 }).aiSummaries).toBe('local')
+    expect(
+      settingsSchema.parse({ aiSummariesLocalModel: { configId: 'ollama' } }).aiSummariesLocalModel,
+    ).toBeNull()
+    expect(
+      settingsSchema.parse({ aiSummariesCloudModel: { configId: '', modelId: 'gpt-5.4-nano' } })
+        .aiSummariesCloudModel,
+    ).toBeNull()
     expect(settingsSchema.parse({ transcriptionFormat: 'yes' }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionFormat: 0 }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionPrompt: 42 }).transcriptionPrompt).toBe('')
@@ -383,43 +398,31 @@ describe('settingsSchema', () => {
     ).toEqual([])
   })
 
-  it('reads an earlier build’s saved on-device default as the cloud default', () => {
-    // Earlier builds saved every key, so `local` without the confirmed flag is
-    // usually their old default; with no attested on-device model it never
-    // summarized anything.
-    const upgraded = settingsSchema.parse({ aiSummaries: 'local' })
-    expect(upgraded.aiSummaries).toBe('cloud')
-    // Nothing is agreed on the user's behalf: the cloud engine still asks first.
-    expect(upgraded.aiSummariesCloudConfirmed).toBe(false)
-
-    const attested = {
-      id: 'ollama',
-      provider: 'openai-compatible',
-      model: 'llama:latest',
-      baseUrl: 'http://localhost:11434/v1',
-      keyHint: '',
-      onDevice: { model: 'llama:latest', baseUrl: 'http://localhost:11434/v1', server: 'ollama' },
-    }
-    expect(
-      settingsSchema.parse({ aiSummaries: 'local', aiProviders: [attested] }).aiSummaries,
-    ).toBe('local')
+  it('keeps an earlier build’s saved on-device summaries on this Mac', () => {
+    // An earlier build's `local`, with no model attested on-device yet, is never
+    // moved to a cloud provider: the user adds a local model, or picks cloud.
+    const earlier = settingsSchema.parse({ aiSummaries: 'local' })
+    expect(earlier.aiSummaries).toBe('local')
+    expect(earlier.aiSummariesCloudConsent).toBeNull()
+    expect(earlier.aiSummariesLocalModel).toBeNull()
   })
 
-  it('runs both legacy steps on one document, each leaving the other keys alone', () => {
+  it('leaves an earlier build’s cloud go-ahead to it: it names no model', () => {
+    // Every build shares the document. The old flag stays as written, for the
+    // builds that read it, and grants nothing here.
+    const earlier = settingsSchema.parse({ aiSummaries: 'cloud', aiSummariesCloudConfirmed: true })
+    expect(earlier.aiSummariesCloudConfirmed).toBe(true)
+    expect(earlier.aiSummariesCloudConsent).toBeNull()
+    // A new document still carries it, as `false`: earlier builds read a
+    // document without it as their own and would move a saved `local` to `cloud`.
+    expect(DEFAULT_SETTINGS.aiSummariesCloudConfirmed).toBe(false)
+  })
+
+  it('upgrades the spoken language without touching the summary mode', () => {
     const upgraded = settingsSchema.parse({ transcriptionLanguage: 'zh', aiSummaries: 'local' })
     expect(upgraded.transcriptionLanguages).toEqual(['zh'])
     expect(upgraded).toHaveProperty('transcriptionLanguage', 'zh')
-    expect(upgraded.aiSummaries).toBe('cloud')
-
-    // A document this build wrote is left as it is by both steps.
-    const current = settingsSchema.parse({
-      transcriptionLanguage: 'ja',
-      transcriptionLanguages: ['en'],
-      aiSummaries: 'local',
-      aiSummariesCloudConfirmed: false,
-    })
-    expect(current.transcriptionLanguages).toEqual(['en'])
-    expect(current.aiSummaries).toBe('local')
+    expect(upgraded.aiSummaries).toBe('local')
   })
 
   it('carries the Rust-owned localOnlyFolders key through verbatim, typos included', () => {
@@ -447,7 +450,10 @@ describe('settingsSchema', () => {
       semanticSearchEnabled: false,
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
-      aiSummaries: 'cloud',
+      aiSummaries: 'local',
+      aiSummariesLocalModel: null,
+      aiSummariesCloudModel: null,
+      aiSummariesCloudConsent: null,
       aiSummariesCloudConfirmed: false,
       localOcrProviderId: null,
       transcriptionFormat: true,

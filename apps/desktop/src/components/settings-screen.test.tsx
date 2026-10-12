@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import type { Locator } from 'vitest/browser'
 import { render } from 'vitest-browser-react'
-import { setBridge, type EmbedStatus, type GraphInfo } from '@reflect/core'
+import { setBridge, type EmbedStatus, type GraphInfo, type OllamaModels } from '@reflect/core'
 import { formatFullDate } from '@/lib/dates.ts'
 import { resetOperations } from '@/lib/operations.ts'
 import { setSemanticIndexProgress } from '@/lib/semantic-index-progress.ts'
@@ -51,6 +51,14 @@ vi.mock('@/lib/platform.ts', async (importOriginal) => ({
 }))
 // The Import section only hands the picked zip to the workspace-level V1
 // import controller, which these screen tests don't mount.
+// The summary model picker's look at Ollama, answered per test.
+const ollama = vi.hoisted(() => ({
+  models: { kind: 'unreachable' } as OllamaModels | undefined,
+  refresh: vi.fn<() => void>(),
+}))
+vi.mock('@/hooks/use-ollama-models.ts', () => ({
+  useOllamaModels: () => ({ models: ollama.models, checking: false, refresh: ollama.refresh }),
+}))
 vi.mock('@/providers/v1-import-provider.tsx', () => ({
   useV1Import: () => ({
     state: { phase: 'idle' },
@@ -134,6 +142,8 @@ async function pickRadio(name: RegExp): Promise<void> {
 
 beforeEach(() => {
   stored = {}
+  ollama.models = { kind: 'unreachable' }
+  ollama.refresh.mockReset()
   embedStatus = { status: 'uninitialized' }
   graph.current = null
   graph.indexGeneration = 7
@@ -340,7 +350,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -417,7 +430,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -508,7 +524,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -606,7 +625,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -683,7 +705,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -753,7 +778,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -832,7 +860,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -908,7 +939,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1012,7 +1046,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1100,7 +1137,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1147,10 +1187,26 @@ describe('SettingsScreen', () => {
     )
   })
 
-  it('summarizes with the cloud provider by default and persists the on-device choice', async () => {
+  it('summarizes on this Mac by default and says how to get a model', async () => {
     await renderScreen()
     const trigger = page.getByRole('combobox', { name: 'AI summaries' })
-    await expect.element(trigger).toMatchTextContent('Cloud provider')
+    await expect.element(trigger).toMatchTextContent('On this Mac')
+    await expect.element(page.getByText(/Ollama isn’t running on this Mac/)).toBeInTheDocument()
+    await page.getByRole('button', { name: 'Check again' }).click()
+    expect(ollama.refresh).toHaveBeenCalledTimes(1)
+
+    ollama.models = { kind: 'ok', models: [] }
+    await trigger.click()
+    await page.getByRole('option', { name: 'Off · show the opening text' }).click()
+    await trigger.click()
+    await page.getByRole('option', { name: 'On this Mac' }).click()
+    await expect
+      .element(page.getByText(/Ollama has no models yet\. Pull one in Terminal/))
+      .toBeInTheDocument()
+    await expect.element(page.getByText('ollama pull qwen3')).toBeInTheDocument()
+
+    await trigger.click()
+    await page.getByRole('option', { name: 'Cloud provider' }).click()
     await expect
       .element(
         page.getByText(
@@ -1162,23 +1218,95 @@ describe('SettingsScreen', () => {
     await expect
       .element(page.getByRole('button', { name: 'Start summarizing' }))
       .not.toBeInTheDocument()
-
-    await trigger.click()
-    await page.getByRole('option', { name: 'On this Mac' }).click()
-
-    await expect.element(trigger).toMatchTextContent('On this Mac')
-    await expect
-      .element(page.getByText('Add an on-device model in AI providers to start summarizing.'))
-      .toBeInTheDocument()
-    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ aiSummaries: 'local' }))
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ aiSummaries: 'cloud' }))
   })
 
-  it('asks for the go-ahead once a cloud provider is set up, and persists it', async () => {
+  it('sets up an Ollama model for summaries once the user confirms it runs here', async () => {
+    ollama.models = {
+      kind: 'ok',
+      models: [
+        { name: 'gemma4:31b', parameterSize: '31.0B' },
+        { name: 'qwen3.8:27b', parameterSize: '27.4B' },
+      ],
+    }
+    await renderScreen()
+    await expect.element(page.getByText('Choose a model to start summarizing.')).toBeInTheDocument()
+
+    await page.getByRole('combobox', { name: 'Summary model' }).click()
+    await page.getByRole('option', { name: 'qwen3.8:27b · 27.4B' }).click()
+    await expect
+      .element(page.getByText('Treat this model as running on this Mac?'))
+      .toBeInTheDocument()
+    await page.getByRole('button', { name: 'Turn on' }).click()
+
+    await vi.waitFor(() => {
+      const document = saved.at(-1) as {
+        aiProviders: { id: string }[]
+        aiSummariesLocalModel: unknown
+      }
+      expect(document.aiProviders).toEqual([
+        expect.objectContaining({
+          provider: 'openai-compatible',
+          model: 'qwen3.8:27b',
+          baseUrl: 'http://localhost:11434/v1',
+          onDevice: {
+            model: 'qwen3.8:27b',
+            baseUrl: 'http://localhost:11434/v1',
+            server: 'ollama',
+          },
+        }),
+      ])
+      expect(document.aiSummariesLocalModel).toEqual({
+        configId: document.aiProviders[0]!.id,
+        modelId: 'qwen3.8:27b',
+      })
+    })
+    await expect
+      .element(page.getByRole('combobox', { name: 'Summary model' }))
+      .toMatchTextContent('qwen3.8:27b · Ollama')
+  })
+
+  it('picks the model already set up on this Mac instead of adding another entry', async () => {
+    const gemma = {
+      id: 'gemma',
+      provider: 'openai-compatible',
+      model: 'gemma4:26b',
+      baseUrl: 'http://localhost:11434/v1',
+      keyHint: '',
+      onDevice: { model: 'gemma4:26b', baseUrl: 'http://localhost:11434/v1', server: 'ollama' },
+    }
+    stored = { aiProviders: [gemma], defaultAiProviderId: 'gemma' }
+    ollama.models = {
+      kind: 'ok',
+      models: [
+        { name: 'gemma4:26b', parameterSize: '25.8B' },
+        { name: 'qwen3.8:27b', parameterSize: '27.4B' },
+      ],
+    }
+    await renderScreen()
+    const picker = page.getByRole('combobox', { name: 'Summary model' })
+    await expect.element(picker).toMatchTextContent('gemma4:26b · Ollama')
+
+    await picker.click()
+    // Set up once, listed once.
+    await expectLocatorToHaveCount(page.getByRole('option', { name: /^gemma4:26b/ }), 1)
+    await page.getByRole('option', { name: 'gemma4:26b · Ollama' }).click()
+
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({
+        aiProviders: [gemma],
+        aiSummariesLocalModel: { configId: 'gemma', modelId: 'gemma4:26b' },
+      }),
+    )
+  })
+
+  it('asks for the go-ahead once a cloud provider is set up, pinning the model', async () => {
     stored = {
       aiProviders: [
         { id: 'cloud', provider: 'anthropic', model: 'claude-opus-4-8', keyHint: 'wxyz1' },
       ],
       defaultAiProviderId: 'cloud',
+      aiSummaries: 'cloud',
     }
     await renderScreen()
     await expect
@@ -1187,16 +1315,87 @@ describe('SettingsScreen', () => {
     await expect
       .element(page.getByText(/Private notes are never sent and keep their opening text/))
       .toBeInTheDocument()
-    await expect.element(page.getByText(/to start summarizing/)).not.toBeInTheDocument()
+    await expect
+      .element(page.getByRole('combobox', { name: 'Summary provider' }))
+      .toMatchTextContent('Anthropic · ·····wxyz1')
+    // The default provider's small model until the user picks another.
+    await expect
+      .element(page.getByRole('combobox', { name: 'Summary model' }))
+      .toMatchTextContent('Claude Haiku 4.5')
 
     await page.getByRole('button', { name: 'Start summarizing' }).click()
 
+    const haiku = { configId: 'cloud', modelId: 'claude-haiku-4-5' }
     await vi.waitFor(() =>
-      expect(saved.at(-1)).toMatchObject({ aiSummaries: 'cloud', aiSummariesCloudConfirmed: true }),
+      expect(saved.at(-1)).toMatchObject({
+        aiSummaries: 'cloud',
+        aiSummariesCloudModel: haiku,
+        aiSummariesCloudConsent: haiku,
+      }),
     )
+    // The flag earlier builds read alone is never set: they'd send to their own
+    // default provider on the strength of it.
+    expect(saved.at(-1)).toHaveProperty('aiSummariesCloudConfirmed', false)
     await expect
       .element(page.getByRole('button', { name: 'Start summarizing' }))
       .not.toBeInTheDocument()
+  })
+
+  it('asks again for any model but the one agreed to', async () => {
+    const haiku = { configId: 'cloud', modelId: 'claude-haiku-4-5' }
+    stored = {
+      aiProviders: [
+        { id: 'cloud', provider: 'anthropic', model: 'claude-opus-4-8', keyHint: 'wxyz1' },
+        { id: 'work', provider: 'openai', model: 'gpt-6.1-sol', keyHint: 'abcde' },
+      ],
+      defaultAiProviderId: 'cloud',
+      aiSummaries: 'cloud',
+      aiSummariesCloudModel: haiku,
+      aiSummariesCloudConsent: haiku,
+    }
+    await renderScreen()
+    await expect
+      .element(page.getByRole('button', { name: 'Start summarizing' }))
+      .not.toBeInTheDocument()
+
+    await page.getByRole('combobox', { name: 'Summary provider' }).click()
+    await page.getByRole('option', { name: 'OpenAI · ·····abcde' }).click()
+
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({
+        aiSummariesCloudModel: { configId: 'work', modelId: 'gpt-5.4-nano' },
+        aiSummariesCloudConsent: haiku,
+      }),
+    )
+    await expect
+      .element(page.getByRole('button', { name: 'Start summarizing' }))
+      .toBeInTheDocument()
+  })
+
+  it('asks for another model on the agreed entry, and over an earlier build’s go-ahead', async () => {
+    stored = {
+      aiProviders: [
+        { id: 'cloud', provider: 'anthropic', model: 'claude-opus-4-8', keyHint: 'wxyz1' },
+      ],
+      defaultAiProviderId: 'cloud',
+      aiSummaries: 'cloud',
+      aiSummariesCloudModel: { configId: 'cloud', modelId: 'claude-sonnet-5-5' },
+      aiSummariesCloudConsent: { configId: 'cloud', modelId: 'claude-haiku-4-5' },
+      // An earlier build's go-ahead named no model and grants nothing here.
+      aiSummariesCloudConfirmed: true,
+    }
+    await renderScreen()
+    await page.getByRole('button', { name: 'Start summarizing' }).click()
+
+    const sonnet = { configId: 'cloud', modelId: 'claude-sonnet-5-5' }
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({
+        aiSummariesCloudModel: sonnet,
+        aiSummariesCloudConsent: sonnet,
+        // Left as that build wrote it.
+        aiSummariesCloudConfirmed: true,
+      }),
+    )
   })
 
   it('names the on-device default instead of asking for a provider the user has', async () => {
@@ -1217,13 +1416,13 @@ describe('SettingsScreen', () => {
         { id: 'cloud', provider: 'anthropic', model: 'claude-opus-4-8', keyHint: 'wxyz1' },
       ],
       defaultAiProviderId: 'ollama',
-      aiSummariesCloudConfirmed: false,
+      aiSummaries: 'cloud',
     }
     await renderScreen()
     await expect
       .element(
         page.getByText(
-          'Your default AI provider runs on this Mac. Choose On this Mac, or make a cloud provider the default.',
+          'Your default AI provider runs on this Mac. Choose a cloud provider, or On this Mac.',
         ),
       )
       .toBeInTheDocument()
@@ -1255,7 +1454,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1357,7 +1559,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1498,7 +1703,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: true,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1586,7 +1794,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1666,7 +1877,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: true,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1789,7 +2003,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -1949,7 +2166,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -2035,7 +2255,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,
@@ -2112,7 +2335,10 @@ describe('SettingsScreen', () => {
           semanticSearchEnabled: false,
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
-          aiSummaries: 'cloud',
+          aiSummaries: 'local',
+          aiSummariesLocalModel: null,
+          aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           aiSummariesCloudConfirmed: false,
           localOcrProviderId: null,
           transcriptionFormat: true,

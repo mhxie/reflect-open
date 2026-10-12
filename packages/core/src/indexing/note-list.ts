@@ -18,7 +18,7 @@ import { recallOrder } from './filtered-search.ts'
  * excludes daily notes — the stream is their home — but a filter includes
  * matching daily notes alongside regular notes. Templates remain boilerplate,
  * not graph content. Uncapped: the screen virtualizes, the row
- * snippet is the stored `preview` column (derived once at index time), and
+ * snippet is the stored `summary` or `preview` column (derived once at index time), and
  * neither query carries a per-row parameter, so list size has no SQL ceiling.
  */
 
@@ -28,7 +28,10 @@ export interface NoteListEntry {
   title: string
   displayTitle?: string | null | undefined
   lang?: string | null | undefined
-  /** The indexed row preview (`buildIndexedNote`; may be empty). */
+  /**
+   * The note's fresh AI summary when it has one, else its indexed leading text
+   * (`buildIndexedNote`; may be empty). Only this row shows the summary.
+   */
   snippet: string
   /** The note's body tags (first-seen casing), alphabetical. */
   tags: string[]
@@ -178,6 +181,7 @@ const NOTE_LIST_COLUMNS = [
   'notes.lang',
   'notes.mtime',
   'notes.preview',
+  'notes.summary',
   'notes.isPinned',
   'notes.pinnedOrder',
   'notes.isPrivate',
@@ -303,7 +307,7 @@ export async function listNotes(options: NoteListOptions = {}): Promise<NoteList
     displayTitle: row.displayTitle,
     lang: row.lang,
     mtime: row.mtime,
-    snippet: row.preview,
+    snippet: row.summary || row.preview,
     tags: tagsByPath.get(row.path) ?? [],
     isPinned: row.isPinned !== 0,
     pinnedOrder: row.pinnedOrder,

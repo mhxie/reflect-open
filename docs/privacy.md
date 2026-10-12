@@ -117,33 +117,46 @@ reads currently return unsupported.
   fifteen minutes. Recording other people may require their consent where you
   are.
 
-## AI summaries in All Notes (your AI provider by default)
+## AI summaries in All Notes (on this Mac by default)
 
-Settings → All Notes → AI summaries decides which engine writes the one-sentence
-summary that replaces a long note's opening text in All Notes. As with audio-memo
-transcription, the default needs nothing beyond a provider set up in Reflect:
+Settings → All Notes → AI summaries decides which engine, and which model,
+writes the one-sentence summary that replaces a long note's opening text in the
+All Notes list:
 
-- **Cloud provider** (the default): the default provider's small model summarizes
-  public notes through the same cloud privacy gate as AI chat. Nothing is sent
-  until you agree once: when a provider is set up and long public notes are
-  waiting, Reflect asks *Summarize N notes with <provider>?* (Settings has the
-  same Start button). From then on it works through the graph's existing long
+- **On this Mac** (the default): only a verified model running on this Mac
+  summarizes, private notes included. Nothing leaves the Mac. The picker lists
+  the models already set up as running on this Mac and the ones installed in a
+  running Ollama. Picking an Ollama model asks you to confirm that it runs here,
+  the same confirmation AI providers asks for, and covers exactly that model at
+  `http://localhost:11434/v1`. A provider entry already confirmed for it is
+  reused; otherwise one is added. Models that can only make embeddings are not
+  listed. Without a choice, the default entry, then the first, that runs on this
+  Mac summarizes. With none set up, notes keep their opening text, and the
+  picker says how to get a model when Ollama isn't running or has none pulled.
+- **Cloud provider:** the provider entry and model you choose (the default
+  provider's small model until you pick one) summarizes public notes through
+  the same cloud privacy gate as AI chat. Nothing is sent until you agree:
+  Reflect asks *Summarize N notes with <provider> (<model>)?*, and Settings has
+  the same Start button. Agreeing records exactly that provider entry and
+  model, and notes go only to them: choosing another entry or another model
+  asks again, so summaries never move to a provider or model you were not
+  asked about. From then on Reflect works through the graph's existing long
   notes in the background and keeps edited notes summarized. Private notes,
-  device-only content, and local-only folders are never sent; private notes keep
-  their opening text, and local-only notes are never summarized at all. When the
-  default provider runs on this Mac, this engine does not turn to another
-  provider; choose *On this Mac* instead.
-- **On this Mac:** only an attested, verified on-device model (an
-  OpenAI-compatible server on this Mac, added in AI providers) summarizes,
-  private notes included. Nothing leaves the Mac.
+  device-only content, and local-only folders are never sent. Private notes
+  keep their opening text, and local-only notes are never summarized at all.
 - **Off · show the opening text:** nothing is summarized and the plain snippet stays.
 
-Earlier builds saved *On-device model only*, their default, whether or not you
-chose it. A settings file from them with no attested on-device model reads as
-*Cloud provider*, which still asks before sending anything.
+A setting saved as *On this Mac* stays there, whether or not a local model is
+set up yet: summaries never switch to a cloud provider on their own. A cloud
+go-ahead given in an earlier build named no model, so this build asks once
+more. It leaves that earlier answer as it is for those builds, and never gives
+one of its own.
 
 The summary is written into the note's `aiSummary` frontmatter, so it travels
-with the note — including to Git backup, like the rest of the note's text.
+with the note, including to Git backup, like the rest of the note's text. In
+Reflect it shows only in the All Notes list. Search results, *On this day*,
+and the note listings AI chat reads keep showing the note's own opening text,
+so AI-written text doesn't feed back into AI context.
 
 ## Semantic search (off by default)
 
@@ -454,7 +467,7 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | Call | Destination | Carries note content? | Off by default? |
 | --- | --- | --- | --- |
 | AI chat | Your chosen provider or verified local model | Yes — cloud tools block private and device-only sources | Yes (needs configuration) |
-| AI summaries | Your default provider's small model for public notes; your verified local model when *On this Mac* is chosen | Yes — private notes are never sent to the cloud | Asks once — nothing is sent until you start it, then existing public long notes are read in the background |
+| AI summaries | The verified local model you pick by default; the cloud provider and model you choose and agree to for public notes | Yes — private notes are never sent to the cloud | On this Mac by default; the cloud asks for each provider and model — nothing is sent until you start it, then existing public long notes are read in the background |
 | Local image/PDF OCR | Your verified local vision model | Yes — stays on your machine | Yes (explicit model selection) |
 | Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
 | On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |

@@ -51,6 +51,31 @@ describe('searchWithFilters', () => {
     expect(mockInvoke.mock.calls[0]![1]['sql']).toContain('"asset_text_hash"')
   })
 
+  it.each([
+    ['#Work', 'What the agenda covers.'],
+    ['', 'What the agenda covers.'],
+    // A title-only match has no snippet either; the row must not fall back to AI text.
+    ['work', ''],
+  ])('carries the AI summary on the no-text feed only (%j)', async (query, summary) => {
+    mockInvoke.mockResolvedValueOnce([
+      {
+        path: 'notes/work.md',
+        title: 'Work',
+        daily_date: null,
+        preview: 'Weekly agenda.',
+        summary: 'What the agenda covers.',
+        mtime: 2000,
+        is_pinned: 0,
+        is_private: 0,
+        has_conflict: 0,
+        fts_highlighted_title: '\u{1}Work\u{2}',
+        snippet: 'Weekly agenda.',
+      },
+    ])
+    const hits = await searchWithFilters(parseSearchQuery(query))
+    expect(hits[0]).toMatchObject({ preview: 'Weekly agenda.', summary })
+  })
+
   it.each(['#Work', '', 'work'])(
     'preserves Private and conflict metadata for %j using one bulk query',
     async (query) => {
@@ -223,6 +248,7 @@ describe('searchWithFilters', () => {
         dailyDate: null,
         snippet: '\u{1}a\u{2} …',
         preview: 'Quokka facts.',
+        summary: '',
         mtime: 3000,
         isPinned: false,
       },

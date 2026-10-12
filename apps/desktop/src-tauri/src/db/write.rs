@@ -56,6 +56,10 @@ pub struct IndexedNote {
     #[serde(default)]
     pub(super) asset_text: String,
     pub(super) preview: String,
+    /// The fresh `aiSummary` text, which only the All Notes row shows; empty
+    /// when the note has none.
+    #[serde(default)]
+    pub(super) summary: String,
     pub(super) links: Vec<IndexedLink>,
     pub(super) tags: Vec<IndexedTag>,
     pub(super) aliases: Vec<IndexedAlias>,
@@ -172,8 +176,8 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
     remove_note(conn, &note.path)?;
 
     conn.prepare_cached(
-        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh, display_title, lang)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh, display_title, lang, summary)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
     )?
     .execute(params![
         note.path,
@@ -202,6 +206,7 @@ pub(super) fn apply_note(conn: &Connection, note: &IndexedNote) -> AppResult<()>
         i64::from(note.summary_fresh),
         note.display_title,
         note.lang,
+        note.summary,
     ])?;
     {
         let mut stmt = conn.prepare_cached(

@@ -135,8 +135,11 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * 32 - localized notes derive display titles from the H1 when no override is authored.
  * 33 - task breadcrumbs start with the chain of headings above the task (the
  * `Tasks` heading included), so every note's tasks must reproject.
+ * 34 - the fresh AI summary moves to `notes.summary` (migration 0029) and
+ * `notes.preview` is the leading plain text again, so search, On this day and
+ * chat listings stop showing AI-written text; every summarized note reprojects.
  */
-export const PROJECTION_VERSION = 33
+export const PROJECTION_VERSION = 34
 
 /**
  * Precedence of the spellings a note answers to (`note_claims.tier`): the
@@ -272,10 +275,15 @@ export const indexedNoteSchema = z.object({
   /** Provenance of the FTS/embedding snapshot, for outbound retrieval gates. */
   hasDeviceOnlyContent: z.boolean().default(false),
   /**
-   * The All Notes row snippet, derived once here rather than per query: the
-   * note's fresh AI summary when it has one, its leading plain text otherwise.
+   * The note's leading plain text, derived once here rather than per query:
+   * the snippet every list, search feed and AI listing shows.
    */
   preview: z.string(),
+  /**
+   * The `aiSummary` frontmatter text while it summarizes the current body,
+   * else empty. Only the All Notes row shows it, in place of `preview`.
+   */
+  summary: z.string().default(''),
   /** The `aiSummary` frontmatter block summarizes the current body. */
   summaryFresh: z.boolean(),
   links: z.array(indexedLinkSchema),
@@ -469,7 +477,8 @@ export function buildIndexedNote(
     text: body,
     assetText: meta.assetText ?? '',
     hasDeviceOnlyContent: meta.hasDeviceOnlyContent ?? false,
-    preview: summary ?? previewSnippet(parsed.displayText, parsed.title),
+    preview: previewSnippet(parsed.displayText, parsed.title),
+    summary: summary ?? '',
     summaryFresh: summary !== null,
     hasContent: parsed.displayText !== '' || hasSearchableChar(body),
     bodyChars: countDisplayChars(parsed),

@@ -275,6 +275,9 @@ export async function writeNote(
  * note neither jumps to the top of the recency-sorted lists nor reads as
  * "Updated just now". The note must exist and still hold `expectedContents`;
  * a note in a local-only folder is refused (`unsupported`).
+ *
+ * The echo asks the index to re-read the note on every platform: with the
+ * time unchanged, the watcher's report of this write reads as already indexed.
  */
 export async function writeNoteKeepingModified(
   path: string,
@@ -287,7 +290,12 @@ export async function writeNoteKeepingModified(
     { path, contents, generation, expectedContents },
     z.number().nullable(),
   )
-  echoLocalWrite({ path, kind: 'upsert', modifiedMs: modifiedMs ?? Date.now() })
+  echoLocalWrite({
+    path,
+    kind: 'upsert',
+    reread: true,
+    ...(modifiedMs === null ? {} : { modifiedMs }),
+  })
 }
 
 /**

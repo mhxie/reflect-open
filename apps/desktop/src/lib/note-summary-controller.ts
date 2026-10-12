@@ -3,9 +3,10 @@ import {
   isNotePath,
   isSilentStop,
   reconcileNoteSummaries,
+  sameSummariesModel,
   subscribeIndexApplied,
-  type AiProviderId,
   type AiProvidersState,
+  type AiSummariesModel,
   type AiSummaryMode,
   type NoteSummaryConsent,
   type ReconcileStop,
@@ -24,15 +25,27 @@ import { providerFetch } from '@/lib/provider-fetch.ts'
  * Notes the pass could not summarize at their indexed revision are remembered
  * for the session, so a refusal is never re-sent until the note changes. A
  * missing model (`config`) holds the loop off for {@link CONFIG_BACKOFF_MS}
- * unless the providers or the mode change, so saves don't re-probe a local
- * server that isn't running. A cloud pass the user hasn't agreed to yet asks
- * through `onConsentNeeded`, once per controller and provider.
+ * unless the providers, the mode or the chosen models change, so saves don't
+ * re-probe a local server that isn't running. A cloud pass the user hasn't
+ * agreed to yet asks through `onConsentNeeded`, once per controller and model.
  */
 export interface NoteSummaryController {
   /** Attach the triggers and run the launch pass. */
   start(): void
+  /**
+   * A setting the passes read changed (mode, model, providers): run a pass
+   * now, asking again if a go-ahead is still needed. A change may have
+   * withdrawn the open ask.
+   */
+  refresh(): void
   /** Tear down triggers and timers; abort an in-flight pass at its next gate. */
   dispose(): void
+}
+
+/** The model each summary mode uses; `null` picks one (see `ReconcileNoteSummariesInput`). */
+export interface NoteSummaryModels {
+  local: AiSummariesModel | null
+  cloud: AiSummariesModel | null
 }
 
 export interface NoteSummaryControllerOptions {
@@ -42,9 +55,11 @@ export interface NoteSummaryControllerOptions {
   getProviders: () => AiProvidersState
   /** The `aiSummaries` setting, read at the start of every pass. */
   getMode: () => AiSummaryMode
-  /** `aiSummariesCloudConfirmed` when the controller was built; a change rebuilds it. */
-  cloudConfirmed: boolean
-  /** A cloud pass is waiting for the user's go-ahead; called once per controller and provider. */
+  /** The model each mode uses (`aiSummariesLocalModel`, `aiSummariesCloudModel`), read per pass. */
+  getModels: () => NoteSummaryModels
+  /** `aiSummariesCloudConsent` when the controller was built; a change rebuilds it. */
+  cloudConsent: AiSummariesModel | null
+  /** A cloud pass is waiting for the user's go-ahead; called once per controller and model. */
   onConsentNeeded: (consent: NoteSummaryConsent) => void
 }
 
@@ -64,11 +79,11 @@ export function createNoteSummaryController(
   /** A `config` stop: the snapshot it held for, and until when. */
   let blocked: { snapshot: string; until: number } | null = null
   let loggedStop: string | null = null
-  /** The provider the open ask names; a pass naming another asks again. */
-  let askedProvider: AiProviderId | null = null
+  /** The model the open ask names; a pass naming another asks again. */
+  let askedChoice: AiSummariesModel | null = null
 
   function snapshot(): string {
-    return JSON.stringify([options.getMode(), options.getProviders()])
+    return JSON.stringify([options.getMode(), options.getProviders(), options.getModels()])
   }
 
   function surfaceStop(stopped: ReconcileStop | null): void {
@@ -107,10 +122,13 @@ export function createNoteSummaryController(
     }
     blocked = null
     const passIsStale = (): boolean => isStale() || snapshot() !== passSnapshot
+    const models = options.getModels()
     const outcome = await reconcileNoteSummaries({
       providers: options.getProviders(),
       mode,
-      cloudConfirmed: options.cloudConfirmed,
+      localModel: models.local,
+      cloudModel: models.cloud,
+      cloudConsent: options.cloudConsent,
       generation: options.generation,
       fetchFn: providerFetch,
       isStale: passIsStale,
@@ -119,9 +137,10 @@ export function createNoteSummaryController(
     })
     for (const key of outcome.settled) settled.add(key)
     surfaceStop(outcome.stopped)
-    if (outcome.consent !== null && outcome.consent.provider !== askedProvider && !isStale()) {
-      askedProvider = outcome.consent.provider
-      options.onConsentNeeded(outcome.consent)
+    const consent = outcome.consent
+    if (consent !== null && !sameSummariesModel(consent.choice, askedChoice) && !isStale()) {
+      askedChoice = consent.choice
+      options.onConsentNeeded(consent)
     }
     if (outcome.nextDueAt !== null && !isStale()) {
       scheduleAt(outcome.nextDueAt)
@@ -170,5 +189,12 @@ export function createNoteSummaryController(
     loop.schedule()
   }
 
-  return { start, dispose: loop.dispose }
+  function refresh(): void {
+    askedChoice = null
+    if (started && !loop.isStale()) {
+      loop.schedule()
+    }
+  }
+
+  return { start, refresh, dispose: loop.dispose }
 }
