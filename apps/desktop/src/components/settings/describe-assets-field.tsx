@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import { resolveOnDeviceTarget, type AiProvidersState } from '@reflect/core'
+import { resolveOnDeviceTarget, type AiProviderConfig, type AiProvidersState } from '@reflect/core'
 import {
   Select,
   SelectContent,
@@ -22,6 +22,33 @@ import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 
+/** The OCR model select's value for "use the default AI provider". */
+const DEFAULT_OCR_MODEL = 'default'
+
+interface OcrModelOption {
+  readonly value: string
+  readonly label: string
+  readonly disabled?: boolean
+}
+
+/**
+ * The OCR model choices, in menu order. The same list labels the closed
+ * select (its `items`), so it shows a model's name rather than its entry id.
+ */
+function ocrModelOptions(
+  localModels: readonly AiProviderConfig[],
+  selectedId: string | null,
+): OcrModelOption[] {
+  const options: OcrModelOption[] = [
+    { value: DEFAULT_OCR_MODEL, label: 'Default AI · public attachments only' },
+    ...localModels.map((config) => ({ value: config.id, label: `${config.model} · on this Mac` })),
+  ]
+  if (selectedId !== null && !localModels.some((config) => config.id === selectedId)) {
+    options.push({ value: selectedId, label: 'Selected local model unavailable', disabled: true })
+  }
+  return options
+}
+
 /**
  * Settings → Search → OCR assets (Plan 20): a toggle for the automatic path
  * (read new images/PDFs as they're added) plus an explicit backfill, gated
@@ -42,6 +69,7 @@ export function DescribeAssetsField(): ReactElement {
       config.supportsImages &&
       resolveOnDeviceTarget(config) !== null,
   )
+  const options = ocrModelOptions(localModels, settings.localOcrProviderId ?? null)
   const generation = graph?.generation ?? null
 
   const runBackfill = async (): Promise<void> => {
@@ -76,27 +104,21 @@ export function DescribeAssetsField(): ReactElement {
     >
       <div className="mt-3">
         <Select
-          value={settings.localOcrProviderId ?? 'default'}
+          value={settings.localOcrProviderId ?? DEFAULT_OCR_MODEL}
+          items={options}
           onValueChange={(value) =>
-            updateSettings({ localOcrProviderId: value === 'default' ? null : value })
+            updateSettings({ localOcrProviderId: value === DEFAULT_OCR_MODEL ? null : value })
           }
         >
           <SelectTrigger aria-label="OCR model">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="default">Default AI · public attachments only</SelectItem>
-            {localModels.map((config) => (
-              <SelectItem key={config.id} value={config.id}>
-                {config.model} · on this Mac
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+                {option.label}
               </SelectItem>
             ))}
-            {settings.localOcrProviderId &&
-            !localModels.some((config) => config.id === settings.localOcrProviderId) ? (
-              <SelectItem value={settings.localOcrProviderId} disabled>
-                Selected local model unavailable
-              </SelectItem>
-            ) : null}
           </SelectContent>
         </Select>
       </div>

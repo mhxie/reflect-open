@@ -67,6 +67,32 @@ describe('DescribeAssetsField', () => {
     )
   })
 
+  it('names the selected OCR model when closed, not its entry id', async () => {
+    const local = {
+      id: 'cfg-ollama-1234',
+      provider: 'openai-compatible',
+      model: 'gemma4:31b',
+      keyHint: '',
+      supportsImages: true,
+      baseUrl: 'http://localhost:11434/v1',
+      onDevice: { baseUrl: 'http://localhost:11434/v1', model: 'gemma4:31b', server: 'ollama' },
+    } as const
+    const select = page.getByRole('combobox', { name: 'OCR model' })
+
+    const closedDefault = await render(<DescribeAssetsField />)
+    await expect.element(select).toMatchTextContent('Default AI · public attachments only')
+    await closedDefault.unmount()
+
+    settingsRef.current = {
+      ...settingsRef.current,
+      aiProviders: [PROVIDER, local],
+      localOcrProviderId: local.id,
+    }
+    await render(<DescribeAssetsField />)
+    await expect.element(select).toMatchTextContent('gemma4:31b · on this Mac')
+    expect(select.element().textContent).not.toContain(local.id)
+  })
+
   it('reflects and toggles the automatic OCR setting', async () => {
     await render(<DescribeAssetsField />)
     const toggle = page.getByRole('switch', { name: /ocr new assets automatically/i })
