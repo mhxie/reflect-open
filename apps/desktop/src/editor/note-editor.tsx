@@ -8,7 +8,7 @@ import {
   resolveNoYouTubeVideo,
 } from '@/editor/local-only-render.ts'
 import { MediaLightbox } from '@/editor/media-lightbox.tsx'
-import { resolveWikilink } from '@/editor/resolve-wikilink.ts'
+import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
 import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
@@ -344,6 +344,7 @@ export function NoteEditor({
   handleRef,
 }: NoteEditorProps): ReactElement {
   const graphXPostResolver = useXPostResolver()
+  const resolveWikilink = useWikilinkResolver()
   const innerRef = useRef<EditorHandle>(null)
 
   // Latest callbacks, read through refs so a changing prop identity never

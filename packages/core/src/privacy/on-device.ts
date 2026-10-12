@@ -13,6 +13,7 @@ import type {
 } from '../settings/schema.ts'
 import { ReflectError } from '../errors.ts'
 import { isLoopbackHttpUrl } from './loopback.ts'
+import type { OnDeviceTarget } from './on-device-target.ts'
 import { verifyOnDeviceServer } from './on-device-verification.ts'
 
 /**
@@ -31,19 +32,6 @@ import { verifyOnDeviceServer } from './on-device-verification.ts'
 
 export { isLoopbackHttpUrl } from './loopback.ts'
 export { verifyOnDeviceServer } from './on-device-verification.ts'
-
-declare const onDeviceTargetBrand: unique symbol
-
-/**
- * A resolved model the user attested runs on this Mac. Only
- * {@link resolveOnDeviceTarget} creates one; an object literal does not
- * typecheck.
- */
-export interface OnDeviceTarget {
-  readonly kind: 'on-device'
-  readonly config: Readonly<OpenAiCompatibleProviderConfig>
-  readonly [onDeviceTargetBrand]: true
-}
 
 /** Any other resolved model: content bound for it must pass the cloud gate. */
 export interface CloudTarget {
@@ -220,12 +208,3 @@ export function withOnDeviceModel(
   const providers = withAiProviderOnDevice(added.providers, id, true, server)
   return { state: { ...added, providers }, id }
 }
-
-/** A refusal from {@link verifyOnDeviceServer}, with the reason to show. */
-export interface OnDeviceServerRefusal {
-  readonly kind: 'refused'
-  readonly reason: string
-}
-
-/** What {@link verifyOnDeviceServer} concluded about the server behind a target. */
-export type OnDeviceServerVerdict = 'ok' | OnDeviceServerRefusal

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WikiEntrySummary } from './entry-summary.ts'
 import { localDayStartMs } from '../indexing/filter-query.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 import { DEFAULT_WIKI_SORT } from './sort-keys.ts'
 import { chooseWikiSort, sortWikiEntries } from './sort.ts'
 

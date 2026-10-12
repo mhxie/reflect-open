@@ -1,5 +1,5 @@
 import { isWikiIndex } from './hierarchy.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 
 /** One topic's entries on the Wiki screen. */
 export interface WikiTopicGroup {

@@ -1,5 +1,5 @@
 import { wikiLocation, wikiPathIn, type WikiLanguage } from './languages.ts'
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 
 /** The file name that makes a note its folder's index (matched exactly, case-sensitive). */
 const INDEX_FILE = 'index.md'

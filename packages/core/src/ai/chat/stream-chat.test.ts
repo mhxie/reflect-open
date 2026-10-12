@@ -7,7 +7,7 @@ import type {
   LanguageModelV3StreamResult,
   LanguageModelV3Usage,
 } from '@ai-sdk/provider'
-import type { RetrievalHit } from '../../embeddings/retrieve.ts'
+import type { RetrievalHit } from '../../embeddings/retrieval-hit.ts'
 import {
   applyProjection,
   connectIndex,

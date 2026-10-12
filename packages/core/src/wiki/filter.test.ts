@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WikiEntrySummary } from './entry-summary.ts'
 import { filterWikiEntries, wikiEntryTags, wikiFiltersEqual, type WikiFilter } from './filter.ts'
-import type { WikiEntry, WikiEntryCopy } from './list.ts'
+import type { WikiEntry, WikiEntryCopy } from './entry-model.ts'
 
 function entry(
   title: string,

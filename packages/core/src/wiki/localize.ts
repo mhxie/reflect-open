@@ -1,4 +1,4 @@
-import type { WikiEntry } from './list.ts'
+import type { WikiEntry } from './entry-model.ts'
 
 /**
  * `entry` as the Wiki screen lists it in the language whose folder is

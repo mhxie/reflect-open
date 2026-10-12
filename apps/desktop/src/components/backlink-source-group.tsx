@@ -1,12 +1,12 @@
 import { useState, type ReactElement } from 'react'
 import { ChevronRight } from 'lucide-react'
-import { displayNoteTitle } from '@reflect/core'
 import { BacklinkSnippet } from '@/components/backlink-snippet.tsx'
 import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import type { BacklinkSource } from '@/lib/group-backlinks.ts'
 import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { NoteTitle } from '@/components/note-title.tsx'
+import { useNoteLabel } from '@/hooks/use-note-label.ts'
 
 interface BacklinkSourceGroupProps {
   source: BacklinkSource
@@ -43,6 +43,7 @@ export function BacklinkSourceGroup({
   onOpen,
   onWikilinkClick,
 }: BacklinkSourceGroupProps): ReactElement {
+  const label = useNoteLabel()(source)
   const [expanded, setExpanded] = useState(expandedOverride)
 
   // Reset to the panel-level toggle whenever it changes; the group chevron can
@@ -75,14 +76,14 @@ export function BacklinkSourceGroup({
             hasConflict={source.hasConflict}
             className="mr-1"
           />
-          <NoteTitle title={source.title} displayTitle={source.displayTitle} lang={source.lang} />
+          <NoteTitle title={label} displayTitle={source.displayTitle} lang={source.lang} />
         </button>
 
         {source.snippets.length > 0 ? (
           <button
             type="button"
             aria-expanded={expanded}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} references from ${displayNoteTitle(source.title)}`}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} references from ${label}`}
             onClick={() => setExpanded(!expanded)}
             className="absolute inset-y-0 -left-5 flex items-center text-text-muted opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
           >

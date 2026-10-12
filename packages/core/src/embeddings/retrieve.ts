@@ -8,6 +8,7 @@ import { buildFtsAnyMatch, isSentenceLike } from '../indexing/search-query.ts'
 import { isPrivateNote } from '../privacy/checkers.ts'
 import { embedStatus, embedTexts } from './commands.ts'
 import { semanticModel } from './models.ts'
+import type { RetrievalHit } from './retrieval-hit.ts'
 
 /**
  * The shared retrieval contract (Plan 09): one `retrieve()` for search and AI.
@@ -18,25 +19,6 @@ import { semanticModel } from './models.ts'
  * `excludePrivateContent` strips their *content* for callers that ship hits to
  * external services (Plan 10), enforced again at the AI boundary.
  */
-
-export interface RetrievalHit {
-  path: string
-  title: string
-  displayTitle?: string | null | undefined
-  lang?: string | null | undefined
-  score: number
-  /** Chunk text (semantic) or highlight-markered FTS snippet (lexical). */
-  snippet: string
-  heading: string | null
-  isPrivate: boolean
-  /** Device-only attachment text in this note's indexed snapshot. */
-  hasDeviceOnlyContent?: boolean
-  /** Attachment-text identity from the same snapshot as the snippet. */
-  assetTextHash?: string
-  hasConflict: boolean
-  /** Hybrid only: which leg found the note — wording, meaning, or both. */
-  matchedBy?: 'lexical' | 'semantic' | 'both'
-}
 
 export interface RetrieveOptions {
   limit?: number
