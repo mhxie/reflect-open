@@ -1,4 +1,9 @@
-import { aiProvider, type AiSummariesModel, type NoteSummaryConsent } from '@reflect/core'
+import {
+  aiProvider,
+  sameSummariesModel,
+  type AiSummariesModel,
+  type NoteSummaryConsent,
+} from '@reflect/core'
 import { startOperation, type OperationHandle } from '@/lib/operations.ts'
 
 /**
@@ -22,10 +27,6 @@ export interface NoteSummaryOfferHandlers {
 
 let offer: OperationHandle | null = null
 
-function sameChoice(left: AiSummariesModel, right: AiSummariesModel): boolean {
-  return left.configId === right.configId && left.modelId === right.modelId
-}
-
 /**
  * Raise the ask, replacing an earlier one. Start agrees only to the provider
  * and model the ask names: if either changed meanwhile, it asks again, naming
@@ -46,7 +47,7 @@ export function offerNoteSummaries(
       label: 'Start',
       run: () => {
         const current = handlers.destination()
-        if (current !== null && !sameChoice(current.choice, consent.choice)) {
+        if (current !== null && !sameSummariesModel(current.choice, consent.choice)) {
           offerNoteSummaries({ ...consent, ...current }, handlers)
           return
         }

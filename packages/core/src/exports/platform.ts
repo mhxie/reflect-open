@@ -302,6 +302,7 @@ export {
   AI_SUMMARY_MODES,
   type AiSummaryMode,
   type AiSummariesModel,
+  sameSummariesModel,
   transcriptionFormatSchema,
   transcriptionPromptSchema,
   TRANSCRIPTION_PROMPT_MAX_LENGTH,

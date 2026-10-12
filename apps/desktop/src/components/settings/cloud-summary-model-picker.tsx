@@ -3,6 +3,7 @@ import {
   aiProvider,
   cloudSummaryConfig,
   resolveOnDeviceTarget,
+  sameSummariesModel,
   smallModelConfig,
   type AiProviderConfig,
 } from '@reflect/core'
@@ -34,9 +35,9 @@ function startingModel(config: AiProviderConfig): string {
 
 /**
  * Settings → All Notes → AI summaries, Cloud provider: which configured
- * provider and model summarize, and the one-time go-ahead. Only entries that
- * don't run on this Mac are offered. Nothing is sent until the user starts;
- * choosing another provider entry asks again.
+ * provider and model summarize, and the go-ahead. Only entries that don't run
+ * on this Mac are offered. Nothing is sent until the user agrees to the exact
+ * entry and model; choosing another asks again.
  */
 export function CloudSummaryModelPicker(): ReactElement {
   const { settings } = useSettings()
@@ -58,7 +59,9 @@ export function CloudSummaryModelPicker(): ReactElement {
   }
 
   const selected = config === null || config === 'on-device' ? null : config
-  const agreed = settings.aiSummariesCloudConfirmed && choice !== null
+  const selectedChoice =
+    selected === null ? null : { configId: selected.id, modelId: selected.model }
+  const agreed = sameSummariesModel(settings.aiSummariesCloudConsent, selectedChoice)
   let hint: string | null = null
   if (config === 'on-device') {
     hint = 'Your default AI provider runs on this Mac. Choose a cloud provider, or On this Mac.'
@@ -104,13 +107,13 @@ export function CloudSummaryModelPicker(): ReactElement {
         )}
       </div>
       {hint === null ? null : <p className="mt-2 text-xs text-text-muted">{hint}</p>}
-      {selected === null || agreed ? null : (
+      {selectedChoice === null || agreed ? null : (
         <div className="mt-3 flex flex-col items-start">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => startCloud({ configId: selected.id, modelId: selected.model })}
+            onClick={() => startCloud(selectedChoice)}
             className="text-text-secondary"
           >
             Start summarizing

@@ -80,16 +80,15 @@ export function LocalSummaryModelPicker(): ReactElement {
   const offered = installed.filter(
     (model) => !attested.some((config) => isOllamaEntryFor(config, model.name)),
   )
-  const items = [
-    ...attested.map((config) => ({
-      value: `${ENTRY_PREFIX}${config.id}`,
-      label: `${config.model} · ${serverLabel(config)}`,
-    })),
-    ...offered.map((model) => ({
-      value: `${OLLAMA_PREFIX}${model.name}`,
-      label: modelLabel(model),
-    })),
-  ]
+  const setUpItems = attested.map((config) => ({
+    value: `${ENTRY_PREFIX}${config.id}`,
+    label: `${config.model} · ${serverLabel(config)}`,
+  }))
+  const installedItems = offered.map((model) => ({
+    value: `${OLLAMA_PREFIX}${model.name}`,
+    label: modelLabel(model),
+  }))
+  const items = [...setUpItems, ...installedItems]
 
   function choose(value: string): void {
     if (value.startsWith(OLLAMA_PREFIX)) {
@@ -162,20 +161,20 @@ export function LocalSummaryModelPicker(): ReactElement {
               <SelectValue placeholder="Choose a model" />
             </SelectTrigger>
             <SelectContent>
-              {attested.length > 0 ? (
+              {setUpItems.length > 0 ? (
                 <SelectGroup>
                   <SelectLabel>Set up on this Mac</SelectLabel>
-                  {items.slice(0, attested.length).map(({ value, label }) => (
+                  {setUpItems.map(({ value, label }) => (
                     <SelectItem key={value} value={value}>
                       {label}
                     </SelectItem>
                   ))}
                 </SelectGroup>
               ) : null}
-              {offered.length > 0 ? (
+              {installedItems.length > 0 ? (
                 <SelectGroup>
                   <SelectLabel>Installed in Ollama</SelectLabel>
-                  {items.slice(attested.length).map(({ value, label }) => (
+                  {installedItems.map(({ value, label }) => (
                     <SelectItem key={value} value={value}>
                       {label}
                     </SelectItem>

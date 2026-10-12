@@ -17,9 +17,9 @@ describe('settingsSchema', () => {
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
       aiSummaries: 'local',
-      aiSummariesCloudConfirmed: false,
       aiSummariesLocalModel: null,
       aiSummariesCloudModel: null,
+      aiSummariesCloudConsent: null,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',
@@ -145,9 +145,6 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ aiSummaries: 'local' }).aiSummaries).toBe('local')
     // Earlier builds' on-device-then-cloud mode is the cloud engine now.
     expect(settingsSchema.parse({ aiSummaries: 'local-and-cloud' }).aiSummaries).toBe('cloud')
-    expect(
-      settingsSchema.parse({ aiSummariesCloudConfirmed: true }).aiSummariesCloudConfirmed,
-    ).toBe(true)
     const choice = { configId: 'ollama', modelId: 'gemma4:31b' }
     expect(settingsSchema.parse({ aiSummariesLocalModel: choice }).aiSummariesLocalModel).toEqual(
       choice,
@@ -155,6 +152,9 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ aiSummariesCloudModel: choice }).aiSummariesCloudModel).toEqual(
       choice,
     )
+    expect(
+      settingsSchema.parse({ aiSummariesCloudConsent: choice }).aiSummariesCloudConsent,
+    ).toEqual(choice)
     expect(settingsSchema.parse({ transcriptionEngine: 'local' }).transcriptionEngine).toBe('local')
     expect(settingsSchema.parse({ transcriptionEngine: 'whisper' }).transcriptionEngine).toBe(
       'cloud',
@@ -402,8 +402,17 @@ describe('settingsSchema', () => {
     // moved to a cloud provider: the user adds a local model, or picks cloud.
     const earlier = settingsSchema.parse({ aiSummaries: 'local' })
     expect(earlier.aiSummaries).toBe('local')
-    expect(earlier.aiSummariesCloudConfirmed).toBe(false)
+    expect(earlier.aiSummariesCloudConsent).toBeNull()
     expect(earlier.aiSummariesLocalModel).toBeNull()
+  })
+
+  it('leaves an earlier build’s cloud go-ahead to it: it names no model', () => {
+    // Every build shares the document. The old flag stays as written, for the
+    // builds that read it, and grants nothing here; this build never writes it.
+    const earlier = settingsSchema.parse({ aiSummaries: 'cloud', aiSummariesCloudConfirmed: true })
+    expect(earlier).toHaveProperty('aiSummariesCloudConfirmed', true)
+    expect(earlier.aiSummariesCloudConsent).toBeNull()
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('aiSummariesCloudConfirmed')
   })
 
   it('upgrades the spoken language without touching the summary mode', () => {
@@ -439,9 +448,9 @@ describe('settingsSchema', () => {
       semanticModel: 'all-MiniLM-L6-v2',
       describeAssets: true,
       aiSummaries: 'local',
-      aiSummariesCloudConfirmed: false,
       aiSummariesLocalModel: null,
       aiSummariesCloudModel: null,
+      aiSummariesCloudConsent: null,
       localOcrProviderId: null,
       transcriptionFormat: true,
       transcriptionPrompt: '',

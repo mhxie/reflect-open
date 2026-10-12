@@ -351,9 +351,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -430,9 +430,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -523,9 +523,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -623,9 +623,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -702,9 +702,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -774,9 +774,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -855,9 +855,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -933,9 +933,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1039,9 +1039,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1129,9 +1129,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1315,19 +1315,24 @@ describe('SettingsScreen', () => {
 
     await page.getByRole('button', { name: 'Start summarizing' }).click()
 
+    const haiku = { configId: 'cloud', modelId: 'claude-haiku-4-5' }
     await vi.waitFor(() =>
       expect(saved.at(-1)).toMatchObject({
         aiSummaries: 'cloud',
-        aiSummariesCloudModel: { configId: 'cloud', modelId: 'claude-haiku-4-5' },
-        aiSummariesCloudConfirmed: true,
+        aiSummariesCloudModel: haiku,
+        aiSummariesCloudConsent: haiku,
       }),
     )
+    // The flag earlier builds read alone is never written: they'd send to their
+    // own default provider on the strength of it.
+    expect(saved.at(-1)).not.toHaveProperty('aiSummariesCloudConfirmed')
     await expect
       .element(page.getByRole('button', { name: 'Start summarizing' }))
       .not.toBeInTheDocument()
   })
 
-  it('asks again when summaries move to another cloud provider', async () => {
+  it('asks again for any model but the one agreed to', async () => {
+    const haiku = { configId: 'cloud', modelId: 'claude-haiku-4-5' }
     stored = {
       aiProviders: [
         { id: 'cloud', provider: 'anthropic', model: 'claude-opus-4-8', keyHint: 'wxyz1' },
@@ -1335,8 +1340,8 @@ describe('SettingsScreen', () => {
       ],
       defaultAiProviderId: 'cloud',
       aiSummaries: 'cloud',
-      aiSummariesCloudModel: { configId: 'cloud', modelId: 'claude-haiku-4-5' },
-      aiSummariesCloudConfirmed: true,
+      aiSummariesCloudModel: haiku,
+      aiSummariesCloudConsent: haiku,
     }
     await renderScreen()
     await expect
@@ -1349,12 +1354,38 @@ describe('SettingsScreen', () => {
     await vi.waitFor(() =>
       expect(saved.at(-1)).toMatchObject({
         aiSummariesCloudModel: { configId: 'work', modelId: 'gpt-5.4-nano' },
-        aiSummariesCloudConfirmed: false,
+        aiSummariesCloudConsent: haiku,
       }),
     )
     await expect
       .element(page.getByRole('button', { name: 'Start summarizing' }))
       .toBeInTheDocument()
+  })
+
+  it('asks for another model on the agreed entry, and over an earlier build’s go-ahead', async () => {
+    stored = {
+      aiProviders: [
+        { id: 'cloud', provider: 'anthropic', model: 'claude-opus-4-8', keyHint: 'wxyz1' },
+      ],
+      defaultAiProviderId: 'cloud',
+      aiSummaries: 'cloud',
+      aiSummariesCloudModel: { configId: 'cloud', modelId: 'claude-sonnet-5-5' },
+      aiSummariesCloudConsent: { configId: 'cloud', modelId: 'claude-haiku-4-5' },
+      // An earlier build's go-ahead named no model and grants nothing here.
+      aiSummariesCloudConfirmed: true,
+    }
+    await renderScreen()
+    await page.getByRole('button', { name: 'Start summarizing' }).click()
+
+    const sonnet = { configId: 'cloud', modelId: 'claude-sonnet-5-5' }
+    await vi.waitFor(() =>
+      expect(saved.at(-1)).toMatchObject({
+        aiSummariesCloudModel: sonnet,
+        aiSummariesCloudConsent: sonnet,
+        // Left as that build wrote it.
+        aiSummariesCloudConfirmed: true,
+      }),
+    )
   })
 
   it('names the on-device default instead of asking for a provider the user has', async () => {
@@ -1376,7 +1407,6 @@ describe('SettingsScreen', () => {
       ],
       defaultAiProviderId: 'ollama',
       aiSummaries: 'cloud',
-      aiSummariesCloudConfirmed: false,
     }
     await renderScreen()
     await expect
@@ -1415,9 +1445,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1519,9 +1549,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1662,9 +1692,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1752,9 +1782,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1834,9 +1864,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -1959,9 +1989,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -2121,9 +2151,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -2209,9 +2239,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',
@@ -2288,9 +2318,9 @@ describe('SettingsScreen', () => {
           semanticModel: 'all-MiniLM-L6-v2',
           describeAssets: true,
           aiSummaries: 'local',
-          aiSummariesCloudConfirmed: false,
           aiSummariesLocalModel: null,
           aiSummariesCloudModel: null,
+          aiSummariesCloudConsent: null,
           localOcrProviderId: null,
           transcriptionFormat: true,
           transcriptionPrompt: '',

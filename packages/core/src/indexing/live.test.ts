@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setBridge } from '../ipc/bridge.ts'
-import type { FileChange } from './file-changes.ts'
+import { subscribeFileChanges, type FileChange } from './file-changes.ts'
 import { subscribeIndexApplied } from './index-applied.ts'
-import { applyIndexChanges, subscribeIndexChanges } from './live.ts'
+import { applyIndexChanges, requestIndexReread, subscribeIndexChanges } from './live.ts'
 
 afterEach(() => {
   setBridge(null)
@@ -309,6 +309,44 @@ describe('subscribeIndexChanges', () => {
     await vi.waitFor(() => {
       expect(mtimes).toEqual([1234])
     })
+  })
+
+  it('re-reads a requested note at its indexed time, telling nothing but the index', async () => {
+    const mtimes: number[] = []
+    fakeBridge(async (command, args) => {
+      if (command === 'note_read') {
+        return '# summarized under its kept time'
+      }
+      if (command === 'index_apply_batch') {
+        mtimes.push(...(args['notes'] as Array<{ mtime: number }>).map((note) => note.mtime))
+      }
+      if (command === 'db_query') {
+        return String(args['sql']).includes('file_hash')
+          ? [{ path: 'notes/a.md', file_hash: 'stored', mtime: 1_000 }]
+          : []
+      }
+      return null
+    })
+    const onApplied = vi.fn()
+    const elsewhere = vi.fn()
+    const unlisten = await subscribeIndexChanges(1, onApplied)
+    const unlistenElsewhere = await subscribeFileChanges(elsewhere)
+
+    requestIndexReread(['notes/a.md'])
+    await vi.waitFor(() => {
+      expect(onApplied).toHaveBeenCalledTimes(1)
+    })
+    // Earlier cases' subscriptions are still live and re-read too; every
+    // apply keeps the indexed time rather than stamping the request's.
+    expect(new Set(mtimes)).toEqual(new Set([1_000]))
+    // Sync, iCloud and open editors subscribe to file changes; none is told.
+    expect(elsewhere).not.toHaveBeenCalled()
+
+    unlisten()
+    requestIndexReread(['notes/a.md'])
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(onApplied).toHaveBeenCalledTimes(1)
+    unlistenElsewhere()
   })
 
   it('drops malformed payloads instead of applying them', async () => {

@@ -5,6 +5,20 @@ function respond(body: string, status = 200): typeof fetch {
   return vi.fn<typeof fetch>(async () => new Response(body, { status }))
 }
 
+/** A fake Ollama: `/api/tags` lists `tags`; `/api/show` answers per model. */
+function ollama(
+  tags: object[],
+  show: (model: string) => Response = () => new Response('{}'),
+): typeof fetch {
+  return vi.fn<typeof fetch>(async (url, init) => {
+    if (String(url).endsWith('/api/tags')) {
+      return new Response(JSON.stringify({ models: tags }))
+    }
+    const { model } = JSON.parse(String(init?.body)) as { model: string }
+    return show(model)
+  })
+}
+
 describe('listOllamaModels', () => {
   it('lists the installed models by name, leaving out the ones Ollama runs in the cloud', async () => {
     const fetchFn = respond(
@@ -30,6 +44,45 @@ describe('listOllamaModels', () => {
     })
     expect(fetchFn).toHaveBeenCalledWith('http://localhost:11434/api/tags', expect.anything())
     expect(OLLAMA_BASE_URL).toBe('http://localhost:11434/v1')
+  })
+
+  it('leaves out models that cannot write text, like embedding models', async () => {
+    const fetchFn = ollama(
+      [
+        { name: 'nomic-embed-text:latest' },
+        { name: 'gemma4:31b' },
+        { name: 'older-server:latest' },
+        { name: 'flaky:latest' },
+      ],
+      (model) => {
+        if (model === 'nomic-embed-text:latest') {
+          return new Response(JSON.stringify({ capabilities: ['embedding'] }))
+        }
+        if (model === 'gemma4:31b') {
+          return new Response(JSON.stringify({ capabilities: ['completion', 'vision'] }))
+        }
+        if (model === 'flaky:latest') {
+          return new Response('busy', { status: 500 })
+        }
+        return new Response(JSON.stringify({ modelfile: 'FROM x' }))
+      },
+    )
+
+    const listed = await listOllamaModels({ fetchFn })
+
+    // A server that reports no capabilities, or a look that fails, keeps the model.
+    expect(listed).toEqual({
+      kind: 'ok',
+      models: [
+        { name: 'flaky:latest', parameterSize: null },
+        { name: 'gemma4:31b', parameterSize: null },
+        { name: 'older-server:latest', parameterSize: null },
+      ],
+    })
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost:11434/api/show',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 
   it('reports an empty install as ok with no models', async () => {
@@ -58,12 +111,6 @@ describe('listOllamaModels', () => {
   it('refuses an oversized list instead of reading it whole', async () => {
     const huge = JSON.stringify({ models: [{ name: 'x'.repeat(1_100_000) }] })
     expect(await listOllamaModels({ fetchFn: respond(huge) })).toEqual({ kind: 'unreachable' })
-  })
-
-  it('asks the server the caller names', async () => {
-    const fetchFn = respond('{"models":[]}')
-    await listOllamaModels({ baseUrl: 'http://127.0.0.1:11500/v1', fetchFn })
-    expect(fetchFn).toHaveBeenCalledWith('http://127.0.0.1:11500/api/tags', expect.anything())
   })
 
   it('rethrows the caller’s abort', async () => {

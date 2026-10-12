@@ -7,7 +7,7 @@ import { errorMessage, isAppError, toAppError } from '../errors.ts'
 import { readNoteLocal, writeNoteKeepingModified } from '../graph/commands.ts'
 import { isLocalOnlyPath } from '../graph/local-only.ts'
 import { db } from '../indexing/db.ts'
-import { echoLocalWrite } from '../indexing/local-write-echo.ts'
+import { requestIndexReread } from '../indexing/live.ts'
 import {
   AI_SUMMARY_KEY,
   aiSummaryOwner,
@@ -27,11 +27,12 @@ import {
   type OnDeviceTarget,
   type VerifiedOnDeviceTarget,
 } from '../privacy/on-device.ts'
-import type {
-  AiProviderConfig,
-  AiProviderId,
-  AiSummariesModel,
-  AiSummaryMode,
+import {
+  sameSummariesModel,
+  type AiProviderConfig,
+  type AiProviderId,
+  type AiSummariesModel,
+  type AiSummaryMode,
 } from '../settings/schema.ts'
 import type { ReconcileStop } from './audio-memo.ts'
 
@@ -46,8 +47,8 @@ import type { ReconcileStop } from './audio-memo.ts'
  * every note, private ones included. In `cloud` mode a public note goes to
  * the chosen cloud model (or the default provider's small model), through the
  * `cloudSafeNoteContent` gate on the note as read now, and a private note
- * keeps its snippet; until the user agrees to that model once
- * (`cloudConfirmed`), a cloud pass only counts what it would send.
+ * keeps its snippet; until the user agrees to that exact entry and model
+ * (`cloudConsent`), a cloud pass only counts what it would send.
  *
  * The write keeps the file's modification time (a summary is not an edit) and
  * is checked against the bytes that were summarized: a note edited meanwhile
@@ -79,18 +80,17 @@ export interface ReconcileNoteSummariesInput {
    */
   localModel: AiSummariesModel | null
   /**
-   * The cloud model `cloud` mode uses (`aiSummariesCloudModel`), pinned when
-   * the user agrees to send notes to it; `null` picks the default provider's
-   * small model.
+   * The cloud model `cloud` mode uses (`aiSummariesCloudModel`); `null` picks
+   * the default provider's small model.
    */
   cloudModel: AiSummariesModel | null
   /**
-   * Whether the user has agreed to send public notes to `cloudModel`
-   * (`aiSummariesCloudConfirmed`). Until then, or while no cloud model is
-   * pinned, a `cloud` pass reads nothing and reports what it would send, and
-   * where, as {@link ReconcileNoteSummariesOutcome.consent}.
+   * The cloud entry and model the user agreed to (`aiSummariesCloudConsent`).
+   * A `cloud` pass sends only to exactly these; otherwise it reads nothing and
+   * reports what it would send, and where, as
+   * {@link ReconcileNoteSummariesOutcome.consent}.
    */
-  cloudConfirmed: boolean
+  cloudConsent: AiSummariesModel | null
   /** `GraphInfo.generation` — pins every read and write to the issuing graph. */
   generation: number
   /** Host transport for cloud calls (the Tauri HTTP plugin's fetch). */
@@ -138,7 +138,7 @@ export interface ReconcileNoteSummariesOutcome {
 export interface NoteSummaryConsent {
   notes: number
   provider: AiProviderId
-  /** The provider entry and model the notes would go to; agreeing pins them. */
+  /** The provider entry and model the notes would go to; agreeing records them. */
   choice: AiSummariesModel
 }
 
@@ -232,6 +232,21 @@ function chosenConfig(
 ): AiProviderConfig | null {
   const entry = providers.find((config) => config.id === choice.configId)
   return entry === undefined ? null : { ...entry, model: choice.modelId }
+}
+
+/**
+ * The entry and model `cloud` mode would send notes to now (see
+ * {@link cloudSummaryConfig}), or `null` when it has none to use: what a
+ * go-ahead must name exactly.
+ */
+export function cloudSummaryChoice(
+  providers: AiProvidersState,
+  choice: AiSummariesModel | null,
+): AiSummariesModel | null {
+  const config = cloudSummaryConfig(providers, choice)
+  return config === null || config === 'on-device'
+    ? null
+    : { configId: config.id, modelId: config.model }
 }
 
 async function resolveCloudEngine(
@@ -345,13 +360,9 @@ async function summarizeCandidate(
   const hash = noteBodyHash(body)
   if (parsed.frontmatter.aiSummary?.hash === hash) {
     // Written, but the index never saw it (an earlier build's write, or a quit
-    // before its echo landed): ask it to re-read the note at its kept time.
-    echoLocalWrite({
-      path: candidate.path,
-      kind: 'upsert',
-      modifiedMs: candidate.mtime,
-      reread: true,
-    })
+    // before its echo landed). Only the index is asked to look again: nothing
+    // is written now, so nothing else hears about it.
+    requestIndexReread([candidate.path])
     return { kind: 'settled' }
   }
 
@@ -448,9 +459,9 @@ export async function reconcileNoteSummaries(
           outcome.stopped = { reason: 'config', message: resolved.message }
           return outcome
         }
-        // The go-ahead names one model: agreeing pins it, so nothing reaches a
-        // provider the user was never asked about.
-        if (resolved.kind === 'cloud' && !(input.cloudConfirmed && input.cloudModel !== null)) {
+        // The go-ahead names one entry and model: anything else, even another
+        // model on the same entry, is asked about first.
+        if (resolved.kind === 'cloud' && !sameSummariesModel(input.cloudConsent, resolved.choice)) {
           // Counted from the index alone: nothing is read before the user agrees.
           const notes = candidates.filter((waiting) => !isPrivateNote(waiting)).length
           outcome.consent =

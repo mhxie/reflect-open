@@ -81,6 +81,7 @@ export { languageModelFor, type TargetModel } from '../ai/language-model.ts'
 export { localOcrAssetTypeFor } from '../actions/asset-description-helpers.ts'
 export { reconcileCachedAssetOcr } from '../actions/asset-ocr-maintenance.ts'
 export {
+  cloudSummaryChoice,
   cloudSummaryConfig,
   localSummaryTarget,
   reconcileNoteSummaries,

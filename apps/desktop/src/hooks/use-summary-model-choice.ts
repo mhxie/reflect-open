@@ -17,10 +17,18 @@ export interface SummaryModelChoice {
    * is attested or added. No other entry changes.
    */
   chooseOllamaModel: (model: string, server: OnDeviceServerKind) => void
-  /** Summarize in the cloud with `choice`; another provider entry asks for the go-ahead again. */
+  /** Summarize in the cloud with `choice`; anything but the agreed model asks again. */
   chooseCloud: (choice: AiSummariesModel) => void
-  /** Agree to send public notes to `choice`, pinning it. */
+  /** Agree to send public notes to exactly `choice`, and summarize with it. */
   startCloud: (choice: AiSummariesModel) => void
+}
+
+/** The settings a cloud go-ahead writes: the model it names, chosen and agreed to. */
+export function cloudGoAhead(choice: AiSummariesModel): {
+  aiSummariesCloudModel: AiSummariesModel
+  aiSummariesCloudConsent: AiSummariesModel
+} {
+  return { aiSummariesCloudModel: choice, aiSummariesCloudConsent: choice }
 }
 
 /**
@@ -47,14 +55,7 @@ export function useSummaryModelChoice(): SummaryModelChoice {
           aiSummariesLocalModel: { configId: id, modelId: model },
         }
       }),
-    chooseCloud: (choice) =>
-      updateSettingsWith((current) => ({
-        aiSummariesCloudModel: choice,
-        aiSummariesCloudConfirmed:
-          current.aiSummariesCloudConfirmed &&
-          current.aiSummariesCloudModel?.configId === choice.configId,
-      })),
-    startCloud: (choice) =>
-      updateSettings({ aiSummariesCloudModel: choice, aiSummariesCloudConfirmed: true }),
+    chooseCloud: (choice) => updateSettings({ aiSummariesCloudModel: choice }),
+    startCloud: (choice) => updateSettings(cloudGoAhead(choice)),
   }
 }

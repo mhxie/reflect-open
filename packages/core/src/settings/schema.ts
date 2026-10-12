@@ -317,18 +317,14 @@ export const aiSummariesSchema = z
   .catch('local')
 
 /**
- * Whether the user has agreed, once, to send public notes to the cloud model
- * in `aiSummariesCloudModel` for `cloud` summaries. Until then the pass sends
- * nothing and Reflect asks, naming the provider and how many notes are
- * waiting; choosing another provider entry asks again.
- */
-export const aiSummariesCloudConfirmedSchema = z.boolean().catch(false)
-
-/**
- * The model AI summaries use in one mode: a configured provider entry and a
- * model within it. `null` picks one: in `local` mode the default entry, then
+ * A configured provider entry and a model within it, for AI summaries. As
+ * `aiSummariesLocalModel` and `aiSummariesCloudModel` it is the model each
+ * mode uses, where `null` picks one: in `local` mode the default entry, then
  * the first, that runs on this Mac; in `cloud` mode the default provider's
- * small model.
+ * small model. As `aiSummariesCloudConsent` it is the cloud entry and model
+ * the user agreed to send public notes to: a cloud pass sends only while it
+ * would use exactly these, and otherwise asks, naming them. Earlier builds'
+ * `aiSummariesCloudConfirmed` names no model, so it is left to them.
  */
 export const aiSummariesModelSchema = z
   .object({
@@ -340,6 +336,19 @@ export const aiSummariesModelSchema = z
 
 /** A summary model choice: a configured provider entry and a model within it. */
 export type AiSummariesModel = NonNullable<z.infer<typeof aiSummariesModelSchema>>
+
+/** Whether two summary model choices name the same entry and model; `null` matches nothing. */
+export function sameSummariesModel(
+  left: AiSummariesModel | null,
+  right: AiSummariesModel | null,
+): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.configId === right.configId &&
+    left.modelId === right.modelId
+  )
+}
 
 /**
  * Whether audio-memo transcripts receive a best-effort AI formatting pass
@@ -810,9 +819,9 @@ const settingsObjectSchema = z.looseObject({
   semanticModel: semanticModelSchema,
   describeAssets: describeAssetsSchema,
   aiSummaries: aiSummariesSchema,
-  aiSummariesCloudConfirmed: aiSummariesCloudConfirmedSchema,
   aiSummariesLocalModel: aiSummariesModelSchema,
   aiSummariesCloudModel: aiSummariesModelSchema,
+  aiSummariesCloudConsent: aiSummariesModelSchema,
   /** Explicit local vision provider; null retains public-attachment descriptions via the default provider. */
   localOcrProviderId: z.string().nullable().catch(null),
   transcriptionFormat: transcriptionFormatSchema,

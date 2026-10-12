@@ -271,6 +271,9 @@ export async function applyIndexChanges(
   return mutations + batch.applied() + touches.applied()
 }
 
+/** The live subscriptions' batch handlers, reachable by {@link requestIndexReread}. */
+const rereadHandlers = new Set<(changes: FileChange[]) => void>()
+
 /**
  * Subscribe to `index:changed` and apply each batch at `generation`. Returns an
  * unlisten function; call it (and resubscribe with the new generation) when the
@@ -302,7 +305,7 @@ export function subscribeIndexChanges(
   // Serialize batches so overlapping events for the same path can't reorder
   // (e.g. an upsert landing after a later remove, leaving a ghost row).
   let applyQueue: Promise<void> = Promise.resolve()
-  return subscribeFileChanges((changes) => {
+  const handle = (changes: FileChange[]): void => {
     if (!canApply()) {
       return
     }
@@ -339,5 +342,29 @@ export function subscribeIndexChanges(
       .catch((error) => {
         console.error('failed to apply watcher batch:', error)
       })
-  })
+  }
+  rereadHandlers.add(handle)
+  return subscribeFileChanges(handle).then(
+    (unlisten) => () => {
+      rereadHandlers.delete(handle)
+      unlisten()
+    },
+    (error: unknown) => {
+      rereadHandlers.delete(handle)
+      throw error
+    },
+  )
+}
+
+/**
+ * Ask the live index to re-read `paths`, keeping each row's indexed time,
+ * without announcing a file change: sync, iCloud and open editors never hear
+ * it. For a note whose last write the index never saw (one that kept the
+ * file's modification time, from a build without the reread echo).
+ */
+export function requestIndexReread(paths: readonly string[]): void {
+  const changes = paths.map((path): FileChange => ({ path, kind: 'upsert', reread: true }))
+  for (const handleBatch of rereadHandlers) {
+    handleBatch(changes)
+  }
 }
