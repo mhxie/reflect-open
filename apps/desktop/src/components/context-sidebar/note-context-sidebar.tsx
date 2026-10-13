@@ -11,21 +11,27 @@ interface NoteContextSidebarProps {
 }
 
 /**
- * An ordinary note's contextual sidebar: a wiki entry's language switch,
- * note actions, the note's outline, then its semantic neighbors — the only place
- * similar notes appear. Inbound links live under the note itself (the
- * incoming-backlinks panel), not here. Rendered in the AppShell's right region
- * on `note` routes.
+ * An ordinary note's contextual sidebar. Pinned at the top, when the note has
+ * them: a wiki entry's language switch, the note actions and the published
+ * link. Below them scroll the note's outline and its semantic neighbors — the
+ * only place similar notes appear. A window too short for the pinned parts and
+ * a few lines of sections scrolls the whole sidebar instead. Inbound links live
+ * under the note itself (the incoming-backlinks panel), not here. Rendered in
+ * the AppShell's right region on `note` routes.
  */
 export function NoteContextSidebar({ path }: NoteContextSidebarProps): ReactElement {
   return (
-    <div className="flex h-full flex-col overflow-y-auto py-2 text-text">
-      <div className="my-4 space-y-4 pb-4">
+    <div className="flex h-full flex-col overflow-y-auto text-text">
+      <div className="flex-none space-y-4 border-b border-border pt-6 pb-4 empty:hidden">
         <WikiLanguageSwitch path={path} />
         <NoteActionsSection path={path} showTrash />
         <PublishedUrlSection path={path} />
-        <OutlineSection path={path} />
-        <SimilarNotesSection path={path} />
+      </div>
+      <div className="min-h-24 flex-1 overflow-y-auto">
+        <div className="space-y-4 py-4">
+          <OutlineSection path={path} />
+          <SimilarNotesSection path={path} />
+        </div>
       </div>
     </div>
   )
