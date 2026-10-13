@@ -38,7 +38,10 @@ export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactEl
     <div className="flex h-full flex-col overflow-y-auto text-text">
       <div
         className={cn(
-          'flex-none space-y-4 border-b border-border pb-4',
+          // The calendar grid and the action buttons carry 8px of padding of
+          // their own, so these half-size gaps leave the same 16px around the
+          // note actions as around every section below.
+          'flex-none space-y-2 border-b border-border pb-2',
           // The calendar's controls must clear the WindowDragRegion strip when
           // the macOS title bar is overlaid.
           hasMacosTitleBarOverlay ? 'pt-0' : 'pt-2',

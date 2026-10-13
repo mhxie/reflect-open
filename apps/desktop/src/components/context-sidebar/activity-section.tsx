@@ -37,7 +37,8 @@ export function ActivitySection(): ReactElement | null {
   }
 
   return (
-    <div className="flex-none border-t border-border py-3">
+    // Extra room at the bottom, where the window edge and its rounded corner sit.
+    <div className="flex-none border-t border-border pt-4 pb-5">
       <SidebarSection storageKey="activity" title="Activity">
         <div ref={measure} className="px-1.5">
           <ActivityHeatmap

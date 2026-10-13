@@ -296,7 +296,7 @@ describe('DailyContextSidebar sections', () => {
     const grid = heatmap.element().getBoundingClientRect()
     expect(grid.top).toBeGreaterThanOrEqual(scroller.getBoundingClientRect().bottom)
     // Only the footer's own padding lies between the heatmap and the bottom edge.
-    expect(frame.bottom - grid.bottom).toBeLessThan(20)
+    expect(frame.bottom - grid.bottom).toBeLessThan(24)
     await view.unmount()
   })
 

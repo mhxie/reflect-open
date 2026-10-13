@@ -22,7 +22,8 @@ interface NoteContextSidebarProps {
 export function NoteContextSidebar({ path }: NoteContextSidebarProps): ReactElement {
   return (
     <div className="flex h-full flex-col overflow-y-auto text-text">
-      <div className="flex-none space-y-4 border-b border-border pt-6 pb-4 empty:hidden">
+      {/* pb-2: the action buttons' own padding makes up the rest of the 16px. */}
+      <div className="flex-none space-y-4 border-b border-border pt-6 pb-2 empty:hidden">
         <WikiLanguageSwitch path={path} />
         <NoteActionsSection path={path} showTrash />
         <PublishedUrlSection path={path} />
