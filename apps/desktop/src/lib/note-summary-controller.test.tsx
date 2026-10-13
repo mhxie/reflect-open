@@ -52,6 +52,7 @@ let mode: AiSummaryMode = 'cloud'
 let cloudConsent: AiSummariesModel | null = null
 let models: NoteSummaryModels = { local: null, cloud: null }
 const onConsentNeeded = vi.fn()
+const catchUp = vi.fn(async () => {})
 
 function create(): NoteSummaryController {
   controller = createNoteSummaryController({
@@ -61,6 +62,7 @@ function create(): NoteSummaryController {
     getModels: () => models,
     cloudConsent,
     onConsentNeeded,
+    catchUp,
   })
   return controller
 }
@@ -105,6 +107,8 @@ describe('createNoteSummaryController', () => {
       localModel: null,
       cloudModel: null,
       cloudConsent,
+      // Other devices' summaries arrive through the backup's pull.
+      catchUp,
     })
 
     onApplied?.([{ path: 'notes/a.md', kind: 'upsert', modifiedMs: 1 }], GEN)

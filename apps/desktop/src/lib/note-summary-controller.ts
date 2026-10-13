@@ -61,6 +61,11 @@ export interface NoteSummaryControllerOptions {
   cloudConsent: AiSummariesModel | null
   /** A cloud pass is waiting for the user's go-ahead; called once per controller and model. */
   onConsentNeeded: (consent: NoteSummaryConsent) => void
+  /**
+   * Brings other devices' changes in before a pass's first model call (the
+   * backup's pull), so a note another device already summarized is skipped.
+   */
+  catchUp: () => Promise<void>
 }
 
 /** How long a `config` stop (no usable model) holds the loop off. */
@@ -134,6 +139,7 @@ export function createNoteSummaryController(
       isStale: passIsStale,
       isBusy: (path) => openSession(path, options.generation)?.isDirty() === true,
       settled,
+      catchUp: options.catchUp,
     })
     for (const key of outcome.settled) settled.add(key)
     surfaceStop(outcome.stopped)

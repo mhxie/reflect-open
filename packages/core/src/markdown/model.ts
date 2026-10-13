@@ -77,6 +77,13 @@ export const aiSummaryFrontmatterSchema = z.object({
   text: z.string(),
   /** {@link noteBodyHash} of the summarized body (coerced like `gist.hash`). */
   hash: z.coerce.string(),
+  /**
+   * When the summary was generated (`Date.prototype.toISOString`). Two devices
+   * that summarize the same body before either's summary syncs both write one,
+   * and the sync merge keeps the one generated first. Summaries written before
+   * this was recorded have none; a value that isn't a string reads as none.
+   */
+  generatedAt: z.string().optional().catch(undefined),
 })
 export type AiSummaryFrontmatter = z.infer<typeof aiSummaryFrontmatterSchema>
 
