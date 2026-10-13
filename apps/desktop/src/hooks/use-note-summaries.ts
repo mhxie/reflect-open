@@ -9,6 +9,7 @@ import {
 } from '@reflect/core'
 import { useMainWindowEffect } from '@/hooks/use-main-window-effect.ts'
 import { cloudGoAhead } from '@/hooks/use-summary-model-choice.ts'
+import { pullBackup } from '@/lib/backup-pull.ts'
 import {
   createNoteSummaryController,
   type NoteSummaryController,
@@ -24,7 +25,8 @@ import { useSettings } from '@/providers/settings-provider.tsx'
  * the writes — and off when the `aiSummaries` setting is. Before the cloud
  * engine sends anything it asks, naming the provider and model; the go-ahead
  * records exactly those and rebuilds the controller, whose launch pass then
- * starts. A changed mode, model or provider runs a pass at once.
+ * starts. A changed mode, model or provider runs a pass at once. Other devices
+ * summarize too, so a pass pulls before its first model call.
  */
 export function useNoteSummaries(graph: GraphInfo): void {
   const { settings, updateSettings } = useSettings()
@@ -102,6 +104,7 @@ export function useNoteSummaries(graph: GraphInfo): void {
           start: (choice) => updateSettingsRef.current(cloudGoAhead(choice)),
         })
       },
+      catchUp: pullBackup,
     })
     controllerRef.current = controller
     controller.start()

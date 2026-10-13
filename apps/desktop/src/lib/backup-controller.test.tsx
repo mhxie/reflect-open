@@ -11,6 +11,7 @@ import {
 } from '@reflect/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { flushBackup } from '@/lib/backup-flush.ts'
+import { pullBackup } from '@/lib/backup-pull.ts'
 import { getOperations, resetOperations } from '@/lib/operations.ts'
 import { setPlatformSurface } from '@/lib/platform-surface.ts'
 import { createBackupController, type BackupState } from './backup-controller.ts'
@@ -695,6 +696,81 @@ describe('createBackupController', () => {
       })
     })
     controller.dispose()
+  })
+
+  it('pulls for a background writer while the graph syncs', async () => {
+    const { calls } = fakeBridge()
+    const fetches = (): number => calls.filter((command) => command === 'git_fetch').length
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    try {
+      await controller.start()
+      await vi.waitFor(() => {
+        expect(calls).toContain('git_merge_remote') // the launch pull
+      })
+      expect(fetches()).toBe(1)
+
+      await pullBackup()
+      expect(fetches()).toBe(2)
+    } finally {
+      controller.dispose()
+    }
+    // Torn down: a pull does nothing.
+    await pullBackup()
+    expect(fetches()).toBe(2)
+  })
+
+  it('a pull asked for while the graph connects waits for it, then pulls', async () => {
+    const { calls } = fakeBridge()
+    const fetches = (): number => calls.filter((command) => command === 'git_fetch').length
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    try {
+      // The launch summary pass can ask before the engine exists.
+      const started = controller.start()
+      await pullBackup()
+      await started
+      // The launch pull, then this one.
+      expect(fetches()).toBe(2)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('leaves a failed sign-in to the resume triggers, not to background writers', async () => {
+    const { calls } = fakeBridge({
+      mergeOutcome: MERGED,
+      pushError: { kind: 'auth', message: 'authentication required' },
+    })
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    try {
+      await controller.start()
+      await vi.waitFor(() => {
+        expect(controller.getState()).toMatchObject({
+          phase: 'connected',
+          status: { state: 'error', errorKind: 'auth' },
+        })
+      })
+      const commands = calls.length
+      await pullBackup()
+      expect(calls).toHaveLength(commands)
+    } finally {
+      controller.dispose()
+    }
+  })
+
+  it('has nothing to pull for a graph without a remote', async () => {
+    const { calls } = fakeBridge({ auth: null, remoteUrl: null })
+    const controller = createBackupController({ graph: GRAPH, indexGeneration: 1 })
+    try {
+      await controller.start()
+      await vi.waitFor(() => {
+        expect(calls).toContain('git_commit_all') // local history's first snapshot
+      })
+      const commands = calls.length
+      await pullBackup()
+      expect(calls).toHaveLength(commands)
+    } finally {
+      controller.dispose()
+    }
   })
 
   // Safety invariant S4 (docs/git-backup-safety.md): the quit-time commit

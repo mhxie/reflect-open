@@ -2,7 +2,8 @@
 
 The rules every change to the sync path must keep. "The sync path" is
 `apps/desktop/src-tauri/src/git/`, `packages/core/src/sync/`,
-`apps/desktop/src/lib/backup-controller.ts`, `backup-flush.ts`, and the
+`apps/desktop/src/lib/backup-controller.ts`, `backup-flush.ts`,
+`backup-pull.ts`, and the
 note session's external-change handling in
 `apps/desktop/src/editor/note-session-state.ts`.
 
@@ -75,9 +76,19 @@ A merge with conflicts writes labeled markers into the note, commits with
 both parents, and pushes. Other notes keep syncing; both devices converge on
 the same marked-up file.
 
+The one conflict settled without markers is two devices' AI summaries of
+the same body (equal `aiSummary.hash`): both sides keep the summary
+generated first and the note merges again. Only a merge that is then clean
+lands without markers, and the choice reads only the two summaries, so both
+devices converge on the same bytes. Any other overlapping change keeps its
+markers.
+
 - Test: `git::tests::conflicting_edits_are_committed_with_labeled_markers`,
   `git::tests::edit_vs_delete_keeps_the_edit`,
-  `git::tests::binary_conflict_keeps_both_copies`.
+  `git::tests::binary_conflict_keeps_both_copies`,
+  `git::tests::summaries_of_the_same_body_merge_to_the_first_generated`,
+  `git::tests::both_devices_settle_summaries_on_the_same_bytes`,
+  `git::tests::a_summary_conflict_beside_a_body_conflict_keeps_the_markers`.
 
 ## S8. Edits in an open note are never silently discarded
 

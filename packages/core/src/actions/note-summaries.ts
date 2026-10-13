@@ -54,6 +54,12 @@ import type { ReconcileStop } from './audio-memo.ts'
  * is checked against the bytes that were summarized: a note edited meanwhile
  * keeps the edit and is retried once its new body settles. Short notes keep
  * their plain snippet: they show most of themselves already.
+ *
+ * Every device with summaries on runs this pass, so before its first model
+ * call a pass catches up with the others (`catchUp`): a note another device
+ * already summarized then reads as summarized and is skipped. Two devices
+ * that still summarize the same body record when they did (`generatedAt`),
+ * and the sync merge keeps the summary generated first.
  */
 
 /** Display characters a note needs before it gets a summary instead of its snippet. */
@@ -104,7 +110,14 @@ export interface ReconcileNoteSummariesInput {
    * of path and indexed file hash); skipped until the file changes.
    */
   settled?: ReadonlySet<string>
-  /** Injectable clock (epoch ms) for the quiet period. */
+  /**
+   * Brings in other devices' changes (the backup's pull), awaited once before
+   * the pass's first model call. Each note is read after it, so one another
+   * device already summarized is skipped. Resolves even when the pull fails:
+   * a device offline still summarizes, and the merge settles a duplicate.
+   */
+  catchUp?: () => Promise<void>
+  /** Injectable clock (epoch ms) for the quiet period and `generatedAt`. */
   now?: () => number
 }
 
@@ -394,7 +407,8 @@ async function summarizeCandidate(
     return { kind: 'settled' }
   }
 
-  const summary: AiSummaryFrontmatter = { text, hash }
+  const generatedAt = new Date((input.now ?? Date.now)()).toISOString()
+  const summary: AiSummaryFrontmatter = { text, hash, generatedAt }
   const next = upsertFrontmatter(source, { [AI_SUMMARY_KEY]: summary })
   try {
     await writeNoteKeepingModified(candidate.path, next, input.generation, source)
@@ -478,6 +492,13 @@ export async function reconcileNoteSummaries(
       if (handled >= MAX_SUMMARIES_PER_PASS) {
         outcome.remaining = true
         return outcome
+      }
+      if (handled === 0 && input.catchUp !== undefined) {
+        await input.catchUp()
+        if (isStale()) {
+          outcome.stopped = STALE
+          return outcome
+        }
       }
       handled += 1
       const step = await summarizeCandidate(candidate, engine, input)

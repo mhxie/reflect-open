@@ -18,7 +18,11 @@
 //! Pure text in, text out: no iCloud types here. The platform half (version
 //! discovery, archiving, applying results) lives in [`crate::icloud`] and the
 //! sweep.
+//!
+//! Git pulls merge through libgit2 instead and take one rule from here:
+//! [`ai_summary`], for two devices' summaries of the same body.
 
+pub(crate) mod ai_summary;
 pub mod archive;
 mod frontmatter;
 pub mod ladder;

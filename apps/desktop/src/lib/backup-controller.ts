@@ -33,6 +33,7 @@ import {
   type Unlisten,
 } from '@reflect/core'
 import { setBackupFlusher } from '@/lib/backup-flush.ts'
+import { setBackupPuller } from '@/lib/backup-pull.ts'
 import { displacedNotesMessage } from '@/lib/displaced-notes.ts'
 import { invalidateGithubAuth } from '@/lib/github-auth-state.ts'
 import { startOperation } from '@/lib/operations.ts'
@@ -139,6 +140,8 @@ export function createBackupController(options: BackupControllerOptions): Backup
   const listeners = new Set<() => void>()
   let disposed = false
   let engine: SyncEngine | null = null
+  /** The engine syncing with the remote: what a background writer's pull runs. */
+  let syncing: SyncEngine | null = null
   let unlisten: Unlisten | null = null
   const domDisposers: Array<() => void> = []
   /** Serializes direct index writes without delaying synchronous file-change fanout. */
@@ -161,12 +164,34 @@ export function createBackupController(options: BackupControllerOptions): Backup
     remoteIndexEpoch += 1
     engine?.stop()
     engine = null
+    syncing = null
     unlisten?.()
     unlisten = null
     for (const dispose of domDisposers.splice(0)) {
       dispose()
     }
     setBackupFlusher(null)
+    setBackupPuller(null)
+  }
+
+  /**
+   * A background writer's pull (the note-summary pass), registered as soon as
+   * `start()` begins: one asked for while the graph is still connecting waits
+   * for that, then runs a full cycle on the syncing engine. With no remote it
+   * does nothing, and a sign-in known to fail is left to the resume triggers,
+   * as the engine leaves it for edits.
+   */
+  function registerPuller(connecting: Promise<void>): void {
+    setBackupPuller(async () => {
+      await connecting
+      const signInFailed =
+        state.phase === 'connected' &&
+        isSyncError(state.status) &&
+        state.status.errorKind === 'auth'
+      if (syncing !== null && !signInFailed) {
+        await syncing.syncNow()
+      }
+    })
   }
 
   /**
@@ -314,6 +339,8 @@ export function createBackupController(options: BackupControllerOptions): Backup
     if (disposed) {
       return
     }
+    const connecting = Promise.withResolvers<void>()
+    registerPuller(connecting.promise)
     setState({ phase: 'loading' })
     try {
       const [status, auth] = await Promise.all([
@@ -434,6 +461,7 @@ export function createBackupController(options: BackupControllerOptions): Backup
       }
 
       domDisposers.push(attachResumeListeners(() => void next.syncNow()))
+      syncing = next
 
       void next.syncNow() // launch pull: pick up other devices' changes
     } catch (error) {
@@ -444,6 +472,8 @@ export function createBackupController(options: BackupControllerOptions): Backup
         console.error('backup start failed:', errorMessage(error))
         setState({ phase: 'disconnected' })
       }
+    } finally {
+      connecting.resolve()
     }
   }
 

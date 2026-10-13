@@ -174,7 +174,43 @@ describe('reconcileNoteSummaries', () => {
     expect(parseNote({ path, source: written }).frontmatter.aiSummary).toEqual({
       text: 'Summary from on-device.',
       hash: noteBodyHash(body),
+      generatedAt: new Date(NOW).toISOString(),
     })
+  })
+
+  it('catches up with other devices before its first model call', async () => {
+    const order: string[] = []
+    const body = splitFrontmatter(LONG_BODY).body
+    // The pull lands another device's summary of the public note's body.
+    const catchUp = vi.fn(async () => {
+      order.push('catch up')
+      files.set(
+        PUBLIC,
+        upsertFrontmatter(LONG_BODY, {
+          aiSummary: { text: 'From the other Mac.', hash: noteBodyHash(body) },
+        }),
+      )
+    })
+    vi.mocked(writeNoteKeepingModified).mockImplementation(async (path) => {
+      order.push(`write ${path}`)
+    })
+
+    const outcome = await reconcileNoteSummaries(input({ catchUp }))
+    expect(catchUp).toHaveBeenCalledTimes(1)
+    expect(order).toEqual(['catch up', `write ${PRIVATE}`])
+    expect(outcome.summarized).toBe(1)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('never catches up for a pass that sends nothing', async () => {
+    const catchUp = vi.fn(async () => {})
+    await reconcileNoteSummaries(input({ catchUp, isBusy: () => true }))
+    await reconcileNoteSummaries(
+      input({ catchUp, providers: { providers: [CLOUD], defaultProviderId: CLOUD.id } }),
+    )
+    await reconcileNoteSummaries(input({ catchUp, mode: 'cloud', cloudConsent: null }))
+    expect(catchUp).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
   })
 
   it('stops without a usable on-device model in local mode', async () => {
