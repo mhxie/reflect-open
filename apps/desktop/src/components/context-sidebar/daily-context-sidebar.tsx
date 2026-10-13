@@ -19,35 +19,42 @@ interface DailyContextSidebarProps {
 
 /**
  * The daily note's contextual sidebar (modeled on the old app's note context
- * sidebar): the month calendar up top — itself the day-navigation surface,
- * with a jump-to-today button — then sections ordered by scope: the day's
- * tasks and calendar events, the note's actions and published link, then the
- * same day in earlier years and semantic neighbors. Tasks always renders, so
- * it sits directly under the calendar on every day; the sections that come
- * and go sit below it and never move it. The calendar and sections scroll
- * together; the graph-wide journaling activity stays pinned to the bottom.
- * Inbound links live under the note itself (the incoming-backlinks section),
- * not here. Rendered in the AppShell's right region on daily routes only.
+ * sidebar). Pinned at the top: the month calendar — itself the day-navigation
+ * surface, with a jump-to-today button — then the note's actions and published
+ * link. Pinned at the bottom: the graph-wide journaling activity. Between them
+ * scroll the sections of open-ended length: the day's tasks and calendar
+ * events, then the same day in earlier years and semantic neighbors. Tasks
+ * always renders, so it opens the scrolling sections on every day; the
+ * sections that come and go sit below it and never move it. A window too short
+ * for the pinned parts and a few lines of sections scrolls the whole sidebar
+ * instead. Inbound links live under the note itself (the incoming-backlinks
+ * section), not here. Rendered in the AppShell's right region on daily routes
+ * only.
  */
 export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactElement {
   const today = useToday()
 
   return (
-    <div className="flex h-full flex-col text-text">
+    <div className="flex h-full flex-col overflow-y-auto text-text">
       <div
         className={cn(
-          'min-h-0 flex-1 overflow-y-auto',
+          // The calendar grid and the action buttons carry 8px of padding of
+          // their own, so these half-size gaps leave the same 16px around the
+          // note actions as around every section below.
+          'flex-none space-y-2 border-b border-border pb-2',
           // The calendar's controls must clear the WindowDragRegion strip when
           // the macOS title bar is overlaid.
           hasMacosTitleBarOverlay ? 'pt-0' : 'pt-2',
         )}
       >
         <DayCalendar selectedDate={date} today={today} />
-        <div className="my-4 space-y-4 pb-4">
+        <NoteActionsSection path={dailyPath(date)} />
+        <PublishedUrlSection path={dailyPath(date)} />
+      </div>
+      <div className="min-h-24 flex-1 overflow-y-auto">
+        <div className="space-y-4 py-4">
           <DayTasksSection date={date} />
           <DailyEventsSection date={date} />
-          <NoteActionsSection path={dailyPath(date)} />
-          <PublishedUrlSection path={dailyPath(date)} />
           <OnThisDaySection date={date} />
           <SimilarNotesSection path={dailyPath(date)} />
         </div>
