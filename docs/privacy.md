@@ -152,8 +152,11 @@ go-ahead given in an earlier build named no model, so this build asks once
 more. It leaves that earlier answer as it is for those builds, and never gives
 one of its own.
 
-The summary is written into the note's `aiSummary` frontmatter, so it travels
-with the note, including to Git backup, like the rest of the note's text. In
+The summary is written into the note's `aiSummary` frontmatter, with the time
+it was generated, so it travels with the note, including to Git backup, like
+the rest of the note's text. With Git backup connected, Reflect syncs before
+it summarizes, so a note another device already summarized isn't sent
+again. In
 Reflect it shows only in the All Notes list. Search results, *On this day*,
 and the note listings AI chat reads keep showing the note's own opening text,
 so AI-written text doesn't feed back into AI context.
