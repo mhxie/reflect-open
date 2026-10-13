@@ -757,6 +757,194 @@ fn conflicting_edits_are_committed_with_labeled_markers() {
     assert_eq!(read(&root_b, "notes/shared.md"), content);
 }
 
+const SUMMARIZED_BODY: &str = "# Shared\n\nA long body both devices summarized.\n";
+
+/// The shared note with an AI summary of [`SUMMARIZED_BODY`], laid out as the
+/// background summary pass writes it.
+fn summarized(text: &str, generated_at: &str, body: &str) -> String {
+    format!(
+        "---\ntitle: Shared\naiSummary:\n  text: {text}\n  hash: 0123456789abcdef\n  \
+         generatedAt: {generated_at}\n---\n\n{body}"
+    )
+}
+
+/// A base note both devices have, then each device's own summary of it,
+/// committed on both: returns the second device's root. Nothing is pushed
+/// past the base.
+fn summarized_on_both_devices(fixture: &Fixture, body_a: &str, body_b: &str) -> PathBuf {
+    let root_a = &fixture.graph_a;
+    write(
+        root_a,
+        "notes/shared.md",
+        &format!("---\ntitle: Shared\n---\n\n{SUMMARIZED_BODY}"),
+    );
+    commit_all(root_a, "base", MAX_FILE_BYTES, None).unwrap();
+    push(root_a, None, &[]).unwrap();
+    let root_b = second_device(fixture);
+    write(
+        &root_b,
+        "notes/shared.md",
+        &summarized(
+            "Summarized first, on b.",
+            "2026-01-02T08:00:00.000Z",
+            body_b,
+        ),
+    );
+    commit_all(&root_b, "b summary", MAX_FILE_BYTES, None).unwrap();
+    write(
+        root_a,
+        "notes/shared.md",
+        &summarized(
+            "Summarized later, on a.",
+            "2026-01-02T09:30:00.000Z",
+            body_a,
+        ),
+    );
+    commit_all(root_a, "a summary", MAX_FILE_BYTES, None).unwrap();
+    root_b
+}
+
+/// Two devices that summarized the same body before either's summary
+/// synced: the merge keeps the summary generated first and needs no review.
+#[test]
+fn summaries_of_the_same_body_merge_to_the_first_generated() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let root_b = summarized_on_both_devices(&fixture, SUMMARIZED_BODY, SUMMARIZED_BODY);
+    push(&root_b, None, &[]).unwrap();
+    let first = summarized(
+        "Summarized first, on b.",
+        "2026-01-02T08:00:00.000Z",
+        SUMMARIZED_BODY,
+    );
+
+    fetch(root_a, None).unwrap();
+    let merged = merge_remote(root_a, None, &[]).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert!(merged.conflicted_paths.is_empty(), "{merged:?}");
+    // Marked up, then settled: the file reindexes.
+    assert!(
+        merged
+            .changed_files
+            .iter()
+            .any(|change| change.path == "notes/shared.md"),
+        "{merged:?}"
+    );
+    assert_eq!(read(root_a, "notes/shared.md"), first);
+    assert_eq!(head_blob(root_a, "notes/shared.md"), first);
+    assert_eq!(head_message(root_a), "Merge changes from other devices");
+    let repo = Repository::open(root_a).unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(!repo.index().unwrap().has_conflicts());
+
+    assert!(push(root_a, None, &[]).unwrap().pushed);
+    fetch(&root_b, None).unwrap();
+    let converged = merge_remote(&root_b, None, &[]).unwrap();
+    assert!(
+        matches!(converged.kind, MergeKind::FastForward),
+        "{converged:?}"
+    );
+    assert_eq!(read(&root_b, "notes/shared.md"), first);
+}
+
+/// This device's summary, generated first, stays: the merge leaves the note
+/// as HEAD had it, but the checkout marked it up in between, so it still
+/// reindexes.
+#[test]
+fn a_kept_summary_from_this_device_still_reindexes() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let root_b = summarized_on_both_devices(&fixture, SUMMARIZED_BODY, SUMMARIZED_BODY);
+    assert!(push(root_a, None, &[]).unwrap().pushed);
+    let kept = read(&root_b, "notes/shared.md");
+
+    fetch(&root_b, None).unwrap();
+    let merged = merge_remote(&root_b, None, &[]).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert_eq!(read(&root_b, "notes/shared.md"), kept);
+    let change = merged
+        .changed_files
+        .iter()
+        .find(|change| change.path == "notes/shared.md")
+        .unwrap_or_else(|| panic!("{merged:?}"));
+    assert!(change.modified_ms.is_some(), "{merged:?}");
+}
+
+/// Point `root`'s `origin/main` at `other`'s `main`: what each device holds
+/// when both fetched the other's commit before either pushed a merge.
+fn fetch_from_device(root: &Path, other: &Path) {
+    let repo = Repository::open(root).unwrap();
+    let mut remote = repo.remote_anonymous(other.to_str().unwrap()).unwrap();
+    remote
+        .fetch(&["+refs/heads/main:refs/remotes/origin/main"], None, None)
+        .unwrap();
+}
+
+/// Each device merging the other's summary settles on the same bytes, the
+/// body edit one of them made merging around the kept summary, so their two
+/// merges then merge without a conflict.
+#[test]
+fn both_devices_settle_summaries_on_the_same_bytes() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let edited = format!("{SUMMARIZED_BODY}\nAppended on a.\n");
+    let root_b = summarized_on_both_devices(&fixture, &edited, SUMMARIZED_BODY);
+    fetch_from_device(root_a, &root_b);
+    fetch_from_device(&root_b, root_a);
+
+    let on_a = merge_remote(root_a, None, &[]).unwrap();
+    let on_b = merge_remote(&root_b, None, &[]).unwrap();
+    assert!(matches!(on_a.kind, MergeKind::Merged), "{on_a:?}");
+    assert!(matches!(on_b.kind, MergeKind::Merged), "{on_b:?}");
+    let settled = summarized(
+        "Summarized first, on b.",
+        "2026-01-02T08:00:00.000Z",
+        &edited,
+    );
+    assert_eq!(read(root_a, "notes/shared.md"), settled);
+    assert_eq!(read(&root_b, "notes/shared.md"), settled);
+
+    // The push checks the server's branch against the fetched one.
+    fetch(root_a, None).unwrap();
+    assert!(push(root_a, None, &[]).unwrap().pushed);
+    fetch(&root_b, None).unwrap();
+    let converged = merge_remote(&root_b, None, &[]).unwrap();
+    assert!(matches!(converged.kind, MergeKind::Merged), "{converged:?}");
+    assert_eq!(read(&root_b, "notes/shared.md"), settled);
+}
+
+/// A body both devices rewrote is a conflict for the user, summaries and
+/// all: the note keeps Git's markers as before.
+#[test]
+fn a_summary_conflict_beside_a_body_conflict_keeps_the_markers() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let root_b = summarized_on_both_devices(
+        &fixture,
+        "# Shared\n\nRewritten on a.\n",
+        "# Shared\n\nRewritten on b.\n",
+    );
+    push(&root_b, None, &[]).unwrap();
+
+    fetch(root_a, None).unwrap();
+    let merged = merge_remote(root_a, None, &[]).unwrap();
+    assert!(
+        matches!(merged.kind, MergeKind::MergedWithConflicts),
+        "{merged:?}"
+    );
+    assert_eq!(merged.conflicted_paths, vec!["notes/shared.md".to_string()]);
+    let content = read(root_a, "notes/shared.md");
+    assert!(content.contains("<<<<<<< this device"), "{content}");
+    assert!(content.contains("Summarized later, on a."), "{content}");
+    assert!(content.contains("Summarized first, on b."), "{content}");
+    assert!(content.contains("Rewritten on a."), "{content}");
+    assert!(content.contains("Rewritten on b."), "{content}");
+    assert_eq!(
+        head_message(root_a),
+        "Merge changes from other devices (conflicts to review)"
+    );
+}
+
 #[test]
 fn edit_vs_delete_keeps_the_edit() {
     let fixture = fixture();

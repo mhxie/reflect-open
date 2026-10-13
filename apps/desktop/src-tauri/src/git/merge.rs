@@ -19,6 +19,11 @@
 //! >>>>>>> other device
 //! ```
 //!
+//! One conflict is settled instead: two devices' AI summaries of the same
+//! body. Both sides take the summary generated first and the note merges
+//! again (`conflict::ai_summary`); only a merge that is then clean is
+//! committed without markers, the same bytes whichever device pulls.
+//!
 //! **Separate histories pause.** Before anything is analyzed or written, a
 //! pull whose incoming commits include a history root the graph has not
 //! accepted pauses sync (see `history_roots`): libgit2 would merge two
@@ -71,6 +76,7 @@ use git2::{Index, IndexEntry, IndexTime, MergeOptions, Repository};
 use reflect_graph_paths::{to_slash_lossy, LocalOnlyFolders};
 use serde::Serialize;
 
+use crate::conflict::ai_summary;
 use crate::error::{AppError, AppResult};
 
 use super::displace::{
@@ -822,7 +828,10 @@ fn complete_merge(
     let local_commit = repo.head()?.peel_to_commit()?;
     let remote_commit = repo.find_commit(remote_oid)?;
     let remote_tree = remote_commit.tree()?;
-    let conflicted_paths = resolve_conflicts(repo, root, &mut index, &remote_tree, policy)?;
+    let ConflictWrites {
+        conflicted: conflicted_paths,
+        settled: settled_paths,
+    } = resolve_conflicts(repo, root, &mut index, &remote_tree, policy)?;
     // Held units merged as this device's version; where the other device
     // changed one (`followed`), history takes its version instead. The files
     // stay frozen.
@@ -844,8 +853,10 @@ fn complete_merge(
     let mut changed_files = changed_between(repo, Some(&local_commit.tree()?), &tree)?;
     changed_files.retain(|change| !under_any(held, &change.path));
     // A conflicted file was rewritten on disk even where history keeps this
-    // device's version (a marker file over the size limit), so it reindexes.
-    for path in &conflicted_paths {
+    // device's version (a marker file over the size limit), and a settled one
+    // was marked up before it was settled, perhaps back to this device's
+    // bytes, so both reindex.
+    for path in conflicted_paths.iter().chain(&settled_paths) {
         if !changed_files.iter().any(|change| change.path == *path) {
             changed_files.push(ChangedFile {
                 path: path.clone(),
@@ -946,8 +957,20 @@ fn stamp_modified_times(root: &Path, changes: &mut [ChangedFile]) {
     }
 }
 
+/// What [`resolve_conflicts`] left in the working tree.
+#[derive(Default)]
+struct ConflictWrites {
+    /// Paths that now carry markers (or a binary conflict copy): the user's
+    /// to review.
+    conflicted: Vec<String>,
+    /// Text conflicts [`settle_both_edited`] rewrote without markers.
+    settled: Vec<String>,
+}
+
 /// Turn every index conflict into committed working-tree content:
 ///
+/// - **two summaries of the same body** — write the note with the one
+///   generated first, when that merges clean ([`settle_both_edited`]);
 /// - **text vs text** — the merge checkout already wrote labeled markers into
 ///   the file; stage it as-is (the user resolves by editing the note);
 /// - **edit vs delete** — keep the edited version, never silently delete;
@@ -960,10 +983,11 @@ fn resolve_conflicts(
     index: &mut Index,
     remote_tree: &git2::Tree,
     policy: &PullPolicy<'_>,
-) -> AppResult<Vec<String>> {
+) -> AppResult<ConflictWrites> {
     let local_only = policy.local_only;
+    let mut writes = ConflictWrites::default();
     if !index.has_conflicts() {
-        return Ok(Vec::new());
+        return Ok(writes);
     }
 
     struct OwnedConflict {
@@ -981,22 +1005,25 @@ fn resolve_conflicts(
         })
         .collect();
 
-    let mut conflicted_paths = Vec::new();
     for conflict in conflicts {
         match (conflict.our, conflict.their) {
             (Some(our), Some(their)) => {
-                conflicted_paths.extend(resolve_both_edited(
-                    repo,
-                    root,
-                    index,
-                    our,
-                    their,
-                    remote_tree,
-                    policy,
-                )?);
+                let ancestor = conflict.ancestor.as_ref();
+                match settle_both_edited(repo, root, index, ancestor, &our, &their, policy)? {
+                    Some(path) => writes.settled.push(path),
+                    None => writes.conflicted.extend(resolve_both_edited(
+                        repo,
+                        root,
+                        index,
+                        our,
+                        their,
+                        remote_tree,
+                        policy,
+                    )?),
+                }
             }
             (Some(edited), None) | (None, Some(edited)) => {
-                conflicted_paths.push(resolve_edit_vs_delete(
+                writes.conflicted.push(resolve_edit_vs_delete(
                     repo, root, index, edited, local_only,
                 )?);
             }
@@ -1007,7 +1034,49 @@ fn resolve_conflicts(
             }
         }
     }
-    Ok(conflicted_paths)
+    Ok(writes)
+}
+
+/// Settle a conflict that only two devices' summaries of the same body
+/// caused (`conflict::ai_summary`): write the merged note and stage it,
+/// returning its path. `None` leaves the conflict to [`resolve_both_edited`]:
+/// a binary or non-UTF-8 version, any other overlapping change, or a merged
+/// note at or above the backup size limit.
+fn settle_both_edited(
+    repo: &Repository,
+    root: &Path,
+    index: &mut Index,
+    ancestor: Option<&ConflictSide>,
+    our: &ConflictSide,
+    their: &ConflictSide,
+    policy: &PullPolicy<'_>,
+) -> AppResult<Option<String>> {
+    let text = |side: &ConflictSide| -> AppResult<Option<String>> {
+        let blob = repo.find_blob(side.id)?;
+        if blob.is_binary() {
+            return Ok(None);
+        }
+        Ok(String::from_utf8(blob.content().to_vec()).ok())
+    };
+    let (Some(ours), Some(theirs)) = (text(our)?, text(their)?) else {
+        return Ok(None);
+    };
+    let base = match ancestor {
+        Some(side) => match text(side)? {
+            Some(base) => Some(base),
+            None => return Ok(None),
+        },
+        None => None,
+    };
+    let Some(note) = ai_summary::resolve(base.as_deref(), &ours, &theirs)? else {
+        return Ok(None);
+    };
+    if note.len() as u64 >= policy.max_file_bytes {
+        return Ok(None);
+    }
+    write_bytes(root, &our.path, note.as_bytes(), policy.local_only)?;
+    index.add_path(Path::new(&our.path))?;
+    Ok(Some(our.path.clone()))
 }
 
 /// Both sides changed the file. Text: the merge checkout already wrote the
@@ -1082,11 +1151,7 @@ fn resolve_edit_vs_delete(
     Ok(edited.path)
 }
 
-/// Write a blob into the working tree. With local-only folders configured
-/// the target goes through the strict write guard, editable folders
-/// included: `fs::write` follows symlinks, a pull never writes into a
-/// local-only folder, and a held path can never conflict, so a refusal here
-/// is a bug surfacing loudly rather than a write through a link.
+/// Write a blob into the working tree (see [`write_bytes`]).
 pub(super) fn write_blob(
     repo: &Repository,
     root: &Path,
@@ -1094,7 +1159,20 @@ pub(super) fn write_blob(
     id: git2::Oid,
     local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<()> {
-    let blob = repo.find_blob(id)?;
+    write_bytes(root, rel, repo.find_blob(id)?.content(), local_only)
+}
+
+/// Write `bytes` into the working tree. With local-only folders configured
+/// the target goes through the strict write guard, editable folders
+/// included: `fs::write` follows symlinks, a pull never writes into a
+/// local-only folder, and a held path can never conflict, so a refusal here
+/// is a bug surfacing loudly rather than a write through a link.
+fn write_bytes(
+    root: &Path,
+    rel: &str,
+    bytes: &[u8],
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
     let target = match local_only {
         Some(folders) => crate::fs::resolve_write_in_graph(root, rel, Some(folders))?,
         None => root.join(rel),
@@ -1102,7 +1180,7 @@ pub(super) fn write_blob(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(target, blob.content())?;
+    fs::write(target, bytes)?;
     Ok(())
 }
 
