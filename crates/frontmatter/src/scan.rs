@@ -96,6 +96,24 @@ pub(crate) enum Load {
     NotLoaded(UnreadableReason),
 }
 
+/// Whether a frontmatter block (the YAML between the fences) loads, by the
+/// rules every native reader applies first ([`load`]).
+pub fn frontmatter_loads(raw: &str) -> bool {
+    matches!(load(raw), Load::Loaded(_))
+}
+
+/// Whether a block that loads uses an alias (`*name`, in a `<<` merge key
+/// too): what it means then depends on where its anchors sit.
+pub fn frontmatter_uses_aliases(raw: &str) -> bool {
+    match load(raw) {
+        Load::Loaded(tree) => tree
+            .nodes
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Alias(_))),
+        Load::NotLoaded(_) => false,
+    }
+}
+
 /// Decide whether `raw` loads: at most [`MAX_BLOCK_BYTES`], no character the
 /// two parsers read differently, one document whose root is a plain mapping
 /// (or empty), no duplicate keys, and aliases within both budgets.

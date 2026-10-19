@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use saphyr::{LoadableYamlNode, Yaml};
 
-use crate::scan::{Load, load};
+use crate::scan::frontmatter_loads;
 use crate::split::split_block;
 
 /// The frontmatter key the summary lives under (`AI_SUMMARY_KEY`).
@@ -70,7 +70,7 @@ struct Fields {
 
 /// The summary's fields: `hash` may have loaded as an integer.
 fn summary_fields(raw: &str) -> Option<Fields> {
-    if !matches!(load(raw), Load::Loaded(_)) {
+    if !frontmatter_loads(raw) {
         return None;
     }
     let documents = Yaml::load_from_str(raw).ok()?;

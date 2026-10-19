@@ -682,6 +682,43 @@ fn frontmatter_only_conflict_merges_keywise() {
     assert_eq!(content.matches("---\n").count(), 2, "{content}");
 }
 
+/// A summarized note pinned on one device, and made private then pinned on
+/// the other, merges key by key around its summary block: one `pinned`, not
+/// the two a word-level merge of the touching lines would keep.
+#[test]
+fn a_summarized_notes_header_conflict_merges_keywise() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let rel = "notes/summarized.md";
+    let note = |keys: &str| {
+        format!(
+            "---\ntitle: Summarized\naiSummary:\n  text: A long body, summarized once.\n  \
+             hash: 0123456789abcdef\n  generatedAt: 2026-01-02T08:00:00.000Z\n{keys}---\n\n\
+             # Summarized\n\nbody\n"
+        )
+    };
+    write(root_a, rel, &note(""));
+    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    push(root_a, None).unwrap();
+
+    // The pin is committed first, so it is the ladder's first side whatever
+    // the clock does: an earlier second, or the same one and it sorts first.
+    let root_b = second_device(&fixture);
+    write(&root_b, rel, &note("pinned: true\n"));
+    commit_all(&root_b, "b pin", MAX_FILE_BYTES).unwrap();
+    push(&root_b, None).unwrap();
+
+    write(root_a, rel, &note("private: true\npinned: true\n"));
+    commit_all(root_a, "a private and pin", MAX_FILE_BYTES).unwrap();
+    fetch(root_a, None).unwrap();
+    let merged = merge_remote(root_a).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert!(merged.review_paths.is_empty(), "{merged:?}");
+    let content = read(root_a, rel);
+    assert_eq!(content, note("pinned: true\nprivate: true\n"));
+    assert_eq!(head_blob(root_a, rel), content);
+}
+
 #[test]
 fn both_devices_resolve_the_same_pair_to_the_same_bytes() {
     let fixture = fixture();

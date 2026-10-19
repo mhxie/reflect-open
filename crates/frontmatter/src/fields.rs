@@ -6,7 +6,7 @@
 
 use saphyr::{LoadableYamlNode, Yaml};
 
-use crate::scan::{Load, load};
+use crate::scan::frontmatter_loads;
 use crate::split::split_block;
 
 /// The frontmatter fields the native readers need.
@@ -41,7 +41,7 @@ pub fn parse_frontmatter(raw: Option<&str>) -> Frontmatter {
     let Some(raw) = raw else {
         return Frontmatter::default();
     };
-    if raw.trim().is_empty() || !matches!(load(raw), Load::Loaded(_)) {
+    if raw.trim().is_empty() || !frontmatter_loads(raw) {
         return Frontmatter::default();
     }
     let Ok(documents) = Yaml::load_from_str(raw) else {
