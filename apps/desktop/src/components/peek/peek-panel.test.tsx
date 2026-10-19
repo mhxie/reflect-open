@@ -1,44 +1,36 @@
-import { cleanup, render } from 'vitest-browser-react'
+import { createTestWindowService } from '@reflect/app/testing'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import {
+  createTestCoreServices,
+  createTestNoteSession,
+  type TestCoreServices,
+} from '@reflect/core/testing'
+import type { MaybePromise } from '@reflect/utils'
+import { useRouter } from '@/routing/router.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import '@/test-utils/locator.ts'
-import { emitNoteMoved } from '@/lib/note-moves.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { PeekPanel } from './peek-panel.tsx'
 import { PeekProvider, usePeek, usePeekNavigation } from './peek-provider.tsx'
 
-const openPaths = vi.hoisted(() => new Set<string>())
-const openRouteInNewWindow = vi.hoisted(() => vi.fn(async () => true))
-vi.mock('@/editor/open-documents.ts', () => ({
-  openSession: (path: string) => (openPaths.has(path) ? {} : null),
-}))
+// Heavy children: the pane mounts the editor, the pages render the PDF.
 vi.mock('@/components/note-pane.tsx', () => ({
   NotePane: ({ path, outline }: { path: string; outline?: boolean }) => (
     <p data-outline={String(outline === true)}>pane:{path}</p>
   ),
 }))
-vi.mock('@/hooks/use-note-row.ts', () => ({ useNoteRow: () => null }))
 vi.mock('./pdf-peek-pages.tsx', () => ({
   PdfPeekPages: ({ path }: { path: string }) => <p>pages:{path}</p>,
 }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 3 } }),
-}))
-const openAsset = vi.hoisted(() => vi.fn(async () => {}))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  openAsset,
-}))
-vi.mock('@/lib/use-today.ts', () => ({ useToday: () => '2026-10-03' }))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'mdy' } }),
-}))
-vi.mock('@/lib/windows/open-in-new-window.ts', () => ({ openRouteInNewWindow }))
 
 const PAST = 'daily/2025-10-03.md'
 const NOTE = 'notes/draft.md'
+
+/** Notes open in a pane of this window: Peek navigates to them instead. */
+let openPaths: Set<string>
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function Opener({ path }: { path: string }): ReactElement {
   const navigate = usePeekNavigation()
@@ -66,30 +58,36 @@ function RouteProbe(): ReactElement {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function renderPeek() {
-  return render(
-    <RouterProvider>
-      <PeekProvider>
-        <Opener path={PAST} />
-        <Opener path={NOTE} />
-        <PdfOpener />
-        <input aria-label="Editor underneath" />
-        <PeekPanel />
-        <RouteProbe />
-      </PeekProvider>
-    </RouterProvider>,
+async function renderPeek(): Promise<TestCoreServices> {
+  const app = createTestCoreServices()
+  app.clock.setToday('2026-10-03')
+  vi.spyOn(app.openDocuments, 'sessionFor').mockImplementation((path) =>
+    openPaths.has(path) ? createTestNoteSession({ path }) : null,
   )
+  await renderInApp(
+    <PeekProvider>
+      <Opener path={PAST} />
+      <Opener path={NOTE} />
+      <PdfOpener />
+      <input aria-label="Editor underneath" />
+      <PeekPanel />
+      <RouteProbe />
+    </PeekProvider>,
+    {
+      app,
+      appServices: { window: createTestWindowService({ openNoteWindow }) },
+      graph: { root: '/g', name: 'g', generation: 3 },
+      settings: { dateFormat: 'mdy' },
+    },
+  )
+  return app
 }
 
 const dialog = () => page.getByRole('dialog', { name: 'Peek: Fri, October 3rd, 2025' })
 
 beforeEach(() => {
-  openPaths.clear()
-  openRouteInNewWindow.mockClear()
-})
-
-afterEach(async () => {
-  await cleanup()
+  openPaths = new Set()
+  openNoteWindow.mockReset().mockResolvedValue(true)
 })
 
 describe('Peek', () => {
@@ -140,7 +138,7 @@ describe('Peek', () => {
     await expect
       .element(page.getByTestId('route'))
       .toHaveTextContent('{"kind":"daily","date":"2025-10-03"}')
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(page.getByRole('dialog').query()).toBeNull()
   })
 
   it('leaves a ⌘-click to the new-window path', async () => {
@@ -150,19 +148,19 @@ describe('Peek', () => {
       modifiers: ['Meta'],
     })
 
-    await vi.waitFor(() => expect(openRouteInNewWindow).toHaveBeenCalled())
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await vi.waitFor(() => expect(openNoteWindow).toHaveBeenCalled())
+    expect(page.getByRole('dialog').query()).toBeNull()
   })
 
   it('reads a PDF page by page, with a way out to its default app', async () => {
-    await renderPeek()
+    const app = await renderPeek()
 
     await userEvent.click(page.getByRole('button', { name: 'open pdf' }))
 
     const pdf = page.getByRole('dialog', { name: 'Peek: a.pdf' })
     await expect.element(pdf.getByText('pages:papers/a.pdf')).toBeVisible()
     await userEvent.click(pdf.getByRole('button', { name: 'Open in default app' }))
-    expect(openAsset).toHaveBeenCalledWith('papers/a.pdf', 3)
+    await vi.waitFor(() => expect(app.attachments.opened()).toEqual(['papers/a.pdf']))
   })
 
   it('takes focus for a PDF and closes it on Esc', async () => {
@@ -190,11 +188,11 @@ describe('Peek', () => {
   })
 
   it('follows a peeked note through a rename', async () => {
-    await renderPeek()
+    const app = await renderPeek()
     await userEvent.click(page.getByRole('button', { name: `open ${NOTE}` }))
     await expect.element(page.getByText(`pane:${NOTE}`)).toBeVisible()
 
-    emitNoteMoved(NOTE, 'notes/final.md')
+    app.noteMove.followHealedMove(NOTE, 'notes/final.md')
 
     const renamed = page.getByRole('dialog', { name: 'Peek: notes/final.md' })
     await expect.element(renamed.getByText('pane:notes/final.md')).toBeVisible()

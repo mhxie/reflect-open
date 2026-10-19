@@ -3,15 +3,18 @@ import { chatModelOptions, resolveChatModel } from '../ai/chat/model-options.ts'
 import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from '../ai/openai-compatible.ts'
 import type { AiProvidersState } from '../ai/provider-config.ts'
 import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
+import { createTestHttpService } from '../testing/http.ts'
 import {
+  cloudTarget,
   isOnDeviceOption,
   modelTarget,
   pickOnDeviceProvider,
   resolveOnDeviceTarget,
-  verifyOnDeviceServer,
+  verifyModelTarget,
   withOnDeviceModel,
 } from './on-device.ts'
 import type { OnDeviceTarget } from './on-device-target.ts'
+import { verifyOnDeviceServer } from './on-device-verification.ts'
 
 const OLLAMA_URL = 'http://localhost:11434/v1'
 
@@ -115,6 +118,46 @@ describe('modelTarget', () => {
   })
 })
 
+describe('cloudTarget', () => {
+  it('keeps a frozen copy of a hosted entry', () => {
+    const config = { id: 'openai', provider: 'openai' as const, model: 'gpt-5.5', keyHint: '' }
+    const target = cloudTarget(config)
+    expect(target).toEqual({ kind: 'cloud', config })
+    expect(Object.isFrozen(target.config)).toBe(true)
+    config.model = 'something-else'
+    expect(target.config.model).toBe('gpt-5.5')
+  })
+})
+
+describe('verifyModelTarget', () => {
+  it('passes a cloud target through without checking any server', async () => {
+    const checked: OnDeviceTarget[] = []
+    const cloud = modelTarget(HOSTED)
+    await expect(
+      verifyModelTarget(cloud, (target) => {
+        checked.push(target)
+        return Promise.resolve('ok')
+      }),
+    ).resolves.toBe(cloud)
+    expect(checked).toEqual([])
+  })
+
+  it('verifies an on-device target only once its server accepts it', async () => {
+    const onDevice = modelTarget(attested())
+    const verified = await verifyModelTarget(onDevice, () => Promise.resolve('ok'))
+    expect(verified).toBe(onDevice)
+    expect(verified.kind).toBe('on-device')
+  })
+
+  it('refuses with the reason when the server is refused, never falling back to cloud', async () => {
+    await expect(
+      verifyModelTarget(modelTarget(attested()), () =>
+        Promise.resolve({ kind: 'refused', reason: 'Choose a model running on this Mac.' }),
+      ),
+    ).rejects.toMatchObject({ kind: 'auth', message: 'Choose a model running on this Mac.' })
+  })
+})
+
 describe('isOnDeviceOption', () => {
   it('marks only the attested model of an attested entry', () => {
     const state: AiProvidersState = {
@@ -212,10 +255,9 @@ describe('withOnDeviceModel', () => {
 
 describe('verifyOnDeviceServer', () => {
   it('refuses an unverified server before any private context is sent', async () => {
+    // Every request answers 404: no Ollama API, and no generic server attested.
     expect(
-      await verifyOnDeviceServer(resolveOnDeviceTarget(attested())!, {
-        fetchFn: async () => new Response('', { status: 404 }),
-      }),
+      await verifyOnDeviceServer(createTestHttpService(), resolveOnDeviceTarget(attested())!),
     ).toMatchObject({ kind: 'refused' })
   })
 })

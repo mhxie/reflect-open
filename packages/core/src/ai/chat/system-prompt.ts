@@ -23,7 +23,9 @@ export interface SystemPromptInput {
    * it could not be loaded — the prompt then simply omits the overview.
    */
   context: CloudSafe<CloudGraphContext> | null
-  /** Whether this turn is bound to a verified on-device model. */
+  /**
+   * Whether this turn is bound to a verified on-device model.
+   */
   onDevice?: boolean
 }
 

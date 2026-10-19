@@ -1,12 +1,12 @@
-import { beforeEach } from 'vitest'
+import { setTestDatabaseOpener } from '@reflect/core/testing'
 import '@/styles/index.css'
-import { resetLocalStorageStores } from '@/lib/local-storage.ts'
-import { resetSessionStorageStores } from '@/lib/session-storage.ts'
 
-// A store holds its key's value in memory, so a test that clears
-// localStorage or sessionStorage would otherwise keep reading what the
-// previous one left behind.
-beforeEach(() => {
-  resetLocalStorageStores()
-  resetSessionStorageStores()
+// Importing `@reflect/core` here would load it before a test file's `vi.mock` of it.
+
+// `createTestDatabaseService()` is Node.js only, so every test double that
+// defaults to it gets the wasm index here. The import waits for the first
+// query: tests that never read the index load nothing.
+setTestDatabaseOpener(async () => {
+  const { createWasmTestDatabaseService } = await import('./test-database.ts')
+  return await createWasmTestDatabaseService()
 })

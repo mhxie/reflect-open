@@ -8,12 +8,11 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
-import { openSession } from '@/editor/open-documents.ts'
 import { useNoteLinkNavigation, type NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { onNoteMoved } from '@/lib/note-moves.ts'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { notePathForRoute, routeForPath, type NoteRoute } from '@/routing/route.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** A note shown in the peek panel, with the route its "Open" button takes. */
 export interface NotePeekTarget {
@@ -24,16 +23,20 @@ export interface NotePeekTarget {
   readonly reveal?: NoteReveal
 }
 
-let revealKeys = 0
-
-/** A fresh reveal for `fragment`, distinct from every earlier one. */
-function peekReveal(fragment: string): NoteReveal {
-  revealKeys += 1
-  return { fragment, key: revealKeys }
-}
-
 /** What the peek panel shows: a note, or a graph-relative PDF read page by page. */
 export type PeekTarget = NotePeekTarget | { readonly kind: 'pdf'; readonly path: string }
+
+/**
+ * What to peek: a note, scrolled to `revealHeading` once it shows, or a PDF.
+ */
+type PeekRequest =
+  | {
+      readonly kind: 'note'
+      readonly path: string
+      readonly route: NoteRoute
+      readonly revealHeading?: string | undefined
+    }
+  | { readonly kind: 'pdf'; readonly path: string }
 
 interface PeekContextValue {
   readonly target: PeekTarget | null
@@ -42,7 +45,7 @@ interface PeekContextValue {
    * peeked, and holds while the same peek follows its note through a rename.
    */
   readonly targetKey: number
-  readonly openPeek: (target: PeekTarget) => void
+  readonly openPeek: (request: PeekRequest) => void
   readonly closePeek: () => void
 }
 
@@ -62,22 +65,37 @@ export interface PeekProviderProps {
 interface PeekState {
   readonly target: PeekTarget | null
   readonly key: number
+  /**
+   * Heading reveals asked for so far: each gets the next key, so a repeated
+   * link to the same heading scrolls there again.
+   */
+  readonly reveals: number
 }
 
-/** `target` peeked after `current`: the same note or PDF keeps its key. */
-function peekState(current: PeekState, target: PeekTarget | null): PeekState {
+/** `request` peeked after `current`: the same note or PDF keeps its key. */
+function peekState(current: PeekState, request: PeekRequest | null): PeekState {
   const same =
-    target !== null &&
+    request !== null &&
     current.target !== null &&
-    current.target.kind === target.kind &&
-    current.target.path === target.path
-  return { target, key: same ? current.key : current.key + 1 }
+    current.target.kind === request.kind &&
+    current.target.path === request.path
+  const key = same ? current.key : current.key + 1
+  if (request === null || request.kind === 'pdf') {
+    return { target: request, key, reveals: current.reveals }
+  }
+  const { revealHeading, ...note } = request
+  if (revealHeading === undefined) {
+    return { target: note, key, reveals: current.reveals }
+  }
+  const reveals = current.reveals + 1
+  return { target: { ...note, reveal: { fragment: revealHeading, key: reveals } }, key, reveals }
 }
 
 export function PeekProvider({ enabled = true, children }: PeekProviderProps): ReactElement {
-  const [state, setState] = useState<PeekState>({ target: null, key: 0 })
+  const { noteMove } = useCoreServices()
+  const [state, setState] = useState<PeekState>({ target: null, key: 0, reveals: 0 })
   const openPeek = useCallback(
-    (target: PeekTarget) => setState((current) => peekState(current, target)),
+    (request: PeekRequest) => setState((current) => peekState(current, request)),
     [],
   )
   const closePeek = useCallback(() => setState((current) => peekState(current, null)), [])
@@ -87,14 +105,14 @@ export function PeekProvider({ enabled = true, children }: PeekProviderProps): R
   // path it left behind.
   useEffect(
     () =>
-      onNoteMoved((from, to) => {
+      noteMove.onMoved((from, to) => {
         setState((current) =>
           current.target?.kind === 'note' && current.target.path === from
             ? { ...current, target: { ...current.target, path: to, route: routeForPath(to) } }
             : current,
         )
       }),
-    [],
+    [noteMove],
   )
 
   const value = useMemo(
@@ -127,17 +145,18 @@ export function usePeekedNotePath(): string | null {
 export function usePeekNavigation(scopeKey?: string | number | null): NoteLinkNavigation {
   const peek = usePeek()
   const today = useToday()
+  const { openDocuments } = useCoreServices()
   const navigateNoteLink = useNoteLinkNavigation(scopeKey)
   const openPeek = peek?.openPeek
   const peekedPath = peek?.target?.kind === 'note' ? peek.target.path : undefined
   return useCallback(
     (options) => {
       const path = notePathForRoute(options.target, today)
-      const reveal = options.revealHeading === undefined ? null : peekReveal(options.revealHeading)
+      const { revealHeading } = options
       if (!options.openInNewWindow && path !== null && path === peekedPath) {
         // Already peeked: only a heading link has somewhere new to go.
-        if (reveal !== null && openPeek !== undefined) {
-          openPeek({ kind: 'note', path, route: options.target, reveal })
+        if (revealHeading !== undefined && openPeek !== undefined) {
+          openPeek({ kind: 'note', path, route: options.target, revealHeading })
         }
         return
       }
@@ -145,18 +164,13 @@ export function usePeekNavigation(scopeKey?: string | number | null): NoteLinkNa
         options.openInNewWindow ||
         openPeek === undefined ||
         path === null ||
-        openSession(path) !== null
+        openDocuments.sessionFor(path) !== null
       ) {
         navigateNoteLink(options)
         return
       }
-      openPeek({
-        kind: 'note',
-        path,
-        route: options.target,
-        ...(reveal === null ? {} : { reveal }),
-      })
+      openPeek({ kind: 'note', path, route: options.target, revealHeading })
     },
-    [navigateNoteLink, openPeek, peekedPath, today],
+    [navigateNoteLink, openDocuments, openPeek, peekedPath, today],
   )
 }

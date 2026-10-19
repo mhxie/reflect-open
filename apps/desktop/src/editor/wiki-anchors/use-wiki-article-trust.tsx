@@ -14,6 +14,7 @@ import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { todayIso } from '@/lib/dates.ts'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { useWikiTrustView, type WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 import { wikiQuestionTransaction } from './wiki-claim-question.ts'
 import { WikiClaimTrustCard } from './wiki-claim-trust-card.tsx'
@@ -95,6 +96,7 @@ export function useWikiArticleTrust(
   published: { readonly current: () => void },
 ): WikiArticleTrust {
   const display = useSettings().settings.wikiTrustDisplay
+  const { logger } = useCoreServices()
   const question = useCallback(
     (claimId: string) => {
       const view = editableView(editor)
@@ -139,7 +141,7 @@ export function useWikiArticleTrust(
   }, [editor, published, trust.view, trust.summary, openClaim])
   useEffect(() => {
     let detach = (): void => {}
-    const cancel = whenEditorMounted(editor, () => {
+    const cancel = whenEditorMounted(logger, editor, () => {
       const dom = editor.view.dom
       dom.dataset['wikiTrustDisplay'] = display
       const click = (event: MouseEvent): void => {
@@ -148,7 +150,8 @@ export function useWikiArticleTrust(
         event.preventDefault()
         setCardFor((current) => (current === id ? null : id))
       }
-      dom.addEventListener('click', click)
+      const listeners = new AbortController()
+      dom.addEventListener('click', click, { signal: listeners.signal })
       // Holding Option reveals every claim's tier and mark, and lasts through
       // Option+Tab so the keyboard can reach a mark.
       const reveal = (on: boolean): void => {
@@ -161,14 +164,11 @@ export function useWikiArticleTrust(
         if (event.key === 'Alt') reveal(false)
       }
       const blur = (): void => reveal(false)
-      window.addEventListener('keydown', keydown)
-      window.addEventListener('keyup', keyup)
-      window.addEventListener('blur', blur)
+      window.addEventListener('keydown', keydown, { signal: listeners.signal })
+      window.addEventListener('keyup', keyup, { signal: listeners.signal })
+      window.addEventListener('blur', blur, { signal: listeners.signal })
       detach = () => {
-        dom.removeEventListener('click', click)
-        window.removeEventListener('keydown', keydown)
-        window.removeEventListener('keyup', keyup)
-        window.removeEventListener('blur', blur)
+        listeners.abort()
         reveal(false)
       }
     })
@@ -176,7 +176,7 @@ export function useWikiArticleTrust(
       cancel()
       detach()
     }
-  }, [editor, display])
+  }, [editor, logger, display])
 
   const open = cardFor === null ? null : (trust.view?.claim(cardFor) ?? null)
   const card =

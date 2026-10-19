@@ -1,12 +1,11 @@
-import { render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
 import { isModEvent } from '@meowdown/core'
 import type { BacklinkSource } from '@/lib/group-backlinks.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { BacklinkSourceGroup } from './backlink-source-group.tsx'
 
 const SOURCE: BacklinkSource = {
-  hasConflict: false,
   path: 'notes/source.md',
   title: 'Source Note',
   isPrivate: false,
@@ -16,7 +15,7 @@ const SOURCE: BacklinkSource = {
 type OnOpen = (path: string, event?: { metaKey: boolean; ctrlKey: boolean }) => void
 
 function mount(onOpen: OnOpen, source: BacklinkSource = SOURCE) {
-  return render(
+  return renderInApp(
     <BacklinkSourceGroup
       source={source}
       first
@@ -28,14 +27,11 @@ function mount(onOpen: OnOpen, source: BacklinkSource = SOURCE) {
 }
 
 describe('BacklinkSourceGroup', () => {
-  it.each([
-    { isPrivate: true, hasConflict: false, label: 'Private' },
-    { isPrivate: false, hasConflict: true, label: 'Protected' },
-  ])(
+  it.each([{ isPrivate: true, label: 'Private' }])(
     'shows $label source metadata and keeps Enter navigation on the parent button',
-    async ({ isPrivate, hasConflict, label }) => {
+    async ({ isPrivate, label }) => {
       const onOpen = vi.fn<OnOpen>()
-      await mount(onOpen, { ...SOURCE, isPrivate, hasConflict })
+      await mount(onOpen, { ...SOURCE, isPrivate })
       const button = page.getByRole('button', { name: `${label} Source Note`, exact: true })
       await expect.element(button.getByRole('img', { name: label, exact: true })).toBeVisible()
       expect(button.element().querySelector('button')).toBeNull()

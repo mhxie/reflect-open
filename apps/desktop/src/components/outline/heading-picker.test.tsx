@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
+import { createTestAppServices } from '@reflect/app/testing'
+import { createTestCoreServices } from '@reflect/core/testing'
 import {
   registerNoteEditorHandle,
   unregisterNoteEditorHandle,
@@ -10,6 +11,7 @@ import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { clearNoteOutline, publishNoteOutline } from '@/editor/outline/outline-store.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { HeadingPickerProvider, useHeadingPicker } from '@/providers/heading-picker-provider.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { HeadingPicker } from './heading-picker.tsx'
 
 const PATH = 'notes/plan.md'
@@ -17,7 +19,10 @@ const owner = Symbol('test editor')
 const reveal = vi.fn()
 
 function commandContext(notePath: string | null): CommandContext {
+  const services = createTestCoreServices()
   return {
+    services,
+    app: createTestAppServices(services),
     navigate: vi.fn(),
     route: () => ({ kind: 'note', path: PATH }),
     notePath: () => notePath,
@@ -36,8 +41,6 @@ function commandContext(notePath: string | null): CommandContext {
     switchGraph: vi.fn(),
     openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
-    generation: () => 1,
-    graphRoot: () => '/notes',
     openPalette: vi.fn(),
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
@@ -58,11 +61,12 @@ function OpenOnMount() {
 }
 
 async function renderOpenPicker(notePath: string | null = PATH): Promise<void> {
-  await render(
+  await renderInApp(
     <HeadingPickerProvider>
       <OpenOnMount />
       <HeadingPicker context={commandContext(notePath)} />
     </HeadingPickerProvider>,
+    { servicesOnly: true },
   )
   // Typing before the dialog's autofocus lands would go to <body>.
   await expect.element(page.getByPlaceholder('Jump to heading…')).toHaveFocus()

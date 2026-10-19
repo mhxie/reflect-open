@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { CircleAlert, CircleCheck } from 'lucide-react'
-import type { FinishedOperation } from '@/lib/operations.ts'
+import type { FinishedOperation } from '@reflect/core'
 
 /** "just now", "5 min ago", "2 h ago". */
 function agoLabel(endedAt: number, now: number): string {

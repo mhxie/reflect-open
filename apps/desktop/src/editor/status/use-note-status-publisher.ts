@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
-import { countDisplayChars, parseNote, type NoteState } from '@reflect/core'
+import { countDisplayChars, parseNote, type NoteState, type TimerHandle } from '@reflect/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import type { NoteProtection } from './note-protection.ts'
 import {
   clearNoteStatus,
@@ -30,7 +31,7 @@ interface PublishingSession {
   status: NoteStatus
   loaded: boolean
   active: boolean
-  timer: ReturnType<typeof setTimeout> | null
+  timer: TimerHandle | null
 }
 
 function countChars(path: string, markdown: string): number {
@@ -49,9 +50,10 @@ export function useNoteStatusPublisher(
   options: NoteStatusPublisherOptions = {},
 ): (markdown: string) => void {
   const { selection, protection = null } = options
+  const { clock } = useCoreServices()
   const generation = scope?.generation ?? null
   const path = scope?.path ?? null
-  const current = useRef<PublishingSession | null>(null)
+  const sessionRef = useRef<PublishingSession | null>(null)
   const stateRef = useRef(state)
   const protectionRef = useRef(protection)
   const selectionRef = useRef(selection)
@@ -62,7 +64,7 @@ export function useNoteStatusPublisher(
   })
 
   const update = useCallback((session: PublishingSession, patch: Partial<NoteStatus>) => {
-    if (!session.active || current.current !== session) {
+    if (!session.active || sessionRef.current !== session) {
       return
     }
     session.status = { ...session.status, ...patch }
@@ -89,21 +91,21 @@ export function useNoteStatusPublisher(
       active: true,
       timer: null,
     }
-    current.current = session
+    sessionRef.current = session
     return () => {
       session.active = false
       if (session.timer !== null) {
-        clearTimeout(session.timer)
+        clock.clearTimeout(session.timer)
       }
-      if (current.current === session) {
-        current.current = null
+      if (sessionRef.current === session) {
+        sessionRef.current = null
       }
       clearNoteStatus(session.scope, session.owner)
     }
-  }, [generation, path])
+  }, [clock, generation, path])
 
   useLayoutEffect(() => {
-    const session = current.current
+    const session = sessionRef.current
     if (session !== null) {
       update(session, { state: stateRef.current, protection: protectionRef.current })
     }
@@ -120,7 +122,7 @@ export function useNoteStatusPublisher(
   ])
 
   useEffect(() => {
-    const session = current.current
+    const session = sessionRef.current
     if (session === null || initialMarkdown === null) {
       return
     }
@@ -136,7 +138,7 @@ export function useNoteStatusPublisher(
     let frame = 0
     const recount = (): void => {
       frame = 0
-      const session = current.current
+      const session = sessionRef.current
       if (
         session === null ||
         session.scope.generation !== generation ||
@@ -172,7 +174,7 @@ export function useNoteStatusPublisher(
 
   return useCallback(
     (markdown: string) => {
-      const session = current.current
+      const session = sessionRef.current
       if (
         session === null ||
         session.scope.generation !== generation ||
@@ -181,16 +183,16 @@ export function useNoteStatusPublisher(
         return
       }
       if (session.timer !== null) {
-        clearTimeout(session.timer)
+        clock.clearTimeout(session.timer)
       }
-      session.timer = setTimeout(() => {
+      session.timer = clock.setTimeout(() => {
         session.timer = null
         update(session, {
           characters: countChars(session.scope.path, markdown),
-          editedAt: Date.now(),
+          editedAt: clock.now(),
         })
       }, RECOUNT_DELAY_MS)
     },
-    [generation, path, update],
+    [clock, generation, path, update],
   )
 }

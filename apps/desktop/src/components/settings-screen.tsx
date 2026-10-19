@@ -1,5 +1,4 @@
 import type { ReactElement } from 'react'
-import { isMacosDesktop } from '@/lib/platform.ts'
 import { AboutSection } from './settings/about-section.tsx'
 import { AgentsSection } from './settings/agents-section.tsx'
 import { AiChatSection } from './settings/ai-chat-section.tsx'
@@ -18,6 +17,7 @@ import { IntegrationsSection } from './settings/integrations-section.tsx'
 import { SearchSection } from './settings/search-section.tsx'
 import { SyncSection } from './settings/sync-section.tsx'
 import { TemplatesSection } from './settings/templates-section.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * The settings screen (a routed view, like notes — reached via ⌘, or the
@@ -25,6 +25,7 @@ import { TemplatesSection } from './settings/templates-section.tsx'
  * settings provider; there is no save button.
  */
 export function SettingsScreen(): ReactElement {
+  const { platform } = useCoreServices()
   return (
     <div aria-label="Settings">
       <h1 className="text-lg font-semibold text-text">Settings</h1>
@@ -38,7 +39,7 @@ export function SettingsScreen(): ReactElement {
         <SearchSection />
         <AiProvidersSection />
         <AudioMemosSection />
-        {isMacosDesktop ? <RecordingSection /> : null}
+        {platform.isMacosDesktop ? <RecordingSection /> : null}
         <AiChatSection />
         <AiPromptsSection />
         <AgentsSection />

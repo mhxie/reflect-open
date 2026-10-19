@@ -1,12 +1,12 @@
-import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { describe, expect, it } from 'vitest'
 import { hover } from '@/test-utils/mouse.ts'
 import { SIDEBAR_HIDE_DELAY_MS } from '@/hooks/use-sidebar-hover-reveal.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SidebarHoverReveal } from './sidebar-hover-reveal.tsx'
 
 function renderReveal() {
-  return render(
+  return renderInApp(
     <div style={{ width: 800, height: 400 }}>
       <SidebarHoverReveal>
         <nav aria-label="Primary">
@@ -20,6 +20,7 @@ function renderReveal() {
         <button type="button">Editor</button>
       </div>
     </div>,
+    { servicesOnly: true },
   )
 }
 

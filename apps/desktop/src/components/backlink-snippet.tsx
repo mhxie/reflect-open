@@ -4,7 +4,7 @@ import {
   resolveNoYouTubeVideo,
 } from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
-import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
+import { useYouTubeVideoResolver } from '@/editor/youtube-video-resolver.ts'
 import { useCallback, useMemo, type ReactElement } from 'react'
 import { MarkdownView } from '@meowdown/react'
 import type { WikilinkClickHandler } from '@meowdown/core'
@@ -12,9 +12,9 @@ import { isLocalOnlyPath, type SnippetTask } from '@reflect/core'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import { useSnippetTaskToggle } from '@/hooks/use-snippet-task-toggle.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
 
 interface BacklinkSnippetProps {
   /** The referencing block context's Markdown source (may span several lines). */
@@ -63,13 +63,14 @@ export function BacklinkSnippet({
   tasks,
   onWikilinkClick,
 }: BacklinkSnippetProps): ReactElement {
-  const generation = useGraph({ optional: true })?.graph?.generation ?? null
-  const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(generation, notePath)
+  const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(notePath)
   const graphXPostResolver = useXPostResolver()
+  const resolveYouTubeVideo = useYouTubeVideoResolver()
   const resolveWikilink = useWikilinkResolver()
   const onTaskClick = useSnippetTaskToggle(notePath, tasks)
-  const onLinkClick = useMarkdownLinkClick(generation, notePath)
-  const privateSource = sourcePrivate || isLocalOnlyPath(notePath)
+  const onLinkClick = useMarkdownLinkClick(notePath)
+  const localOnly = useLocalOnlyFolders()
+  const privateSource = sourcePrivate || isLocalOnlyPath(localOnly, notePath)
   const imageResolver = useMemo(
     () => (privateSource ? localImagesOnly(resolveImageUrl) : resolveImageUrl),
     [privateSource, resolveImageUrl],

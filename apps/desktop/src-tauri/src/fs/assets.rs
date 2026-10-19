@@ -29,19 +29,22 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use tauri::ipc::{InvokeBody, Request};
 use tauri::State;
+use tauri::ipc::{InvokeBody, Request};
 
 use reflect_graph_paths::LocalOnlyFolders;
 
 use crate::error::{AppError, AppResult};
+use reflect_graph_io::io::staging_dir;
 
 use super::local_only_edit;
-use super::resolve::{resolve_note_edit, resolve_write, EditTarget, LocalOnlyEntry, TargetKind};
-use super::{graph_for, root_for_generation, GraphState};
+use super::{
+    EditTarget, GraphState, LocalOnlyEntry, TargetKind, graph_for, resolve_note_edit,
+    resolve_write, root_for_generation, with_graph_lock,
+};
 
 /// Header carrying the upload id on `asset_upload_append` calls — raw-body
 /// requests have no JSON args, so the id travels out-of-band.
@@ -156,16 +159,6 @@ fn persist_unique_beneath(
         .ok_or_else(|| no_free_name(desired))
 }
 
-/// The staging directory for in-flight uploads (and the V1 import's asset
-/// downloads): inside the graph (so the commit rename stays on one
-/// filesystem) but under `.reflect/` (so the watcher, indexer, and sync never
-/// see a partial file).
-pub(super) fn staging_dir(root: &Path) -> AppResult<std::path::PathBuf> {
-    let dir = root.join(".reflect").join("tmp");
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
-}
-
 /// Where an intake lands.
 enum Destination {
     /// The graph's synced `assets/` directory.
@@ -180,9 +173,10 @@ enum Destination {
 /// them in that folder's `assets/` (never the synced one); a note in a
 /// read-only local-only folder, or one the filesystem resolves into a
 /// local-only folder by another spelling, takes none. Path-shaped names are
-/// refused, and so are hidden names inside a local-only folder.
+/// refused, and so are hidden names inside a local-only folder. Call it with
+/// the graph lock held when the intake lands right after.
 fn attachment_destination(
-    state: &State<GraphState>,
+    state: &GraphState,
     generation: u64,
     note_path: &str,
     name: &str,
@@ -226,17 +220,25 @@ fn graph_assets_dir(
     Ok(dir)
 }
 
-/// Land the staged `temp` at `destination` as `desired` (or its first free
-/// `-2`, `-3`, … variant) and return the graph-relative path.
+/// Land the staged `temp` for the note at `note_path` as `desired` (or its
+/// first free `-2`, `-3`, … variant) under the graph lock, and return the
+/// graph-relative path.
 fn land(
+    state: &GraphState,
+    root: &Path,
+    generation: u64,
+    note_path: &str,
     temp: tempfile::NamedTempFile,
-    destination: Destination,
     desired: &str,
 ) -> AppResult<String> {
-    match destination {
-        Destination::Graph(dir) => Ok(format!("assets/{}", persist_unique(temp, &dir, desired)?)),
-        Destination::LocalOnly(note) => persist_unique_beneath(temp, &note, desired),
-    }
+    with_graph_lock(root, || {
+        match attachment_destination(state, generation, note_path, desired)? {
+            Destination::Graph(dir) => {
+                Ok(format!("assets/{}", persist_unique(temp, &dir, desired)?))
+            }
+            Destination::LocalOnly(note) => persist_unique_beneath(temp, &note, desired),
+        }
+    })
 }
 
 /// Start a streamed asset upload: creates a temp file in the graph's staging
@@ -292,17 +294,14 @@ pub(crate) fn append_chunk(uploads: &AssetUploads, id: &str, bytes: &[u8]) -> Ap
 /// `-2`-suffixed variant). Returns the final graph-relative path:
 /// `assets/…`, or `<folder>/assets/…` for a note in an editable local-only
 /// folder.
-///
-/// The landing runs on the blocking pool: into a local-only folder on
-/// another volume it copies the whole file.
-#[tauri::command]
-pub async fn asset_upload_commit(
+#[tauri::command(async)]
+pub fn asset_upload_commit(
     id: String,
     desired_name: String,
     note_path: String,
     generation: u64,
-    state: State<'_, GraphState>,
-    uploads: State<'_, AssetUploads>,
+    state: State<GraphState>,
+    uploads: State<AssetUploads>,
 ) -> AppResult<String> {
     let upload = lock_uploads(&uploads)?
         .remove(&id)
@@ -315,9 +314,14 @@ pub async fn asset_upload_commit(
     // Pin the root before persisting: after the file lands, a failed root
     // lookup would otherwise skip invalidation and strand a stale catalog.
     let root = root_for_generation(&state, generation)?;
-    let destination = attachment_destination(&state, generation, &note_path, &desired_name)?;
-    let path = crate::blocking::run_blocking(move || land(upload.file, destination, &desired_name))
-        .await?;
+    let path = land(
+        &state,
+        &root,
+        generation,
+        &note_path,
+        upload.file,
+        &desired_name,
+    )?;
     super::invalidate_file_catalog(&state, &root);
     Ok(path)
 }
@@ -351,8 +355,9 @@ fn persist_exact(temp: tempfile::NamedTempFile, target: &Path) -> AppResult<()> 
 /// (its transcription note and daily-note backlink share the basename), so
 /// the `assets/` collision renaming of [`asset_upload_commit`] would corrupt
 /// it. Memo basenames carry millisecond precision; an existing file at
-/// `path` is a bug and fails loudly rather than being clobbered.
-#[tauri::command]
+/// `path` is a bug and fails loudly rather than being clobbered. Never into
+/// a local-only folder.
+#[tauri::command(async)]
 pub fn asset_upload_commit_path(
     id: String,
     path: String,
@@ -368,9 +373,12 @@ pub fn asset_upload_commit_path(
             "upload was started for a different graph session; dropping it",
         ));
     }
-    let (root, local_only) = graph_for(&state, Some(generation))?;
-    let target = resolve_write(&root, &path, local_only.as_deref())?;
-    persist_exact(upload.file, &target)?;
+    let root = root_for_generation(&state, generation)?;
+    with_graph_lock(&root, || {
+        let (root, local_only) = graph_for(&state, Some(generation))?;
+        let target = resolve_write(&root, &path, local_only.as_deref())?;
+        persist_exact(upload.file, &target)
+    })?;
     super::invalidate_file_catalog(&state, &root);
     Ok(())
 }
@@ -389,26 +397,31 @@ pub fn asset_upload_abort(id: String, uploads: State<AssetUploads>) -> AppResult
 /// never cross the IPC. Returns the final graph-relative path, as
 /// [`asset_upload_commit`] does.
 #[tauri::command]
-pub fn asset_import(
+pub async fn asset_import(
     source_path: String,
     desired_name: String,
     note_path: String,
     generation: u64,
-    state: State<GraphState>,
+    state: State<'_, GraphState>,
 ) -> AppResult<String> {
-    let source = Path::new(&source_path);
-    if !source.is_file() {
+    if !Path::new(&source_path).is_file() {
         return Err(AppError::not_found(format!(
             "import source is not a file: {source_path}"
         )));
     }
     let root = root_for_generation(&state, generation)?;
     // Decided before any byte is copied: a note that takes no attachments
-    // gets nothing staged.
-    let destination = attachment_destination(&state, generation, &note_path, &desired_name)?;
-    let mut temp = tempfile::NamedTempFile::new_in(staging_dir(&root)?)?;
-    std::io::copy(&mut fs::File::open(source)?, temp.as_file_mut())?;
-    let path = land(temp, destination, &desired_name)?;
+    // gets nothing staged. The landing decides again under the graph lock.
+    attachment_destination(&state, generation, &note_path, &desired_name)?;
+    let staging = staging_dir(&root)?;
+    let temp = crate::blocking::run_blocking(move || {
+        let mut temp = tempfile::NamedTempFile::new_in(staging)?;
+        std::io::copy(&mut fs::File::open(&source_path)?, temp.as_file_mut())?;
+        temp.as_file().sync_all()?; // the persist's own fsync is then cheap
+        Ok(temp)
+    })
+    .await?;
+    let path = land(&state, &root, generation, &note_path, temp, &desired_name)?;
     super::invalidate_file_catalog(&state, &root);
     Ok(path)
 }
@@ -421,16 +434,39 @@ pub fn asset_import(
 /// and a source that is already gone means an earlier ingest moved it (or a
 /// cancelled session swept it away while this capture sat in the queue).
 /// Neither is a failure worth parking the capture queue behind.
+#[cfg(test)]
 fn import_exact(source: &Path, staging: &Path, target: &Path) -> AppResult<()> {
+    match stage_import(source, staging, target)? {
+        Some(temp) => persist_import(temp, target),
+        None => Ok(()),
+    }
+}
+
+/// Copy `source` into `staging`. Returns `None` when there is nothing to
+/// persist: the target is already taken or the source is gone.
+fn stage_import(
+    source: &Path,
+    staging: &Path,
+    target: &Path,
+) -> AppResult<Option<tempfile::NamedTempFile>> {
     if super::file_occupied(target) {
-        return Ok(());
+        return Ok(None);
     }
     if !source.is_file() {
         tracing::warn!(?source, "audio memo import source is gone");
-        return Ok(());
+        return Ok(None);
     }
     let mut temp = tempfile::NamedTempFile::new_in(staging)?;
     std::io::copy(&mut fs::File::open(source)?, temp.as_file_mut())?;
+    temp.as_file().sync_all()?; // the persist's own fsync is then cheap
+    Ok(Some(temp))
+}
+
+/// Persist a staged copy unless a concurrent import took the target first.
+fn persist_import(temp: tempfile::NamedTempFile, target: &Path) -> AppResult<()> {
+    if super::file_occupied(target) {
+        return Ok(());
+    }
     persist_exact(temp, target)
 }
 
@@ -439,13 +475,14 @@ fn import_exact(source: &Path, staging: &Path, target: &Path) -> AppResult<()> {
 /// enter webview memory, which is what makes meeting-length segments
 /// affordable on a phone. The destination is fenced to `audio-memos/` like
 /// `audio_memo_delete`, and the path *is* the memo's identity, so the
-/// `assets/` collision renaming of [`asset_import`] would corrupt it.
+/// `assets/` collision renaming of [`asset_import`] would corrupt it. Never
+/// into a local-only folder.
 #[tauri::command]
-pub fn audio_memo_import(
+pub async fn audio_memo_import(
     source_path: String,
     path: String,
     generation: u64,
-    state: State<GraphState>,
+    state: State<'_, GraphState>,
 ) -> AppResult<()> {
     if !path.starts_with("audio-memos/") {
         return Err(AppError::traversal(format!(
@@ -453,8 +490,18 @@ pub fn audio_memo_import(
         )));
     }
     let (root, local_only) = graph_for(&state, Some(generation))?;
+    let staging = staging_dir(&root)?;
     let target = resolve_write(&root, &path, local_only.as_deref())?;
-    import_exact(Path::new(&source_path), &staging_dir(&root)?, &target)?;
+    let staged = crate::blocking::run_blocking(move || {
+        stage_import(Path::new(&source_path), &staging, &target)
+    })
+    .await?;
+    if let Some(temp) = staged {
+        with_graph_lock(&root, || {
+            let (root, local_only) = graph_for(&state, Some(generation))?;
+            persist_import(temp, &resolve_write(&root, &path, local_only.as_deref())?)
+        })?;
+    }
     super::invalidate_file_catalog(&state, &root);
     Ok(())
 }
@@ -462,7 +509,7 @@ pub fn audio_memo_import(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::io::bootstrap;
+    use reflect_graph_io::io::bootstrap;
     use tempfile::tempdir;
 
     fn temp_in(dir: &Path, contents: &[u8]) -> tempfile::NamedTempFile {

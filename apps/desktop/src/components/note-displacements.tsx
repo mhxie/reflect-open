@@ -1,44 +1,38 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import { recordDisplacedNotes, subscribeNoteDisplaced } from '@reflect/core'
-import { followDisplacedNote } from '@/editor/move-note.ts'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
-import { trackSubscriptions } from '@/lib/subscriptions.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** Follow pull displacements only while their issuing file graph session is active. */
 export function NoteDisplacements(): null {
-  const bridgeReady = useBridgeReady()
+  const { noteDisplacement, noteMove } = useCoreServices()
   const { graph, status } = useGraph()
   const generation = status === 'ready' ? graph?.generation : undefined
-  const currentGeneration = useRef(generation)
+  const currentGenerationRef = useRef(generation)
   // Committed before the subscription effect's cleanup runs, so a generation
   // that has changed is seen at once; never written during render.
   useLayoutEffect(() => {
-    currentGeneration.current = generation
+    currentGenerationRef.current = generation
   }, [generation])
 
   useEffect(() => {
-    if (!bridgeReady || generation === undefined) {
+    if (generation === undefined) {
       return
     }
     let active = true
-    const isCurrent = (): boolean => active && currentGeneration.current === generation
-    const subscriptions = trackSubscriptions()
-    void subscriptions.add(
-      subscribeNoteDisplaced((displacement) => {
-        if (!isCurrent() || displacement.generation !== generation) {
-          return
-        }
-        const { from, to, keptOut } = displacement
-        recordDisplacedNotes([displacement], generation)
-        void followDisplacedNote(from, to, keptOut, generation, isCurrent)
-      }),
-    )
+    const isCurrent = (): boolean => active && currentGenerationRef.current === generation
+    const unlisten = noteDisplacement.onDisplaced((displacement) => {
+      if (!isCurrent() || displacement.generation !== generation) {
+        return
+      }
+      const { from, to, keptOut } = displacement
+      noteDisplacement.record([displacement], generation)
+      void noteMove.followDisplacedNote(from, to, keptOut, generation, isCurrent)
+    })
     return () => {
       active = false
-      subscriptions.disposeAll()
+      unlisten()
     }
-  }, [bridgeReady, generation])
+  }, [generation, noteDisplacement, noteMove])
 
   return null
 }

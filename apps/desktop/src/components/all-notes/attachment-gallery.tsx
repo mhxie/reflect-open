@@ -1,23 +1,21 @@
-import { useEffect, useRef, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FileText } from 'lucide-react'
 import {
   displayNoteTitle,
   firstExistingAttachment,
-  listAttachmentPreviews,
   type NoteListEntry,
   type PreviewableAttachmentType,
 } from '@reflect/core'
 import { AttachmentPreviewImage } from '@/components/attachment-preview-image.tsx'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { formatRecencyLabel } from '@/lib/dates.ts'
-import { queryKeys } from '@/lib/query-client.ts'
-import { createAttachmentCatalogQueryOptions } from '@/lib/query-options.ts'
+import { createAttachmentPreviewsQueryOptions } from '@/lib/query-options.ts'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 
 interface AttachmentGalleryProps {
@@ -48,19 +46,19 @@ export function AttachmentGallery({
 }: AttachmentGalleryProps): ReactElement {
   const { graph } = useGraph()
   const { settings } = useSettings()
-  const bridgeReady = useBridgeReady()
+  const { noteList, attachments } = useCoreServices()
   const generation = graph?.generation ?? null
   const { data: previews } = useQuery({
-    queryKey: queryKeys.index.attachmentPreviews(graph?.root, type),
-    queryFn: () => listAttachmentPreviews(type),
-    enabled: bridgeReady && graph !== null,
+    ...createAttachmentPreviewsQueryOptions(noteList, graph?.root, type),
+    enabled: graph !== null,
   })
   // An attachment reference names several candidate paths; the catalog says
   // which exists.
-  const { data: catalog } = useQuery({
-    ...createAttachmentCatalogQueryOptions(generation ?? 0),
-    enabled: bridgeReady && generation !== null,
-  })
+  const subscribeCatalog = useCallback(
+    (listener: () => void) => attachments.onCatalogChanged(listener),
+    [attachments],
+  )
+  const catalog = useSyncExternalStore(subscribeCatalog, () => attachments.peekCatalog())
   const listRef = useRef<HTMLUListElement>(null)
 
   // Cards render in the list's order, so the selection's index is the card's.
@@ -79,9 +77,7 @@ export function AttachmentGallery({
       {notes.map((note) => {
         const candidates = previews?.get(note.path)
         const assetPath =
-          candidates === undefined
-            ? undefined
-            : firstExistingAttachment(candidates, catalog ?? null)
+          candidates === undefined ? undefined : firstExistingAttachment(candidates, catalog)
         const placeholder = (
           <FileText aria-hidden strokeWidth={1.5} className="size-6 text-text-muted" />
         )
@@ -126,12 +122,7 @@ export function AttachmentGallery({
                 }}
                 className="truncate text-left text-xs font-medium text-text hover:underline"
               >
-                <NoteStateIndicator
-                  path={note.path}
-                  isPrivate={note.isPrivate}
-                  hasConflict={note.hasConflict}
-                  className="mr-1"
-                />
+                <NoteStateIndicator path={note.path} isPrivate={note.isPrivate} className="mr-1" />
                 {title}
               </button>
               <span className="text-2xs text-text-muted">

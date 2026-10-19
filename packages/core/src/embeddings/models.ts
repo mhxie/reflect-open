@@ -3,8 +3,9 @@
  * `apps/desktop/src-tauri/src/embed.rs`; the ids must match). The first is
  * the default: the original model, so an existing index keeps its vector
  * table's width. Its vectors still re-embed once when the chunking or
- * `PASSAGE_VERSION` (`pipeline.ts`) changes what a chunk is embedded as.
- * Choosing another model re-embeds the graph into a vector table of its width.
+ * `PASSAGE_VERSION` (`embedding-index-service.ts`) changes what a chunk is
+ * embedded as. Choosing another model re-embeds the graph into a vector table
+ * of its width.
  */
 export const SEMANTIC_MODEL_IDS = ['all-MiniLM-L6-v2', 'embeddinggemma-300m'] as const
 
@@ -16,7 +17,9 @@ export interface SemanticModel {
   readonly id: SemanticModelId
   readonly label: string
   readonly description: string
-  /** The download: the ONNX weights plus tokenizer files. */
+  /**
+   * The download: the ONNX weights plus tokenizer files.
+   */
   readonly sizeBytes: number
   /**
    * Neighbors farther than this cosine distance are noise, not matches. KNN
@@ -48,7 +51,9 @@ export const SEMANTIC_MODELS: readonly SemanticModel[] = [
   },
 ]
 
-/** The catalog entry for `id`; unknown ids (a model since dropped) read as the default. */
+/**
+ * The catalog entry for `id`; unknown ids (a model since dropped) read as the default.
+ */
 export function semanticModel(id: string): SemanticModel {
   return (
     SEMANTIC_MODELS.find((model) => model.id === id) ??

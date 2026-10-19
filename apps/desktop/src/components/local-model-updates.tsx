@@ -1,12 +1,7 @@
 import { useEffect } from 'react'
-import {
-  checkForLocalModelUpdates,
-  clearPendingLocalModelUpdate,
-} from '@/lib/local-model-updates.ts'
-import { isMacosDesktop } from '@/lib/platform.ts'
 import { useLocalModelStatus } from '@/lib/use-local-model-status.ts'
-import { isMainWindow } from '@/lib/windows/window-role.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * How often a long-running session asks again. Rust throttles the network
@@ -23,10 +18,12 @@ const RECHECK_MS = 6 * 60 * 60 * 1000
  */
 export function LocalModelUpdates(): null {
   const { settings } = useSettings()
+  const { clock, platform } = useCoreServices()
+  const { localModelUpdates, window: appWindow } = useAppServices()
   const model = settings.localTranscriptionModel
   const active =
-    isMacosDesktop &&
-    isMainWindow() &&
+    platform.isMacosDesktop &&
+    appWindow.isMainWindow() &&
     settings.transcriptionEngine === 'local' &&
     settings.localTranscriptionUpdateChecks
   const ready = useLocalModelStatus(model, active).status === 'ready'
@@ -35,15 +32,15 @@ export function LocalModelUpdates(): null {
     if (!active || !ready) {
       return
     }
-    void checkForLocalModelUpdates(model, false)
-    const timer = window.setInterval(() => void checkForLocalModelUpdates(model, false), RECHECK_MS)
-    return () => window.clearInterval(timer)
-  }, [active, ready, model])
+    void localModelUpdates.check(model, false)
+    const timer = clock.setInterval(() => void localModelUpdates.check(model, false), RECHECK_MS)
+    return () => clock.clearInterval(timer)
+  }, [active, ready, model, clock, localModelUpdates])
 
   // An offer for another model, or for an engine no longer chosen, is stale.
   useEffect(() => {
-    return () => clearPendingLocalModelUpdate()
-  }, [active, model])
+    return () => localModelUpdates.clear()
+  }, [active, model, localModelUpdates])
 
   return null
 }

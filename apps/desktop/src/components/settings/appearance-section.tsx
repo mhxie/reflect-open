@@ -22,7 +22,7 @@ const THEME_OPTIONS: ThemeOption[] = [
 
 /**
  * Theme picker as radio cards (the original app's idiom) and the activity
- * heatmap toggle. Edits the settings document directly — the ThemeProvider
+ * heatmap toggle. Edits the settings document directly — the ThemeEffect
  * applies whatever is persisted, so this section needs no theme context.
  */
 export function AppearanceSection(): ReactElement {

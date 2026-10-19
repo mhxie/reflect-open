@@ -1,12 +1,14 @@
 import { z } from 'zod'
+import type { HttpService } from '../ports/http-service.ts'
 import {
   isOllamaCloudModel,
   ollamaNativeUrl,
   readBoundedJson,
 } from '../privacy/on-device-verification.ts'
-import { onDeviceFetch } from './on-device-fetch.ts'
 
-/** Where Ollama serves its OpenAI-compatible API on this Mac by default. */
+/**
+ * Where Ollama serves its OpenAI-compatible API on this Mac by default.
+ */
 export const OLLAMA_BASE_URL = 'http://localhost:11434/v1'
 
 const TIMEOUT_MS = 5_000
@@ -26,23 +28,32 @@ const tagsSchema = z.object({
 
 const showSchema = z.object({ capabilities: z.array(z.string()).optional() })
 
-/** One model installed in Ollama. */
+/**
+ * One model installed in Ollama.
+ */
 export interface OllamaModel {
-  /** The id requests name, tag included (`gemma4:31b`). */
+  /**
+   * The id requests name, tag included (`gemma4:31b`).
+   */
   readonly name: string
-  /** Ollama's parameter-count label (`31B`), when it reports one. */
+  /**
+   * Ollama's parameter-count label (`31B`), when it reports one.
+   */
   readonly parameterSize: string | null
 }
 
-/** What a look at the local Ollama server found. */
+/**
+ * What a look at the local Ollama server found.
+ */
 export type OllamaModels =
   | { readonly kind: 'unreachable' }
   | { readonly kind: 'ok'; readonly models: readonly OllamaModel[] }
 
-/** Optional cancellation and a test transport. */
+/**
+ * Optional cancellation of a look at the Ollama server.
+ */
 export interface ListOllamaModelsOptions {
   signal?: AbortSignal | undefined
-  fetchFn?: typeof fetch
 }
 
 /**
@@ -53,13 +64,13 @@ export interface ListOllamaModelsOptions {
  * installed.
  */
 async function canComplete(
+  http: HttpService,
   model: string,
-  fetchFn: typeof fetch,
   signal: AbortSignal,
   callerSignal: AbortSignal | undefined,
 ): Promise<boolean> {
   try {
-    const response = await fetchFn(ollamaNativeUrl(OLLAMA_BASE_URL, 'show'), {
+    const response = await http.fetch(ollamaNativeUrl(OLLAMA_BASE_URL, 'show'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, verbose: false }),
@@ -79,21 +90,21 @@ async function canComplete(
 
 /**
  * The models installed in the Ollama server on this Mac that can write a
- * summary (`GET /api/tags`, then each model's capabilities), through the
- * loopback-only transport, sorted by name. Cloud models are left out: Ollama
- * runs them elsewhere, and on-device verification refuses them. So are
- * embedding models. `unreachable` covers a server that is not running and
- * one that does not answer like Ollama.
+ * summary (`GET /api/tags`, then each model's capabilities), through `http`,
+ * the loopback-only transport (`OnDeviceHttpService`), sorted by name. Cloud
+ * models are left out: Ollama runs them elsewhere, and on-device verification
+ * refuses them. So are embedding models. `unreachable` covers a server that
+ * is not running and one that does not answer like Ollama.
  */
 export async function listOllamaModels(
+  http: HttpService,
   options: ListOllamaModelsOptions = {},
 ): Promise<OllamaModels> {
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout
-  const fetchFn = options.fetchFn ?? onDeviceFetch
   let installed: z.infer<typeof tagsSchema>['models']
   try {
-    const response = await fetchFn(ollamaNativeUrl(OLLAMA_BASE_URL, 'tags'), { signal })
+    const response = await http.fetch(ollamaNativeUrl(OLLAMA_BASE_URL, 'tags'), { signal })
     if (!response.ok) {
       await response.body?.cancel()
       return { kind: 'unreachable' }
@@ -113,7 +124,7 @@ export async function listOllamaModels(
     if (isOllamaCloudModel(model.name) || model.remote_host?.trim() || model.remote_model?.trim()) {
       continue
     }
-    if (await canComplete(model.name, fetchFn, signal, options.signal)) {
+    if (await canComplete(http, model.name, signal, options.signal)) {
       models.push({ name: model.name, parameterSize: model.details?.parameter_size ?? null })
     }
   }

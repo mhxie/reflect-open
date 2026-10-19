@@ -1,6 +1,6 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render } from 'vitest-browser-react'
+import { createTestCoreServices } from '@reflect/core/testing'
 import { describe, expect, it, vi } from 'vitest'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NotePreview } from './note-preview.tsx'
 
 /** The props each rendered preview received. */
@@ -11,40 +11,27 @@ vi.mock('@/editor/markdown-preview.tsx', () => ({
     return <span data-testid="markdown-preview">{props.content}</span>
   },
 }))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  readNote: async () => 'A body with an embed.\n',
-  // The graph's local-only folders are `secure`.
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'mdy' } }),
-}))
+// The graph's local-only folders are `secure`.
+const GRAPH = { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] }
 
 async function renderedFor(path: string): Promise<{ remoteEmbeds?: boolean }> {
   previews.length = 0
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const view = await render(
-    <QueryClientProvider client={client}>
-      <NotePreview
-        entry={{
-          isPrivate: false,
-          hasConflict: false,
-          path,
-          title: 'T',
-          date: null,
-          snippet: null,
-          phrase: null,
-          alias: null,
-          related: false,
-        }}
-      />
-    </QueryClientProvider>,
+  const app = createTestCoreServices()
+  vi.spyOn(app.noteDocuments, 'readSource').mockResolvedValue('A body with an embed.\n')
+  const view = await renderInApp(
+    <NotePreview
+      entry={{
+        isPrivate: false,
+        path,
+        title: 'T',
+        date: null,
+        snippet: null,
+        phrase: null,
+        alias: null,
+        related: false,
+      }}
+    />,
+    { app, graph: GRAPH, settings: { dateFormat: 'mdy' } },
   )
   await expect.element(view.getByTestId('markdown-preview')).toBeVisible()
   await view.unmount()

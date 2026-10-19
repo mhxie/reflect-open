@@ -9,14 +9,13 @@ import { useHasWiki } from '@/hooks/use-has-wiki.ts'
 import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { keybindingFor } from '@/lib/commands/app-commands.ts'
-import { runCommand } from '@/lib/commands/registry.ts'
 import { createNoteFromFiles } from '@/lib/create-note-from-files.ts'
 import { useToday } from '@/lib/use-today.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
-import { hasMacosTitleBarOverlay } from '@/lib/window-chrome.ts'
 import { cn } from '@/lib/utils.ts'
 import { notePathForRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { GraphFooter } from './graph-footer.tsx'
 import { NavigateArrows } from './navigate-arrows.tsx'
 import { SidebarItem } from './sidebar-item.tsx'
@@ -39,6 +38,7 @@ interface SidebarProps {
  * `Mod-\` via the command registry.)
  */
 export function Sidebar({ graph, context }: SidebarProps): ReactElement {
+  const { platform } = useCoreServices()
   const { route } = useRouter()
   const today = useToday()
   const pinned = usePinnedNotes()
@@ -92,7 +92,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
         'relative flex h-full min-h-0 flex-col',
         // With the overlaid macOS title bar, the traffic lights and the
         // WindowDragRegion strip own the top 28px — start content below them.
-        hasMacosTitleBarOverlay ? 'pt-2' : 'pt-2.5',
+        platform.hasMacosTitleBarOverlay ? 'pt-2' : 'pt-2.5',
       )}
     >
       <div className="flex flex-none items-center justify-end px-2 pt-1">
@@ -114,7 +114,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
             label="Daily notes"
             binding={keybindingFor('nav.today') ?? undefined}
             active={(route.kind === 'today' || route.kind === 'daily') && !hasActivePinnedNote}
-            onClick={() => void runCommand('nav.today', context)}
+            onClick={() => void context.app.commands.run('nav.today', context)}
           />
           <SidebarItem
             icon={
@@ -129,7 +129,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
             // title slug is also what hands the note off to ordinary
             // navigation, releasing the highlight.
             active={route.kind === 'note' && isUntitledNotePath(route.path)}
-            onClick={() => void runCommand('note.new', context)}
+            onClick={() => void context.app.commands.run('note.new', context)}
           />
           <SidebarItem
             icon={<ListIcon className="shrink-0" />}
@@ -146,7 +146,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
                 !hasActivePinnedNote &&
                 !openWikiNote)
             }
-            onClick={() => void runCommand('nav.allNotes', context)}
+            onClick={() => void context.app.commands.run('nav.allNotes', context)}
           />
           {hasWiki ? (
             <SidebarItem
@@ -160,7 +160,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
               // Lit while reading an entry or its translation, which All notes
               // then leaves unlit — the same hand-off New note and All notes use.
               active={route.kind === 'wiki' || openWikiNote}
-              onClick={() => void runCommand('nav.wiki', context)}
+              onClick={() => void context.app.commands.run('nav.wiki', context)}
             />
           ) : null}
           <SidebarItem
@@ -172,7 +172,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
             label="Attachments"
             binding={keybindingFor('nav.attachments') ?? undefined}
             active={route.kind === 'attachments'}
-            onClick={() => void runCommand('nav.attachments', context)}
+            onClick={() => void context.app.commands.run('nav.attachments', context)}
           />
           <SidebarItem
             icon={
@@ -183,7 +183,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
             label="Tasks"
             binding={keybindingFor('nav.tasks') ?? undefined}
             active={route.kind === 'tasks'}
-            onClick={() => void runCommand('nav.tasks', context)}
+            onClick={() => void context.app.commands.run('nav.tasks', context)}
           />
           <SidebarItem
             icon={
@@ -194,7 +194,7 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
             label="Chat"
             binding={keybindingFor('chat.open') ?? undefined}
             active={route.kind === 'chat'}
-            onClick={() => void runCommand('chat.open', context)}
+            onClick={() => void context.app.commands.run('chat.open', context)}
           />
         </nav>
       </div>

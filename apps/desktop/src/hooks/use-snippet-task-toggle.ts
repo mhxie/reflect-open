@@ -1,43 +1,22 @@
 import { useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import {
-  errorMessage,
-  isLocalOnlyReadOnlyPath,
-  type SnippetTask,
-  type TaskLocator,
-} from '@reflect/core'
-import type { TaskClickHandler, TaskClickPayload } from '@meowdown/react'
-import { writeTask } from '@/lib/note-task.ts'
-import { startOperation } from '@/lib/operations.ts'
+import { isLocalOnlyReadOnlyPath, type SnippetTask, type TaskLocator } from '@reflect/core'
+import type { TaskClickHandler } from '@meowdown/react'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { mutationKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface SnippetToggleInput {
   notePath: string
   locator: TaskLocator
   checked: boolean
-  generation: number
-}
-
-/**
- * The clicked checkbox against our anchor for the same index. The view and the
- * anchors enumerate the same markdown independently (meowdown's render walk vs
- * the core's parse — see `extractSnippetTasks`), so index, state, and the
- * item's own first-line text must all agree; any mismatch means the two walks
- * drifted, and a toggle would hit the wrong task. `null` refuses.
- */
-function anchorFor(tasks: readonly SnippetTask[], payload: TaskClickPayload): SnippetTask | null {
-  const anchor = tasks[payload.index]
-  if (anchor === undefined || anchor.checked !== payload.checked || anchor.text !== payload.text) {
-    return null
-  }
-  return anchor
 }
 
 /**
  * Write a backlink-snippet checkbox click through to the source note — old
  * Reflect's `toggleListChecked` behavior for checkboxes in a backlink's
- * context. Routes through {@link writeTask}: the same session-aware,
+ * context. Routes through `TaskService.toggleSnippetTask`: the same session-aware,
  * per-note-serialized, staleness-guarded path the Tasks view uses, so an open
  * source note keeps its live buffer and a drifted note refuses instead of
  * toggling the wrong task. Only round `+ [ ]` Reflect tasks carry a locator
@@ -51,37 +30,34 @@ export function useSnippetTaskToggle(
   tasks: readonly SnippetTask[],
 ): TaskClickHandler | undefined {
   const { graph } = useGraph()
+  const { tasks: taskService } = useCoreServices()
+  const localOnly = useLocalOnlyFolders()
 
   const { mutate, isPending } = useMutation({
     mutationKey: mutationKeys.tasks.snippetToggle(graph?.root),
-    mutationFn: ({ notePath: path, locator, generation }: SnippetToggleInput) =>
-      writeTask({ notePath: path, ...locator }, [{ kind: 'toggle' }], generation),
-    onError: (cause, { checked }) => {
-      startOperation(checked ? 'Reopening task' : 'Completing task').fail(errorMessage(cause))
-    },
+    // The service reports a failed write itself.
+    mutationFn: ({ notePath: path, locator, checked }: SnippetToggleInput) =>
+      taskService.toggleSnippetTask(path, { locator, checked }),
   })
 
-  const generation = graph?.generation
   const handler = useCallback<TaskClickHandler>(
     (payload) => {
-      if (generation === undefined || isPending) {
+      if (isPending) {
         return
       }
-      const anchor = anchorFor(tasks, payload)
-      if (anchor === null) {
-        startOperation('Updating task').fail('The note has changed — try again in a moment.')
+      // A drifted click answers null, already reported.
+      const anchor = taskService.resolveSnippetTask(tasks, payload)
+      if (anchor === null || anchor.locator === null) {
         return
       }
-      if (anchor.locator === null) {
-        return
-      }
-      mutate({ notePath, locator: anchor.locator, checked: anchor.checked, generation })
+      mutate({ notePath, locator: anchor.locator, checked: anchor.checked })
     },
-    [notePath, tasks, generation, isPending, mutate],
+    [notePath, tasks, isPending, mutate, taskService],
   )
 
   // A read-only local-only source note keeps its checkboxes inert.
-  return tasks.some((task) => task.locator !== null) && !isLocalOnlyReadOnlyPath(notePath)
+  return tasks.some((task) => task.locator !== null) &&
+    !isLocalOnlyReadOnlyPath(localOnly, notePath)
     ? handler
     : undefined
 }

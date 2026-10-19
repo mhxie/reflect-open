@@ -1,16 +1,10 @@
 /**
- * Content hashing for change detection (Plan 04). Sync providers rewrite mtimes,
- * so the index compares a content hash, not just the modification time.
+ * Lowercase hex SHA-256 of the exact binary source bytes (via Web Crypto,
+ * available in the WebView): the identity of an attachment's bytes, as text
+ * hashes use `sha256Hex` from `@reflect/utils`.
  */
-
-/** Lowercase hex SHA-256 of `content` (via Web Crypto, available in the WebView). */
-export async function hashContent(content: string): Promise<string> {
-  return await hashBytes(new TextEncoder().encode(content))
-}
-
-/** Lowercase hex SHA-256 of the exact binary source bytes. */
 export async function hashBytes(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 

@@ -1,6 +1,6 @@
 import type { ModelMessage } from '@reflect/modules/ai'
-import type { ChatStreamEvent } from './stream-chat.ts'
-import type { NoteToolCall, NoteToolResult } from './tools.ts'
+import type { ChatStreamEvent } from './chat-engine-service.ts'
+import type { NoteToolCall, NoteToolResult } from './note-tools-service.ts'
 
 /**
  * The chat conversation model (Plan 10). A {@link ChatTurn} is the single
@@ -9,7 +9,8 @@ import type { NoteToolCall, NoteToolResult } from './tools.ts'
  * contributed. Hosts store only turns — the history a new turn resends is
  * *derived* via {@link buildHistory}, so the transcript and the model's view
  * can never drift apart. The same record is what the store persists
- * (`./store`), so a restored conversation renders and resends identically.
+ * (`./chat-history-service`), so a restored conversation renders and
+ * resends identically.
  *
  * Parts are built by folding the engine's {@link ChatStreamEvent}s with
  * {@link appendEvent} (pure, so the fold is unit-testable without
@@ -68,7 +69,7 @@ export const NO_REPLY_NOTICE =
 
 /**
  * Shown when a cloud turn's send left out earlier exchanges that used notes
- * which are private now (`./history-privacy`). A transcript shows it once
+ * which are private now (`./chat-privacy-service`). A transcript shows it once
  * ({@link showsHistoryWithheld}), on the first turn that withheld any.
  */
 export const HISTORY_WITHHELD_NOTICE =
@@ -186,9 +187,9 @@ export function userMessage(text: string, attachments: readonly ChatAttachment[]
  * enforce, and invite the model to answer a question the transcript shows
  * as failed.
  *
- * This is everything the turns hold; `streamChat` then leaves out, for a
- * cloud model, each exchange that used a note that is private now
- * (`./history-privacy`).
+ * This is everything the turns hold; `ChatEngineService.streamTurn` then
+ * leaves out, for a cloud model, each exchange that used a note that is
+ * private now (`./chat-privacy-service`).
  */
 export function buildHistory(turns: readonly ChatTurn[]): ModelMessage[] {
   return turns

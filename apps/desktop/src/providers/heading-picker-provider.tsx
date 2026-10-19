@@ -20,7 +20,14 @@ interface HeadingPickerContextValue {
 
 const HeadingPickerContext = createContext<HeadingPickerContextValue | null>(null)
 
-export function HeadingPickerProvider({ children }: { children: ReactNode }): ReactElement {
+interface HeadingPickerProviderProps {
+  children: ReactNode
+}
+
+/**
+ * Holds whether the "Jump to heading…" picker is open for the workspace.
+ */
+export function HeadingPickerProvider({ children }: HeadingPickerProviderProps): ReactElement {
   const [open, setOpen] = useState(false)
 
   const openHeadingPicker = useCallback(() => {
@@ -37,6 +44,9 @@ export function HeadingPickerProvider({ children }: { children: ReactNode }): Re
   return <HeadingPickerContext value={value}>{children}</HeadingPickerContext>
 }
 
+/**
+ * The heading picker's open state and controls. Use within a {@link HeadingPickerProvider}.
+ */
 export function useHeadingPicker(): HeadingPickerContextValue {
   const context = use(HeadingPickerContext)
   if (!context) {

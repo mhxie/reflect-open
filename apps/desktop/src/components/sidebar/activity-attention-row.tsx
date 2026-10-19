@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react'
 import { CircleAlert, TriangleAlert, X } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
-import { dismissOperation, type Operation } from '@/lib/operations.ts'
+import type { Operation } from '@reflect/core'
 import { cn } from '@/lib/utils.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 export interface ActivityAttentionRowProps {
   operation: Operation
@@ -10,6 +11,8 @@ export interface ActivityAttentionRowProps {
 
 /** An operation that failed or warned: its message, its action, and a dismiss. */
 export function ActivityAttentionRow({ operation }: ActivityAttentionRowProps): ReactElement {
+  const { operations } = useAppServices()
+  const { logger } = useCoreServices()
   const failed = operation.status === 'failed'
   const Icon = failed ? CircleAlert : TriangleAlert
   const action = operation.action
@@ -33,7 +36,7 @@ export function ActivityAttentionRow({ operation }: ActivityAttentionRowProps): 
             className="mt-1"
             onClick={() => {
               void Promise.resolve(action.run()).catch((error: unknown) => {
-                console.error('operation action failed:', error)
+                logger.error('operation action failed:', error)
               })
             }}
           >
@@ -44,7 +47,7 @@ export function ActivityAttentionRow({ operation }: ActivityAttentionRowProps): 
       <button
         type="button"
         aria-label={`Dismiss ${operation.label}`}
-        onClick={() => dismissOperation(operation.id)}
+        onClick={() => operations.dismiss(operation.id)}
         className="flex size-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text"
       >
         <X aria-hidden className="size-3" strokeWidth={1.75} />

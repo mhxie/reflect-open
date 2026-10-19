@@ -1,13 +1,12 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
+import { createTestCoreServices } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
-import { afterEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
-import { setBridge } from '@reflect/core'
 import { addDaysIso, todayIso } from '@/lib/dates.ts'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { DailyStream } from './daily-stream.tsx'
 
 /**
@@ -40,20 +39,6 @@ vi.mock('@/components/note-pane.tsx', async () => {
     },
   }
 })
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: { dateFormat: 'mdy' },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
-
-setBridge({ invoke: () => new Promise(() => {}), listen: async () => () => {} })
-
-afterEach(async () => {
-  await cleanup()
-})
-
 function FollowDayLink({ date }: { date: string }): null {
   const { navigate } = useRouter()
   useEffect(() => {
@@ -74,16 +59,17 @@ function Stream(): ReactElement {
 it('reveals the linked heading in the arrival day only, once', async () => {
   reveals.length = 0
   const yesterday = addDaysIso(todayIso(), -1)
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  await render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'today' }}>
-        <div style={{ height: 800 }}>
-          <Stream />
-        </div>
-        <FollowDayLink date={yesterday} />
-      </RouterProvider>
-    </QueryClientProvider>,
+  const app = createTestCoreServices()
+  // The stream's today is the clock's; the link targets the real yesterday.
+  app.clock.setNow(Date.now())
+  await renderInApp(
+    <>
+      <div style={{ height: 800 }}>
+        <Stream />
+      </div>
+      <FollowDayLink date={yesterday} />
+    </>,
+    { app, route: { kind: 'today' }, settings: { dateFormat: 'mdy' } },
   )
 
   await vi.waitFor(() => expect(reveals).toEqual([{ date: yesterday, fragment: 'Agenda' }]))

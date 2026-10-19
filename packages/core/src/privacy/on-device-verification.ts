@@ -1,14 +1,18 @@
 import { z } from 'zod'
-import { onDeviceFetch } from '../ai/on-device-fetch.ts'
+import type { HttpService } from '../ports/http-service.ts'
 import type { OnDeviceTarget } from './on-device-target.ts'
 
-/** A refusal from {@link verifyOnDeviceServer}, with the reason to show. */
+/**
+ * A refusal from {@link verifyOnDeviceServer}, with the reason to show.
+ */
 export interface OnDeviceServerRefusal {
   readonly kind: 'refused'
   readonly reason: string
 }
 
-/** What {@link verifyOnDeviceServer} concluded about the server behind a target. */
+/**
+ * What {@link verifyOnDeviceServer} concluded about the server behind a target.
+ */
 export type OnDeviceServerVerdict = 'ok' | OnDeviceServerRefusal
 
 const TIMEOUT_MS = 5_000
@@ -24,18 +28,21 @@ const showSchema = z.object({
   remote_model: z.string().optional(),
 })
 
-/** Optional caller cancellation and credentials; fetch is injectable only for verification tests. */
+/**
+ * Optional caller cancellation and credentials.
+ */
 export interface OnDeviceVerificationOptions {
-  apiKey?: string
+  apiKey?: string | undefined
   signal?: AbortSignal | undefined
-  fetchFn?: typeof fetch
 }
 
 function refused(reason: string): OnDeviceServerVerdict {
   return { kind: 'refused', reason }
 }
 
-/** Ollama's native endpoint (`/api/<endpoint>`) beside an OpenAI-compatible base URL. */
+/**
+ * Ollama's native endpoint (`/api/<endpoint>`) beside an OpenAI-compatible base URL.
+ */
 export function ollamaNativeUrl(baseUrl: string, endpoint: string): string {
   const url = new URL(baseUrl)
   url.pathname = `${url.pathname.replace(/\/v1\/?$/u, '').replace(/\/$/u, '')}/api/${endpoint}`
@@ -81,13 +88,15 @@ export function isOllamaCloudModel(model: string): boolean {
 }
 
 /**
- * Check the exact selected model through the hardened loopback transport.
- * Ollama cloud references are refused before show, whose cloud-name path can
- * itself proxy off-device. Aliases are checked by remote metadata, not names.
- * Generic servers require an explicit server attestation when the native API
- * is absent; failed or ambiguous Ollama checks never become generic successes.
+ * Check the exact selected model through `http`, the hardened loopback
+ * transport (`OnDeviceHttpService`). Ollama cloud references are refused
+ * before show, whose cloud-name path can itself proxy off-device. Aliases are
+ * checked by remote metadata, not names. Generic servers require an explicit
+ * server attestation when the native API is absent; failed or ambiguous
+ * Ollama checks never become generic successes.
  */
 export async function verifyOnDeviceServer(
+  http: HttpService,
   target: OnDeviceTarget,
   options: OnDeviceVerificationOptions = {},
 ): Promise<OnDeviceServerVerdict> {
@@ -98,13 +107,12 @@ export async function verifyOnDeviceServer(
   }
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout
-  const fetchFn = options.fetchFn ?? onDeviceFetch
   const headers = new Headers()
   if (options.apiKey?.trim()) {
     headers.set('authorization', `Bearer ${options.apiKey}`)
   }
   try {
-    const version = await fetchFn(ollamaNativeUrl(target.config.baseUrl, 'version'), {
+    const version = await http.fetch(ollamaNativeUrl(target.config.baseUrl, 'version'), {
       headers,
       signal,
     })
@@ -125,7 +133,7 @@ export async function verifyOnDeviceServer(
       )
     }
     headers.set('content-type', 'application/json')
-    const response = await fetchFn(ollamaNativeUrl(target.config.baseUrl, 'show'), {
+    const response = await http.fetch(ollamaNativeUrl(target.config.baseUrl, 'show'), {
       method: 'POST',
       headers,
       body: JSON.stringify({ model: target.config.model, verbose: false }),

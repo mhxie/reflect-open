@@ -1,4 +1,6 @@
-import type { NoteListSort, WikiLanguage } from '@reflect/core'
+import type { MaybePromise } from '@reflect/utils'
+import type { AppServices, Command } from '@reflect/app'
+import type { CoreServices, NoteListSort, WikiLanguage } from '@reflect/core'
 import type { Route } from '@/routing/route.ts'
 import type { NavigateOptions } from '@/routing/router.tsx'
 
@@ -10,6 +12,11 @@ import type { NavigateOptions } from '@/routing/router.tsx'
  */
 
 export interface CommandContext {
+  /**
+   * The core services, for the commands that call one directly.
+   */
+  services: CoreServices
+  app: AppServices
   navigate: (route: Route, options?: NavigateOptions) => void
   /** The current route, read at run time. */
   route: () => Route
@@ -21,9 +28,9 @@ export interface CommandContext {
    */
   notePath: () => string | null
   /** Toggle the focused note pin with immediate shared feedback. */
-  togglePin: () => Promise<void>
+  togglePin: () => MaybePromise<void>
   /** Toggle the focused note privacy with immediate shared feedback. */
-  togglePrivate: () => Promise<void>
+  togglePrivate: () => MaybePromise<void>
   /** Open the focused note's status menu (privacy, edit state, backup). */
   showNoteDetails: () => void
   back: () => void
@@ -47,14 +54,6 @@ export interface CommandContext {
   openPinnedNote: (index: number) => void
   /** Start an audio memo, or stop-and-save the one recording. */
   toggleAudioMemo: () => void
-  /**
-   * The open **index session** generation (`index_open`), or null when none —
-   * what index/embedding commands echo. File writes (`note_write`) take
-   * `graph.generation` instead; no current command needs that one.
-   */
-  generation: () => number | null
-  /** Absolute root of the open graph, or null when none is open. */
-  graphRoot: () => string | null
   /** Open the ⌘K palette (optionally pre-filled). */
   openPalette: (query?: string) => void
   /** Open the ⌘/ shortcuts cheat-sheet. */
@@ -77,14 +76,7 @@ export interface CommandContext {
   wikiLanguages: () => readonly WikiLanguage[]
 }
 
-export interface AppCommand {
-  /** Stable id — the deep-link/CLI name (e.g. `nav.today`). */
-  id: string
-  /** Palette display title. */
-  title: string
-  /** Extra match terms for palette filtering. */
-  keywords?: string[]
-  /** Keymap-registry binding (app scope), e.g. `Mod-d`. */
-  keybinding?: string
-  run: (context: CommandContext) => void | Promise<void>
-}
+/**
+ * A command of this app: it runs with a {@link CommandContext}.
+ */
+export type AppCommand = Command<CommandContext>

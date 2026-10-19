@@ -5,7 +5,11 @@ import {
   wikiNoteReference,
 } from '../graph/note-reference.ts'
 import { ATTACHMENT_TYPE_EXTENSIONS } from '../graph/attachment-types.ts'
-import { isLocalOnlyPath } from '../graph/local-only.ts'
+import {
+  isLocalOnlyPath,
+  NO_LOCAL_ONLY_FOLDERS,
+  type LocalOnlyFolders,
+} from '../graph/local-only.ts'
 import {
   dateFromDailyPath,
   foldGraphPath,
@@ -15,11 +19,10 @@ import {
 } from '../graph/paths.ts'
 import { hasSearchableChar } from '../lib/searchable-char.ts'
 import {
+  canonicalEmail,
   countDisplayChars,
-  detectConflictMarkers,
   encodeTaskPath,
   extractEmailFields,
-  foldEmail,
   foldKey,
   foldTag,
   freshAiSummary,
@@ -50,7 +53,7 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
 /**
  * Version of the projection {@link buildIndexedNote} produces. Bump it whenever
  * the rows derived from an *unchanged* file change — a new column, a changed
- * derivation — so `syncIndex` rebuilds graphs whose rows predate it. The
+ * derivation — so `NoteIndexer.sync` rebuilds graphs whose rows predate it. The
  * hash-based reconcile alone would never re-index an unchanged file, leaving
  * new columns at their migration defaults forever.
  *
@@ -58,7 +61,7 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * first stamped version; v2 rows also carry the 0004 pinned columns) ·
  * 3 — repairs `notes.mtime` 0 rows written by the watcher path before it
  * carried `modifiedMs` (hash-reconcile can never refresh them) ·
- * 4 — `notes.has_conflict` (sync conflict markers, Plan 12) ·
+ * 4 — retained `notes.has_conflict` column, no longer written or read ·
  * 5 — `notes.gist_url` + `notes.gist_stale` (gist publishing) ·
  * 6 — rendered Markdown escapes in titles, wiki-link targets, and previews ·
  * 7 — `tasks` projection (GFM checkboxes, Plan 18): existing notes carry no task
@@ -199,7 +202,7 @@ export type IndexedAlias = z.infer<typeof indexedAliasSchema>
 export const indexedEmailSchema = z.object({
   /** Display casing (as written in the field bullet). */
   email: z.string(),
-  /** Case-folded match key ({@link foldEmail}) — what resolution compares against. */
+  /** Case-folded match key ({@link canonicalEmail}) — what resolution compares against. */
   emailKey: z.string(),
 })
 export type IndexedEmail = z.infer<typeof indexedEmailSchema>
@@ -252,8 +255,6 @@ export const indexedNoteSchema = z.object({
   isPinned: z.boolean(),
   /** Explicit pin order (`pinned: <n>`); null for bare `pinned: true`. */
   pinnedOrder: z.number().nullable(),
-  /** The file carries Git conflict markers from a sync merge (Plan 12). */
-  hasConflict: z.boolean(),
   /** The note is not blank: it has display text, or a body the FTS can match. */
   hasContent: z.boolean(),
   /** Characters of display text (code points, like SQLite `length`). */
@@ -395,8 +396,10 @@ export function projectNoteClaims(
 
 /**
  * Flatten a parsed note into the index payload. `meta.source` is the raw
- * markdown the note was parsed from — conflict markers are detected on it
- * (not on the extracted plain text, which may reshape marker lines).
+ * markdown the note was parsed from. `meta.localOnly` is the graph's
+ * local-only folders: a note inside one is private whatever its frontmatter
+ * says. The indexer always passes its session's folders; the default (none)
+ * is for callers outside a graph.
  */
 export function buildIndexedNote(
   parsed: ParsedNote,
@@ -406,6 +409,7 @@ export function buildIndexedNote(
     source: string
     assetText?: string
     hasDeviceOnlyContent?: boolean
+    localOnly?: LocalOnlyFolders
   },
 ): IndexedNote {
   const wikiLinks: IndexedLink[] = parsed.wikiLinks.map((link) => {
@@ -462,10 +466,11 @@ export function buildIndexedNote(
     // classifier's withheld bit), or a note inside a local-only folder whatever
     // its frontmatter says: every `is_private` filter and gate downstream
     // covers all three.
-    isPrivate: parsed.frontmatter.private || isLocalOnlyPath(parsed.path),
+    isPrivate:
+      parsed.frontmatter.private ||
+      isLocalOnlyPath(meta.localOnly ?? NO_LOCAL_ONLY_FOLDERS, parsed.path),
     isPinned: isPinned(parsed.frontmatter),
     pinnedOrder: pinnedOrder(parsed.frontmatter),
-    hasConflict: detectConflictMarkers(meta.source),
     gistUrl: parsed.frontmatter.gist?.url ?? null,
     // Staleness is a body-hash comparison (frontmatter excluded): publishing
     // writes the `gist` block itself, and a pin/private toggle is not an edit
@@ -486,7 +491,7 @@ export function buildIndexedNote(
     tags: parsed.tags.map((tag) => ({ tag, tagKey: foldTag(tag) })),
     aliases,
     claims: projectNoteClaims(parsed, aliases),
-    emails: extractEmailFields(body).map((email) => ({ email, emailKey: foldEmail(email) })),
+    emails: extractEmailFields(body).map((email) => ({ email, emailKey: canonicalEmail(email) })),
     // One reference can contribute several candidate spellings; the
     // projection stores each path once.
     assets: [

@@ -1,6 +1,8 @@
 import { useCallback } from 'react'
-import { allNotesRoute } from '@/routing/route.ts'
+import { routeForTag } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
+
+export type TagNavigation = (tag: string) => void
 
 /**
  * Navigation for a clicked inline `#tag`: open the All Notes screen filtered by
@@ -10,12 +12,12 @@ import { useRouter } from '@/routing/router.tsx'
  *
  * @returns a stable click handler for the note editor's tag extension.
  */
-export function useTagNavigation(): (tag: string) => void {
+export function useTagNavigation(): TagNavigation {
   const { navigate } = useRouter()
 
   return useCallback(
-    (tag: string) => {
-      navigate(allNotesRoute(tag))
+    (tag) => {
+      navigate(routeForTag(tag))
     },
     [navigate],
   )

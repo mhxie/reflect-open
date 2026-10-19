@@ -9,7 +9,6 @@ export {
   aiSummaryFrontmatterSchema,
   isPinned,
   pinnedOrder,
-  PARSED_NOTE_VERSION,
   type Frontmatter,
   type GistFrontmatter,
   type AiSummaryFrontmatter,
@@ -34,10 +33,8 @@ export { parseNote, isTagName, hasAuthoredTitle } from './extract.ts'
 export { countDisplayChars } from './char-count.ts'
 export {
   scanInlineWikiLinks,
-  scanInlineImages,
   scanInlineSegments,
   type InlineWikiLink,
-  type InlineImage,
   type InlineSegment,
 } from './scan.ts'
 export { appendBlock, wikiLinkSafe, setTaskDueDate, clearTaskDueDate } from './edit.ts'
@@ -48,18 +45,7 @@ export {
   wikiLinkTargetForTitle,
   type NoteTitleMetadata,
 } from './note-title.ts'
-export {
-  conflictMarkerBlockCount,
-  conflictMarkerLabels,
-  detectConflictMarkers,
-  parseConflictMarkers,
-  resolveConflictMarkers,
-  type ConflictMarkerLabels,
-  type ConflictResolution,
-  type ConflictSegment,
-  type ConflictSide,
-} from './conflict-markers.ts'
-export { canonicalEmail, canonicalEmails, extractEmailFields, foldEmail } from './email-fields.ts'
+export { canonicalEmail, canonicalEmails, extractEmailFields } from './email-fields.ts'
 export { foldFallbackTitleKey, foldKey, foldTag } from './keys.ts'
 export {
   AI_SUMMARY_KEY,
@@ -74,13 +60,9 @@ export { subjectAliases } from './subject-aliases.ts'
 export {
   normalizeWikiTarget,
   resolved,
-  resolveWikiLink,
-  resolveWikiLinkAsync,
   unresolved,
   type NormalizedTarget,
   type Resolution,
-  type WikiLookup,
-  type AsyncWikiLookup,
 } from './resolve.ts'
 export { renderInlineText } from './inline-text.ts'
 export { compareTaskPaths, decodeTaskPath, encodeTaskPath, isSameTaskPath } from './task-path.ts'
@@ -105,6 +87,7 @@ export {
   type TaskEditInsert,
   type TaskEditItem,
   type TaskEditResult,
+  type TaskLogContext,
   type TaskMove,
   type TaskEntry,
   type TaskRow,

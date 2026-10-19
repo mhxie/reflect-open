@@ -1,14 +1,13 @@
 import type { SyntaxNode, Tree } from '@meowdown/markdown'
 import { parseFrontmatter, splitFrontmatter } from '../markdown/frontmatter.ts'
 import { parseBody } from '../markdown/grammar.ts'
-import { unescapeMarkdownText } from '../markdown/plain-text.ts'
+import { stripAtxHeadingMarks, unescapeMarkdownText } from '../markdown/plain-text.ts'
 import { normalizeWikiTarget } from '../markdown/resolve.ts'
 import { isWikiNodeName, wikiBracketStart } from '../markdown/wiki-nodes.ts'
 
 /**
  * Block-level context extraction for the backlinks panel, ported from old
- * Reflect's `getBacklinkContextHtml`. Where {@link lineAt} returns only the
- * physical line around a link, this walks the parsed block structure and
+ * Reflect's `getBacklinkContextHtml`. This walks the parsed block structure and
  * returns the whole unit of meaning the mention sits in:
  *
  * - **Paragraph** — the whole paragraph (which may wrap across lines).
@@ -183,12 +182,7 @@ function headingSectionEnd(heading: SyntaxNode): number {
 /** Does the heading's text line carry anything beyond ATX `#` marks? */
 function headingHasText(body: string, heading: SyntaxNode): boolean {
   const firstLine = body.slice(heading.from, lineEndAt(body, heading.from))
-  return (
-    firstLine
-      .replace(/^#{1,6}[ \t]*/, '')
-      .replace(/[ \t]*#*[ \t]*$/, '')
-      .trim() !== ''
-  )
+  return stripAtxHeadingMarks(firstLine) !== ''
 }
 
 /**

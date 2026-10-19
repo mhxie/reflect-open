@@ -1,23 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
+  canTrashNote,
   chooseNoteListSort,
   classifyKnowledgePath,
-  foldTag,
-  isDaily,
-  listNotes,
-  listNoteTags,
   sortNoteListRows,
-  type NoteListOptions,
   type NoteListSortKey,
 } from '@reflect/core'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { useKnowledgeLevels } from '@/hooks/use-knowledge-level.ts'
-import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
+import { useNoteLinkNavigation, type ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
+import { useNoteRows } from '@/hooks/note-row-overlay.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import { createAllNotesQueryOptions } from '@/lib/query-options.ts'
 import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useScrollToIndexBridge } from '@/lib/use-scroll-to-index-bridge.ts'
@@ -25,6 +21,7 @@ import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath, type AllNotesFilter } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
 import { AllNotesPrivacyButton } from './all-notes-privacy-button.tsx'
 import { AllNotesTable } from './all-notes-table.tsx'
@@ -33,38 +30,6 @@ import { AllNotesTrashDialog } from './all-notes-trash-dialog.tsx'
 import { NewNoteButton } from './new-note-button.tsx'
 import { useAllNotesKeyboard } from './use-all-notes-keyboard.ts'
 import { isModEvent } from '@meowdown/core'
-
-/** The `listNotes` options for a route filter. */
-function noteListOptions(filter: AllNotesFilter | null): NoteListOptions {
-  switch (filter?.kind) {
-    case undefined:
-      return {}
-    case 'tag':
-      return { tag: filter.tag }
-    case 'attachment':
-      return { attachment: filter.type }
-    case 'updated':
-      return { updatedOn: filter.date }
-    case 'level':
-      return { includeDaily: true }
-  }
-}
-
-/** The list query's cache key for a route filter. */
-function allNotesQueryKey(root: string | undefined, filter: AllNotesFilter | null) {
-  switch (filter?.kind) {
-    case undefined:
-      return queryKeys.index.allNotesWithTag(root, null)
-    case 'tag':
-      return queryKeys.index.allNotesWithTag(root, foldTag(filter.tag))
-    case 'attachment':
-      return queryKeys.index.allNotesWithAttachment(root, filter.type)
-    case 'updated':
-      return queryKeys.index.allNotesUpdatedOn(root, filter.date)
-    case 'level':
-      return queryKeys.index.allNotesIncludingDaily(root)
-  }
-}
 
 interface AllNotesScreenProps {
   /** Active filter carried by the route (`null` = all non-daily notes). */
@@ -91,6 +56,7 @@ interface AllNotesScreenProps {
  */
 export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const { graph } = useGraph()
+  const { noteList } = useCoreServices()
   const { settings, updateSettingsWith } = useSettings()
   const knowledgeLevels = useKnowledgeLevels()
   const sort = settings.allNotesSort
@@ -105,17 +71,18 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   // The surface, so the keyboard shortcuts can scope to it (and focus it on mount).
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const bridgeReady = useBridgeReady()
-  const enabled = bridgeReady && graph !== null
+  const enabled = graph !== null
 
-  const { data: notes } = useQuery({
-    queryKey: allNotesQueryKey(graph?.root, filter),
-    queryFn: () => listNotes(noteListOptions(filter)),
+  const { data: indexedNotes } = useQuery({
+    ...createAllNotesQueryOptions(noteList, graph?.root, filter),
     enabled,
   })
+  // Unfiltered (and for the level filter, which reads every note before it
+  // narrows them), the list holds every note that can be trashed.
+  const notes = useNoteRows(indexedNotes, { complete: filter === null || filter.kind === 'level' })
   const { data: facets } = useQuery({
     queryKey: queryKeys.index.allNotesTags(graph?.root),
-    queryFn: () => listNoteTags(),
+    queryFn: () => noteList.listNoteTags(),
     enabled,
   })
 
@@ -178,7 +145,7 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const [confirmingTrash, setConfirmingTrash] = useState(false)
   const [pendingPaths, setPendingPaths] = useState<readonly string[]>([])
   const trashableSelectedPaths = useMemo(
-    () => [...selection.selected].filter((path) => !isDaily(path)),
+    () => [...selection.selected].filter((path) => canTrashNote(path)),
     [selection.selected],
   )
   const selectedNotes = useMemo(

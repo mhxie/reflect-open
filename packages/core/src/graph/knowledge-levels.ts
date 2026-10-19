@@ -1,7 +1,8 @@
 import { z } from 'zod'
-import { readNoteOrNull } from './patch-note.ts'
 
-/** Derived by the graph's knowledge harness; Reflect only reads this contract. */
+/**
+ * Derived by the graph's knowledge harness; Reflect only reads this contract.
+ */
 export const KNOWLEDGE_LEVELS_PATH = '.reflect/knowledge-levels.json'
 
 const levelSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
@@ -42,7 +43,9 @@ const knowledgeLevelsSchema = z
     })
   })
 
-/** Shared versioned path rules and labels supplied by the graph's canonical harness. */
+/**
+ * Shared versioned path rules and labels supplied by the graph's canonical harness.
+ */
 export type KnowledgeLevels = z.infer<typeof knowledgeLevelsSchema>
 
 export interface KnowledgeClassification {
@@ -51,13 +54,17 @@ export interface KnowledgeClassification {
   readonly role?: 'shadow'
 }
 
-/** An absent contract is an ordinary graph; an invalid one cannot assign levels. */
+/**
+ * An absent contract is an ordinary graph; an invalid one cannot assign levels.
+ */
 export type KnowledgeLevelsState =
   | { readonly kind: 'missing' }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'ready'; readonly config: KnowledgeLevels }
 
-/** Parse without repairing paths, inventing default levels, or inferring validation status. */
+/**
+ * Parse without repairing paths, inventing default levels, or inferring validation status.
+ */
 export function parseKnowledgeLevels(source: string): KnowledgeLevelsState {
   try {
     const parsed = knowledgeLevelsSchema.safeParse(JSON.parse(source))
@@ -65,12 +72,6 @@ export function parseKnowledgeLevels(source: string): KnowledgeLevelsState {
   } catch {
     return { kind: 'unavailable' }
   }
-}
-
-/** Load the fixed graph-relative contract, pinned to the issuing graph session. */
-export async function loadKnowledgeLevels(generation: number): Promise<KnowledgeLevelsState> {
-  const source = await readNoteOrNull(KNOWLEDGE_LEVELS_PATH, generation)
-  return source === null ? { kind: 'missing' } : parseKnowledgeLevels(source)
 }
 
 /**

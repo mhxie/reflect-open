@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { Progress } from '@/components/ui/progress.tsx'
-import type { SemanticIndexProgress } from '@/lib/semantic-index-progress.ts'
+import type { SemanticIndexProgress } from '@reflect/core'
 
 interface SemanticIndexProgressBarProps {
   /** The running backfill's position. */

@@ -1,48 +1,18 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { setBridge } from '@reflect/core'
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
+import type { OpenerService } from '@reflect/app'
+import { createTestAppServices, type TestAppServices } from '@reflect/app/testing'
+import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { queryClient } from '@/lib/query-client.ts'
-import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 
 /**
  * A wiki entry through the real note view and editor: its `anchors` fences
  * fold into numbered references until the caret goes into them.
  */
-
-const openUrlSync = vi.hoisted(() => vi.fn<(url: string) => void>())
-vi.mock('@/lib/open-url.ts', () => ({ openUrlSync }))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getBacklinksWithContext: async () => ({ contexts: [], nextCursor: null, indexedLinkCount: 0 }),
-  relatedNotes: async () => [],
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1 },
-    indexing: false,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      editorMarkdownSyntax: 'hide',
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-      allNotesFilterTags: [],
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
 
 const ENTRY = [
   '# Anchoring',
@@ -63,37 +33,40 @@ const ENTRY = [
   'After the evidence.',
 ].join('\n')
 let entrySource = ENTRY
+let app: TestCoreServices
+let appLayer: TestAppServices
+/**
+ * Every URL the system browser was asked to open.
+ */
+let openUrlSync: MockInstance<OpenerService['openUrlSync']>
 
 beforeEach(() => {
-  openUrlSync.mockReset()
   entrySource = ENTRY
-  setBridge({
-    invoke: async (command, args) => {
-      if (command === 'note_read')
-        return args['path'] === 'wiki/Anchoring.md' ? entrySource : undefined
-      if (command === 'db_query') return []
-      return null
-    },
-    listen: async () => () => {},
-  })
+  app = createTestCoreServices()
+  appLayer = createTestAppServices(app)
+  openUrlSync = vi.spyOn(appLayer.opener, 'openUrlSync').mockImplementation(() => {})
 })
 
-afterEach(async () => {
-  await cleanup()
-  setBridge(null)
+afterEach(() => {
   queryClient.clear()
 })
 
 function renderEntry() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'note', path: 'wiki/Anchoring.md' }}>
-        <PaletteProvider>
-          <RouteContent />
-        </PaletteProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+  app.noteFile.set('wiki/Anchoring.md', entrySource)
+  return renderInApp(
+    <PaletteProvider>
+      <RouteContent />
+    </PaletteProvider>,
+    {
+      app,
+      appServices: appLayer,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      route: { kind: 'note', path: 'wiki/Anchoring.md' },
+      settings: {
+        editorMarkdownSyntax: 'hide',
+        wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+      },
+    },
   )
 }
 
@@ -120,11 +93,10 @@ it('folds evidence into numbered links with dates and reviews behind Details', a
     .element(page.getByText('reviewer: verified · 2020-01-03', { exact: true }))
     .toBeVisible()
   await expect.element(page.getByText('Readwise', { exact: true })).toBeVisible()
-  await view.unmount()
 })
 
 it('opens a source in the system browser', async () => {
-  const view = await renderEntry()
+  await renderEntry()
 
   await page.getByRole('link', { name: 'arXiv 2501.13956' }).first().click()
   expect(openUrlSync).toHaveBeenCalledWith('https://arxiv.org/abs/2501.13956')
@@ -132,7 +104,6 @@ it('opens a source in the system browser', async () => {
   await page.getByLabelText('Evidence details').click()
   await page.getByText('Readwise', { exact: true }).click()
   expect(openUrlSync).toHaveBeenLastCalledWith('https://read.readwise.io/read/01kk')
-  await view.unmount()
 })
 
 it('packs matching trailing source links once, retains locators, and reveals them for editing', async () => {
@@ -172,7 +143,6 @@ it('packs matching trailing source links once, retains locators, and reveals the
   expect(folded()).toBeNull()
   await page.getByText('After the evidence.').click()
   expect(folded()?.checkVisibility()).toBe(false)
-  await view.unmount()
 })
 
 it('shows the raw fence for editing once the caret goes into it', async () => {
@@ -183,11 +153,10 @@ it('shows the raw fence for editing once the caret goes into it', async () => {
 
   await expect.element(page.getByText(/@anchor: arxiv:2501\.13956/)).toBeVisible()
   expect(view.container.querySelector('[data-wiki-anchors]')).toBeNull()
-  await view.unmount()
 })
 
 it('opens the right block from Edit after text is added above it', async () => {
-  const view = await renderEntry()
+  await renderEntry()
   await page.getByText('Body of the first claim.').click()
 
   await userEvent.keyboard(' More detail.')
@@ -196,11 +165,10 @@ it('opens the right block from Edit after text is added above it', async () => {
   await page.getByRole('button', { name: 'Edit metadata' }).click()
 
   await expect.element(page.getByText(/@anchor: arxiv:2501\.13956/)).toBeVisible()
-  await view.unmount()
 })
 
 it('enters the folded block with the arrow keys instead of skipping it', async () => {
-  const view = await renderEntry()
+  await renderEntry()
   // The click lands past the line's end, where the caret stays.
   await page.getByText('Body of the first claim.').click()
 
@@ -211,7 +179,6 @@ it('enters the folded block with the arrow keys instead of skipping it', async (
   await expect.element(page.getByRole('link', { name: 'arXiv 2501.13956' }).first()).toBeVisible()
   await userEvent.keyboard('{ArrowLeft}')
   await expect.element(page.getByText(/@pass: reviewer/)).toBeVisible()
-  await view.unmount()
 })
 
 it('folds legacy citations while preserving source and keyboard protection', async () => {
@@ -235,7 +202,6 @@ it('folds legacy citations while preserving source and keyboard protection', asy
   await userEvent.keyboard('{Backspace}')
   await expect.element(page.getByText(/@cite:/).first()).toBeVisible()
   await expect.element(page.getByText('After the citation.', { exact: true })).toBeVisible()
-  await view.unmount()
 })
 
 it('keeps flagged reviews and unparsed evidence visible in the collapsed row', async () => {
@@ -243,20 +209,19 @@ it('keeps flagged reviews and unparsed evidence visible in the collapsed row', a
     '```\n\nAfter',
     'Do not hide this qualification.\n```\n\nAfter',
   )
-  const view = await renderEntry()
+  await renderEntry()
   await expect.element(page.getByText('Flagged review', { exact: true })).toBeVisible()
   await expect.element(page.getByText('Check evidence', { exact: true })).toBeVisible()
   await page.getByLabelText('Evidence details').click()
   await expect
     .element(page.getByText('Do not hide this qualification.', { exact: true }))
     .toBeVisible()
-  await view.unmount()
 })
 
 it('renders inline references in the note editor and exposes source through the keyboard', async () => {
   entrySource =
     '# Anchoring\n\nClaim [[Related#^c2|ref]]<!-- {"metadata":{"citation":{"valid_at":"2020-01-02"}}} -->\n\nAfter.'
-  const view = await renderEntry()
+  await renderEntry()
   const reference = page.getByTestId('wikilink').first()
   await expect.element(reference).toHaveClass(/meowdown-reference/)
   reference.element().focus()
@@ -265,11 +230,10 @@ it('renders inline references in the note editor and exposes source through the 
   await expect.element(page.getByText(/"valid_at":"2020-01-02"/)).toBeVisible()
   await userEvent.keyboard('{Escape}')
   await expect.element(reference).toBeVisible()
-  await view.unmount()
 })
 
 it('unfolds the block on Delete or Backspace beside it instead of joining it', async () => {
-  const view = await renderEntry()
+  await renderEntry()
   // The click lands past the line's end, where the caret stays.
   await page.getByText('Body of the first claim.').click()
 
@@ -283,7 +247,6 @@ it('unfolds the block on Delete or Backspace beside it instead of joining it', a
 
   await expect.element(page.getByText(/@pass: reviewer/)).toBeVisible()
   await expect.element(page.getByText('After the evidence.', { exact: true })).toBeVisible()
-  await view.unmount()
 })
 
 it('deletes an empty line beside the block instead of entering it', async () => {
@@ -310,5 +273,4 @@ it('deletes an empty line beside the block instead of entering it', async () => 
   await userEvent.keyboard('{Delete}')
   await vi.waitFor(() => expect(paragraphs()).toBe(beforeBlock - 1))
   expect(fence()).toContain('@anchor: arxiv:2501.13956 | valid_at: 2020-01-02')
-  await view.unmount()
 })

@@ -1,31 +1,38 @@
-import { getXArchiveOwners } from '../../x-archive.ts'
 import { z } from 'zod'
-import { classifyAssetFromNotes } from '../../actions/asset-privacy.ts'
+import type { AssetOcrState } from '../../assets/asset-ocr-cache.ts'
+import { readManagedDescription } from '../../assets/asset-description-helpers.ts'
+import type { AssetPrivacyService } from '../../assets/asset-privacy-service.ts'
+import type { XArchiveService } from '../../embeds/x-archive-service.ts'
 import { isAppError } from '../../errors.ts'
+import type { LocalOnlyFolders } from '../../graph/local-only.ts'
+import type { DeviceNoteRead } from '../../graph/note-file-service.ts'
 import { descriptionPathFor, isAssetPath, isAttachmentPath } from '../../graph/paths.ts'
-import { canonicalAssetPath, attachmentReferenceCandidates } from '../../markdown/extract.ts'
+import type { FileMeta } from '../../graph/schemas.ts'
+import type { AssetReferences } from '../../indexing/asset-refs.ts'
+import { attachmentReferenceCandidates, canonicalAssetPath } from '../../markdown/extract.ts'
 import { splitFrontmatter } from '../../markdown/frontmatter.ts'
 import { localSafeAssetDescription, type LocalSafe } from '../../privacy/local-checkers.ts'
 import type { VerifiedModelTarget } from '../../privacy/on-device.ts'
-import { readAssetOcrState } from '../../actions/asset-ocr-cache.ts'
-import { readManagedDescription } from '../../actions/asset-description-helpers.ts'
-import { listAttachments, readNoteForDevice, type DeviceNoteRead } from '../../graph/commands.ts'
 import {
-  cloudSafeAssetDescription,
-  notePrivate,
   isPrivateNoteError,
+  notePrivate,
   type CloudAssetDescription,
   type CloudSafe,
-} from '../../privacy/checkers.ts'
+  type PrivacyService,
+} from '../../privacy/privacy-service.ts'
 
 /**
  * The read_assets tool's executor (Plan 20 meets Plan 10): resolve an
  * `assets/…` path to its stored description sidecar (`<asset>.reflect.md`)
  * and gate it for the provider. The tool registration, name, and transcript
- * unions stay in `./tools` — this module only knows how to read one asset.
+ * unions stay in `./note-tools-service` — this module only knows how to read
+ * one asset. A verified on-device model also reads attachments outside
+ * `assets/` and the device-only OCR text of the local cache.
  */
 
-/** Cap on assets one read_assets call returns, mirroring `MAX_READ_NOTES`. */
+/**
+ * Cap on assets one read_assets call returns, mirroring `MAX_READ_NOTES`.
+ */
 export const MAX_READ_ASSETS = 10
 
 /**
@@ -35,7 +42,9 @@ export const MAX_READ_ASSETS = 10
  */
 export const MAX_ASSET_DESCRIPTION_CHARS = 8_000
 
-/** read_assets miss — the sidecar description file doesn't exist (yet). */
+/**
+ * read_assets miss — the sidecar description file doesn't exist (yet).
+ */
 export const NO_ASSET_DESCRIPTION_ERROR =
   'No description exists for this asset yet — descriptions are generated in the background.'
 
@@ -46,16 +55,28 @@ export const NO_ASSET_DESCRIPTION_ERROR =
  */
 export const ASSET_UNAVAILABLE_ERROR = 'This asset cannot be read by AI.'
 
-/** read_assets refusal for a path that is not an `assets/` attachment. */
+/**
+ * read_assets refusal for a path that is not an `assets/` attachment.
+ */
 export const NOT_AN_ASSET_ERROR =
   'Not an asset path — pass assets/… paths exactly as they appear in note markdown.'
 
-/** One asset in a {@link ReadAssetsOutput}: its stored description, or a structured miss/refusal. */
+/**
+ * read_assets refusal, on device, for a bare filename several attachments share.
+ */
+export const AMBIGUOUS_ASSET_ERROR =
+  'Several attachments have this filename. Pass the full graph-relative path.'
+
+/**
+ * One asset in a {@link ReadAssetsOutput}: its stored description, or a structured miss/refusal.
+ */
 export type ReadAssetResult =
   | { ok: true; asset: CloudSafe<CloudAssetDescription> | LocalSafe<CloudAssetDescription> }
   | { ok: false; path: string; error: string }
 
-/** The read_assets output: one {@link ReadAssetResult} per requested path, in order. */
+/**
+ * The read_assets output: one {@link ReadAssetResult} per requested path, in order.
+ */
 export interface ReadAssetsOutput {
   assets: ReadAssetResult[]
 }
@@ -71,13 +92,39 @@ export const readAssetsInput = z.object({
     ),
 })
 
-/** The effects {@link buildReadOneAsset} needs, already defaulted by the caller. */
+/**
+ * The effects {@link buildReadOneAsset} needs.
+ */
 export interface ReadAssetDeps {
-  readNoteFn: (path: string) => Promise<string>
-  readDeviceNoteFn?: (path: string, generation?: number) => Promise<DeviceNoteRead>
-  assetReferencingNotePathsFn: (assetPath: string, owners?: readonly string[]) => Promise<string[]>
-  target?: VerifiedModelTarget | undefined
-  generation?: number | undefined
+  /**
+   * The tier's note reader for sidecars and referencing notes: it rejects a
+   * local-only note (with `PrivateNoteError` for the cloud tier).
+   */
+  readNote: (path: string) => Promise<string>
+  /**
+   * The on-device tier's reader, which reports a local-only sidecar instead of refusing it.
+   */
+  readDeviceNote: (path: string) => Promise<DeviceNoteRead>
+  /**
+   * The graph's attachments, which resolve a bare filename on device.
+   */
+  listAttachments: () => Promise<FileMeta[]>
+  /**
+   * The device-only OCR state of an attachment (`assets/asset-ocr-cache.ts`).
+   */
+  readOcrState: (assetPath: string) => Promise<AssetOcrState | null>
+  assetReferences: AssetReferences
+  assetPrivacy: AssetPrivacyService
+  xArchive: XArchiveService
+  privacy: PrivacyService
+  /**
+   * The verified destination of the model the tools serve.
+   */
+  target: VerifiedModelTarget
+  /**
+   * The local-only folders of the graph the tools read.
+   */
+  localOnly: LocalOnlyFolders
 }
 
 /**
@@ -91,45 +138,49 @@ export interface ReadAssetDeps {
  * gates the mint, failing closed. Once a sidecar exists, the verdict outranks
  * everything else about it — even an empty body answers "unavailable", not
  * "no description", when the asset is blocked.
+ *
+ * An attachment with device-only OCR is never readable by a cloud model; a
+ * verified on-device model reads the OCR text, unless a user-authored
+ * sidecar takes precedence, and a sticky invalidation hides an old managed
+ * sidecar from both tiers.
  */
 export function buildReadOneAsset(deps: ReadAssetDeps) {
+  const onDevice = deps.target.kind === 'on-device' ? deps.target : null
   return async function readOneAsset(path: string): Promise<ReadAssetResult> {
-    const local = deps.target?.kind === 'on-device'
-    let canonical = local
-      ? (attachmentReferenceCandidates('', path)[0] ?? null)
-      : canonicalAssetPath(path)
-    if (local && canonical !== null && !canonical.includes('/')) {
-      const matches = (await listAttachments(deps.generation)).filter(
-        (file) => file.path.split('/').at(-1) === canonical,
+    let canonical =
+      onDevice !== null
+        ? (attachmentReferenceCandidates('', path)[0] ?? null)
+        : canonicalAssetPath(path)
+    if (onDevice !== null && canonical !== null && !canonical.includes('/')) {
+      const filename = canonical
+      const matches = (await deps.listAttachments()).filter(
+        (file) => file.path.split('/').at(-1) === filename,
       )
-      if (matches.length > 1)
-        return {
-          ok: false,
-          path,
-          error: 'Several attachments have this filename. Pass the full graph-relative path.',
-        }
+      if (matches.length > 1) {
+        return { ok: false, path, error: AMBIGUOUS_ASSET_ERROR }
+      }
       canonical = matches[0]?.path ?? canonical
     }
-    if (canonical === null || !(local ? isAttachmentPath(canonical) : isAssetPath(canonical))) {
+    if (
+      canonical === null ||
+      !(onDevice !== null ? isAttachmentPath(canonical) : isAssetPath(canonical))
+    ) {
       return { ok: false, path, error: NOT_AN_ASSET_ERROR }
     }
-    const cacheState = await readAssetOcrState(canonical, deps.generation)
+    const cacheState = await deps.readOcrState(canonical)
     const cache = cacheState?.status === 'complete' ? cacheState : null
-    if (!local && cacheState !== null) {
+    if (onDevice === null && cacheState !== null) {
       return { ok: false, path, error: ASSET_UNAVAILABLE_ERROR }
     }
     let source: string | null = null
     let localOnly = false
     try {
-      if (local) {
-        const read = await (deps.readDeviceNoteFn ?? readNoteForDevice)(
-          descriptionPathFor(canonical),
-          deps.generation,
-        )
+      if (onDevice !== null) {
+        const read = await deps.readDeviceNote(descriptionPathFor(canonical))
         source = read.content
         localOnly = read.localOnly
       } else {
-        source = await deps.readNoteFn(descriptionPathFor(canonical))
+        source = await deps.readNote(descriptionPathFor(canonical))
       }
     } catch (cause) {
       if (isAppError(cause) && cause.kind === 'notFound') {
@@ -151,9 +202,14 @@ export function buildReadOneAsset(deps: ReadAssetDeps) {
     }
     const useCache = cache !== null && (source === null || readManagedDescription(source) !== null)
     const body = useCache ? cache.body : splitFrontmatter(source ?? '').body.trim()
-    const owners = await getXArchiveOwners(canonical)
-    const candidates = await deps.assetReferencingNotePathsFn(canonical, owners)
-    const verdict = await classifyAssetFromNotes(canonical, candidates, deps.readNoteFn, owners)
+    const owners = await deps.xArchive.owners(canonical)
+    const candidates = await deps.assetReferences.notePaths(canonical, owners)
+    const verdict = await deps.assetPrivacy.classifyAssetFromNotes(
+      canonical,
+      candidates,
+      deps.readNote,
+      owners,
+    )
     const truncated = body.length > MAX_ASSET_DESCRIPTION_CHARS
     try {
       const content = {
@@ -164,9 +220,9 @@ export function buildReadOneAsset(deps: ReadAssetDeps) {
         truncated,
       }
       const asset =
-        deps.target?.kind === 'on-device'
-          ? localSafeAssetDescription(deps.target, content)
-          : cloudSafeAssetDescription(content)
+        onDevice !== null
+          ? localSafeAssetDescription(deps.localOnly, onDevice, content)
+          : deps.privacy.cloudSafeAssetDescription(content)
       if (body === '') {
         // An existing-but-empty sidecar reads as "no description" — but only
         // for a sendable asset; a blocked one threw above, so the two miss

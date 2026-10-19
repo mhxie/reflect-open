@@ -1,6 +1,5 @@
 import type { ReactElement } from 'react'
-import type { OpenTask } from '@reflect/core'
-import { getTaskKey } from '@/lib/tasks/task-identity.ts'
+import { getTaskKey, type OpenTask } from '@reflect/core'
 import { useDayTasks } from '@/lib/tasks/use-day-tasks.ts'
 import { useTaskActions } from '@/lib/tasks/use-task-actions.ts'
 import { useToday } from '@/lib/use-today.ts'

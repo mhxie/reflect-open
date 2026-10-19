@@ -15,15 +15,15 @@ mod local_only;
 mod trust_report;
 mod walk;
 
-pub use graph_settings::{graph_settings_key, same_folder, LOCAL_ONLY_SETTINGS_KEY};
-pub use local_only::{folder_name_problem, LocalOnlyFolders, LocalOnlyLink};
+pub use graph_settings::{LOCAL_ONLY_SETTINGS_KEY, graph_settings_key, same_folder};
+pub use local_only::{LocalOnlyFolders, LocalOnlyLink, folder_name_problem};
 pub use trust_report::{
-    is_wiki_trust_report_path, normalize_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH,
-    WIKI_TRUST_REPORT_PATH_KEY,
+    DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY, is_wiki_trust_report_path,
+    normalize_wiki_trust_report_path,
 };
 pub use walk::{
-    has_pruned_component, is_pruned_dir_name, local_only_links, walk_catalog, walk_catalog_with,
-    FileCatalog, FileEntry, REFLECT_IGNORE_FILE,
+    FileCatalog, FileEntry, REFLECT_IGNORE_FILE, has_pruned_component, is_pruned_dir_name,
+    local_only_links, walk_catalog, walk_catalog_with,
 };
 
 /// Root trees reserved for Reflect-managed attachments and recordings.
@@ -273,8 +273,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        classify, evicted_logical_path, eviction_placeholder, is_openable, is_safe_visible,
-        normalize_line_endings, to_slash, to_slash_lossy, wire_path, GraphPathKind,
+        GraphPathKind, classify, evicted_logical_path, eviction_placeholder, is_openable,
+        is_safe_visible, normalize_line_endings, to_slash, to_slash_lossy, wire_path,
     };
     use serde::Deserialize;
 
@@ -373,7 +373,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[test]
     fn dataless_decodes_only_the_kernel_flag() {
-        use super::{dataless_flags, SF_DATALESS};
+        use super::{SF_DATALESS, dataless_flags};
         assert!(dataless_flags(SF_DATALESS));
         assert!(dataless_flags(SF_DATALESS | 0x1));
         assert!(!dataless_flags(0));

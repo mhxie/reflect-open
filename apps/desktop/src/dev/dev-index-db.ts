@@ -7,7 +7,7 @@ import {
   foldGraphPath,
   isCalendarDate,
   noteBasenameKey,
-  ReflectError,
+  AppError,
   type IndexedNote,
 } from '@reflect/core'
 
@@ -36,6 +36,10 @@ export interface DevIndexDb {
   saveChatMessage: (conversation: DevChatConversation, message: DevChatMessageRow) => void
   /** Delete a conversation; its messages cascade (`chat_conversation_delete`). */
   deleteChatConversation: (id: string) => void
+  /**
+   * Release the database.
+   */
+  close: () => void
 }
 
 /** Mirrors `chat_write.rs`'s `ChatConversation` (camelCased over IPC). */
@@ -121,8 +125,8 @@ export async function createDevIndexDb(): Promise<DevIndexDb> {
       removeNote(db, note.path)
       run(
         db,
-        `INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, summary_fresh, display_title, lang, summary)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, summary_fresh, display_title, lang, summary)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           note.path,
           note.id,
@@ -134,7 +138,6 @@ export async function createDevIndexDb(): Promise<DevIndexDb> {
           note.isPrivate,
           note.isPinned,
           note.pinnedOrder,
-          note.hasConflict,
           note.gistUrl,
           note.gistStale,
           note.fileHash,
@@ -226,7 +229,7 @@ export async function createDevIndexDb(): Promise<DevIndexDb> {
     moveNote: (from, to) => {
       const occupied = db.selectValue('SELECT 1 FROM notes WHERE path = ?', [to])
       if (occupied !== undefined) {
-        throw new ReflectError('io', `cannot move note: ${to} is already indexed`)
+        throw new AppError('io', `cannot move note: ${to} is already indexed`)
       }
       // Mirrors the Rust caller: the child tables reference `notes(path)`, so
       // the parent-key update needs deferred FK checks — which only apply
@@ -341,6 +344,10 @@ export async function createDevIndexDb(): Promise<DevIndexDb> {
 
     deleteChatConversation: (id) => {
       run(db, 'DELETE FROM chat_conversations WHERE id = ?', [id])
+    },
+
+    close: () => {
+      db.close()
     },
   }
 }

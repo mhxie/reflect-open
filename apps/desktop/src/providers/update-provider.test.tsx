@@ -1,66 +1,44 @@
-import { useEffect, type ReactElement } from 'react'
-import { render } from 'vitest-browser-react'
+import type { ReactElement } from 'react'
 import { page } from 'vitest/browser'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { UpdateController } from '@/lib/update-controller.ts'
-
-const controller = vi.hoisted((): UpdateController => {
-  // A stable snapshot, as useSyncExternalStore requires.
-  const idle = { phase: 'idle' } as const
-  return {
-    subscribe: () => () => {},
-    getState: () => idle,
-    start: vi.fn(),
-    dispose: vi.fn(),
-    checkNow: vi.fn(async () => {}),
-    install: vi.fn(async () => {}),
-    restart: vi.fn(async () => {}),
-  }
-})
-const createUpdateController = vi.hoisted(() => vi.fn(() => controller))
-vi.mock('@/lib/platform.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/platform.ts')>()),
-  isNativeShell: () => true,
-}))
-vi.mock('@/lib/update-controller.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/update-controller.ts')>()),
-  createUpdateController,
-}))
-vi.mock('@/components/update-toasts.ts', () => ({ attachUpdateToasts: () => () => {} }))
-vi.mock('@/hooks/use-main-window-effect.ts', () => ({ useMainWindowEffect: useEffect }))
-
-const { UpdateProvider, useUpdate } = await import('./update-provider.tsx')
+import { describe, expect, it, vi } from 'vitest'
+import { createAppServices } from '@reflect/app'
+import { createTestAppHost, createTestUpdateService } from '@reflect/app/testing'
+import { createTestCoreServices } from '@reflect/core/testing'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { UpdateProvider, useUpdate } from './update-provider.tsx'
 
 function Supported(): ReactElement {
   return <p>{useUpdate().supported ? 'updates on' : 'updates off'}</p>
 }
 
-afterEach(() => {
-  vi.unstubAllEnvs()
-  vi.clearAllMocks()
-})
-
 describe('UpdateProvider', () => {
   it('checks the release feed from a packaged desktop build', async () => {
-    await render(
+    const update = createTestUpdateService()
+    await renderInApp(
       <UpdateProvider autoCheck>
         <Supported />
       </UpdateProvider>,
+      { appServices: { update }, route: null },
     )
 
     await expect.element(page.getByText('updates on')).toBeVisible()
-    expect(createUpdateController).toHaveBeenCalledWith({ autoCheck: true })
+    expect(update.calls).toContain('start')
   })
 
   it('never checks or offers updates in a local build', async () => {
-    vi.stubEnv('VITE_UPDATES', 'off')
-    await render(
+    // A local build (`VITE_UPDATES=off`) gets no updater from the desktop
+    // host (`createDesktopHost`), so its update service is unsupported.
+    const app = createTestCoreServices()
+    const { update } = createAppServices(app, createTestAppHost())
+    const start = vi.spyOn(update, 'start')
+    await renderInApp(
       <UpdateProvider autoCheck>
         <Supported />
       </UpdateProvider>,
+      { app, appServices: { update }, route: null },
     )
 
     await expect.element(page.getByText('updates off')).toBeVisible()
-    expect(createUpdateController).not.toHaveBeenCalled()
+    expect(start).not.toHaveBeenCalled()
   })
 })

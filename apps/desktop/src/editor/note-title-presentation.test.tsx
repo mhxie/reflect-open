@@ -1,17 +1,16 @@
 import { createRef } from 'react'
 import { expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 import { MarkdownPreview } from './markdown-preview.tsx'
 import { NoteTitlePresentationBridge } from './note-title-presentation.tsx'
-import { RouterProvider } from '@/routing/router.tsx'
 
 it('shows a compact language title and reveals the unchanged source for editing', async () => {
   const handle = createRef<NoteEditorHandle>()
   const changed = vi.fn()
-  await render(
+  await renderInApp(
     <>
       <NoteEditor
         initialContent={'# Anchoring (中文)\n\n正文'}
@@ -23,7 +22,6 @@ it('shows a compact language title and reveals the unchanged source for editing'
       </NoteEditor>
       <button type="button">Outside</button>
     </>,
-    { wrapper: RouterProvider },
   )
   const compact = page.getByRole('button', { name: 'Anchoring，中文' })
   await expect.element(compact).toBeVisible()
@@ -41,14 +39,13 @@ it('shows a compact language title and reveals the unchanged source for editing'
 it('uses language metadata alone with a simple H1 in reading and editing', async () => {
   const handle = createRef<NoteEditorHandle>()
   const source = '# Anchoring\n\n正文\n'
-  await render(
+  await renderInApp(
     <>
       <NoteEditor initialContent={source} privateNote handleRef={handle} onChange={vi.fn()}>
         <NoteTitlePresentationBridge metadata={{ lang: 'zh-CN' }} />
       </NoteEditor>
       <button type="button">Outside</button>
     </>,
-    { wrapper: RouterProvider },
   )
   const title = page.getByRole('heading', { name: 'Anchoring，中文', level: 1 })
   await expect.element(title).toBeVisible()
@@ -62,7 +59,7 @@ it('uses language metadata alone with a simple H1 in reading and editing', async
 })
 
 it('applies the same presentation to a preview and respects embedded heading depth', async () => {
-  await render(
+  await renderInApp(
     <MarkdownPreview
       sourcePath={null}
       content={'# Anchoring (中文)\n\n正文'}
@@ -70,7 +67,6 @@ it('applies the same presentation to a preview and respects embedded heading dep
       headingOffset={1}
       remoteEmbeds={false}
     />,
-    { wrapper: RouterProvider },
   )
   const heading = page.getByRole('heading', { level: 2 })
   await expect.element(heading).toHaveTextContent('Anchoring中文')
@@ -81,7 +77,7 @@ it('reveals an H1 that was autofocused before the presentation plugin installed'
   const changed = vi.fn()
   const source = '# Anchoring (中文)\n\n正文\n'
   let handle: NoteEditorHandle | null = null
-  await render(
+  await renderInApp(
     <>
       <NoteEditor
         initialContent={source}
@@ -96,7 +92,6 @@ it('reveals an H1 that was autofocused before the presentation plugin installed'
       </NoteEditor>
       <button type="button">Outside</button>
     </>,
-    { wrapper: RouterProvider },
   )
   await expect.element(page.locate('.ProseMirror')).toHaveFocus()
   await expect.element(page.locate('.ProseMirror h1')).toHaveTextContent('Anchoring (中文)')

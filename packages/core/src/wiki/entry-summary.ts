@@ -58,9 +58,12 @@ export function wikiReviewState(summary: WikiEntrySummary): WikiReviewState {
   return summary.verifiedClaims > 0 ? 'partial' : 'unreviewed'
 }
 
-const SECTION_HEADING_RE = /^##\s+(.*?)(?:\s+#+)?\s*$/
-const HEADING_LINE_RE = /^(#{1,6})\s+(.*)$/
-const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/
+const HEADING_LINE_RE = /^(#{1,6})\s+(\S.*)?$/
+// The fence's marker; its info string is the rest of the line.
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/
+// Text with no line terminator: what `.*` matches.
+const ONE_LINE_RE = /^.*$/
+const WHITESPACE_RE = /\s/
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/
 const REVISION_DATE_RE = /^-\s+\**(\d{4}-\d{2}-\d{2})/
 // Lines that open a block other than a paragraph: a heading, quote, list
@@ -88,11 +91,39 @@ interface ReviewerPass {
 function opensFence(line: string): Fence | null {
   const match = FENCE_OPEN_RE.exec(line)
   const marker = match?.[1]
-  if (match === null || marker === undefined) {
+  const rest = match === null ? '' : line.slice(match[0].length)
+  if (match === null || marker === undefined || !ONE_LINE_RE.test(rest)) {
     return null
   }
-  const info = (match[2] ?? '').trim().split(/\s+/)[0] ?? ''
+  const info = rest.trim().split(/\s+/)[0] ?? ''
   return { char: marker.charAt(0), length: marker.length, anchors: info === 'anchors' }
+}
+
+/**
+ * The text of a `## ` heading line, without the closing `#` sequence that
+ * follows whitespace, or null when `line` is not one: what
+ * `/^##\s+(.*?)(?:\s+#+)?\s*$/` captures, read in one pass.
+ */
+function sectionHeadingText(line: string): string | null {
+  if (!line.startsWith('##')) {
+    return null
+  }
+  const after = line.slice(2)
+  const text = after.trimStart()
+  if (text.length === after.length) {
+    return null
+  }
+  const trimmed = text.trimEnd()
+  let hashes = trimmed.length
+  while (hashes > 0 && trimmed.charAt(hashes - 1) === '#') {
+    hashes -= 1
+  }
+  let spaces = hashes
+  while (spaces > 0 && WHITESPACE_RE.test(trimmed.charAt(spaces - 1))) {
+    spaces -= 1
+  }
+  const heading = hashes < trimmed.length && spaces < hashes ? trimmed.slice(0, spaces) : trimmed
+  return ONE_LINE_RE.test(heading) ? heading : null
 }
 
 function closesFence(line: string, fence: Fence): boolean {
@@ -204,10 +235,10 @@ export function summarizeWikiEntry(source: string, asOf: string): WikiEntrySumma
       continue
     }
 
-    const sectionHeading = SECTION_HEADING_RE.exec(line)
+    const sectionHeading = sectionHeadingText(line)
     if (sectionHeading !== null) {
       closeClaim()
-      section = sectionHeading[1] ?? null
+      section = sectionHeading
       continue
     }
 

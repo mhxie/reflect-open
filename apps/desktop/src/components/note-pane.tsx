@@ -2,23 +2,19 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElem
 import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
 import type { SelectionMenuSearchHandler } from '@meowdown/react'
 import {
+  deferredCreationPolicy,
   deriveNoteState,
-  detectConflictMarkers,
   isDaily,
   isLocalOnlyPath,
   isLocalOnlyReadOnlyPath,
-  isTemplatePath,
-  isUntitledNotePath,
   splitFrontmatter,
   splitWikiLinkTarget,
-  untitledNoteSeed,
   wikiClaimHeadingText,
   findWikiClaim,
   readWikiClaimIndex,
   wikiClaimId,
 } from '@reflect/core'
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
-import { ConflictNoteView } from '@/components/conflict-note-view.tsx'
 import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
 import { PrivateNoteNotice } from '@/components/private-note-notice.tsx'
 import { NoteLoading } from '@/components/note-loading.tsx'
@@ -28,7 +24,6 @@ import { NoteSaveAlerts } from '@/components/note-save-alerts.tsx'
 import { usePeek } from '@/components/peek/peek-provider.tsx'
 import { ProtectedNoteView } from '@/components/protected-note-view.tsx'
 import { SuggestedContactCard } from '@/components/suggested-contact-card.tsx'
-import { SyncConflictNotice } from '@/components/sync-conflict-notice.tsx'
 import { EditorAiKeymap } from '@/editor/ai-menu/editor-ai-keymap.tsx'
 import { useEditorAiMenu } from '@/editor/ai-menu/use-editor-ai-menu.tsx'
 import { editorBodyWithDefaultBullet } from '@/editor/default-bullet.ts'
@@ -63,13 +58,14 @@ import { useLinkPreview } from '@/editor/use-link-preview.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
 import { formatRecencyLabel, todayIso } from '@/lib/dates.ts'
-import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
 import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useNoteSearchQuery, useNoteSearchReport } from '@/providers/note-find-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NotePaneProps {
   /** Graph-relative path of the note to edit. */
@@ -78,24 +74,24 @@ interface NotePaneProps {
    * Request lazy creation. The pane permits it only for daily notes and the
    * explicit new-note ULID route; arbitrary missing paths fail closed.
    */
-  lazy?: boolean
+  lazy?: boolean | undefined
   /** Focus the editor when it mounts (the navigated-to day/note). */
-  autoFocus?: boolean
+  autoFocus?: boolean | undefined
   /**
    * Where the caret lands when {@link autoFocus} applies: the document start
    * (default — a seeded new note's empty H1, so typing names the note) or the
    * end of the note's content (append-style capture, e.g. the mobile daily
    * double-tap).
    */
-  autoFocusSelection?: 'start' | 'end'
+  autoFocusSelection?: 'start' | 'end' | undefined
   /** Called once the autofocus actually happened (the editor mounted). */
-  onAutoFocused?: () => void
+  onAutoFocused?: (() => void) | undefined
   /**
    * Extra classes for the pane root in every state (loading, error,
    * protected, editing). The note route uses this to make the pane a
    * stretching flex column so the editor can fill the viewport.
    */
-  className?: string
+  className?: string | undefined
   /**
    * Extra classes for the editable area (e.g. the daily stream's per-day
    * `min-h-*`). Applied to the contenteditable root, so the reserved space
@@ -103,7 +99,7 @@ interface NotePaneProps {
    * holds the same space in every state instead of collapsing and re-expanding
    * around the stream's scroll anchor while its note arrives.
    */
-  editorClassName?: string
+  editorClassName?: string | undefined
   /**
    * Horizontal gutter applied *inside* the pane's pieces — the contenteditable
    * itself plus the chrome around it (alerts, backlinks, loading/error text) —
@@ -111,15 +107,15 @@ interface NotePaneProps {
    * spans the pane's full width (dividers run edge to edge) while the gutter
    * stays part of the editor's click-to-focus area.
    */
-  gutterClassName?: string
+  gutterClassName?: string | undefined
   /**
    * Render the built-in desktop backlinks panel below the note (default).
    * The mobile surfaces pass `false` and mount their own touch-chrome
    * `IncomingBacklinks` section over the same data layer.
    */
-  showBacklinks?: boolean
+  showBacklinks?: boolean | undefined
   /** Publish the note's outline for the sidebar and "Jump to heading…". */
-  outline?: boolean
+  outline?: boolean | undefined
   /**
    * The daily stream's day key for this pane (omitted by non-daily callers).
    * Required for {@link registerHandle} and {@link onExitBoundary} to identify
@@ -131,13 +127,13 @@ interface NotePaneProps {
    * daily stream, so it can move the caret here from an adjacent day. Keyed by
    * {@link dailyDate}.
    */
-  registerHandle?: (date: string, handle: NoteEditorHandle | null) => void
+  registerHandle?: ((date: string, handle: NoteEditorHandle | null) => void) | undefined
   /**
    * The caret tried to leave this pane's top (`'up'`) / bottom (`'down'`) edge.
    * The daily stream moves focus to the adjacent day; returns `true` when it
    * did, so the editor consumes the key.
    */
-  onExitBoundary?: (date: string, direction: 'up' | 'down') => boolean
+  onExitBoundary?: ((date: string, direction: 'up' | 'down') => boolean) | undefined
   /** Scroll to a followed link's heading once the editor shows the note; once per `key`. */
   reveal?: NoteReveal | undefined
   /** The pane scrolled to {@link reveal}, so a host can stop asking (a remount would ask again). */
@@ -158,8 +154,8 @@ function revealFragment(editor: NoteEditorHandle, fragment: string): boolean {
 
 /**
  * One open note: the editor bound to its on-disk document via the Plan 05 save
- * pipeline (debounced atomic writes, watcher-driven external reload, and a
- * non-destructive conflict prompt when an external change races unsaved edits).
+ * pipeline (debounced atomic writes, and watcher-driven external reload that
+ * merges an external change into unsaved edits on the next write).
  * Notes the editor can't faithfully round-trip open **protected** (read-only)
  * so a converter gap can never silently rewrite a file. A note inside a
  * read-only local-only folder opens as a rendered, never-writing view instead
@@ -195,42 +191,40 @@ export function NotePaneComponent({
 }: NotePaneProps): ReactElement {
   const { graph } = useGraph()
   const { settings } = useSettings()
+  const { noteCreation, platform } = useCoreServices()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const dailyNote = isDaily(path)
   // Every leak guard follows `localOnly`; only the edit gates relax for an
   // editable folder (`readOnlyLocal` is false there).
-  const localOnly = isLocalOnlyPath(path)
-  const readOnlyLocal = isLocalOnlyReadOnlyPath(path)
-  const lazyCreate = lazy && !localOnly && (dailyNote || isUntitledNotePath(path))
-  // Templates rename via file operations only (settings, or outside the app):
-  // the rename pipeline's slug targets live under `notes/`, so tracking a
-  // template's title would move it out of `templates/`. The untitled `id:`
-  // seed is skipped for the same reason — it exists to feed that pipeline.
-  const template = isTemplatePath(path)
+  const localOnlyFolders = useLocalOnlyFolders()
+  const localOnly = isLocalOnlyPath(localOnlyFolders, path)
+  const readOnlyLocal = isLocalOnlyReadOnlyPath(localOnlyFolders, path)
+  const policy = deferredCreationPolicy(path)
+  const lazyCreate = lazy && !localOnly && policy.lazyCreatable
   // One seed per (pane, path): a fresh seed carries a fresh `id:`, and a mere
   // re-render must not mint a new identity (the session is keyed on the seed).
   // Re-mint during render when the path changes — only the committed render's
   // seed reaches the session, so the transient stale render is harmless, and
   // this avoids writing a ref during render.
-  const needsSeed = lazyCreate && !dailyNote && !template
-  const [seed, setSeed] = useState(() => ({ path, seed: untitledNoteSeed() }))
+  const needsSeed = lazyCreate && policy.seedsUntitled
+  const [seed, setSeed] = useState(() => ({ path, seed: noteCreation.untitledNoteSeed() }))
   if (needsSeed && seed.path !== path) {
-    setSeed({ path, seed: untitledNoteSeed() })
+    setSeed({ path, seed: noteCreation.untitledNoteSeed() })
   }
-  const document = useNoteDocument(path, generation, {
+  const document = useNoteDocument(path, {
     createIfMissing: lazyCreate,
     // Every editable regular note maintains title-addressed links and
     // title-mirroring backlink displays. The coordinator separately limits
     // title-derived file moves to Reflect-managed notes.
-    trackRenames: !dailyNote && !template && !readOnlyLocal,
+    trackRenames: policy.trackRenames && !readOnlyLocal,
     readOnly: readOnlyLocal,
     // A missing ordinary note opens as a name-me template (old Reflect's
     // new-note flow): the seed — `id:` frontmatter plus an empty H1 the
     // caret lands in, ghosted "Untitled" by the title placeholder — only
     // reaches disk if the user edits, and typing names the note. Daily
     // notes stay unseeded — the date is their identity.
-    ...(needsSeed ? { missingSeed: seed.seed } : {}),
+    missingSeed: needsSeed ? seed.seed : undefined,
   })
   // A double-clicked PDF reads in Peek where the workspace offers it.
   const openPeek = usePeek()?.openPeek
@@ -251,29 +245,22 @@ export function NotePaneComponent({
     saveFile,
     resolveFileInfo,
     saveError,
-  } = useAssetPersistence(generation, path, openPdf)
+  } = useAssetPersistence(path, openPdf)
   const renderWikilinkHoverCard = useWikiLinkHoverPreview({
-    generation,
-    graphKey: graph?.root ?? null,
     dateFormat: settings.dateFormat,
   })
-  // Without a generation the navigation only resolves: a link from a
-  // local-only note must never create a note.
-  const followWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
-  const onLinkClick = useMarkdownLinkClick(generation, path)
+  // Read-only navigation only resolves: a link from a local-only note must
+  // never create a note.
+  const followWikiLink = useWikiLinkNavigation({ readOnly: localOnly })
+  const onLinkClick = useMarkdownLinkClick(path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
   const linkPreviewSession = useMemo(
     () =>
-      generation === null || graphKey === null || localOnly
+      graphKey === null || localOnly
         ? null
-        : {
-            path,
-            generation,
-            graphKey,
-            sessionEpoch: document.sessionEpoch,
-          },
-    [path, generation, graphKey, localOnly, document.sessionEpoch],
+        : { path, graphKey, sessionEpoch: document.sessionEpoch },
+    [path, graphKey, localOnly, document.sessionEpoch],
   )
   const resolveLinkPreview = useLinkPreview(linkPreviewSession)
 
@@ -289,12 +276,12 @@ export function NotePaneComponent({
   )
   // The registry entry this pane made, so unmount removes exactly it (a
   // remount of the same path may already have re-registered).
-  const registeredHandle = useRef<{ path: string; handle: NoteEditorHandle } | null>(null)
+  const registeredHandleRef = useRef<{ path: string; handle: NoteEditorHandle } | null>(null)
   // The `/` menu's template rows insert into this pane's own editor, read
   // through the registry ref at select time (a late resolve after the pane
   // unmounted must insert nowhere rather than somewhere stale).
   const onSlashMenuSearch = useTemplateSlashItems(
-    useCallback(() => registeredHandle.current?.handle ?? null, []),
+    useCallback(() => registeredHandleRef.current?.handle ?? null, []),
   )
   // The mounted editor as state, so a reveal request can wait for it.
   const [revealEditor, setRevealEditor] = useState<NoteEditorHandle | null>(null)
@@ -322,13 +309,16 @@ export function NotePaneComponent({
       aiEditorRef.current = handle
       setRevealEditor(handle)
       if (handle === null) {
-        if (registeredHandle.current !== null) {
-          unregisterNoteEditorHandle(registeredHandle.current.path, registeredHandle.current.handle)
-          registeredHandle.current = null
+        if (registeredHandleRef.current !== null) {
+          unregisterNoteEditorHandle(
+            registeredHandleRef.current.path,
+            registeredHandleRef.current.handle,
+          )
+          registeredHandleRef.current = null
         }
       } else {
         registerNoteEditorHandle(path, handle, generation)
-        registeredHandle.current = { path, handle }
+        registeredHandleRef.current = { path, handle }
       }
       if (dailyDate !== undefined) {
         registerHandle?.(dailyDate, handle)
@@ -356,19 +346,19 @@ export function NotePaneComponent({
     ],
   )
 
-  const revealedKey = useRef<number | null>(null)
+  const revealedKeyRef = useRef<number | null>(null)
   useEffect(() => {
     if (
       reveal === undefined ||
       (revealEditor === null && !(previewOnly && document.status === 'ready')) ||
-      revealedKey.current === reveal.key
+      revealedKeyRef.current === reveal.key
     ) {
       return
     }
     // A frame later, so the host's own arrival scroll (a parent's effect)
     // doesn't land on top of the reveal.
     const frame = requestAnimationFrame(() => {
-      revealedKey.current = reveal.key
+      revealedKeyRef.current = reveal.key
       revealInPane(reveal.fragment)
       onRevealed?.(reveal.key)
     })
@@ -410,9 +400,10 @@ export function NotePaneComponent({
     sessionEpoch: document.sessionEpoch,
     editorRef: aiEditorRef,
   })
+  const aiSelectionMenuSearch = aiMenu.onSelectionMenuSearch
   const onSelectionMenuSearch = useCallback<SelectionMenuSearchHandler>(
     async (query, context) => {
-      const existing = (await aiMenu.onSelectionMenuSearch?.(query, context)) ?? []
+      const existing = (await aiSelectionMenuSearch?.(query, context)) ?? []
       if (dailyNote) return existing
       const article = noteArticleFor(path)
       const claims = article?.selectionClaims(context.from, context.to) ?? []
@@ -439,7 +430,7 @@ export function NotePaneComponent({
         ...existing,
       ]
     },
-    [aiMenu.onSelectionMenuSearch, dailyNote, path],
+    [aiSelectionMenuSearch, dailyNote, path],
   )
 
   const handleExitBoundary: ExitBoundaryHandler | undefined = useMemo(() => {
@@ -476,28 +467,15 @@ export function NotePaneComponent({
       noteProtection({
         protected: document.protected,
         saveBlocked: document.saveBlocked,
-        initialContent: document.initialContent,
         error: document.error,
-        conflict: document.conflict,
-        keepMine: document.keepMine,
-        loadTheirs: document.loadTheirs,
         retrySave: document.retrySave,
       }),
-    [
-      document.protected,
-      document.saveBlocked,
-      document.initialContent,
-      document.error,
-      document.conflict,
-      document.keepMine,
-      document.loadTheirs,
-      document.retrySave,
-    ],
+    [document.protected, document.saveBlocked, document.error, document.retrySave],
   )
   const publishStatus = useNoteStatusPublisher(
     generation === null ? null : { generation, path },
     document.status === 'ready' ? document.initialContent : null,
-    deriveNoteState({
+    deriveNoteState(localOnlyFolders, {
       path,
       isPrivate: privateNote,
       readOnly: readOnlyLocal,
@@ -563,23 +541,11 @@ export function NotePaneComponent({
   }
 
   if (document.protected) {
-    // Sync-conflicted notes land here (the session gates on the markers), so the
-    // conflict notice — with its raw-text resolution actions — leads the
-    // view, and the file renders with each block's sides color-coded instead
-    // of the generic read-only dump (whose converter-gap alert would only
-    // double up on the conflict explanation). The notice resolves the text
-    // rendered here, so a version that lands unseen is refused, not resolved.
-    const conflicted = detectConflictMarkers(document.initialContent)
     return (
       <div className={cn(gutterClassName, className)}>
         <WikiBreadcrumb path={path} className="mb-1" />
         <KnowledgeLevelLabel path={path} className="mb-2 block" />
-        <SyncConflictNotice path={path} shownContent={document.initialContent} className="mb-4" />
-        {conflicted ? (
-          <ConflictNoteView content={document.initialContent} />
-        ) : (
-          <ProtectedNoteView content={document.initialContent} />
-        )}
+        <ProtectedNoteView content={document.initialContent} />
         {showBacklinks ? <BacklinksPanel path={path} /> : null}
       </div>
     )
@@ -604,9 +570,7 @@ export function NotePaneComponent({
           <PrivateNoteNotice path={path} interactive={settings.statusBarEnabled} className="mb-3" />
         ) : null}
 
-        {/* A parked conflict comes first: restoring under it would race the
-            choice between the two versions. */}
-        {document.recovery !== null && document.conflict === null ? (
+        {document.recovery !== null ? (
           <NoteRecoveryBanner
             keptAt={formatRecencyLabel(document.recovery.savedAtMs, settings)}
             onRestore={document.restoreRecovery}
@@ -615,8 +579,6 @@ export function NotePaneComponent({
         ) : null}
 
         <NoteSaveAlerts document={document} assetSaveError={saveError} />
-
-        <SyncConflictNotice path={path} className="mb-4" />
 
         {/* Daily notes are date-titled, so a contact can never match one —
             the hook gates on it, and skipping the mount keeps the stream lean.
@@ -661,7 +623,9 @@ export function NotePaneComponent({
         onWikiLinkClick={onWikiLinkClick}
         onLinkClick={onLinkClick}
         resolveLinkPreview={resolveLinkPreview}
-        {...(generation !== null && !isTouchEditorSurface() ? { renderWikilinkHoverCard } : {})}
+        renderWikilinkHoverCard={
+          graph !== null && !platform.surface.touchEditor ? renderWikilinkHoverCard : undefined
+        }
         onTagClick={onTagClick}
         onWikilinkSearch={onWikilinkSearch}
         onTagSearch={onTagSearch}

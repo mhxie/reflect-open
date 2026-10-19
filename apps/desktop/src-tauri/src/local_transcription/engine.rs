@@ -247,29 +247,31 @@ impl Engine {
     }
 
     fn touch(&self) {
-        if let Ok(mut slot) = self.0.lock() {
-            if let Some(loaded) = slot.loaded.as_mut() {
-                loaded.last_used = Instant::now();
-            }
+        if let Ok(mut slot) = self.0.lock()
+            && let Some(loaded) = slot.loaded.as_mut()
+        {
+            loaded.last_used = Instant::now();
         }
     }
 
     /// Release the model once it has idled for [`IDLE_RELEASE`].
     fn watch_idle(&self, epoch: u64) {
         let slot = Arc::clone(&self.0);
-        std::thread::spawn(move || loop {
-            std::thread::sleep(IDLE_POLL);
-            let Ok(mut slot) = slot.lock() else {
-                return;
-            };
-            match slot.loaded.as_ref() {
-                Some(loaded) if loaded.epoch == epoch => {
-                    if loaded.last_used.elapsed() >= IDLE_RELEASE {
-                        slot.loaded = None;
-                        return;
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(IDLE_POLL);
+                let Ok(mut slot) = slot.lock() else {
+                    return;
+                };
+                match slot.loaded.as_ref() {
+                    Some(loaded) if loaded.epoch == epoch => {
+                        if loaded.last_used.elapsed() >= IDLE_RELEASE {
+                            slot.loaded = None;
+                            return;
+                        }
                     }
+                    _ => return,
                 }
-                _ => return,
             }
         });
     }
@@ -378,10 +380,12 @@ pub fn join_segments(segments: &[TranscriptSegment]) -> String {
     let mut text = String::new();
     for segment in segments {
         let next = segment.text.as_str();
-        if let (Some(last), Some(first)) = (text.chars().last(), next.chars().next()) {
-            if !last.is_whitespace() && !first.is_whitespace() && !(is_cjk(last) && is_cjk(first)) {
-                text.push(' ');
-            }
+        if let (Some(last), Some(first)) = (text.chars().last(), next.chars().next())
+            && !last.is_whitespace()
+            && !first.is_whitespace()
+            && !(is_cjk(last) && is_cjk(first))
+        {
+            text.push(' ');
         }
         text.push_str(next);
     }

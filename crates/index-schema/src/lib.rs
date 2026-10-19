@@ -73,7 +73,7 @@ mod schema {
 
     use rusqlite::ffi::{sqlite3, sqlite3_api_routines};
     use rusqlite::{Connection, TransactionBehavior};
-    use rusqlite_migration::{Migrations, M};
+    use rusqlite_migration::{M, Migrations};
 
     /// Ordered schema migrations, loaded from `migrations/*.sql`.
     static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
@@ -418,6 +418,6 @@ mod schema {
 
 #[cfg(feature = "vec")]
 pub use schema::{
-    migrate, migrate_to, open_in_memory, open_index_at, open_index_read_only_at,
-    register_sqlite_vec, validate, SchemaError,
+    SchemaError, migrate, migrate_to, open_in_memory, open_index_at, open_index_read_only_at,
+    register_sqlite_vec, validate,
 };

@@ -8,6 +8,7 @@ import {
   useState,
   type ReactElement,
 } from 'react'
+import type { WikiEmbedResolver } from '@meowdown/core'
 import type { NoteEmbedPayload, NoteEmbedRenderer } from '@meowdown/react'
 import { ArrowUpRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { splitFrontmatter, splitWikiLinkTarget } from '@reflect/core'
@@ -17,9 +18,9 @@ import { NoteEmbedBody } from '@/editor/note-embed-body.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import { useNoteEmbedNavigation } from '@/editor/use-note-embed-navigation.ts'
 import { useNoteEmbedSource, type NoteEmbedSourceOptions } from '@/editor/use-note-embed-source.ts'
-import { createNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { usePreviewOverflow } from '@/hooks/use-preview-overflow.ts'
 import { cn } from '@/lib/utils.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import {
   embeddedHeadingElement,
   notifyOutlineEmbed,
@@ -56,8 +57,8 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
   const { source, reload } = useNoteEmbedSource({ ...props, enabled: true })
   const bodyId = useId()
   const rootRef = useRef<HTMLDivElement>(null)
-  const revealed = useRef(false)
-  const outlineReveal = useRef<number | null>(null)
+  const revealedRef = useRef(false)
+  const outlineRevealRef = useRef<number | null>(null)
   const { setRoot: setPreviewRoot, overflowing } = usePreviewOverflow()
   const path = source.kind === 'ready' ? source.path : sourcePath
   const reveal = useCallback(
@@ -87,15 +88,15 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
 
   useEffect(() => {
     const { fragment } = splitWikiLinkTarget(target)
-    if (expanded && source.kind === 'ready' && !revealed.current && rootRef.current) {
+    if (expanded && source.kind === 'ready' && !revealedRef.current && rootRef.current) {
       if (fragment !== null) {
-        revealed.current = revealPreviewHeading(rootRef.current, source.source, fragment)
+        revealedRef.current = revealPreviewHeading(rootRef.current, source.source, fragment)
       } else {
         const firstBlock = rootRef.current.querySelector<HTMLElement>('h1, h2, h3, h4, h5, h6, p')
         if (firstBlock !== null) {
           firstBlock.tabIndex = -1
           firstBlock.focus({ preventScroll: true })
-          revealed.current = true
+          revealedRef.current = true
         }
       }
     }
@@ -112,8 +113,8 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
     [body, ancestors.length, target],
   )
   const requestOutlineReveal = useCallback((ordinal: number) => {
-    outlineReveal.current = ordinal
-    revealed.current = true
+    outlineRevealRef.current = ordinal
+    revealedRef.current = true
     setExpanded(true)
     const root = rootRef.current
     if (root !== null && renderedExpanded(root)) {
@@ -121,7 +122,7 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
       if (heading !== null) {
         heading.tabIndex = -1
         heading.focus({ preventScroll: true })
-        outlineReveal.current = null
+        outlineRevealRef.current = null
       }
     }
   }, [])
@@ -144,12 +145,12 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
   useLayoutEffect(() => {
     const root = rootRef.current
     if (root === null) return
-    if (expanded && outlineReveal.current !== null) {
-      const heading = embeddedHeadingElement(root, outlineReveal.current)
+    if (expanded && outlineRevealRef.current !== null) {
+      const heading = embeddedHeadingElement(root, outlineRevealRef.current)
       if (heading !== null) {
         heading.tabIndex = -1
         heading.focus({ preventScroll: true })
-        outlineReveal.current = null
+        outlineRevealRef.current = null
       }
     }
     notifyOutlineEmbed(root)
@@ -158,9 +159,12 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
     () => noteEmbedExcerpt(body, splitWikiLinkTarget(target).fragment),
     [body, target],
   )
-  const previewAttachments = useMemo(
-    () => createNoteAttachments(generation, path),
-    [generation, path],
+  const { attachments } = useCoreServices()
+  // Classifying an embed reads no catalog, so the passive preview resolves no
+  // note's attachments before the reader opens.
+  const resolvePreviewEmbed = useCallback<WikiEmbedResolver>(
+    ({ target: embedTarget }) => attachments.resolveWikiEmbed(embedTarget),
+    [attachments],
   )
   return (
     <div
@@ -201,7 +205,7 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
               // Passive: no link resolves, so no attachment resolver is built.
               sourcePath={null}
               headingOffset={ancestors.length}
-              resolveWikiEmbed={previewAttachments.resolveWikiEmbed}
+              resolveWikiEmbed={resolvePreviewEmbed}
               interactive={false}
               remoteEmbeds={false}
               className="reflect-note-surface"
@@ -238,7 +242,7 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
           aria-expanded={expanded}
           aria-controls={bodyId}
           onClick={() => {
-            revealed.current = false
+            revealedRef.current = false
             setExpanded(!expanded)
           }}
           className={cn(

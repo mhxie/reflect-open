@@ -1,7 +1,7 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
 import { imageThumbnailWidthBucket, pdfPageWidthBucket } from '@reflect/core'
-import { attachmentUrl, imageThumbnailUrl, pdfPageUrl } from '@/editor/use-note-attachments.ts'
 import { cn } from '@/lib/utils.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface AttachmentPreviewImageProps {
   generation: number
@@ -43,6 +43,7 @@ export function AttachmentPreviewImage({
   onLoadSize,
   onError,
 }: AttachmentPreviewImageProps): ReactElement {
+  const { attachments } = useCoreServices()
   // Starts over whenever the source changes (another file, a new version),
   // so a reused instance never keeps an earlier source's failure.
   const source = `${generation}:${kind}:${path}:${version ?? ''}`
@@ -61,12 +62,12 @@ export function AttachmentPreviewImage({
   const pixels = width * window.devicePixelRatio
   const url =
     kind === 'pdf'
-      ? pdfPageUrl(generation, path, 1, pdfPageWidthBucket(pixels))
+      ? attachments.pdfPageUrl(path, 1, pdfPageWidthBucket(pixels), generation)
       : stage === 'raster'
         ? // Held to the thumbnail budget: an image refused a thumbnail for its
           // size is refused here too, never decoded in full for a card.
-          `${attachmentUrl(generation, path)}?reflect-preview=raster&budget=thumb`
-        : imageThumbnailUrl(generation, path, imageThumbnailWidthBucket(pixels))
+          `${attachments.assetUrl(path, generation)}?reflect-preview=raster&budget=thumb`
+        : attachments.imageThumbnailUrl(path, imageThumbnailWidthBucket(pixels), generation)
   return (
     <img
       src={version === undefined ? url : `${url}&${version}`}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useEditor, useExtension } from '@meowdown/react'
 import type { EditorExtension } from '@meowdown/core'
 import { defineDocChangeHandler } from '@prosekit/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { whenEditorMounted } from '../when-editor-mounted.ts'
 import { outlineHeadingsEqual, type OutlineHeading } from './outline-headings.ts'
 import { OUTLINE_EMBED_CHANGE, readOutlineWithEmbeds } from './outline-embeds.ts'
@@ -39,6 +40,7 @@ interface OutlineBridgeProps {
  */
 export function OutlineBridge({ path }: OutlineBridgeProps): null {
   const editor = useEditor<EditorExtension>()
+  const { logger } = useCoreServices()
   // Not meowdown's `onDocChange`, which skips `setMarkdown` (an external
   // reload). Doc-change handlers do not fire on mount; the effect reads the
   // initial outline itself.
@@ -52,7 +54,7 @@ export function OutlineBridge({ path }: OutlineBridgeProps): null {
     const owner = Symbol('outline')
     let teardown: (() => void) | null = null
 
-    const cancel = whenEditorMounted(editor, () => {
+    const cancel = whenEditorMounted(logger, editor, () => {
       const view = editor.view
       const container = verticalScrollContainer(view.dom)
       let headings: readonly OutlineHeading[] = []
@@ -195,18 +197,22 @@ export function OutlineBridge({ path }: OutlineBridgeProps): null {
       }
 
       docChangedRef.current = refreshHeadings
-      container?.addEventListener('scroll', scheduleActiveRefresh, { passive: true })
-      view.dom.addEventListener(OUTLINE_EMBED_CHANGE, refreshHeadings)
-      window.addEventListener('resize', scheduleActiveRefresh)
+      const listeners = new AbortController()
+      container?.addEventListener('scroll', scheduleActiveRefresh, {
+        passive: true,
+        signal: listeners.signal,
+      })
+      view.dom.addEventListener(OUTLINE_EMBED_CHANGE, refreshHeadings, {
+        signal: listeners.signal,
+      })
+      window.addEventListener('resize', scheduleActiveRefresh, { signal: listeners.signal })
       refreshHeadings()
       publish()
 
       teardown = () => {
         mounted = false
         docChangedRef.current = null
-        container?.removeEventListener('scroll', scheduleActiveRefresh)
-        view.dom.removeEventListener(OUTLINE_EMBED_CHANGE, refreshHeadings)
-        window.removeEventListener('resize', scheduleActiveRefresh)
+        listeners.abort()
         if (spyFrame !== null) {
           cancelAnimationFrame(spyFrame)
         }
@@ -222,7 +228,7 @@ export function OutlineBridge({ path }: OutlineBridgeProps): null {
       cancel()
       teardown?.()
     }
-  }, [editor, path])
+  }, [editor, logger, path])
 
   return null
 }

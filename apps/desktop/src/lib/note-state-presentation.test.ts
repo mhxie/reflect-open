@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveNoteState } from '@reflect/core'
+import { deriveNoteState, NO_LOCAL_ONLY_FOLDERS } from '@reflect/core'
 import { activeNoteStateKinds } from './note-state-presentation.ts'
 
 const ORDINARY = {
@@ -18,7 +18,11 @@ describe('activeNoteStateKinds', () => {
   it('keeps Private visible next to an edit gate', () => {
     expect(
       activeNoteStateKinds(
-        deriveNoteState({ path: 'notes/a.md', isPrivate: true, protected: true }),
+        deriveNoteState(NO_LOCAL_ONLY_FOLDERS, {
+          path: 'notes/a.md',
+          isPrivate: true,
+          protected: true,
+        }),
       ),
     ).toEqual(['protected', 'private'])
     expect(
@@ -46,9 +50,9 @@ describe('activeNoteStateKinds', () => {
       { path: 'notes/a.md', isPrivate: false },
       { path: 'notes/a.md', isPrivate: true },
       { path: 'notes/a.md', isPrivate: true, readOnly: true },
-      { path: 'notes/a.md', isPrivate: false, hasConflict: true },
+      { path: 'notes/a.md', isPrivate: false, protected: true },
     ]) {
-      const state = deriveNoteState(input)
+      const state = deriveNoteState(NO_LOCAL_ONLY_FOLDERS, input)
       expect(activeNoteStateKinds(state)[0]).toBe(state.kind)
     }
   })

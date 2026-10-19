@@ -1,6 +1,5 @@
-import type { NoteState } from '@reflect/core'
+import type { BackupState, NoteState } from '@reflect/core'
 import type { NoteGitVersion } from '@/hooks/use-note-git-version.ts'
-import type { BackupState } from '@/lib/backup-controller.ts'
 
 interface NoteDetailRow<Name extends string, Status extends string> {
   readonly name: Name
@@ -82,7 +81,10 @@ function backupDetail(state: NoteState, backup: BackupState | undefined): Backup
   }
   const { status } = backup
   switch (status.state) {
+    // The quiet window before the next backup reads as backed up, as upstream's
+    // mobile status does: the edits it holds back go out when it closes.
     case 'idle':
+    case 'waiting':
       return { name: 'Backup', status: 'backed-up', value: 'Backed up', hint: null }
     case 'syncing':
       return { name: 'Backup', status: 'syncing', value: 'Syncing', hint: null }

@@ -1,17 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { setLocalOnlyFolders } from '../graph/local-only.ts'
+import { describe, expect, it } from 'vitest'
+import { createLocalOnlyFolders, NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
+import { createTestOnDeviceModelService } from '../testing/ai.ts'
 import {
   localSafeAssetDescription,
   localSafeNoteContent,
   localSafeNoteListing,
   localSafeSearchHit,
 } from './local-checkers.ts'
-import { modelTarget, verifyModelTarget, type VerifiedOnDeviceTarget } from './on-device.ts'
-
-vi.mock('./on-device-verification', () => ({ verifyOnDeviceServer: async () => 'ok' }))
+import { modelTarget, type VerifiedOnDeviceTarget } from './on-device.ts'
 
 async function localTarget(): Promise<VerifiedOnDeviceTarget> {
-  const target = await verifyModelTarget(
+  const target = await createTestOnDeviceModelService().verify(
     modelTarget({
       id: 'local',
       provider: 'openai-compatible',
@@ -32,14 +31,10 @@ async function localTarget(): Promise<VerifiedOnDeviceTarget> {
   return target
 }
 
-afterEach(() => {
-  setLocalOnlyFolders([])
-})
-
 describe('local-safe provenance', () => {
   it('leaves public values unmarked', async () => {
     const target = await localTarget()
-    const listing = localSafeNoteListing(target, {
+    const listing = localSafeNoteListing(NO_LOCAL_ONLY_FOLDERS, target, {
       path: 'notes/plan.md',
       isPrivate: false,
       title: 'Plan',
@@ -52,19 +47,19 @@ describe('local-safe provenance', () => {
 
   it('marks every value whose note must stay on the device', async () => {
     const target = await localTarget()
-    setLocalOnlyFolders(['vault'])
+    const vault = createLocalOnlyFolders(['vault'])
     const content = { title: 'Plan', content: 'body', truncated: false }
 
     expect(
-      localSafeNoteContent(target, { ...content, path: 'notes/plan.md', isPrivate: true })
+      localSafeNoteContent(vault, target, { ...content, path: 'notes/plan.md', isPrivate: true })
         .reflectPrivateContext,
     ).toBe(true)
     expect(
-      localSafeNoteContent(target, { ...content, path: 'vault/plan.md', isPrivate: false })
+      localSafeNoteContent(vault, target, { ...content, path: 'vault/plan.md', isPrivate: false })
         .reflectPrivateContext,
     ).toBe(true)
     expect(
-      localSafeNoteContent(target, {
+      localSafeNoteContent(vault, target, {
         ...content,
         path: 'notes/plan.md',
         isPrivate: false,
@@ -72,7 +67,7 @@ describe('local-safe provenance', () => {
       }).reflectPrivateContext,
     ).toBe(true)
     expect(
-      localSafeAssetDescription(target, {
+      localSafeAssetDescription(vault, target, {
         path: 'vault/scan.png',
         isPrivate: false,
         description: 'text',
@@ -91,9 +86,10 @@ describe('local-safe provenance', () => {
       isPrivate: false,
     }
 
-    expect(localSafeSearchHit(target, hit).reflectPrivateContext).toBe(true)
+    expect(localSafeSearchHit(NO_LOCAL_ONLY_FOLDERS, target, hit).reflectPrivateContext).toBe(true)
     expect(
-      localSafeSearchHit(target, { ...hit, assetTextHash: 'hash' }).reflectPrivateContext,
+      localSafeSearchHit(NO_LOCAL_ONLY_FOLDERS, target, { ...hit, assetTextHash: 'hash' })
+        .reflectPrivateContext,
     ).toBeUndefined()
   })
 })

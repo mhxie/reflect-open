@@ -1,7 +1,13 @@
 import { createRef } from 'react'
-import { cleanup, renderHook } from 'vitest-browser-react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoteState } from '@reflect/core'
+import {
+  createTestClockService,
+  createTestCoreServices,
+  type TestClockService,
+  type TestCoreServices,
+} from '@reflect/core/testing'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import type { NoteProtection } from './note-protection.ts'
 import { useNoteStatus, type NoteStatusScope } from './note-status-store.ts'
 import { useNoteStatusPublisher } from './use-note-status-publisher.ts'
@@ -18,10 +24,26 @@ function scope(path: string, generation = 17): NoteStatusScope {
   return { generation, path }
 }
 
-afterEach(async () => {
-  await cleanup()
-  vi.useRealTimers()
+/**
+ * Runs the recount delay.
+ */
+let clock: TestClockService
+/**
+ * One app per test, so every publisher and reader of it shares {@link clock}.
+ */
+let app: TestCoreServices
+
+beforeEach(() => {
+  clock = createTestClockService()
+  app = createTestCoreServices({ clock })
 })
+
+/**
+ * Render `hook` in the app of the running test.
+ */
+function renderHook<Result>(hook: () => Result) {
+  return renderHookInApp(hook, { app })
+}
 
 describe('useNoteStatusPublisher', () => {
   it('expires recovery callbacks across graph changes and unmounts', async () => {
@@ -101,12 +123,10 @@ describe('useNoteStatusPublisher', () => {
     expect(secondRetry).toHaveBeenCalledOnce()
   })
 
-  it('expires both conflict choices after pane replacement, graph changes, and unmount', async () => {
+  it("expires a replaced pane's retry, then its successor's across a graph change and unmount", async () => {
     let generation = 63
-    const firstKeep = vi.fn()
-    const firstLoad = vi.fn()
-    const secondKeep = vi.fn()
-    const secondLoad = vi.fn()
+    const firstRetry = vi.fn()
+    const secondRetry = vi.fn()
     const protectedState: NoteState = {
       ...EDITABLE,
       kind: 'protected',
@@ -114,68 +134,52 @@ describe('useNoteStatusPublisher', () => {
       isReadOnly: true,
     }
     const first = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/conflict.md', 63), 'first\n', protectedState, {
-        protection: {
-          kind: 'external-change',
-          message: 'First blocked',
-          keepMine: firstKeep,
-          loadTheirs: firstLoad,
-        },
+      useNoteStatusPublisher(scope('notes/blocked.md', 63), 'first\n', protectedState, {
+        protection: { kind: 'save-blocked', message: 'First blocked', retrySave: firstRetry },
       }),
     )
-    const reader = await renderHook(() => useNoteStatus(scope('notes/conflict.md', generation)))
+    const reader = await renderHook(() => useNoteStatus(scope('notes/blocked.md', generation)))
     const oldProtection = reader.result.current?.protection
-    if (oldProtection?.kind !== 'external-change') {
-      throw new Error('Expected first conflict recovery')
+    if (oldProtection?.kind !== 'save-blocked') {
+      throw new Error('Expected first blocked-save recovery')
     }
     const protection: NoteProtection = {
-      kind: 'external-change',
+      kind: 'save-blocked',
       message: 'Second blocked',
-      keepMine: secondKeep,
-      loadTheirs: secondLoad,
+      retrySave: secondRetry,
     }
     const second = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/conflict.md', generation), 'second\n', protectedState, {
+      useNoteStatusPublisher(scope('notes/blocked.md', generation), 'second\n', protectedState, {
         protection,
       }),
     )
     await reader.rerender()
     await first.unmount()
-    oldProtection.keepMine()
-    oldProtection.loadTheirs()
-    expect(firstKeep).not.toHaveBeenCalled()
-    expect(firstLoad).not.toHaveBeenCalled()
+    oldProtection.retrySave()
+    expect(firstRetry).not.toHaveBeenCalled()
 
     const successor = reader.result.current?.protection
-    if (successor?.kind !== 'external-change') {
-      throw new Error('Expected successor conflict recovery')
+    if (successor?.kind !== 'save-blocked') {
+      throw new Error('Expected successor blocked-save recovery')
     }
-    successor.keepMine()
-    successor.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledOnce()
-    expect(secondLoad).toHaveBeenCalledOnce()
+    successor.retrySave()
+    expect(secondRetry).toHaveBeenCalledOnce()
 
     generation = 64
     await second.rerender()
     await reader.rerender()
-    successor.keepMine()
-    successor.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledOnce()
-    expect(secondLoad).toHaveBeenCalledOnce()
+    successor.retrySave()
+    expect(secondRetry).toHaveBeenCalledOnce()
 
     const current = reader.result.current?.protection
-    if (current?.kind !== 'external-change') {
-      throw new Error('Expected current conflict recovery')
+    if (current?.kind !== 'save-blocked') {
+      throw new Error('Expected current blocked-save recovery')
     }
-    current.keepMine()
-    current.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledTimes(2)
-    expect(secondLoad).toHaveBeenCalledTimes(2)
+    current.retrySave()
+    expect(secondRetry).toHaveBeenCalledTimes(2)
     await second.unmount()
-    current.keepMine()
-    current.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledTimes(2)
-    expect(secondLoad).toHaveBeenCalledTimes(2)
+    current.retrySave()
+    expect(secondRetry).toHaveBeenCalledTimes(2)
   })
 
   it('counts the loaded note, recounts after typing settles, and clears on unmount', async () => {
@@ -191,12 +195,9 @@ describe('useNoteStatusPublisher', () => {
       protection: null,
     })
 
-    vi.useFakeTimers()
     publisher.result.current('今天写了七个字\n')
     expect(reader.result.current?.characters).toBe(12)
-    await publisher.act(async () => {
-      vi.advanceTimersByTime(300)
-    })
+    await publisher.act(() => clock.advance(300))
     await reader.rerender()
     expect(reader.result.current?.characters).toBe(7)
     expect(reader.result.current?.editedAt).toBeGreaterThan(0)
@@ -261,11 +262,8 @@ describe('useNoteStatusPublisher', () => {
       useNoteStatusPublisher(scope('notes/state.md'), 'original\n', state),
     )
     const reader = await renderHook(() => useNoteStatus(scope('notes/state.md')))
-    vi.useFakeTimers()
     publisher.result.current('a longer live buffer\n')
-    await publisher.act(async () => {
-      vi.advanceTimersByTime(300)
-    })
+    await publisher.act(() => clock.advance(300))
     await reader.rerender()
     const edited = reader.result.current
     expect(edited?.characters).toBe('a longer live buffer'.length)
@@ -305,16 +303,13 @@ describe('useNoteStatusPublisher', () => {
     const first = await renderHook(() => useNoteStatus(scope('notes/shared.md', 41)))
     const second = await renderHook(() => useNoteStatus(scope('notes/shared.md', 42)))
     const oldChange = publisher.result.current
-    vi.useFakeTimers()
     oldChange('an old queued recount\n')
 
     generation = 42
     markdown = 'second graph\n'
     await publisher.rerender()
     oldChange('an old callback delivered after switching\n')
-    await publisher.act(async () => {
-      vi.advanceTimersByTime(300)
-    })
+    await publisher.act(() => clock.advance(300))
     await first.rerender()
     await second.rerender()
 

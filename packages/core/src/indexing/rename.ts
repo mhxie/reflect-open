@@ -1,4 +1,9 @@
-import { isLocalOnlyPath, isLocalOnlyReadOnlyPath } from '../graph/local-only.ts'
+import type { MaybePromise } from '@reflect/utils'
+import {
+  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
+  type LocalOnlyFolders,
+} from '../graph/local-only.ts'
 import { patchNoteWith } from '../graph/patch-note.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
@@ -20,17 +25,17 @@ import { isWikiLinkSafeText, serializeWikiSuggestionAddress } from './suggest.ts
 
 export interface RenameIo {
   /** Distinct source paths of links whose folded target key matches. */
-  sources: (targetKey: string) => Promise<string[]>
+  sources: (targetKey: string) => MaybePromise<string[]>
   /** Links that currently resolve to the renamed note's subject path. */
-  backlinks: (path: string) => Promise<RenameBacklink[]>
-  read: (path: string) => Promise<string>
+  backlinks: (path: string) => MaybePromise<RenameBacklink[]>
+  read: (path: string) => MaybePromise<string>
   /**
-   * A checked write with the graph generation pre-bound (stale → loud
-   * rejection): it lands only while the file still holds `expectedContents`,
-   * the source the rewrite was computed from.
+   * A checked write with the graph generation pre-bound: `expectedContents`
+   * names the source the rewrite was computed from, so a concurrent change is
+   * merged or refused, never overwritten.
    */
-  write: (path: string, content: string, expectedContents: string | null) => Promise<void>
-  resolve: (target: string) => Promise<Resolution>
+  write: (path: string, content: string, expectedContents: string | null) => MaybePromise<void>
+  resolve: (target: string) => MaybePromise<Resolution>
 }
 
 /** Indexed fields needed to find title-mirroring displays for one subject. */
@@ -46,6 +51,8 @@ export interface TitleRenameRewriteOptions {
   path: string
   from: string
   to: string
+  /** The graph's local-only folders, which bound the rewrite (see below). */
+  localOnly: LocalOnlyFolders
   io: RenameIo
   onProgress?: (done: number, total: number) => void
 }
@@ -86,9 +93,9 @@ export interface TitleRenameRewriteResult {
  * note's old title, and update pipe displays that still mirror the old title
  * on any link resolving to the same subject. Serialized (ordering stays
  * deterministic and progress means something); a failing source is skipped,
- * not fatal. The old-title alias keeps its links resolving. Each write is
- * checked against the text it rewrote: a source edited meanwhile is re-read
- * and rewritten again (`patchNoteWith`), never overwritten.
+ * not fatal. The old-title alias keeps its links resolving. Each write names
+ * the text it rewrote (`patchNoteWith`): a source edited meanwhile is merged
+ * or rewritten again, never overwritten.
  *
  * Local-only notes bound the rewrite both ways. A source in a read-only
  * local-only folder is never written. When the renamed note itself is
@@ -99,7 +106,7 @@ export interface TitleRenameRewriteResult {
 export async function rewriteLinksForTitleChange(
   options: TitleRenameRewriteOptions,
 ): Promise<TitleRenameRewriteResult> {
-  const { path, from, to, io, onProgress } = options
+  const { path, from, to, localOnly, io, onProgress } = options
   // Links carry the linkable form of a title, not the raw title — for a rich
   // title (`Meeting with [[Ada]]`) the two differ, and only the linkable form
   // ever appears inside `[[…]]`. Rewrite in that space.
@@ -192,15 +199,15 @@ export async function rewriteLinksForTitleChange(
   // stay as they are (the old-title alias keeps them resolving), and that is
   // not a failure to report.
   const candidates = [...new Set([...titleSources, ...backlinkSources])]
-    .filter((source) => source !== path && !isLocalOnlyReadOnlyPath(source))
+    .filter((source) => source !== path && !isLocalOnlyReadOnlyPath(localOnly, source))
     .sort()
   // A local-only note's new title stays out of backed-up notes.
-  const renamedLocalOnly = isLocalOnlyPath(path)
+  const renamedLocalOnly = isLocalOnlyPath(localOnly, path)
   const keptInBackup = renamedLocalOnly
-    ? candidates.filter((source) => !isLocalOnlyPath(source))
+    ? candidates.filter((source) => !isLocalOnlyPath(localOnly, source))
     : []
   const sources = renamedLocalOnly
-    ? candidates.filter((source) => isLocalOnlyPath(source))
+    ? candidates.filter((source) => isLocalOnlyPath(localOnly, source))
     : candidates
   const repoint =
     collision || destinationBlocked ? null : { fromKey: foldKey(fromTarget), to: toTarget }
@@ -267,10 +274,10 @@ function aliasFamily(title: string): string[] {
 /** Data access for {@link rewritePathLinksForMove}, injected like {@link RenameIo}. */
 export interface PathLinkRewriteIo {
   /** Distinct source paths of links whose folded target path key matches. */
-  pathLinkSources: (targetPathKey: string) => Promise<string[]>
-  read: (path: string) => Promise<string>
+  pathLinkSources: (targetPathKey: string) => MaybePromise<string[]>
+  read: (path: string) => MaybePromise<string>
   /** A checked write, as {@link RenameIo.write}. */
-  write: (path: string, content: string, expectedContents: string | null) => Promise<void>
+  write: (path: string, content: string, expectedContents: string | null) => MaybePromise<void>
 }
 
 /** What {@link rewritePathLinksForMove} touched, mirroring the title result. */
@@ -294,6 +301,7 @@ export async function rewritePathLinksForMove(
   fromPath: string,
   toPath: string,
   io: PathLinkRewriteIo,
+  localOnly: LocalOnlyFolders,
 ): Promise<PathLinkRewriteResult> {
   const to = toPath.replace(/\.md$/, '')
   // The destination is a `slugForTitle` product today (lowercase word
@@ -307,7 +315,7 @@ export async function rewritePathLinksForMove(
   // links dangle like any unwritable source's, without being read or
   // reported. An editable folder's notes are retargeted like any other.
   const sources = (await io.pathLinkSources(fromPathKey))
-    .filter((source) => source !== fromPath && !isLocalOnlyReadOnlyPath(source))
+    .filter((source) => source !== fromPath && !isLocalOnlyReadOnlyPath(localOnly, source))
     .sort()
   const rewritten: string[] = []
   const failed: string[] = []

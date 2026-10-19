@@ -2,7 +2,7 @@ import { useCallback, type CSSProperties, type ReactElement } from 'react'
 import { LightboxRoot, type LightboxController } from '@meowdown/react'
 import { ImageLightboxContent } from '@/editor/image-lightbox-content.tsx'
 import { VideoLightboxContent } from '@/editor/video-lightbox-content.tsx'
-import { isMobileSurface } from '@/lib/platform-surface.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 // The mobile lightbox owns its background: drag-to-dismiss fades it to reveal
 // the note behind.
@@ -18,7 +18,8 @@ interface MediaLightboxProps {
 }
 
 export function MediaLightbox({ lightbox, onOpenImage }: MediaLightboxProps): ReactElement {
-  const mobileSurface = isMobileSurface()
+  const { platform } = useCoreServices()
+  const mobileSurface = platform.surface.mobileApp
   const { close } = lightbox
   const onClose = useCallback(() => close(), [close])
 

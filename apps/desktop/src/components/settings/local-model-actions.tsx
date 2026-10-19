@@ -1,20 +1,14 @@
 import { useState, type ReactElement } from 'react'
 import {
-  deleteLocalModel,
-  downloadLocalModel,
   errorMessage,
+  formatModelSize,
   localTranscriptionModel,
   type LocalModelStatus,
   type LocalTranscriptionModelId,
 } from '@reflect/core'
 import { InlineAlert } from '@/components/inline-alert.tsx'
-import { formatModelSize } from '@/lib/format-model-size.ts'
-import {
-  clearPendingLocalModelUpdate,
-  installLocalModelUpdate,
-  skipPendingLocalModelUpdate,
-  usePendingLocalModelUpdate,
-} from '@/lib/local-model-updates.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
+import { useServiceState } from '@/services/use-service-state.ts'
 import { ModelDownloadProgress } from './model-download-progress.tsx'
 
 const PRIMARY_BUTTON =
@@ -36,11 +30,13 @@ interface LocalModelActionsProps {
  * failed update reports through its operation toast.
  */
 export function LocalModelActions({ model, status }: LocalModelActionsProps): ReactElement | null {
-  const update = usePendingLocalModelUpdate()
+  const { localTranscription } = useCoreServices()
+  const { localModelUpdates } = useAppServices()
+  const update = useServiceState(localModelUpdates, localModelUpdates.getPending)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const download = (): void => {
     // The status events carry progress and the outcome; nothing to add here.
-    void downloadLocalModel(model).catch(() => undefined)
+    void localTranscription.download(model).catch(() => undefined)
   }
 
   switch (status.status) {
@@ -80,8 +76,10 @@ export function LocalModelActions({ model, status }: LocalModelActionsProps): Re
               type="button"
               onClick={() => {
                 setDeleteError(null)
-                clearPendingLocalModelUpdate()
-                void deleteLocalModel(model).catch((cause) => setDeleteError(errorMessage(cause)))
+                localModelUpdates.clear()
+                void localTranscription
+                  .delete(model)
+                  .catch((cause: unknown) => setDeleteError(errorMessage(cause)))
               }}
               className={SECONDARY_BUTTON}
             >
@@ -96,14 +94,14 @@ export function LocalModelActions({ model, status }: LocalModelActionsProps): Re
               <span className="flex shrink-0 gap-2">
                 <button
                   type="button"
-                  onClick={() => void installLocalModelUpdate()}
+                  onClick={() => void localModelUpdates.install()}
                   className={PRIMARY_BUTTON}
                 >
                   Update
                 </button>
                 <button
                   type="button"
-                  onClick={() => void skipPendingLocalModelUpdate()}
+                  onClick={() => void localModelUpdates.skip()}
                   className={SECONDARY_BUTTON}
                 >
                   Skip this version

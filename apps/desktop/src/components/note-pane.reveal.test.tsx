@@ -1,50 +1,17 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
-import { setBridge } from '@reflect/core'
+import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
-import { queryClient } from '@/lib/query-client.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { RouteContent } from './route-content.tsx'
 
 /**
  * A followed heading link through the real router, note view, and editor:
  * the arriving note puts the caret in the heading the link points at.
  */
-
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  isLocalOnlyPath: () => localOnly,
-  isLocalOnlyReadOnlyPath: () => localOnly && !editableLocal,
-  getBacklinksWithContext: async () => ({ contexts: [], nextCursor: null, indexedLinkCount: 0 }),
-  relatedNotes: async () => [],
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1 },
-    indexing: false,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      editorMarkdownSyntax: 'hide',
-      dateFormat: 'mdy',
-      allNotesFilterTags: [],
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
 
 const ENTRY = [
   '# Anchoring',
@@ -59,30 +26,6 @@ const ENTRY = [
   'The wheel-of-fortune study.',
 ].join('\n')
 
-let files: Record<string, string>
-let localOnly: boolean
-let editableLocal: boolean
-
-beforeEach(() => {
-  localOnly = false
-  editableLocal = false
-  files = { 'wiki/Anchoring.md': ENTRY }
-  setBridge({
-    invoke: async (command, args) => {
-      if (command === 'note_read') return files[String(args.path)]
-      if (command === 'db_query') return []
-      return null
-    },
-    listen: async () => () => {},
-  })
-})
-
-afterEach(async () => {
-  await cleanup()
-  setBridge(null)
-  queryClient.clear()
-})
-
 /** Follows a heading link once mounted, the way a wiki-link click does. */
 function FollowLink({ fragment }: { fragment: string }): ReactElement | null {
   const { navigate } = useRouter()
@@ -92,19 +35,44 @@ function FollowLink({ fragment }: { fragment: string }): ReactElement | null {
   return null
 }
 
-function renderFollowing(fragment: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'today' }}>
-        <PaletteProvider>
-          <div style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
-            <RouteContent />
-          </div>
-          <FollowLink fragment={fragment} />
-        </PaletteProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+/**
+ * Open the entry (`source`, the claim entry by default) through a heading
+ * link to `fragment`. `localOnly` puts its `wiki` folder among the graph's
+ * local-only folders: `'editable'` edits in place, `'read-only'` previews.
+ */
+async function renderFollowing(
+  fragment: string,
+  options?: { source?: string; localOnly?: 'editable' | 'read-only' },
+) {
+  const app = createTestCoreServices({
+    noteFile: createTestNoteFileService({
+      files: { 'wiki/Anchoring.md': options?.source ?? ENTRY },
+    }),
+  })
+  const localOnly = options?.localOnly
+  return await renderInApp(
+    <PaletteProvider>
+      <div style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
+        <RouteContent />
+      </div>
+      <FollowLink fragment={fragment} />
+    </PaletteProvider>,
+    {
+      app,
+      graph: {
+        root: '/g',
+        name: 'g',
+        generation: 1,
+        localOnlyFolders: localOnly === undefined ? [] : ['wiki'],
+        localOnlyEditableFolders: localOnly === 'editable' ? ['wiki'] : [],
+      },
+      settings: {
+        editorMarkdownSyntax: 'hide',
+        dateFormat: 'mdy',
+        wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+      },
+      route: { kind: 'today' },
+    },
   )
 }
 
@@ -115,34 +83,38 @@ function caretHeading(): Element | null {
   return element?.closest('h1, h2, h3, h4, h5, h6') ?? null
 }
 
+/** The element holding focus, if any. */
+function focusedElement(): Element | null {
+  return document.activeElement
+}
+
 it('puts the caret in the claim a ^cN link names', async () => {
-  const view = await renderFollowing('^c2')
+  await renderFollowing('^c2')
 
   await expect.element(page.getByText('The wheel-of-fortune study.')).toBeInTheDocument()
   await vi.waitFor(() => expect(caretHeading()?.textContent).toContain('[C2] The canonical'))
-  await view.unmount()
 })
 
 it('puts the caret in a heading named by its text', async () => {
-  const view = await renderFollowing('claims')
+  await renderFollowing('claims')
 
   await expect.element(page.getByText('The wheel-of-fortune study.')).toBeInTheDocument()
   await vi.waitFor(() => expect(caretHeading()?.textContent).toBe('Claims'))
-  await view.unmount()
 })
 
 it('puts the caret in a repeated heading named by its numbered slug', async () => {
-  files['wiki/Anchoring.md'] = [
-    '# Anchoring',
-    '',
-    '## Next steps',
-    '',
-    ...Array.from({ length: 40 }, (_, index) => `Filler paragraph ${index + 1}.\n`),
-    '## Next steps',
-    '',
-    'The second plan.',
-  ].join('\n')
-  const view = await renderFollowing('next-steps-1')
+  await renderFollowing('next-steps-1', {
+    source: [
+      '# Anchoring',
+      '',
+      '## Next steps',
+      '',
+      ...Array.from({ length: 40 }, (_, index) => `Filler paragraph ${index + 1}.\n`),
+      '## Next steps',
+      '',
+      'The second plan.',
+    ].join('\n'),
+  })
 
   await expect.element(page.getByText('The second plan.')).toBeInTheDocument()
   await vi.waitFor(() => {
@@ -152,72 +124,64 @@ it('puts the caret in a repeated heading named by its numbered slug', async () =
     expect(repeats).toHaveLength(2)
     expect(caretHeading()).toBe(repeats[1])
   })
-  await view.unmount()
 })
 
 it('scrolls to a heading in the same note from a [[#Heading]] link', async () => {
-  files['wiki/Anchoring.md'] = [
-    '# Anchoring',
-    '',
-    'See [[#Evidence]] below.',
-    '',
-    ...Array.from({ length: 40 }, (_, index) => `Filler paragraph ${index + 1}.\n`),
-    '## Evidence',
-    '',
-    'The wheel-of-fortune study.',
-  ].join('\n')
-  const view = await renderFollowing('anchoring')
+  await renderFollowing('anchoring', {
+    source: [
+      '# Anchoring',
+      '',
+      'See [[#Evidence]] below.',
+      '',
+      ...Array.from({ length: 40 }, (_, index) => `Filler paragraph ${index + 1}.\n`),
+      '## Evidence',
+      '',
+      'The wheel-of-fortune study.',
+    ].join('\n'),
+  })
 
   await page.getByTestId('wikilink').first().click()
 
   await vi.waitFor(() => expect(caretHeading()?.textContent).toBe('Evidence'))
-  await view.unmount()
 })
 
 it('reveals a claim after an editable local-only editor mounts', async () => {
-  localOnly = true
-  editableLocal = true
-  const view = await renderFollowing('^c2')
+  await renderFollowing('^c2', { localOnly: 'editable' })
 
   await expect.element(page.getByText('The wheel-of-fortune study.')).toBeInTheDocument()
   await vi.waitFor(() => expect(caretHeading()?.textContent).toContain('[C2] The canonical'))
   expect(document.querySelector('[contenteditable="true"]')).not.toBeNull()
-  await view.unmount()
 })
 
 it('reveals a claim in a local-only read-only preview', async () => {
-  localOnly = true
-  const view = await renderFollowing('^c2')
+  await renderFollowing('^c2', { localOnly: 'read-only' })
 
   await expect.element(page.getByText('The wheel-of-fortune study.')).toBeInTheDocument()
-  await vi.waitFor(() =>
-    expect(document.activeElement?.textContent).toContain('[C2] The canonical'),
-  )
+  await vi.waitFor(() => expect(focusedElement()?.textContent).toContain('[C2] The canonical'))
   expect(document.querySelector('[contenteditable="true"]')).toBeNull()
-  expect(document.activeElement?.getBoundingClientRect().top).toBeLessThan(window.innerHeight)
-  await view.unmount()
+  expect(focusedElement()?.getBoundingClientRect().top).toBeLessThan(window.innerHeight)
 })
 
 it('reveals a repeated heading by its numbered slug in a read-only preview', async () => {
-  localOnly = true
-  files['wiki/Anchoring.md'] = '# Anchoring\n\n## Next steps\n\nFirst.\n\n## Next steps\n\nSecond.'
-  const view = await renderFollowing('next-steps-1')
+  await renderFollowing('next-steps-1', {
+    localOnly: 'read-only',
+    source: '# Anchoring\n\n## Next steps\n\nFirst.\n\n## Next steps\n\nSecond.',
+  })
 
   await expect.element(page.getByText('Second.')).toBeInTheDocument()
   await vi.waitFor(() => {
     const headings = document.querySelectorAll('h2')
     expect(document.activeElement).toBe(headings[1])
   })
-  await view.unmount()
 })
 
 it('follows a same-note heading link in a read-only preview', async () => {
-  localOnly = true
-  files['wiki/Anchoring.md'] = '# Anchoring\n\nSee [[#Evidence]].\n\n## Evidence\n\nStudy.'
-  const view = await renderFollowing('anchoring')
+  await renderFollowing('anchoring', {
+    localOnly: 'read-only',
+    source: '# Anchoring\n\nSee [[#Evidence]].\n\n## Evidence\n\nStudy.',
+  })
 
   await page.getByTestId('wikilink').first().click()
 
-  await vi.waitFor(() => expect(document.activeElement?.textContent).toBe('Evidence'))
-  await view.unmount()
+  await vi.waitFor(() => expect(focusedElement()?.textContent).toBe('Evidence'))
 })

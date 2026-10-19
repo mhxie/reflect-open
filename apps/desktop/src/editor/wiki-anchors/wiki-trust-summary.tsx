@@ -13,7 +13,7 @@ interface WikiTrustSummaryProps {
  */
 export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement | null {
   const article = useNoteArticle(path)
-  const step = useRef(-1)
+  const stepRef = useRef(-1)
   const summary = article?.trust ?? null
   if (article === null || summary === null) return null
   const { needsWork, pending } = summary
@@ -31,8 +31,8 @@ export function WikiTrustSummary({ path }: WikiTrustSummaryProps): ReactElement 
     )
   }
   const next = (): void => {
-    step.current = (step.current + 1) % needsWork.length
-    const id = needsWork[step.current]
+    stepRef.current = (stepRef.current + 1) % needsWork.length
+    const id = needsWork[stepRef.current]
     if (id !== undefined) article.focusClaim(id)
   }
   return (

@@ -1,110 +1,114 @@
-import { setBridge, type NoteRecovery } from '@reflect/core'
-import { afterEach, expect, it, vi } from 'vitest'
-import { renderHook } from 'vitest-browser-react'
-import { z } from 'zod'
-import { flushOpenDocuments } from './open-documents.ts'
+import { expect, it, vi } from 'vitest'
+import { AppError, createLocalOnlyFolders, type NoteRecovery } from '@reflect/core'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  overrideNoteFileService,
+} from '@reflect/core/testing'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useNoteDocument } from './use-note-document.ts'
 
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  isLocalOnlyPath: (path: string) => path.startsWith('secure/'),
-}))
+const NOTE = 'secure/note.md'
 
-const preserveSchema = z.object({
-  path: z.literal('secure/note.md'),
-  ownerId: z.string().regex(/^[a-f0-9]{32}$/),
-  contents: z.string(),
-  sourceRevision: z.string().nullable(),
-  generation: z.literal(1),
-})
-const clearSchema = z.object({
-  path: z.literal('secure/note.md'),
-  ownerId: z.string(),
-  token: z.string(),
-  generation: z.literal(1),
-})
-
-afterEach(() => setBridge(null))
-
-it('pins recovery ownership to the hook session and offers each closed window’s draft', async () => {
-  vi.spyOn(console, 'error').mockImplementation(() => {})
-  let disk = '# Hello\n'
-  let blocked = true
-  let version = 0
+/**
+ * A note in the editable local-only folder `secure`, whose writes fail while
+ * `blocked()` (the folder is unmounted) and whose kept unsaved text lives one
+ * copy per owner, the newest offered first, the way the Rust store keeps it.
+ * `bases` holds the revision each landed write named.
+ */
+function recoveryStore(blocked: () => boolean) {
+  const inner = createTestNoteFileService({
+    files: { [NOTE]: '# Hello\n' },
+    localOnly: createLocalOnlyFolders(['secure'], ['secure']),
+  })
   const copies = new Map<string, NoteRecovery>()
-  const clear = vi.fn<(args: z.infer<typeof clearSchema>) => void>()
-  setBridge({
-    invoke: async (command, args) => {
-      if (command === 'note_read') return disk
-      if (command === 'note_write') {
-        if (blocked) throw { kind: 'traversal', message: 'local-only folder is unmounted' }
-        const { contents, expectedContents } = z
-          .object({
-            contents: z.string(),
-            expectedContents: z.string().nullable(),
-          })
-          .parse(args)
-        expect(expectedContents).toBe(disk)
-        disk = contents
-        return null
+  const cleared: string[] = []
+  const bases: (string | null | undefined)[] = []
+  let version = 0
+  const noteFile = overrideNoteFileService(inner, {
+    async write(path, contents, generation, expectedContents) {
+      if (blocked()) {
+        throw new AppError('traversal', 'local-only folder is unmounted')
       }
-      if (command === 'note_recovery_write') {
-        const { ownerId, contents, sourceRevision } = preserveSchema.parse(args)
+      const result = await inner.write(path, contents, generation, expectedContents)
+      bases.push(expectedContents)
+      return result
+    },
+    writeRecovery: (path, contents, ownerId, sourceRevision, generation) =>
+      Promise.try(() => {
+        expect({ path, generation }).toEqual({ path: NOTE, generation: 1 })
+        expect(ownerId).toMatch(/^[a-f0-9]{32}$/)
+        version += 1
         const copy: NoteRecovery = {
           ownerId,
           contents,
           sourceRevision,
-          token: (++version).toString(16).padStart(32, '0'),
+          token: version.toString(16).padStart(32, '0'),
           savedAtMs: 5,
         }
         copies.delete(ownerId)
         copies.set(ownerId, copy)
         return copy
-      }
-      if (command === 'note_recovery_read') return [...copies.values()].at(-1) ?? null
-      if (command === 'note_recovery_clear') {
-        const identity = clearSchema.parse(args)
-        clear(identity)
-        if (copies.get(identity.ownerId)?.token === identity.token) copies.delete(identity.ownerId)
-      }
-      return null
-    },
-    listen: async () => () => {},
+      }),
+    readRecovery: () => Promise.resolve([...copies.values()].at(-1) ?? null),
+    clearRecovery: (path, ownerId, token) =>
+      Promise.try(() => {
+        expect(path).toBe(NOTE)
+        cleared.push(token)
+        if (copies.get(ownerId)?.token === token) copies.delete(ownerId)
+      }),
   })
+  return {
+    noteFile,
+    copies,
+    cleared,
+    bases,
+    disk: () => inner.files().get(NOTE),
+    mergeNextWrite: (content: string) => inner.mergeNextWrite(NOTE, content),
+  }
+}
+
+it('pins recovery ownership to the hook session and offers each closed window’s draft', async () => {
+  let blocked = true
+  const store = recoveryStore(() => blocked)
+  const app = createTestCoreServices({ noteFile: store.noteFile })
+  const graph = {
+    generation: 1,
+    localOnlyFolders: ['secure'],
+    localOnlyEditableFolders: ['secure'],
+  }
 
   for (const contents of ['# A\n', '# B\n']) {
-    const window = await renderHook(() => useNoteDocument('secure/note.md', 1))
+    const window = await renderHookInApp(() => useNoteDocument(NOTE), { app, graph })
     await vi.waitFor(() => expect(window.result.current.status).toBe('ready'))
     window.result.current.onEditorChange(contents)
-    await flushOpenDocuments()
+    await app.openDocuments.flushAll()
     await vi.waitFor(() => expect(window.result.current.saveBlocked).toBe(true))
     await window.unmount()
   }
-  expect(copies.size).toBe(2)
-  const [first, second] = [...copies.values()]
+  expect(store.copies.size).toBe(2)
+  const [first, second] = [...store.copies.values()]
   expect(first?.ownerId).not.toBe(second?.ownerId)
   expect(first?.sourceRevision).toBe('# Hello\n')
   expect(second?.sourceRevision).toBe('# Hello\n')
 
   blocked = false
-  const reopened = await renderHook(() => useNoteDocument('secure/note.md', 1))
+  const reopened = await renderHookInApp(() => useNoteDocument(NOTE), { app, graph })
   await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(second))
   reopened.result.current.restoreRecovery()
-  await flushOpenDocuments()
+  await app.openDocuments.flushAll()
   await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(first))
-  // A was kept against the note B has since replaced, so restoring it parks
-  // B as the conflict instead of silently overwriting it.
+  expect(store.disk()).toBe('# B\n')
+  // A was kept against the note B has since replaced, so restoring it names
+  // that older revision as the write's base: the file merges A into B
+  // instead of silently overwriting it.
+  store.mergeNextWrite('# A\n\n# B\n')
   reopened.result.current.restoreRecovery()
-  await flushOpenDocuments()
-  await vi.waitFor(() => expect(reopened.result.current.conflict).toBe('# B\n'))
-  expect(disk).toBe('# B\n')
-  reopened.result.current.keepMine()
-  await flushOpenDocuments()
-  await vi.waitFor(() => expect(disk).toBe('# A\n'))
-  await vi.waitFor(() => expect(copies.size).toBe(0))
-  expect(reopened.result.current.recovery).toBeNull()
-  const cleared = clear.mock.calls.map(([identity]) => identity.token)
-  expect(cleared[0]).toBe(second?.token)
-  expect(cleared.at(-1)).toBe(first?.token)
-  await reopened.unmount()
+  await app.openDocuments.flushAll()
+  await vi.waitFor(() => expect(store.disk()).toBe('# A\n\n# B\n'))
+  expect(store.bases.at(-1)).toBe('# Hello\n')
+  await vi.waitFor(() => expect(store.copies.size).toBe(0))
+  await vi.waitFor(() => expect(reopened.result.current.recovery).toBeNull())
+  expect(store.cleared[0]).toBe(second?.token)
+  expect(store.cleared.at(-1)).toBe(first?.token)
 })

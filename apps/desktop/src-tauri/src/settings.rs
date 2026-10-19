@@ -140,7 +140,7 @@ pub fn settings_save(settings: SettingsDoc) -> AppResult<()> {
 fn save_keeping_rust_keys(path: &Path, mut settings: SettingsDoc) -> AppResult<()> {
     let on_disk = load_from(path).map_err(|err| {
         let reason = match err {
-            AppError::Io { message } | AppError::NotFound { message } => message,
+            AppError::Io { message, .. } | AppError::NotFound { message } => message,
             other => format!("{other:?}"),
         };
         AppError::io(format!(

@@ -16,7 +16,7 @@
 //! commands — a request racing a graph switch is refused, never resolved
 //! against the new graph. The path must be a supported attachment and passes
 //! the shared symlink-aware read guard before any IO (which grants the one
-//! local-only hop, `resolve::resolve_read`).
+//! local-only hop, `resolve_read`).
 //! Passive previews append `?reflect-preview=raster`; those responses are
 //! served only when byte sniffing identifies PNG, JPEG, GIF, or WebP content,
 //! so an SVG renamed with a raster extension cannot load subresources there.
@@ -38,14 +38,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use reflect_graph_paths::LocalOnlyFolders;
-use tauri::http::{header, Request, Response, StatusCode};
+use tauri::http::{Request, Response, StatusCode, header};
 use tauri::utils::mime_type::MimeType;
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
+use super::GraphState;
+use super::ReadTarget;
 use super::image_thumbnail::{self, ThumbnailError, ThumbnailLookup, ThumbnailRequest};
 use super::pdf_render::{self, PageLookup, PageRequest, PdfError};
-use super::resolve::ReadTarget;
-use super::GraphState;
 
 /// The scheme name, shared with the `lib.rs` registration. The frontend and
 /// the CSP `img-src` grant in `tauri.conf.json` spell it out literally.
@@ -179,7 +179,7 @@ fn locate<R: Runtime>(app: &AppHandle<R>, request_path: &str) -> Result<Located,
     let state = app.state::<GraphState>();
     let (root, local_only) =
         super::graph_for(&state, Some(generation)).map_err(|_| StatusCode::FORBIDDEN)?;
-    let target = super::resolve::resolve_read(&root, rel, local_only.as_deref())
+    let target = super::resolve_read(&root, rel, local_only.as_deref())
         .map_err(|_| StatusCode::FORBIDDEN)?;
     Ok(Located {
         root,

@@ -3,7 +3,7 @@ import type { NoteListEntry } from '@reflect/core'
 import { Pin } from 'lucide-react'
 import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
@@ -75,11 +75,7 @@ export const AllNotesRow = memo(function AllNotesRow({
           )}
         >
           <NoteTitle title={noteLabel(note)} displayTitle={note.displayTitle} lang={note.lang} />
-          <NoteStateIndicator
-            path={note.path}
-            isPrivate={note.isPrivate}
-            hasConflict={note.hasConflict}
-          />
+          <NoteStateIndicator path={note.path} isPrivate={note.isPrivate} />
         </ListRowSubject>
       </div>
       <span className="min-w-0" aria-label="Knowledge level">

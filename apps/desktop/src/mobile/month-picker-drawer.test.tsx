@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { MonthPickerDrawer } from './month-picker-drawer.tsx'
 
 /**
@@ -21,11 +21,9 @@ vi.mock('@/components/ui/drawer.tsx', () => ({
   DrawerTitle: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
 }))
 
-afterEach(cleanup)
-
 async function mount(overrides: Partial<Parameters<typeof MonthPickerDrawer>[0]> = {}) {
   const onPick = vi.fn()
-  const view = await render(
+  const view = await renderInApp(
     <MonthPickerDrawer
       open
       onOpenChange={() => {}}

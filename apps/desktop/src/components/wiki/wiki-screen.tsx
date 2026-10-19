@@ -7,7 +7,6 @@ import {
   errorMessage,
   filterWikiEntries,
   groupWikiEntries,
-  listWikiEntries,
   sortWikiEntries,
   visibleWikiIndexRows,
   wikiEntryIn,
@@ -18,17 +17,17 @@ import {
   type WikiSortKey,
 } from '@reflect/core'
 import { useAllNotesKeyboard } from '@/components/all-notes/use-all-notes-keyboard.ts'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { queryKeys } from '@/lib/query-client.ts'
+import { createWikiEntriesQueryOptions } from '@/lib/query-options.ts'
 import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useToday } from '@/lib/use-today.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { routeForPath, wikiRoute } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { WikiFilters } from './wiki-filters.tsx'
 import { WikiLanguageTabs } from './wiki-language-tabs.tsx'
 import { WikiLayoutTabs } from './wiki-layout-tabs.tsx'
@@ -89,14 +88,10 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
       ? null
       : routeFilter
 
-  const bridgeReady = useBridgeReady()
+  const { wiki } = useCoreServices()
   const { data: entries, error } = useQuery({
-    queryKey: queryKeys.index.wikiEntries(graph?.root, today, languages),
-    queryFn: async () =>
-      graph === null
-        ? []
-        : await listWikiEntries({ generation: graph.generation, asOf: today, languages }),
-    enabled: bridgeReady && graph !== null,
+    ...createWikiEntriesQueryOptions(wiki, graph?.root, today, languages),
+    enabled: graph !== null,
   })
 
   const layout = useMemo((): WikiTableLayout | undefined => {

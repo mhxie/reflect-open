@@ -4,7 +4,7 @@ import {
   resolveNoYouTubeVideo,
 } from '@/editor/local-only-render.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
-import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
+import { useYouTubeVideoResolver } from '@/editor/youtube-video-resolver.ts'
 import { createElement, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react'
 import type { NoteTitleMetadata } from '@reflect/core'
 import { NoteTitle } from '@/components/note-title.tsx'
@@ -27,7 +27,6 @@ import { WikiEvidencePreview } from '@/editor/wiki-anchors/wiki-evidence-preview
 import { createWikiArticleProjectionReader } from '@/editor/wiki-anchors/wiki-article-projection.ts'
 import { renderWikiArticleBlock } from '@/editor/wiki-anchors/wiki-article-preview.tsx'
 import { useWikiArticleIdentities } from '@/editor/wiki-anchors/use-wiki-article-identities.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
 
 /**
  * A read-only rendering of note markdown via @meowdown/react's `<MarkdownView>`
@@ -120,14 +119,14 @@ export function MarkdownPreview({
   showClaimRanges = false,
   claimFragment,
 }: MarkdownPreviewProps): ReactElement {
-  const generation = useGraph({ optional: true })?.graph?.generation ?? null
-  const markdownLinkClick = useMarkdownLinkClick(generation, sourcePath)
+  const markdownLinkClick = useMarkdownLinkClick(sourcePath)
   // A source-aware surface may take over link activation; otherwise links
   // follow the Markdown link policy for `sourcePath`.
   const activateLink = onLinkClick ?? markdownLinkClick
   // The click handler is read through a ref so a changing prop never gives
   // MarkdownView a new callback identity (which would re-render its whole
   // tree).
+  const resolveYouTubeVideo = useYouTubeVideoResolver()
   const graphXPostResolver = useXPostResolver()
   const resolveXPost = remoteEmbeds ? graphXPostResolver : resolveNoXPost
   const resolveWikilink = useWikilinkResolver()

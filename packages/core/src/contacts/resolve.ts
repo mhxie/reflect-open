@@ -1,4 +1,4 @@
-import { lookupContactsByEmail, type ContactMatch } from './commands.ts'
+import type { ContactMatch } from './commands.ts'
 
 /**
  * Attendee resolution for the calendar flow (see
@@ -34,17 +34,4 @@ export function pickContactForEmail(
     return null
   }
   return owners.find((owner) => owner.fullName.trim() !== '') ?? owners[0] ?? null
-}
-
-/**
- * Look up an attendee email in Apple Contacts. A null answer is the expected
- * miss — the calendar flow still creates a person note from the bare email,
- * as v1 did. Callers gate on the integration being enabled and readable.
- */
-export async function resolveAttendeeContact(email: string): Promise<ContactMatch | null> {
-  if (email.trim() === '') {
-    return null
-  }
-  const candidates = await lookupContactsByEmail(email.trim())
-  return pickContactForEmail(email, candidates)
 }

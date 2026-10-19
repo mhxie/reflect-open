@@ -1,29 +1,35 @@
-import { useRef, useState, type ReactElement } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
+import { isICloudRoot, suggestRepoName } from '@reflect/core'
+import { CountdownText } from '@/components/countdown-text.tsx'
 import { ConnectGithubDialog } from '@/components/settings/connect-github-dialog.tsx'
-import { ConflictedNoteLinks } from '@/components/settings/conflicted-note-links.tsx'
 import { SettingsField } from '@/components/settings/field.tsx'
 import { GithubSignOutRow } from '@/components/settings/github-sign-out-row.tsx'
 import { SyncForkNotice } from '@/components/settings/sync-fork-notice.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { useAsyncAction } from '@/hooks/use-async-action.ts'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { useGithubConnected } from '@/hooks/use-github-connected.ts'
-import { suggestRepoName } from '@/lib/github-repos.ts'
-import {
-  createConflictedNotesQueryOptions,
-  createDuplicateNoteIdsQueryOptions,
-} from '@/lib/query-options.ts'
+import { createDuplicateNoteIdsQueryOptions } from '@/lib/query-options.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSync, type BackupState } from '@/providers/sync-provider.tsx'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
-/** A short, plain-language line for each backup state — never Git jargon. */
-function statusLine(backup: Extract<BackupState, { phase: 'connected' }>): string {
+/** A short, plain-language line for each backup state, never Git jargon. */
+function BackupStatusLine({
+  backup,
+}: {
+  backup: Extract<BackupState, { phase: 'connected' }>
+}): ReactNode {
   switch (backup.status.state) {
     case 'idle':
       return 'Backed up'
+    case 'waiting':
+      return (
+        <>
+          Backs up in <CountdownText until={backup.status.until} />
+        </>
+      )
     case 'syncing':
       return 'Backing up…'
     case 'offline':
@@ -46,31 +52,23 @@ function githubRepoBrowserUrl(
 /**
  * Settings → Sync → GitHub sync: connect a GitHub repository, see the current
  * backup state in product language, back up on demand, and disconnect.
- * Conflicted notes ("needs review") surface here with a count; each conflicted
- * note also shows its own banner when opened.
  */
 export function BackupSettingsField(): ReactElement {
   const { backup, disconnectGraph, signOut, backUpNow } = useSync()
   const { graph } = useGraph()
+  const { indexQuery } = useCoreServices()
+  const { opener } = useAppServices()
   const githubConnected = useGithubConnected()
   const [connectOpen, setConnectOpen] = useState(false)
-  const openRepoAttempt = useRef(0)
+  const openRepoAttemptRef = useRef(0)
   const action = useAsyncAction()
 
-  const bridgeReady = useBridgeReady()
-  const conflicted = useQuery({
-    ...createConflictedNotesQueryOptions(graph?.root),
-    enabled: bridgeReady && graph !== null,
-  })
-  const conflictedNotes = conflicted.data ?? []
-  const conflictCount = conflictedNotes.length
-
   // A sync fork (Plan 17): two files claiming one frontmatter id — the same
-  // note retitled differently on two devices. Surfaced for review beside the
-  // marker conflicts; repair is the user's call, never automatic.
+  // note retitled differently on two devices. Surfaced for review;
+  // repair is the user's call, never automatic.
   const duplicateIds = useQuery({
-    ...createDuplicateNoteIdsQueryOptions(graph?.root),
-    enabled: bridgeReady && graph !== null,
+    ...createDuplicateNoteIdsQueryOptions(indexQuery, graph?.root),
+    enabled: graph !== null,
   })
   const forkGroups = duplicateIds.data ?? []
 
@@ -82,23 +80,25 @@ export function BackupSettingsField(): ReactElement {
       : null
   // A hand-wired non-GitHub remote (Plan 16) renders the section host-neutral.
   const genericRemote = backup.phase === 'connected' && backup.repo === null
+  const hosted = graph !== null && isICloudRoot(graph.root)
 
   function openGithubRepo(): void {
     if (backup.phase !== 'connected' || backup.repo === null) {
       return
     }
     const url = githubRepoBrowserUrl(backup.repo)
-    const attempt = openRepoAttempt.current + 1
-    openRepoAttempt.current = attempt
+    const attempt = openRepoAttemptRef.current + 1
+    openRepoAttemptRef.current = attempt
     action.setError(null)
-    void openUrl(url)
+    void opener
+      .openUrl(url)
       .then(() => {
-        if (openRepoAttempt.current === attempt) {
+        if (openRepoAttemptRef.current === attempt) {
           action.setError(null)
         }
       })
       .catch(() => {
-        if (openRepoAttempt.current === attempt) {
+        if (openRepoAttemptRef.current === attempt) {
           action.setError(`Couldn’t open the browser — visit ${url} yourself.`)
         }
       })
@@ -109,9 +109,11 @@ export function BackupSettingsField(): ReactElement {
       <SettingsField
         legend={genericRemote ? 'Backup' : 'GitHub sync'}
         description={
-          genericRemote
-            ? 'This graph backs up to its own git remote. Edits back up automatically a few moments after you stop typing.'
-            : 'Back up this graph to a GitHub repository. Edits back up automatically a few moments after you stop typing.'
+          hosted && backup.phase === 'connected'
+            ? `${genericRemote ? 'Pushes to the backup' : 'Backs up to GitHub'} five minutes after iCloud and your edits go quiet. Back up now commits locally.`
+            : genericRemote
+              ? 'This graph backs up to its own git remote. Edits back up automatically a few moments after you stop typing.'
+              : 'Back up this graph to a GitHub repository. Edits back up automatically a few moments after you stop typing.'
         }
       >
         <div className="mt-3 flex flex-col gap-2">
@@ -126,6 +128,12 @@ export function BackupSettingsField(): ReactElement {
                   Connect GitHub…
                 </Button>
               </div>
+              {hosted ? (
+                <p className="text-xs text-text-muted">
+                  This graph already syncs through iCloud Drive. One sync method per graph is
+                  simplest; a GitHub backup here pushes only after five quiet minutes.
+                </p>
+              ) : null}
               {githubConnected ? (
                 <GithubSignOutRow
                   signOut={signOut}
@@ -139,19 +147,10 @@ export function BackupSettingsField(): ReactElement {
             <>
               <p className="text-sm text-text">
                 <span className="font-medium">{repoLabel}</span>
-                <span className="ml-2 text-xs text-text-muted">{statusLine(backup)}</span>
+                <span className="ml-2 text-xs text-text-muted">
+                  <BackupStatusLine backup={backup} />
+                </span>
               </p>
-              {conflictCount > 0 ? (
-                <div className="text-xs text-amber-700 dark:text-amber-300">
-                  <p>
-                    {conflictCount === 1
-                      ? '1 note needs review'
-                      : `${conflictCount} notes need review`}{' '}
-                    — open {conflictCount === 1 ? 'it' : 'one'} to keep the version you want:
-                  </p>
-                  <ConflictedNoteLinks notes={conflictedNotes} />
-                </div>
-              ) : null}
               <SyncForkNotice groups={forkGroups} />
               <div className="flex flex-wrap gap-2">
                 <Button

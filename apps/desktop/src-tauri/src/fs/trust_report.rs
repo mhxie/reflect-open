@@ -8,8 +8,8 @@ use std::path::Path;
 use serde::Serialize;
 use tauri::State;
 
-use super::resolve::resolve;
-use super::{graph_for, GraphState};
+use super::resolve;
+use super::{GraphState, graph_for};
 use crate::error::{AppError, AppResult};
 
 /// The largest report Reflect reads; a larger file is refused, not truncated.

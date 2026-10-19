@@ -14,7 +14,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use reflect_graph_paths::{graph_settings_key, LocalOnlyFolders, LOCAL_ONLY_SETTINGS_KEY};
+use reflect_graph_paths::{LOCAL_ONLY_SETTINGS_KEY, LocalOnlyFolders, graph_settings_key};
 use serde_json::Value;
 
 use crate::error::CliError;
@@ -115,9 +115,11 @@ mod tests {
     fn no_file_no_key_or_no_entry_configures_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert!(folders_in_settings(&dir.path().join("missing.json"), root)
-            .unwrap()
-            .is_none());
+        assert!(
+            folders_in_settings(&dir.path().join("missing.json"), root)
+                .unwrap()
+                .is_none()
+        );
         let path = settings(dir.path(), r#"{ "theme": "dark" }"#);
         assert!(folders_in_settings(&path, root).unwrap().is_none());
         let path = settings(

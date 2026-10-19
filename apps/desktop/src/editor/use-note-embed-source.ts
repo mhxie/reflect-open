@@ -1,25 +1,35 @@
 import { useCallback, useEffect, useState } from 'react'
-import { resolveExistingWikiTarget, subscribeOwnWrites, type FileChange } from '@reflect/core'
-import { readExistingNoteSource } from '@/lib/read-existing-note-source.ts'
-import { useFileChanges } from '@/lib/use-file-changes.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
-/** Deepest chain of ancestors an embed still reads; deeper ones show the depth limit. */
+/**
+ * Deepest chain of ancestors an embed still reads; deeper ones show the depth limit.
+ */
 export const MAX_NOTE_EMBED_DEPTH = 4
 
-/** Which embed to read, and from where. */
+/**
+ * Which embed to read, and from where.
+ */
 export interface NoteEmbedSourceOptions {
-  /** The embed's wiki target (`Note` or `Note#Heading`). */
+  /**
+   * The embed's wiki target (`Note` or `Note#Heading`).
+   */
   readonly target: string
-  /** The note containing the embed, for relative resolution. */
+  /**
+   * The note containing the embed, for relative resolution.
+   */
   readonly sourcePath: string
   readonly generation: number | null
   readonly graphKey: string | null
-  /** Resolved paths of the notes above this embed, for cycle and depth checks. */
+  /**
+   * Resolved paths of the notes above this embed, for cycle and depth checks.
+   */
   readonly ancestors: readonly string[]
   readonly enabled: boolean
 }
 
-/** An embed's source: its resolved path and contents, or why it can't be shown. */
+/**
+ * An embed's source: its resolved path and contents, or why it can't be shown.
+ */
 export type NoteEmbedSource =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly path: string; readonly source: string }
@@ -32,12 +42,15 @@ interface SourceSnapshot {
 
 const LOADING: NoteEmbedSource = { kind: 'loading' }
 
-/** Read-only source loading pinned to a graph; disabled, unmounted, or replaced reads retire. */
+/**
+ * Read-only source loading pinned to a graph; disabled, unmounted, or replaced reads retire.
+ */
 export function useNoteEmbedSource(options: NoteEmbedSourceOptions): {
   readonly source: NoteEmbedSource
   readonly reload: () => void
 } {
   const { target, sourcePath, generation, graphKey, ancestors, enabled } = options
+  const { noteLinkResolver, noteDocuments, fileChanges } = useCoreServices()
   const key = JSON.stringify([graphKey, generation, target, sourcePath, ancestors])
   const [revision, setRevision] = useState(0)
   const [snapshot, setSnapshot] = useState<SourceSnapshot | null>(null)
@@ -64,7 +77,7 @@ export function useNoteEmbedSource(options: NoteEmbedSourceOptions): {
         return
       }
       try {
-        const result = await resolveExistingWikiTarget(target, generation, sourcePath)
+        const result = await noteLinkResolver.resolveWikiTarget(target, generation, sourcePath)
         if (!active) return
         if (result.kind !== 'resolved') {
           publish({ kind: result.kind })
@@ -74,7 +87,7 @@ export function useNoteEmbedSource(options: NoteEmbedSourceOptions): {
           publish({ kind: 'cycle' })
           return
         }
-        const contents = await readExistingNoteSource(result.path, generation)
+        const contents = await noteDocuments.readExisting(result.path, generation)
         publish({ kind: 'ready', path: result.path, source: contents })
       } catch {
         publish({ kind: 'unavailable' })
@@ -84,12 +97,23 @@ export function useNoteEmbedSource(options: NoteEmbedSourceOptions): {
     return () => {
       active = false
     }
-  }, [enabled, key, revision, generation, graphKey, target, sourcePath, ancestors])
+  }, [
+    enabled,
+    key,
+    revision,
+    generation,
+    graphKey,
+    target,
+    sourcePath,
+    ancestors,
+    noteLinkResolver,
+    noteDocuments,
+  ])
 
   const sourceKind = source.kind
-  const onFileChanges = useCallback(
-    (changes: FileChange[]) => {
-      if (!enabled) return
+  useEffect(() => {
+    if (!enabled) return
+    return fileChanges.subscribe(({ changes }) => {
       if (
         watchPath !== null
           ? changes.some((change) => change.path === watchPath)
@@ -99,15 +123,13 @@ export function useNoteEmbedSource(options: NoteEmbedSourceOptions): {
       ) {
         reload()
       }
-    },
-    [enabled, sourceKind, watchPath, reload],
-  )
-  useFileChanges(enabled ? onFileChanges : null)
+    })
+  }, [enabled, fileChanges, sourceKind, watchPath, reload])
   useEffect(() => {
     if (!enabled || watchPath === null) return
-    return subscribeOwnWrites((path) => {
-      if (path === watchPath) reload()
+    return fileChanges.subscribeOwnWrites((paths) => {
+      if (paths.includes(watchPath)) reload()
     })
-  }, [enabled, watchPath, reload])
+  }, [enabled, fileChanges, watchPath, reload])
   return { source, reload }
 }

@@ -1,3 +1,4 @@
+import { AppError } from '../errors.ts'
 import type { NoteCreateOutcome } from '../graph/schemas.ts'
 
 /**
@@ -44,31 +45,38 @@ export function fakeNoteStore(initial: Record<string, string> = {}): FakeNoteSto
     landed: [],
     refused: 0,
     beforeWrite: () => {},
-    readNote: async (path) => {
-      const contents = files.get(path)
-      if (contents === undefined) {
-        throw { kind: 'notFound', message: `no such note: ${path}` }
-      }
-      return contents
-    },
-    writeNote: async (path, contents, _generation, expectedContents) => {
-      store.beforeWrite(path)
-      if ((files.get(path) ?? null) !== expectedContents) {
-        store.refused += 1
-        throw { ...CHANGED_ON_DISK }
-      }
-      files.set(path, contents)
-      store.landed.push({ path, contents })
-    },
-    createNoteIfAbsent: async (path, contents) => {
-      store.beforeWrite(path)
-      if (files.has(path)) {
-        return { kind: 'collision' }
-      }
-      files.set(path, contents)
-      store.landed.push({ path, contents })
-      return { kind: 'created', modifiedMs: null }
-    },
+    // Each executor turns a synchronous throw into a rejection, as Rust's
+    // commands answer.
+    readNote: (path) =>
+      new Promise((resolve) => {
+        const contents = files.get(path)
+        if (contents === undefined) {
+          throw new AppError('notFound', `no such note: ${path}`)
+        }
+        resolve(contents)
+      }),
+    writeNote: (path, contents, _generation, expectedContents) =>
+      new Promise((resolve) => {
+        store.beforeWrite(path)
+        if ((files.get(path) ?? null) !== expectedContents) {
+          store.refused += 1
+          throw new AppError(CHANGED_ON_DISK.kind, CHANGED_ON_DISK.message)
+        }
+        files.set(path, contents)
+        store.landed.push({ path, contents })
+        resolve()
+      }),
+    createNoteIfAbsent: (path, contents) =>
+      new Promise((resolve) => {
+        store.beforeWrite(path)
+        if (files.has(path)) {
+          resolve({ kind: 'collision' })
+          return
+        }
+        files.set(path, contents)
+        store.landed.push({ path, contents })
+        resolve({ kind: 'created', modifiedMs: null })
+      }),
   }
   return store
 }

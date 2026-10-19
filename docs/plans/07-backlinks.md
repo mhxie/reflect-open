@@ -57,10 +57,8 @@ link UX (create-from-unresolved largely subsumes the failure case).
   link changes), then links are rewritten from the old value, which stays as
   an alias. An H1 typed under a `title:` in the same session renames nothing:
   it may be a section heading.
-  Recorded edge: a rename pending while a conflict is parked stays
-  pending until the conflict resolves ("keep mine" re-arms it, "load theirs"
-  cancels it) — rewriting the graph for a title the user may discard would
-  strand every rewritten link.
+  Recorded edge: a merged write that changes the title cancels a pending
+  rename (`#adoptMergedWrite` in `note-session-service.ts`).
 
 ## Steps
 

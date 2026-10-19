@@ -22,8 +22,8 @@ here as the fork grows; the [README](../README.md#this-fork) remains a short ove
   in the editor's single-row footer. Open it for editing, privacy, AI, Git
   backup, graph sync, and the note's last committed short Git SHA. Private
   notes still support Git backup; Local-only notes stay excluded.
-  Protected details explain the cause and offer conflict resolution, save retry,
-  or revealing unsupported Markdown in the desktop file manager.
+  Protected details explain the cause and offer save retry, or revealing
+  unsupported Markdown in the desktop file manager.
 - **Hidden sidebar on hover:** with the sidebar hidden (`⌘\`), rest the pointer
   on the window's leading edge to float it over the content. Shift-click a
   pinned row to Peek it; its context menu also opens it in a new window,
@@ -73,9 +73,12 @@ here as the fork grows; the [README](../README.md#this-fork) remains a short ove
 ## Git backup
 
 - **Git backup protection:** preserve uncommitted notes and open edits during
-  pulls, refuse stale writes, and configure backup file-size limits per graph.
-  Sync pauses rather than joining a remote history this graph has not
-  accepted.
+  pulls (a pull moves this device's uncommitted copy aside as
+  `name (this device).md`), and configure backup file-size limits per graph.
+  Every note write names the revision it replaces: a write against a revision
+  the file has moved past is merged, never overwritten, and an unchecked write
+  is refused. Sync pauses rather than joining a remote history this graph has
+  not accepted.
 
 See the [release notes](../apps/desktop/CHANGELOG.md) for version history and
 [feature plans](plans/) for implementation details.

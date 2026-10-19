@@ -8,12 +8,18 @@ use std::cell::RefCell;
 use std::ffi::CStr;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use block2::{DynBlock, RcBlock};
 use objc2::AnyThread;
 use objc2_core_audio::{
+    AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID,
+    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
+    AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
+    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
+    AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyScope,
+    AudioObjectPropertySelector, CATapDescription, CATapMuteBehavior,
     kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceIsStackedKey,
     kAudioAggregateDeviceMainSubDeviceKey, kAudioAggregateDeviceNameKey,
     kAudioAggregateDeviceSubDeviceListKey, kAudioAggregateDeviceTapAutoStartKey,
@@ -23,12 +29,7 @@ use objc2_core_audio::{
     kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
     kAudioObjectPropertyScopeInput, kAudioObjectSystemObject, kAudioObjectUnknown,
     kAudioSubDeviceDriftCompensationKey, kAudioSubDeviceUIDKey, kAudioSubTapDriftCompensationKey,
-    kAudioSubTapUIDKey, AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID,
-    AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
-    AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
-    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
-    AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyScope,
-    AudioObjectPropertySelector, CATapDescription, CATapMuteBehavior,
+    kAudioSubTapUIDKey,
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioTimeStamp};
 use objc2_core_foundation::{CFArray, CFBoolean, CFDictionary, CFRetained, CFString, CFType};
@@ -463,11 +464,14 @@ fn dictionary(entries: &[(&CStr, &CFType)]) -> CFRetained<CFDictionary<CFString,
 /// `list` must point at a valid list for the returned lifetime.
 unsafe fn buffer_slice<'a>(list: NonNull<AudioBufferList>) -> &'a [AudioBuffer] {
     let list = list.as_ptr();
-    let count = (*list).mNumberBuffers as usize;
-    std::slice::from_raw_parts(
-        std::ptr::addr_of!((*list).mBuffers).cast::<AudioBuffer>(),
-        count,
-    )
+    // SAFETY: the caller guarantees `list` points at a valid list.
+    unsafe {
+        let count = (*list).mNumberBuffers as usize;
+        std::slice::from_raw_parts(
+            std::ptr::addr_of!((*list).mBuffers).cast::<AudioBuffer>(),
+            count,
+        )
+    }
 }
 
 /// Downmix the microphone streams and the tap into interleaved

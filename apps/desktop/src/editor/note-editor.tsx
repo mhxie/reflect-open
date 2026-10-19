@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { EditorInputTraits } from '@/editor/editor-input-traits.tsx'
 import { shouldEmbedFile } from '@/editor/embed-file.ts'
 import { noteTitleFromFile } from '@/editor/file-title.ts'
@@ -11,8 +12,8 @@ import { MediaLightbox } from '@/editor/media-lightbox.tsx'
 import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
-import { resolveYouTubeVideo } from '@/editor/youtube-video-resolver.ts'
-import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
+import { useYouTubeVideoResolver } from '@/editor/youtube-video-resolver.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { cn } from '@/lib/utils.ts'
 import type {
   AcceptPendingReplacementOptions,
@@ -60,7 +61,7 @@ import {
   type Ref,
 } from 'react'
 
-type WikilinkHoverRenderer = (hit: WikilinkHoverHit) => ReactNode | Promise<ReactNode>
+type WikilinkHoverRenderer = (hit: WikilinkHoverHit) => MaybePromise<ReactNode>
 
 // See apps/youtube-relay/README.md.
 const YOUTUBE_RELAY_URL = 'https://youtube-relay-reflect.vercel.app/'
@@ -213,7 +214,7 @@ interface NoteEditorProps {
    */
   resolveAssetOpenPath?: (src: string) => string | null
   /** Open a vetted graph-relative asset path in the OS default application. */
-  openAsset?: (path: string) => Promise<void> | void
+  openAsset?: (path: string) => MaybePromise<void>
   /**
    * Persist a pasted/dropped file (any kind) and return its markdown
    * destination, or null to decline. meowdown inserts `![](dest)` for images
@@ -253,7 +254,7 @@ interface NoteEditorProps {
    * renders no card. Must be a stable function: a new identity re-runs the
    * resolution for the currently hovered link.
    */
-  renderWikilinkHoverCard?: WikilinkHoverRenderer
+  renderWikilinkHoverCard?: WikilinkHoverRenderer | undefined
   /** Click on an inline `#tag`. The tag name arrives without the leading `#`. */
   onTagClick?: (tag: string) => void
   /** Search notes for the `[[` autocomplete menu. */
@@ -343,7 +344,10 @@ export function NoteEditor({
   onSearchChange,
   handleRef,
 }: NoteEditorProps): ReactElement {
+  const { platform, logger } = useCoreServices()
+  const touchEditor = platform.surface.touchEditor
   const graphXPostResolver = useXPostResolver()
+  const graphYouTubeVideoResolver = useYouTubeVideoResolver()
   const resolveWikilink = useWikilinkResolver()
   const innerRef = useRef<EditorHandle>(null)
 
@@ -356,6 +360,7 @@ export function NoteEditor({
   // the new policy.
   const privateNoteRef = useRef(privateNote)
   const graphXPostResolverRef = useRef(graphXPostResolver)
+  const graphYouTubeVideoResolverRef = useRef(graphYouTubeVideoResolver)
   const onWikiLinkClickRef = useRef(onWikiLinkClick)
   const onTagClickRef = useRef(onTagClick)
   const resolveImageUrlRef = useRef(resolveImageUrl)
@@ -370,6 +375,7 @@ export function NoteEditor({
     onChangeRef.current = onChange
     privateNoteRef.current = privateNote
     graphXPostResolverRef.current = graphXPostResolver
+    graphYouTubeVideoResolverRef.current = graphYouTubeVideoResolver
     onWikiLinkClickRef.current = onWikiLinkClick
     onTagClickRef.current = onTagClick
     resolveImageUrlRef.current = resolveImageUrl
@@ -461,7 +467,8 @@ export function NoteEditor({
     [],
   )
   const handleResolveYouTubeVideo: YouTubeVideoResolver = useCallback(
-    (url) => (privateNoteRef.current ? resolveNoYouTubeVideo : resolveYouTubeVideo)(url),
+    (url) =>
+      (privateNoteRef.current ? resolveNoYouTubeVideo : graphYouTubeVideoResolverRef.current)(url),
     [],
   )
   const handleResolveEmbed: EmbedResolver = useCallback((src) => resolveEmbedRef.current?.(src), [])
@@ -490,7 +497,7 @@ export function NoteEditor({
           const openPath = resolveAssetOpenPathRef.current?.(src) ?? null
           if (openPath !== null) {
             void Promise.resolve(openAssetRef.current?.(openPath)).catch((cause) => {
-              console.error('open PDF failed:', errorMessage(cause))
+              logger.error('open PDF failed:', errorMessage(cause))
             })
           }
         }
@@ -507,7 +514,7 @@ export function NoteEditor({
           openPath !== null && openImage !== null
             ? () => {
                 void Promise.resolve(openImage(openPath)).catch((cause) => {
-                  console.error('open image failed:', errorMessage(cause))
+                  logger.error('open image failed:', errorMessage(cause))
                 })
               }
             : null,
@@ -515,7 +522,7 @@ export function NoteEditor({
         openLightbox({ type: 'image', src: displayUrl, alt }, element)
       })
     },
-    [openLightbox, handleResolveImageUrl],
+    [handleResolveImageUrl, logger, openLightbox],
   )
 
   const handleXPostMediaClick: XPostMediaClickHandler = useCallback(
@@ -567,7 +574,7 @@ export function NoteEditor({
         // from it at focus time, and smart punctuation corrupts markdown
         // syntax ([[ wiki links, code spans, --- fences) — Plan 19 gate.
         // Autocorrect is independent and stays on (EditorInputTraits).
-        spellCheck={isTouchEditorSurface() ? false : spellCheck}
+        spellCheck={touchEditor ? false : spellCheck}
         searchQuery={searchQuery ?? ''}
         onSearchChange={onSearchChange}
         // Reflect's implementation-neutral `12h`/`24h` maps to meowdown's
@@ -580,7 +587,7 @@ export function NoteEditor({
         // revealed on hover and drag-reorders blocks with a pointer, neither of
         // which a touch webview can express. Turning it off also drops the drop
         // indicator, which meowdown gates on the same prop.
-        blockHandle={isTouchEditorSurface() ? false : blockHandle}
+        blockHandle={touchEditor ? false : blockHandle}
         editorClassName={cn('reflect-editor', className)}
         placeholder={titlePlaceholder}
         onDocChange={handleDocChange}

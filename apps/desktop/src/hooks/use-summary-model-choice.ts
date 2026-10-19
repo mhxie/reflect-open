@@ -6,6 +6,7 @@ import {
   type OnDeviceServerKind,
 } from '@reflect/core'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** The writes behind the AI summaries model picker (Settings → All Notes). */
 export interface SummaryModelChoice {
@@ -37,6 +38,7 @@ export function cloudGoAhead(choice: AiSummariesModel): {
  */
 export function useSummaryModelChoice(): SummaryModelChoice {
   const { updateSettings, updateSettingsWith } = useSettings()
+  const { id: ids } = useCoreServices()
   return {
     chooseLocal: (config) =>
       updateSettings({ aiSummariesLocalModel: { configId: config.id, modelId: config.model } }),
@@ -47,7 +49,7 @@ export function useSummaryModelChoice(): SummaryModelChoice {
           OLLAMA_BASE_URL,
           model,
           server,
-          () => crypto.randomUUID(),
+          () => ids.uuid(),
         )
         return {
           aiProviders: state.providers,

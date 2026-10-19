@@ -24,7 +24,6 @@ export interface BacklinkSource {
    * leaving it unsaid, makes it private.
    */
   isPrivate: boolean
-  hasConflict: boolean
   /** The line around each link, keyed `path:posFrom` for stable rendering. */
   snippets: BacklinkSnippetData[]
 }
@@ -48,15 +47,11 @@ export function groupBacklinksBySource(backlinks: readonly BacklinkContext[]): B
         displayTitle: backlink.sourceDisplayTitle,
         lang: backlink.sourceLang,
         isPrivate: sourcePrivate,
-        hasConflict: backlink.sourceHasConflict,
         snippets: [],
       }
       groups.set(backlink.sourcePath, group)
     } else if (sourcePrivate) {
       group.isPrivate = true
-    }
-    if (backlink.sourceHasConflict) {
-      group.hasConflict = true
     }
     if (backlink.snippet !== '') {
       group.snippets.push({

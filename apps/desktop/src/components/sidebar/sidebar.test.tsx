@@ -1,127 +1,66 @@
-import { render } from 'vitest-browser-react'
+import type { MaybePromise } from '@reflect/utils'
+import type { ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import {
   DEFAULT_SETTINGS,
-  untitledNotePath,
-  type GraphInfo,
+  isOstensiblyEmptyNoteSource,
+  type GraphSessionService,
+  type NoteDocumentService,
   type PinnedNote,
-  type Settings,
+  type SettingsService,
 } from '@reflect/core'
+import type {
+  GraphBootService,
+  NativeContextMenuItem,
+  NativeContextMenuOptions,
+} from '@reflect/app'
+import {
+  createTestAppServices,
+  createTestOperationsService,
+  createTestWindowService,
+  type TestClipboardService,
+  type TestOpenerService,
+  type TestOperationsService,
+} from '@reflect/app/testing'
+import { createTestCoreServices, createTestBackupService } from '@reflect/core/testing'
 import type { CommandContext } from '@/lib/commands/types.ts'
-import type { NoteRoute, Route } from '@/routing/route.ts'
+import type { Route } from '@/routing/route.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
-import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { UpdateProvider } from '@/providers/update-provider.tsx'
-import { RouterProvider } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { deepLinkForRoute } from '@reflect/app'
+import { Sidebar } from './sidebar.tsx'
 
-const getPinnedNotes = vi.hoisted(() => vi.fn<() => Promise<PinnedNote[]>>(async () => []))
-const hasWikiEntries = vi.hoisted(() => vi.fn<() => Promise<boolean>>(async () => false))
-const revealItemInDir = vi.hoisted(() => vi.fn<(path: string) => Promise<void>>(async () => {}))
-const openUrl = vi.hoisted(() => vi.fn<(url: string) => Promise<void>>(async () => {}))
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<(route: NoteRoute) => Promise<boolean>>())
-const openRecent = vi.hoisted(() => vi.fn())
-const pickAndOpen = vi.hoisted(() => vi.fn())
-const chooseGraph = vi.hoisted(() => vi.fn())
-type NativeContextMenuItemForTest = { text: string; action: () => void } | { separator: true }
-
-interface NativeContextMenuOptionsForTest {
-  items: NativeContextMenuItemForTest[]
-}
-
-/** The native menu row the mocked menu "selects" when it opens. */
-const menuChoice = vi.hoisted(() => ({ text: 'Unpin Note' }))
-const openNativeContextMenu = vi.hoisted(() =>
-  vi.fn(async (options: NativeContextMenuOptionsForTest) => {
+/**
+ * The native menu row the mocked menu "selects" when it opens.
+ */
+const menuChoice = { text: 'Unpin Note' }
+const openNativeContextMenu = vi.fn((options: NativeContextMenuOptions) =>
+  Promise.try(() => {
     for (const item of options.items) {
-      if ('text' in item && item.text === menuChoice.text) {
+      if (isMenuAction(item) && item.text === menuChoice.text) {
         item.action()
       }
     }
   }),
 )
 
-/** The menu's rows as labels, with separators as `null`. */
+function isMenuAction(item: NativeContextMenuItem): item is NativeContextMenuItem & {
+  text: string
+  action: () => void
+} {
+  return 'text' in item
+}
+
+/**
+ * The menu's rows as labels, with separators as `null`.
+ */
 function menuLabels(): (string | null)[] {
   const items = openNativeContextMenu.mock.calls[0]?.[0].items ?? []
-  return items.map((item) => ('text' in item ? item.text : null))
+  return items.map((item) => (isMenuAction(item) ? item.text : null))
 }
-const operationFail = vi.hoisted(() => vi.fn())
-const startOperation = vi.hoisted(() => vi.fn(() => ({ fail: operationFail })))
-vi.mock('@/lib/operations.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/operations.ts')>()),
-  startOperation,
-}))
-const commitNoteFrontmatter = vi.hoisted(() => vi.fn(async () => {}))
-vi.mock('@/lib/note-frontmatter.ts', () => ({
-  commitNoteFrontmatter,
-  readNoteSource: async () => '# Rust\n',
-}))
-const updateSettingsWith = vi.hoisted(() =>
-  vi.fn<(updater: (current: Settings) => Partial<Settings>) => void>(),
-)
-
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getPinnedNotes,
-  hasWikiEntries,
-}))
-vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir, openUrl }))
-vi.mock('@tauri-apps/api/path', () => ({
-  join: async (...parts: string[]) => parts.join('/'),
-}))
-const runCopyDeepLink = vi.hoisted(() => vi.fn(async () => {}))
-vi.mock('@/lib/note-deep-link.ts', () => ({ runCopyDeepLink }))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openRouteInNewWindow,
-}))
-vi.mock('@/lib/native-menu/context-menu.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/native-menu/context-menu.ts')>()),
-  openNativeContextMenu,
-}))
-
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: GRAPH,
-    recents: [
-      { root: '/notes', name: 'Notes', openedMs: 2 },
-      { root: '/work', name: 'Work', openedMs: 1 },
-    ],
-    indexing: false,
-    openRecent,
-    pickAndOpen,
-    chooseGraph,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      dateFormat: 'mdy',
-      graphColors: {},
-      wikiLanguages: [
-        { label: 'English', folder: 'wiki' },
-        { label: '简体中文', folder: 'wiki-cn' },
-      ],
-    },
-    updateSettings: () => {},
-    updateSettingsWith,
-  }),
-}))
-vi.mock('@/providers/sync-provider.tsx', () => ({
-  useSyncContext: () => null,
-  useSync: () => ({
-    backup: { phase: 'disconnected' },
-    connectNewRepo: async () => {},
-    connectExistingRepo: async () => 'connected',
-    disconnectGraph: async () => {},
-    signOut: async () => {},
-    backUpNow: async () => {},
-  }),
-}))
 
 const audioMemo = vi.hoisted(() => ({
   phase: 'idle' as const,
@@ -139,10 +78,8 @@ const audioMemo = vi.hoisted(() => ({
 vi.mock('@/providers/audio-memo-provider.tsx', () => ({
   useAudioMemo: () => audioMemo,
 }))
-const createNoteFromFiles = vi.hoisted(() => vi.fn(async () => {}))
-vi.mock('@/lib/create-note-from-files.ts', () => ({ createNoteFromFiles }))
 
-const GRAPH: GraphInfo = {
+const GRAPH = {
   root: '/notes',
   name: 'Notes',
   generation: 1,
@@ -156,35 +93,45 @@ const RUST_PIN: PinnedNote = {
   dailyDate: null,
 }
 
-// Import after the core mock so the command registry sees the mocked module.
-const { Sidebar } = await import('./sidebar.tsx')
-const { registerAppCommands } = await import('@/lib/commands/app-commands.ts')
-registerAppCommands()
+// What the app's fakes answer; each test sets them before `renderSidebar`.
+const getPinnedNotes = vi.fn<() => Promise<PinnedNote[]>>()
+const hasWikiEntries = vi.fn<() => Promise<boolean>>()
+const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
+
+// The services of the rendered app; set by `renderSidebar`.
+let opener: TestOpenerService
+let clipboard: TestClipboardService
+let operations: TestOperationsService
+/**
+ * A fresh untitled placeholder path, as the new-note route has it.
+ */
+function untitledNotePath(): string {
+  return createTestCoreServices().noteCreation.untitledNotePath()
+}
+
+let openRecent: MockInstance<GraphSessionService['openRecent']>
+let pickAndOpen: MockInstance<GraphBootService['pickAndOpen']>
+let chooseGraph: MockInstance<GraphBootService['chooseGraph']>
+let updateSettingsWith: MockInstance<SettingsService['updateWith']>
 
 beforeEach(() => {
-  // The hoisted mock is shared module state — restore it so mic-related cases
-  // can't inherit mutations from earlier tests.
   getPinnedNotes.mockReset().mockResolvedValue([])
   hasWikiEntries.mockReset().mockResolvedValue(false)
+  commitNoteFrontmatter.mockReset().mockResolvedValue(undefined)
+  openNoteWindow.mockReset().mockResolvedValue(true)
+  // The hoisted mock is shared module state — restore it so mic-related cases
+  // can't inherit mutations from earlier tests.
   audioMemo.available = true
   audioMemo.unavailableReason = null
   audioMemo.toggle.mockReset()
-  revealItemInDir.mockClear()
-  openUrl.mockClear()
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
-  openRecent.mockClear()
-  pickAndOpen.mockClear()
-  chooseGraph.mockClear()
-  updateSettingsWith.mockClear()
   openNativeContextMenu.mockClear()
   menuChoice.text = 'Unpin Note'
-  runCopyDeepLink.mockClear()
-  operationFail.mockClear()
-  startOperation.mockClear()
-  commitNoteFrontmatter.mockClear()
 })
 
-/** Shows the peeked note's path, standing in for the peek panel. */
+/**
+ * Shows the peeked note's path, standing in for the peek panel.
+ */
 function PeekProbe() {
   const target = usePeek()?.target
   return <output aria-label="Peeked note">{target?.path ?? ''}</output>
@@ -197,15 +144,33 @@ async function renderSidebar(
 ) {
   const navigate = vi.fn()
   const openPalette = vi.fn()
+  const readSource = (): Promise<string> => Promise.resolve('# Rust\n')
+  operations = createTestOperationsService()
+  const app = createTestCoreServices({
+    progress: operations,
+    noteDocuments: {
+      readSource,
+      readExisting: readSource,
+      commitFrontmatter: commitNoteFrontmatter,
+      commitSourceEdit: () => Promise.reject(new Error('commitSourceEdit is not stubbed')),
+      isOstensiblyEmpty: isOstensiblyEmptyNoteSource,
+    },
+    backup: createTestBackupService({ state: { phase: 'disconnected' } }),
+  })
+  const appLayer = createTestAppServices(app, {
+    window: createTestWindowService({ openNoteWindow }),
+  })
   const context: CommandContext = {
+    services: app,
+    app: appLayer,
     navigate,
     route: () => ({ kind: 'today' }),
     notePath: () => null,
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
-    togglePin: vi.fn(async () => {}),
-    togglePrivate: vi.fn(async () => {}),
+    togglePin: vi.fn(() => {}),
+    togglePrivate: vi.fn(() => {}),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -216,8 +181,6 @@ async function renderSidebar(
     switchGraph: vi.fn(),
     openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
-    generation: () => 1,
-    graphRoot: () => '/notes',
     openPalette,
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
@@ -228,26 +191,48 @@ async function renderSidebar(
     wikiLanguages: () => [],
     ...overrides,
   }
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  vi.spyOn(app.indexQuery, 'getPinnedNotes').mockImplementation(getPinnedNotes)
+  vi.spyOn(app.wiki, 'hasEntries').mockImplementation(hasWikiEntries)
+  vi.spyOn(appLayer.nativeMenu, 'openContextMenu').mockImplementation(openNativeContextMenu)
+  openRecent = vi.spyOn(app.graphSession, 'openRecent').mockResolvedValue(true)
+  pickAndOpen = vi.spyOn(appLayer.graphBoot, 'pickAndOpen').mockResolvedValue()
+  chooseGraph = vi.spyOn(appLayer.graphBoot, 'chooseGraph').mockResolvedValue()
+  updateSettingsWith = vi.spyOn(app.settings, 'updateWith')
+  opener = appLayer.opener
+  clipboard = appLayer.clipboard
   // The app constrains the sidebar to its rail width; without it the graph
   // menu's anchor spans the viewport and popper pushes the submenu off-screen.
-  const view = await render(
-    <div style={{ width: 260, height: 560 }}>
-      <TooltipProvider>
-        <QueryClientProvider client={client}>
-          <UpdateProvider autoCheck={false}>
-            <RouterProvider initialRoute={initialRoute}>
-              <PeekProvider enabled={peek}>
-                <Sidebar graph={GRAPH} context={context} />
-                <PeekProbe />
-              </PeekProvider>
-            </RouterProvider>
-          </UpdateProvider>
-        </QueryClientProvider>
-      </TooltipProvider>
-    </div>,
-  )
-  return { view, navigate, openPalette, context }
+  const view = await renderInApp(<Sidebar graph={GRAPH} context={context} />, {
+    app,
+    appServices: appLayer,
+    graph: GRAPH,
+    graphState: {
+      recents: [
+        { root: '/notes', name: 'Notes', openedMs: 2 },
+        { root: '/work', name: 'Work', openedMs: 1 },
+      ],
+    },
+    settings: {
+      dateFormat: 'mdy',
+      graphColors: {},
+      wikiLanguages: [
+        { label: 'English', folder: 'wiki' },
+        { label: '简体中文', folder: 'wiki-cn' },
+      ],
+    },
+    ...(initialRoute === undefined ? {} : { route: initialRoute }),
+    wrapper: (children: ReactNode) => (
+      <div style={{ width: 260, height: 560 }}>
+        <UpdateProvider autoCheck={false}>
+          <PeekProvider enabled={peek}>
+            {children}
+            <PeekProbe />
+          </PeekProvider>
+        </UpdateProvider>
+      </div>
+    ),
+  })
+  return { view, navigate, openPalette, context, app }
 }
 
 describe('Sidebar', () => {
@@ -398,11 +383,7 @@ describe('Sidebar', () => {
 
   it('pinned notes render their own section', async () => {
     getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/roadmap.md',
-        title: 'Roadmap',
-        dailyDate: null,
-      },
+      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
     ])
     const { view } = await renderSidebar()
 
@@ -445,11 +426,7 @@ describe('Sidebar', () => {
 
   it('modifier-click opens a pinned note in a new window without changing routes', async () => {
     getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/roadmap.md',
-        title: 'Roadmap',
-        dailyDate: null,
-      },
+      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
     ])
     const { view } = await renderSidebar()
     const roadmap = view.getByRole('button', { name: 'Roadmap' })
@@ -457,22 +434,20 @@ describe('Sidebar', () => {
     await roadmap.click({ modifiers: ['ControlOrMeta'] })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({
-        kind: 'note',
-        path: 'notes/roadmap.md',
-      }),
+      expect(openNoteWindow).toHaveBeenCalledWith(
+        deepLinkForRoute({
+          kind: 'note',
+          path: 'notes/roadmap.md',
+        }),
+      ),
     )
-    expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
+    expect(openNoteWindow).toHaveBeenCalledTimes(1)
     await expect.element(roadmap).not.toHaveAttribute('aria-current')
   })
 
   it('renders wiki links in pinned note titles as display text', async () => {
     getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/meeting.md',
-        title: 'Meeting with [[Ada Lovelace|Ada]]',
-        dailyDate: null,
-      },
+      { path: 'notes/meeting.md', title: 'Meeting with [[Ada Lovelace|Ada]]', dailyDate: null },
     ])
     const { view } = await renderSidebar()
 
@@ -484,11 +459,7 @@ describe('Sidebar', () => {
 
   it('All notes is inactive while the active note is pinned', async () => {
     getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/roadmap.md',
-        title: 'Roadmap',
-        dailyDate: null,
-      },
+      { path: 'notes/roadmap.md', title: 'Roadmap', dailyDate: null },
     ])
     const { view } = await renderSidebar(undefined, { kind: 'note', path: 'notes/roadmap.md' })
 
@@ -507,13 +478,7 @@ describe('Sidebar', () => {
   })
 
   it('right-click unpins a pinned row through the native context menu', async () => {
-    getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/rust.md',
-        title: 'Rust',
-        dailyDate: null,
-      },
-    ])
+    getPinnedNotes.mockResolvedValue([{ path: 'notes/rust.md', title: 'Rust', dailyDate: null }])
     const { view } = await renderSidebar()
     const rust = view.getByRole('button', { name: 'Rust' })
 
@@ -592,7 +557,9 @@ describe('Sidebar', () => {
     await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({ kind: 'note', path: 'notes/rust.md' }),
+      expect(openNoteWindow).toHaveBeenCalledWith(
+        deepLinkForRoute({ kind: 'note', path: 'notes/rust.md' }),
+      ),
     )
   })
 
@@ -603,7 +570,8 @@ describe('Sidebar', () => {
 
     await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
 
-    await vi.waitFor(() => expect(runCopyDeepLink).toHaveBeenCalledWith('notes/rust.md', 1))
+    await vi.waitFor(() => expect(clipboard.writes()).toHaveLength(1))
+    expect(clipboard.writes()[0]).toMatch(/^reflect:\/\//)
   })
 
   it('Reveal in Finder shows the pinned note file in the system file manager', async () => {
@@ -613,20 +581,12 @@ describe('Sidebar', () => {
 
     await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
 
-    await vi.waitFor(() =>
-      expect(revealItemInDir).toHaveBeenCalledExactlyOnceWith('/notes/notes/rust.md'),
-    )
+    await vi.waitFor(() => expect(opener.revealedPaths()).toEqual(['/notes/notes/rust.md']))
   })
 
   it('restores an optimistically removed pinned row when unpin fails', async () => {
     commitNoteFrontmatter.mockRejectedValueOnce(new Error('disk failed'))
-    getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/rust.md',
-        title: 'Rust',
-        dailyDate: null,
-      },
-    ])
+    getPinnedNotes.mockResolvedValue([{ path: 'notes/rust.md', title: 'Rust', dailyDate: null }])
     const { view } = await renderSidebar()
     const rust = view.getByRole('button', { name: 'Rust' })
 
@@ -636,18 +596,13 @@ describe('Sidebar', () => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/rust.md', { pinned: false }, 1),
     )
     await expect.element(view.getByRole('button', { name: 'Rust' })).toBeInTheDocument()
-    expect(startOperation).toHaveBeenCalledExactlyOnceWith('Updating pin')
-    expect(operationFail).toHaveBeenCalledExactlyOnceWith('disk failed')
+    expect(operations.snapshot()).toMatchObject([
+      { label: 'Updating pin', status: 'failed', message: 'disk failed' },
+    ])
   })
 
   it('history arrows walk the router stack and disable at its edges', async () => {
-    getPinnedNotes.mockResolvedValue([
-      {
-        path: 'notes/rust.md',
-        title: 'Rust',
-        dailyDate: null,
-      },
-    ])
+    getPinnedNotes.mockResolvedValue([{ path: 'notes/rust.md', title: 'Rust', dailyDate: null }])
     const { view } = await renderSidebar()
     const backButton = view.getByRole('button', { name: 'Go back' })
     const forwardButton = view.getByRole('button', { name: 'Go forward' })
@@ -673,6 +628,7 @@ describe('Sidebar', () => {
     await view.getByRole('button', { name: /Notes/ }).click()
     const work = page.getByRole('menuitem', { name: 'Work', exact: true })
     await expect.element(work).toBeVisible()
+    // ⌘1–⌘0 open pinned notes, so the graph rows carry no number keycaps.
     expect(work.element().querySelector('kbd')).toBeNull()
     await work.click()
     expect(openRecent).toHaveBeenCalledWith('/work')
@@ -703,15 +659,12 @@ describe('Sidebar', () => {
     await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
 
     await dialog.getByRole('button', { name: 'Get iOS app' }).click()
-    expect(openUrl).toHaveBeenNthCalledWith(
-      1,
-      'https://apps.apple.com/us/app/reflect-open/id6787385615',
-    )
+    expect(opener.openedUrls()).toEqual(['https://apps.apple.com/us/app/reflect-open/id6787385615'])
     await dialog.getByRole('button', { name: 'Get Chrome extension' }).click()
-    expect(openUrl).toHaveBeenNthCalledWith(
-      2,
+    expect(opener.openedUrls()).toEqual([
+      'https://apps.apple.com/us/app/reflect-open/id6787385615',
       'https://chromewebstore.google.com/detail/reflect-capture/ccabifmooehighoonjeiololjfofkhkd',
-    )
+    ])
 
     await dialog.getByRole('button', { name: 'Close', exact: true }).click()
     await expect.element(dialog).not.toBeInTheDocument()
@@ -744,7 +697,7 @@ describe('Sidebar', () => {
     await view.getByRole('button', { name: /Notes/ }).click()
     await page.getByRole('menuitem', { name: /reveal graph in finder/i }).click()
 
-    expect(revealItemInDir).toHaveBeenCalledWith('/notes')
+    await vi.waitFor(() => expect(opener.revealedPaths()).toEqual(['/notes']))
   })
 
   it.each([
@@ -812,10 +765,8 @@ describe('Sidebar', () => {
       new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }),
     )
     await vi.waitFor(() =>
-      expect(createNoteFromFiles).toHaveBeenCalledWith(
-        [expect.any(File)],
-        1,
-        expect.objectContaining({ navigate }),
+      expect(navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'note', path: expect.stringMatching(/^notes\/.+\.md$/) }),
       ),
     )
     expect(view.getByText('Drop to create a note').query()).toBeNull()

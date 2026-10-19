@@ -1,59 +1,43 @@
-import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RetrievalService } from '@reflect/core'
+import { createTestCoreServices, createTestRetrievalService } from '@reflect/core/testing'
 import type { ReactNode } from 'react'
-import { TooltipProvider } from '@/components/ui/tooltip.tsx'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { scrollContainerOf } from '@/test-utils/scroll-container.ts'
 import { NoteContextSidebar } from './note-context-sidebar.tsx'
 
-const relatedNotes = vi.hoisted(() => vi.fn())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  relatedNotes,
-}))
-vi.mock('@/lib/use-embed-status.ts', () => ({
-  useEmbedStatus: () => ({ status: 'ready', model: 'all-MiniLM-L6-v2' }),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      semanticSearchEnabled: true,
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-    },
-    updateSettings: () => {},
-  }),
-}))
+const relatedNotes = vi.fn<RetrievalService['relatedNotes']>()
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-/** Renders the sidebar in a clipping frame like AppShell's context region, `height` px tall if given. */
-function renderSidebar(path: string, height?: number) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <TooltipProvider>
-      <QueryClientProvider client={client}>
-        <RouterProvider>
-          <div data-testid="context-frame" className="overflow-hidden" style={{ height }}>
-            <NoteContextSidebar path={path} />
-          </div>
-          <RouteProbe />
-        </RouterProvider>
-      </QueryClientProvider>
-    </TooltipProvider>,
+/**
+ * Renders the sidebar in a clipping frame like AppShell's context region, `height` px tall if given.
+ */
+async function renderSidebar(path: string, height?: number) {
+  return await renderInApp(
+    <>
+      <div data-testid="context-frame" className="overflow-hidden" style={{ height }}>
+        <NoteContextSidebar path={path} />
+      </div>
+      <RouteProbe />
+    </>,
+    {
+      app: createTestCoreServices({ retrieval: createTestRetrievalService({ relatedNotes }) }),
+      graph: { root: '/g', name: 'g' },
+      settings: {
+        semanticSearchEnabled: true,
+        wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+      },
+    },
   )
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear()
   relatedNotes.mockReset().mockResolvedValue([])
 })
 
@@ -62,7 +46,6 @@ describe('NoteContextSidebar', () => {
     const view = await renderSidebar('notes/rust.md')
     await vi.waitFor(() => expect(relatedNotes).toHaveBeenCalledWith('notes/rust.md', 6))
     expect(view.getByText('Similar notes').query()).toBeNull()
-    await view.unmount()
   })
 
   it('scrolls its sections within the context region', async () => {
@@ -74,7 +57,6 @@ describe('NoteContextSidebar', () => {
     expect(view.getByTestId('context-frame').element().contains(panel)).toBe(true)
     panel.scrollTop = panel.scrollHeight
     expect(panel.scrollTop).toBeGreaterThan(0)
-    await view.unmount()
   })
 
   it('lists similar notes under their own section and navigates on click', async () => {
@@ -93,6 +75,5 @@ describe('NoteContextSidebar', () => {
     await userEvent.click(view.getByText('Zig'))
     await expect.element(view.getByTestId('route')).toMatchTextContent('"kind":"note"')
     await expect.element(view.getByTestId('route')).toMatchTextContent('notes/zig.md')
-    await view.unmount()
   })
 })

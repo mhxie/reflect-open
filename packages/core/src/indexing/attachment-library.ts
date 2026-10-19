@@ -1,24 +1,19 @@
-import {
-  ATTACHMENT_TYPE_EXTENSIONS,
-  attachmentTypeOf,
-  NOTE_ATTACHMENT_TYPES,
-  type NoteAttachmentType,
-} from '../graph/attachment-types.ts'
+import { attachmentTypeOf, type NoteAttachmentType } from '../graph/attachment-types.ts'
 import {
   createAttachmentCatalog,
   resolveAttachmentLink,
   type AttachmentCatalog,
 } from '../graph/attachment-resolution.ts'
 import type { FileMeta } from '../graph/schemas.ts'
-import { db } from './db.ts'
 
 /**
  * The Attachments library: every media file in the graph (images, PDFs,
  * video, audio), newest first, each with the notes that link to it. The file
- * listing (`listAttachments`) is the source of truth for what exists — the
- * index `assets` projection stores reference *spellings* (bare filenames,
- * source-relative candidates, missing files) — so the index only contributes
- * the "linked from" notes.
+ * listing (`NoteFileService.listAttachments`) is the source of truth for what
+ * exists — the index `assets` projection stores reference *spellings* (bare
+ * filenames, source-relative candidates, missing files) — so the index only
+ * contributes the "linked from" notes (`NoteListService.listAttachmentReferences`
+ * and `listAttachmentNoteTags`).
  */
 
 /** A note that links to an attachment. */
@@ -30,7 +25,6 @@ export interface AttachmentNoteRef {
   /** The note's body tags (first-seen casing), ordered on the folded key. */
   readonly tags: readonly string[]
   readonly isPrivate: boolean
-  readonly hasConflict: boolean
 }
 
 /** One media file in the Attachments library. */
@@ -56,64 +50,12 @@ export interface AttachmentReferenceRow {
   readonly title: string
   readonly mtime: number
   readonly isPrivate: boolean
-  readonly hasConflict: boolean
 }
 
 /** One body tag of a note that links to a media attachment. */
 export interface AttachmentNoteTagRow {
   readonly notePath: string
   readonly tag: string
-}
-
-/** Every media extension, for narrowing the reference rows in SQL. */
-const MEDIA_EXTENSIONS = NOTE_ATTACHMENT_TYPES.flatMap((type) => ATTACHMENT_TYPE_EXTENSIONS[type])
-
-/**
- * References from notes (regular and daily; templates are boilerplate, not
- * graph content) to media attachment spellings. `LIKE` is ASCII
- * case-insensitive, matching {@link attachmentTypeOf}.
- */
-function mediaReferences() {
-  return db
-    .selectFrom('assets')
-    .innerJoin('notes', 'notes.path', 'assets.notePath')
-    .where('notes.kind', 'in', ['note', 'daily'])
-    .where((eb) =>
-      eb.or(MEDIA_EXTENSIONS.map((extension) => eb('assets.assetPath', 'like', `%.${extension}`))),
-    )
-}
-
-/** The indexed references from notes to media attachment spellings. */
-export async function listAttachmentReferences(): Promise<AttachmentReferenceRow[]> {
-  const rows = await mediaReferences()
-    .select([
-      'assets.assetPath',
-      'assets.notePath',
-      'notes.title',
-      'notes.mtime',
-      'notes.isPrivate',
-      'notes.hasConflict',
-    ])
-    .execute()
-  return rows.map((row) => ({
-    ...row,
-    isPrivate: row.isPrivate !== 0,
-    hasConflict: row.hasConflict !== 0,
-  }))
-}
-
-/**
- * The body tags of every note with a media reference, ordered on the folded
- * key like the All Notes facets — by subquery, since an `IN (…)` list of
- * paths would hit SQLite's bound-parameter ceiling.
- */
-export async function listAttachmentNoteTags(): Promise<AttachmentNoteTagRow[]> {
-  return await db
-    .selectFrom('tags')
-    .where('tags.notePath', 'in', mediaReferences().select('assets.notePath'))
-    .select(['tags.notePath', 'tags.tag'])
-    .orderBy('tags.tagKey')
-    .execute()
 }
 
 /** Push `row` onto the list keyed by `key`. */
@@ -196,7 +138,6 @@ export function buildAttachmentLibrary(
         mtime: reference.mtime,
         tags: tagsByNote.get(reference.notePath) ?? [],
         isPrivate: reference.isPrivate,
-        hasConflict: reference.hasConflict,
       })
     }
     entries.push({

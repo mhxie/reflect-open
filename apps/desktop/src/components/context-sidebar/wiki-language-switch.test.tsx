@@ -1,61 +1,45 @@
-import { render } from 'vitest-browser-react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { deepLinkForRoute } from '@reflect/app'
+import { createTestWindowService } from '@reflect/app/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import type { WikiService } from '@reflect/core'
+import { createTestCoreServices } from '@reflect/core/testing'
+import type { MaybePromise } from '@reflect/utils'
+import { useRouter } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiLanguageSwitch } from './wiki-language-switch.tsx'
-
-const wikiCopies = vi.hoisted(() => vi.fn())
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  wikiCopies,
-}))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openRouteInNewWindow,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      wikiLanguages: [
-        { label: 'English', folder: 'wiki' },
-        { label: '简体中文', folder: 'wiki-cn' },
-        { label: '日本語', folder: 'wiki-ja' },
-      ],
-    },
-    updateSettings: () => {},
-  }),
-}))
 
 const ENGLISH = { label: 'English', folder: 'wiki' }
 const CHINESE = { label: '简体中文', folder: 'wiki-cn' }
 const JAPANESE = { label: '日本語', folder: 'wiki-ja' }
+
+const wikiCopies = vi.fn<WikiService['copies']>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function renderSection(path: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider>
-        <WikiLanguageSwitch path={path} />
-        <RouteProbe />
-      </RouterProvider>
-    </QueryClientProvider>,
+async function renderSection(path: string) {
+  const app = createTestCoreServices()
+  vi.spyOn(app.wiki, 'copies').mockImplementation(wikiCopies)
+  return await renderInApp(
+    <>
+      <WikiLanguageSwitch path={path} />
+      <RouteProbe />
+    </>,
+    {
+      app,
+      appServices: { window: createTestWindowService({ openNoteWindow }) },
+      graph: { root: '/g', name: 'g' },
+      settings: { wikiLanguages: [ENGLISH, CHINESE, JAPANESE] },
+    },
   )
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear()
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
+  openNoteWindow.mockReset().mockResolvedValue(true)
   wikiCopies.mockReset().mockResolvedValue([
     { language: ENGLISH, path: 'wiki/memory/Spacing Effect.md' },
     { language: CHINESE, path: 'wiki-cn/memory/Spacing Effect.md' },
@@ -94,10 +78,9 @@ describe('WikiLanguageSwitch', () => {
     await view.getByRole('button', { name: '简体中文' }).click({ modifiers: ['ControlOrMeta'] })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({
-        kind: 'note',
-        path: 'wiki-cn/memory/Spacing Effect.md',
-      }),
+      expect(openNoteWindow).toHaveBeenCalledWith(
+        deepLinkForRoute({ kind: 'note', path: 'wiki-cn/memory/Spacing Effect.md' }),
+      ),
     )
   })
 

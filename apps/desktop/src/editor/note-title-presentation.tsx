@@ -4,6 +4,7 @@ import { definePlugin } from '@prosekit/core'
 import { Plugin, PluginKey, TextSelection } from '@prosekit/pm/state'
 import { Decoration, DecorationSet } from '@prosekit/pm/view'
 import { noteTitlePresentation, type NoteTitleMetadata } from '@reflect/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { whenEditorMounted } from './when-editor-mounted.ts'
 
 interface TitleState {
@@ -145,18 +146,19 @@ export function NoteTitlePresentationBridge({
   metadata?: NoteTitleMetadata | undefined
 }): null {
   const editor = useEditor()
+  const { logger } = useCoreServices()
   const [extension] = useState(() => defineTitlePresentation(metadata ?? {}))
   useExtension(extension)
   useEffect(
     () =>
-      whenEditorMounted(editor, () => {
+      whenEditorMounted(logger, editor, () => {
         editor.view.dispatch(
           editor.state.tr
             .setMeta(titleKey, { metadata: metadata ?? {} })
             .setMeta('addToHistory', false),
         )
       }),
-    [editor, metadata],
+    [editor, logger, metadata],
   )
   return null
 }

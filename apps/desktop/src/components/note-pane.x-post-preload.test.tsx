@@ -1,90 +1,18 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { setBridge, type NoteRow } from '@reflect/core'
-import type { resolveArchivedPost } from '@reflect/core/x-archive'
+import { expect, it, vi } from 'vitest'
+import type { IndexQueryService, NoteRow } from '@reflect/core'
+import type { ResolvedArchivedPost } from '@reflect/core/x-archive'
+import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { queryClient } from '@/lib/query-client.ts'
-import { RouterProvider } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import '@/test-utils/locator.ts'
 import { RouteContent } from './route-content.tsx'
 
-vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (path: string) => `reflect-asset://${path}`,
-}))
-const getNote = vi.hoisted(() => vi.fn<(path: string) => Promise<NoteRow | undefined>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getBacklinksWithContext: async () => ({ contexts: [], nextCursor: null, indexedLinkCount: 0 }),
-  relatedNotes: async () => [],
-  getNote,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1 },
-    indexing: false,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      editorMarkdownSyntax: 'hide',
-      allNotesFilterTags: [],
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
+type ResolvedArchive = ResolvedArchivedPost | null
 
-type ResolvedArchive = Awaited<ReturnType<typeof resolveArchivedPost>>
-
-let files: Record<string, string>
-let commands: string[]
-const resolveArchive = vi.fn<(postId: string) => Promise<ResolvedArchive>>()
-
-/** An index row for `path`; the note's privacy lives in its row and frontmatter. */
-function noteRow(path: string, isPrivate: boolean): NoteRow {
-  return {
-    path,
-    title: '',
-    dailyDate: null,
-    isPrivate,
-    hasConflict: false,
-    gistUrl: null,
-    gistStale: false,
-  }
-}
-
-beforeEach(() => {
-  files = {}
-  commands = []
-  getNote.mockImplementation(async (path) => noteRow(path, false))
-  setBridge({
-    invoke: async (command, args) => {
-      commands.push(command)
-      if (command === 'note_read') return files[String(args.path)]
-      if (command === 'x_archive_resolve') return await resolveArchive(String(args.postId))
-      if (command === 'db_query') return []
-      return null
-    },
-    listen: async () => () => {},
-  })
-})
-
-afterEach(async () => {
-  await cleanup()
-  setBridge(null)
-  queryClient.clear()
-  vi.resetAllMocks()
-})
+/** What reaches the network, or writes the X archive, on a note's behalf. */
+const REMOTE_COMMANDS = ['x_archive_resolve', 'x_syndication_fetch', 'x_archive_write']
 
 function archivedPost(id: string, text: string): NonNullable<ResolvedArchive> {
   return {
@@ -102,17 +30,51 @@ function archivedPost(id: string, text: string): NonNullable<ResolvedArchive> {
   }
 }
 
-function renderNote(path: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'note', path }}>
-        <PaletteProvider>
-          <RouteContent />
-        </PaletteProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+/** An index row for `path`; the note's privacy lives in its row and frontmatter. */
+function noteRow(path: string, isPrivate: boolean): NoteRow {
+  return {
+    path,
+    title: '',
+    dailyDate: null,
+    isPrivate,
+    gistUrl: null,
+    gistStale: false,
+  }
+}
+
+async function renderNote(
+  path: string,
+  source: string,
+  resolveArchive: (postId: string) => Promise<ResolvedArchive>,
+  getNote: IndexQueryService['getNote'] = (notePath) => Promise.resolve(noteRow(notePath, false)),
+) {
+  const app = createTestCoreServices({
+    noteFile: createTestNoteFileService({ files: { [path]: source } }),
+  })
+  const resolve = vi
+    .spyOn(app.xArchive, 'resolve')
+    .mockImplementation(async (_generation, postId) => await resolveArchive(postId))
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
+  // The X post resolver and its preload read the app's shared query client.
+  const view = await renderInApp(
+    <PaletteProvider>
+      <RouteContent />
+    </PaletteProvider>,
+    {
+      app,
+      queryClient,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      settings: {
+        editorMarkdownSyntax: 'hide',
+        wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+      },
+      route: { kind: 'note', path },
+    },
   )
+  return Object.assign(view, {
+    resolve,
+    commands: () => app.ipc.calls().map((call) => call.command),
+  })
 }
 
 // Every rendered state is observed before it can paint.
@@ -126,13 +88,15 @@ function watchLoadingCards(): { seen: boolean; stop: () => void } {
 }
 
 it('renders archived X posts in the first frame of the editor', async () => {
-  files['notes/tweets.md'] = '![](https://x.com/jack/status/101)\n'
-  resolveArchive.mockImplementation(async (postId) => {
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    return archivedPost(postId, 'Archived first')
-  })
   const loadingCards = watchLoadingCards()
-  const view = await renderNote('notes/tweets.md')
+  const view = await renderNote(
+    'notes/tweets.md',
+    '![](https://x.com/jack/status/101)\n',
+    async (postId) => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      return archivedPost(postId, 'Archived first')
+    },
+  )
 
   await expect.element(page.getByText('Archived first')).toBeVisible()
   loadingCards.stop()
@@ -141,9 +105,11 @@ it('renders archived X posts in the first frame of the editor', async () => {
 })
 
 it('mounts the editor once the wait runs out for a slow archive', async () => {
-  files['notes/slow.md'] = 'Slow note\n\n![](https://x.com/jack/status/102)\n'
-  resolveArchive.mockImplementation(() => new Promise(() => {}))
-  const view = await renderNote('notes/slow.md')
+  const view = await renderNote(
+    'notes/slow.md',
+    'Slow note\n\n![](https://x.com/jack/status/102)\n',
+    () => new Promise(() => {}),
+  )
 
   await expect.element(page.getByText('Slow note')).toBeVisible()
   await expect.element(page.getByText('Loading this post…')).toBeVisible()
@@ -151,14 +117,16 @@ it('mounts the editor once the wait runs out for a slow archive', async () => {
 })
 
 it('renders archived X posts in the first frame when the index row is slow', async () => {
-  files['notes/tweets.md'] = '![](https://x.com/jack/status/103)\n'
-  getNote.mockImplementation(async (path) => {
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    return noteRow(path, false)
-  })
-  resolveArchive.mockImplementation(async (postId) => archivedPost(postId, 'Archived late row'))
   const loadingCards = watchLoadingCards()
-  const view = await renderNote('notes/tweets.md')
+  const view = await renderNote(
+    'notes/tweets.md',
+    '![](https://x.com/jack/status/103)\n',
+    (postId) => Promise.resolve(archivedPost(postId, 'Archived late row')),
+    async (path) => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      return noteRow(path, false)
+    },
+  )
 
   await expect.element(page.getByText('Archived late row')).toBeVisible()
   loadingCards.stop()
@@ -167,18 +135,20 @@ it('renders archived X posts in the first frame when the index row is slow', asy
 })
 
 it('preloads nothing for a locked note and mounts at once', async () => {
-  files['notes/locked.md'] =
-    '---\nprivate: true\n---\nLocked\n\n![](https://x.com/jack/status/104)\n'
-  getNote.mockImplementation(async (path) => noteRow(path, true))
-  resolveArchive.mockImplementation(() => new Promise(() => {}))
-  const view = await renderNote('notes/locked.md')
+  const view = await renderNote(
+    'notes/locked.md',
+    '---\nprivate: true\n---\nLocked\n\n![](https://x.com/jack/status/104)\n',
+    () => new Promise(() => {}),
+    (path) => Promise.resolve(noteRow(path, true)),
+  )
 
   await expect.element(page.getByText('Locked')).toBeVisible()
   await expect
     .element(page.getByTestId('embed-link'))
     .toHaveTextContent('https://x.com/jack/status/104')
-  expect(commands).not.toContain('x_archive_resolve')
-  expect(commands).not.toContain('x_syndication_fetch')
-  expect(commands).not.toContain('x_archive_write')
+  expect(view.resolve).not.toHaveBeenCalled()
+  for (const command of REMOTE_COMMANDS) {
+    expect(view.commands()).not.toContain(command)
+  }
   await view.unmount()
 })

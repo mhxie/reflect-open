@@ -9,9 +9,13 @@ export const MEETING_EVENT_LEAD_MS = 10 * 60 * 1000
 
 interface RankedEvent {
   readonly event: CalendarEvent
-  /** Milliseconds the recording shares with the event itself. */
+  /**
+   * Milliseconds the recording shares with the event itself.
+   */
   readonly overlapMs: number
-  /** Distance between the event's start and the recording's start. */
+  /**
+   * Distance between the event's start and the recording's start.
+   */
   readonly startDistanceMs: number
 }
 

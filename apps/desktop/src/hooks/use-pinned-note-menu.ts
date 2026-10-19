@@ -1,28 +1,12 @@
 import { useCallback, type MouseEvent } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { join } from '@tauri-apps/api/path'
-import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { NATIVE_MENU_SEPARATOR, type NativeContextMenuItem } from '@reflect/app'
 import { errorMessage, type PinnedNote } from '@reflect/core'
 import { usePeek, usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import {
-  NATIVE_MENU_SEPARATOR,
-  openNativeContextMenu,
-  type NativeContextMenuItem,
-} from '@/lib/native-menu/context-menu.ts'
-import { runCopyDeepLink } from '@/lib/note-deep-link.ts'
-import { unpinNote } from '@/lib/note-pin.ts'
-import { startOperation } from '@/lib/operations.ts'
+import { copyNoteDeepLink } from '@/lib/clipboard-actions.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
-
-async function revealNote(root: string, path: string): Promise<void> {
-  try {
-    await revealItemInDir(await join(root, path))
-  } catch (cause) {
-    startOperation('Revealing note').fail(errorMessage(cause))
-  }
-}
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * The pinned shelf's right-click menu, after Arc's tab menu: the ways to open
@@ -32,7 +16,8 @@ async function revealNote(root: string, path: string): Promise<void> {
  */
 export function usePinnedNoteMenu(note: PinnedNote): (event: MouseEvent<HTMLElement>) => void {
   const { graph } = useGraph()
-  const queryClient = useQueryClient()
+  const services = useCoreServices()
+  const appServices = useAppServices()
   const canPeek = usePeek() !== null
   const peekNoteLink = usePeekNavigation()
   const navigateNoteLink = useNoteLinkNavigation()
@@ -44,7 +29,16 @@ export function usePinnedNoteMenu(note: PinnedNote): (event: MouseEvent<HTMLElem
       if (graph === null) {
         return
       }
+      const { noteActions } = services
+      const { nativeMenu, opener, operations } = appServices
       const target = routeForPath(note.path)
+      const revealNote = async (): Promise<void> => {
+        try {
+          await opener.revealInFileManager(await noteActions.absolutePathFor(note.path))
+        } catch (cause) {
+          operations.start('Revealing note').fail(errorMessage(cause))
+        }
+      }
       const items: NativeContextMenuItem[] = [
         ...(canPeek
           ? [
@@ -61,29 +55,22 @@ export function usePinnedNoteMenu(note: PinnedNote): (event: MouseEvent<HTMLElem
         NATIVE_MENU_SEPARATOR,
         {
           text: 'Copy Deep Link',
-          action: () => void runCopyDeepLink(note.path, graph.generation),
+          action: () => void copyNoteDeepLink(services, appServices, note.path),
         },
         {
           text: 'Reveal in Finder',
-          action: () => void revealNote(graph.root, note.path),
+          action: () => void revealNote(),
         },
         NATIVE_MENU_SEPARATOR,
         {
           text: 'Unpin Note',
-          action: () => {
-            void unpinNote({
-              queryClient,
-              root: graph.root,
-              generation: graph.generation,
-              path: note.path,
-            })
-          },
+          action: () => void noteActions.unpin(note.path),
         },
       ]
-      void openNativeContextMenu({ items }).catch((cause: unknown) => {
-        startOperation('Opening note menu').fail(errorMessage(cause))
+      nativeMenu.openContextMenu({ items }).catch((cause: unknown) => {
+        operations.start('Opening note menu').fail(errorMessage(cause))
       })
     },
-    [canPeek, graph, navigateNoteLink, note.path, peekNoteLink, queryClient],
+    [appServices, canPeek, graph, navigateNoteLink, note.path, peekNoteLink, services],
   )
 }

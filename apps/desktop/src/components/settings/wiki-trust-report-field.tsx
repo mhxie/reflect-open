@@ -2,9 +2,9 @@ import { useState, type ReactElement } from 'react'
 import { normalizeWikiTrustReportPath } from '@reflect/core'
 import { useWikiTrustReport, type WikiTrustReportState } from '@/hooks/use-wiki-trust-report.ts'
 import { formatRecencyLabel } from '@/lib/dates.ts'
-import { isMacosDesktop } from '@/lib/platform.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 
 const INPUT_CLASS =
@@ -22,6 +22,7 @@ function plural(count: number, noun: string): string {
 function statusOf(
   state: WikiTrustReportState,
   prefs: Parameters<typeof formatRecencyLabel>[1],
+  isMacosDesktop: boolean,
 ): Status | null {
   switch (state.status) {
     case 'off':
@@ -68,8 +69,9 @@ export function WikiTrustReportField(): ReactElement {
   const { settings, updateSettings } = useSettings()
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { platform } = useCoreServices()
   const state = useWikiTrustReport(true)
-  const status = statusOf(state, settings)
+  const status = statusOf(state, settings, platform.isMacosDesktop)
   const value = draft ?? settings.wikiTrustReportPath
 
   const commit = (): void => {

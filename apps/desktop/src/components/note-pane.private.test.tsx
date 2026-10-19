@@ -1,55 +1,24 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { setBridge, type NoteRow } from '@reflect/core'
-import type { resolveArchivedPost } from '@reflect/core/x-archive'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { createRef, useLayoutEffect, type RefObject } from 'react'
+import type { IndexQueryService, NoteRow } from '@reflect/core'
+import type { ResolvedArchivedPost } from '@reflect/core/x-archive'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  type TestCoreServices,
+  type TestNoteFileService,
+} from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
-import { toggleNotePrivate } from '@/lib/note-private.ts'
+import { useNoteMenuRequest } from '@/editor/status/note-menu-request.ts'
+import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { queryClient } from '@/lib/query-client.ts'
-import type { Route } from '@/routing/route.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter, type RouterNavigate } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { RouteContent } from './route-content.tsx'
 
-vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (path: string) => `reflect-asset://${path}`,
-}))
-const getNote = vi.hoisted(() => vi.fn<(path: string) => Promise<NoteRow | undefined>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getBacklinksWithContext: async () => ({ contexts: [], nextCursor: null, indexedLinkCount: 0 }),
-  relatedNotes: async () => [],
-  // The graph's local-only folders are `secure`, read-only.
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-  isLocalOnlyReadOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-  getNote,
-}))
-const requestNoteMenu = vi.hoisted(() => vi.fn<(path: string) => void>())
-vi.mock('@/editor/status/note-menu-request.ts', () => ({ requestNoteMenu }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 }, indexing: false }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      statusBarEnabled: true,
-      editorMarkdownSyntax: 'hide',
-      allNotesFilterTags: [],
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
-
-type ResolvedArchive = Awaited<ReturnType<typeof resolveArchivedPost>>
+type ResolvedArchive = ResolvedArchivedPost | null
 
 const X_URL = 'https://x.com/jack/status/101'
 const YOUTUBE_URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
@@ -79,10 +48,11 @@ const REMOTE_COMMANDS = [
   'capture_oembed_fetch',
 ]
 
-let files: Record<string, string>
-let commands: string[]
-let client: QueryClient
-let navigate: ((route: Route) => void) | null = null
+// The app of the rendered pane; set by `renderNote`.
+let app: TestCoreServices
+let noteFile: TestNoteFileService
+const navigateRef: RefObject<RouterNavigate | null> = createRef()
+const getNote = vi.fn<IndexQueryService['getNote']>()
 const resolveArchive = vi.fn<(postId: string) => Promise<ResolvedArchive>>()
 
 function noteRow(path: string, isPrivate: boolean): NoteRow {
@@ -91,7 +61,6 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
     title: '',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -114,59 +83,79 @@ function archivedPost(id: string, text: string): NonNullable<ResolvedArchive> {
 }
 
 beforeEach(() => {
-  files = {}
-  commands = []
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  getNote.mockImplementation(async (path) => noteRow(path, false))
-  resolveArchive.mockImplementation(async (postId) => archivedPost(postId, 'Archived post'))
-  setBridge({
-    invoke: async (command, args) => {
-      commands.push(command)
-      if (command === 'note_read') return files[String(args.path)]
-      if (command === 'note_write') {
-        files[String(args.path)] = String(args.contents)
-        return null
-      }
-      if (command === 'x_archive_resolve') return await resolveArchive(String(args.postId))
-      if (command === 'db_query') return []
-      return null
-    },
-    listen: async () => () => {},
-  })
-})
-
-afterEach(async () => {
-  await cleanup()
-  setBridge(null)
-  queryClient.clear()
-  vi.resetAllMocks()
-  navigate = null
+  navigateRef.current = null
+  getNote.mockReset().mockImplementation((path) => Promise.resolve(noteRow(path, false)))
+  resolveArchive
+    .mockReset()
+    .mockImplementation((postId) => Promise.resolve(archivedPost(postId, 'Archived post')))
 })
 
 /** Exposes the router's navigate, so a test can move one pane between notes. */
 function Navigator(): null {
-  navigate = useRouter().navigate
+  const { navigate } = useRouter()
+
+  useLayoutEffect(() => {
+    navigateRef.current = navigate
+    return () => {
+      navigateRef.current = null
+    }
+  }, [navigate])
+
   return null
 }
 
-function renderNote(path: string) {
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'note', path }}>
-        <PaletteProvider>
-          <Navigator />
-          <RouteContent />
-        </PaletteProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+/** The newest status-menu request for `path`, as the status bar would see it. */
+function MenuRequestProbe({ path }: { path: string }) {
+  const request = useNoteMenuRequest(path)
+  return <output data-testid="menu-request">{request ?? 'none'}</output>
+}
+
+/**
+ * The note route for `path` over `files`, in a graph whose local-only folder
+ * `secure` is read-only.
+ */
+async function renderNote(path: string, files: Record<string, string>) {
+  noteFile = createTestNoteFileService({ files })
+  app = createTestCoreServices({ noteFile })
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
+  vi.spyOn(app.xArchive, 'resolve').mockImplementation(
+    async (_generation, postId) => await resolveArchive(postId),
+  )
+  // The X post resolver and its preload read the app's shared query client.
+  return await renderInApp(
+    <PaletteProvider>
+      <Navigator />
+      <MenuRequestProbe path={path} />
+      <RouteContent />
+    </PaletteProvider>,
+    {
+      app,
+      queryClient,
+      graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
+      settings: {
+        statusBarEnabled: true,
+        editorMarkdownSyntax: 'hide',
+        wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+      },
+      route: { kind: 'note', path },
+    },
   )
 }
 
+/** Every remote command the pane sent so far, and the archive lookups. */
+function remoteCalls(since = 0): string[] {
+  const commands = app.ipc
+    .calls()
+    .slice(since)
+    .map((call) => call.command)
+  return commands.filter((command) => REMOTE_COMMANDS.includes(command))
+}
+
 function openNote(path: string): void {
-  if (navigate === null) {
+  if (navigateRef.current === null) {
     throw new Error('the router has not rendered')
   }
-  navigate({ kind: 'note', path })
+  navigateRef.current({ kind: 'note', path })
 }
 
 /**
@@ -225,9 +214,10 @@ function remoteElements(): Element | null {
 }
 
 it('opens a locked note in the editor with nothing remote', async () => {
-  files['notes/locked.md'] = `---\nprivate: true\n---\n# Locked\n\n${REMOTE_BODY}`
-  getNote.mockImplementation(async (path) => noteRow(path, true))
-  const view = await renderNote('notes/locked.md')
+  getNote.mockImplementation((path) => Promise.resolve(noteRow(path, true)))
+  await renderNote('notes/locked.md', {
+    'notes/locked.md': `---\nprivate: true\n---\n# Locked\n\n${REMOTE_BODY}`,
+  })
 
   const links = page.getByTestId('embed-link')
   await expect.element(links.first()).toHaveTextContent(X_URL)
@@ -237,64 +227,61 @@ it('opens a locked note in the editor with nothing remote', async () => {
   await expect.element(links.last()).toBeVisible()
   expect(editable()).not.toBeNull()
   expect(remoteElements()).toBeNull()
-  for (const command of REMOTE_COMMANDS) {
-    expect(commands).not.toContain(command)
-  }
-  await view.unmount()
+  expect(remoteCalls()).toEqual([])
+  expect(resolveArchive).not.toHaveBeenCalled()
 })
 
 it('marks a private note above its title and opens its status menu from there', async () => {
-  files['notes/locked.md'] = `---\nprivate: true\n---\n# Locked\n`
-  getNote.mockImplementation(async (path) => noteRow(path, true))
-  const view = await renderNote('notes/locked.md')
+  getNote.mockImplementation((path) => Promise.resolve(noteRow(path, true)))
+  await renderNote('notes/locked.md', { 'notes/locked.md': `---\nprivate: true\n---\n# Locked\n` })
 
   const notice = page.getByRole('button', { name: 'Private note: show note details' })
   await expect.element(notice).toHaveTextContent('Private · never sent to AI or other services')
+  const before = page.getByTestId('menu-request').element().textContent
   await notice.click()
-  expect(requestNoteMenu).toHaveBeenCalledWith('notes/locked.md')
-  await view.unmount()
+  await expect.element(page.getByTestId('menu-request')).not.toHaveTextContent(before ?? '')
+  await expect.element(page.getByTestId('menu-request')).not.toHaveTextContent('none')
 })
 
 it('treats a note whose live header is locked as private while its row says public', async () => {
-  files['notes/locked.md'] = `---\nprivate: true\n---\n# Locked\n\n${REMOTE_BODY}`
-  const view = await renderNote('notes/locked.md')
+  await renderNote('notes/locked.md', {
+    'notes/locked.md': `---\nprivate: true\n---\n# Locked\n\n${REMOTE_BODY}`,
+  })
 
   await expect.element(page.getByTestId('embed-link').first()).toHaveTextContent(X_URL)
   expect(remoteElements()).toBeNull()
-  for (const command of REMOTE_COMMANDS) {
-    expect(commands).not.toContain(command)
-  }
-  await view.unmount()
+  expect(remoteCalls()).toEqual([])
+  expect(resolveArchive).not.toHaveBeenCalled()
 })
 
 it('switches the policy live on a Lock toggle, without remounting the editor', async () => {
   const path = 'notes/tweets.md'
-  files[path] = `# Tweets\n\n![](${X_URL})\n`
-  const view = await renderNote(path)
+  await renderNote(path, { [path]: `# Tweets\n\n![](${X_URL})\n` })
   await expect.element(page.getByText('Archived post')).toBeVisible()
   const editor = editable()
   expect(editor).not.toBeNull()
 
-  const beforeLock = commands.length
-  await toggleNotePrivate({ queryClient: client, root: '/g', generation: 1, path })
+  const beforeLock = app.ipc.calls().length
+  const lookupsBeforeLock = resolveArchive.mock.calls.length
+  await toggleNotePrivate(app.noteActions, path)
   await expect.element(page.getByTestId('embed-link')).toHaveTextContent(X_URL)
   expect(remoteElements()).toBeNull()
   expect(editable()).toBe(editor)
   await vi.waitFor(() =>
-    expect(files[path]).toBe(`---\nprivate: true\n---\n\n# Tweets\n\n![](${X_URL})\n`),
+    expect(noteFile.files().get(path)).toBe(
+      `---\nprivate: true\n---\n\n# Tweets\n\n![](${X_URL})\n`,
+    ),
   )
-  for (const command of REMOTE_COMMANDS) {
-    expect(commands.slice(beforeLock)).not.toContain(command)
-  }
+  expect(remoteCalls(beforeLock)).toEqual([])
+  expect(resolveArchive).toHaveBeenCalledTimes(lookupsBeforeLock)
 
   await expect.element(page.getByTestId('private-note-notice')).toBeVisible()
 
-  await toggleNotePrivate({ queryClient: client, root: '/g', generation: 1, path })
+  await toggleNotePrivate(app.noteActions, path)
   await expect.element(page.getByText('Archived post')).toBeVisible()
   expect(page.getByTestId('embed-link').query()).toBeNull()
   expect(page.getByTestId('private-note-notice').query()).toBeNull()
   expect(editable()).toBe(editor)
-  await view.unmount()
 })
 
 const SECRET = 'secret words'
@@ -302,29 +289,29 @@ const SECRET = 'secret words'
 /**
  * Open a public note, then a local-only one holding `remote`, so the public
  * note's row is cached when the pane goes back to it (its policy is known at
- * once). Returns the number of bridge calls made before the pane leaves the
- * local-only note.
+ * once). Returns how many IPC calls and archive lookups were made before the
+ * pane leaves the local-only note.
  */
-async function visitLocalOnlyNote(remote: string): Promise<number> {
-  files['notes/public.md'] = '# Public\n\nhello public\n'
-  files['secure/a.md'] = `# Secret\n\n${SECRET}\n\n${remote}\n`
-  getNote.mockImplementation(async (path) => noteRow(path, path.startsWith('secure/')))
-  await renderNote('notes/public.md')
+async function visitLocalOnlyNote(remote: string): Promise<{ calls: number; lookups: number }> {
+  getNote.mockImplementation((path) => Promise.resolve(noteRow(path, path.startsWith('secure/'))))
+  await renderNote('notes/public.md', {
+    'notes/public.md': '# Public\n\nhello public\n',
+    'secure/a.md': `# Secret\n\n${SECRET}\n\n${remote}\n`,
+  })
   await expect.element(page.getByText('hello public')).toBeVisible()
   openNote('secure/a.md')
   await expect.element(page.getByTestId('local-only-sheet')).toBeVisible()
   await expect.element(page.getByText(SECRET)).toBeVisible()
-  return commands.length
+  return { calls: app.ipc.calls().length, lookups: resolveArchive.mock.calls.length }
 }
 
 it('never looks up a local-only note’s X posts for the note the pane opens next', async () => {
-  const beforeLeaving = await visitLocalOnlyNote('![](https://x.com/jack/status/999)')
+  const before = await visitLocalOnlyNote('![](https://x.com/jack/status/999)')
 
   openNote('notes/public.md')
   await expect.element(page.getByText('hello public')).toBeVisible()
-  for (const command of REMOTE_COMMANDS) {
-    expect(commands.slice(beforeLeaving)).not.toContain(command)
-  }
+  expect(remoteCalls(before.calls)).toEqual([])
+  expect(resolveArchive).toHaveBeenCalledTimes(before.lookups)
 })
 
 it('never shows a local-only note in an editor for the note the pane opens next', async () => {

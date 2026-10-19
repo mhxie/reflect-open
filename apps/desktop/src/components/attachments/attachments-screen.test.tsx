@@ -1,37 +1,26 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTestCoreServices } from '@reflect/core/testing'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
 import type { ReactElement } from 'react'
-import { setBridge } from '@reflect/core'
+import type { AttachmentService, FileMeta } from '@reflect/core'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
-import { resetLocalStorageStores } from '@/lib/local-storage.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { resetRatioCaches } from './attachment-ratio-cache.ts'
 import { AttachmentsScreen } from './attachments-screen.tsx'
 
 /**
- * The Attachments screen over the real query layer and a fake IPC bridge: the
- * file listing from `list_attachments`, "linked from" notes from compiled SQL,
- * and navigation through the real router.
+ * The Attachments screen over the real query layer and scripted services: the
+ * file listing from `attachments.listFiles`, "linked from" notes and their
+ * tags from the note list, and navigation through the real router.
  */
 
-const openAttachment = vi.hoisted(() =>
-  vi.fn<(path: string, generation: number) => Promise<void>>(),
-)
-vi.mock('@/lib/open-attachment.ts', () => ({ openAttachment }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 }, indexing: false }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'iso', timeFormat: '24h' } }),
-}))
 // Every asset URL serves one real 1×1 PNG, so thumbnails load (and report
 // their size) instead of falling back — except paths listed in `broken`,
 // which serve bytes no image decoder accepts. The asset path rides in the
 // fragment.
-const assets = vi.hoisted(() => {
+const assets = (() => {
   const bytes = Uint8Array.from(
     atob(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
@@ -43,15 +32,10 @@ const assets = vi.hoisted(() => {
     corrupt: URL.createObjectURL(new Blob(['not an image'], { type: 'image/png' })),
     broken: new Set<string>(),
   }
-})
-vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (path: string, protocol: string) =>
-    `${assets.broken.has(path) ? assets.corrupt : assets.image}#${protocol}/${path}`,
-}))
+})()
 
 const DAY = 24 * 60 * 60 * 1000
-const files = [
+const files: FileMeta[] = [
   { path: 'assets/table.csv', size: 10, modifiedMs: 6 * DAY },
   { path: 'assets/clip.mp4', size: 10, modifiedMs: 5 * DAY },
   { path: 'assets/photo.png', size: 10, modifiedMs: 4 * DAY },
@@ -61,71 +45,52 @@ const files = [
 ]
 const references = [
   {
-    is_private: 0,
-    has_conflict: 0,
-    asset_path: 'assets/photo.png',
-    note_path: 'notes/trip.md',
+    isPrivate: false,
+    assetPath: 'assets/photo.png',
+    notePath: 'notes/trip.md',
     title: 'Trip',
     mtime: 9,
   },
   {
-    is_private: 0,
-    has_conflict: 0,
-    asset_path: 'photo.png',
-    note_path: 'notes/later.md',
+    isPrivate: false,
+    assetPath: 'photo.png',
+    notePath: 'notes/later.md',
     title: 'Later',
     mtime: 10,
   },
   {
-    is_private: 0,
-    has_conflict: 0,
-    asset_path: 'assets/report.pdf',
-    note_path: 'notes/report.md',
+    isPrivate: false,
+    assetPath: 'assets/report.pdf',
+    notePath: 'notes/report.md',
     title: 'Report',
     mtime: 3,
   },
 ]
 const noteTags = [
-  { note_path: 'notes/trip.md', tag: 'travel' },
-  { note_path: 'notes/report.md', tag: 'Travel' },
-  { note_path: 'notes/report.md', tag: 'work' },
+  { notePath: 'notes/trip.md', tag: 'travel' },
+  { notePath: 'notes/report.md', tag: 'Travel' },
+  { notePath: 'notes/report.md', tag: 'work' },
 ]
 
-const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
-setBridge({ invoke: mockInvoke, listen: async () => () => {} })
+/** What the file listing reports; tests swap it, then refetch. */
+let listing: readonly FileMeta[] = files
+let openOrReveal: MockInstance<AttachmentService['openOrReveal']>
 
-function serve(listing: readonly unknown[]): void {
-  mockInvoke.mockImplementation(async (command, args) => {
-    if (command === 'list_attachments') {
-      return listing
-    }
-    if (command !== 'db_query') {
-      return null
-    }
-    return String(args['sql']).startsWith('select "tags"') ? noteTags : references
-  })
+function serve(next: readonly FileMeta[]): void {
+  listing = next
 }
 
 beforeEach(() => {
   // Media sizes remembered by an earlier test must not shape this one's layout.
   resetRatioCaches()
-  resetLocalStorageStores()
   localStorage.removeItem('reflect.attachment-ratios:/g')
-  openAttachment.mockReset().mockResolvedValue(undefined)
   assets.broken.clear()
-  mockInvoke.mockReset()
   serve(files)
 })
 
-function Probes(): ReactElement {
-  const { route } = useRouter()
+function PeekProbe(): ReactElement {
   const peek = usePeek()
-  return (
-    <>
-      <output data-testid="route">{JSON.stringify(route)}</output>
-      <output data-testid="peek">{JSON.stringify(peek?.target ?? null)}</output>
-    </>
-  )
+  return <output data-testid="peek">{JSON.stringify(peek?.target ?? null)}</output>
 }
 
 function RoutedScreen(): ReactElement {
@@ -137,23 +102,37 @@ function RoutedScreen(): ReactElement {
   )
 }
 
-/** Render the routed screen; returns its query client, for refetches. */
-function renderScreen(): QueryClient {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'attachments', type: null, tag: null }}>
-        <PeekProvider>
-          {/* A fixed width gives the flow three columns. */}
-          <div style={{ height: '100vh', width: 900 }}>
-            <RoutedScreen />
-          </div>
-          <Probes />
-        </PeekProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+async function renderScreen() {
+  const app = createTestCoreServices()
+  vi.spyOn(app.attachments, 'listFiles').mockImplementation(() => Promise.resolve([...listing]))
+  vi.spyOn(app.attachments, 'assetUrl').mockImplementation(
+    (path, generation) =>
+      `${assets.broken.has(`${generation}/${path}`) ? assets.corrupt : assets.image}#reflect-asset/${generation}/${path}`,
   )
-  return client
+  openOrReveal = vi.spyOn(app.attachments, 'openOrReveal').mockResolvedValue(undefined)
+  vi.spyOn(app.noteList, 'listAttachmentReferences').mockResolvedValue(references)
+  vi.spyOn(app.noteList, 'listAttachmentNoteTags').mockResolvedValue(noteTags)
+  return await renderInApp(
+    <PeekProvider>
+      {/* A fixed width gives the flow three columns. */}
+      <div style={{ height: '100vh', width: 900 }}>
+        <RoutedScreen />
+      </div>
+      <PeekProbe />
+    </PeekProvider>,
+    {
+      app,
+      graph: { root: '/g', name: 'g', generation: 7 },
+      route: { kind: 'attachments', type: null, tag: null },
+      settings: { dateFormat: 'iso', timeFormat: '24h' },
+    },
+  )
+}
+
+type ScreenView = Awaited<ReturnType<typeof renderScreen>>
+
+function probedRoute(view: ScreenView): unknown {
+  return view.appServices.navigation.getState().route
 }
 
 /** The card preview buttons, in DOM (reading) order. */
@@ -163,9 +142,14 @@ function cardLabels(): (string | null)[] {
   )
 }
 
+/** The element holding focus, if any. */
+function focusedElement(): Element | null {
+  return document.activeElement
+}
+
 describe('AttachmentsScreen', () => {
   it('lists media files newest first, each with the notes linking to it', async () => {
-    renderScreen()
+    await renderScreen()
 
     await expect.element(page.getByRole('heading', { name: 'Attachments' })).toBeVisible()
     await expect.element(page.getByTestId('attachments-count')).toHaveTextContent('5')
@@ -207,7 +191,7 @@ describe('AttachmentsScreen', () => {
   })
 
   it('offers a tab per type the graph has and narrows the flow to it', async () => {
-    renderScreen()
+    const view = await renderScreen()
     const filters = page.getByRole('group', { name: 'Filter attachments' })
     await expect.element(filters.getByRole('button', { name: 'PDF' })).toBeVisible()
     expect(filters.getByRole('button', { name: 'Audio' }).query()).toBeNull()
@@ -215,14 +199,14 @@ describe('AttachmentsScreen', () => {
     await filters.getByRole('button', { name: 'PDF' }).click()
 
     await expect
-      .element(page.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'attachments', type: 'pdf', tag: null }))
+      .poll(() => probedRoute(view))
+      .toEqual({ kind: 'attachments', type: 'pdf', tag: null })
     await expect.element(page.getByTestId('attachments-count')).toHaveTextContent('1')
     await expect.poll(cardLabels).toEqual(['Preview report.pdf'])
   })
 
   it('narrows to files linked from notes with a tag, combined with the type', async () => {
-    renderScreen()
+    const view = await renderScreen()
     const tagFilter = page.getByRole('group', { name: 'Filter attachments by tag' })
     await tagFilter.getByRole('button', { name: 'Tag' }).click()
     // Facets fold casing and count files: photo (via Trip) and report.
@@ -230,8 +214,8 @@ describe('AttachmentsScreen', () => {
     await page.getByRole('option', { name: '#work 1' }).click()
 
     await expect
-      .element(page.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'attachments', type: null, tag: 'work' }))
+      .poll(() => probedRoute(view))
+      .toEqual({ kind: 'attachments', type: null, tag: 'work' })
     await expect.poll(cardLabels).toEqual(['Preview report.pdf'])
 
     // The type tabs keep the tag; the clear button drops it and keeps the type.
@@ -242,25 +226,23 @@ describe('AttachmentsScreen', () => {
     await expect.element(page.getByText('No images in notes tagged #work.')).toBeVisible()
     await tagFilter.getByRole('button', { name: 'Clear tag filter' }).click()
     await expect
-      .element(page.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'attachments', type: 'image', tag: null }))
+      .poll(() => probedRoute(view))
+      .toEqual({ kind: 'attachments', type: 'image', tag: null })
     await expect
       .poll(cardLabels)
       .toEqual(['Preview photo.png', 'Preview logo.svg', 'Preview stray.jpg'])
   })
 
   it('opens the linking note', async () => {
-    renderScreen()
+    const view = await renderScreen()
 
     await page.getByRole('button', { name: 'Later' }).click()
 
-    await expect
-      .element(page.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/later.md' }))
+    await expect.poll(() => probedRoute(view)).toEqual({ kind: 'note', path: 'notes/later.md' })
   })
 
   it('lists every linking note from the "+N" menu, from the keyboard too', async () => {
-    renderScreen()
+    const view = await renderScreen()
     const more = page.getByRole('button', { name: '1 more note links to photo.png' })
     await expect.element(more).toBeVisible()
 
@@ -274,16 +256,14 @@ describe('AttachmentsScreen', () => {
     await expect.element(menu.getByRole('menuitem', { name: 'Trip' })).toBeVisible()
 
     await menu.getByRole('menuitem', { name: 'Trip' }).click()
-    await expect
-      .element(page.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/trip.md' }))
+    await expect.poll(() => probedRoute(view)).toEqual({ kind: 'note', path: 'notes/trip.md' })
   })
 
   it('previews images in the lightbox, PDFs in Peek, and opens video in its default app', async () => {
-    renderScreen()
+    await renderScreen()
 
     await page.getByRole('button', { name: 'Open clip.mp4' }).click()
-    expect(openAttachment).toHaveBeenCalledWith('assets/clip.mp4', 7)
+    expect(openOrReveal).toHaveBeenCalledWith('assets/clip.mp4')
 
     await page.getByRole('button', { name: 'Preview report.pdf' }).click()
     await expect
@@ -293,23 +273,23 @@ describe('AttachmentsScreen', () => {
     await page.getByRole('button', { name: 'Preview logo.svg' }).click()
     await expect.element(page.getByRole('button', { name: 'Close image preview' })).toBeVisible()
     await page.getByRole('button', { name: 'Open', exact: true }).click()
-    expect(openAttachment).toHaveBeenLastCalledWith('assets/logo.svg', 7)
+    expect(openOrReveal).toHaveBeenLastCalledWith('assets/logo.svg')
   })
 
   it('moves between cards with the arrow keys, starting from the screen', async () => {
-    renderScreen()
+    await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Open clip.mp4' })).toBeVisible()
 
     // Three columns: clip, photo, report across the top; logo under clip;
     // stray under photo.
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Open clip.mp4')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Open clip.mp4')
     await userEvent.keyboard('{ArrowDown}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview logo.svg')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview logo.svg')
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview stray.jpg')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview stray.jpg')
     await userEvent.keyboard('{ArrowUp}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview photo.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview photo.png')
   })
 
   it('mounts only the cards near the viewport, and more as it scrolls', async () => {
@@ -320,7 +300,7 @@ describe('AttachmentsScreen', () => {
         modifiedMs: 600 - index,
       })),
     )
-    renderScreen()
+    await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Preview f000.png' })).toBeVisible()
 
     const mountedCount = (): number => cardLabels().length
@@ -335,16 +315,16 @@ describe('AttachmentsScreen', () => {
   })
 
   it('keeps keyboard focus on its card when a newer file sorts in ahead of it', async () => {
-    const listing = Array.from({ length: 600 }, (_, index) => ({
+    const many = Array.from({ length: 600 }, (_, index) => ({
       path: `assets/f${String(index).padStart(3, '0')}.png`,
       size: 10,
       modifiedMs: 600 - index,
     }))
-    serve(listing)
-    const client = renderScreen()
+    serve(many)
+    const view = await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Preview f000.png' })).toBeVisible()
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview f000.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview f000.png')
 
     // Scroll far past the focused card: it stays mounted, and focused.
     const scroller = page.getByTestId('attachments-scroll').element()
@@ -352,19 +332,19 @@ describe('AttachmentsScreen', () => {
     await expect.element(page.getByRole('button', { name: 'Preview f599.png' })).toBeInTheDocument()
 
     // A new file lands at the top, shifting every card's position by one.
-    serve([{ path: 'assets/newest.png', size: 10, modifiedMs: 10_000 }, ...listing])
-    await client.invalidateQueries()
+    serve([{ path: 'assets/newest.png', size: 10, modifiedMs: 10_000 }, ...many])
+    await view.queryClient.invalidateQueries()
     await expect.element(page.getByTestId('attachments-count')).toHaveTextContent('601')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview f000.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview f000.png')
   })
 
   it('keeps keyboard focus on a card whose file is rewritten', async () => {
-    const client = renderScreen()
+    const view = await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Open clip.mp4' })).toBeVisible()
     // Into the flow at clip.mp4 (column 0), then across to photo.png (column 1).
     await userEvent.keyboard('{ArrowRight}')
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview photo.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview photo.png')
     const focused = document.activeElement
 
     serve(
@@ -372,7 +352,7 @@ describe('AttachmentsScreen', () => {
         file.path === 'assets/photo.png' ? { ...file, modifiedMs: file.modifiedMs + 1 } : file,
       ),
     )
-    await client.invalidateQueries()
+    await view.queryClient.invalidateQueries()
     await vi.waitFor(() =>
       expect(focused?.querySelector('img')?.getAttribute('src')).toContain(`&v=${4 * DAY + 1}-10`),
     )
@@ -387,7 +367,7 @@ describe('AttachmentsScreen', () => {
         modifiedMs: 600 - index,
       })),
     )
-    renderScreen()
+    await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Preview f000.png' })).toBeVisible()
     await userEvent.keyboard('{ArrowRight}')
     const card = document.activeElement
@@ -416,11 +396,11 @@ describe('AttachmentsScreen', () => {
         modifiedMs: 600 - index,
       })),
     ])
-    renderScreen()
+    await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Later' })).toBeVisible()
     await userEvent.keyboard('{ArrowRight}')
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview f000.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview f000.png')
     // Focus moves from f000's preview into photo.png's note link (Shift-Tab
     // does this in Chromium; WebKit's tab order is platform-configured).
     const link = page.getByRole('button', { name: 'Later' }).element()
@@ -436,7 +416,7 @@ describe('AttachmentsScreen', () => {
 
   it('reloads a card whose file was rewritten, clearing an earlier load failure', async () => {
     assets.broken.add('7/assets/photo.png')
-    const client = renderScreen()
+    const view = await renderScreen()
     // Thumbnail and raster fallback both fail, so the card opens the file instead.
     await expect.element(page.getByRole('button', { name: 'Open photo.png' })).toBeInTheDocument()
 
@@ -446,7 +426,7 @@ describe('AttachmentsScreen', () => {
         file.path === 'assets/photo.png' ? { ...file, modifiedMs: file.modifiedMs + 1 } : file,
       ),
     )
-    await client.invalidateQueries()
+    await view.queryClient.invalidateQueries()
 
     const photo = page.getByRole('button', { name: 'Preview photo.png' })
     await expect.element(photo).toBeInTheDocument()
@@ -457,7 +437,7 @@ describe('AttachmentsScreen', () => {
 
   it('says when the graph has no media', async () => {
     serve([{ path: 'assets/table.csv', size: 10, modifiedMs: 1 }])
-    renderScreen()
+    await renderScreen()
 
     await expect.element(page.getByText(/^No attachments yet\./)).toBeVisible()
   })

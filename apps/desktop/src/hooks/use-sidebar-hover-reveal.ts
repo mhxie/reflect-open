@@ -33,19 +33,19 @@ export interface SidebarHoverRevealState {
 export function useSidebarHoverReveal(): SidebarHoverRevealState {
   const [revealed, setRevealed] = useState(false)
   const overlayRef = useRef<HTMLElement>(null)
-  const revealTimer = useRef<number | null>(null)
+  const revealTimerRef = useRef<number | null>(null)
 
   const cancelReveal = useCallback((): void => {
-    if (revealTimer.current !== null) {
-      window.clearTimeout(revealTimer.current)
-      revealTimer.current = null
+    if (revealTimerRef.current !== null) {
+      window.clearTimeout(revealTimerRef.current)
+      revealTimerRef.current = null
     }
   }, [])
 
   const onPointerEnter = useCallback((): void => {
     cancelReveal()
-    revealTimer.current = window.setTimeout(() => {
-      revealTimer.current = null
+    revealTimerRef.current = window.setTimeout(() => {
+      revealTimerRef.current = null
       setRevealed(true)
     }, SIDEBAR_REVEAL_DELAY_MS)
   }, [cancelReveal])

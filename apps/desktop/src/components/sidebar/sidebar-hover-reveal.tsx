@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react'
 import { useSidebarHoverReveal } from '@/hooks/use-sidebar-hover-reveal.ts'
-import { hasMacosTitleBarOverlay } from '@/lib/window-chrome.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface SidebarHoverRevealProps {
   /** The workspace sidebar, mounted only while revealed. */
@@ -16,6 +16,7 @@ interface SidebarHoverRevealProps {
  * ⌘K palette and other later overlays still cover them.
  */
 export function SidebarHoverReveal({ children }: SidebarHoverRevealProps): ReactElement {
+  const { platform } = useCoreServices()
   const { revealed, overlayRef, edgeHandlers } = useSidebarHoverReveal()
 
   return (
@@ -35,7 +36,7 @@ export function SidebarHoverReveal({ children }: SidebarHoverRevealProps): React
         >
           {/* The overlay covers the title-bar drag strip; restore dragging
               beneath the history arrows, which raise themselves above it. */}
-          {hasMacosTitleBarOverlay ? (
+          {platform.hasMacosTitleBarOverlay ? (
             <div aria-hidden data-tauri-drag-region className="absolute inset-x-0 top-0 z-30 h-7" />
           ) : null}
           {children}

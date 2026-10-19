@@ -142,7 +142,7 @@ export function fitToContextWindow(
  * Group messages into turn segments: each starts at a `user` message and
  * carries everything the assistant did in response (assistant messages, tool
  * results). Trimming whole segments is what keeps tool pairs intact; the
- * resend privacy filter (`./history-privacy`) drops whole segments for the
+ * resend privacy filter (`./chat-privacy-service`) drops whole segments for the
  * same reason.
  */
 export function splitIntoTurnSegments(messages: readonly ModelMessage[]): ModelMessage[][] {

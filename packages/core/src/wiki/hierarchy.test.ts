@@ -19,7 +19,6 @@ function entry(path: string, claims: number | null = 0): WikiEntry {
     topic: null,
     mtime: 0,
     isPrivate: false,
-    hasConflict: false,
     state: claims === null ? 'evicted' : 'local',
     preview: null,
     revised: null,

@@ -8,7 +8,6 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   simple-git-hooks: false
-  spawn-sync: true
 
 dedupePeers: true
 
@@ -27,25 +26,6 @@ minimumReleaseAgeExclude:
   - prosemirror-view
   - '@ai-sdk/*'
   - ai
-  - '@tauri-apps/api@2.12.0'
-  - '@tauri-apps/cli-darwin-arm64@2.12.0'
-  - '@tauri-apps/cli-darwin-x64@2.12.0'
-  - '@tauri-apps/cli-linux-arm-gnueabihf@2.12.0'
-  - '@tauri-apps/cli-linux-arm64-gnu@2.12.0'
-  - '@tauri-apps/cli-linux-arm64-musl@2.12.0'
-  - '@tauri-apps/cli-linux-riscv64-gnu@2.12.0'
-  - '@tauri-apps/cli-linux-x64-gnu@2.12.0'
-  - '@tauri-apps/cli-linux-x64-musl@2.12.0'
-  - '@tauri-apps/cli-win32-arm64-msvc@2.12.0'
-  - '@tauri-apps/cli-win32-ia32-msvc@2.12.0'
-  - '@tauri-apps/cli-win32-x64-msvc@2.12.0'
-  - '@tauri-apps/cli@2.12.0'
-  - '@tauri-apps/plugin-deep-link@2.5.0'
-  - '@tauri-apps/plugin-dialog@2.8.0'
-  - '@tauri-apps/plugin-http@2.7.0'
-  - '@tauri-apps/plugin-opener@2.6.0'
-  - '@tauri-apps/plugin-process@2.4.0'
-  - '@tauri-apps/plugin-updater@2.13.0'
 
 # Keep these commented examples for future pkg.pr.new testing; do not remove them.
 # blockExoticSubdeps: false
@@ -58,6 +38,6 @@ minimumReleaseAgeExclude:
 # master) from tarballs vendored by
 # apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
-  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.76.1-622725d8bc93.tgz
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.0-622725d8bc93.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.80.1-622725d8bc93.tgz
+  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.77.0-cdde84f3734a.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.1-cdde84f3734a.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.80.3-cdde84f3734a.tgz

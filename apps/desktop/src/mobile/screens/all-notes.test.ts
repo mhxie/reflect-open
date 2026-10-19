@@ -15,16 +15,14 @@ function hit(overrides: Partial<FilteredSearchHit>): FilteredSearchHit {
     summary: '',
     mtime: 0,
     isPinned: false,
-    hasConflict: false,
     ...overrides,
   }
 }
 
 describe('rowForHit', () => {
-  it('preserves note privacy and conflict metadata for the state indicator', () => {
-    const row = rowForHit(hit({ isPrivate: true, hasConflict: true }), 'mdy')
+  it('preserves note privacy metadata for the state indicator', () => {
+    const row = rowForHit(hit({ isPrivate: true }), 'mdy')
     expect(row.isPrivate).toBe(true)
-    expect(row.hasConflict).toBe(true)
   })
 
   it('renders an FTS snippet as highlighted segments', () => {

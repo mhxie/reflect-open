@@ -80,7 +80,7 @@ export interface WikiAnchorsBlock {
   readonly unparsed: readonly string[]
 }
 
-const MARKER_RE = /^\s*@(anchor|pass|cite):\s*(.*)$/
+const MARKER_RE = /^\s*@(anchor|pass|cite):\s*(\S.*)?$/
 const HTTP_URL_RE = /^https?:\/\//i
 const citationSchema = z
   .strictObject({
@@ -149,23 +149,39 @@ export function wikiCitationDescription(dates: WikiCitationDates): string {
   return `Evidence recorded ${dates.validAt}${dates.invalidAt === undefined ? '' : `; invalidated ${dates.invalidAt}`}`
 }
 
+/**
+ * The ` | key: value` fields after a citation's target: empty when the rest of
+ * the line is blank, null when it is neither blank nor fields. The fields run
+ * from a ` | ` separator to the end of the line and may end in whitespace.
+ */
+function citationFieldsText(rest: string): string | null {
+  if (rest.trim() === '') return ''
+  const separator = /^\s+\|\s+/.exec(rest)?.[0]
+  if (separator === undefined) return null
+  const value = /^.*/.exec(rest.slice(separator.length))?.[0] ?? ''
+  const end = separator.length + value.length
+  return rest.slice(end).trim() === '' ? rest.slice(0, end) : null
+}
+
 function readCitationLine(line: string, asOf: string): WikiCitation | null {
-  const match = /^\s*@cite:\s*\[\[([^\]\r\n[]+)\]\]((?:\s+\|\s+.*)?)\s*$/.exec(line)
+  const match = /^\s*@cite:\s*\[\[([^\]\r\n[]+)\]\]/.exec(line)
   if (match === null) return null
+  const fieldsText = citationFieldsText(line.slice(match[0].length))
+  if (fieldsText === null) return null
   const inner = match[1] ?? ''
   const pipe = inner.indexOf('|')
   const target = (pipe === -1 ? inner : inner.slice(0, pipe)).trim()
   if (!isWikiCitationTarget(target)) return null
-  const fields: Record<string, string> = {}
-  for (const part of (match[2] ?? '').split(/\s+\|\s+/)) {
+  const fields = new Map<string, string>()
+  for (const part of fieldsText.split(/\s+\|\s+/)) {
     if (part.trim() === '') continue
     const pair = /^([a-z_]+):\s*(\S+)\s*$/.exec(part.trim())
     const key = pair?.[1]
     const value = pair?.[2]
-    if (key === undefined || value === undefined || key in fields) return null
-    fields[key] = value
+    if (key === undefined || value === undefined || fields.has(key)) return null
+    fields.set(key, value)
   }
-  const dates = readWikiCitationMetadata({ citation: fields })
+  const dates = readWikiCitationMetadata({ citation: Object.fromEntries(fields) })
   if (dates === null) return null
   return {
     target,

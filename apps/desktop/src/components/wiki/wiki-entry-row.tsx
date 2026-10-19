@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { formatDayRecencyLabel, formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { WikiSignals } from './wiki-signals.tsx'
 
@@ -137,11 +137,7 @@ export const WikiEntryRow = memo(function WikiEntryRow({
         >
           {isIndex ? <Waypoints aria-hidden className="size-3.5 flex-none text-accent" /> : null}
           <NoteTitle title={entry.title} displayTitle={entry.displayTitle} lang={entry.lang} />
-          <NoteStateIndicator
-            path={entry.path}
-            isPrivate={entry.isPrivate}
-            hasConflict={entry.hasConflict}
-          />
+          <NoteStateIndicator path={entry.path} isPrivate={entry.isPrivate} />
         </ListRowSubject>
         {isIndex ? (
           <Badge variant="secondary" className="h-4 rounded px-1.5 text-[10px]">

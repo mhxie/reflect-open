@@ -67,14 +67,14 @@ export function PinnedTagSortableList({
 }: PinnedTagSortableListProps): ReactElement {
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [overTag, setOverTag] = useState<string | null>(null)
-  const mounted = useRef(true)
-  const dragSession = useRef<PinnedTagDragSession | null>(null)
-  const originalOrder = useRef(tags)
+  const mountedRef = useRef(true)
+  const dragSessionRef = useRef<PinnedTagDragSession | null>(null)
+  const originalOrderRef = useRef(tags)
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 4 },
       onActivation: ({ event }) => {
-        dragSession.current = sessionFromEvent(event)
+        dragSessionRef.current = sessionFromEvent(event)
       },
     }),
     useSensor(KeyboardSensor, {
@@ -84,11 +84,11 @@ export function PinnedTagSortableList({
   )
 
   useLayoutEffect(() => {
-    mounted.current = true
+    mountedRef.current = true
     return () => {
-      mounted.current = false
-      const session = dragSession.current
-      dragSession.current = null
+      mountedRef.current = false
+      const session = dragSessionRef.current
+      dragSessionRef.current = null
       if (session !== null) {
         cancelPinnedTagDrag(session)
       }
@@ -96,15 +96,15 @@ export function PinnedTagSortableList({
   }, [])
 
   useLayoutEffect(() => {
-    if (dragSession.current !== null) {
-      cancelPinnedTagDrag(dragSession.current)
+    if (dragSessionRef.current !== null) {
+      cancelPinnedTagDrag(dragSessionRef.current)
     }
   }, [tags])
 
   const handleDragStart = (event: DragStartEvent): void => {
     if (typeof event.active.id === 'string') {
-      originalOrder.current = tags
-      dragSession.current = sessionFromEvent(event.activatorEvent)
+      originalOrderRef.current = tags
+      dragSessionRef.current = sessionFromEvent(event.activatorEvent)
       setActiveTag(event.active.id)
       setOverTag(event.active.id)
     }
@@ -113,13 +113,13 @@ export function PinnedTagSortableList({
     setOverTag(typeof event.over?.id === 'string' ? event.over.id : null)
   }
   const handleDragEnd = (event: DragEndEvent): void => {
-    dragSession.current = null
+    dragSessionRef.current = null
     setActiveTag(null)
     setOverTag(null)
-    if (!mounted.current || event.over === null || typeof event.active.id !== 'string') {
+    if (!mountedRef.current || event.over === null || typeof event.active.id !== 'string') {
       return
     }
-    const original = originalOrder.current
+    const original = originalOrderRef.current
     onReorder(
       original,
       orderPinnedFilterTags(original, event.active.id, event.over.id),
@@ -127,8 +127,8 @@ export function PinnedTagSortableList({
     )
   }
   const handleDragCancel = (): void => {
-    dragSession.current = null
-    if (mounted.current) {
+    dragSessionRef.current = null
+    if (mountedRef.current) {
       setActiveTag(null)
       setOverTag(null)
     }
@@ -161,13 +161,13 @@ export function PinnedTagSortableList({
         sensors={sensors}
         collisionDetection={detectPinnedTagCollision}
         onDragAbort={() => {
-          dragSession.current = null
+          dragSessionRef.current = null
         }}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
-        cancelDrop={() => !mounted.current}
+        cancelDrop={() => !mountedRef.current}
         accessibility={{
           announcements,
           screenReaderInstructions: {

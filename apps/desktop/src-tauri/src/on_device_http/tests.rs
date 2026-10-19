@@ -167,9 +167,10 @@ fn a_chunked_body_arrives_in_order_across_reads() {
         let head = state.send("chunked", post(&url, "{}")).await.unwrap();
         assert_eq!(head.status, 200);
         assert_eq!(head.status_text, "OK");
-        assert!(head
-            .headers
-            .contains(&("content-type".into(), "text/event-stream".into())));
+        assert!(
+            head.headers
+                .contains(&("content-type".into(), "text/event-stream".into()))
+        );
         assert_eq!(state.read("chunked").await.unwrap(), b"hello");
         release.send(()).unwrap();
         assert_eq!(state.read("chunked").await.unwrap(), b" world");
@@ -246,10 +247,12 @@ fn a_redirect_comes_back_unfollowed() {
     let url = format!("http://127.0.0.1:{first_port}/v1/chat/completions");
     let head = block_on(state.send("redirect", post(&url, "{}"))).unwrap();
     assert_eq!(head.status, 307);
-    assert!(head
-        .headers
-        .iter()
-        .any(|(name, value)| name == "location" && value.ends_with(&format!(":{second_port}/v1"))));
+    assert!(
+        head.headers
+            .iter()
+            .any(|(name, value)| name == "location"
+                && value.ends_with(&format!(":{second_port}/v1")))
+    );
     assert_eq!(block_on(state.read("redirect")).unwrap(), b"");
     server.join().unwrap();
     assert!(never_connected(&second));
@@ -415,14 +418,18 @@ fn request_bodies_are_decoded_and_capped() {
         .unwrap(),
         Some(b"hi".to_vec())
     );
-    assert!(request_body(Some(RequestBody::Base64 {
-        data: "not base64!".into()
-    }))
-    .is_err());
-    assert!(request_body(Some(RequestBody::Text {
-        text: "x".repeat(MAX_REQUEST_BODY_BYTES + 1)
-    }))
-    .is_err());
+    assert!(
+        request_body(Some(RequestBody::Base64 {
+            data: "not base64!".into()
+        }))
+        .is_err()
+    );
+    assert!(
+        request_body(Some(RequestBody::Text {
+            text: "x".repeat(MAX_REQUEST_BODY_BYTES + 1)
+        }))
+        .is_err()
+    );
 }
 
 #[test]

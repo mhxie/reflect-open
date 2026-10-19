@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { localImagesOnly, resolveNoXPost, resolveNoYouTubeVideo } from './local-only-render.ts'
 
 describe('localImagesOnly', () => {
-  it('refuses every remote source and delegates graph attachments', async () => {
+  it('refuses every remote source and delegates graph attachments', () => {
     const resolver = vi.fn((source: string) => `reflect-asset://${source}`)
     const local = localImagesOnly(resolver)
     for (const remote of [

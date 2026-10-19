@@ -17,7 +17,7 @@ use tauri::State;
 use crate::error::{AppError, AppResult};
 
 use super::local_only_edit::{self, NoteRecovery};
-use super::{ensure_relative, graph_for, note_write_guard, GraphState};
+use super::{GraphState, ensure_relative, graph_for, with_graph_lock};
 
 /// Keep `contents` as the unsaved text of the local-only note at `path`,
 /// replacing only this editor session's earlier copy.
@@ -32,23 +32,24 @@ pub async fn note_recovery_write(
 ) -> AppResult<NoteRecovery> {
     let root = recovery_root(&state, generation, &path)?;
     crate::blocking::run_blocking(move || {
-        let _guard = note_write_guard();
-        local_only_edit::write_recovery(
-            &root,
-            &path,
-            &owner_id,
-            source_revision.as_deref(),
-            &contents,
-        )
+        with_graph_lock(&root, || {
+            local_only_edit::write_recovery(
+                &root,
+                &path,
+                &owner_id,
+                source_revision.as_deref(),
+                &contents,
+            )
+        })
     })
     .await
 }
 
 /// The kept unsaved text of the local-only note at `path`, or `None`.
 ///
-/// Takes no note write guard: copies land and go with single renames and
-/// unlinks, so a read never sees half of one, and opening a note must not
-/// wait out a Git pull's checkout.
+/// Takes no graph lock: copies land and go with single renames and unlinks,
+/// so a read never sees half of one, and opening a note must not wait out a
+/// Git pull's checkout.
 #[tauri::command]
 pub async fn note_recovery_read(
     path: String,
@@ -70,8 +71,9 @@ pub async fn note_recovery_clear(
 ) -> AppResult<()> {
     let root = recovery_root(&state, generation, &path)?;
     crate::blocking::run_blocking(move || {
-        let _guard = note_write_guard();
-        local_only_edit::clear_recovery(&root, &path, &owner_id, &token)
+        with_graph_lock(&root, || {
+            local_only_edit::clear_recovery(&root, &path, &owner_id, &token)
+        })
     })
     .await
 }
@@ -98,6 +100,7 @@ mod tests {
     use std::future::Future;
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
+    use std::sync::mpsc;
     use std::task::{Context, Poll, Waker};
 
     use reflect_graph_paths::LocalOnlyFolders;
@@ -192,20 +195,40 @@ mod tests {
         found
     }
 
+    /// Hold the graph lock of `root` on another thread, the way a Git pull
+    /// holds it through its checkout, until the returned sender fires.
+    fn hold_graph_lock(root: &Path) -> (mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let root = root.to_path_buf();
+        let holder = std::thread::spawn(move || {
+            with_graph_lock(&root, || {
+                entered_tx.send(()).unwrap();
+                let _ = release_rx.recv();
+                Ok(())
+            })
+            .unwrap();
+        });
+        entered_rx.recv().unwrap();
+        (release_tx, holder)
+    }
+
     #[test]
     fn a_recovery_read_never_waits_for_a_pull() {
         let session = session(secure());
-        let _pulling = note_write_guard();
+        let (release, holder) = hold_graph_lock(&session.root);
         assert_eq!(
             note_recovery_read("finance/secure/bank.md".into(), 1, session.app.state()).unwrap(),
             None
         );
+        release.send(()).unwrap();
+        holder.join().unwrap();
     }
 
     #[test]
     fn a_recovery_write_waits_for_a_pull_without_blocking_its_command_future() {
         let session = session(secure());
-        let guard = note_write_guard();
+        let (release, holder) = hold_graph_lock(&session.root);
         let mut write = Box::pin(super::note_recovery_write(
             "finance/secure/bank.md".into(),
             "unsaved".into(),
@@ -216,7 +239,8 @@ mod tests {
         ));
         let mut context = Context::from_waker(Waker::noop());
         assert!(matches!(write.as_mut().poll(&mut context), Poll::Pending));
-        drop(guard);
+        release.send(()).unwrap();
+        holder.join().unwrap();
         assert_eq!(
             tauri::async_runtime::block_on(write).unwrap().contents,
             "unsaved"
@@ -353,15 +377,17 @@ mod tests {
         let before = snapshot(&notes);
         let path = "finance/secure/bank.md";
 
-        assert!(note_recovery_write(
-            path.into(),
-            "unsaved".into(),
-            OWNER_A.into(),
-            None,
-            1,
-            state()
-        )
-        .is_err());
+        assert!(
+            note_recovery_write(
+                path.into(),
+                "unsaved".into(),
+                OWNER_A.into(),
+                None,
+                1,
+                state()
+            )
+            .is_err()
+        );
         assert!(note_recovery_read(path.into(), 1, state()).is_err());
         assert!(
             note_recovery_clear(path.into(), OWNER_A.into(), OWNER_B.into(), 1, state()).is_err()

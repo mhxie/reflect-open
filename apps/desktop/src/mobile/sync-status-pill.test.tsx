@@ -1,32 +1,14 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getConflictedNotes, type GraphInfo } from '@reflect/core'
-import type { BackupState } from '@/lib/backup-controller.ts'
-import { publishKeyboardHeight } from '@/mobile/use-keyboard.ts'
+import { describe, expect, it } from 'vitest'
+import type { BackupState } from '@reflect/core'
+import { createTestCoreServices, createTestBackupService } from '@reflect/core/testing'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SyncStatusPill } from './sync-status-pill.tsx'
 
 /**
  * The floating status pill (Plan 19, step 10): visible only when sync has
- * something to say, plain language only, and it yields to the keyboard.
+ * something to say, plain language only.
  */
-
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getConflictedNotes: vi.fn(async () => []),
-}))
-
-const graphState = vi.hoisted(() => ({
-  graph: { root: '/g', name: 'G', generation: 3 } as GraphInfo | null,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => graphState }))
-
-const sync = vi.hoisted(() => ({ backup: { phase: 'loading' } as BackupState }))
-vi.mock('@/providers/sync-provider.tsx', () => ({
-  useSyncContext: () => ({ backup: sync.backup }),
-}))
 
 function connected(status: Extract<BackupState, { phase: 'connected' }>['status']): BackupState {
   return {
@@ -37,27 +19,9 @@ function connected(status: Extract<BackupState, { phase: 'connected' }>['status'
   }
 }
 
-let queryClient: QueryClient
-
-beforeEach(() => {
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  sync.backup = connected({ state: 'idle' })
-  vi.mocked(getConflictedNotes).mockResolvedValue([])
-})
-
-afterEach(async () => {
-  await cleanup()
-  queryClient.clear()
-  publishKeyboardHeight(0)
-  vi.clearAllMocks()
-})
-
-async function mount(): Promise<void> {
-  await render(
-    <QueryClientProvider client={queryClient}>
-      <SyncStatusPill />
-    </QueryClientProvider>,
-  )
+async function mount(backup: BackupState = connected({ state: 'idle' })): Promise<void> {
+  const app = createTestCoreServices({ backup: createTestBackupService({ state: backup }) })
+  await renderInApp(<SyncStatusPill />, { app, graph: { root: '/g', name: 'G', generation: 3 } })
 }
 
 describe('SyncStatusPill', () => {
@@ -69,46 +33,8 @@ describe('SyncStatusPill', () => {
   })
 
   it('shows Syncing while a cycle runs', async () => {
-    sync.backup = connected({ state: 'syncing' })
-    await mount()
+    await mount(connected({ state: 'syncing' }))
 
     await expect.element(page.getByRole('status')).toMatchTextContent('Syncing')
-  })
-
-  it('claims nothing until the conflict count is known', async () => {
-    // A pill shown before the count resolves could flip from hidden
-    // (reads as Backed up) to Needs review.
-    sync.backup = connected({ state: 'offline', message: 'Offline' })
-    vi.mocked(getConflictedNotes).mockReturnValue(new Promise(() => {}))
-    await mount()
-
-    await Promise.resolve()
-    await expect.element(page.getByRole('status')).not.toBeInTheDocument()
-  })
-
-  it('still shows engine states when the conflict count fails to load', async () => {
-    // Loading hides; a failed count must not — Offline/Needs attention are
-    // engine truth and would otherwise blank forever.
-    sync.backup = connected({ state: 'offline', message: 'Offline' })
-    vi.mocked(getConflictedNotes).mockRejectedValue(new Error('index unavailable'))
-    await mount()
-
-    await expect.element(page.getByRole('status')).toMatchTextContent('Offline')
-  })
-
-  it('shows Needs review while conflicted notes exist', async () => {
-    vi.mocked(getConflictedNotes).mockResolvedValue([{ path: 'notes/a.md', title: 'A' }])
-    await mount()
-
-    await expect.element(page.getByRole('status')).toMatchTextContent('Needs review')
-  })
-
-  it('yields to the software keyboard', async () => {
-    sync.backup = connected({ state: 'syncing' })
-    publishKeyboardHeight(300)
-    await mount()
-
-    await Promise.resolve()
-    await expect.element(page.getByRole('status')).not.toBeInTheDocument()
   })
 })

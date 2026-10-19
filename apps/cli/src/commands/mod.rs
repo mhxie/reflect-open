@@ -19,7 +19,7 @@ use std::path::Path;
 use reflect_graph_paths::LocalOnlyFolders;
 
 use crate::error::CliError;
-use crate::index::{local_only_folders, open_read_only, IndexOpen, OpenIndex};
+use crate::index::{IndexOpen, OpenIndex, local_only_folders, open_read_only};
 use crate::local_only_settings::configured_local_only_folders;
 
 pub(crate) fn warn(message: impl Display) {

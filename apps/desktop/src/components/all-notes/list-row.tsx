@@ -1,6 +1,6 @@
 import type { MouseEvent, ReactElement, ReactNode } from 'react'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 
 interface ListRowProps {
   path: string

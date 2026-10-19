@@ -7,12 +7,12 @@ use std::fs;
 use std::path::Path;
 
 use reflect_graph_paths::{
-    is_wiki_trust_report_path, normalize_wiki_trust_report_path, DEFAULT_WIKI_TRUST_REPORT_PATH,
-    WIKI_TRUST_REPORT_PATH_KEY,
+    DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY, is_wiki_trust_report_path,
+    normalize_wiki_trust_report_path,
 };
 use serde_json::Value;
 
-use crate::commands::output::{print_json, TrustReportJson};
+use crate::commands::output::{TrustReportJson, print_json};
 use crate::commands::warn;
 use crate::error::CliError;
 use crate::graph::Graph;

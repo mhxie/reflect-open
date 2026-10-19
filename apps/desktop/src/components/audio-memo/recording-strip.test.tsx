@@ -1,38 +1,67 @@
-import { render, type RenderResult } from 'vitest-browser-react'
+import { createTestCoreServices } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactElement } from 'react'
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import type { AudioMemoContextValue } from '@/providers/audio-memo-provider.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import type { Mutable } from '@reflect/utils'
 
-const memo = vi.hoisted(() => ({
-  phase: 'idle' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
+const memo = vi.hoisted((): Mutable<AudioMemoContextValue> => ({
+  phase: 'idle',
   elapsedMs: 0,
   stream: null,
+  nativeRecorder: false,
   subscribeLevel: null,
-  error: null as string | null,
+  available: true,
+  unavailableReason: null,
+  error: null,
   canRetry: false,
+  toggle: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
   discard: vi.fn(),
+  pendingCount: 0,
+  recorderState: 'idle',
 }))
 const recorder = vi.hoisted(() => ({
   lastTranscript: null as string | null,
   dismissTranscript: vi.fn(),
 }))
-const openNote = vi.hoisted(() => vi.fn())
 
 vi.mock('@/providers/audio-memo-provider.tsx', () => ({ useAudioMemo: () => ({ ...memo }) }))
 vi.mock('@/providers/recorder-provider.tsx', () => ({
   useOptionalRecorder: () => ({ ...recorder }),
 }))
-vi.mock('@/components/peek/peek-provider.tsx', () => ({ usePeekNavigation: () => openNote }))
-vi.mock('@/hooks/use-note-row.ts', () => ({
-  useNoteRow: () => ({ title: 'Call with Sarah Chen' }),
-}))
 
 const { RecordingStrip } = await import('./recording-strip.tsx')
 
-function renderStrip(): Promise<RenderResult> {
-  return render(<RecordingStrip />)
+/** What Peek shows, as an attribute so the strip's text stays its own. */
+function PeekProbe(): ReactElement {
+  const target = usePeek()?.target ?? null
+  return <div data-testid="peek" data-target={JSON.stringify(target)} />
+}
+
+async function renderStrip() {
+  const app = createTestCoreServices()
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation((path) =>
+    Promise.resolve({
+      path,
+      title: 'Call with Sarah Chen',
+      dailyDate: null,
+      isPrivate: false,
+      gistUrl: null,
+      gistStale: false,
+    }),
+  )
+  return await renderInApp(
+    <PeekProvider>
+      <RecordingStrip />
+      <PeekProbe />
+    </PeekProvider>,
+    { app },
+  )
 }
 
 beforeEach(() => {
@@ -96,10 +125,11 @@ describe('RecordingStrip', () => {
 
     const ready = page.getByRole('status', { name: 'Transcript ready' })
     await userEvent.click(ready.getByText('Call with Sarah Chen'))
-    expect(openNote).toHaveBeenCalledWith({
-      target: { kind: 'note', path: 'recordings/2026-10-03-call.md' },
-      openInNewWindow: false,
-    })
+    await vi.waitFor(() =>
+      expect(page.getByTestId('peek').element().getAttribute('data-target')).toContain(
+        '"path":"recordings/2026-10-03-call.md"',
+      ),
+    )
     expect(recorder.dismissTranscript).toHaveBeenCalled()
   })
 })

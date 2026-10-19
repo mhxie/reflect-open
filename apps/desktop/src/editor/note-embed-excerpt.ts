@@ -3,8 +3,16 @@ import GithubSlugger from 'github-slugger'
 /** Characters of source Markdown a collapsed note embed renders. */
 export const NOTE_EMBED_PREVIEW_CHARS = 4096
 
-const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t#]*$/
+const HEADING = /^ {0,3}(#{1,6})[ \t](.*)$/
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
+
+/**
+ * A heading line's text after its marker: without the spaces before it or the
+ * closing run of spaces and `#`.
+ */
+function headingText(rest: string): string {
+  return rest.replace(/^[ \t]+/, '').replace(/[ \t#]+$/, '')
+}
 
 function lookupKey(text: string): string {
   return text.normalize('NFKC').trim().replaceAll(/\s+/g, ' ').toLowerCase()
@@ -56,7 +64,7 @@ export function noteEmbedExcerpt(body: string, fragment: string | null): string 
     const heading = fence === null ? HEADING.exec(line) : null
     if (heading === null) continue
     const depth = heading[1]!.length
-    const text = heading[2]!
+    const text = headingText(heading[2]!)
     if (start !== -1) {
       if (depth <= level) {
         end = index

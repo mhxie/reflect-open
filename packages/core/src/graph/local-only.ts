@@ -14,35 +14,63 @@
  * The folder names come from Rust (`GraphInfo.localOnlyFolders` and
  * `GraphInfo.localOnlyEditableFolders`, loaded from the settings store when
  * the graph opens), so the walk, the read guard, the index flag, the edit
- * resolver, and these gates share one configuration. The graph-open commands
- * record them here as the open graph's session state.
+ * resolver, and these gates share one configuration. Each open graph's
+ * {@link LocalOnlyFolders} is its `GraphSession.localOnly`, so a pass that
+ * outlives a graph switch keeps deciding with its own graph's folders.
  *
  * The predicates mirror `LocalOnlyFolders` in `crates/graph-paths` exactly —
  * per `/`-separated component, empty and `.` segments skipped, ASCII
  * case-insensitive, directory components only — and
  * `fixtures/local-only-paths.json` and `fixtures/local-only-editable.json`
- * pin the two together.
+ * pin the two together. They are the UI's gates and a first check: Rust
+ * decides again for every path that leaves this machine and every write into
+ * a local-only folder.
  */
+
+/**
+ * One graph's local-only folder names, ASCII-folded.
+ */
+export interface LocalOnlyFolders {
+  /**
+   * Every configured local-only folder name.
+   */
+  readonly folders: ReadonlySet<string>
+  /**
+   * The configured names whose notes are editable in place.
+   */
+  readonly editable: ReadonlySet<string>
+}
+
+/**
+ * A graph without local-only folders.
+ */
+export const NO_LOCAL_ONLY_FOLDERS: LocalOnlyFolders = {
+  folders: new Set(),
+  editable: new Set(),
+}
+
+/**
+ * The local-only folders named by a graph's configuration, and, of those, the
+ * ones editable in place. An editable name that is not a configured folder
+ * grants nothing.
+ */
+export function createLocalOnlyFolders(
+  names: readonly string[],
+  editable: readonly string[] = [],
+): LocalOnlyFolders {
+  if (names.length === 0) {
+    return NO_LOCAL_ONLY_FOLDERS
+  }
+  const folders = new Set(names.map(foldAscii))
+  return {
+    folders,
+    editable: new Set(editable.map(foldAscii).filter((key) => folders.has(key))),
+  }
+}
 
 /** ASCII-only lowercase, matching Rust's `eq_ignore_ascii_case`. */
 function foldAscii(name: string): string {
   return name.replaceAll(/[A-Z]/g, (letter) => letter.toLowerCase())
-}
-
-let folderKeys: ReadonlySet<string> = new Set()
-let editableKeys: ReadonlySet<string> = new Set()
-
-/**
- * Record the open graph's local-only folder names and, of those, the ones
- * editable in place (both from `GraphInfo`). An editable name that is not a
- * configured folder grants nothing.
- */
-export function setLocalOnlyFolders(
-  names: readonly string[],
-  editable: readonly string[] = [],
-): void {
-  folderKeys = new Set(names.map(foldAscii))
-  editableKeys = new Set(editable.map(foldAscii).filter((key) => folderKeys.has(key)))
 }
 
 /** A path's directory components (every component but the last), as written. */
@@ -54,16 +82,16 @@ function directoryComponents(path: string): string[] {
 }
 
 /**
- * Whether a graph-relative path lies inside a local-only folder of the open
- * graph: some directory component (every component but the last) is a
+ * Whether a graph-relative path lies inside one of the graph's local-only
+ * folders: some directory component (every component but the last) is a
  * configured name. Such a note is private regardless of its frontmatter, and
  * this is the predicate every privacy gate uses, editable folder or not.
  */
-export function isLocalOnlyPath(path: string): boolean {
-  if (folderKeys.size === 0) {
+export function isLocalOnlyPath(localOnly: LocalOnlyFolders, path: string): boolean {
+  if (localOnly.folders.size === 0) {
     return false
   }
-  return directoryComponents(path).some((component) => folderKeys.has(foldAscii(component)))
+  return directoryComponents(path).some((component) => localOnly.folders.has(foldAscii(component)))
 }
 
 /**
@@ -71,14 +99,13 @@ export function isLocalOnlyPath(path: string): boolean {
  * editable: it is local-only ({@link isLocalOnlyPath}) and every directory
  * component carrying a configured name is an editable one, so a folder
  * nested in a read-only folder stays read-only. Mirrors
- * `LocalOnlyFolders::editable_contains`. Rust decides again from the entry
- * the path resolves to, so this gates the UI and is never the only check.
+ * `LocalOnlyFolders::editable_contains`.
  */
-export function isEditableLocalOnlyPath(path: string): boolean {
+export function isEditableLocalOnlyPath(localOnly: LocalOnlyFolders, path: string): boolean {
   const configured = directoryComponents(path)
     .map(foldAscii)
-    .filter((key) => folderKeys.has(key))
-  return configured.length > 0 && configured.every((key) => editableKeys.has(key))
+    .filter((key) => localOnly.folders.has(key))
+  return configured.length > 0 && configured.every((key) => localOnly.editable.has(key))
 }
 
 /**
@@ -87,8 +114,8 @@ export function isEditableLocalOnlyPath(path: string): boolean {
  * editable. Every edit gate (the editor, task toggles, note actions,
  * attachment intake, link rewrites) refuses such a note.
  */
-export function isLocalOnlyReadOnlyPath(path: string): boolean {
-  return isLocalOnlyPath(path) && !isEditableLocalOnlyPath(path)
+export function isLocalOnlyReadOnlyPath(localOnly: LocalOnlyFolders, path: string): boolean {
+  return isLocalOnlyPath(localOnly, path) && !isEditableLocalOnlyPath(localOnly, path)
 }
 
 /**
@@ -99,8 +126,10 @@ export function isLocalOnlyReadOnlyPath(path: string): boolean {
  * note's attachments live in `<folder>/assets/`. Mirrors
  * `LocalOnlyFolders::folder_root`.
  */
-export function localOnlyFolderRoot(path: string): string | null {
+export function localOnlyFolderRoot(localOnly: LocalOnlyFolders, path: string): string | null {
   const directories = directoryComponents(path)
-  const innermost = directories.findLastIndex((component) => folderKeys.has(foldAscii(component)))
+  const innermost = directories.findLastIndex((component) =>
+    localOnly.folders.has(foldAscii(component)),
+  )
   return innermost === -1 ? null : directories.slice(0, innermost + 1).join('/')
 }

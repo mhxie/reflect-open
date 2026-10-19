@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { NoteState } from '@reflect/core'
-import type { BackupState } from '@/lib/backup-controller.ts'
+import type { BackupState, NoteState } from '@reflect/core'
 import { noteDetails } from './note-details.ts'
 
 const EDITABLE: NoteState = {
@@ -94,6 +93,8 @@ describe('noteDetails', () => {
     expect(backupLabel({ phase: 'loading' })).toBe('Checking')
     expect(backupLabel({ phase: 'disconnected' })).toBe('Backup off')
     expect(backupLabel(connected({ state: 'syncing' }))).toBe('Syncing')
+    // The quiet window before the next backup still reads as backed up.
+    expect(backupLabel(connected({ state: 'waiting', until: 5_000 }))).toBe('Backed up')
     expect(
       noteDetails({
         state: EDITABLE,

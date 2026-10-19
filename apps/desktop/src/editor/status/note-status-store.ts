@@ -45,23 +45,17 @@ export function publishNoteStatus(scope: NoteStatusScope, owner: symbol, status:
     entries.set(scope.generation, generation)
   }
   const protection = status.protection
-  if (protection?.kind === 'save-blocked' || protection?.kind === 'external-change') {
-    function guardRecovery(callback: () => void): () => void {
-      return () => {
+  if (protection?.kind === 'save-blocked') {
+    const { retrySave } = protection
+    const guarded: NoteProtection = {
+      ...protection,
+      retrySave: () => {
         const entry = entries.get(scope.generation)?.get(scope.path)
         if (entry?.owner === owner && entry.status.protection === guarded) {
-          callback()
+          retrySave()
         }
-      }
+      },
     }
-    const guarded: NoteProtection =
-      protection.kind === 'save-blocked'
-        ? { ...protection, retrySave: guardRecovery(protection.retrySave) }
-        : {
-            ...protection,
-            keepMine: guardRecovery(protection.keepMine),
-            loadTheirs: guardRecovery(protection.loadTheirs),
-          }
     generation.set(scope.path, { owner, status: { ...status, protection: guarded } })
   } else {
     generation.set(scope.path, { owner, status })

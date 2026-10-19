@@ -1,11 +1,9 @@
 import { useState, type ReactElement } from 'react'
-import { errorMessage, revealAsset } from '@reflect/core'
+import { errorMessage } from '@reflect/core'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
 import type { NoteStatusScope } from '@/editor/status/note-status-store.ts'
-import { isMobileSurface } from '@/lib/platform-surface.ts'
 import { Button } from '@/components/ui/button.tsx'
-import { NoteConflictBanner } from './note-conflict-banner.tsx'
-import { SyncConflictNotice } from './sync-conflict-notice.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteProtectionDetailsProps {
   readonly scope: NoteStatusScope
@@ -17,6 +15,7 @@ export function NoteProtectionDetails({
   scope,
   protection,
 }: NoteProtectionDetailsProps): ReactElement {
+  const { attachments, platform } = useCoreServices()
   const [revealing, setRevealing] = useState(false)
   const [revealError, setRevealError] = useState<string | null>(null)
 
@@ -24,7 +23,7 @@ export function NoteProtectionDetails({
     setRevealing(true)
     setRevealError(null)
     try {
-      await revealAsset(scope.path, scope.generation)
+      await attachments.reveal(scope.path, scope.generation)
     } catch (cause) {
       setRevealError(errorMessage(cause))
     } finally {
@@ -34,26 +33,7 @@ export function NoteProtectionDetails({
 
   return (
     <div className="mb-3 space-y-2 border-b border-border pb-3 text-xs whitespace-normal">
-      {protection.kind === 'sync-conflict' ? (
-        <>
-          <p className="font-medium">Sync conflict</p>
-          <p className="text-text-secondary">Choose which versions of this note to keep.</p>
-          <SyncConflictNotice path={scope.path} shownContent={protection.content} compact />
-        </>
-      ) : protection.kind === 'external-change' ? (
-        <>
-          <p className="font-medium">External change</p>
-          <p className="break-words text-text-secondary">{protection.message}</p>
-          <p className="text-text-secondary">
-            The file changed while saving was blocked. Choose which version to keep.
-          </p>
-          <NoteConflictBanner
-            onKeepMine={protection.keepMine}
-            onLoadTheirs={protection.loadTheirs}
-            compact
-          />
-        </>
-      ) : protection.kind === 'save-blocked' ? (
+      {protection.kind === 'save-blocked' ? (
         <>
           <p className="font-medium">Saving blocked</p>
           <p className="break-words text-text-secondary">{protection.message}</p>
@@ -70,7 +50,7 @@ export function NoteProtectionDetails({
           <p className="text-text-secondary">
             The editor cannot save this Markdown faithfully. Edit the source file in another app.
           </p>
-          {isMobileSurface() ? null : (
+          {platform.surface.mobileApp ? null : (
             <Button
               size="sm"
               variant="outline"

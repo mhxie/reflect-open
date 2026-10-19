@@ -3,14 +3,15 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import {
   errorMessage,
   parseWikiTrustReport,
-  readWikiTrustReportFile,
+  type WikiService,
   type WikiTrustReport,
+  type WikiTrustReportFile,
 } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSyncContext } from '@/providers/sync-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** How often an open graph re-checks the report file for a new version. */
 const POLL_MS = 5000
@@ -55,10 +56,10 @@ export function shownWikiTrustReport(state: WikiTrustReportState): WikiTrustRepo
 }
 
 async function loadReport(
+  wiki: WikiService,
   client: QueryClient,
   key: readonly unknown[],
   path: string,
-  generation: number,
   changed: () => void,
 ): Promise<Loaded> {
   const previous = client.getQueryData<Loaded>(key)
@@ -72,9 +73,9 @@ async function loadReport(
   const known = previous?.status === 'ready' ? previous.stamp : null
   const before =
     previous === undefined || previous.status === 'missing' ? null : (previous.stamp ?? null)
-  let file: Awaited<ReturnType<typeof readWikiTrustReportFile>>
+  let file: WikiTrustReportFile | null
   try {
-    file = await readWikiTrustReportFile(path, known, generation)
+    file = await wiki.readTrustReportFile(path, known)
   } catch (cause) {
     return { status: 'unreadable', path, error: errorMessage(cause), last, stamp: before }
   }
@@ -105,19 +106,19 @@ async function loadReport(
  */
 export function useWikiTrustReport(always = false): WikiTrustReportState {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { wiki } = useCoreServices()
   const { settings } = useSettings()
   const client = useQueryClient()
   // Read when a report arrives, not when its read began: backup may start
   // while a read is still in flight.
   const syncContext = useSyncContext()
-  const sync = useRef(syncContext)
+  const syncRef = useRef(syncContext)
   useEffect(() => {
-    sync.current = syncContext
+    syncRef.current = syncContext
   })
   const path = settings.wikiTrustReportPath
-  const enabled = graph !== null && bridgeReady && (always || settings.wikiTrustDisplay !== 'off')
-  const generation = graph?.generation
+  const enabled = graph !== null && (always || settings.wikiTrustDisplay !== 'off')
+  const open = graph !== null
   const root = graph?.root
   const key = queryKeys.wikiTrust.report(root, path)
   // A Tauri window regaining focus fires `focus` without `visibilitychange`,
@@ -136,10 +137,10 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
     // A real fetcher even when this observer is idle: the always-on watcher
     // and a display-off editor share the key.
     queryFn: () =>
-      generation === undefined
-        ? Promise.reject(new Error('No graph is open.'))
-        : loadReport(client, key, path, generation, () => sync.current?.fileChanged()),
-    enabled: enabled && generation !== undefined,
+      open
+        ? loadReport(wiki, client, key, path, () => syncRef.current?.fileChanged())
+        : Promise.reject(new Error('No graph is open.')),
+    enabled,
     refetchInterval: (query) =>
       query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS,
     // The backup watcher polls with the window hidden too: the file watcher

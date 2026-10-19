@@ -21,7 +21,6 @@ mod background_task;
 mod blocking;
 mod calendar;
 mod capture;
-mod conflict;
 mod contacts;
 mod db;
 mod dev_harness;
@@ -30,9 +29,9 @@ mod editor_link_preview;
 mod error;
 mod fs;
 mod git;
-mod graph_gitignore;
 mod icloud;
 mod link_preview;
+mod logging;
 mod menu;
 mod on_device_http;
 mod quit;
@@ -118,25 +117,18 @@ mod capability_tests {
             .as_array()
             .expect("capability permissions");
 
-        assert!(permissions
-            .iter()
-            .any(|permission| permission.as_str() == Some("core:window:allow-hide")));
+        assert!(
+            permissions
+                .iter()
+                .any(|permission| permission.as_str() == Some("core:window:allow-hide"))
+        );
     }
-}
-
-/// Route `tracing` output to stderr, honoring `RUST_LOG` (default `info`).
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    // `try_init` so a second call (tests, mobile re-entry) is a no-op, not a panic.
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "macos")]
     local_transcription::prepare_process_environment();
-    init_tracing();
     let builder = tauri::Builder::default();
 
     // Single-instance must be the first plugin so a second launch is caught
@@ -175,6 +167,7 @@ pub fn run() {
     // geometry, but mobile has no window-state plugin, so show it here or the
     // UI would never appear.
     let builder = builder.setup(|app| {
+        logging::init(app.handle());
         #[cfg(any(target_os = "linux", all(windows, debug_assertions)))]
         {
             use tauri_plugin_deep_link::DeepLinkExt;
@@ -324,7 +317,6 @@ pub fn run() {
             icloud::storage::icloud_status,
             icloud::storage::icloud_adopt_graph,
             icloud::sweep::icloud_conflicts_scan,
-            conflict::conflict_merge_text,
             icloud::watch::icloud_watch_start,
             icloud::watch::icloud_watch_stop,
             fs::graph_open,
@@ -450,7 +442,8 @@ pub fn run() {
             git::git_clone,
             git::git_commit_all,
             git::git_fetch,
-            git::git_merge_remote,
+            git::git_remote_head,
+            git::git_pull,
             git::git_push,
             quit::quit_confirm,
             windows::open_note_window,

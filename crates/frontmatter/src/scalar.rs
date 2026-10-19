@@ -176,7 +176,7 @@ fn radix_value(digits: &str, radix: u32) -> Option<f64> {
 fn resolve_float(text: &str) -> Option<CoreValue<'_>> {
     match text {
         ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => {
-            return Some(CoreValue::Number(f64::INFINITY))
+            return Some(CoreValue::Number(f64::INFINITY));
         }
         "-.inf" | "-.Inf" | "-.INF" => return Some(CoreValue::Number(f64::NEG_INFINITY)),
         ".nan" | ".NaN" | ".NAN" => return Some(CoreValue::Number(f64::NAN)),

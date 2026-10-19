@@ -1,128 +1,120 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render } from 'vitest-browser-react'
-import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
 import {
-  clearDisplacedNotes,
-  isRecentlyDisplaced,
-  setBridge,
-  setDisplacedNotesGeneration,
-  setLocalWriteEcho,
-} from '@reflect/core'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
+  createTestCoreServices,
+  createTestPlatformService,
+  type TestCoreServiceOverrides,
+} from '@reflect/core/testing'
 import { MobileRoot } from '@/mobile/mobile-root.tsx'
+import { act } from '@/test-utils/act.ts'
+import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteDisplacements } from './note-displacements.tsx'
 
-const state = vi.hoisted(() => ({ generation: 7, status: 'ready', indexGeneration: 70 }))
-const followDisplacedNote = vi.hoisted(() =>
-  vi.fn<typeof import('@/editor/move-note.ts').followDisplacedNote>(async () => {}),
-)
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  GraphProvider: ({ children }: { children: ReactNode }) => children,
-  useGraph: () => ({
-    graph: { root: '/graph', generation: state.generation },
-    status: state.status,
-    indexGeneration: state.indexGeneration,
-  }),
-}))
-vi.mock('@/editor/move-note.ts', () => ({ followDisplacedNote }))
+// The mobile shell's screens: the wiring test only needs the root around them.
 vi.mock('@/mobile/mobile-app.tsx', () => ({ MobileApp: () => null }))
 
 const FROM = 'notes/plan.md'
 const TO = 'notes/plan (this device).md'
 
-function fakeBridge(gateListen = false) {
+/** The graph the tests open: file and index generations are independent counters. */
+const GRAPH = { root: '/graph', name: 'graph', generation: 7, indexGeneration: 70 }
+
+/**
+ * Core services whose `note:displaced` subscriptions are kept by the test, as
+ * Rust would deliver to them: `deliver(index, generation)` calls the
+ * `index`-th subscription's handler, a disposed one included. With
+ * `gateListen`, a subscription resolves only on `release()`.
+ */
+function setup(options?: { gateListen?: boolean; mobile?: boolean }) {
+  const overrides: TestCoreServiceOverrides =
+    options?.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}
+  const app = createTestCoreServices(overrides)
+  const { ipc } = app
   const handlers: Array<(payload: unknown) => void> = []
   const unlisten = vi.fn()
-  let release: (() => void) | undefined
-  setBridge({
-    invoke: async () => null,
-    listen: async (event, handler) => {
-      expect(event).toBe('note:displaced')
-      handlers.push(handler)
-      if (gateListen) {
-        await new Promise<void>((resolve) => {
-          release = resolve
-        })
-      }
-      return unlisten
-    },
+  const gate = Promise.withResolvers<void>()
+  const listen = ipc.listen.bind(ipc)
+  vi.spyOn(ipc, 'listen').mockImplementation(async (event, handler) => {
+    if (event !== 'note:displaced') {
+      return await listen(event, handler)
+    }
+    handlers.push(handler)
+    if (options?.gateListen === true) {
+      await gate.promise
+    }
+    return unlisten
   })
+  const follow = vi.spyOn(app.noteMove, 'followDisplacedNote').mockResolvedValue()
   return {
-    emit: (index: number, generation: number) => {
+    app,
+    follow,
+    unlisten,
+    subscriptions: () => handlers.length,
+    deliver: (index: number, generation: number) => {
       handlers[index]?.({ generation, from: FROM, to: TO, keptOut: false })
     },
-    release: () => release?.(),
-    unlisten,
+    release: () => gate.resolve(),
   }
 }
 
-beforeEach(() => {
-  state.generation = 7
-  state.status = 'ready'
-  followDisplacedNote.mockClear()
-  setDisplacedNotesGeneration(state.generation)
-})
-
-afterEach(() => {
-  setBridge(null)
-  clearDisplacedNotes()
-  setLocalWriteEcho(false)
-  setPlatformSurface({ touchEditor: false, mobileApp: false })
-})
-
 describe('NoteDisplacements', () => {
   it('subscribes on the mobile surface within its graph provider', async () => {
-    const bridge = fakeBridge()
-    await render(<MobileRoot platform="ios" />)
+    const { app, follow, deliver, subscriptions } = setup({ mobile: true })
+    app.graphSession.setGraph(GRAPH)
+    await renderInApp(<MobileRoot platform="ios" />, { app, servicesOnly: true })
+    await vi.waitFor(() => expect(subscriptions()).toBe(1))
 
-    bridge.emit(0, state.generation)
-    expect(followDisplacedNote).toHaveBeenCalledWith(FROM, TO, false, 7, expect.any(Function))
-    expect(isRecentlyDisplaced(FROM, TO)).toBe(true)
+    deliver(0, GRAPH.generation)
+    expect(follow).toHaveBeenCalledWith(FROM, TO, false, 7, expect.any(Function))
+    expect(app.noteDisplacement.isRecentlyDisplaced(FROM, TO)).toBe(true)
   })
 
   it('uses the file generation rather than the independent index generation', async () => {
-    const bridge = fakeBridge()
-    await render(<NoteDisplacements />)
+    const { app, follow, deliver, subscriptions } = setup()
+    await renderInApp(<NoteDisplacements />, { app, graph: GRAPH })
+    await vi.waitFor(() => expect(subscriptions()).toBe(1))
 
-    bridge.emit(0, state.indexGeneration)
-    expect(followDisplacedNote).not.toHaveBeenCalled()
-    expect(isRecentlyDisplaced(FROM, TO)).toBe(false)
+    deliver(0, GRAPH.indexGeneration)
+    expect(follow).not.toHaveBeenCalled()
+    expect(app.noteDisplacement.isRecentlyDisplaced(FROM, TO)).toBe(false)
 
-    bridge.emit(0, state.generation)
-    expect(isRecentlyDisplaced(FROM, TO)).toBe(true)
-    expect(followDisplacedNote).toHaveBeenCalledWith(FROM, TO, false, 7, expect.any(Function))
+    deliver(0, GRAPH.generation)
+    expect(app.noteDisplacement.isRecentlyDisplaced(FROM, TO)).toBe(true)
+    expect(follow).toHaveBeenCalledWith(FROM, TO, false, 7, expect.any(Function))
   })
 
   it('rejects old events after a graph switch, including delivery to the disposed listener', async () => {
-    const bridge = fakeBridge()
-    const view = await render(<NoteDisplacements />)
-    bridge.emit(0, 7)
-    const oldGuard = followDisplacedNote.mock.calls[0]?.[4]
-    followDisplacedNote.mockClear()
+    const { app, follow, deliver, subscriptions } = setup()
+    await renderInApp(<NoteDisplacements />, { app, graph: GRAPH })
+    await vi.waitFor(() => expect(subscriptions()).toBe(1))
+    deliver(0, 7)
+    const oldGuard = follow.mock.calls[0]?.[4]
+    follow.mockClear()
 
-    state.generation = 8
-    setDisplacedNotesGeneration(state.generation)
-    await view.rerender(<NoteDisplacements />)
-    bridge.emit(0, 7)
-    bridge.emit(1, 7)
+    await act(() => app.graphSession.setGraph({ ...GRAPH, generation: 8, indexGeneration: 80 }))
+    await vi.waitFor(() => expect(subscriptions()).toBe(2))
+    deliver(0, 7)
+    deliver(1, 7)
 
     expect(oldGuard?.()).toBe(false)
-    expect(followDisplacedNote).not.toHaveBeenCalled()
-    expect(isRecentlyDisplaced(FROM, TO)).toBe(false)
-    bridge.emit(1, 8)
-    expect(followDisplacedNote).toHaveBeenCalledWith(FROM, TO, false, 8, expect.any(Function))
-    expect(isRecentlyDisplaced(FROM, TO)).toBe(true)
+    expect(follow).not.toHaveBeenCalled()
+    expect(app.noteDisplacement.isRecentlyDisplaced(FROM, TO)).toBe(false)
+    deliver(1, 8)
+    expect(follow).toHaveBeenCalledWith(FROM, TO, false, 8, expect.any(Function))
+    expect(app.noteDisplacement.isRecentlyDisplaced(FROM, TO)).toBe(true)
   })
 
   it('ignores delivery after unmount and disposes a late-resolving subscription', async () => {
-    const bridge = fakeBridge(true)
-    const view = await render(<NoteDisplacements />)
+    const { app, follow, deliver, release, unlisten, subscriptions } = setup({
+      gateListen: true,
+    })
+    const view = await renderInApp(<NoteDisplacements />, { app, graph: GRAPH })
+    await vi.waitFor(() => expect(subscriptions()).toBe(1))
     await view.unmount()
-    bridge.emit(0, 7)
-    bridge.release()
+    deliver(0, 7)
+    release()
 
-    await vi.waitFor(() => expect(bridge.unlisten).toHaveBeenCalledOnce())
-    expect(followDisplacedNote).not.toHaveBeenCalled()
-    expect(isRecentlyDisplaced(FROM, TO)).toBe(false)
+    await vi.waitFor(() => expect(unlisten).toHaveBeenCalledOnce())
+    expect(follow).not.toHaveBeenCalled()
+    expect(app.noteDisplacement.isRecentlyDisplaced(FROM, TO)).toBe(false)
   })
 })

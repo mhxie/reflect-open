@@ -1,80 +1,19 @@
-import { useCallback } from 'react'
-import {
-  aiKeySecretName,
-  aiProviderRequiresApiKey,
-  apiKeyHint,
-  defaultAiProvider,
-  deleteSecret,
-  normalizeOpenAICompatibleBaseUrl,
-  setSecret,
-  withAiProviderAdded,
-  withAiProviderCapabilities,
-  withAiProviderModel,
-  withAiProviderOnDevice,
-  withAiProviderRemoved,
-  type AiProviderCapabilities,
-  type AiProviderConfig,
-  type AiProviderId,
-  type AppError,
-  type OnDeviceServerKind,
+import type {
+  AiProviderCapabilities,
+  AiProviderConfig,
+  NewAiProvider,
+  OnDeviceServerKind,
 } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
+import { useServiceState } from '@/services/use-service-state.ts'
 
-/**
- * The configured-AI-providers surface (Plan 10): one hook owning the pairing
- * of the settings document (entries + default id) with the OS keychain (the
- * key itself). Components never touch the secret commands directly, so the
- * "settings entry ⇄ keychain entry" invariant has one owner.
- */
-
-/** What the add-provider dialog collects; the key goes to the keychain only. */
-export interface NewAiProvider {
-  provider: AiProviderId
-  model: string
-  baseUrl?: string | undefined
-  apiKey: string
-  isDefault: boolean
-  /**
-   * OpenAI-compatible only: the user attests the endpoint runs `model` on
-   * this Mac. Honored only for a loopback base URL.
-   */
-  onDevice?: boolean | undefined
-  /** The local server confirmed alongside the model and endpoint. */
-  onDeviceServer?: OnDeviceServerKind | undefined
-  /** OpenAI-compatible only: the model accepts image input. */
-  supportsImages?: boolean | undefined
-  /** OpenAI-compatible only: the server's context window, in tokens. */
-  contextWindow?: number | undefined
-}
-
-/** The settings entry for `draft`, before its optional OpenAI-compatible declarations. */
-function newEntry(id: string, draft: NewAiProvider, apiKey: string): AiProviderConfig {
-  const keyHint = apiKeyHint(apiKey)
-  return draft.provider === 'openai-compatible'
-    ? {
-        id,
-        provider: draft.provider,
-        model: draft.model,
-        baseUrl: normalizeOpenAICompatibleBaseUrl(draft.baseUrl ?? ''),
-        keyHint,
-      }
-    : { id, provider: draft.provider, model: draft.model, keyHint }
-}
-
-function draftCapabilities(draft: NewAiProvider): AiProviderCapabilities {
-  const capabilities: AiProviderCapabilities = {}
-  if (draft.supportsImages !== undefined) {
-    capabilities.supportsImages = draft.supportsImages
-  }
-  if (draft.contextWindow !== undefined) {
-    capabilities.contextWindow = draft.contextWindow
-  }
-  return capabilities
-}
+export type { NewAiProvider } from '@reflect/core'
 
 interface UseAiProvidersValue {
   providers: AiProviderConfig[]
-  /** The entry AI features use by default (null only when the list is empty). */
+  /**
+   * The entry AI features use by default (null only when the list is empty).
+   */
   defaultProvider: AiProviderConfig | null
   /**
    * Store the key in the keychain, then add the settings entry. Rejects (and
@@ -84,9 +23,13 @@ interface UseAiProvidersValue {
    * survive a restart.
    */
   addProvider: (draft: NewAiProvider) => Promise<void>
-  /** Delete the key from the keychain, then drop the settings entry. */
+  /**
+   * Delete the key from the keychain, then drop the settings entry.
+   */
   removeProvider: (id: string) => Promise<void>
-  /** Make the entry with `id` the app-wide default. */
+  /**
+   * Make the entry with `id` the app-wide default.
+   */
   makeDefault: (id: string) => void
   /**
    * Change the default model used by the configured provider entry. An
@@ -99,126 +42,27 @@ interface UseAiProvidersValue {
    * entry whose base URL is not a loopback host changes nothing.
    */
   setOnDevice: (id: string, attest: boolean, server?: OnDeviceServerKind) => void
-  /** Change what an OpenAI-compatible entry declares about its model. */
+  /**
+   * Change what an OpenAI-compatible entry declares about its model.
+   */
   setCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
 }
 
+/**
+ * The configured-AI-providers surface (Plan 10), over the `AiProviderConfigService`.
+ */
 export function useAiProviders(): UseAiProvidersValue {
-  const { settings, updateSettingsWith, whenSettingsLoaded } = useSettings()
-  const providers = settings.aiProviders
-  const defaultProvider = defaultAiProvider({
-    providers,
-    defaultProviderId: settings.defaultAiProviderId,
-  })
-
-  // Every write goes through `updateSettingsWith` so the state is rebuilt
-  // from the settings as they are when the update applies — not from this
-  // render's snapshot. The keychain awaits make these genuinely concurrent:
-  // a second add/remove can land mid-flight, and a snapshot-based write
-  // would clobber it (or resurrect an entry whose key was already deleted).
-
-  const addProvider = useCallback(
-    async (draft: NewAiProvider): Promise<void> => {
-      // Refuse before the key touches the keychain: with an unreadable
-      // settings store the entry would be session-only, and after a restart
-      // the stored key would be orphaned with no UI left to delete it.
-      // Awaiting the outcome (rather than reading a flag) also covers an add
-      // racing the in-flight load that then fails.
-      if ((await whenSettingsLoaded()) === 'failed') {
-        const error: AppError = {
-          kind: 'io',
-          message:
-            'Settings could not be loaded, so new AI providers cannot be saved. The API key was not stored.',
-        }
-        throw error
-      }
-      const id = crypto.randomUUID()
-      const apiKey = draft.apiKey.trim()
-      if (apiKey !== '' || aiProviderRequiresApiKey(draft.provider)) {
-        await setSecret(aiKeySecretName(id), apiKey)
-      }
-      updateSettingsWith((current) => {
-        const next = withAiProviderAdded(
-          { providers: current.aiProviders, defaultProviderId: current.defaultAiProviderId },
-          newEntry(id, draft, apiKey),
-          draft.isDefault,
-        )
-        let providers = withAiProviderCapabilities(next.providers, id, draftCapabilities(draft))
-        if (draft.onDevice === true) {
-          providers = withAiProviderOnDevice(providers, id, true, draft.onDeviceServer)
-        }
-        return { aiProviders: providers, defaultAiProviderId: next.defaultProviderId }
-      })
-    },
-    [whenSettingsLoaded, updateSettingsWith],
-  )
-
-  const removeProvider = useCallback(
-    async (id: string): Promise<void> => {
-      // Keychain first, deliberately. The two stores can't be updated
-      // transactionally; interrupted in this order, the leftover is a
-      // visibly dead settings row the user can remove again. The reverse
-      // order would strand the credential invisibly in the keychain — the
-      // keyring API can't enumerate entries, so it could never be swept.
-      // The settings write itself is retried by the provider on failure.
-      await deleteSecret(aiKeySecretName(id))
-      updateSettingsWith((current) => {
-        const next = withAiProviderRemoved(
-          { providers: current.aiProviders, defaultProviderId: current.defaultAiProviderId },
-          id,
-        )
-        return { aiProviders: next.providers, defaultAiProviderId: next.defaultProviderId }
-      })
-    },
-    [updateSettingsWith],
-  )
-
-  const makeDefault = useCallback(
-    (id: string): void => {
-      updateSettingsWith(() => ({ defaultAiProviderId: id }))
-    },
-    [updateSettingsWith],
-  )
-
-  const setDefaultModel = useCallback(
-    (id: string, model: string): void => {
-      const normalizedModel = model.trim()
-      if (normalizedModel === '') {
-        return
-      }
-      updateSettingsWith((current) => ({
-        aiProviders: withAiProviderModel(current.aiProviders, id, normalizedModel),
-      }))
-    },
-    [updateSettingsWith],
-  )
-
-  const setOnDevice = useCallback(
-    (id: string, attest: boolean, server?: OnDeviceServerKind): void => {
-      updateSettingsWith((current) => ({
-        aiProviders: withAiProviderOnDevice(current.aiProviders, id, attest, server),
-      }))
-    },
-    [updateSettingsWith],
-  )
-
-  const setCapabilities = useCallback(
-    (id: string, capabilities: AiProviderCapabilities): void => {
-      updateSettingsWith((current) => ({
-        aiProviders: withAiProviderCapabilities(current.aiProviders, id, capabilities),
-      }))
-    },
-    [updateSettingsWith],
-  )
-
+  const { aiProviderConfig: service } = useCoreServices()
+  const providers = useServiceState(service, service.list)
+  const defaultProvider = useServiceState(service, service.defaultProvider)
   return {
     providers,
     defaultProvider,
-    addProvider,
-    removeProvider,
-    makeDefault,
-    setDefaultModel,
-    setOnDevice,
-    setCapabilities,
+    addProvider: (draft) => service.add(draft),
+    removeProvider: (id) => service.remove(id),
+    makeDefault: (id) => service.makeDefault(id),
+    setDefaultModel: (id, model) => service.setDefaultModel(id, model),
+    setOnDevice: (id, attest, server) => service.setOnDevice(id, attest, server),
+    setCapabilities: (id, capabilities) => service.setCapabilities(id, capabilities),
   }
 }

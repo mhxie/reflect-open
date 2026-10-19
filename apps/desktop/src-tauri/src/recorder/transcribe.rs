@@ -9,11 +9,11 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::audio_file::{read_part, Stereo, SAMPLE_RATE};
+use super::audio_file::{SAMPLE_RATE, Stereo, read_part};
 use super::echo::{self, EchoOutcome};
 use super::session::SessionManifest;
-use crate::local_transcription::engine::TranscriptSegment;
 use crate::local_transcription::LocalModel;
+use crate::local_transcription::engine::TranscriptSegment;
 
 /// Both sides of one recording, timed from its start.
 #[derive(Clone, Debug, Serialize, Deserialize)]

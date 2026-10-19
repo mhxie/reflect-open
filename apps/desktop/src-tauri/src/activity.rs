@@ -120,7 +120,7 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
-    use super::{platform, ActivityState};
+    use super::{ActivityState, platform};
 
     #[test]
     fn a_token_ends_its_activity_once() {

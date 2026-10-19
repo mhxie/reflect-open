@@ -1,7 +1,5 @@
 import { describe, test } from 'vitest'
 import { parseSearchQuery } from '../indexing/filter-query.ts'
-import { searchWithFilters } from '../indexing/filtered-search.ts'
-import { suggestWikiTargets } from '../indexing/queries-suggestions.ts'
 import { openBenchIndex } from './bench-index.ts'
 
 /**
@@ -17,7 +15,7 @@ describe(`palette search — ${index.label}`, () => {
   for (const query of ['a', 'th', 'tra', 'transformer', 'kv cache', '推', '推理', 'is:daily a']) {
     test(`search "${query}"`, async ({ bench }) => {
       await bench(`search "${query}"`, async () => {
-        await searchWithFilters(parseSearchQuery(query))
+        await index.search.searchWithFilters(parseSearchQuery(query))
       }).run(run)
     })
   }
@@ -27,7 +25,7 @@ describe(`palette suggestions — ${index.label}`, () => {
   for (const query of ['a', 'th', 'tra', 'transformer', '推']) {
     test(`suggest "${query}"`, async ({ bench }) => {
       await bench(`suggest "${query}"`, async () => {
-        await suggestWikiTargets(query, 8)
+        await index.suggestions.suggestWikiTargets(query, 8)
       }).run(run)
     })
   }

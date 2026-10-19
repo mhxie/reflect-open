@@ -1,5 +1,5 @@
+import type { OperationsService } from '@reflect/app'
 import type { GraphInfo } from '@reflect/core'
-import { startOperation } from '@/lib/operations.ts'
 
 /**
  * Show a graph's local-only configuration problems (a dropped folder name, an
@@ -7,9 +7,9 @@ import { startOperation } from '@/lib/operations.ts'
  * would otherwise leave a folder silently unprotected. Persistent until
  * dismissed.
  */
-export function reportLocalOnlyWarnings(info: GraphInfo): void {
+export function reportLocalOnlyWarnings(operations: OperationsService, info: GraphInfo): void {
   const warnings = info.localOnlyWarnings ?? []
   if (warnings.length > 0) {
-    startOperation('Local-only folders', { persistent: true }).warn(warnings.join(' '))
+    operations.start('Local-only folders', { persistent: true }).warn(warnings.join(' '))
   }
 }

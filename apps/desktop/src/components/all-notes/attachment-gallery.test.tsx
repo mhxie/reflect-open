@@ -1,29 +1,19 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render } from 'vitest-browser-react'
+import {
+  createTestAttachmentService,
+  createTestCoreServices,
+  type TestCoreServices,
+} from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NoteListEntry } from '@reflect/core'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import type { CoreServices, NoteListEntry } from '@reflect/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { AttachmentGallery } from './attachment-gallery.tsx'
 
-const listAttachmentPreviews = vi.hoisted(() => vi.fn())
-const listAttachments = vi.hoisted(() => vi.fn())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  listAttachmentPreviews,
-  listAttachments,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 7 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'iso', timeFormat: '24h' } }),
-}))
 // Every asset URL serves one real 1×1 PNG, so previews load rather than
 // falling back to the placeholder; the asset path rides in the fragment.
-const imageUrl = vi.hoisted(() => {
+const imageUrl = (() => {
   const bytes = Uint8Array.from(
     atob(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
@@ -31,16 +21,11 @@ const imageUrl = vi.hoisted(() => {
     (character) => character.charCodeAt(0),
   )
   return URL.createObjectURL(new Blob([bytes], { type: 'image/png' }))
-})
-vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (path: string, protocol: string) => `${imageUrl}#${protocol}/${path}`,
-}))
+})()
 
 function entry(path: string, title: string): NoteListEntry {
   return {
     isPrivate: false,
-    hasConflict: false,
     path,
     title,
     snippet: '',
@@ -56,38 +41,51 @@ const selection = {
   clickSelect: vi.fn(),
 } as unknown as ListSelection & { clickSelect: ReturnType<typeof vi.fn> }
 
-function renderGallery(
+// The services of the rendered gallery; set by `renderGallery`.
+let app: TestCoreServices
+let listAttachmentPreviews: MockInstance<CoreServices['noteList']['listAttachmentPreviews']>
+
+async function renderGallery(
   type: 'pdf' | 'image',
   onOpen = vi.fn(),
   registerScrollToIndex: (scrollToIndex: (index: number) => void) => void = vi.fn(),
 ) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <AttachmentGallery
-        type={type}
-        notes={[entry('papers/socc.md', 'SoCC paper'), entry('notes/trip.md', 'Trip')]}
-        selection={selection}
-        onOpen={onOpen}
-        registerScrollToIndex={registerScrollToIndex}
-      />
-    </QueryClientProvider>,
+  const attachments = createTestAttachmentService({
+    graphSession: { getState: () => app.graphSession.getState() },
+    catalog: [
+      { path: 'papers/a.pdf', size: 10 },
+      { path: 'assets/map.png', size: 10 },
+    ],
+  })
+  vi.spyOn(attachments, 'assetUrl').mockImplementation(
+    (path, generation) => `${imageUrl}#reflect-asset/${generation}/${path}`,
   )
-}
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  listAttachmentPreviews.mockResolvedValue(
+  app = createTestCoreServices({ attachments })
+  listAttachmentPreviews = vi.spyOn(app.noteList, 'listAttachmentPreviews').mockResolvedValue(
     new Map([
       // `a.pdf` linked from `papers/` may mean either spelling; only one exists.
       ['papers/socc.md', ['a.pdf', 'papers/a.pdf']],
       ['notes/trip.md', ['notes/assets/map.png', 'assets/map.png']],
     ]),
   )
-  listAttachments.mockResolvedValue([
-    { path: 'papers/a.pdf', size: 10 },
-    { path: 'assets/map.png', size: 10 },
-  ])
+  return await renderInApp(
+    <AttachmentGallery
+      type={type}
+      notes={[entry('papers/socc.md', 'SoCC paper'), entry('notes/trip.md', 'Trip')]}
+      selection={selection}
+      onOpen={onOpen}
+      registerScrollToIndex={registerScrollToIndex}
+    />,
+    {
+      app,
+      graph: { root: '/g', name: 'g', generation: 7 },
+      settings: { dateFormat: 'iso', timeFormat: '24h' },
+    },
+  )
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
 })
 
 describe('AttachmentGallery', () => {

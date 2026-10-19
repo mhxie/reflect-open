@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { pdfPageWidthBucket } from '@reflect/core'
-import { pdfPageUrl } from '@/editor/use-note-attachments.ts'
 import { useElementWidth } from '@/hooks/use-element-width.ts'
 import { createPdfInfoQueryOptions } from '@/lib/query-options.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * A PDF read in Peek: every page at the panel's width, stacked, loading as it
@@ -17,8 +17,11 @@ export function PdfPeekPages({
   generation: number
   path: string
 }): ReactElement {
+  const { attachments } = useCoreServices()
   const [measure, width] = useElementWidth()
-  const { data, error } = useQuery(createPdfInfoQueryOptions(generation, path, undefined))
+  const { data, error } = useQuery(
+    createPdfInfoQueryOptions(attachments, generation, path, undefined),
+  )
   const bucket = pdfPageWidthBucket(width * window.devicePixelRatio)
 
   return (
@@ -33,7 +36,7 @@ export function PdfPeekPages({
               key={index + 1}
               alt={`Page ${index + 1}`}
               loading="lazy"
-              src={pdfPageUrl(generation, path, index + 1, bucket)}
+              src={attachments.pdfPageUrl(path, index + 1, bucket, generation)}
               width={page.width}
               height={page.height}
               className="h-auto w-full rounded-sm bg-white shadow-sm"

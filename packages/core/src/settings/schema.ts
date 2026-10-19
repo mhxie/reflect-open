@@ -3,7 +3,6 @@ import {
   DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
   LOCAL_TRANSCRIPTION_MODEL_IDS,
 } from '../ai/local-transcription-models.ts'
-import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
 import { DEFAULT_SEMANTIC_MODEL, SEMANTIC_MODEL_IDS } from '../embeddings/models.ts'
 import { NOTE_ATTACHMENT_TYPES } from '../graph/attachment-types.ts'
 import {
@@ -11,6 +10,7 @@ import {
   NOTE_LIST_SORT_KEYS,
   SORT_DIRECTIONS,
 } from '../indexing/note-list-sort.ts'
+import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../lib/http-url.ts'
 import { normalizeWikiLanguages } from '../wiki/languages.ts'
 import {
   DEFAULT_WIKI_TRUST_REPORT_PATH,
@@ -582,9 +582,7 @@ export const aiProviderIdSchema = z.enum([
 
 export type AiProviderId = z.infer<typeof aiProviderIdSchema>
 
-const hostedAiProviderIdSchema = z.enum(['openai', 'anthropic', 'google', 'openrouter'])
-
-export type HostedAiProviderId = z.infer<typeof hostedAiProviderIdSchema>
+export type HostedAiProviderId = Exclude<AiProviderId, 'openai-compatible'>
 
 export const openAiCompatibleBaseUrlSchema = z
   .string()
@@ -625,15 +623,6 @@ const googleProviderConfigSchema = aiProviderConfigBaseSchema.extend({
 const openRouterProviderConfigSchema = aiProviderConfigBaseSchema.extend({
   provider: z.literal('openrouter'),
 })
-
-const hostedAiProviderConfigSchema = z.union([
-  openAiProviderConfigSchema,
-  anthropicProviderConfigSchema,
-  googleProviderConfigSchema,
-  openRouterProviderConfigSchema,
-])
-
-export type HostedAiProviderConfig = z.infer<typeof hostedAiProviderConfigSchema>
 
 /**
  * The user's statement that an OpenAI-compatible entry runs its model on this
@@ -682,6 +671,8 @@ export const aiProviderConfigSchema = z.discriminatedUnion('provider', [
 ])
 
 export type AiProviderConfig = z.infer<typeof aiProviderConfigSchema>
+
+export type HostedAiProviderConfig = Exclude<AiProviderConfig, { provider: 'openai-compatible' }>
 
 /**
  * The `aiProviders` entry AI features use by default. A dangling or null id

@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use reflect_index_schema::cjk::{is_unsegmented, letter_segments, run_bigrams, unsegmented_runs};
 use rusqlite::types::Value;
-use rusqlite::{params_from_iter, Connection};
+use rusqlite::{Connection, params_from_iter};
 use unicode_normalization::char::is_combining_mark;
 
 use crate::error::CliError;

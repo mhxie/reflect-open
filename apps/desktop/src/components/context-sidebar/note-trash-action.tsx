@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import { errorMessage, isDaily, isLocalOnlyPath } from '@reflect/core'
+import { canTrashNote, errorMessage, isLocalOnlyPath, KEPT_IN_GRAPH_TRASH } from '@reflect/core'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -10,10 +10,9 @@ import {
   DialogFooter,
   DialogTitle,
 } from '@/components/ui/dialog.tsx'
-import { deleteOpenNote, KEPT_IN_GRAPH_TRASH } from '@/lib/note-delete.ts'
-import { startOperation } from '@/lib/operations.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteTrashActionProps {
   /** Graph-relative path of the regular note to move into trash. */
@@ -25,31 +24,29 @@ interface NoteTrashActionProps {
  * editable local-only folder gets there by way of a private holding folder:
  * the graph's `.reflect/trash/`, or a hidden folder beside the note when its
  * raw store sits on another volume. When the system Trash refuses it, a note
- * held in `.reflect/trash/` stays there, which the status line then says. Daily notes return `null` here as a second
- * UI-layer guard; the shared delete helper enforces the same rule before
- * touching disk.
+ * held in `.reflect/trash/` stays there, which the status line then says.
+ * Daily notes return `null` here as a second UI-layer guard; the shared
+ * delete helper enforces the same rule before touching disk.
  */
 export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | null {
-  const { graph } = useGraph()
   const { navigate } = useRouter()
+  const { noteActions } = useCoreServices()
+  const { operations } = useAppServices()
+  const localOnly = useLocalOnlyFolders()
   const [confirmingTrash, setConfirmingTrash] = useState(false)
   const [isTrashing, setIsTrashing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (isDaily(path)) {
+  if (!canTrashNote(path)) {
     return null
   }
 
   const onTrash = async (): Promise<void> => {
-    const generation = graph?.generation
-    if (generation === undefined) {
-      return
-    }
-    const operation = startOperation('Trashing note')
+    const operation = operations.start('Trashing note')
     setIsTrashing(true)
     setError(null)
     try {
-      const outcome = await deleteOpenNote(path, generation)
+      const outcome = await noteActions.trashOne(path)
       if (outcome?.trashed === 'graph') {
         operation.warn(KEPT_IN_GRAPH_TRASH)
       } else {
@@ -88,7 +85,7 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
         <DialogContent>
           <DialogTitle>Trash this note?</DialogTitle>
           <DialogDescription>
-            {isLocalOnlyPath(path)
+            {isLocalOnlyPath(localOnly, path)
               ? 'It moves to your system Trash by way of a private holding folder. Put Back returns it to that folder, not here.'
               : 'It moves to your system Trash, where you can restore it.'}
           </DialogDescription>

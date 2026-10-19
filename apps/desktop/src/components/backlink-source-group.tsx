@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import { BacklinkSnippet } from '@/components/backlink-snippet.tsx'
 import type { BacklinkWikilinkClick } from '@/hooks/use-backlink-navigation.ts'
 import type { BacklinkSource } from '@/lib/group-backlinks.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { NoteTitle } from '@/components/note-title.tsx'
 import { useNoteLabel } from '@/hooks/use-note-label.ts'
@@ -70,12 +70,7 @@ export function BacklinkSourceGroup({
           onClick={(event) => onOpen(source.path, event)}
           className="min-w-0 cursor-pointer truncate text-left text-xs text-accent"
         >
-          <NoteStateIndicator
-            path={source.path}
-            isPrivate={source.isPrivate}
-            hasConflict={source.hasConflict}
-            className="mr-1"
-          />
+          <NoteStateIndicator path={source.path} isPrivate={source.isPrivate} className="mr-1" />
           <NoteTitle title={label} displayTitle={source.displayTitle} lang={source.lang} />
         </button>
 

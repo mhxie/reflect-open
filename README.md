@@ -55,7 +55,10 @@ See the [fork feature guide](docs/fork-features.md) for the full list and contro
 2. **Install the iOS beta.** Join
    [TestFlight](https://testflight.apple.com/join/j2eEz43d). The iOS app uses
    the same plain-file graph and sync options as the Mac app.
-3. **Install the Chrome extension.** Add
+3. **Windows and Linux (experimental).** Unsigned builds are attached to a
+   release when their builds succeed. See [docs/windows-builds.md](docs/windows-builds.md) and
+   [docs/linux-builds.md](docs/linux-builds.md).
+4. **Install the Chrome extension.** Add
    [Reflect Capture from the Chrome Web Store](https://chromewebstore.google.com/detail/reflect-capture/ccabifmooehighoonjeiololjfofkhkd)
    to save the current page, selected text, screenshots, and optional page text
    from Chrome.
@@ -163,9 +166,16 @@ pnpm release:ios --build-number=123
 Reflect is in beta and used daily. The current focus is the Mac app, iOS
 companion, browser capture, local-first data model, and sync reliability.
 
-Windows, Android, and a plugin API are out of scope for now. See the
+Android and a plugin API are out of scope for now. Windows and Linux builds
+are experimental. See the
 [V2 product vision](docs/reflect-v2-product-vision.md) and the implementation
 plans in [docs/plans/](docs/plans/) for the longer-term direction.
+
+## Community
+
+Join the [Reflect Discord server](https://reflect.app/discord) to ask questions,
+share feedback, and follow the project. Report bugs and request features in
+[GitHub issues](https://github.com/team-reflect/reflect-open/issues).
 
 ## License
 

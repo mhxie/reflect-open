@@ -1,146 +1,82 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import { QueryClient } from '@tanstack/react-query'
+import { describe, expect, it, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { mouse } from 'vitest-browser-commands/playwright'
 import { render } from 'vitest-browser-react'
-import { act, type ReactElement } from 'react'
-import { DEFAULT_SETTINGS, KNOWLEDGE_LEVELS_PATH, setBridge, type Settings } from '@reflect/core'
-import { resetOperations, useOperations } from '@/lib/operations.ts'
+import type { ReactElement } from 'react'
+import {
+  buildIndexedNote,
+  KNOWLEDGE_LEVELS_PATH,
+  parseNote,
+  type NoteFileService,
+  type Settings,
+} from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
+import { act } from '@/test-utils/act.ts'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { hover } from '@/test-utils/mouse.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { AllNotesScreen } from './all-notes-screen.tsx'
+import { deepLinkForRoute } from '@reflect/app'
 
 /**
- * The All Notes screen over the real query layer and a fake IPC bridge: rows
- * from compiled SQL, tag tabs from settings, the Custom menu from the facet
+ * The All Notes screen over the real query layer and a seeded test index:
+ * rows from the index, tag tabs from settings, the Custom menu from the facet
  * query, and navigation through the real router.
  */
 
-const settingsState = vi.hoisted(
-  (): {
-    dateFormat: 'mdy' | 'dmy' | 'iso'
-    allNotesFilterAttachments: ('pdf' | 'image' | 'audio' | 'video')[]
-  } => ({
-    dateFormat: 'mdy',
-    allNotesFilterAttachments: ['pdf', 'video'],
-  }),
-)
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
-
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1 },
-    indexing: false,
-  }),
-}))
-/** Settings writes re-render the real filter and sort controls. */
-const settingsStore = vi.hoisted(() => {
-  let settings: Settings
-  let writes: Partial<Settings>[] = []
-  const listeners = new Set<() => void>()
-  return {
-    get: (): Settings => settings,
-    set: (next: Settings): void => {
-      settings = next
-      for (const listener of listeners) {
-        listener()
-      }
-    },
-    update: (patch: Partial<Settings>): void => {
-      writes.push(patch)
-      settings = { ...settings, ...patch }
-      for (const listener of listeners) {
-        listener()
-      }
-    },
-    writes: (): Partial<Settings>[] => writes,
-    reset: (initial: Settings): void => {
-      settings = initial
-      writes = []
-    },
-    subscribe: (listener: () => void): (() => void) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-  }
-})
-vi.mock('@/providers/settings-provider.tsx', async () => {
-  const { useSyncExternalStore } = await import('react')
-  return {
-    useSettings: () => {
-      const settings = useSyncExternalStore(settingsStore.subscribe, settingsStore.get)
-      return {
-        settings: {
-          ...settings,
-          dateFormat: settingsState.dateFormat,
-          allNotesFilterAttachments: settingsState.allNotesFilterAttachments,
-        },
-        updateSettings: settingsStore.update,
-        updateSettingsWith: (updater: (current: Settings) => Partial<Settings>) =>
-          settingsStore.update(updater(settingsStore.get())),
-      }
-    },
-  }
-})
-const setNotesPrivate = vi.hoisted(() => vi.fn(async () => ({ changed: 0, skipped: 0 })))
-vi.mock('@/lib/note-private.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/note-private.ts')>()),
-  setNotesPrivate,
-}))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openRouteInNewWindow,
-}))
+interface SeedNote {
+  path: string
+  title: string
+  mtime: number
+  preview: string
+  tags?: readonly string[]
+  /** The indexed flag, which the seeded markdown does not carry. */
+  isPrivate?: boolean
+  /** A numbered pin's shelf position; unpinned when absent. */
+  pinnedOrder?: number
+  /** The attachments the note references. */
+  assets?: readonly string[]
+}
 
 // Deterministic regardless of the test run's clock: both timestamps are far in
 // the past, so the Updated column always renders the short-date form.
 const HEALTH_MTIME = new Date(2020, 0, 15, 12, 0).getTime()
 const TOKYO_MTIME = new Date(2020, 0, 10, 12, 0).getTime()
 
-const noteRows = [
-  {
-    is_private: 0,
-    has_conflict: 0,
-    is_pinned: 0,
-    path: 'notes/health.md',
-    title: 'Health Stacked',
-    mtime: HEALTH_MTIME,
-    preview: 'Shop your health goals.',
-  },
-  {
-    is_private: 0,
-    has_conflict: 0,
-    is_pinned: 0,
-    path: 'notes/tokyo.md',
-    title: 'Tokyo Gâteau',
-    mtime: TOKYO_MTIME,
-    preview: 'Dandelion chocolate.',
-  },
-]
-const taggedDailyRow = {
-  is_private: 0,
-  has_conflict: 0,
-  is_pinned: 0,
+const healthRow: SeedNote = {
+  path: 'notes/health.md',
+  title: 'Health Stacked',
+  mtime: HEALTH_MTIME,
+  preview: 'Shop your health goals.',
+  tags: ['link'],
+}
+const tokyoRow: SeedNote = {
+  path: 'notes/tokyo.md',
+  title: 'Tokyo Gâteau',
+  mtime: TOKYO_MTIME,
+  preview: 'Dandelion chocolate.',
+  tags: ['link'],
+  // The only note that references a PDF.
+  assets: ['assets/menu.pdf'],
+}
+const noteRows: SeedNote[] = [healthRow, tokyoRow]
+// A daily note: absent from the unfiltered list, present under its tag.
+const taggedDailyRow: SeedNote = {
   path: 'daily/2026-06-09.md',
   title: '2026-06-09',
   mtime: TOKYO_MTIME,
   preview: 'Daily travel notes.',
+  tags: ['travel'],
 }
-const tagRows = [
-  { note_path: 'notes/health.md', tag: 'link' },
-  { note_path: 'notes/tokyo.md', tag: 'link' },
-  { note_path: 'daily/2026-06-09.md', tag: 'travel' },
-]
 const facetRows = [
   { tag: 'book', count: 3 },
   { tag: 'travel', count: 2 },
 ]
 
-const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
-let knowledgeLevelSource: string | null = null
 const knowledgeLevelContract = {
   version: 1,
   levels: [
@@ -156,92 +92,17 @@ const knowledgeLevelContract = {
   ],
 }
 
-setBridge({ invoke: mockInvoke, listen: async () => () => {} })
-
-const manyNoteRows = Array.from({ length: 1000 }, (_, index) => ({
-  is_private: 0,
-  has_conflict: 0,
+const manyNoteRows: SeedNote[] = Array.from({ length: 1000 }, (_, index) => ({
   path: `notes/n${index}.md`,
   title: `Note ${index}`,
   mtime: 1_000_000 - index,
   preview: '',
 }))
 
-function mockManyNotes(): void {
-  mockInvoke.mockImplementation(async (command, args) => {
-    if (command !== 'db_query') {
-      return null
-    }
-    const sql = String(args['sql'])
-    if (sql.includes('"preview"')) {
-      return manyNoteRows
-    }
-    return []
-  })
-}
-
-beforeEach(() => {
-  knowledgeLevelSource = null
-  resetOperations()
-  settingsState.dateFormat = 'mdy'
-  settingsState.allNotesFilterAttachments = ['pdf', 'video']
-  settingsStore.reset({ ...DEFAULT_SETTINGS, allNotesFilterTags: ['book', 'person'] })
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
-  mockInvoke.mockReset()
-  mockInvoke.mockImplementation(async (command, args) => {
-    if (command === 'note_read' && args['path'] === KNOWLEDGE_LEVELS_PATH) {
-      return knowledgeLevelSource
-    }
-    if (command === 'note_delete') {
-      return { trashed: 'system' }
-    }
-    if (command !== 'db_query') {
-      return null
-    }
-    const sql = String(args['sql'])
-    const params = args['params'] as unknown[]
-    if (sql.includes('group by')) {
-      return facetRows
-    }
-    if (sql.includes('"preview"')) {
-      // A tag-filtered list starts from the folded tag key — only `travel`
-      // has matches in this fixture.
-      if (sql.includes('from "tags"')) {
-        return params.includes('travel') ? [taggedDailyRow] : []
-      }
-      // An edit-day list: only Health was last edited on 2020-01-15.
-      if (sql.includes('"notes"."mtime" >=')) {
-        const start = params.find((value) => typeof value === 'number')
-        return start === new Date(2020, 0, 15).getTime() ? [noteRows[0]] : []
-      }
-      // An attachment-filtered list: only Tokyo references a PDF.
-      if (sql.includes('from "assets"')) {
-        return params.includes('%.pdf') ? [noteRows[1]] : []
-      }
-      return params.includes('daily') ? [...noteRows, taggedDailyRow] : noteRows
-    }
-    if (sql.includes('from "tags"')) {
-      // The per-note tags fetch (a join, not an IN list); rows for unlisted
-      // paths are ignored by the grouping, so always answer in full.
-      return tagRows
-    }
-    return []
-  })
-})
-
-function RouteProbe(): ReactElement {
-  const { route } = useRouter()
-  return <output data-testid="route">{JSON.stringify(route)}</output>
-}
-
-/** Surfaces the operations store so tests can assert a failure was reported. */
-function OperationsProbe(): ReactElement {
-  const operations = useOperations()
-  return (
-    <output data-testid="operations">
-      {operations.map((operation) => `${operation.status}:${operation.message ?? ''}`).join('|')}
-    </output>
-  )
+function noteMarkdown(note: SeedNote): string {
+  const tags = (note.tags ?? []).map((tag) => `#${tag}`).join(' ')
+  const heading = note.path.startsWith('daily/') ? '' : `# ${note.title}\n\n`
+  return `${heading}${tags}\n`
 }
 
 function RoutedScreen(): ReactElement {
@@ -268,32 +129,105 @@ function ReArrive(): ReactElement {
   )
 }
 
-function renderScreen(
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  filter: AllNotesFilter | null = null,
-  width?: number,
-) {
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'allNotes', filter }}>
-        {/* The screen fills its container (`h-full`); hand it the viewport
-            height so the scroll container gets a real, bounded size. */}
-        <div data-testid="screen-container" style={{ height: '100vh', width }}>
-          <RoutedScreen />
-        </div>
-        <RouteProbe />
-        <OperationsProbe />
-        <ReArrive />
-      </RouterProvider>
-    </QueryClientProvider>,
+let deleteNote: MockInstance<NoteFileService['delete']>
+/** The screen's settings writes, through either entry point. */
+let settingsUpdates: MockInstance<(patch: Partial<Settings>) => void>
+let settingsUpdatesWith: MockInstance<(updater: (current: Settings) => Partial<Settings>) => void>
+/** The settings' own `update`, for a change made outside the screen. */
+let updateSettingsElsewhere: (patch: Partial<Settings>) => void
+
+interface RenderScreenOptions {
+  /**
+   * The indexed notes; defaults to the two regular notes and the tagged daily.
+   */
+  notes?: readonly SeedNote[]
+  /** The route's filter; none by default. */
+  filter?: AllNotesFilter | null
+  /** Over the stored settings: `mdy` dates, `#book` and `#person` pinned, PDF and Video tabs. */
+  settings?: Partial<Settings>
+  /** The graph's knowledge-level contract file, when it has one. */
+  knowledgeLevels?: string
+  /** The screen container's width (CSS px); the viewport's by default. */
+  width?: number
+  queryClient?: QueryClient
+}
+
+async function renderScreen(options: RenderScreenOptions = {}) {
+  const notes = options.notes ?? [...noteRows, taggedDailyRow]
+  const files: Record<string, string> = Object.fromEntries(
+    notes.map((note) => [note.path, noteMarkdown(note)]),
+  )
+  if (options.knowledgeLevels !== undefined) {
+    files[KNOWLEDGE_LEVELS_PATH] = options.knowledgeLevels
+  }
+  const app = createTestCoreServices({
+    noteFile: createTestNoteFileService({
+      files,
+      // A delete pinned to another generation rejects.
+      generation: 1,
+    }),
+  })
+  for (const note of notes) {
+    const source = noteMarkdown(note)
+    app.database.applyProjection({
+      ...buildIndexedNote(parseNote({ path: note.path, source }), {
+        fileHash: `hash-${note.path}`,
+        mtime: note.mtime,
+        source,
+      }),
+      preview: note.preview,
+      isPrivate: note.isPrivate ?? false,
+      isPinned: note.pinnedOrder !== undefined,
+      pinnedOrder: note.pinnedOrder ?? null,
+      assets: [...(note.assets ?? [])],
+    })
+  }
+  // The facet counts are scripted: the fixture pins `book` although no listed
+  // note carries it, so the Custom menu has a pinned facet to mark.
+  vi.spyOn(app.noteList, 'listNoteTags').mockResolvedValue(facetRows)
+  deleteNote = vi.spyOn(app.noteFile, 'delete')
+  updateSettingsElsewhere = app.settings.update
+  settingsUpdates = vi.spyOn(app.settings, 'update')
+  settingsUpdatesWith = vi.spyOn(app.settings, 'updateWith')
+  return await renderInApp(
+    <>
+      {/* The screen fills its container (`h-full`); hand it the viewport
+          height so the scroll container gets a real, bounded size. */}
+      <div data-testid="screen-container" style={{ height: '100vh', width: options.width }}>
+        <RoutedScreen />
+      </div>
+      <ReArrive />
+    </>,
+    {
+      app,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      route: { kind: 'allNotes', filter: options.filter ?? null },
+      settings: {
+        dateFormat: 'mdy',
+        allNotesFilterTags: ['book', 'person'],
+        allNotesFilterAttachments: ['pdf', 'video'],
+        ...options.settings,
+      },
+      ...(options.queryClient === undefined ? {} : { queryClient: options.queryClient }),
+    },
   )
 }
 
-function probedRoute(view: Awaited<ReturnType<typeof renderScreen>>): unknown {
-  return JSON.parse(view.getByTestId('route').element().textContent ?? 'null')
+type ScreenView = Awaited<ReturnType<typeof renderScreen>>
+
+function probedRoute(view: ScreenView): unknown {
+  return view.appServices.navigation.getState().route
 }
 
-async function openPinnedFilters(view: Awaited<ReturnType<typeof renderScreen>>): Promise<void> {
+function openedNoteWindows(view: ScreenView): readonly string[] {
+  return view.appServices.window.openedNoteWindows()
+}
+
+function pinnedTags(view: ScreenView): readonly string[] {
+  return view.app.settings.get().allNotesFilterTags
+}
+
+async function openPinnedFilters(view: ScreenView): Promise<void> {
   await view
     .getByRole('group', { name: 'Filter notes' })
     .getByRole('button', { expanded: false })
@@ -302,18 +236,18 @@ async function openPinnedFilters(view: Awaited<ReturnType<typeof renderScreen>>)
   await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
 }
 
-function pinnedTabOrder(view: Awaited<ReturnType<typeof renderScreen>>): string[] {
-  const pins = settingsStore.get().allNotesFilterTags
+function pinnedTabOrder(view: ScreenView): string[] {
+  const pins = pinnedTags(view)
   return [...view.getByRole('group', { name: 'Filter notes' }).element().querySelectorAll('button')]
     .map((button) => button.textContent?.trim() ?? '')
     .filter((label) => pins.some((tag) => label === `#${tag}`))
 }
 
-function pinWrites(): Partial<Settings>[] {
-  return settingsStore.writes()
+function pinWrites(): unknown[] {
+  return [...settingsUpdates.mock.calls, ...settingsUpdatesWith.mock.calls]
 }
 
-async function movePinnedTagUpWithKeyboard(tag: string): Promise<void> {
+async function movePinnedTagUpWithKeyboard(view: ScreenView, tag: string): Promise<void> {
   const handle = page.getByRole('button', { name: `Reorder #${tag}` })
   handle.element().focus()
   await userEvent.keyboard('{Space}')
@@ -321,59 +255,41 @@ async function movePinnedTagUpWithKeyboard(tag: string): Promise<void> {
   await userEvent.keyboard('{ArrowUp}')
   await expect
     .element(
-      page.getByText(
-        `#${tag} will move to position 1 of ${settingsStore.get().allNotesFilterTags.length}.`,
-        { exact: true },
-      ),
+      page.getByText(`#${tag} will move to position 1 of ${pinnedTags(view).length}.`, {
+        exact: true,
+      }),
     )
     .toBeInTheDocument()
 }
 
 describe('AllNotesScreen', () => {
-  it('shows indexed Private and conflict flags and keeps keyboard subject navigation', async () => {
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command !== 'db_query') return null
-      const sql = String(args['sql'])
-      if (sql.includes('"preview"'))
-        return [
-          { ...noteRows[0], is_private: 1, has_conflict: 0 },
-          { ...noteRows[1], is_private: 0, has_conflict: 1 },
-        ]
-      return sql.includes('from "tags"') ? tagRows : []
+  it('shows the indexed Private flag and keeps keyboard subject navigation', async () => {
+    const view = await renderScreen({
+      notes: [{ ...healthRow, isPrivate: true }, tokyoRow],
     })
-    const view = await renderScreen()
     const privateNote = view.getByRole('button', { name: 'Health Stacked Private', exact: true })
     await expect.element(view.getByText('Wiki', { exact: true })).toBeVisible()
-    const protectedNote = view.getByRole('button', { name: 'Tokyo Gâteau Protected', exact: true })
     await expect
       .element(privateNote.getByRole('img', { name: 'Private', exact: true }))
-      .toBeVisible()
-    await expect
-      .element(protectedNote.getByRole('img', { name: 'Protected', exact: true }))
       .toBeVisible()
     expect(privateNote.element().querySelector('button')).toBeNull()
     privateNote.element().focus()
     await userEvent.keyboard('{Enter}')
-    await expect
-      .element(view.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/health.md' }))
+    await expect.poll(() => probedRoute(view)).toEqual({ kind: 'note', path: 'notes/health.md' })
     await view.unmount()
   })
 
   it.each([
-    { privacy: [0, 0], label: 'Mark private (2)', makePrivate: true },
-    { privacy: [1, 0], label: 'Mark private (2)', makePrivate: true },
-    { privacy: [1, 1], label: 'Unmark private (2)', makePrivate: false },
+    { privacy: [false, false], label: 'Mark private (2)', makePrivate: true },
+    { privacy: [true, false], label: 'Mark private (2)', makePrivate: true },
+    { privacy: [true, true], label: 'Unmark private (2)', makePrivate: false },
   ])('offers $label for the selection', async ({ privacy, label, makePrivate }) => {
-    setNotesPrivate.mockClear()
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command !== 'db_query') return null
-      const sql = String(args['sql'])
-      if (sql.includes('"preview"'))
-        return noteRows.map((row, index) => ({ ...row, is_private: privacy[index] }))
-      return sql.includes('from "tags"') ? tagRows : []
+    const view = await renderScreen({
+      notes: noteRows.map((row, index) => ({ ...row, isPrivate: privacy[index] ?? false })),
     })
-    const view = await renderScreen()
+    const setNotesPrivate = vi
+      .spyOn(view.app.noteActions, 'setNotesPrivate')
+      .mockResolvedValue({ changed: [], skipped: 0 })
     await expect.element(view.getByText('Tokyo Gâteau')).toBeVisible()
     expect(view.getByRole('button', { name: /private \(/ }).query()).toBeNull()
 
@@ -383,7 +299,6 @@ describe('AllNotesScreen', () => {
     await view.getByRole('button', { name: label }).click()
 
     expect(setNotesPrivate).toHaveBeenCalledWith(
-      expect.objectContaining({ root: '/g', generation: 1 }),
       expect.arrayContaining(['notes/health.md', 'notes/tokyo.md']),
       makePrivate,
     )
@@ -407,8 +322,7 @@ describe('AllNotesScreen', () => {
   })
 
   it('keeps ISO updated dates on one line', async () => {
-    settingsState.dateFormat = 'iso'
-    const view = await renderScreen()
+    const view = await renderScreen({ settings: { dateFormat: 'iso' } })
 
     const updated = view.getByText('2020-01-15')
     await expect.element(updated).toHaveClass('whitespace-nowrap')
@@ -419,29 +333,9 @@ describe('AllNotesScreen', () => {
   })
 
   it('renders a dash, not an epoch date, for a row missing its mtime', async () => {
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command !== 'db_query') {
-        return null
-      }
-      const sql = String(args['sql'])
-      if (sql.includes('group by')) {
-        return facetRows
-      }
-      if (sql.includes('"preview"')) {
-        return [
-          {
-            is_private: 0,
-            has_conflict: 0,
-            path: 'notes/legacy.md',
-            title: 'Legacy Note',
-            mtime: 0,
-            preview: '',
-          },
-        ]
-      }
-      return []
+    const view = await renderScreen({
+      notes: [{ path: 'notes/legacy.md', title: 'Legacy Note', mtime: 0, preview: '' }],
     })
-    const view = await renderScreen()
 
     await expect.element(view.getByText('Legacy Note')).toBeInTheDocument()
     await expect.element(view.getByText('—')).toBeInTheDocument()
@@ -449,29 +343,11 @@ describe('AllNotesScreen', () => {
   })
 
   it('shows a `//` subject by its first segment', async () => {
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command !== 'db_query') {
-        return null
-      }
-      const sql = String(args['sql'])
-      if (sql.includes('group by')) {
-        return facetRows
-      }
-      if (sql.includes('"preview"')) {
-        return [
-          {
-            is_private: 0,
-            has_conflict: 0,
-            path: 'notes/tim-maccaw-dad.md',
-            title: 'Tim MacCaw // Dad',
-            mtime: 0,
-            preview: '',
-          },
-        ]
-      }
-      return []
+    const view = await renderScreen({
+      notes: [
+        { path: 'notes/tim-maccaw-dad.md', title: 'Tim MacCaw // Dad', mtime: 0, preview: '' },
+      ],
     })
-    const view = await renderScreen()
 
     await expect.element(view.getByText('Tim MacCaw', { exact: true })).toBeInTheDocument()
     expect(view.getByText('Tim MacCaw // Dad').query()).toBeNull()
@@ -495,10 +371,9 @@ describe('AllNotesScreen', () => {
       .click({ modifiers: ['ControlOrMeta'] })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({
-        kind: 'note',
-        path: 'notes/health.md',
-      }),
+      expect(openedNoteWindows(view)).toContain(
+        deepLinkForRoute({ kind: 'note', path: 'notes/health.md' }),
+      ),
     )
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     expect(view.getByRole('button', { name: /Trash \(/ }).query()).toBeNull()
@@ -512,12 +387,11 @@ describe('AllNotesScreen', () => {
     await subject.dblClick({ modifiers: ['ControlOrMeta'] })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({
-        kind: 'note',
-        path: 'notes/health.md',
-      }),
+      expect(openedNoteWindows(view)).toContain(
+        deepLinkForRoute({ kind: 'note', path: 'notes/health.md' }),
+      ),
     )
-    expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
+    expect(openedNoteWindows(view)).toHaveLength(1)
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
@@ -565,8 +439,7 @@ describe('AllNotesScreen', () => {
   })
 
   it('filters by level after Video, keeps translations compact, and restores the filter on Back', async () => {
-    knowledgeLevelSource = JSON.stringify(knowledgeLevelContract)
-    const view = await renderScreen()
+    const view = await renderScreen({ knowledgeLevels: JSON.stringify(knowledgeLevelContract) })
     const level = view.getByRole('button', { name: 'Wiki', exact: true })
     await expect.element(level).toBeVisible()
     const video = view.getByRole('button', { name: 'Video', exact: true }).element()
@@ -607,16 +480,21 @@ describe('AllNotesScreen', () => {
   })
 
   it('updates the active level filter when path rules change on focus', async () => {
-    knowledgeLevelSource = JSON.stringify(knowledgeLevelContract)
-    const view = await renderScreen(undefined, { kind: 'level', level: 3 })
-    await expect.element(view.getByText('No L3 notes.')).toBeVisible()
-    knowledgeLevelSource = JSON.stringify({
-      ...knowledgeLevelContract,
-      rules: [
-        ...knowledgeLevelContract.rules,
-        { path: 'notes/health.md', match: 'file', level: 3 },
-      ],
+    const view = await renderScreen({
+      filter: { kind: 'level', level: 3 },
+      knowledgeLevels: JSON.stringify(knowledgeLevelContract),
     })
+    await expect.element(view.getByText('No L3 notes.')).toBeVisible()
+    view.app.noteFile.set(
+      KNOWLEDGE_LEVELS_PATH,
+      JSON.stringify({
+        ...knowledgeLevelContract,
+        rules: [
+          ...knowledgeLevelContract.rules,
+          { path: 'notes/health.md', match: 'file', level: 3 },
+        ],
+      }),
+    )
     window.dispatchEvent(new Event('focus'))
     await expect.element(view.getByText('Health Stacked')).toBeVisible()
     expect(view.getByText('Tokyo Gâteau').query()).toBeNull()
@@ -624,8 +502,10 @@ describe('AllNotesScreen', () => {
   })
 
   it('explains unavailable levels and lets the reader clear the filter', async () => {
-    knowledgeLevelSource = '{"version":2}'
-    const view = await renderScreen(undefined, { kind: 'level', level: 4 })
+    const view = await renderScreen({
+      filter: { kind: 'level', level: 4 },
+      knowledgeLevels: '{"version":2}',
+    })
     await expect
       .element(view.getByText('Knowledge levels are unavailable. Choose All levels to show notes.'))
       .toBeVisible()
@@ -638,7 +518,7 @@ describe('AllNotesScreen', () => {
   })
 
   it('lists the notes edited on a day set by the heatmap, and All clears it', async () => {
-    const view = await renderScreen(undefined, { kind: 'updated', date: '2020-01-15' })
+    const view = await renderScreen({ filter: { kind: 'updated', date: '2020-01-15' } })
 
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
     expect(view.getByText('Tokyo Gâteau').query()).toBeNull()
@@ -654,15 +534,17 @@ describe('AllNotesScreen', () => {
   })
 
   it('says when no notes were edited on the chosen day', async () => {
-    const view = await renderScreen(undefined, { kind: 'updated', date: '2020-01-01' })
+    const view = await renderScreen({ filter: { kind: 'updated', date: '2020-01-01' } })
 
     await expect.element(view.getByText('No notes edited on 1/1/2020.')).toBeInTheDocument()
     await view.unmount()
   })
 
   it('keeps the active type tab when settings switched that type off', async () => {
-    settingsState.allNotesFilterAttachments = []
-    const view = await renderScreen(undefined, { kind: 'attachment', type: 'image' })
+    const view = await renderScreen({
+      filter: { kind: 'attachment', type: 'image' },
+      settings: { allNotesFilterAttachments: [] },
+    })
 
     await expect
       .element(view.getByRole('button', { name: 'Images' }))
@@ -672,8 +554,7 @@ describe('AllNotesScreen', () => {
   })
 
   it('re-anchors to the top when re-arriving on the same route', async () => {
-    mockManyNotes()
-    const view = await renderScreen()
+    const view = await renderScreen({ notes: manyNoteRows })
     await expect.element(view.getByText('Note 0', { exact: true })).toBeInTheDocument()
 
     const scroller = view.getByTestId('all-notes-scroll').element()
@@ -697,8 +578,10 @@ describe('AllNotesScreen', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     })
+    const listed = { isPinned: false, pinnedOrder: null, isPrivate: false }
     client.setQueryData(queryKeys.index.allNotesWithTag('/g', null), [
       {
+        ...listed,
         path: 'notes/health.md',
         title: 'Health Stacked',
         snippet: 'Shop your health goals.',
@@ -706,6 +589,7 @@ describe('AllNotesScreen', () => {
         mtime: HEALTH_MTIME,
       },
       {
+        ...listed,
         path: 'notes/tokyo.md',
         title: 'Tokyo Gâteau',
         snippet: 'Dandelion chocolate.',
@@ -715,7 +599,7 @@ describe('AllNotesScreen', () => {
     ])
     client.setQueryData(queryKeys.index.allNotesTags('/g'), facetRows)
 
-    const view = await renderScreen(client)
+    const view = await renderScreen({ notes: [], queryClient: client })
 
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
     await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
@@ -723,9 +607,7 @@ describe('AllNotesScreen', () => {
   })
 
   it('virtualizes long lists instead of rendering every row', async () => {
-    mockManyNotes()
-
-    const view = await renderScreen()
+    const view = await renderScreen({ notes: manyNoteRows })
 
     await expect.element(view.getByText('Note 0', { exact: true })).toBeInTheDocument()
     const rendered = view.getByTestId('all-notes-scroll').element().querySelectorAll('li')
@@ -806,13 +688,13 @@ describe('AllNotesScreen', () => {
 
 describe('AllNotesScreen — pinned tag management', () => {
   it('pins the active Custom filter without changing its route or results', async () => {
-    const view = await renderScreen(undefined, { kind: 'tag', tag: 'travel' })
+    const view = await renderScreen({ filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
 
     await view.getByRole('button', { name: /#travel/, expanded: false }).click()
     await page.getByRole('button', { name: 'Pin #travel', exact: true }).click()
 
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person', 'travel'])
+    expect(pinnedTags(view)).toEqual(['book', 'person', 'travel'])
     expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#travel'])
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
@@ -853,7 +735,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .toBeInTheDocument()
     await page.getByRole('button', { name: 'Pin #研究/project', exact: true }).click()
 
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person', '研究/project'])
+    expect(pinnedTags(view)).toEqual(['book', 'person', '研究/project'])
     expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#研究/project'])
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await expect.element(input).toHaveValue('')
@@ -873,15 +755,17 @@ describe('AllNotesScreen — pinned tag management', () => {
   })
 
   it('keeps an unpinned active filter and supports removing every shortcut', async () => {
-    settingsStore.update({ allNotesFilterTags: ['book', 'person', 'travel'] })
-    const view = await renderScreen(undefined, { kind: 'tag', tag: 'travel' })
+    const view = await renderScreen({
+      filter: { kind: 'tag', tag: 'travel' },
+      settings: { allNotesFilterTags: ['book', 'person', 'travel'] },
+    })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
     await openPinnedFilters(view)
 
     await page.getByRole('button', { name: 'Actions for #travel' }).click()
     await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click()
     await expect.element(page.getByRole('button', { name: 'Actions for #person' })).toHaveFocus()
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+    expect(pinnedTags(view)).toEqual(['book', 'person'])
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
 
@@ -889,7 +773,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       await page.getByRole('button', { name: `Actions for #${tag}` }).click()
       await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click()
     }
-    expect(settingsStore.get().allNotesFilterTags).toEqual([])
+    expect(pinnedTags(view)).toEqual([])
     await expect.element(page.getByPlaceholder('Find a tag to pin…')).toHaveFocus()
     await page.getByRole('button', { name: 'Done', exact: true }).click()
     expect(pinnedTabOrder(view)).toEqual([])
@@ -899,16 +783,23 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(view.getByRole('button', { name: 'All', exact: true })).toBeInTheDocument()
     await expect.element(view.getByRole('button', { name: 'PDF', exact: true })).toBeInTheDocument()
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
+    await view.app.settings.flush()
+    const saved = view.app.settings.saves().at(-1)
+    expect(saved?.allNotesFilterTags).toEqual([])
     await view.unmount()
 
-    const reopened = await renderScreen()
+    // The emptied list persists: reopening over the saved document shows no
+    // shortcuts rather than falling back to the defaults.
+    const reopened = await renderScreen({ settings: { ...saved } })
     expect(pinnedTabOrder(reopened)).toEqual([])
     await reopened.unmount()
   })
 
   it('moves a tag through its menu, disables boundaries, and returns focus to that tag', async () => {
-    settingsStore.update({ allNotesFilterTags: ['book', 'person', 'travel'] })
-    const view = await renderScreen(undefined, { kind: 'tag', tag: 'travel' })
+    const view = await renderScreen({
+      filter: { kind: 'tag', tag: 'travel' },
+      settings: { allNotesFilterTags: ['book', 'person', 'travel'] },
+    })
     await openPinnedFilters(view)
     await page.getByRole('button', { name: 'Actions for #book' }).click()
     await expect
@@ -919,7 +810,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .toHaveAttribute('aria-disabled', 'true')
     await page.getByRole('menuitem', { name: 'Move to bottom', exact: true }).click()
 
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'travel', 'book'])
+    expect(pinnedTags(view)).toEqual(['person', 'travel', 'book'])
     expect(pinnedTabOrder(view)).toEqual(['#person', '#travel', '#book'])
     await expect.element(page.getByRole('button', { name: 'Actions for #book' })).toHaveFocus()
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
@@ -985,15 +876,13 @@ describe('AllNotesScreen — pinned tag management', () => {
       await expect
         .element(page.getByText('#person will move to position 1 of 2.', { exact: true }))
         .toBeInTheDocument()
-      expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+      expect(pinnedTags(view)).toEqual(['book', 'person'])
       expect(pinWrites()).toHaveLength(0)
     } finally {
       await mouse.up()
     }
 
-    await vi.waitFor(() =>
-      expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book']),
-    )
+    await vi.waitFor(() => expect(pinnedTags(view)).toEqual(['person', 'book']))
     expect(pinWrites()).toHaveLength(1)
     expect(pinnedTabOrder(view)).toEqual(['#person', '#book'])
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
@@ -1007,18 +896,16 @@ describe('AllNotesScreen — pinned tag management', () => {
   })
 
   it('saves a keyboard reorder once on drop and retains the active filter', async () => {
-    const view = await renderScreen(undefined, { kind: 'tag', tag: 'book' })
+    const view = await renderScreen({ filter: { kind: 'tag', tag: 'book' } })
     await openPinnedFilters(view)
     const handle = page.getByRole('button', { name: 'Reorder #person' })
-    await movePinnedTagUpWithKeyboard('person')
+    await movePinnedTagUpWithKeyboard(view, 'person')
 
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+    expect(pinnedTags(view)).toEqual(['book', 'person'])
     expect(pinWrites()).toHaveLength(0)
     await userEvent.keyboard('{Enter}')
 
-    await vi.waitFor(() =>
-      expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book']),
-    )
+    await vi.waitFor(() => expect(pinnedTags(view)).toEqual(['person', 'book']))
     expect(pinWrites()).toHaveLength(1)
     expect(pinnedTabOrder(view)).toEqual(['#person', '#book'])
     await expect.element(handle).not.toHaveAttribute('aria-pressed', 'true')
@@ -1032,11 +919,11 @@ describe('AllNotesScreen — pinned tag management', () => {
     const view = await renderScreen()
     await openPinnedFilters(view)
     const handle = page.getByRole('button', { name: 'Reorder #person' })
-    await movePinnedTagUpWithKeyboard('person')
+    await movePinnedTagUpWithKeyboard(view, 'person')
     await userEvent.keyboard('{Escape}')
     await expect.element(handle).not.toHaveAttribute('aria-pressed', 'true')
 
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+    expect(pinnedTags(view)).toEqual(['book', 'person'])
     expect(pinWrites()).toHaveLength(0)
     expect(pinnedTabOrder(view)).toEqual(['#book', '#person'])
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
@@ -1052,7 +939,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     async (exit) => {
       const view = await renderScreen()
       await openPinnedFilters(view)
-      await movePinnedTagUpWithKeyboard('person')
+      await movePinnedTagUpWithKeyboard(view, 'person')
 
       if (exit === 'Done') {
         await page.getByRole('button', { name: 'Done', exact: true }).click()
@@ -1062,18 +949,16 @@ describe('AllNotesScreen — pinned tag management', () => {
       await expect
         .element(page.getByRole('list', { name: 'Pinned filters' }))
         .not.toBeInTheDocument()
-      expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person'])
+      expect(pinnedTags(view)).toEqual(['book', 'person'])
       expect(pinWrites()).toHaveLength(0)
       await openPinnedFilters(view)
       await expect
         .element(page.getByRole('button', { name: 'Actions for #book' }))
         .toBeInTheDocument()
       expect(pinnedTabOrder(view)).toEqual(['#book', '#person'])
-      await movePinnedTagUpWithKeyboard('person')
+      await movePinnedTagUpWithKeyboard(view, 'person')
       await userEvent.keyboard('{Enter}')
-      await vi.waitFor(() =>
-        expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book']),
-      )
+      await vi.waitFor(() => expect(pinnedTags(view)).toEqual(['person', 'book']))
       expect(pinWrites()).toHaveLength(1)
       await view.unmount()
     },
@@ -1128,12 +1013,9 @@ describe('AllNotesScreen — pinned tag management', () => {
   it('cancels a draft after an external pin update and keeps the external order', async () => {
     const view = await renderScreen()
     await openPinnedFilters(view)
-    await movePinnedTagUpWithKeyboard('person')
-    await act(async () => {
-      settingsStore.set({
-        ...settingsStore.get(),
-        allNotesFilterTags: ['book', 'person', 'external'],
-      })
+    await movePinnedTagUpWithKeyboard(view, 'person')
+    await act(() => {
+      updateSettingsElsewhere({ allNotesFilterTags: ['book', 'person', 'external'] })
     })
     await expect
       .element(page.getByRole('button', { name: 'Actions for #external' }))
@@ -1141,23 +1023,24 @@ describe('AllNotesScreen — pinned tag management', () => {
     page.getByPlaceholder('Find a tag to pin…').element().focus()
     await userEvent.keyboard('{ArrowUp}{Enter}')
 
-    expect(settingsStore.get().allNotesFilterTags).toEqual(['book', 'person', 'external'])
+    expect(pinnedTags(view)).toEqual(['book', 'person', 'external'])
     expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#external'])
     expect(pinWrites()).toHaveLength(0)
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
-    await movePinnedTagUpWithKeyboard('person')
+    await movePinnedTagUpWithKeyboard(view, 'person')
     await userEvent.keyboard('{Enter}')
-    await vi.waitFor(() =>
-      expect(settingsStore.get().allNotesFilterTags).toEqual(['person', 'book', 'external']),
-    )
+    await vi.waitFor(() => expect(pinnedTags(view)).toEqual(['person', 'book', 'external']))
     expect(pinWrites()).toHaveLength(1)
     await view.unmount()
   })
 
   it('keeps All and Custom reachable in a narrow header with long tags and the edit-day filter', async () => {
     const longTags = Array.from({ length: 12 }, (_, index) => `非常长的项目标签/project-${index}`)
-    settingsStore.update({ allNotesFilterTags: longTags })
-    const view = await renderScreen(undefined, { kind: 'updated', date: '2020-01-15' }, 320)
+    const view = await renderScreen({
+      filter: { kind: 'updated', date: '2020-01-15' },
+      settings: { allNotesFilterTags: longTags },
+      width: 320,
+    })
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
     const group = view.getByRole('group', { name: 'Filter notes' })
     const all = group
@@ -1227,51 +1110,17 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     // ⌘-click a second row extends the selection.
     await view.getByText('Dandelion chocolate.').click({ modifiers: ['ControlOrMeta'] })
     await expect.element(view.getByRole('button', { name: /Trash \(2\)/ })).toBeInTheDocument()
-    expect(openRouteInNewWindow).not.toHaveBeenCalled()
+    expect(openedNoteWindows(view)).toEqual([])
     await view.unmount()
   })
 
   it('range-selects rows with Shift-click', async () => {
     const rows = [
-      {
-        is_private: 0,
-        has_conflict: 0,
-        path: 'notes/a.md',
-        title: 'Note A',
-        mtime: 3,
-        preview: 'alpha',
-      },
-      {
-        is_private: 0,
-        has_conflict: 0,
-        path: 'notes/b.md',
-        title: 'Note B',
-        mtime: 2,
-        preview: 'bravo',
-      },
-      {
-        is_private: 0,
-        has_conflict: 0,
-        path: 'notes/c.md',
-        title: 'Note C',
-        mtime: 1,
-        preview: 'charlie',
-      },
+      { path: 'notes/a.md', title: 'Note A', mtime: 3, preview: 'alpha' },
+      { path: 'notes/b.md', title: 'Note B', mtime: 2, preview: 'bravo' },
+      { path: 'notes/c.md', title: 'Note C', mtime: 1, preview: 'charlie' },
     ]
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command !== 'db_query') {
-        return null
-      }
-      const sql = String(args['sql'])
-      if (sql.includes('group by')) {
-        return facetRows
-      }
-      if (sql.includes('"preview"')) {
-        return sql.includes('from "tags"') ? [] : rows
-      }
-      return []
-    })
-    const view = await renderScreen()
+    const view = await renderScreen({ notes: rows })
     await expect.element(view.getByText('Note A')).toBeInTheDocument()
 
     // Click the first row's body (the snippet), then Shift-click the third →
@@ -1303,7 +1152,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(1) // newest first: Health (Jan 15) above Tokyo (Jan 10)
 
     await view.getByRole('button', { name: 'Sort by subject' }).click()
-    expect(settingsStore.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
+    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     await expect
       .element(view.getByRole('button', { name: 'Subject, sorted A to Z' }))
       .toBeInTheDocument()
@@ -1316,7 +1165,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(-1)
 
     await view.getByRole('button', { name: 'Sort by updated' }).click()
-    expect(settingsStore.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
+    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
     await view.getByRole('button', { name: 'Updated, sorted newest first' }).click()
     await expect
       .element(view.getByRole('button', { name: 'Updated, sorted oldest first' }))
@@ -1326,22 +1175,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
   })
 
   it('marks pinned notes, which lead the list whatever their age', async () => {
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command !== 'db_query') {
-        return null
-      }
-      const sql = String(args['sql'])
-      if (sql.includes('group by')) {
-        return facetRows
-      }
-      if (sql.includes('"preview"')) {
-        return sql.includes('from "tags"')
-          ? []
-          : [noteRows[0], { ...noteRows[1], is_pinned: 1, pinned_order: 1024 }]
-      }
-      return sql.includes('from "tags"') ? tagRows : []
-    })
-    const view = await renderScreen()
+    const view = await renderScreen({ notes: [healthRow, { ...tokyoRow, pinnedOrder: 1024 }] })
     await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
 
     const text = view.container.textContent ?? ''
@@ -1357,8 +1191,9 @@ describe('AllNotesScreen — selection and bulk trash', () => {
   })
 
   it('moves the keyboard selection through the sorted order', async () => {
-    settingsStore.update({ allNotesSort: { key: 'updated', direction: 'asc' } })
-    const view = await renderScreen()
+    const view = await renderScreen({
+      settings: { allNotesSort: { key: 'updated', direction: 'asc' } },
+    })
     await expect.element(view.getByText('Tokyo Gâteau')).toBeInTheDocument()
 
     await userEvent.keyboard('{ArrowDown}') // the first row in the oldest-first order
@@ -1377,7 +1212,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     view.getByRole('button', { name: 'Sort by subject' }).element().focus()
     await userEvent.keyboard('{Enter}')
 
-    expect(settingsStore.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
+    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
@@ -1391,7 +1226,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     await userEvent.keyboard('{Enter}')
     expect(probedRoute(view)).toEqual({ kind: 'note', path: 'notes/health.md' })
-    expect(openRouteInNewWindow).not.toHaveBeenCalled()
+    expect(openedNoteWindows(view)).toEqual([])
     await view.unmount()
   })
 
@@ -1405,12 +1240,11 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     await userEvent.keyboard('{ControlOrMeta>}{Enter}{/ControlOrMeta}')
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({
-        kind: 'note',
-        path: 'notes/health.md',
-      }),
+      expect(openedNoteWindows(view)).toContain(
+        deepLinkForRoute({ kind: 'note', path: 'notes/health.md' }),
+      ),
     )
-    expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
+    expect(openedNoteWindows(view)).toHaveLength(1)
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
@@ -1440,15 +1274,10 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     await page.getByRole('button', { name: 'Trash', exact: true }).click()
 
     await vi.waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('note_delete', {
-        path: 'notes/health.md',
-        generation: 1,
-      })
-      expect(mockInvoke).toHaveBeenCalledWith('note_delete', {
-        path: 'notes/tokyo.md',
-        generation: 1,
-      })
+      expect(deleteNote).toHaveBeenCalledWith('notes/health.md', 1)
+      expect(deleteNote).toHaveBeenCalledWith('notes/tokyo.md', 1)
     })
+    expect(view.app.noteFile.trashed()).toEqual(['notes/health.md', 'notes/tokyo.md'])
     // Optimistic removal: the rows leave at once — the test harness has no file
     // watcher to drive the reindex that would otherwise refresh the list.
     await expectLocatorToHaveCount(view.getByText('Health Stacked'), 0)
@@ -1480,7 +1309,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     await userEvent.keyboard('{ControlOrMeta>}{Backspace}{/ControlOrMeta}')
     expect(page.getByText('Trash 1 note?').query()).toBeNull()
-    expect(mockInvoke.mock.calls.some(([command]) => command === 'note_delete')).toBe(false)
+    expect(deleteNote).not.toHaveBeenCalled()
     await view.unmount()
   })
 
@@ -1503,26 +1332,8 @@ describe('AllNotesScreen — selection and bulk trash', () => {
   })
 
   it('closes the confirm and reports the failure via the operations toast', async () => {
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command === 'note_delete') {
-        throw new Error('disk on fire')
-      }
-      if (command !== 'db_query') {
-        return null
-      }
-      const sql = String(args['sql'])
-      if (sql.includes('group by')) {
-        return facetRows
-      }
-      if (sql.includes('"preview"')) {
-        return sql.includes('from "tags"') ? [] : noteRows
-      }
-      if (sql.includes('from "tags"')) {
-        return tagRows
-      }
-      return []
-    })
     const view = await renderScreen()
+    deleteNote.mockRejectedValue(new Error('disk on fire'))
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
     await view.getByText('Shop your health goals.').click()
@@ -1532,7 +1343,13 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     // The confirm closes either way; the reason lands in the operations toast.
     await expectLocatorToHaveCount(page.getByText('Trash 1 note?'), 0)
-    await expect.element(view.getByTestId('operations')).toMatchTextContent('failed:disk on fire')
+    await vi.waitFor(() =>
+      expect(
+        view.app.progress
+          .getAll()
+          .map((operation) => `${operation.status}:${operation.message ?? ''}`),
+      ).toContain('failed:disk on fire'),
+    )
     // The note that failed to trash is left in the list and stays selected, so
     // the bulk action is still available for an immediate retry (no re-select).
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
@@ -1543,29 +1360,13 @@ describe('AllNotesScreen — selection and bulk trash', () => {
   it('keeps trashed rows gone on a partial failure (no index resurrection)', async () => {
     // health trashes; tokyo fails. The index still lists health until the
     // watcher reindexes, so a refetch here would wrongly bring it back.
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command === 'note_delete') {
-        if (args['path'] === 'notes/tokyo.md') {
-          throw new Error('locked')
-        }
-        return { trashed: 'system' }
-      }
-      if (command !== 'db_query') {
-        return null
-      }
-      const sql = String(args['sql'])
-      if (sql.includes('group by')) {
-        return facetRows
-      }
-      if (sql.includes('"preview"')) {
-        return sql.includes('from "tags"') ? [] : noteRows
-      }
-      if (sql.includes('from "tags"')) {
-        return tagRows
-      }
-      return []
-    })
     const view = await renderScreen()
+    deleteNote.mockImplementation((path) => {
+      if (path === 'notes/tokyo.md') {
+        return Promise.reject(new Error('locked'))
+      }
+      return Promise.resolve({ trashed: 'system' })
+    })
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
     await view.getByText('Shop your health goals.').click()
@@ -1596,9 +1397,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     confirm.click() // a rapid second click must not double-delete
 
     await expectLocatorToHaveCount(page.getByText('Trash 1 note?'), 0)
-    const healthDeletes = mockInvoke.mock.calls.filter(
-      ([command, args]) => command === 'note_delete' && args['path'] === 'notes/health.md',
-    )
+    const healthDeletes = deleteNote.mock.calls.filter(([path]) => path === 'notes/health.md')
     expect(healthDeletes).toHaveLength(1)
     await view.unmount()
   })

@@ -3,14 +3,18 @@
 # plugins. One lockfile pins one SQLite everywhere — the desktop writer and
 # the CLI reader can never skew.
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
   "apps/cli",
   "apps/desktop/src-tauri",
   "apps/native-host",
   "crates/frontmatter",
+  "crates/graph-io",
+  "crates/git",
   "crates/graph-paths",
+  "crates/index",
   "crates/index-schema",
+  "crates/types",
   "plugins/tauri-plugin-app-store",
   "plugins/tauri-plugin-keyboard",
   "plugins/tauri-plugin-mobile-haptics",
@@ -18,19 +22,28 @@ members = [
   "plugins/tauri-plugin-web-auth",
 ]
 
+[workspace.package]
+edition = "2024"
+license = "MIT"
+publish = false
+
 [workspace.dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rusqlite_migration = "2.6.0"
 sqlite-vec = "0.1.9"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-sha2 = "0.11.0"
+serde_json = "1.0.154"
+sha2 = "0.11.1"
 tempfile = "3.27.0"
 reflect-frontmatter = { path = "crates/frontmatter" }
 reflect-graph-paths = { path = "crates/graph-paths" }
+reflect-types = { path = "crates/types" }
+reflect-index = { path = "crates/index" }
+reflect-graph-io = { path = "crates/graph-io" }
+reflect-git = { path = "crates/git" }
 tauri = "2.12.1"
 tauri-plugin = { version = "2.7.1", features = ["build"] }
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 
 # Dependencies build optimized even in dev: the on-device models (tokenizers,
 # ONNX glue, whisper.cpp) run an order of magnitude slower unoptimized, which

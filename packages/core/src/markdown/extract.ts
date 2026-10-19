@@ -6,7 +6,7 @@ import { parseBody } from './grammar.ts'
 import { foldTag } from './keys.ts'
 import { parseInlineLink } from './link-syntax.ts'
 import { headingLevelOf } from './node-types.ts'
-import { buildPlainText, unescapeMarkdownText } from './plain-text.ts'
+import { buildPlainText, stripAtxHeadingMarks, unescapeMarkdownText } from './plain-text.ts'
 import { projectTasks } from './task-ast.ts'
 import { isWikiNodeName, wikiBracketStart } from './wiki-nodes.ts'
 import type {
@@ -69,11 +69,7 @@ function cleanHeadingText(raw: string): string {
   if (newline !== -1) {
     return unescapeMarkdownText(raw.slice(0, newline).trim()) // setext: heading text is the first line
   }
-  const text = raw
-    .replace(/^#{1,6}[ \t]*/, '')
-    .replace(/[ \t]*#*[ \t]*$/, '')
-    .trim()
-  return unescapeMarkdownText(text)
+  return unescapeMarkdownText(stripAtxHeadingMarks(raw))
 }
 
 /** GitHub-style anchor slug. */

@@ -10,14 +10,14 @@ use reflect_graph_paths::LocalOnlyFolders;
 use reflect_index_schema::{INDEX_FILE, REFLECT_DIR};
 
 use crate::app_search::search_app;
-use crate::commands::output::{print_json, HitJson, SearchJson};
+use crate::commands::output::{HitJson, SearchJson, print_json};
 use crate::commands::warn;
 use crate::error::CliError;
 use crate::graph::Graph;
-use crate::index::{detect_staleness, local_only_folders, open_read_only, IndexOpen, OpenIndex};
+use crate::index::{IndexOpen, OpenIndex, detect_staleness, local_only_folders, open_read_only};
 use crate::note_file::{read_note, subject_display_title};
 use crate::search::{
-    any_term_index, build_fts_any_match, build_fts_match, is_sentence_like, search_index, SearchHit,
+    SearchHit, any_term_index, build_fts_any_match, build_fts_match, is_sentence_like, search_index,
 };
 
 /// The privacy re-check: the index row said public, but the file's own
@@ -72,16 +72,17 @@ fn lexical_hits(
     };
     // A sentence rarely has every word in one note: top it up with the notes
     // sharing the most, and rarest, of its words, as the app's search does.
-    if hits.len() < limit && is_sentence_like(query) {
-        if let Some(any_match) = build_fts_any_match(query, opened.cjk_column) {
-            let listed: HashSet<String> = hits.iter().map(|hit| hit.path.clone()).collect();
-            hits.extend(any_term_index(
-                &opened.conn,
-                &any_match,
-                limit - hits.len(),
-                &listed,
-            )?);
-        }
+    if hits.len() < limit
+        && is_sentence_like(query)
+        && let Some(any_match) = build_fts_any_match(query, opened.cjk_column)
+    {
+        let listed: HashSet<String> = hits.iter().map(|hit| hit.path.clone()).collect();
+        hits.extend(any_term_index(
+            &opened.conn,
+            &any_match,
+            limit - hits.len(),
+            &listed,
+        )?);
     }
     Ok((staleness.is_stale(), hits, local_only))
 }

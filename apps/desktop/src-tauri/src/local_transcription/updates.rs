@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use hf_hub::api::sync::ApiBuilder;
 use serde::{Deserialize, Serialize};
 
-use super::models::{self, ModelSpec, CATALOG_GENERATION, MODEL_REPO};
+use super::models::{self, CATALOG_GENERATION, MODEL_REPO, ModelSpec};
 
 /// Upstream checks run at most this often unless forced.
 const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;

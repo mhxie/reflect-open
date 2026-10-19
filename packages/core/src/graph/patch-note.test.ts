@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isAppError } from '../errors.ts'
-import { subscribeFileChanges } from '../indexing/file-changes.ts'
-import { setLocalWriteEcho } from '../indexing/local-write-echo.ts'
-import { setBridge } from '../ipc/bridge.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { AppError, isAppError } from '../errors.ts'
 import { CHANGED_ON_DISK, fakeNoteStore, type FakeNoteStore } from '../testing/fake-note-store.ts'
+import {
+  createTestClockService,
+  createTestFileChangeService,
+  createTestIpcBridgeService,
+  createTestNoteFileService,
+  overrideNoteFileService,
+} from '../testing/index.ts'
+import { createNoteFileService } from './note-file-service.ts'
 import {
   NoteChangedError,
   PATCH_NOTE_ATTEMPTS,
@@ -18,7 +23,7 @@ const PATH = 'notes/plan.md'
 /** The store as a patch's IO, with a missing note read as `null`. */
 function storeIo(store: FakeNoteStore): NotePatchIo {
   return {
-    read: async (path) => store.files.get(path) ?? null,
+    read: (path) => store.files.get(path) ?? null,
     write: (path, contents, expectedContents) =>
       store.writeNote(path, contents, 1, expectedContents),
   }
@@ -28,11 +33,6 @@ function storeIo(store: FakeNoteStore): NotePatchIo {
 function appendLine(line: string): (source: string | null) => string {
   return (source) => `${source ?? ''}${line}\n`
 }
-
-afterEach(() => {
-  setBridge(null)
-  setLocalWriteEcho(false)
-})
 
 describe('patchNoteWith', () => {
   it('writes the patched source checked against the bytes the patch saw', async () => {
@@ -162,10 +162,10 @@ describe('patchNoteWith', () => {
   })
 
   it('surfaces a real write failure at once when the file did not change', async () => {
-    const diskFull = { kind: 'io', message: 'disk full' }
+    const diskFull = new AppError('io', 'disk full')
     const io: NotePatchIo = {
-      read: async () => '# Plan\n',
-      write: vi.fn(async () => {
+      read: () => '# Plan\n',
+      write: vi.fn(() => {
         throw diskFull
       }),
     }
@@ -175,14 +175,14 @@ describe('patchNoteWith', () => {
   })
 
   it('surfaces the refusal when the note cannot be re-read', async () => {
-    const graphSwitched = { kind: 'io', message: 'the graph changed since this command was issued' }
+    const graphSwitched = new AppError('io', 'the graph changed since this command was issued')
     const read = vi
       .fn<NotePatchIo['read']>()
       .mockResolvedValueOnce('# Plan\n')
-      .mockRejectedValue({ kind: 'noGraph', message: 'No graph is open' })
+      .mockRejectedValue(new AppError('noGraph', 'No graph is open'))
     const io: NotePatchIo = {
       read,
-      write: async () => {
+      write: () => {
         throw graphSwitched
       },
     }
@@ -205,72 +205,69 @@ describe('patchNoteWith', () => {
 describe('patchNote', () => {
   it('pins the read and the checked write to the generation', async () => {
     const files = new Map([[PATH, '# Plan\n']])
-    const invoke = vi.fn(async (command: string, args: Record<string, unknown>) => {
-      if (command === 'note_read') {
-        const contents = files.get(String(args['path']))
-        if (contents === undefined) throw { kind: 'notFound', message: 'missing' }
-        return contents
-      }
-      if (command === 'note_write') {
-        files.set(String(args['path']), String(args['contents']))
-        return 1_234
-      }
-      throw new Error(`unexpected command ${command}`)
+    const ipc = createTestIpcBridgeService({
+      commands: {
+        note_read: (args) => {
+          const contents = files.get(String(args['path']))
+          if (contents === undefined) throw new AppError('notFound', 'missing')
+          return contents
+        },
+        note_write: (args) => {
+          files.set(String(args['path']), String(args['contents']))
+          return 1_234
+        },
+      },
     })
-    setBridge({ invoke, listen: async () => () => {} })
-
-    await patchNote(PATH, appendLine('- step'), 7)
-    await patchNote('notes/new.md', appendLine('- first'), 7)
-
-    expect(invoke).toHaveBeenCalledWith('note_read', { path: PATH, generation: 7 })
-    expect(invoke).toHaveBeenCalledWith('note_write', {
-      path: PATH,
-      contents: '# Plan\n- step\n',
-      generation: 7,
-      checkContents: true,
-      expectedContents: '# Plan\n',
+    const noteFile = createNoteFileService({
+      ipc,
+      clock: createTestClockService(),
+      fileChanges: createTestFileChangeService(),
     })
-    expect(invoke).toHaveBeenCalledWith('note_write', {
-      path: 'notes/new.md',
-      contents: '- first\n',
-      generation: 7,
-      checkContents: true,
-      expectedContents: null,
+
+    await patchNote(noteFile, PATH, appendLine('- step'), 7)
+    await patchNote(noteFile, 'notes/new.md', appendLine('- first'), 7)
+
+    expect(ipc.calls()).toContainEqual({
+      command: 'note_read',
+      args: { path: PATH, generation: 7 },
+    })
+    expect(ipc.calls()).toContainEqual({
+      command: 'note_write',
+      args: {
+        path: PATH,
+        contents: '# Plan\n- step\n',
+        generation: 7,
+        checkContents: true,
+        expectedContents: '# Plan\n',
+      },
+    })
+    expect(ipc.calls()).toContainEqual({
+      command: 'note_write',
+      args: {
+        path: 'notes/new.md',
+        contents: '- first\n',
+        generation: 7,
+        checkContents: true,
+        expectedContents: null,
+      },
     })
   })
 
   it('never applies a patch twice when its write fails only after landing', async () => {
-    const files = new Map([[PATH, '# Plan\n']])
-    let writes = 0
-    setBridge({
-      invoke: async (command: string, args: Record<string, unknown>) => {
-        if (command === 'note_read') {
-          return files.get(String(args['path']))
-        }
-        if (command === 'note_write') {
-          writes += 1
-          files.set(String(args['path']), String(args['contents']))
-          return 1_234
-        }
-        throw new Error(`unexpected command ${command}`)
+    const inner = createTestNoteFileService({ files: { [PATH]: '# Plan\n' } })
+    // A write whose bytes are already on disk can still reject: a change
+    // listener that throws after the write landed.
+    const noteFile = overrideNoteFileService(inner, {
+      write: async (path, contents, generation, expectedContents) => {
+        await inner.write(path, contents, generation, expectedContents)
+        throw new Error('listener failed')
       },
-      listen: async () => () => {},
-    })
-    // Mobile echoes a landed write in-process, so a throwing change listener
-    // rejects a write whose bytes are already on disk.
-    setLocalWriteEcho(true)
-    const unsubscribe = await subscribeFileChanges(() => {
-      throw new Error('listener failed')
     })
 
-    try {
-      const result = await patchNote(PATH, appendLine('- step'), 7)
+    const result = await patchNote(noteFile, PATH, appendLine('- step'), 7)
 
-      expect(result).toEqual({ source: '# Plan\n', patched: '# Plan\n- step\n', written: true })
-      expect(writes).toBe(1)
-      expect(files.get(PATH)).toBe('# Plan\n- step\n')
-    } finally {
-      unsubscribe()
-    }
+    expect(result).toEqual({ source: '# Plan\n', patched: '# Plan\n- step\n', written: true })
+    expect(inner.getWrites(PATH)).toEqual(['# Plan\n- step\n'])
+    expect(inner.files().get(PATH)).toBe('# Plan\n- step\n')
   })
 })

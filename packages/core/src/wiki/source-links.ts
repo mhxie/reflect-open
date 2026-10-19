@@ -19,7 +19,7 @@ export function readWikiSourceLinks(text: string, block: WikiAnchorsBlock): Wiki
   if (block.unparsed.length > 0) return null
   const elements = parseInline(text)
   const last = elements.at(-1)
-  if (last?.type !== LEZER_NODE_IDS.Link || !/^[ \t]*[.。]?[ \t]*$/.test(text.slice(last.to))) {
+  if (last?.type !== LEZER_NODE_IDS.Link || !/^[ \t]*(?:[.。][ \t]*)?$/.test(text.slice(last.to))) {
     return null
   }
   let first = elements.length - 1

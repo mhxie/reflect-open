@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { UNREADABLE_FRONTMATTER_HINT } from '@reflect/core'
 import { Shield } from 'lucide-react'
 import { useUnreadableFrontmatter } from '@/hooks/use-unreadable-frontmatter.ts'
-import { toggleNotePrivate, UNREADABLE_FRONTMATTER_HINT } from '@/lib/note-private.ts'
+import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { cn } from '@/lib/utils.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu.tsx'
 import { NOTE_MENU_ITEM, NoteMenuItemContent } from './note-menu-row.tsx'
 
@@ -22,14 +22,11 @@ interface NotePrivacyActionProps {
  * frontmatter can't be read stays locked and says how to fix it.
  */
 export function NotePrivacyAction({ path, isPrivate, hint }: NotePrivacyActionProps): ReactElement {
-  const { graph } = useGraph()
-  const queryClient = useQueryClient()
+  const { noteActions } = useCoreServices()
   const unreadable = useUnreadableFrontmatter(path, isPrivate)
 
   const toggle = async (): Promise<void> => {
-    if (graph !== null) {
-      await toggleNotePrivate({ queryClient, root: graph.root, generation: graph.generation, path })
-    }
+    await toggleNotePrivate(noteActions, path)
   }
 
   return (

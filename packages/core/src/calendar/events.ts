@@ -1,4 +1,4 @@
-import type { MeetingAttendee } from '../actions/resolve-attendees.ts'
+import type { MeetingAttendee } from '../contacts/meeting-service.ts'
 import type { CalendarAttendee, CalendarEvent } from './commands.ts'
 
 /**

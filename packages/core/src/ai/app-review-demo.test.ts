@@ -1,13 +1,29 @@
+import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { isNotNullish } from '@ocavue/utils'
 import { generateText, streamText } from '@reflect/modules/ai'
 import { describe, expect, it } from 'vitest'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import { APP_REVIEW_STUB_KEY, createDemoModel, DEMO_REPLY_TEXT } from './app-review-demo.ts'
-import { streamChat, type ChatStreamEvent } from './chat/stream-chat.ts'
-
-const throwingFetch = (() => {
-  throw new Error('demo mode must not fetch')
-}) as unknown as typeof fetch
+import {
+  createTestAssetStoreService,
+  createTestDatabaseService,
+  createTestHttpService,
+  createTestLoggerService,
+  createTestNoteFileService,
+  createTestOnDeviceHttpService,
+  createTestOnDeviceModelService,
+  createTestRetrievalService,
+  createTestXArchiveService,
+} from '../testing/index.ts'
+import { createAssetPrivacyService } from '../assets/asset-privacy-service.ts'
+import { NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
+import { createPrivacyService } from '../privacy/privacy-service.ts'
+import { createNoteListService } from '../indexing/note-list-service.ts'
+import { createChatPrivacyService } from './chat/chat-privacy-service.ts'
+import { createNoteToolsService } from './chat/note-tools-service.ts'
+import { createChatEngineService, type ChatStreamEvent } from './chat/chat-engine-service.ts'
+import { fitToContextWindow } from './chat/context-window.ts'
+import { createLanguageModelService, createLazyAiSdkLoader } from './language-model-service.ts'
 
 describe('createDemoModel', () => {
   it('generates the demo reply without any transport', async () => {
@@ -40,14 +56,59 @@ describe('createDemoModel', () => {
       keyHint: 'demo1',
     }
     const events: ChatStreamEvent[] = []
-    const turn = streamChat({
+    // No route answers: any request the demo sent would fail the turn.
+    const http = createTestHttpService()
+    const onDeviceHttp = createTestOnDeviceHttpService()
+    const database = createTestDatabaseService()
+    const noteFile = createTestNoteFileService()
+    const assetStore = createTestAssetStoreService()
+    const xArchive = createTestXArchiveService()
+    const graphSession = createTestGraphSessionService({ graph: { generation: 1 } })
+    const assetReferences = { notePaths: () => [] }
+    const assetPrivacy = createAssetPrivacyService({
+      noteFile,
+      xArchive,
+      assetReferences,
+      graphSession,
+    })
+    const chatPrivacy = createChatPrivacyService({
+      database,
+      noteFile,
+      assetStore,
+      assetReferences,
+      assetPrivacy,
+    })
+    const engine = createChatEngineService({
+      logger: createTestLoggerService(),
+      languageModel: createLanguageModelService({
+        http,
+        onDeviceHttp,
+        sdk: createLazyAiSdkLoader(),
+      }),
+      onDeviceModels: createTestOnDeviceModelService(),
+      noteTools: createNoteToolsService({
+        retrieval: createTestRetrievalService(),
+        noteFile,
+        assetStore,
+        noteList: createNoteListService({ database }),
+        dailyNotes: { listDailyNotes: () => [] },
+        assetReferences,
+        assetPrivacy,
+        xArchive,
+        privacy: createPrivacyService({ noteFile, graphSession }),
+        chatPrivacy,
+      }),
+      chatPrivacy,
+      fitToContextWindow,
+    })
+    const turn = engine.streamTurn({
       config,
       apiKey: APP_REVIEW_STUB_KEY,
-      generation: 1,
-      fetchFn: throwingFetch,
       messages: [{ role: 'user', content: 'What is in my notes?' }],
       today: '2026-08-14',
       semanticSearchEnabled: false,
+      generation: 1,
+      localOnly: NO_LOCAL_ONLY_FOLDERS,
       customSystemPrompt: '',
       context: null,
     })
@@ -60,5 +121,7 @@ describe('createDemoModel', () => {
       .join('')
     expect(text).toBe(DEMO_REPLY_TEXT)
     expect(events.at(-1)?.type).toBe('complete')
+    expect(http.requests()).toEqual([])
+    expect(onDeviceHttp.requests()).toEqual([])
   })
 })

@@ -1,6 +1,6 @@
 import { parseNote, splitFrontmatter } from '../markdown/index.ts'
+import { sha256Hex } from '@reflect/utils'
 import { isUnsegmented } from '../indexing/cjk.ts'
-import { hashContent } from '../indexing/hash.ts'
 import {
   MAX_ASSET_TEXT_CHARS,
   type AssetDescriptionBody,
@@ -15,7 +15,9 @@ import {
  */
 
 export interface NoteChunk {
-  /** Nearest enclosing heading's text, if any. */
+  /**
+   * Nearest enclosing heading's text, if any.
+   */
   heading: string | null
   posFrom: number
   posTo: number
@@ -29,14 +31,22 @@ export interface NoteChunk {
  * characters, so a thousand characters of Chinese would overrun the 512-token
  * window the embedding models read while the same span of English fits twice.
  */
-/** Accumulate sentences up to this many tokens before starting a new chunk. */
+/**
+ * Accumulate sentences up to this many tokens before starting a new chunk.
+ */
 const TARGET_TOKENS = 300
-/** No chunk runs past this (the window less room for the title context). */
+/**
+ * No chunk runs past this (the window less room for the title context).
+ */
 const MAX_TOKENS = 450
-/** A trailing chunk smaller than this merges into its predecessor. */
+/**
+ * A trailing chunk smaller than this merges into its predecessor.
+ */
 const MIN_TOKENS = 50
 
-/** Approximate model tokens in `text` (see the size note above). */
+/**
+ * Approximate model tokens in `text` (see the size note above).
+ */
 export function approxTokens(text: string): number {
   let unsegmented = 0
   let other = 0
@@ -76,7 +86,9 @@ function sentenceSpans(text: string, base: number): Array<{ from: number; to: nu
   return spans
 }
 
-/** `text[from, to)` in pieces of at most {@link MAX_TOKENS}. */
+/**
+ * `text[from, to)` in pieces of at most {@link MAX_TOKENS}.
+ */
 function splitBySize(text: string, from: number, to: number): Array<{ from: number; to: number }> {
   if (approxTokens(text.slice(from, to)) <= MAX_TOKENS) {
     return [{ from, to }]
@@ -145,7 +157,7 @@ async function chunkRun(text: string, base: number, heading: string | null): Pro
       posFrom: chunkFrom,
       posTo: chunkTo,
       text: chunkText,
-      contentHash: await hashContent(chunkText),
+      contentHash: await sha256Hex(chunkText),
     })
     chunkFrom = -1
   }
@@ -200,7 +212,7 @@ async function mergeRuntTail(
       posFrom: prev.posFrom,
       posTo: last.posTo,
       text,
-      contentHash: await hashContent(text),
+      contentHash: await sha256Hex(text),
     },
   ]
 }
@@ -244,7 +256,9 @@ export async function chunkNote(
   return await mergeRuntTail(chunks, (from, to) => source.slice(from, to))
 }
 
-/** `assets/graphs/q4.png` → `q4.png` — the chunk heading for an asset body. */
+/**
+ * `assets/graphs/q4.png` → `q4.png` — the chunk heading for an asset body.
+ */
 function assetBasename(assetPath: string): string {
   return assetPath.split('/').pop() ?? assetPath
 }

@@ -1,41 +1,20 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { DailyActivity, DailyEditCount, NoteListEntry, NoteListOptions } from '@reflect/core'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import type { CoreServices, DailyActivityService, NoteListEntry } from '@reflect/core'
+import { createTestCoreServices } from '@reflect/core/testing'
+import { queryKeys } from '@/lib/query-client.ts'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { ActivitySection } from './activity-section.tsx'
 
 const TODAY = '2026-10-03'
 
-const listDailyActivity = vi.hoisted(() => vi.fn<() => Promise<DailyActivity[]>>())
-const listDailyEditCounts = vi.hoisted(() => vi.fn<() => Promise<DailyEditCount[]>>())
-const listNotes = vi.hoisted(() =>
-  vi.fn<(options: NoteListOptions) => Promise<NoteListEntry[]>>(async () => []),
-)
-const settingsState = vi.hoisted(() => ({ activityHeatmapEnabled: true }))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  listDailyActivity,
-  listDailyEditCounts,
-  listNotes,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/lib/use-today.ts', () => ({ useToday: () => TODAY }))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      dateFormat: 'iso',
-      weekStartDay: 'monday',
-      activityHeatmapEnabled: settingsState.activityHeatmapEnabled,
-    },
-  }),
-}))
+const listDailyActivity = vi.fn<DailyActivityService['listDailyActivity']>()
+const listDailyEditCounts = vi.fn<DailyActivityService['listDailyEditCounts']>()
+const listNotes = vi.fn<CoreServices['noteList']['listNotes']>()
+let activityHeatmapEnabled: boolean
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()
@@ -43,18 +22,24 @@ function RouteProbe(): ReactNode {
 }
 
 async function renderSection(width = 300) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const view = await render(
-    <QueryClientProvider client={client}>
-      <RouterProvider>
-        <div style={{ width }}>
-          <ActivitySection />
-        </div>
-        <RouteProbe />
-      </RouterProvider>
-    </QueryClientProvider>,
+  const app = createTestCoreServices()
+  app.clock.setToday(TODAY)
+  vi.spyOn(app.dailyActivity, 'listDailyActivity').mockImplementation(listDailyActivity)
+  vi.spyOn(app.dailyActivity, 'listDailyEditCounts').mockImplementation(listDailyEditCounts)
+  vi.spyOn(app.noteList, 'listNotes').mockImplementation(listNotes)
+  return await renderInApp(
+    <>
+      <div style={{ width }}>
+        <ActivitySection />
+      </div>
+      <RouteProbe />
+    </>,
+    {
+      app,
+      graph: { root: '/g', name: 'g' },
+      settings: { dateFormat: 'iso', weekStartDay: 'monday', activityHeatmapEnabled },
+    },
   )
-  return Object.assign(view, { client })
 }
 
 function editedOn(date: string): string {
@@ -71,8 +56,7 @@ function heatmap() {
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear()
-  settingsState.activityHeatmapEnabled = true
+  activityHeatmapEnabled = true
   listDailyEditCounts.mockReset().mockResolvedValue([
     { date: '2026-10-02', notes: 3 },
     { date: '2026-09-29', notes: 1 },
@@ -82,10 +66,7 @@ beforeEach(() => {
     { date: '2026-10-01', characters: 300 },
     { date: '2026-10-02', characters: 1200 },
   ])
-})
-
-afterEach(async () => {
-  await cleanup()
+  listNotes.mockReset().mockResolvedValue([])
 })
 
 describe('ActivitySection', () => {
@@ -131,7 +112,6 @@ describe('ActivitySection', () => {
   it('previews the hovered day’s most recently edited notes', async () => {
     const entry = (path: string, title: string, mtime: number): NoteListEntry => ({
       isPrivate: false,
-      hasConflict: false,
       path,
       title,
       snippet: '',
@@ -162,7 +142,7 @@ describe('ActivitySection', () => {
     await expect.element(heatmap()).toBeVisible()
     const narrowColumns = columnCount(narrow.container)
     const narrowCell = narrow.container.querySelector('[data-date]')!.getBoundingClientRect()
-    await cleanup()
+    await narrow.unmount()
 
     const wide = await renderSection(400)
     await expect.element(heatmap()).toBeVisible()
@@ -183,6 +163,9 @@ describe('ActivitySection', () => {
   it('moves between days with the arrow keys from a single tab stop', async () => {
     const view = await renderSection()
     await expect.element(heatmap()).toBeVisible()
+    // The pointer rests where an earlier test left it; keep it off the grid so
+    // only focus drives the tooltip.
+    await userEvent.hover(page.getByTestId('route'))
     const stops = view.container.querySelectorAll<HTMLElement>('[role="gridcell"][tabindex="0"]')
     expect(stops).toHaveLength(1)
 
@@ -199,12 +182,17 @@ describe('ActivitySection', () => {
   })
 
   it('stays hidden and fetches nothing when turned off in settings', async () => {
-    settingsState.activityHeatmapEnabled = false
+    activityHeatmapEnabled = false
     const view = await renderSection()
 
-    const queries = view.client.getQueryCache().getAll()
-    expect(queries.length).toBeGreaterThan(0)
-    expect(queries.every((query) => query.state.fetchStatus === 'idle')).toBe(true)
+    const cache = view.queryClient.getQueryCache()
+    const queries = [
+      queryKeys.index.dailyActivity('/g'),
+      queryKeys.index.dailyEditCounts('/g'),
+    ].map((queryKey) => cache.find({ queryKey, exact: true }))
+    for (const query of queries) {
+      expect(query?.state.fetchStatus).toBe('idle')
+    }
     expect(listDailyActivity).not.toHaveBeenCalled()
     expect(view.container.textContent).not.toContain('Activity')
   })

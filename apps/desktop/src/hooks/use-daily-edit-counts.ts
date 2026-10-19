@@ -1,9 +1,8 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { listDailyEditCounts } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 const NO_COUNTS: ReadonlyMap<string, number> = new Map()
 
@@ -13,11 +12,11 @@ const NO_COUNTS: ReadonlyMap<string, number> = new Map()
  */
 export function useDailyEditCounts(enabled: boolean): ReadonlyMap<string, number> {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { dailyActivity } = useCoreServices()
   const { data } = useQuery({
     queryKey: queryKeys.index.dailyEditCounts(graph?.root),
-    queryFn: () => listDailyEditCounts(),
-    enabled: enabled && bridgeReady && graph !== null,
+    queryFn: () => dailyActivity.listDailyEditCounts(),
+    enabled: enabled && graph !== null,
   })
   return useMemo(
     () =>

@@ -1,15 +1,12 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { buildAttachmentLibrary, type AttachmentLibraryEntry } from '@reflect/core'
 import {
-  buildAttachmentLibrary,
-  listAttachmentNoteTags,
-  listAttachmentReferences,
-  listAttachments,
-  type AttachmentLibraryEntry,
-} from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
-import { queryKeys } from '@/lib/query-client.ts'
+  createAttachmentFilesQueryOptions,
+  createAttachmentReferencesQueryOptions,
+} from '@/lib/query-options.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * The open graph's Attachments library, or undefined while it loads. The file
@@ -20,25 +17,17 @@ import { useGraph } from '@/providers/graph-provider.tsx'
  */
 export function useAttachmentLibrary(): readonly AttachmentLibraryEntry[] | undefined {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
-  const enabled = bridgeReady && graph !== null
+  const { attachments, noteList } = useCoreServices()
+  const enabled = graph !== null
   const generation = graph?.generation ?? 0
 
   const { data: files } = useQuery({
-    queryKey: queryKeys.attachments.files(generation),
-    queryFn: () => listAttachments(generation),
+    ...createAttachmentFilesQueryOptions(attachments, generation),
     enabled,
   })
   // One index query: the links and their notes' tags change together.
   const { data: index } = useQuery({
-    queryKey: queryKeys.index.attachmentReferences(graph?.root),
-    queryFn: async () => {
-      const [references, noteTags] = await Promise.all([
-        listAttachmentReferences(),
-        listAttachmentNoteTags(),
-      ])
-      return { references, noteTags }
-    },
+    ...createAttachmentReferencesQueryOptions(noteList, graph?.root),
     enabled,
   })
 

@@ -12,13 +12,13 @@ use std::time::Instant;
 use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::http::StatusCode;
 use tauri::State;
+use tauri::http::StatusCode;
 use tokio::sync::Semaphore;
 
-use super::preview_cache;
-use super::resolve::{resolve_read, resolve_write, ReadTarget};
 use super::GraphState;
+use super::preview_cache;
+use super::{ReadTarget, resolve_read, resolve_write};
 use crate::error::{AppError, AppResult};
 
 #[cfg(target_os = "macos")]
@@ -493,10 +493,10 @@ impl PageRender {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "rendered PDF page"
         );
-        if let Some(entry) = self.cache {
-            if let Err(err) = super::io::atomic_write_bytes(&entry.root, &entry.path, &png) {
-                tracing::warn!(?err, path = %entry.path.display(), "failed to cache a PDF page");
-            }
+        if let Some(entry) = self.cache
+            && let Err(err) = super::io::atomic_write_bytes(&entry.root, &entry.path, &png)
+        {
+            tracing::warn!(?err, path = %entry.path.display(), "failed to cache a PDF page");
         }
         Ok(png)
     }
@@ -863,8 +863,7 @@ mod tests {
         assert_eq!(kind(PdfError::Unsupported), "unsupported");
         assert_eq!(kind(PdfError::TooLarge(MAX_PDF_BYTES + 1)), "unsupported");
         assert_eq!(
-            serde_json::to_value(AppError::from(PdfError::TooLarge(MAX_PDF_BYTES + 1))).unwrap()
-                ["message"],
+            serde_json::to_value(AppError::from(PdfError::TooLarge(MAX_PDF_BYTES + 1))).unwrap()["message"],
             "PDF previews are limited to 200 MB; this file is 201 MB"
         );
         assert_eq!(kind(PdfError::Locked), "locked");
@@ -1054,14 +1053,16 @@ mod tests {
             .len(),
             3
         );
-        assert!(tauri::async_runtime::block_on(pdf_page_read_for_device(
-            "finance/secure/scan.pdf".into(),
-            1,
-            4,
-            source_hash.clone(),
-            app.state::<GraphState>()
-        ))
-        .is_ok());
+        assert!(
+            tauri::async_runtime::block_on(pdf_page_read_for_device(
+                "finance/secure/scan.pdf".into(),
+                1,
+                4,
+                source_hash.clone(),
+                app.state::<GraphState>()
+            ))
+            .is_ok()
+        );
         fs::write(root.join("assets/paper.pdf"), b"changed during OCR").unwrap();
         assert!(matches!(
             tauri::async_runtime::block_on(pdf_info_for_device(

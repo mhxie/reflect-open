@@ -1,14 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { setBridge } from '../ipc/bridge.ts'
+import { describe, expect, it } from 'vitest'
 import {
   bestChunkPerNote,
-  type ChunkHitRow,
   fuseRanked,
   mergeNearestFirst,
-  retrieve,
-  withMatchedBy,
+  type ChunkHitRow,
+  type RetrievalHit,
 } from './retrieve.ts'
-import type { RetrievalHit } from './retrieval-hit.ts'
+import { withMatchedBy } from './retrieval-service.ts'
 
 function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
   return {
@@ -18,7 +16,6 @@ function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
     snippet: `about ${path}`,
     heading: null,
     isPrivate: false,
-    hasConflict: false,
     ...overrides,
   }
 }
@@ -30,7 +27,6 @@ function row(path: string, distance: number, overrides?: Partial<ChunkHitRow>): 
     heading: null,
     text: ` about ${path} `,
     isPrivate: 0,
-    hasConflict: 0,
     modelId: 'all-MiniLM-L6-v2',
     distance,
     ...overrides,
@@ -95,10 +91,9 @@ describe('bestChunkPerNote', () => {
   })
 
   it('trims snippets and converts the private flag', () => {
-    const hits = bestChunkPerNote([row('notes/p.md', 0.1, { isPrivate: 1, hasConflict: 1 })], 12)
+    const hits = bestChunkPerNote([row('notes/p.md', 0.1, { isPrivate: 1 })], 12)
     expect(hits[0]!.snippet).toBe('about notes/p.md')
     expect(hits[0]!.isPrivate).toBe(true)
-    expect(hits[0]!.hasConflict).toBe(true)
   })
 })
 
@@ -156,9 +151,8 @@ describe('fuseRanked (reciprocal rank fusion)', () => {
   })
 
   it('keeps the private flag through fusion', () => {
-    const fused = fuseRanked([[hit('p', { isPrivate: true, hasConflict: true })]], 5)
+    const fused = fuseRanked([[hit('p', { isPrivate: true })]], 5)
     expect(fused[0]!.isPrivate).toBe(true)
-    expect(fused[0]!.hasConflict).toBe(true)
   })
 
   it('retains device-only provenance across lexical and semantic legs', () => {
@@ -182,197 +176,6 @@ describe('fuseRanked (reciprocal rank fusion)', () => {
   })
 })
 
-describe('retrieve', () => {
-  afterEach(() => {
-    setBridge(null)
-  })
-
-  /** A bridge whose `db_query` answers by query shape; records every call. */
-  function fakeIndex(answers: {
-    everyTerm: object[]
-    anyTerm: object[]
-    knn?: object[]
-    loadedModel?: string
-  }): Array<[string, unknown]> {
-    const calls: Array<[string, unknown]> = []
-    setBridge({
-      invoke: async (command, args) => {
-        calls.push([command, args])
-        if (command === 'embed_status') {
-          return answers.loadedModel === undefined
-            ? { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
-            : { status: 'ready', model: answers.loadedModel, dims: 384 }
-        }
-        if (command === 'embed_texts') {
-          return [[0.1, 0.2]]
-        }
-        const sql = String(args['sql'] ?? '')
-        if (sql.includes('materialized')) {
-          return answers.everyTerm.map((entry) => ({
-            is_private: 0,
-            has_device_only_content: 0,
-            ...entry,
-          }))
-        }
-        if (sql.includes('bm25(search_fts, 0, 10.0, 1.0, 1.0)')) {
-          return answers.anyTerm
-        }
-        if (sql.includes('embedding_vectors v')) {
-          return answers.knn ?? []
-        }
-        return []
-      },
-      listen: async () => () => {},
-    })
-    return calls
-  }
-
-  const EXACT = {
-    path: 'notes/exact.md',
-    title: 'Exact',
-    daily_date: null,
-    preview: '',
-    mtime: 1,
-    is_pinned: 0,
-    is_private: 0,
-    has_conflict: 0,
-    fts_highlighted_title: 'Exact',
-    snippet: 'every term',
-  }
-
-  it('keeps device-only snippet provenance without a second index read', async () => {
-    const snippet = '\u{1}exact\u{2} OCR'
-    const calls = fakeIndex({
-      everyTerm: [{ ...EXACT, snippet, has_device_only_content: 1 }],
-      anyTerm: [],
-    })
-    const hits = await retrieve('exact', { mode: 'lexical', limit: 1 })
-    expect(hits[0]).toMatchObject({ snippet, hasDeviceOnlyContent: true })
-    expect(calls.filter(([command]) => command === 'db_query')).toHaveLength(1)
-  })
-
-  it('fills a sentence-long query with any-term matches after the every-term ones', async () => {
-    const calls = fakeIndex({
-      everyTerm: [EXACT],
-      anyTerm: [
-        { path: 'notes/exact.md', title: 'Exact', snippet: '', isPrivate: 0 },
-        {
-          path: 'notes/related.md',
-          title: 'Related',
-          snippet: 'some terms',
-          isPrivate: 1,
-          hasConflict: 0,
-        },
-      ],
-    })
-    const hits = await retrieve('a sentence about wombat formats and their storage', {
-      mode: 'lexical',
-      limit: 3,
-    })
-    // The every-term hit leads and isn't repeated; the rest rank by bm25.
-    expect(hits.map((hit) => [hit.path, hit.isPrivate])).toEqual([
-      ['notes/exact.md', false],
-      ['notes/related.md', true],
-    ])
-    expect(hits.map((hit) => hit.score)).toEqual([1, 0.5])
-    const anyTerm = calls.find(([, args]) =>
-      String((args as { sql?: string }).sql).includes('bm25(search_fts, 0, 10.0, 1.0, 1.0)'),
-    )
-    expect(anyTerm).toBeDefined()
-  })
-
-  it('skips the any-term leg when every term already filled the limit', async () => {
-    const calls = fakeIndex({ everyTerm: [EXACT], anyTerm: [] })
-    await retrieve('exact', { mode: 'lexical', limit: 1 })
-    expect(
-      calls.some(([, args]) => String((args as { sql?: string }).sql).includes('ORDER BY bm25')),
-    ).toBe(false)
-  })
-
-  it('keeps a few keywords strict: no partial matches fill the list', async () => {
-    const calls = fakeIndex({
-      everyTerm: [EXACT],
-      anyTerm: [
-        {
-          path: 'notes/related.md',
-          title: 'Related',
-          snippet: 'some',
-          isPrivate: 0,
-          hasConflict: 0,
-        },
-      ],
-    })
-    const hits = await retrieve('wombat formats', { mode: 'lexical', limit: 3 })
-    expect(hits.map((hit) => hit.path)).toEqual(['notes/exact.md'])
-    expect(
-      calls.some(([, args]) => String((args as { sql?: string }).sql).includes('ORDER BY bm25')),
-    ).toBe(false)
-  })
-
-  it('ignores vectors another model wrote, until the table is refitted', async () => {
-    const knnRow = {
-      path: 'notes/near.md',
-      title: 'Near',
-      heading: null,
-      text: 'near',
-      isPrivate: 0,
-      hasConflict: 0,
-      distance: 0.1,
-    }
-    fakeIndex({
-      everyTerm: [],
-      anyTerm: [],
-      loadedModel: 'embeddinggemma-300m',
-      knn: [{ ...knnRow, modelId: 'all-MiniLM-L6-v2' }],
-    })
-    expect(await retrieve('notes about storage', { mode: 'semantic' })).toEqual([])
-
-    fakeIndex({
-      everyTerm: [],
-      anyTerm: [],
-      loadedModel: 'embeddinggemma-300m',
-      knn: [{ ...knnRow, modelId: 'embeddinggemma-300m' }],
-    })
-    const hits = await retrieve('notes about storage', { mode: 'semantic', maxDistance: 2 })
-    expect(hits.map((hit) => hit.path)).toEqual(['notes/near.md'])
-  })
-
-  it('embeds the semantic query as a query, with the model the status named', async () => {
-    const calls = fakeIndex({ everyTerm: [], anyTerm: [] })
-    await retrieve('where did we land on pricing', { mode: 'semantic' })
-    expect(calls.find(([command]) => command === 'embed_texts')?.[1]).toEqual({
-      texts: ['where did we land on pricing'],
-      role: 'query',
-      model: 'all-MiniLM-L6-v2',
-    })
-  })
-
-  it('preserves Private and conflict metadata from both lexical legs', async () => {
-    fakeIndex({
-      everyTerm: [{ ...EXACT, is_private: 1, has_conflict: 1 }],
-      anyTerm: [
-        {
-          path: 'notes/related.md',
-          title: 'Related',
-          snippet: 'related terms',
-          isPrivate: 1,
-          hasConflict: 1,
-        },
-      ],
-    })
-    const hits = await retrieve('a sentence about wombat formats and their storage', {
-      mode: 'lexical',
-      limit: 3,
-    })
-    expect(
-      hits.map(({ path, isPrivate, hasConflict }) => ({ path, isPrivate, hasConflict })),
-    ).toEqual([
-      { path: EXACT.path, isPrivate: true, hasConflict: true },
-      { path: 'notes/related.md', isPrivate: true, hasConflict: true },
-    ])
-  })
-})
-
 describe('withMatchedBy', () => {
   const hit = (path: string) => ({
     path,
@@ -381,7 +184,6 @@ describe('withMatchedBy', () => {
     snippet: '',
     heading: null,
     isPrivate: false,
-    hasConflict: false,
   })
 
   it('tags each fused hit with the leg that found it', () => {

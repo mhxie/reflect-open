@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { setLocalOnlyFolders } from '../graph/local-only.ts'
+import {
+  createLocalOnlyFolders,
+  type LocalOnlyFolders,
+  NO_LOCAL_ONLY_FOLDERS,
+} from '../graph/local-only.ts'
 import { noteBodyHash, parseNote } from '../markdown/index.ts'
 import {
   buildIndexedNote,
@@ -72,16 +76,12 @@ describe('buildIndexedNote', () => {
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {
     const source = '# Bank\n\nAccount details.\n'
-    const build = (path: string) =>
-      buildIndexedNote(parseNote({ path, source }), { fileHash: 'h', mtime: 1, source })
-    setLocalOnlyFolders(['secure'])
-    try {
-      expect(build('finance/secure/bank.md').isPrivate).toBe(true)
-      expect(build('finance/bank.md').isPrivate).toBe(false)
-    } finally {
-      setLocalOnlyFolders([])
-    }
-    expect(build('finance/secure/bank.md').isPrivate).toBe(false)
+    const build = (path: string, localOnly: LocalOnlyFolders) =>
+      buildIndexedNote(parseNote({ path, source }), { fileHash: 'h', mtime: 1, source, localOnly })
+    const secure = createLocalOnlyFolders(['secure'])
+    expect(build('finance/secure/bank.md', secure).isPrivate).toBe(true)
+    expect(build('finance/bank.md', secure).isPrivate).toBe(false)
+    expect(build('finance/secure/bank.md', NO_LOCAL_ONLY_FOLDERS).isPrivate).toBe(false)
   })
 
   it('flattens a parsed note into the index payload', () => {
@@ -443,27 +443,6 @@ describe('buildIndexedNote', () => {
       source,
     })
     expect(indexed.tasks[0]?.dueDate).toBe('2026-06-20')
-  })
-
-  it('flags notes carrying sync conflict markers', () => {
-    const source = '# Shared\n\n<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n'
-    const indexed = buildIndexedNote(parseNote({ path: 'notes/shared.md', source }), {
-      fileHash: 'h',
-      mtime: 0,
-      source,
-    })
-    expect(indexed.hasConflict).toBe(true)
-  })
-
-  it('does not flag a note quoting a conflict inside a code block', () => {
-    const source =
-      '# How to resolve\n\n```\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n```\n'
-    const indexed = buildIndexedNote(parseNote({ path: 'notes/howto.md', source }), {
-      fileHash: 'h',
-      mtime: 0,
-      source,
-    })
-    expect(indexed.hasConflict).toBe(false)
   })
 
   it('produces a payload that satisfies the cross-language contract schema', () => {

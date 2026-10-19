@@ -1,5 +1,5 @@
-use super::x_archive_store as archive;
 use crate::error::{AppError, AppResult as Result};
+use reflect_graph_io::x_archive_store as archive;
 use reflect_graph_paths::LocalOnlyFolders;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -99,7 +99,7 @@ pub async fn download(
 
 /// The `assets/x` directory media lands in, through the write guard.
 fn media_directory(root: &Path, local_only: Option<&LocalOnlyFolders>) -> Result<PathBuf> {
-    super::resolve::resolve_write(root, "assets/x", local_only)
+    super::resolve_write(root, "assets/x", local_only)
 }
 
 async fn download_once(
@@ -158,11 +158,7 @@ async fn download_once(
     tauri::async_runtime::spawn_blocking(move || {
         let (extension, mime, bytes) = archive::sniff(temporary.path())?;
         let name = format!("url_sha256_{hash}.{extension}");
-        let path = super::resolve::resolve_write(
-            &root,
-            &format!("assets/x/{name}"),
-            local_only.as_deref(),
-        )?;
+        let path = super::resolve_write(&root, &format!("assets/x/{name}"), local_only.as_deref())?;
         temporary.persist(path).map_err(|error| error.error)?;
         #[cfg(unix)]
         std::fs::File::open(directory)?.sync_all()?;
@@ -319,9 +315,11 @@ mod tests {
                 None,
                 "https://pbs.twimg.com/waits-for-capacity.png".into(),
             );
-            assert!(tokio::time::timeout(Duration::from_millis(50), pending)
-                .await
-                .is_err());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), pending)
+                    .await
+                    .is_err()
+            );
             let url = "https://pbs.twimg.com/cached.png";
             let hash = archive::hash_url(url).unwrap();
             let directory = root.path().join("assets/x");

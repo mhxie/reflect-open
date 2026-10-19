@@ -10,8 +10,8 @@ import { TextSelection } from '@prosekit/pm/state'
 import { planWikiClaim, planWikiClaimBoundary, type WikiArticleIndex } from '@reflect/core'
 import { toast } from '@/components/ui/toast.tsx'
 import { todayIso } from '@/lib/dates.ts'
-import { openUrlSync } from '@/lib/open-url.ts'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 import { clearNoteArticle, publishNoteArticle, useNoteArticle } from './wiki-article-store.ts'
 import { useWikiArticleIdentities } from './use-wiki-article-identities.ts'
 import { useWikiArticleTrust } from './use-wiki-article-trust.tsx'
@@ -28,6 +28,8 @@ interface WikiArticleBridgeProps {
 /** Hosts the note's shared claim projection and its local authoring action. */
 export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgeProps): ReactElement {
   const editor = useEditor<EditorExtension>()
+  const { logger } = useCoreServices()
+  const { opener } = useAppServices()
   const article = useNoteArticle(path)
   const noteIdentity = useWikiArticleIdentities(article?.index.source ?? '')
   const identitiesRef = useRef(noteIdentity)
@@ -46,7 +48,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       asOf: todayIso,
       evidence: {
         interactive: true,
-        openUrl: openUrlSync,
+        openUrl: (url) => opener.openUrlSync(url),
         openWikiLink: (options) => navigateRef.current(options),
       },
       onUpdate: () => updateRef.current(),
@@ -196,12 +198,12 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       })
     }
     updateRef.current = publish
-    const cancel = whenEditorMounted(editor, publish)
+    const cancel = whenEditorMounted(logger, editor, publish)
     return () => {
       cancel()
       updateRef.current = () => {}
       clearNoteArticle(path, owner)
     }
-  }, [editor, path, trustSummaryOf])
+  }, [editor, logger, path, trustSummaryOf])
   return <>{trustCard}</>
 }

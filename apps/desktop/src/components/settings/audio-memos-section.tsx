@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { TRANSCRIPTION_PROMPT_MAX_LENGTH, normalizeTranscriptionPrompt } from '@reflect/core'
-import { isMacosDesktop } from '@/lib/platform.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { LocalModelField } from './local-model-field.tsx'
 import { SettingsSection } from './section.tsx'
 import { SettingsSwitchField } from './switch-field.tsx'
@@ -15,11 +15,14 @@ import { TranscriptionLanguagesField } from './transcription-languages-field.tsx
  */
 export function AudioMemosSection(): ReactElement {
   const { settings, updateSettings } = useSettings()
+  const { platform } = useCoreServices()
 
   return (
     <SettingsSection id="audio-memos">
-      {isMacosDesktop ? <TranscriptionEngineField /> : null}
-      {isMacosDesktop && settings.transcriptionEngine === 'local' ? <LocalModelField /> : null}
+      {platform.isMacosDesktop ? <TranscriptionEngineField /> : null}
+      {platform.isMacosDesktop && settings.transcriptionEngine === 'local' ? (
+        <LocalModelField />
+      ) : null}
       <TranscriptionLanguagesField />
       {settings.transcriptionEngine === 'cloud' ? (
         <SettingsSwitchField

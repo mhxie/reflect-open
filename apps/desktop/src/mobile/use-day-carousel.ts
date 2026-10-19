@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import useEmblaCarousel from 'embla-carousel-react'
 import { createDayWindow, dateAtIndex, indexWithin, type DayWindow } from '@/lib/day-window.ts'
-import { getKeyboardHeight } from '@/mobile/use-keyboard.ts'
+import { useAppServices } from '@/services/services-provider.tsx'
 
 /**
  * Days either side of the carousel anchor. A fixed **symmetric** window
@@ -47,16 +47,6 @@ export function shouldRecenter(
   margin: number = RECENTER_MARGIN,
 ): boolean {
   return index < margin || index >= window.count - margin
-}
-
-/**
- * Embla's `watchDrag` predicate: swiping between days is disabled while the
- * software keyboard is up (V1 parity — horizontal drags would fight text
- * selection and the caret). Module-level so the options object stays stable
- * across renders; Embla evaluates it at drag start.
- */
-function dragAllowedWithKeyboardClosed(): boolean {
-  return getKeyboardHeight() === 0
 }
 
 /** What the carousel should do when the external target `date` changes. */
@@ -165,6 +155,7 @@ export function useDayCarousel(
   onSelect: (date: string) => void,
   onTarget: (date: string, navigationKey: string) => void,
 ): DayCarousel {
+  const { keyboard } = useAppServices()
   const [dayWindow, setDayWindow] = useState<DayWindow>(() =>
     createDayWindow(date, CAROUSEL_WINDOW),
   )
@@ -177,7 +168,10 @@ export function useDayCarousel(
     startIndex: indexWithin(dayWindow, date),
     align: 'center',
     skipSnaps: false,
-    watchDrag: dragAllowedWithKeyboardClosed,
+    // Swiping between days is disabled while the software keyboard is up (V1
+    // parity: horizontal drags would fight text selection and the caret).
+    // Embla evaluates the predicate at drag start.
+    watchDrag: () => keyboard.getHeight() === 0,
     // The container's direct children change only on a re-anchor, and the
     // follow effect below already reInits synchronously (layout effect —
     // before Embla's MutationObserver microtask would fire). Watching

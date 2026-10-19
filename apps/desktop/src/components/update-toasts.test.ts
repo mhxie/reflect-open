@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { UpdateController, UpdateState } from '@/lib/update-controller.ts'
+import { createTestUpdateService } from '@reflect/app/testing'
+import { createTestLoggerService } from '@reflect/core/testing'
 import type { MockToastAddOptions } from '@/test-utils/toast.ts'
 import { attachUpdateToasts } from './update-toasts.ts'
 
@@ -10,37 +11,6 @@ const toast = vi.hoisted(() => ({
 
 vi.mock('@/components/ui/toast.tsx', () => ({ toast }))
 
-function createFakeController(): {
-  controller: UpdateController
-  setState: (next: UpdateState) => void
-} {
-  let state: UpdateState = { phase: 'idle' }
-  const listeners = new Set<() => void>()
-  const controller: UpdateController = {
-    getState: () => state,
-    subscribe: (listener) => {
-      listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
-    },
-    start: vi.fn(),
-    checkNow: vi.fn(async () => {}),
-    install: vi.fn(async () => {}),
-    restart: vi.fn(async () => {}),
-    dispose: vi.fn(),
-  }
-  return {
-    controller,
-    setState: (next) => {
-      state = next
-      for (const listener of listeners) {
-        listener()
-      }
-    },
-  }
-}
-
 afterEach(() => {
   toast.add.mockClear()
   toast.close.mockClear()
@@ -48,10 +18,10 @@ afterEach(() => {
 
 describe('attachUpdateToasts', () => {
   it('shows an install action when an update is available', () => {
-    const { controller, setState } = createFakeController()
-    attachUpdateToasts(controller)
+    const update = createTestUpdateService()
+    attachUpdateToasts(update, createTestLoggerService())
 
-    setState({ phase: 'available', version: '1.2.3' })
+    update.setState({ phase: 'available', version: '1.2.3' })
 
     expect(toast.add).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -66,16 +36,16 @@ describe('attachUpdateToasts', () => {
 
     const options = toast.add.mock.lastCall?.[0]
     options?.actionProps?.onClick()
-    expect(controller.install).toHaveBeenCalledTimes(1)
+    expect(update.calls).toEqual(['install'])
   })
 
   it('updates the same toast while downloading and when ready', () => {
-    const { controller, setState } = createFakeController()
-    attachUpdateToasts(controller)
+    const update = createTestUpdateService()
+    attachUpdateToasts(update, createTestLoggerService())
     expect(toast.close).toHaveBeenCalledWith('reflect-update')
 
-    setState({ phase: 'available', version: '1.2.3' })
-    setState({ phase: 'downloading', version: '1.2.3', percent: 42 })
+    update.setState({ phase: 'available', version: '1.2.3' })
+    update.setState({ phase: 'downloading', version: '1.2.3', percent: 42 })
     expect(toast.add).toHaveBeenLastCalledWith(
       expect.objectContaining({
         id: 'reflect-update',
@@ -92,7 +62,7 @@ describe('attachUpdateToasts', () => {
     expect(Object.hasOwn(downloadingOptions ?? {}, 'actionProps')).toBe(true)
     expect(downloadingOptions?.actionProps).toBeUndefined()
 
-    setState({ phase: 'ready', version: '1.2.3' })
+    update.setState({ phase: 'ready', version: '1.2.3' })
     expect(toast.add).toHaveBeenLastCalledWith(
       expect.objectContaining({
         id: 'reflect-update',
@@ -104,14 +74,14 @@ describe('attachUpdateToasts', () => {
   })
 
   it('surfaces install errors but ignores check-only failures', () => {
-    const { controller, setState } = createFakeController()
-    attachUpdateToasts(controller)
+    const update = createTestUpdateService()
+    attachUpdateToasts(update, createTestLoggerService())
 
-    setState({ phase: 'error', message: 'offline', during: 'check' })
+    update.setState({ phase: 'error', message: 'offline', during: 'check' })
     expect(toast.close).toHaveBeenCalledWith('reflect-update')
     expect(toast.add).not.toHaveBeenCalled()
 
-    setState({ phase: 'error', message: 'signature failed', during: 'install' })
+    update.setState({ phase: 'error', message: 'signature failed', during: 'install' })
     expect(toast.add).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'reflect-update',
@@ -121,14 +91,17 @@ describe('attachUpdateToasts', () => {
         actionProps: expect.objectContaining({ children: 'Retry install' }),
       }),
     )
+
+    toast.add.mock.lastCall?.[0]?.actionProps?.onClick()
+    expect(update.calls).toEqual(['retryAction', 'install'])
   })
 
   it('stops mirroring after detach', () => {
-    const { controller, setState } = createFakeController()
-    const detach = attachUpdateToasts(controller)
+    const update = createTestUpdateService()
+    const detach = attachUpdateToasts(update, createTestLoggerService())
     detach()
 
-    setState({ phase: 'available', version: '1.2.3' })
+    update.setState({ phase: 'available', version: '1.2.3' })
     expect(toast.add).not.toHaveBeenCalled()
   })
 })

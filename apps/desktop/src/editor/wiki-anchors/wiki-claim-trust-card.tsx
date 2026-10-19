@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { WikiClaimStanding, WikiSourceStanding } from '@reflect/core'
-import { openUrlSync } from '@/lib/open-url.ts'
 import { cn } from '@/lib/utils.ts'
+import { useAppServices } from '@/services/services-provider.tsx'
 import { wikiStandingLabel, wikiStandingStyle } from './wiki-trust-labels.ts'
 
 /** What the trust card shows about one claim, and the one action it offers. */
@@ -37,6 +37,7 @@ function webUrl(url: string | null): string | null {
 }
 
 function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
+  const { opener } = useAppServices()
   const url = webUrl(source.url)
   return (
     <li className="space-y-0.5">
@@ -46,7 +47,7 @@ function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
         ) : (
           <button
             type="button"
-            onClick={() => openUrlSync(url)}
+            onClick={() => opener.openUrlSync(url)}
             title={url}
             className="min-w-0 flex-1 truncate text-left text-text-secondary underline decoration-border-strong underline-offset-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
           >

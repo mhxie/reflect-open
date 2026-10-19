@@ -1,18 +1,11 @@
 import { useCallback, useLayoutEffect, useRef } from 'react'
 import type { LinkClickHandler } from '@meowdown/core'
-import {
-  errorMessage,
-  markdownNoteReference,
-  resolveExistingMarkdownTarget,
-  resolveExistingWikiTarget,
-  splitWikiLinkTarget,
-} from '@reflect/core'
-import { reportAmbiguousNoteTitle } from '@/editor/ambiguous-note-feedback.ts'
-import { useOpenExternalLink } from '@/editor/open-external-link.ts'
+import { errorMessage, markdownNoteReference, splitWikiLinkTarget } from '@reflect/core'
+import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { startOperation } from '@/lib/operations.ts'
 import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
 import { routeForPath } from '@/routing/route.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteEmbedNavigationOptions {
   readonly generation: number | null
@@ -21,7 +14,9 @@ interface NoteEmbedNavigationOptions {
   readonly reveal: (fragment: string) => void
 }
 
-/** A Markdown href's `#fragment` as heading text (`My%20Heading` → `My Heading`). */
+/**
+ * A Markdown href's `#fragment` as heading text (`My%20Heading` → `My Heading`).
+ */
 function hrefFragment(fragment: string): string {
   try {
     return decodeURIComponent(fragment)
@@ -30,21 +25,27 @@ function hrefFragment(fragment: string): string {
   }
 }
 
-/** Source-aware link activation that only resolves existing notes, with no creation fallback. */
+/**
+ * Source-aware link activation that only resolves existing notes, with no creation fallback.
+ */
 export function useNoteEmbedNavigation({
   generation,
   graphKey,
   sourcePath,
   reveal,
 }: NoteEmbedNavigationOptions) {
+  const { noteLinkResolver } = useCoreServices()
+  const { linkNavigation, operations } = useAppServices()
   const scope = JSON.stringify([graphKey, generation, sourcePath])
-  const currentScope = useRef(scope)
+  const scopeRef = useRef(scope)
   useLayoutEffect(() => {
-    currentScope.current = scope
+    scopeRef.current = scope
   }, [scope])
   const openNote = useNoteLinkNavigation(scope)
   const beginLinkIntent = useLinkIntentGuard()
-  const openExternal = useOpenExternalLink()
+  // Belongs to no note: a deep link takes the deep-link pipeline, an allowed
+  // scheme the OS opener, and anything else does nothing.
+  const openExternal = useMarkdownLinkClick(null)
   const follow = useCallback(
     (kind: 'wiki' | 'markdown', target: string, openInNewWindow: boolean) => {
       if (generation === null || graphKey === null) return
@@ -53,9 +54,9 @@ export function useNoteEmbedNavigation({
         try {
           const result =
             kind === 'wiki'
-              ? await resolveExistingWikiTarget(target, generation, sourcePath)
-              : await resolveExistingMarkdownTarget(target, sourcePath, generation)
-          if (isStale() || currentScope.current !== scope) return
+              ? await noteLinkResolver.resolveWikiTarget(target, generation, sourcePath)
+              : await noteLinkResolver.resolveMarkdownHref(sourcePath, target, generation)
+          if (isStale() || scopeRef.current !== scope) return
           if (result.kind === 'resolved') {
             const fragment =
               kind === 'wiki'
@@ -69,18 +70,28 @@ export function useNoteEmbedNavigation({
               revealHeading: fragment ?? undefined,
             })
           } else if (result.kind === 'ambiguous') {
-            reportAmbiguousNoteTitle('Opening link', target)
+            linkNavigation.reportAmbiguousNoteTitle('Opening link', target)
           } else if (result.kind === 'unavailable') {
-            startOperation('Opening link').fail('This note is not available on this device.')
+            operations.fail('Opening link', 'This note is not available on this device.')
           }
         } catch (cause) {
-          if (!isStale() && currentScope.current === scope) {
-            startOperation('Opening link').fail(errorMessage(cause))
+          if (!isStale() && scopeRef.current === scope) {
+            operations.fail('Opening link', errorMessage(cause))
           }
         }
       })()
     },
-    [generation, graphKey, sourcePath, scope, beginLinkIntent, openNote],
+    [
+      generation,
+      graphKey,
+      sourcePath,
+      scope,
+      beginLinkIntent,
+      openNote,
+      noteLinkResolver,
+      linkNavigation,
+      operations,
+    ],
   )
   const onWikiLinkClick = useCallback(
     ({ target, openInNewWindow }: { target: string; openInNewWindow: boolean }) => {

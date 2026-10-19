@@ -1,17 +1,10 @@
 import { buildFileMarkdown } from '@meowdown/core'
-import {
-  assetFileName,
-  assetLinkDestination,
-  createAsset,
-  errorMessage,
-  untitledNotePath,
-} from '@reflect/core'
+import type { ClockService } from '@reflect/core'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { shouldEmbedFile } from '@/editor/embed-file.ts'
 import { noteTitleFromFile } from '@/editor/file-title.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
-import { startOperation } from '@/lib/operations.ts'
 import { routesEqual } from '@/routing/route.ts'
 
 /** How long the new note's editor gets to mount before the files give up on it. */
@@ -20,8 +13,8 @@ const MOUNT_TIMEOUT_MS = 3000
 /** How often the wait checks for the editor: a timer, which runs even in a hidden window. */
 const MOUNT_POLL_MS = 16
 
-/** What creating the note needs from the app: where the user is, and a way to go. */
-export type NoteFromFilesNavigation = Pick<CommandContext, 'navigate' | 'route'>
+/** What creating the note needs from the app: the services, where the user is, and a way to go. */
+export type NoteFromFilesContext = Pick<CommandContext, 'services' | 'app' | 'navigate' | 'route'>
 
 /** The note's markdown: the first titled file's name as its heading, then a line per file. */
 export function noteMarkdownForFiles(
@@ -36,16 +29,20 @@ export function noteMarkdownForFiles(
   return [title === undefined ? '#' : `# ${title}`, ...links].join('\n\n')
 }
 
-function waitForEditor(path: string): Promise<NoteEditorHandle | null> {
-  const deadline = Date.now() + MOUNT_TIMEOUT_MS
+function waitForEditor(
+  clock: ClockService,
+  path: string,
+  generation: number,
+): Promise<NoteEditorHandle | null> {
+  const deadline = clock.now() + MOUNT_TIMEOUT_MS
   return new Promise((resolve) => {
     const check = (): void => {
-      const handle = noteEditorHandleFor(path)
-      if (handle !== null || Date.now() > deadline) {
+      const handle = noteEditorHandleFor(path, generation)
+      if (handle !== null || clock.now() > deadline) {
         resolve(handle)
         return
       }
-      setTimeout(check, MOUNT_POLL_MS)
+      clock.setTimeout(check, MOUNT_POLL_MS)
     }
     check()
   })
@@ -53,43 +50,52 @@ function waitForEditor(path: string): Promise<NoteEditorHandle | null> {
 
 /**
  * Files dropped on the sidebar become a new note, as a link dragged to Arc's
- * sidebar becomes a tab: each file is copied into `assets/`, a fresh note
- * opens, and its editor receives the first titled file's name as the heading
- * (images carry none) and each file embedded or linked as a drop into the editor would — one undoable edit that
- * saves like typing, so the lazy note is created by it. Copying can take a
- * while: if the user has moved on by the time it finishes, the note doesn't
- * open over where they went, and the files stay in `assets/`.
+ * sidebar becomes a tab: each file is copied into `assets/` under its own
+ * name, a fresh note opens, and its editor receives the first titled file's
+ * name as the heading (images carry none) and each file embedded or linked as
+ * a drop into the editor would — one undoable edit that saves like typing, so
+ * the lazy note is created by it. Copying can take a while: if the user has
+ * moved on by the time it finishes, the note doesn't open over where they
+ * went, and the files stay in `assets/`. The copies belong to the graph
+ * session of `generation`: once another graph opens, the rest are not copied.
  */
 export async function createNoteFromFiles(
   files: readonly File[],
   generation: number,
-  app: NoteFromFilesNavigation,
+  context: NoteFromFilesContext,
 ): Promise<void> {
-  const operation = startOperation('Creating note from files')
-  const startRoute = app.route()
+  const { attachments, clock, graphSession, noteCreation } = context.services
+  const operation = context.app.operations.start('Creating note from files')
+  const startRoute = context.route()
   // Named before the uploads: the note an attachment is for decides where
   // it lands (a fresh note's go to the graph's `assets/`).
-  const path = untitledNotePath()
+  const path = noteCreation.untitledNotePath()
   const saved: { file: File; assetPath: string }[] = []
   const failed: string[] = []
   for (const file of files) {
-    try {
-      const assetPath = await createAsset(assetFileName(file.name), file, path, generation)
-      saved.push({ file, assetPath: assetLinkDestination(assetPath) })
-    } catch (cause) {
-      failed.push(`${file.name}: ${errorMessage(cause)}`)
+    if (graphSession.getState().session?.generation !== generation) {
+      failed.push(`${file.name}: the graph it was dropped in is no longer open`)
+      continue
+    }
+    const result = await attachments.saveFile(file, path, { keepName: true })
+    if (result === null) {
+      failed.push(`${file.name}: no graph is open`)
+    } else if (result.ok) {
+      saved.push({ file, assetPath: result.destination })
+    } else {
+      failed.push(`${file.name}: ${result.error.message}`)
     }
   }
   if (saved.length === 0) {
     operation.fail(failed.join('; '))
     return
   }
-  if (!routesEqual(app.route(), startRoute)) {
+  if (!routesEqual(context.route(), startRoute)) {
     operation.warn('You moved on before the files were copied; they are in assets/.')
     return
   }
-  app.navigate({ kind: 'note', path })
-  const handle = await waitForEditor(path)
+  context.navigate({ kind: 'note', path })
+  const handle = await waitForEditor(clock, path, generation)
   if (handle === null) {
     operation.fail('The new note didn’t open; the files are in assets/.')
     return

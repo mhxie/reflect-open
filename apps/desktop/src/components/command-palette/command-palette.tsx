@@ -7,7 +7,6 @@ import { Kbd } from '@/components/kbd.tsx'
 import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { ShortcutKeys } from '@/components/shortcut-keys.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { runCommand } from '@/lib/commands/registry.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
@@ -245,13 +244,8 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                                   />
                                 )}
                               </span>
-                              {entry.isPrivate === undefined ||
-                              entry.hasConflict === undefined ? null : (
-                                <NoteStateIndicator
-                                  path={entry.path}
-                                  isPrivate={entry.isPrivate}
-                                  hasConflict={entry.hasConflict}
-                                />
+                              {entry.isPrivate === undefined ? null : (
+                                <NoteStateIndicator path={entry.path} isPrivate={entry.isPrivate} />
                               )}
                               {entry.related ? (
                                 <span className="shrink-0 rounded-sm bg-surface-active px-1 text-2xs text-text-muted">
@@ -293,7 +287,7 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                         onSelect={() => {
                           pendingNoteOpenRef.current = null
                           closePalette()
-                          void runCommand(command.id, context)
+                          void context.app.commands.run(command.id, context)
                         }}
                         className="reflect-palette-item"
                       >

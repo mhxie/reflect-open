@@ -1,48 +1,24 @@
-import { useEffect, useState } from 'react'
-import { embedStatus, subscribeEmbedStatus, type EmbedStatus } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
-
-/** The last status any mount received, so a later mount starts from it. */
-let lastStatus: EmbedStatus = { status: 'uninitialized' }
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import type { EmbedStatus, Unlisten } from '@reflect/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * The embedding runtime's live status (Plan 09). Polls once on mount, then
- * tracks `embed:status` events. Without a bridge semantic features stay in
- * `uninitialized` — i.e. invisible.
+ * tracks `embed:status` events; a later mount starts from the last status
+ * the runtime observed.
  */
 export function useEmbedStatus(): EmbedStatus {
-  const [status, setStatus] = useState<EmbedStatus>(lastStatus)
-  const bridgeReady = useBridgeReady()
+  const { embeddingRuntime } = useCoreServices()
+  const subscribe = useCallback(
+    (onChange: () => void): Unlisten => embeddingRuntime.subscribe(onChange),
+    [embeddingRuntime],
+  )
+
+  const getSnapshot = useCallback(() => embeddingRuntime.lastStatus(), [embeddingRuntime])
 
   useEffect(() => {
-    if (!bridgeReady) {
-      return
-    }
-    let active = true
-    let unlisten: (() => void) | null = null
-    void embedStatus().then((current) => {
-      lastStatus = current
-      if (active) {
-        setStatus(current)
-      }
-    })
-    void subscribeEmbedStatus((next) => {
-      lastStatus = next
-      if (active) {
-        setStatus(next)
-      }
-    }).then((fn) => {
-      if (active) {
-        unlisten = fn
-      } else {
-        fn()
-      }
-    })
-    return () => {
-      active = false
-      unlisten?.()
-    }
-  }, [bridgeReady])
+    void embeddingRuntime.status()
+  }, [embeddingRuntime])
 
-  return status
+  return useSyncExternalStore(subscribe, getSnapshot)
 }

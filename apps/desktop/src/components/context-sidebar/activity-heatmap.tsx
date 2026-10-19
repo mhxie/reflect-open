@@ -73,7 +73,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
   // A focused day that scrolled out of the window falls back to today.
   const focusedIndex = days.indexOf(focused)
   const focusIndex = focusedIndex < 0 ? lastPast : Math.min(lastPast, focusedIndex)
-  const cells = useRef(new Map<string, HTMLButtonElement>())
+  const cellsRef = useRef(new Map<string, HTMLButtonElement>())
   // One tooltip for the whole grid; each day's cell is a trigger carrying its date.
   const [tooltip] = useState(() => createTooltipHandle<string>())
 
@@ -85,7 +85,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
     event.preventDefault()
     const date = days[next]!
     setFocused(date)
-    cells.current.get(date)?.focus()
+    cellsRef.current.get(date)?.focus()
   }
 
   return (
@@ -133,9 +133,9 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
                     <button
                       ref={(element) => {
                         if (element === null) {
-                          cells.current.delete(date)
+                          cellsRef.current.delete(date)
                         } else {
-                          cells.current.set(date, element)
+                          cellsRef.current.set(date, element)
                         }
                       }}
                       type="button"
