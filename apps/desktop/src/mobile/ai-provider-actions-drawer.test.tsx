@@ -89,11 +89,11 @@ describe('AiProviderActionsDrawer', () => {
 
     await page.getByRole('button', { name: 'Remove provider' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(app.logger.getErrors()).toEqual([
         { message: 'AI provider removal failed:', cause: 'keychain unavailable' },
-      ]),
-    )
+      ])
+    })
     expect(onOpenChange).not.toHaveBeenCalled()
     // The pending spinner cleared — the row is pressable again.
     await expect.element(page.getByRole('button', { name: 'Remove provider' })).toBeEnabled()

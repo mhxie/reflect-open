@@ -6,6 +6,7 @@ import { createTestWindowService } from '@reflect/app/testing'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteLinkNavigation } from './use-note-link-navigation.ts'
 
 // Receives the `reflect://` link of every note window a test opens.
@@ -23,23 +24,23 @@ function Links({ scopeKey }: { readonly scopeKey: string | undefined }): ReactEl
     <>
       <button
         type="button"
-        onClick={(event) =>
+        onClick={(event) => {
           openNoteLink({
             target: { kind: 'note', path: 'notes/alpha.md' },
             openInNewWindow: isModEvent(event),
           })
-        }
+        }}
       >
         Alpha
       </button>
       <button
         type="button"
-        onClick={(event) =>
+        onClick={(event) => {
           openNoteLink({
             target: { kind: 'note', path: 'notes/bravo.md' },
             openInNewWindow: isModEvent(event),
           })
-        }
+        }}
       >
         Bravo
       </button>
@@ -54,13 +55,13 @@ function HeadingLink(): ReactElement {
     <>
       <button
         type="button"
-        onClick={(event) =>
+        onClick={(event) => {
           openNoteLink({
             target: { kind: 'note', path: 'notes/plan.md' },
             openInNewWindow: isModEvent(event),
             revealHeading: 'Next steps',
           })
-        }
+        }}
       >
         Plan next steps
       </button>
@@ -102,7 +103,7 @@ function Harness({ scopeKey, visible = true }: HarnessProps): ReactElement {
  * Render `ui` on the All Notes route of an app whose note windows go to `openNoteWindow`.
  */
 async function mount(ui: ReactElement) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   return await renderInApp(ui, {
     app,
     appServices: { window: createTestWindowService({ openNoteWindow }) },
@@ -150,9 +151,9 @@ describe('useNoteLinkNavigation', () => {
     await view.getByRole('button', { name: 'Plan next steps' }).click({
       modifiers: ['ControlOrMeta'],
     })
-    await vi.waitFor(() =>
-      expect(openNoteWindow).toHaveBeenCalledWith('reflect://note/notes%2Fplan.md'),
-    )
+    await vi.waitFor(() => {
+      expect(openNoteWindow).toHaveBeenCalledWith('reflect://note/notes%2Fplan.md')
+    })
     await expect.element(view.getByTestId('reveal')).toHaveTextContent('Next steps')
   })
 
@@ -202,12 +203,11 @@ describe('useNoteLinkNavigation', () => {
   it('does not let an older rejected open override a newer note-link intent', async () => {
     let rejectOpen: (cause: Error) => void = () => {}
     openNoteWindow
-      .mockImplementationOnce(
-        () =>
-          new Promise((_resolve, reject) => {
-            rejectOpen = reject
-          }),
-      )
+      .mockImplementationOnce(() => {
+        return new Promise((_resolve, reject) => {
+          rejectOpen = reject
+        })
+      })
       .mockResolvedValueOnce(true)
     const view = await mount(<Harness />)
 

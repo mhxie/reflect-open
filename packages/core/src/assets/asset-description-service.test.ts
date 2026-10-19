@@ -9,11 +9,11 @@ import type { IndexAppliedEvent } from '../indexing/index-lifecycle-service.ts'
 import type { SecretStoreService } from '../secrets/secret-store-service.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAssetDescriberService,
   createTestAssetReferences,
   createTestAssetStoreService,
   createTestClockService,
-  createTestDatabaseService,
   createTestGraphSessionService,
   createTestActivityPort,
   createTestAiKeyValidationService,
@@ -233,7 +233,7 @@ function setup(options?: {
   const service = createAssetDescriptionService({
     assetStore,
     noteFile: files,
-    database: createTestDatabaseService(),
+    database: createNodeTestDatabaseService(),
     assetPrivacy: privacy,
     assetDescriber: describer,
     aiProviderConfig,
@@ -276,13 +276,14 @@ function setup(options?: {
     index,
     indexedEvents: () => indexedEvents,
     addAsset,
-    reconcile: async (overrides: Partial<ReconcileAssetDescriptionsInput> = {}) =>
-      await service.reconcile({
+    reconcile: async (overrides: Partial<ReconcileAssetDescriptionsInput> = {}) => {
+      return await service.reconcile({
         generation: GENERATION,
         mode: 'incremental',
         changed: ['assets/a.png'],
         ...overrides,
-      }),
+      })
+    },
   }
 }
 

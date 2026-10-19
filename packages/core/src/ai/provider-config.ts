@@ -79,11 +79,13 @@ export function withAiProviderModel(
   id: string,
   model: string,
 ): AiProviderConfig[] {
-  return withEntry(providers, id, (entry) =>
-    entry.provider === 'openai-compatible' && entry.onDevice && entry.onDevice.model !== model
+  return withEntry(providers, id, (entry) => {
+    return entry.provider === 'openai-compatible' &&
+      entry.onDevice &&
+      entry.onDevice.model !== model
       ? { ...entry, model, onDevice: null }
-      : { ...entry, model },
-  )
+      : { ...entry, model }
+  })
 }
 
 /**

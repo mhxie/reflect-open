@@ -290,14 +290,14 @@ function speakerSegments(channels: RecordingChannels): {
   me: RecordingSegment[]
   them: RecordingSegment[]
 } {
-  const timed =
-    (speaker: RecordingSegment['speaker']) =>
-    (segment: { startMs: number; endMs: number; text: string }): RecordingSegment => ({
+  const timed = (speaker: RecordingSegment['speaker']) => {
+    return (segment: { startMs: number; endMs: number; text: string }): RecordingSegment => ({
       startMs: segment.startMs,
       endMs: segment.endMs,
       speaker,
       text: segment.text,
     })
+  }
   return { me: channels.me.map(timed('me')), them: channels.them.map(timed('them')) }
 }
 
@@ -758,14 +758,15 @@ class RecordingServiceImpl implements RecordingService {
     await patchNote(
       noteFile,
       dailyPath(identity.date),
-      (source) =>
-        source !== null && hasTranscriptLink(source, identity)
+      (source) => {
+        return source !== null && hasTranscriptLink(source, identity)
           ? null
           : appendListItem(source ?? '', {
               kind: 'bullet',
               markdown: `[[${identity.base}|${eventTitle} transcript]]`,
               section: { titles: [MEETINGS_HEADING], linked: false },
-            }),
+            })
+      },
       input.generation,
     )
     return 'written'
@@ -781,14 +782,15 @@ class RecordingServiceImpl implements RecordingService {
     await patchNote(
       noteFile,
       dailyPath(identity.date),
-      (source) =>
-        source !== null && hasTranscriptLink(source, identity)
+      (source) => {
+        return source !== null && hasTranscriptLink(source, identity)
           ? null
           : appendListItem(source ?? '', {
               kind: 'bullet',
               markdown: entry,
               section: { titles: [memosNoteTitle, AUDIO_MEMOS_NOTE_TITLE], linked: true },
-            }),
+            })
+      },
       generation,
     )
   }

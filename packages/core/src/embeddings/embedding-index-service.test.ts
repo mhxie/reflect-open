@@ -2,7 +2,7 @@ import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it } from 'vitest'
 import { createLocalOnlyFolders, NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import {
-  createTestDatabaseService,
+  createNodeTestDatabaseService,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
   createTestIndexLifecycleService,
@@ -52,7 +52,7 @@ async function setup(options: {
 }) {
   const path = options.path ?? NOTE_PATH
   const evictedSidecars = options.evictedSidecars ?? []
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   await seedStoredRows(database, options.storedRows)
   const runtime = createTestEmbeddingRuntimeService({ vectors: () => [0.5, 0.5] })
   const index = createTestEmbeddingIndexService({
@@ -472,7 +472,7 @@ const NOTES = [
  * An embedding index whose chunk writes land in a database indexed with {@link NOTES}.
  */
 function setupGraph(options?: { unreadable?: string[]; onEmbed?: (text: string) => void }) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, NOTES)
   const unreadable = options?.unreadable ?? []
   /**

@@ -134,7 +134,7 @@ describe('dev bridge on-device transport', () => {
         command,
       ).rejects.toMatchObject({
         kind: 'unsupported',
-        message: expect.stringContaining('needs the desktop app'),
+        message: expect.stringContaining('needs the desktop app') as string,
       })
     }
   })
@@ -251,13 +251,14 @@ describe('dev bridge note_write parity', () => {
 
   it('writes only over the contents the caller names', async () => {
     const { files, bridge } = await bridgeOver({ 'notes/plan.md': '# Plan\n' })
-    const write = (path: string, expectedContents: string | null) =>
-      bridge.invoke('note_write', {
+    const write = (path: string, expectedContents: string | null) => {
+      return bridge.invoke('note_write', {
         path,
         contents: '# New\n',
         checkContents: true,
         expectedContents,
       })
+    }
 
     await expect(write('notes/plan.md', '# Stale\n')).rejects.toMatchObject({
       kind: 'io',

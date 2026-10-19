@@ -100,22 +100,19 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
       sort,
     )
   }, [notes, sort, filter, knowledgeLevels])
-  const levels = useMemo(
-    () =>
-      knowledgeLevels?.kind === 'ready'
-        ? knowledgeLevels.config.levels
-            .map(({ level }) => level)
-            .sort((left, right) => left - right)
-        : [],
-    [knowledgeLevels],
-  )
+  const levels = useMemo(() => {
+    return knowledgeLevels?.kind === 'ready'
+      ? knowledgeLevels.config.levels.map(({ level }) => level).sort((left, right) => left - right)
+      : []
+  }, [knowledgeLevels])
   const levelUnavailable =
     filter?.kind === 'level' && knowledgeLevels !== undefined && knowledgeLevels.kind !== 'ready'
   const handleSort = useCallback(
-    (key: NoteListSortKey) =>
+    (key: NoteListSortKey) => {
       updateSettingsWith((current) => ({
         allNotesSort: chooseNoteListSort(current.allNotesSort, key),
-      })),
+      }))
+    },
     [updateSettingsWith],
   )
 
@@ -126,11 +123,12 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
   const orderedPaths = useMemo(() => (sortedNotes ?? []).map((note) => note.path), [sortedNotes])
   const selection = useListSelection(orderedPaths)
   const openNote = useCallback(
-    (path: string, event?: ModClickEvent) =>
+    (path: string, event?: ModClickEvent) => {
       navigateNoteLink({
         target: routeForPath(path),
         openInNewWindow: event !== undefined && isModEvent(event),
-      }),
+      })
+    },
     [navigateNoteLink],
   )
   const handleFilterSelect = useCallback(

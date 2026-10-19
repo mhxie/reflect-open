@@ -1,12 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
-import {
-  createTestCoreServices,
-  createTestPlatformService,
-  type TestCoreServiceOverrides,
-} from '@reflect/core/testing'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { createTestCoreServices, createTestPlatformService } from '@reflect/core/testing'
 import { MobileRoot } from '@/mobile/mobile-root.tsx'
 import { act } from '@/test-utils/act.ts'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteDisplacements } from './note-displacements.tsx'
 
 // The mobile shell's screens: the wiring test only needs the root around them.
@@ -25,9 +22,11 @@ const GRAPH = { root: '/graph', name: 'graph', generation: 7, indexGeneration: 7
  * `gateListen`, a subscription resolves only on `release()`.
  */
 function setup(options?: { gateListen?: boolean; mobile?: boolean }) {
-  const overrides: TestCoreServiceOverrides =
-    options?.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}
-  const app = createTestCoreServices(overrides)
+  const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    ...(options?.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),
+  })
+  onTestFinished(() => app.database.close())
   const { ipc } = app
   const handlers: Array<(payload: unknown) => void> = []
   const unlisten = vi.fn()

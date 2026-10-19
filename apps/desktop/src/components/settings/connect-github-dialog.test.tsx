@@ -10,6 +10,7 @@ import {
   createTestSecretStoreService,
 } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ConnectGithubDialog } from './connect-github-dialog.tsx'
 
 // The connect actions of the graph's backup service, scripted per test.
@@ -64,6 +65,7 @@ async function renderWizard(onClose = vi.fn()): Promise<ReturnType<typeof vi.fn>
   backup.onConnectNewRepo(sync.connectNewRepo)
   backup.onConnectExistingRepo(sync.connectExistingRepo)
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     backup,
     // The wizard polls on the clock: real time, so `pollIntervalMs` elapses.
     clock: createSystemClock(),
@@ -94,12 +96,12 @@ describe('ConnectGithubDialog', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     // The owner is the verified sign-in — never typed.
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(sync.connectExistingRepo).toHaveBeenCalledWith(
         { owner: 'alex', name: 'my-notes' },
         { allowPublic: false },
-      ),
-    )
+      )
+    })
     await vi.waitFor(() => expect(sync.connectNewRepo).toHaveBeenCalledWith('my-notes'))
     expect(onClose).toHaveBeenCalled()
   })
@@ -129,12 +131,12 @@ describe('ConnectGithubDialog', () => {
     )
 
     // Once the repo exists, a poll connects it — the user clicks nothing.
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(sync.connectExistingRepo).toHaveBeenLastCalledWith(
         { owner: 'alex', name: 'g-backup' },
         { allowPublic: false },
-      ),
-    )
+      )
+    })
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled())
     // The repo exists now — re-running the API create would just 422.
     expect(sync.connectNewRepo).toHaveBeenCalledTimes(1)
@@ -206,12 +208,12 @@ describe('ConnectGithubDialog', () => {
 
     await page.getByRole('button', { name: 'Back up to a public repo' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(sync.connectExistingRepo).toHaveBeenLastCalledWith(
         { owner: 'alex', name: 'public-notes' },
         { allowPublic: true },
-      ),
-    )
+      )
+    })
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -246,12 +248,12 @@ describe('ConnectGithubDialog', () => {
     await page.getByLabelText('Existing repository', { exact: true }).fill('alex/notes')
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(sync.connectExistingRepo).toHaveBeenLastCalledWith(
         { owner: 'alex', name: 'notes' },
         { allowPublic: false },
-      ),
-    )
+      )
+    })
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -299,12 +301,12 @@ describe('ConnectGithubDialog', () => {
     )
 
     // Back from the browser with access granted — the poll connects, no click.
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(sync.connectExistingRepo).toHaveBeenLastCalledWith(
         { owner: 'alex', name: 'notes' },
         { allowPublic: false },
-      ),
-    )
+      )
+    })
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(sync.connectExistingRepo.mock.calls.length).toBeGreaterThanOrEqual(3)
   })

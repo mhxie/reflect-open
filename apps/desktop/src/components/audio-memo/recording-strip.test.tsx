@@ -1,11 +1,12 @@
 import { createTestCoreServices } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import type { AudioMemoContextValue } from '@/providers/audio-memo-provider.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { Mutable } from '@reflect/utils'
 
 const memo = vi.hoisted((): Mutable<AudioMemoContextValue> => ({
@@ -44,17 +45,18 @@ function PeekProbe(): ReactElement {
 }
 
 async function renderStrip() {
-  const app = createTestCoreServices()
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation((path) =>
-    Promise.resolve({
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation((path) => {
+    return Promise.resolve({
       path,
       title: 'Call with Sarah Chen',
       dailyDate: null,
       isPrivate: false,
       gistUrl: null,
       gistStale: false,
-    }),
-  )
+    })
+  })
   return await renderInApp(
     <PeekProvider>
       <RecordingStrip />
@@ -125,11 +127,11 @@ describe('RecordingStrip', () => {
 
     const ready = page.getByRole('status', { name: 'Transcript ready' })
     await userEvent.click(ready.getByText('Call with Sarah Chen'))
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(page.getByTestId('peek').element().getAttribute('data-target')).toContain(
         '"path":"recordings/2026-10-03-call.md"',
-      ),
-    )
+      )
+    })
     expect(recorder.dismissTranscript).toHaveBeenCalled()
   })
 })

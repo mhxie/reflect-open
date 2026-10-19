@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type {
   AttachmentService,
   BackupState,
@@ -31,6 +31,7 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { act } from '@/test-utils/act.ts'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteStatusBar } from './note-status-bar.tsx'
 
 const EDITABLE: NoteState = {
@@ -91,13 +92,13 @@ function PeekOpener(): ReactElement {
   return (
     <button
       type="button"
-      onClick={() =>
+      onClick={() => {
         peek?.openPeek({
           kind: 'note',
           path: 'notes/peeked.md',
           route: { kind: 'note', path: 'notes/peeked.md' },
         })
-      }
+      }}
     >
       peek
     </button>
@@ -131,16 +132,18 @@ let togglePrivate: MockInstance<NoteActionsService['togglePrivate']>
 async function renderBar(initialRoute: Route, options: BarOptions = {}) {
   backup = createTestBackupService({ state: options.backup ?? { phase: 'disconnected' } })
   app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     backup,
     noteFile: createTestNoteFileService({ files: { ...options.files } }),
     ...(options.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),
   })
+  onTestFinished(() => app.database.close())
   app.clock.setToday('2026-10-03')
   app.gitRepository.onNoteVersion(() => 'abc123def4')
   const mtime = options.mtime ?? null
-  vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(() =>
-    Promise.resolve(mtime ?? undefined),
-  )
+  vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(() => {
+    return Promise.resolve(mtime ?? undefined)
+  })
   reveal = vi.spyOn(app.attachments, 'reveal').mockResolvedValue()
   togglePrivate = vi
     .spyOn(app.noteActions, 'togglePrivate')
@@ -362,8 +365,9 @@ describe('NoteStatusBar', () => {
     const editor = document.createElement('div')
     editor.contentEditable = 'true'
     view.container.append(editor)
-    const statistics = () =>
-      view.container.querySelector<HTMLElement>('[data-testid="note-statistics"]')!
+    const statistics = () => {
+      return view.container.querySelector<HTMLElement>('[data-testid="note-statistics"]')!
+    }
 
     editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
     await vi.waitFor(() => expect(statistics().className).toContain('opacity-0'))
@@ -457,9 +461,9 @@ describe('NoteStatusBar', () => {
 
     const dialog = page.getByRole('menu')
     await expect.element(dialog).toBeVisible()
-    await vi.waitFor(async () =>
-      expect(await detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4']),
-    )
+    await vi.waitFor(async () => {
+      expect(await detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4'])
+    })
     await expect.element(dialog.getByText('Never sent to AI or other services.')).toBeVisible()
     await expect
       .element(dialog.getByRole('menuitemcheckbox', { name: 'Private' }))
@@ -487,9 +491,9 @@ describe('NoteStatusBar', () => {
     })
 
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
-    await vi.waitFor(async () =>
-      expect(await detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4']),
-    )
+    await vi.waitFor(async () => {
+      expect(await detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4'])
+    })
   })
 
   it('keeps one horizontal row and hides the time before a narrow footer wraps', async () => {
@@ -557,9 +561,9 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' }, { backup: { phase: 'loading' } })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    await vi.waitFor(async () =>
-      expect(await detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4']),
-    )
+    await vi.waitFor(async () => {
+      expect(await detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4'])
+    })
   })
 
   it('toggles privacy from the details through the shared note action', async () => {
@@ -619,15 +623,15 @@ describe('NoteStatusBar', () => {
 
     await expect.element(page.getByRole('menuitem', { name: /Resolve…/ })).toBeVisible()
     expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
-    await vi.waitFor(async () =>
+    await vi.waitFor(async () => {
       expect(await detailValues()).toEqual([
         'Unsupported Markdown',
         'Standard',
         'Paused',
         'Backup off',
         'abc123def4',
-      ]),
-    )
+      ])
+    })
   })
 
   it('moves between actionable items with the arrow keys and copies the version', async () => {
@@ -655,9 +659,9 @@ describe('NoteStatusBar', () => {
     await userEvent.keyboard('{End}{Enter}')
 
     expect(writeText).toHaveBeenCalledWith('abc123def4')
-    await vi.waitFor(() =>
-      expect(add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Version copied' })),
-    )
+    await vi.waitFor(() => {
+      expect(add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Version copied' }))
+    })
     await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
     add.mockRestore()
   })

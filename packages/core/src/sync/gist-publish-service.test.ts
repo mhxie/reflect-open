@@ -134,15 +134,16 @@ function setup(options?: SetupOptions) {
     /**
      * The gist requests sent with `method`, each with its JSON body.
      */
-    sent: (method: string) =>
-      http
+    sent: (method: string) => {
+      return http
         .requests()
         .filter((request) => request.method === method)
         .map((request) => ({
           url: request.url,
           token: request.headers.get('Authorization'),
           body: request.body === null ? null : (JSON.parse(request.body) as unknown),
-        })),
+        }))
+    },
   }
 }
 
@@ -288,7 +289,7 @@ describe('GistPublishService.publish', () => {
     await expect(service.publish(PATH)).resolves.toBeNull()
     expect(progress.findByLabel('Publishing gist')).toMatchObject({
       status: 'failed',
-      message: expect.stringMatching(/empty/i),
+      message: expect.stringMatching(/empty/i) as string,
     })
     expect(http.requests()).toEqual([])
   })
@@ -307,7 +308,7 @@ describe('GistPublishService.publish', () => {
     await expect(service.publish(PATH)).resolves.toBeNull()
     expect(progress.findByLabel('Publishing gist')).toMatchObject({
       status: 'failed',
-      message: expect.stringMatching(/invalid frontmatter/i),
+      message: expect.stringMatching(/invalid frontmatter/i) as string,
     })
     expect(http.requests()).toEqual([])
   })
@@ -389,7 +390,7 @@ describe('GistPublishService.publish', () => {
     expect(progress.snapshot()).toContainEqual(
       expect.objectContaining({
         status: 'failed',
-        message: expect.stringMatching(/connect github/i),
+        message: expect.stringMatching(/connect github/i) as string,
       }),
     )
   })
@@ -424,7 +425,7 @@ describe('GistPublishService.unpublish', () => {
     await expect(service.unpublish(PATH)).resolves.toBeNull()
     expect(progress.findByLabel('Unpublishing gist')).toMatchObject({
       status: 'failed',
-      message: expect.stringContaining('deleting the gist failed'),
+      message: expect.stringContaining('deleting the gist failed') as string,
     })
 
     expect(files.writes()).toEqual([
@@ -481,7 +482,7 @@ describe('GistPublishService.unpublish', () => {
     expect(progress.snapshot()).toContainEqual(
       expect.objectContaining({
         status: 'failed',
-        message: expect.stringMatching(/connect github/i),
+        message: expect.stringMatching(/connect github/i) as string,
       }),
     )
     expect(noteRows.getOverlay(PATH)).toBeNull()
@@ -505,7 +506,7 @@ describe('GistPublishService.unpublish', () => {
     expect(progress.snapshot()).toContainEqual(
       expect.objectContaining({
         status: 'failed',
-        message: expect.stringMatching(/current gist operation/i),
+        message: expect.stringMatching(/current gist operation/i) as string,
       }),
     )
 

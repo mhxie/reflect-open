@@ -181,9 +181,9 @@ class ContactSuggestionServiceImpl implements ContactSuggestionService {
     if (match === null || contactDetailsMarkdown(match) === '') {
       return null
     }
-    const dismissed = note.frontmatter.ignoredContacts.some((name) =>
-      contactNamesEqual(name, match.fullName),
-    )
+    const dismissed = note.frontmatter.ignoredContacts.some((name) => {
+      return contactNamesEqual(name, match.fullName)
+    })
     return dismissed ? null : match
   }
 

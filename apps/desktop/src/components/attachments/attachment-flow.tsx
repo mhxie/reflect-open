@@ -74,19 +74,17 @@ export function AttachmentFlow({
   // close). By path, not position: a new file sorts in ahead of it.
   const [focusedPath, setFocusedPath] = useState<string | null>(null)
 
-  const layout = useMemo(
-    () =>
-      layoutMasonry(
-        entries.length,
-        (index, columnWidth) => {
-          const entry = entries[index]
-          const ratio = entry === undefined ? 0 : attachmentPreviewRatio(entry, ratioOf(entry))
-          return Math.round(columnWidth * ratio) + CARD_FOOTER_HEIGHT
-        },
-        { width, minColumnWidth: MIN_COLUMN_WIDTH, gap: GAP },
-      ),
-    [entries, width, ratioOf],
-  )
+  const layout = useMemo(() => {
+    return layoutMasonry(
+      entries.length,
+      (index, columnWidth) => {
+        const entry = entries[index]
+        const ratio = entry === undefined ? 0 : attachmentPreviewRatio(entry, ratioOf(entry))
+        return Math.round(columnWidth * ratio) + CARD_FOOTER_HEIGHT
+      },
+      { width, minColumnWidth: MIN_COLUMN_WIDTH, gap: GAP },
+    )
+  }, [entries, width, ratioOf])
   // Read by the navigation callback, so it stays stable across relayouts and
   // the memoized cards skip re-rendering when only other cards moved.
   const latestRef = useRef({ layout, entries })

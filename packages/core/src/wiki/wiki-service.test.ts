@@ -3,7 +3,7 @@ import { AppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { buildIndexedNote } from '../indexing/indexed-note.ts'
 import { parseNote } from '../markdown/extract.ts'
-import { createTestDatabaseService, type TestDatabaseService } from '../testing/database.ts'
+import { createNodeTestDatabaseService, type TestDatabaseService } from '../testing/database.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createTestNoteFileService, overrideNoteFileService } from '../testing/graph.ts'
 import { createTestIpcBridgeService, type TestIpcBridgeService } from '../testing/ipc.ts'
@@ -118,7 +118,7 @@ interface Setup {
 
 function setup(options: Setup = {}) {
   const graph = options.graph ?? GRAPH
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   const files: Record<string, string> = {}
   for (const [path, note] of Object.entries(graph)) {
     project(database, path, note)
@@ -271,15 +271,16 @@ describe('WikiService.listEntries', () => {
 
   it('marks a file it cannot read on its own row instead of failing the list', async () => {
     const { wiki } = setup({
-      noteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      noteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           readLocal: async (path, generation) => {
             if (path === HUB) {
               throw new AppError('io', 'stream did not contain valid UTF-8')
             }
             return await inner.readLocal(path, generation)
           },
-        }),
+        })
+      },
     })
 
     const entries = await wiki.listEntries({ asOf: '2026-03-01', languages: LANGUAGES })
@@ -292,10 +293,11 @@ describe('WikiService.listEntries', () => {
 
   it('fails the list on an error that is not a read failure', async () => {
     const { wiki } = setup({
-      noteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      noteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           readLocal: () => Promise.reject(new TypeError('broken')),
-        }),
+        })
+      },
     })
 
     await expect(wiki.listEntries({ asOf: '2026-03-01', languages: LANGUAGES })).rejects.toThrow(
@@ -384,10 +386,11 @@ describe('WikiService.readTrustReportFile', () => {
   it('reads the report pinned to the open graph session', async () => {
     const ipc = createTestIpcBridgeService({
       commands: {
-        wiki_trust_report_read: (args) =>
-          args['knownStamp'] === 's1'
+        wiki_trust_report_read: (args) => {
+          return args['knownStamp'] === 's1'
             ? { stamp: 's1', contents: null }
-            : { stamp: 's1', contents: '{}' },
+            : { stamp: 's1', contents: '{}' }
+        },
       },
     })
     const { wiki } = setup({ ipc, generation: 3 })

@@ -37,12 +37,12 @@ export function OnThisDaySection({ date }: OnThisDaySectionProps): ReactElement 
             <button
               type="button"
               title={formatDayLabel(entry.dailyDate, settings.dateFormat)}
-              onClick={(event) =>
+              onClick={(event) => {
                 navigateNoteLink({
                   target: routeForPath(entry.path),
                   openInNewWindow: isModEvent(event),
                 })
-              }
+              }}
               className="flex w-full flex-col gap-0.5 rounded-md px-3 py-1 text-left leading-5 text-text-secondary hover:bg-surface-hover hover:text-text"
             >
               <span className="text-xs">

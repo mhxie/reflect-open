@@ -145,9 +145,9 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
                       aria-label={`${formatDayLabel(date, settings.dateFormat)} · ${activityDaySummary(editCounts.get(date), size)}`}
                       data-date={date}
                       onFocus={() => setFocused(date)}
-                      onClick={() =>
+                      onClick={() => {
                         navigate({ kind: 'allNotes', filter: { kind: 'updated', date } })
-                      }
+                      }}
                       className={cn(
                         'rounded-[2px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text',
                         date > today ? 'invisible' : LEVEL_CLASSES[activityLevel(size, thresholds)],
@@ -162,8 +162,8 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
       </div>
       {/* Passive: it floats over neighbouring days, which stay hoverable and clickable. */}
       <Tooltip handle={tooltip} disableHoverablePopup>
-        {({ payload }) =>
-          payload === undefined ? null : (
+        {({ payload }) => {
+          return payload === undefined ? null : (
             <TooltipContent
               side="top"
               sideOffset={4}
@@ -178,7 +178,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
               />
             </TooltipContent>
           )
-        }
+        }}
       </Tooltip>
     </div>
   )

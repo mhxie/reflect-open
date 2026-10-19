@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { DEFAULT_SETTINGS } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { usePinnedTagFilters } from './use-pinned-tag-filters.ts'
 
 const PINS = { allNotesFilterTags: ['book', 'person'] }
@@ -31,7 +32,8 @@ describe('usePinnedTagFilters', () => {
   })
 
   it('reports no change for an edit queued until settings load', async () => {
-    const app = createTestCoreServices()
+    const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    onTestFinished(() => app.database.close())
     // Hold the load, so the edit waits for it.
     const load = Promise.withResolvers<void>()
     app.settings.ipc.onCommand('settings_load', async () => {

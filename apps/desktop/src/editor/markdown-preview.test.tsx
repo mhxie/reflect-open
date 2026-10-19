@@ -40,9 +40,9 @@ describe('MarkdownPreview wiki-link chips', () => {
       <MarkdownPreview sourcePath={null} content={content} onWikiLinkClick={onWikiLinkClick} />,
       GRAPH,
     )
-    await vi.waitFor(() =>
-      expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(3),
-    )
+    await vi.waitFor(() => {
+      expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(3)
+    })
     const inline = view.getByTestId('wikilink').first()
     await expect.element(inline).toHaveClass(/meowdown-reference/)
     await expect
@@ -85,9 +85,9 @@ describe('MarkdownPreview wiki-link chips', () => {
       <MarkdownPreview sourcePath={null} content={`${prose}\n\n${fence}`} />,
       GRAPH,
     )
-    await vi.waitFor(() =>
-      expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(1),
-    )
+    await vi.waitFor(() => {
+      expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(1)
+    })
     expect(view.container.querySelector('p')?.textContent).toBe('A supported claim.')
     await expect
       .element(view.getByRole('link', { name: 'Author, p2' }).first())
@@ -100,14 +100,14 @@ describe('MarkdownPreview wiki-link chips', () => {
         content={`${prose}\n\n${fence.replace('example.org/paper', 'example.org/other')}`}
       />,
     )
-    await vi.waitFor(() =>
-      expect(view.container.querySelector('p')?.textContent).toContain('Author, p2'),
-    )
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('p')?.textContent).toContain('Author, p2')
+    })
   })
 
   it('renumbers a distant citation when an earlier one changes', async () => {
-    const article = (first: string): string =>
-      [
+    const article = (first: string): string => {
+      return [
         '# Example',
         '',
         `One <!-- claim:c1 -->first [ref][${first}]<!-- /claim:c1 -->.`,
@@ -121,10 +121,12 @@ describe('MarkdownPreview wiki-link chips', () => {
         '[one]: https://example.org/one "Study one"',
         '[two]: https://example.org/two "Study two"',
       ].join('\n')
-    const later = (): string | undefined =>
-      [...view.container.querySelectorAll('p')]
+    }
+    const later = (): string | undefined => {
+      return [...view.container.querySelectorAll('p')]
         .find((paragraph) => paragraph.textContent.startsWith('Later'))
         ?.querySelector('.wiki-article-reference')?.textContent
+    }
     const view = await renderInApp(
       <MarkdownPreview sourcePath={null} content={article('one')} />,
       GRAPH,
@@ -146,17 +148,18 @@ describe('MarkdownPreview wiki-link chips', () => {
       />,
       GRAPH,
     )
-    await vi.waitFor(() =>
-      expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(2),
-    )
+    await vi.waitFor(() => {
+      expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(2)
+    })
     expect(view.container.querySelector('a, button, summary, [tabindex]')).toBeNull()
   })
 })
 
 describe('MarkdownPreview saved embed snapshots', () => {
   const THUMBNAIL = 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg'
-  const showsImage = (container: HTMLElement, src: string): boolean =>
-    [...container.querySelectorAll('img')].some((img) => img.getAttribute('src') === src)
+  const showsImage = (container: HTMLElement, src: string): boolean => {
+    return [...container.querySelectorAll('img')].some((img) => img.getAttribute('src') === src)
+  }
   const SNAPSHOT = JSON.stringify({
     snapshot: {
       kind: 'youtube-video',

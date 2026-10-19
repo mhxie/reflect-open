@@ -380,8 +380,8 @@ class WikiServiceImpl implements WikiService {
       ])
       .where(inFolder('backlinks.target_path', source.folder))
       .whereRef('backlinks.sourcePath', '!=', 'backlinks.targetPath')
-      .where((eb) =>
-        eb.and([
+      .where((eb) => {
+        return eb.and([
           // The wiki's hub indexes link every entry.
           eb.not(
             eb.and([
@@ -389,11 +389,11 @@ class WikiServiceImpl implements WikiService {
               eb('backlinks.sourcePath', 'like', '%/index.md'),
             ]),
           ),
-          ...translations.map((language) =>
-            eb.not(inFolder('backlinks.source_path', language.folder)),
-          ),
-        ]),
-      )
+          ...translations.map((language) => {
+            return eb.not(inFolder('backlinks.source_path', language.folder))
+          }),
+        ])
+      })
       .groupBy('backlinks.targetPath')
       .execute()
     const counts = new Map<string, number>()

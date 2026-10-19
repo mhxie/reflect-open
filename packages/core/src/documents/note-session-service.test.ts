@@ -236,8 +236,9 @@ function harness(options?: {
     ...(recovery === undefined
       ? {}
       : {
-          writeRecovery: async (path, contents, ownerId, sourceRevision) =>
-            await recovery.writeRecovery(path, contents, ownerId, sourceRevision),
+          writeRecovery: async (path, contents, ownerId, sourceRevision) => {
+            return await recovery.writeRecovery(path, contents, ownerId, sourceRevision)
+          },
           readRecovery: async (path) => await recovery.readRecovery(path),
           clearRecovery: async (path, ownerId, token) => {
             await recovery.clearRecovery(path, ownerId, token)
@@ -418,8 +419,9 @@ describe('createNoteSession', () => {
   })
 
   it('re-gates protection when external content stops being representable', async () => {
-    const lossyWhenTasks = (markdown: string): RoundTripFidelity =>
-      markdown.includes('+ [ ]') ? 'lossy' : 'exact'
+    const lossyWhenTasks = (markdown: string): RoundTripFidelity => {
+      return markdown.includes('+ [ ]') ? 'lossy' : 'exact'
+    }
     const { session, snapshots, setDisk } = harness({ classify: lossyWhenTasks })
     session.load()
     await settled()
@@ -509,8 +511,9 @@ describe('external changes and saves', () => {
   })
 
   it('a lossy merged result opens protected', async () => {
-    const lossyWhenTasks = (markdown: string): RoundTripFidelity =>
-      markdown.includes('+ [ ]') ? 'lossy' : 'exact'
+    const lossyWhenTasks = (markdown: string): RoundTripFidelity => {
+      return markdown.includes('+ [ ]') ? 'lossy' : 'exact'
+    }
     const h = harness({ classify: lossyWhenTasks })
     h.session.load()
     await settled()
@@ -2041,13 +2044,11 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
 
   it('a teardown over a refused save keeps the latest text, and its flush waits for it', async () => {
     let releaseKeep: () => void = () => {}
-    const recovery = recoveryFake(
-      null,
-      () =>
-        new Promise<void>((resolve) => {
-          releaseKeep = resolve
-        }),
-    )
+    const recovery = recoveryFake(null, () => {
+      return new Promise<void>((resolve) => {
+        releaseKeep = resolve
+      })
+    })
     const { session, setDisk, writes } = harness({ localOnly: 'editable', recovery })
     session.load()
     await settled()

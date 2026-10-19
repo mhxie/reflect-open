@@ -1,6 +1,6 @@
 import type { MaybePromise } from '@reflect/utils'
 import { createRef, type ReactNode } from 'react'
-import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import type { EmbedMediaService } from '@reflect/core'
 import {
@@ -13,6 +13,7 @@ import { pasteFiles } from '@/test-utils/file-events.ts'
 import '@/test-utils/locator.ts'
 import { hover, unhover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { XPost } from '@post-embed/types'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 import { createPdfPagesView } from './pdf-pages-view.ts'
@@ -22,8 +23,8 @@ const X_PHOTO_URL =
   "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='100'%20height='100'/%3E"
 const X_VIDEO_URL = 'data:video/mp4;base64,'
 
-const resolveXPost = vi.hoisted(() =>
-  vi.fn((): XPost => ({
+const resolveXPost = vi.hoisted(() => {
+  return vi.fn((): XPost => ({
     id: '20',
     createdAt: '2006-03-21T20:50:14.000Z',
     lang: 'en',
@@ -38,8 +39,8 @@ const resolveXPost = vi.hoisted(() =>
         sources: [{ type: 'video/mp4', url: X_VIDEO_URL }],
       },
     ],
-  })),
-)
+  }))
+})
 // The real resolver only lets `reflect-asset:` media through, which no test
 // browser can load.
 vi.mock('@/editor/use-x-post-resolver.ts', () => ({
@@ -57,7 +58,11 @@ let resolveYouTubeVideo: MockInstance<EmbedMediaService['resolveYouTubeVideo']>
  * Render `ui` in the app, on a platform with the facts `platform`.
  */
 async function render(ui: ReactNode, platform?: TestPlatformOptions) {
-  const app = createTestCoreServices({ platform: createTestPlatformService(platform) })
+  const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    platform: createTestPlatformService(platform),
+  })
+  onTestFinished(() => app.database.close())
   resolveYouTubeVideo = vi.spyOn(app.embedMedia, 'resolveYouTubeVideo').mockResolvedValue(undefined)
   return await renderInApp(ui, { app })
 }
@@ -185,12 +190,12 @@ describe('NoteEditor wiki-link chips', () => {
 
 describe('NoteEditor link preview', () => {
   it('forwards host-resolved metadata to the link popup', async () => {
-    const resolveLinkPreview = vi.fn(() =>
-      Promise.resolve({
+    const resolveLinkPreview = vi.fn(() => {
+      return Promise.resolve({
         title: 'Example Domain',
         description: 'An example description.',
-      }),
-    )
+      })
+    })
     // Park the mouse first, for the same reason as the wiki-link hover card.
     await unhover()
     await render(
@@ -885,9 +890,9 @@ describe('NoteEditor private note policy', () => {
     await render(<NoteEditor privateNote={false} initialContent="" handleRef={handleRef} />)
     await pmRoot.click()
     pasteText(pmRoot.element(), YOUTUBE_URL)
-    await vi.waitFor(() =>
-      expect(handleRef.current?.getMarkdown().trim()).toBe(`![](${YOUTUBE_URL})`),
-    )
+    await vi.waitFor(() => {
+      expect(handleRef.current?.getMarkdown().trim()).toBe(`![](${YOUTUBE_URL})`)
+    })
   })
 
   it('switches the policy live, without remounting the editor', async () => {

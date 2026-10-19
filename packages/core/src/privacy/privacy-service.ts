@@ -144,15 +144,15 @@ async function searchHitsWithProbe(
   const liveFlags = await Promise.all(indexedPublic.map((hit) => isPrivateLive(hit)))
   return indexedPublic
     .filter((_, index) => liveFlags[index] === false)
-    .map((hit) =>
-      mint({
+    .map((hit) => {
+      return mint({
         path: hit.path,
         title: hit.title,
         snippet: hit.snippet,
         heading: hit.heading,
         ...(hit.assetTextHash === undefined ? {} : { assetTextHash: hit.assetTextHash }),
-      }),
-    )
+      })
+    })
 }
 
 /**
@@ -184,15 +184,15 @@ async function noteListingsWithProbe(
   const liveFlags = await Promise.all(indexedPublic.map((entry) => isPrivateLive(entry.path)))
   return indexedPublic
     .filter((_, index) => liveFlags[index] === false)
-    .map((entry) =>
-      mint({
+    .map((entry) => {
+      return mint({
         path: entry.path,
         title: entry.title,
         dailyDate: entry.dailyDate,
         snippet: entry.snippet,
         modifiedAt: entry.modifiedAt,
-      }),
-    )
+      })
+    })
 }
 
 /**

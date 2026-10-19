@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { noteBodyHash } from '../markdown/body-hash.ts'
 import { upsertFrontmatter } from '../markdown/frontmatter.ts'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import {
   createNoteListService,
   firstExistingAttachment,
@@ -32,7 +32,7 @@ const NOTES: TestNote[] = [
 ]
 
 function setup(notes: TestNote[] = NOTES) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, notes)
   const noteList: NoteListService = createNoteListService({ database })
   return { database, noteList }

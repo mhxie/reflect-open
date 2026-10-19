@@ -36,13 +36,13 @@ describe('assertCloudAllowed', () => {
   })
 
   it('throws PrivateNoteError for device-only derivations', () => {
-    expect(() =>
+    expect(() => {
       assertCloudAllowed(NONE, {
         path: 'notes/scan.md',
         isPrivate: false,
         hasDeviceOnlyContent: true,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
   })
 })
 
@@ -54,9 +54,9 @@ describe('cloudSafeLinkHref', () => {
   })
 
   it('refuses a private note before the destination can be fetched', () => {
-    expect(() =>
-      cloudSafeLinkHref(NONE, { path: PRIVATE_PATH, isPrivate: true }, 'https://example.com'),
-    ).toThrow(PrivateNoteError)
+    expect(() => {
+      return cloudSafeLinkHref(NONE, { path: PRIVATE_PATH, isPrivate: true }, 'https://example.com')
+    }).toThrow(PrivateNoteError)
   })
 })
 
@@ -291,28 +291,28 @@ describe('cloudSafeNoteContent', () => {
   })
 
   it('refuses to mint a private note before any content escapes', () => {
-    expect(() =>
-      cloudSafeNoteContent(NONE, {
+    expect(() => {
+      return cloudSafeNoteContent(NONE, {
         path: PRIVATE_PATH,
         isPrivate: true,
         title: PRIVATE_TITLE,
         content: PRIVATE_BODY,
         truncated: false,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
   })
 
   it('refuses a note whose malformed frontmatter declares it private', () => {
     const source = `---\nprivate: true\ntitle: [unclosed\n---\n${PRIVATE_BODY}`
-    expect(() =>
-      cloudSafeNoteContent(NONE, {
+    expect(() => {
+      return cloudSafeNoteContent(NONE, {
         path: PRIVATE_PATH,
         isPrivate: notePrivate(source),
         title: PRIVATE_TITLE,
         content: source,
         truncated: false,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
   })
 })
 
@@ -333,14 +333,14 @@ describe('cloudSafeAssetDescription', () => {
   })
 
   it('refuses to mint a blocked asset before any description escapes', () => {
-    expect(() =>
-      cloudSafeAssetDescription(NONE, {
+    expect(() => {
+      return cloudSafeAssetDescription(NONE, {
         path: 'assets/secret.png',
         isPrivate: true,
         description: PRIVATE_BODY,
         truncated: false,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
   })
 })
 
@@ -352,9 +352,9 @@ describe('cloudSafeSelection', () => {
   })
 
   it('refuses to mint a selection from a private note', () => {
-    expect(() =>
-      cloudSafeSelection(NONE, { path: PRIVATE_PATH, isPrivate: true }, PRIVATE_BODY),
-    ).toThrow(PrivateNoteError)
+    expect(() => {
+      return cloudSafeSelection(NONE, { path: PRIVATE_PATH, isPrivate: true }, PRIVATE_BODY)
+    }).toThrow(PrivateNoteError)
   })
 })
 
@@ -369,24 +369,24 @@ describe('local-only folders', () => {
     const note = { path: LOCAL_PATH, isPrivate: false }
     expect(isPrivateNote(SECURE, note)).toBe(true)
     expect(() => assertCloudAllowed(SECURE, note)).toThrow(PrivateNoteError)
-    expect(() =>
-      cloudSafeNoteContent(SECURE, {
+    expect(() => {
+      return cloudSafeNoteContent(SECURE, {
         ...note,
         title: LOCAL_TITLE,
         content: PRIVATE_BODY,
         truncated: false,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
     expect(() => cloudSafeSelection(SECURE, note, PRIVATE_BODY)).toThrow(PrivateNoteError)
     expect(() => cloudSafeLinkHref(SECURE, note, 'https://example.com')).toThrow(PrivateNoteError)
-    expect(() =>
-      cloudSafeAssetDescription(SECURE, {
+    expect(() => {
+      return cloudSafeAssetDescription(SECURE, {
         path: 'finance/secure/scan.png',
         isPrivate: false,
         description: PRIVATE_BODY,
         truncated: false,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
   })
 
   it('applies the open graph folders in every service gate', () => {
@@ -397,14 +397,14 @@ describe('local-only folders', () => {
     expect(() => privacy.assertCloudAllowed(note)).toThrow(PrivateNoteError)
     expect(() => privacy.cloudSafeSelection(note, PRIVATE_BODY)).toThrow(PrivateNoteError)
     expect(() => privacy.cloudSafeLinkHref(note, 'https://example.com')).toThrow(PrivateNoteError)
-    expect(() =>
-      privacy.cloudSafeNoteContent({
+    expect(() => {
+      return privacy.cloudSafeNoteContent({
         ...note,
         title: LOCAL_TITLE,
         content: PRIVATE_BODY,
         truncated: false,
-      }),
-    ).toThrow(PrivateNoteError)
+      })
+    }).toThrow(PrivateNoteError)
   })
 
   it('drops local-only search hits without probing them', async () => {
@@ -475,8 +475,8 @@ describe('local-only folders', () => {
   })
 
   it('leaves notes outside the folders to the frontmatter flag', () => {
-    expect(() =>
-      assertCloudAllowed(SECURE, { path: 'finance/secured.md', isPrivate: false }),
-    ).not.toThrow()
+    expect(() => {
+      assertCloudAllowed(SECURE, { path: 'finance/secured.md', isPrivate: false })
+    }).not.toThrow()
   })
 })

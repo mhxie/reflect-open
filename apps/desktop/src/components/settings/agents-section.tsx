@@ -60,8 +60,9 @@ export function AgentsSection(): ReactElement | null {
   const actionPending = isCurrentMutation && mutation.isPending
   const actionError =
     isCurrentMutation && mutation.error !== null ? errorMessage(mutation.error) : null
-  const mutate = (action: AgentSkillAction['action']): void =>
+  const mutate = (action: AgentSkillAction['action']): void => {
     mutation.mutate({ action, root: graph.root, generation: graph.generation })
+  }
   return (
     <SettingsSection id="agents">
       <SettingsField

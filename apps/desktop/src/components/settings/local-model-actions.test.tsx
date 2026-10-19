@@ -1,10 +1,11 @@
 import { createTestCoreServices } from '@reflect/core/testing'
 import { createTestAppServices } from '@reflect/app/testing'
 import { page } from 'vitest/browser'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { LocalModelStatus, LocalTranscriptionModelId } from '@reflect/core'
 import type { PendingLocalModelUpdate } from '@reflect/app'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { LocalModelActions } from './local-model-actions.tsx'
 
 /**
@@ -16,7 +17,8 @@ async function renderActions(
   status: LocalModelStatus,
   pending: PendingLocalModelUpdate | null = null,
 ) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   const appServices = createTestAppServices(app)
   const download = vi
     .spyOn(app.localTranscription, 'download')

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { NoteRow } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteRowOverlay } from './note-row-overlay.ts'
 
 function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
@@ -30,7 +31,7 @@ async function mount(path: string) {
 }
 
 beforeEach(() => {
-  app = createTestCoreServices()
+  app = createTestCoreServices({ database: createWasmTestDatabaseService() })
 })
 
 describe('useNoteRowOverlay', () => {
@@ -48,14 +49,14 @@ describe('useNoteRowOverlay', () => {
     const { result } = await mount('notes/a.md')
     await act(() => app.noteRows.setOverlay('notes/a.md', GEN, { gistUrl: URL, gistStale: false }))
 
-    await act(() =>
-      app.noteRows.reconcile('notes/a.md', noteRow({ gistUrl: URL, gistStale: true })),
-    )
+    await act(() => {
+      app.noteRows.reconcile('notes/a.md', noteRow({ gistUrl: URL, gistStale: true }))
+    })
     expect(result.current).toEqual({ gistStale: false })
 
-    await act(() =>
-      app.noteRows.reconcile('notes/a.md', noteRow({ gistUrl: URL, gistStale: false })),
-    )
+    await act(() => {
+      app.noteRows.reconcile('notes/a.md', noteRow({ gistUrl: URL, gistStale: false }))
+    })
     expect(result.current).toBeNull()
   })
 })

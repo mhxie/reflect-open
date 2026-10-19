@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { queryClient } from '@/lib/query-client.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useXPostPreload, type XPostPreloadPrivacy } from './use-x-post-preload.ts'
 
 /**
  * Core services whose X post archive reads never answer: only the wait can settle the preload.
  */
 function appWithStuckArchive() {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   const loadXPost = vi
     .spyOn(app.embedMedia, 'loadXPost')
     .mockImplementation(async () => await new Promise(() => {}))
@@ -33,8 +35,9 @@ describe('useXPostPreload', () => {
   it('waits without fetching while a note with X posts has no verdict yet', async () => {
     const { app, loadXPost } = appWithStuckArchive()
     const hook = await renderHookInApp(
-      ({ privacy }: { privacy: XPostPreloadPrivacy } = { privacy: 'pending' }) =>
-        useXPostPreload('![](https://x.com/jack/status/101)\n', privacy),
+      ({ privacy }: { privacy: XPostPreloadPrivacy } = { privacy: 'pending' }) => {
+        return useXPostPreload('![](https://x.com/jack/status/101)\n', privacy)
+      },
       { app, initialProps: { privacy: 'pending' } },
     )
     expect(hook.result.current).toBe(false)

@@ -218,11 +218,11 @@ export async function rewriteLinksForTitleChange(
   let done = 0
   for (const source of sources) {
     try {
-      const result = await patchNoteWith(io, source, (content) =>
-        content === null
+      const result = await patchNoteWith(io, source, (content) => {
+        return content === null
           ? null
-          : retitleWikiLinks(content, { repoint, display, subjectTargetKeys }),
-      )
+          : retitleWikiLinks(content, { repoint, display, subjectTargetKeys })
+      })
       if (result.written) {
         rewritten.push(source)
       }
@@ -321,9 +321,9 @@ export async function rewritePathLinksForMove(
   const failed: string[] = []
   for (const source of sources) {
     try {
-      const result = await patchNoteWith(io, source, (content) =>
-        content === null ? null : repointPathWikiLinks(content, { fromPathKey, to }),
-      )
+      const result = await patchNoteWith(io, source, (content) => {
+        return content === null ? null : repointPathWikiLinks(content, { fromPathKey, to })
+      })
       if (result.written) {
         rewritten.push(source)
       }

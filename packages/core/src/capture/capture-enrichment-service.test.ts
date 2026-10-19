@@ -313,13 +313,13 @@ describe('CaptureEnrichmentService', () => {
       siteName: null,
     })
     let finishProvider: (() => void) | undefined
-    kit.describeMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finishProvider = () =>
-            resolve({ title: 'A title from AI', description: 'A description from AI.' })
-        }),
-    )
+    kit.describeMock.mockImplementation(() => {
+      return new Promise((resolve) => {
+        finishProvider = () => {
+          resolve({ title: 'A title from AI', description: 'A description from AI.' })
+        }
+      })
+    })
 
     const running = kit.reconcile()
 
@@ -378,12 +378,10 @@ describe('CaptureEnrichmentService', () => {
     kit.scrapeMock.mockClear()
     const stillWaiting = await kit.reconcile()
 
-    expect(stillWaiting).toEqual({
-      pending: 1,
-      enriched: 0,
-      skipped: 0,
-      stopped: expect.objectContaining({ reason: 'config' }),
-    })
+    expect(stillWaiting.pending).toBe(1)
+    expect(stillWaiting.enriched).toBe(0)
+    expect(stillWaiting.skipped).toBe(0)
+    expect(stillWaiting.stopped?.reason).toBe('config')
     expect(kit.scrapeMock).not.toHaveBeenCalled()
     expect(kit.describeMock).not.toHaveBeenCalled()
 
@@ -581,12 +579,11 @@ describe('CaptureEnrichmentService', () => {
 
     const outcome = await kit.reconcile({ providers: NO_PROVIDERS })
 
-    expect(outcome).toEqual({
-      pending: 2,
-      enriched: 1,
-      skipped: 0,
-      stopped: expect.objectContaining({ reason: 'network' }),
-    })
+    expect(outcome.pending).toBe(2)
+    expect(outcome.enriched).toBe(1)
+    expect(outcome.skipped).toBe(0)
+    expect(outcome.stopped?.reason).toBe('network')
+
     expect(kit.noteFile.files().get(IDENTITY.notePath)).toContain('captureStatus: pending')
     expect(kit.noteFile.files().get(laterIdentity.notePath)).toContain('captureStatus: done')
     expect(kit.noteFile.files().get(laterIdentity.notePath)).toContain(
@@ -668,12 +665,10 @@ describe('CaptureEnrichmentService', () => {
 
     const outcome = await kit.reconcile()
 
-    expect(outcome).toEqual({
-      pending: 2,
-      enriched: 1,
-      skipped: 0,
-      stopped: expect.objectContaining({ reason: 'network' }),
-    })
+    expect(outcome.pending).toBe(2)
+    expect(outcome.enriched).toBe(1)
+    expect(outcome.skipped).toBe(0)
+    expect(outcome.stopped?.reason).toBe('network')
     expect(kit.noteFile.files().get(IDENTITY.notePath)).toContain('captureStatus: pending')
     expect(kit.noteFile.files().get(IDENTITY.notePath)).toContain('captureMetadataStatus: done')
     expect(kit.noteFile.files().get(laterIdentity.notePath)).toContain('captureStatus: done')
@@ -986,12 +981,10 @@ describe('CaptureEnrichmentService', () => {
     kit.installSecrets()
     const waiting = await kit.reconcile()
 
-    expect(waiting).toEqual({
-      pending: 1,
-      enriched: 0,
-      skipped: 0,
-      stopped: expect.objectContaining({ reason: 'config' }),
-    })
+    expect(waiting.pending).toBe(1)
+    expect(waiting.enriched).toBe(0)
+    expect(waiting.skipped).toBe(0)
+    expect(waiting.stopped?.reason).toBe('config')
     expect(kit.scrapeMock).not.toHaveBeenCalled()
     expect(kit.describeMock).not.toHaveBeenCalled()
     expect(kit.noteFile.files().get(DAILY)).toContain('|A title from metadata]]')

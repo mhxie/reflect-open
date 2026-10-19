@@ -19,6 +19,7 @@ import {
 } from '@reflect/core/testing'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SyncSection } from './sync-section.tsx'
 
 const ICLOUD_DOCUMENTS = '/Users/alex/Library/Mobile Documents/iCloud~app/Documents'
@@ -57,13 +58,14 @@ async function renderSection(): Promise<void> {
   }
   backup.setState(backupState)
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     icloudNative,
     backup,
     platform: createTestPlatformService(platform),
   })
-  vi.spyOn(app.indexQuery, 'getDuplicateNoteIds').mockImplementation(() =>
-    Promise.resolve(duplicateIds),
-  )
+  vi.spyOn(app.indexQuery, 'getDuplicateNoteIds').mockImplementation(() => {
+    return Promise.resolve(duplicateIds)
+  })
   openRecent = vi
     .spyOn(app.graphSession, 'openRecent')
     .mockImplementation(() => Promise.resolve(reopens))

@@ -7,6 +7,7 @@ import {
 } from '@reflect/core/testing'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SETTINGS_SECTIONS, settingsSectionDomId } from './sections.ts'
 import { SettingsNavigator } from './settings-navigator.tsx'
 
@@ -14,10 +15,9 @@ import { SettingsNavigator } from './settings-navigator.tsx'
 // platform-gated entries are hidden (Integrations needs the contacts answer;
 // Agents and Recording need `isMacosDesktop`) — the navigator lists the
 // sections every platform shows.
-const VISIBLE_SECTIONS = SETTINGS_SECTIONS.filter(
-  (section) =>
-    section.id !== 'integrations' && section.id !== 'agents' && section.id !== 'recording',
-)
+const VISIBLE_SECTIONS = SETTINGS_SECTIONS.filter((section) => {
+  return section.id !== 'integrations' && section.id !== 'agents' && section.id !== 'recording'
+})
 
 /**
  * Real page geometry: the scroll container is an 800px viewport whose content
@@ -36,6 +36,7 @@ function sectionTop(index: number): number {
 
 async function renderNavigatorPage(): Promise<HTMLElement> {
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     platform: createTestPlatformService({ isMacosDesktop: false }),
     contacts: createTestContactsService({ status: 'unavailable' }),
   })

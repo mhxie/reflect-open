@@ -128,8 +128,8 @@ export function isLocalOnlyReadOnlyPath(localOnly: LocalOnlyFolders, path: strin
  */
 export function localOnlyFolderRoot(localOnly: LocalOnlyFolders, path: string): string | null {
   const directories = directoryComponents(path)
-  const innermost = directories.findLastIndex((component) =>
-    localOnly.folders.has(foldAscii(component)),
-  )
+  const innermost = directories.findLastIndex((component) => {
+    return localOnly.folders.has(foldAscii(component))
+  })
   return innermost === -1 ? null : directories.slice(0, innermost + 1).join('/')
 }

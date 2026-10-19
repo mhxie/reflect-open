@@ -14,7 +14,7 @@ import { createSuggestionService } from '../indexing/suggestion-service.ts'
 import { createWikiResolverService } from '../indexing/wiki-resolver-service.ts'
 import {
   createTestContactsService,
-  createTestDatabaseService,
+  createNodeTestDatabaseService,
   createTestGraphSessionService,
   createTestLoggerService,
   createTestNoteCreationService,
@@ -128,7 +128,7 @@ function meetingService(
 }
 
 beforeEach(() => {
-  database = createTestDatabaseService()
+  database = createNodeTestDatabaseService()
   noteFile = createTestNoteFileService()
   noteCreation = createTestNoteCreationService({ noteFile })
   contacts = createTestContactsService()

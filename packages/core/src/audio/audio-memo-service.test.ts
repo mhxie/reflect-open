@@ -140,11 +140,12 @@ function nativeRecorderIpc(now: () => number) {
     /**
      * The native recorder commands sent, in order.
      */
-    commands: () =>
-      ipc
+    commands: () => {
+      return ipc
         .calls()
         .map((call) => call.command)
-        .filter((command) => command !== 'recorder_status'),
+        .filter((command) => command !== 'recorder_status')
+    },
   }
 }
 

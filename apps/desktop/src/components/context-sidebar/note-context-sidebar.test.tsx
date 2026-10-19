@@ -1,11 +1,12 @@
 import { userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { RetrievalService } from '@reflect/core'
 import { createTestCoreServices, createTestRetrievalService } from '@reflect/core/testing'
 import type { ReactNode } from 'react'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { scrollContainerOf } from '@/test-utils/scroll-container.ts'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteContextSidebar } from './note-context-sidebar.tsx'
 
 const relatedNotes = vi.fn<RetrievalService['relatedNotes']>()
@@ -35,7 +36,12 @@ function RouteProbe(): ReactNode {
 }
 
 function createApp() {
-  return createTestCoreServices({ retrieval: createTestRetrievalService({ relatedNotes }) })
+  const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    retrieval: createTestRetrievalService({ relatedNotes }),
+  })
+  onTestFinished(() => app.database.close())
+  return app
 }
 
 /**

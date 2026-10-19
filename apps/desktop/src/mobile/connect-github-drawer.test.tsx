@@ -12,6 +12,7 @@ import {
 } from '@reflect/core/testing'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ConnectGithubDrawer } from './connect-github-drawer.tsx'
 
 /**
@@ -41,6 +42,7 @@ async function mount(
   const backup = createTestBackupService({ state: { phase: 'disconnected' } })
   script?.(backup)
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     platform: createTestPlatformService({ isMacosDesktop: false, hasMacosTitleBarOverlay: false }),
     // A stored PAT + GitHub accepting it ("alex") makes the auth step skip
     // itself, so a Continue lands straight on the finish step.
@@ -73,16 +75,19 @@ describe('ConnectGithubDrawer', () => {
     await expect.element(page.getByLabelText('Repository name')).toHaveValue('reflect-backup')
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(backup.calls()).toContainEqual({
         method: 'connectExistingRepo',
         ref: { owner: 'alex', name: 'reflect-backup' },
         allowPublic: false,
-      }),
-    )
-    await vi.waitFor(() =>
-      expect(backup.calls()).toContainEqual({ method: 'connectNewRepo', name: 'reflect-backup' }),
-    )
+      })
+    })
+    await vi.waitFor(() => {
+      expect(backup.calls()).toContainEqual({
+        method: 'connectNewRepo',
+        name: 'reflect-backup',
+      })
+    })
     await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 
@@ -98,13 +103,13 @@ describe('ConnectGithubDrawer', () => {
     })
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(backup.calls()).toContainEqual({
         method: 'connectExistingRepo',
         ref: { owner: 'alex', name: 'notes' },
         allowPublic: false,
-      }),
-    )
+      })
+    })
     await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 

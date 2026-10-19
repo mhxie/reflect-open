@@ -64,9 +64,9 @@ export function LocalModelField(): ReactElement {
         legend="Check for model updates"
         description="Look for newer weights once a day. Updates are offered, never installed on their own."
         checked={settings.localTranscriptionUpdateChecks}
-        onCheckedChange={(localTranscriptionUpdateChecks) =>
+        onCheckedChange={(localTranscriptionUpdateChecks) => {
           updateSettings({ localTranscriptionUpdateChecks })
-        }
+        }}
       />
     </>
   )

@@ -24,8 +24,9 @@ const PATH = 'notes/plan.md'
 function storeIo(store: FakeNoteStore): NotePatchIo {
   return {
     read: (path) => store.files.get(path) ?? null,
-    write: (path, contents, expectedContents) =>
-      store.writeNote(path, contents, 1, expectedContents),
+    write: (path, contents, expectedContents) => {
+      return store.writeNote(path, contents, 1, expectedContents)
+    },
   }
 }
 
@@ -99,8 +100,9 @@ describe('patchNoteWith', () => {
     store.beforeWrite = () => {
       store.files.set(PATH, '# Plan\n- step\n- from the phone\n')
     }
-    const once = (source: string | null): string | null =>
-      source?.includes('- step') === true ? null : appendLine('- step')(source)
+    const once = (source: string | null): string | null => {
+      return source?.includes('- step') === true ? null : appendLine('- step')(source)
+    }
 
     const result = await patchNoteWith(storeIo(store), PATH, once)
 

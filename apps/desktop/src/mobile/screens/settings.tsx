@@ -297,9 +297,9 @@ export function MobileSettings(): ReactElement {
             <SettingsSwitchRow
               label="Smooth caret animation"
               checked={settings.editorSmoothCaretAnimation}
-              onCheckedChange={(editorSmoothCaretAnimation) =>
+              onCheckedChange={(editorSmoothCaretAnimation) => {
                 updateSettings({ editorSmoothCaretAnimation })
-              }
+              }}
             />
             <SettingsSwitchRow
               label="Start with a bullet"
@@ -309,9 +309,9 @@ export function MobileSettings(): ReactElement {
             <SettingsSwitchRow
               label="Bullet after a heading"
               checked={settings.editorBulletAfterHeading}
-              onCheckedChange={(editorBulletAfterHeading) =>
+              onCheckedChange={(editorBulletAfterHeading) => {
                 updateSettings({ editorBulletAfterHeading })
-              }
+              }}
             />
           </SettingsGroup>
 
@@ -576,11 +576,11 @@ export function MobileSettings(): ReactElement {
         value={settings.wikiTrustReportPath}
         open={trustReportOpen}
         onOpenChange={setTrustReportOpen}
-        onSave={(path) =>
+        onSave={(path) => {
           updateSettings({
             wikiTrustReportPath: path === '' ? DEFAULT_WIKI_TRUST_REPORT_PATH : path,
           })
-        }
+        }}
       />
       <TextSettingDrawer
         title="System prompt"

@@ -1,5 +1,5 @@
 import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import '@/styles/index.css'
 import { Suspense, use, type ReactElement } from 'react'
@@ -14,6 +14,7 @@ import { wikiRoute, type Route } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiScreen } from './wiki-screen.tsx'
 
 /**
@@ -152,9 +153,9 @@ let listingFailure: Error | null = null
  */
 function rehashed(paths: readonly string[], files: Record<string, string>): Fixture {
   return {
-    notes: WIKI.notes.map((note) =>
-      paths.includes(note.path) ? { ...note, file_hash: `${note.file_hash}-changed` } : note,
-    ),
+    notes: WIKI.notes.map((note) => {
+      return paths.includes(note.path) ? { ...note, file_hash: `${note.file_hash}-changed` } : note
+    }),
     files,
   }
 }
@@ -196,8 +197,10 @@ async function renderScreen(language: string | null = null) {
     CITERS.map((path) => [path, 'See [[wiki/memory/Spacing Effect]].\n']),
   )
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { ...fixture.files, ...citers }, generation: 1 }),
   })
+  onTestFinished(() => app.database.close())
   const index = (path: string, title: string | null, fileHash: string, mtime: number) => {
     const source = fixture.files[path] ?? citers[path] ?? ''
     const indexed = buildIndexedNote(parseNote({ path, source }), { fileHash, mtime, source })
@@ -255,10 +258,9 @@ async function expectRoute(view: ScreenView, route: Route): Promise<void> {
  * button; an index tree row's expander is its expanded one).
  */
 function rowTitles(view: ScreenView): string[] {
-  return [...view.container.querySelectorAll('[data-row-index]')].map(
-    (row) =>
-      row.querySelector('button:not([aria-pressed]):not([aria-expanded])')?.textContent ?? '',
-  )
+  return [...view.container.querySelectorAll('[data-row-index]')].map((row) => {
+    return row.querySelector('button:not([aria-pressed]):not([aria-expanded])')?.textContent ?? ''
+  })
 }
 
 describe('WikiScreen', () => {
@@ -431,14 +433,16 @@ describe('WikiScreen', () => {
     // A leaf has nothing to expand.
     expect(view.getByRole('button', { name: 'Indexes under Sleep Index' }).query()).toBeNull()
     // Each level nests in its parent's list item, so assistive tech hears the depth.
-    const itemOf = (title: string): Element | null | undefined =>
-      [...view.container.querySelectorAll('[data-row-index]')]
-        .find(
-          (row) =>
+    const itemOf = (title: string): Element | null | undefined => {
+      return [...view.container.querySelectorAll('[data-row-index]')]
+        .find((row) => {
+          return (
             row.querySelector('button:not([aria-pressed]):not([aria-expanded])')?.textContent ===
-            title,
-        )
+            title
+          )
+        })
         ?.closest('li')
+    }
     expect(itemOf('Memory Index')?.contains(itemOf('Sleep Index') ?? null)).toBe(true)
     expect(itemOf('Wiki Index')?.contains(itemOf('Motivation Index') ?? null)).toBe(true)
     expect(itemOf('Motivation Index')?.contains(itemOf('Sleep Index') ?? null)).toBe(false)
@@ -638,22 +642,22 @@ describe('WikiScreen', () => {
     const view = await renderScreen()
     const header = view.getByRole('banner')
     await header.getByRole('button', { name: 'Missing 简体中文 3' }).click()
-    await vi.waitFor(() =>
-      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect']),
-    )
+    await vi.waitFor(() => {
+      expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect'])
+    })
 
     view.app.settings.update({
       wikiLanguages: normalizeWikiLanguages([{ label: 'English', folder: 'wiki' }]),
     })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(rowTitles(view)).toEqual([
         'Retrieval Practice',
         'Spacing Effect',
         'Wiki Index',
         'Zeigarnik Effect',
-      ]),
-    )
+      ])
+    })
     await view.unmount()
   })
 

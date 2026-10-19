@@ -18,10 +18,10 @@ import type {
   Settings,
 } from '../settings/schema.ts'
 import {
+  createNodeTestDatabaseService,
   createTestActivityPort,
   createTestAiKeyValidationService,
   createTestClockService,
-  createTestDatabaseService,
   createTestFileChangeService,
   createTestGraphSessionService,
   createTestIdService,
@@ -98,7 +98,7 @@ interface SetupOptions {
  * recorded in `calls`.
  */
 async function setup(options: SetupOptions = {}) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   const noteFile = createTestNoteFileService({ generation: GENERATION })
   const graphSession = createTestGraphSessionService({
     graph: {
@@ -109,22 +109,20 @@ async function setup(options: SetupOptions = {}) {
   })
   const clock = createTestClockService({ now: NOW })
   const calls: LanguageModelV4CallOptions[] = []
-  const languageModel = createTestLanguageModelService(
-    (config) =>
-      new MockLanguageModelV4({
-        doGenerate: (callOptions) => {
-          calls.push(callOptions)
-          const engine =
-            'onDevice' in config && config.onDevice !== undefined ? 'on-device' : 'cloud'
-          return Promise.resolve({
-            content: [{ type: 'text', text: `Summary from ${engine}.` }],
-            finishReason: { unified: 'stop' as const, raw: undefined },
-            usage: USAGE,
-            warnings: [],
-          })
-        },
-      }),
-  )
+  const languageModel = createTestLanguageModelService((config) => {
+    return new MockLanguageModelV4({
+      doGenerate: (callOptions) => {
+        calls.push(callOptions)
+        const engine = 'onDevice' in config && config.onDevice !== undefined ? 'on-device' : 'cloud'
+        return Promise.resolve({
+          content: [{ type: 'text', text: `Summary from ${engine}.` }],
+          finishReason: { unified: 'stop' as const, raw: undefined },
+          usage: USAGE,
+          warnings: [],
+        })
+      },
+    })
+  })
   const onDeviceModels = createTestOnDeviceModelService()
   const aiCredentials = createAiCredentialService({
     secretStore: createTestSecretStoreService({
@@ -560,7 +558,10 @@ describe('NoteSummaryService.reconcile', () => {
     ]
     for (const [providers, cloudModel, message] of cases) {
       const result = await service.reconcile(input({ mode: 'cloud', providers, cloudModel }))
-      expect(result.stopped).toEqual({ reason: 'config', message: expect.stringMatching(message) })
+      expect(result.stopped).toEqual({
+        reason: 'config',
+        message: expect.stringMatching(message) as string,
+      })
     }
     expect(onDeviceModels.verifyCalls()).toEqual([])
     expect(writeKeepingModified).not.toHaveBeenCalled()

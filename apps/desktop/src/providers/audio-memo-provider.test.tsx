@@ -17,6 +17,7 @@ import {
 import { toast } from '@/components/ui/toast.tsx'
 import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AudioMemoProvider, useAudioMemo } from './audio-memo-provider.tsx'
 
 const GRAPH: GraphInfo = {
@@ -60,7 +61,10 @@ async function setup(provider: AiProviderConfig = OPENAI) {
     defaultAiProviderId: provider.id,
   })
   await settings.whenLoaded()
-  const app: TestCoreServices = createTestCoreServices({ settings })
+  const app: TestCoreServices = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    settings,
+  })
   app.audioRecorder.setStopResult(RECORDING)
 
   const hook = await renderHookInApp(() => ({ memo: useAudioMemo(), sidebar: useSidebar() }), {
@@ -72,8 +76,9 @@ async function setup(provider: AiProviderConfig = OPENAI) {
       </SidebarProvider>
     ),
   })
-  const cancels = (): number =>
-    app.audioRecorder.calls().filter((call) => call.method === 'cancel').length
+  const cancels = (): number => {
+    return app.audioRecorder.calls().filter((call) => call.method === 'cancel').length
+  }
   return { ...hook, app, cancels }
 }
 
@@ -181,12 +186,12 @@ describe('AudioMemoProvider', () => {
       result.current.sidebar.toggleSidebar()
     })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(app.progress.findByLabel('Saving audio memo')).toMatchObject({
         status: 'failed',
         message: 'disk full',
-      }),
-    )
+      })
+    })
     expect(result.current.memo.error).toBe('disk full')
     expect(result.current.memo.canRetry).toBe(true)
   })

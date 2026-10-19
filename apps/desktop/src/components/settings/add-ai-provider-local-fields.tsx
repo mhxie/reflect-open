@@ -140,8 +140,9 @@ export function AddAiProviderLocalFields({
           autoComplete="off"
           placeholder="Server default"
           {...register('contextWindow', {
-            validate: (value) =>
-              parseContextWindowInput(value).kind !== 'invalid' || CONTEXT_WINDOW_ERROR,
+            validate: (value) => {
+              return parseContextWindowInput(value).kind !== 'invalid' || CONTEXT_WINDOW_ERROR
+            },
           })}
         />
         {formState.errors.contextWindow ? (

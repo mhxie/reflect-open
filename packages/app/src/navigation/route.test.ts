@@ -38,8 +38,9 @@ describe('routesEqual', () => {
   })
 
   it('compares allNotes routes by their edit day', () => {
-    const editedOn = (date: string) =>
-      ({ kind: 'allNotes', filter: { kind: 'updated', date } }) as const
+    const editedOn = (date: string) => {
+      return { kind: 'allNotes', filter: { kind: 'updated', date } } as const
+    }
     expect(routesEqual(editedOn('2026-10-02'), editedOn('2026-10-02'))).toBe(true)
     expect(routesEqual(editedOn('2026-10-02'), editedOn('2026-10-01'))).toBe(false)
     expect(
@@ -67,8 +68,9 @@ describe('routesEqual', () => {
   })
 
   it('compares attachments routes by their type and tag', () => {
-    const attachments = (type: 'pdf' | null, tag: string | null) =>
-      ({ kind: 'attachments', type, tag }) as const
+    const attachments = (type: 'pdf' | null, tag: string | null) => {
+      return { kind: 'attachments', type, tag } as const
+    }
     expect(routesEqual(attachments(null, null), attachments(null, null))).toBe(true)
     expect(routesEqual(attachments('pdf', 'trip'), attachments('pdf', 'trip'))).toBe(true)
     expect(routesEqual(attachments('pdf', null), attachments(null, null))).toBe(false)

@@ -18,7 +18,7 @@ import {
 import {
   createTestClockService,
   createTestContactsService,
-  createTestDatabaseService,
+  createNodeTestDatabaseService,
   createTestGraphSessionService,
   createTestLoggerService,
   createTestNoteCreationService,
@@ -82,7 +82,7 @@ async function setup(options?: SetupOptions) {
   const created: { title: string; generation: number; body?: string }[] = []
   const ensured: EnsurePersonNoteInput[] = []
   const graphSession = createTestGraphSessionService({ graph: { generation: 7 } })
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   const suggestions = createSuggestionService({ database })
   vi.spyOn(suggestions, 'suggestWikiLinkTargets').mockImplementation((query, limit, dateGen) => {
     linkQueries.push({
@@ -107,12 +107,12 @@ async function setup(options?: SetupOptions) {
         Promise.resolve({ kind: 'created', path: 'notes/created.md' }))
     },
   )
-  vi.spyOn(contacts, 'canLookup').mockImplementation((current) =>
-    contactsCanLookup({ authorization }, current),
-  )
-  vi.spyOn(contacts, 'lookupPeople').mockImplementation((query) =>
-    lookupContactPeople(query, lookupByName),
-  )
+  vi.spyOn(contacts, 'canLookup').mockImplementation((current) => {
+    return contactsCanLookup({ authorization }, current)
+  })
+  vi.spyOn(contacts, 'lookupPeople').mockImplementation((query) => {
+    return lookupContactPeople(query, lookupByName)
+  })
   const personNotes = createPersonNoteService({
     database,
     wikiResolver: createWikiResolverService({ database }),
@@ -249,11 +249,12 @@ describe('AutocompleteSuggestionService.suggestLinks', () => {
 
   it('reports an ambiguous background create instead of silently doing nothing', async () => {
     const { suggest, operations, created } = await setup({
-      create: () =>
-        Promise.resolve({
+      create: () => {
+        return Promise.resolve({
           kind: 'ambiguous',
           paths: ['notes/business-ideas.md', 'notes/business-ideas-2.md'],
-        }),
+        })
+      },
     })
     const items = await suggest('Business ideas')
     expect(items).toMatchObject([{ target: 'Business ideas', label: 'Create “Business ideas”' }])
@@ -600,7 +601,7 @@ describe('AutocompleteSuggestionService.suggestLinks', () => {
   })
 
   it('ranks suggestions from the index and creates the note behind the Create row', async () => {
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     seedNotes(database, [
       { path: 'notes/roadmap.md', markdown: '# Roadmap\n' },
       { path: 'notes/road-trip.md', markdown: '# Road trip\n' },

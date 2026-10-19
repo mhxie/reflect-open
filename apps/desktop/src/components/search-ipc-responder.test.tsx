@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { SearchIpcAnswer, SearchIpcRequest } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SearchIpcResponder } from './search-ipc-responder.tsx'
 
 const REQUEST: SearchIpcRequest = { id: 7, query: 'wombat', mode: 'hybrid', limit: 10 }
@@ -16,17 +17,19 @@ const ANSWER: SearchIpcAnswer = {
  * answer scripted (`SearchIpcService.answer` itself is tested in core).
  */
 function setup() {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   const { ipc } = app
   for (const command of ['search_ipc_start', 'search_ipc_stop', 'search_ipc_respond']) {
     ipc.onCommand(command, () => null)
   }
   const answer = vi.spyOn(app.searchIpc, 'answer').mockResolvedValue(ANSWER)
-  const socketCalls = () =>
-    ipc
+  const socketCalls = () => {
+    return ipc
       .calls()
       .filter((call) => call.command.startsWith('search_ipc_'))
       .map((call) => call.command)
+  }
   return { app, ipc, answer, socketCalls }
 }
 
@@ -37,12 +40,12 @@ describe('SearchIpcResponder', () => {
     await vi.waitFor(() => expect(socketCalls()).toEqual(['search_ipc_start']))
 
     ipc.emit('search-ipc:request', REQUEST)
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(ipc.calls()).toContainEqual({
         command: 'search_ipc_respond',
         args: { id: 7, answer: ANSWER },
-      }),
-    )
+      })
+    })
     expect(answer).toHaveBeenCalledWith(REQUEST)
   })
 

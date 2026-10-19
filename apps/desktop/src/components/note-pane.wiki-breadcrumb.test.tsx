@@ -1,9 +1,10 @@
 import { page } from 'vitest/browser'
-import { expect, it, vi } from 'vitest'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { RouteContent } from './route-content.tsx'
 
 /** Every way the pane renders a note — editor, protected, read-only preview — leads with the wiki trail. */
@@ -15,18 +16,21 @@ import { RouteContent } from './route-content.tsx'
  */
 async function renderNote(path: string, content: string) {
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { [path]: content } }),
   })
+  onTestFinished(() => app.database.close())
   // The editor round-trips nearly all Markdown, so one body stands in for a
   // converter gap and opens the note protected.
   const createSession = app.noteSessions.create.bind(app.noteSessions)
-  vi.spyOn(app.noteSessions, 'create').mockImplementation((options) =>
-    createSession({
+  vi.spyOn(app.noteSessions, 'create').mockImplementation((options) => {
+    return createSession({
       ...options,
-      classify: (markdown) =>
-        markdown.includes('Unsupported body.') ? 'lossy' : options.classify(markdown),
-    }),
-  )
+      classify: (markdown) => {
+        return markdown.includes('Unsupported body.') ? 'lossy' : options.classify(markdown)
+      },
+    })
+  })
   vi.spyOn(app.wiki, 'ancestors').mockResolvedValue([
     { path: 'wiki/index.md', title: 'Wiki Index', displayTitle: null, lang: null },
   ])

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { noteBodyHash } from '../markdown/body-hash.ts'
 import { parseNote } from '../markdown/index.ts'
 import {
-  createTestDatabaseService,
+  createNodeTestDatabaseService,
   seedNotes,
   type TestDatabaseService,
   type TestNote,
@@ -27,7 +27,7 @@ function setup(notes: readonly TestNote[]): {
   database: TestDatabaseService
   search: SearchService
 } {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, notes)
   const wikiResolver = createWikiResolverService({ database })
   return { database, search: createSearchService({ database, wikiResolver }) }
@@ -371,7 +371,7 @@ describe('searchWithFilters', () => {
   })
 
   it('reads privacy flags in the same snapshot as the search snippet', async () => {
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     const markdown = '---\nprivate: true\n---\n# Scan\n![](assets/scan.png)\n'
     database.applyProjection(
       buildIndexedNote(parseNote({ path: 'notes/scan.md', source: markdown }), {
@@ -390,10 +390,10 @@ describe('searchWithFilters', () => {
     const hits = await search.searchWithFilters(parseSearchQuery('OCR'))
 
     expect(hits[0]).toMatchObject({
-      snippet: expect.stringContaining('\u{1}OCR\u{2}'),
+      snippet: expect.stringContaining('\u{1}OCR\u{2}') as string,
       isPrivate: true,
       hasDeviceOnlyContent: true,
-      assetTextHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      assetTextHash: expect.stringMatching(/^[0-9a-f]{64}$/) as string,
     })
     expect(hits[0]?.assetTextHash).not.toBe(EMPTY_ASSET_TEXT_HASH)
     const queries = database.getQueries()

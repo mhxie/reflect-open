@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { QueryClient } from '@tanstack/react-query'
 import {
   createTestBackupService,
@@ -8,6 +8,7 @@ import {
 } from '@reflect/core/testing'
 import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useWikiTrustReport } from './use-wiki-trust-report.ts'
 
 const VALID = JSON.stringify({
@@ -33,8 +34,11 @@ let readGate: Promise<void> | null
  * `backup` as the graph's backup service (none when it is null).
  */
 function appWith(backup: TestBackupService | null): TestCoreServices {
-  const app: TestCoreServices =
-    backup === null ? createTestCoreServices() : createTestCoreServices({ backup })
+  const app: TestCoreServices = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    ...(backup === null ? {} : { backup }),
+  })
+  onTestFinished(() => app.database.close())
   app.ipc.onCommand('wiki_trust_report_read', async (args) => {
     await readGate
     if (file === null) return null
@@ -106,9 +110,9 @@ describe('useWikiTrustReport and a backup that starts mid-read', () => {
       settings: SETTINGS,
       graphState: { services: null },
     })
-    await vi.waitFor(() =>
-      expect(app.ipc.calls().map((call) => call.command)).toContain('wiki_trust_report_read'),
-    )
+    await vi.waitFor(() => {
+      expect(app.ipc.calls().map((call) => call.command)).toContain('wiki_trust_report_read')
+    })
     // The graph's services (with its backup) start while the read is out.
     await act(() => {
       app.graphSession.setGraph({})

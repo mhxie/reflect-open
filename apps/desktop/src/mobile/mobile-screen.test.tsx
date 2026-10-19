@@ -1,6 +1,15 @@
 import type { RenderResult } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+  type MockInstance,
+} from 'vitest'
 import { StrictMode, type ReactElement } from 'react'
 import { act } from '@/test-utils/act.ts'
 import type { AppServices } from '@reflect/app'
@@ -18,6 +27,7 @@ import { monthLabel, monthOf } from '@/lib/month-grid.ts'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { createWeekWindow, weekOf } from './calendar.ts'
 import { MobileShell } from './mobile-shell.tsx'
 
@@ -93,8 +103,9 @@ vi.mock('@/editor/note-editor.tsx', async () => {
 // honours `open`, so the month-picker sheet renders only once the title
 // opens it.
 vi.mock('@/components/ui/drawer.tsx', () => ({
-  Drawer: ({ open, children }: { open?: boolean; children?: import('react').ReactNode }) =>
-    open ? <div data-testid="drawer">{children}</div> : null,
+  Drawer: ({ open, children }: { open?: boolean; children?: import('react').ReactNode }) => {
+    return open ? <div data-testid="drawer">{children}</div> : null
+  },
   DrawerContent: ({ children }: { children?: import('react').ReactNode }) => <div>{children}</div>,
   DrawerBody: ({ children }: { children?: import('react').ReactNode }) => <div>{children}</div>,
   DrawerDescription: ({ children }: { children?: import('react').ReactNode }) => <p>{children}</p>,
@@ -132,7 +143,9 @@ let statusBarEnabled: boolean
 
 /** Fresh services for the next `mount`, as each test starts with. */
 function createApp(): void {
-  app = createTestCoreServices()
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database })
   appServices = createTestAppServices(app)
   // The tests compute dates from the real clock.
   app.clock.setNow(Date.now())
@@ -272,9 +285,9 @@ describe('MobileShell', () => {
 
     document.documentElement.style.setProperty('--keyboard-height', '240px')
     await act(() => appServices.keyboard.publish(240))
-    await waitFor(() =>
-      expect(footerElement.getBoundingClientRect().bottom).toBeLessThanOrEqual(460),
-    )
+    await waitFor(() => {
+      expect(footerElement.getBoundingClientRect().bottom).toBeLessThanOrEqual(460)
+    })
     await expect.element(footer).toBeVisible()
   })
 
@@ -282,9 +295,9 @@ describe('MobileShell', () => {
     const today = todayIso()
     app.noteFile.set(`daily/${today}.md`, 'Captured today')
     const withoutStatus = await mount({ kind: 'today' })
-    await waitFor(() =>
-      expect(withoutStatus.getByTestId('fake-editor').elements().length).toBeGreaterThan(0),
-    )
+    await waitFor(() => {
+      expect(withoutStatus.getByTestId('fake-editor').elements().length).toBeGreaterThan(0)
+    })
     const defaultBottom = withoutStatus
       .getByRole('button', { name: 'Show capture actions' })
       .element()
@@ -300,12 +313,12 @@ describe('MobileShell', () => {
     const footer = withStatus.getByRole('status', { name: 'Note status' })
     await expect.element(footer).toBeVisible()
     const capture = withStatus.getByRole('button', { name: 'Show capture actions' }).element()
-    await waitFor(() =>
+    await waitFor(() => {
       expect(
         capture.getBoundingClientRect().bottom,
         capture.parentElement?.getAttribute('style') ?? '',
-      ).toBeLessThan(footer.element().getBoundingClientRect().top),
-    )
+      ).toBeLessThan(footer.element().getBoundingClientRect().top)
+    })
     await waitFor(() => expect(defaultBottom - capture.getBoundingClientRect().bottom).toBe(24))
   })
 
@@ -338,14 +351,14 @@ describe('MobileShell', () => {
     expect(todayButton.element().hasAttribute('inert')).toBe(true)
 
     await user.click(view.getByRole('button', { name: dayCellLabel(other) }))
-    await waitFor(() =>
+    await waitFor(() => {
       expect(
         view
           .getByRole('button', { name: dayCellLabel(other) })
           .element()
           .getAttribute('aria-current'),
-      ).toBe('date'),
-    )
+      ).toBe('date')
+    })
     expect(
       view.getByRole('button', { name: 'Today' }).element().classList.contains('opacity-100'),
     ).toBe(true)
@@ -437,14 +450,14 @@ describe('MobileShell', () => {
     await user.click(view.getByRole('button', { name: monthLabel(monthOf(today)) }))
 
     expect(view.getByTestId('drawer').query()).toBeNull()
-    await waitFor(() =>
+    await waitFor(() => {
       expect(
         view
           .getByRole('button', { name: dayCellLabel(today) })
           .element()
           .getAttribute('aria-current'),
-      ).toBe('date'),
-    )
+      ).toBe('date')
+    })
     expect(view.getByRole('button', { name: 'Today' }).query()).toBeNull()
   })
 
@@ -532,14 +545,14 @@ describe('MobileShell', () => {
     const view = await mount({ kind: 'today' })
 
     await user.click(view.getByRole('button', { name: dayCellLabel(other) }))
-    await waitFor(() =>
+    await waitFor(() => {
       expect(
         view
           .getByRole('button', { name: dayCellLabel(other) })
           .element()
           .getAttribute('aria-current'),
-      ).toBe('date'),
-    )
+      ).toBe('date')
+    })
 
     await user.click(view.getByRole('button', { name: 'All' }))
     await expect.element(view.getByRole('searchbox', { name: 'Search notes' })).toBeVisible()
@@ -547,13 +560,14 @@ describe('MobileShell', () => {
 
     await user.click(view.getByRole('button', { name: 'Daily', exact: true }))
     await waitFor(
-      () =>
+      () => {
         expect(
           view
             .getByRole('button', { name: dayCellLabel(other) })
             .element()
             .getAttribute('aria-current'),
-        ).toBe('date'),
+        ).toBe('date')
+      },
       { timeout: 10_000 },
     )
   })
@@ -628,14 +642,14 @@ describe('MobileShell', () => {
     const view = await mount({ kind: 'daily', date: other })
 
     await user.click(view.getByRole('button', { name: 'Daily', exact: true }))
-    await waitFor(() =>
+    await waitFor(() => {
       expect(
         view
           .getByRole('button', { name: dayCellLabel(other) })
           .element()
           .getAttribute('aria-current'),
-      ).toBe('date'),
-    )
+      ).toBe('date')
+    })
     expect(
       view
         .getByRole('button', { name: dayCellLabel(today) })
@@ -707,7 +721,7 @@ describe('MobileShell', () => {
     await act(() => appServices.keyboard.publish(316))
     expect(view.getByRole('toolbar', { name: 'Formatting' }).query()).toBeNull()
 
-    await act(() =>
+    await act(() => {
       publishFormattingToolbar(owner, {
         capabilities: {
           canIndent: true,
@@ -728,8 +742,8 @@ describe('MobileShell', () => {
           attachFiles: vi.fn(),
           scrollCaretIntoView: vi.fn(),
         },
-      }),
-    )
+      })
+    })
     await expect.element(view.getByRole('toolbar', { name: 'Formatting' })).toBeVisible()
     expect(view.getByRole('navigation', { name: 'Sections' }).query()).toBeNull()
 

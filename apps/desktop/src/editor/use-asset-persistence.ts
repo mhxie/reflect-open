@@ -114,19 +114,22 @@ export function useAssetPersistence(
     [attachments],
   )
 
-  const resolveEmbed = useMemo(
-    () =>
-      createPdfEmbedResolver({
-        generation,
-        notePath: path,
-        attachments,
-        noteAttachments,
-        mobileApp: platform.surface.mobileApp,
-        openAsset: (assetPath) =>
-          openPdf === undefined ? void openAsset(assetPath) : openPdf(assetPath),
-      }),
-    [generation, path, attachments, noteAttachments, platform, openAsset, openPdf],
-  )
+  const resolveEmbed = useMemo(() => {
+    return createPdfEmbedResolver({
+      generation,
+      notePath: path,
+      attachments,
+      noteAttachments,
+      mobileApp: platform.surface.mobileApp,
+      openAsset: (assetPath) => {
+        if (openPdf === undefined) {
+          void openAsset(assetPath)
+        } else {
+          openPdf(assetPath)
+        }
+      },
+    })
+  }, [generation, path, attachments, noteAttachments, platform, openAsset, openPdf])
 
   const saveFile = useCallback(
     // The note this save is for decides where the file lands, so it is the
@@ -136,8 +139,9 @@ export function useAssetPersistence(
   )
 
   const resolveFileInfo = useCallback(
-    async (href: string): Promise<FileInfo | undefined> =>
-      await attachments.resolveFileInfo(path, href),
+    async (href: string): Promise<FileInfo | undefined> => {
+      return await attachments.resolveFileInfo(path, href)
+    },
     [attachments, path],
   )
 

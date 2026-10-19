@@ -296,9 +296,9 @@ class NoteActionsServiceImpl implements NoteActionsService {
       return SKIPPED
     }
     const { generation } = session
-    return await this.#dedupe(this.#pendingPins, path, generation, () =>
-      this.#updatePin(path, generation, 'toggle'),
-    )
+    return await this.#dedupe(this.#pendingPins, path, generation, () => {
+      return this.#updatePin(path, generation, 'toggle')
+    })
   }
 
   async unpin(path: string): Promise<NoteActionOutcome<NotePinResult>> {
@@ -310,9 +310,9 @@ class NoteActionsServiceImpl implements NoteActionsService {
       return SKIPPED
     }
     const { generation } = session
-    return await this.#dedupe(this.#pendingPins, path, generation, () =>
-      this.#updatePin(path, generation, 'unpin'),
-    )
+    return await this.#dedupe(this.#pendingPins, path, generation, () => {
+      return this.#updatePin(path, generation, 'unpin')
+    })
   }
 
   async reorderPinned(
@@ -347,9 +347,9 @@ class NoteActionsServiceImpl implements NoteActionsService {
       return SKIPPED
     }
     const { generation } = session
-    return await this.#dedupe(this.#pendingPrivacy, path, generation, () =>
-      this.#writePrivacy(path, generation, (current) => !current),
-    )
+    return await this.#dedupe(this.#pendingPrivacy, path, generation, () => {
+      return this.#writePrivacy(path, generation, (current) => !current)
+    })
   }
 
   async setNotesPrivate(
@@ -369,9 +369,9 @@ class NoteActionsServiceImpl implements NoteActionsService {
         skipped += 1
         continue
       }
-      const outcome = await this.#dedupe(this.#pendingPrivacy, path, generation, () =>
-        this.#writePrivacy(path, generation, () => isPrivate),
-      )
+      const outcome = await this.#dedupe(this.#pendingPrivacy, path, generation, () => {
+        return this.#writePrivacy(path, generation, () => isPrivate)
+      })
       if (outcome.status !== 'done') {
         skipped += 1
       } else if (outcome.changed) {

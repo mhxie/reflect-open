@@ -1,10 +1,11 @@
 import { createTestCoreServices, makeOpenTask } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NoteRow, OpenTask } from '@reflect/core'
 import type { TaskActions } from '@/lib/tasks/use-task-actions.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileTaskEditSheet } from './task-edit-sheet.tsx'
 
 const X_URL = 'https://x.com/jack/status/101'
@@ -47,7 +48,8 @@ const actions: TaskActions = {
 }
 
 async function renderSheet(task: OpenTask) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   const getNote = vi
     .spyOn(app.indexQuery, 'getNote')
     .mockImplementation((path) => Promise.resolve(noteRow(path, path === 'notes/locked.md')))

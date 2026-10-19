@@ -356,18 +356,20 @@ class RenameCoordinatorImpl implements RenameCoordinator {
             localOnly,
             io: {
               sources: (targetKey) => wikiResolver.getLinkSources(targetKey),
-              backlinks: (forPath) =>
-                pinned === null
+              backlinks: (forPath) => {
+                return pinned === null
                   ? backlinks.getBacklinks(forPath)
-                  : Promise.resolve(pinned.backlinks),
+                  : Promise.resolve(pinned.backlinks)
+              },
               read: (forPath) => noteFile.read(forPath, gen),
               write: async (forPath, contents, expectedContents) => {
                 await noteFile.write(forPath, contents, gen, expectedContents)
               },
-              resolve: (target) =>
-                pinned !== null && target === pinned.target
+              resolve: (target) => {
+                return pinned !== null && target === pinned.target
                   ? Promise.resolve(pinned.from)
-                  : wikiResolver.resolveWikiTarget(target),
+                  : wikiResolver.resolveWikiTarget(target)
+              },
             },
             onProgress: (done, total) => {
               operation.progress(done, total)

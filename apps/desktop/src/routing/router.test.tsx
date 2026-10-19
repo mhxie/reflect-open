@@ -3,13 +3,17 @@ import { describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp, renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { Route } from './route.ts'
 import { RouterFreeze, useRouter } from './router.tsx'
 
 /**
  * `useRouter()` under the app's `RouterProvider`, mounted on `initialRoute`.
  */
-function routerHook(initialRoute?: Route, app: TestCoreServices = createTestCoreServices()) {
+function routerHook(
+  initialRoute?: Route,
+  app: TestCoreServices = createTestCoreServices({ database: createWasmTestDatabaseService() }),
+) {
   return renderHookInApp(() => useRouter(), {
     app,
     ...(initialRoute === undefined ? {} : { route: initialRoute }),
@@ -34,9 +38,9 @@ describe('router', () => {
   it('renders the navigation service through navigate, back, and forward', async () => {
     const { result, appServices } = await routerHook()
     await act(() => result.current.navigate({ kind: 'daily', date: '2026-06-08' }))
-    await act(() =>
-      result.current.navigate({ kind: 'note', path: 'notes/a.md' }, { focusEditor: true }),
-    )
+    await act(() => {
+      result.current.navigate({ kind: 'note', path: 'notes/a.md' }, { focusEditor: true })
+    })
     expect(result.current.route).toEqual({ kind: 'note', path: 'notes/a.md' })
     expect(result.current.arrivalSeq).toBe(2)
     expect(result.current.arrivalFocusEditor).toBe(true)
@@ -61,9 +65,9 @@ describe('router', () => {
   it('exposes the heading an arrival asked to reveal until the next history move', async () => {
     const { result, act } = await routerHook()
     expect(result.current.arrivalRevealHeading).toBeNull()
-    await act(() =>
-      result.current.navigate({ kind: 'note', path: 'notes/a.md' }, { revealHeading: '^c3' }),
-    )
+    await act(() => {
+      result.current.navigate({ kind: 'note', path: 'notes/a.md' }, { revealHeading: '^c3' })
+    })
     expect(result.current.arrivalRevealHeading).toBe('^c3')
 
     await act(() => result.current.back())

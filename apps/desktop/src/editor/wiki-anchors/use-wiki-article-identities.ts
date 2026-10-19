@@ -12,19 +12,17 @@ export function useWikiArticleIdentities(source: string): (title: string) => str
   const graph = useMaybeGraph()?.graph ?? null
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
-  const namesKey = useMemo(
-    () =>
-      JSON.stringify(
-        [
-          ...new Set(
-            readWikiArticle(source, todayIso())
-              .references.filter((reference) => reference.kind === 'note')
-              .map((reference) => splitWikiLinkTarget(reference.target).name),
-          ),
-        ].sort(),
-      ),
-    [source],
-  )
+  const namesKey = useMemo(() => {
+    return JSON.stringify(
+      [
+        ...new Set(
+          readWikiArticle(source, todayIso())
+            .references.filter((reference) => reference.kind === 'note')
+            .map((reference) => splitWikiLinkTarget(reference.target).name),
+        ),
+      ].sort(),
+    )
+  }, [source])
   const [resolved, setResolved] = useState<{ key: string; values: ReadonlyMap<string, string> }>(
     () => ({ key: '', values: new Map() }),
   )

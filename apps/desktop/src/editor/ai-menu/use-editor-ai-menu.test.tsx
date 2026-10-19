@@ -1,10 +1,11 @@
 import type { RefObject } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AiProviderConfig } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { toast } from '@/components/ui/toast.tsx'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useEditorAiMenu } from './use-editor-ai-menu.tsx'
 
 const PROVIDER: AiProviderConfig = {
@@ -48,7 +49,8 @@ function editorWithSelection(stagesReplacement = false): {
  * spy that sees every provider call (a model built for the transform).
  */
 function appWithKey(key: Promise<string | null>) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   const read = vi.spyOn(app.aiCredentials, 'read').mockReturnValueOnce(key)
   const create = vi.spyOn(app.languageModel, 'create')
   return { app, read, create }
@@ -59,8 +61,14 @@ describe('useEditorAiMenu', () => {
     const add = vi.spyOn(toast, 'add')
     const { editorRef, openSelectionMenu } = editorWithSelection()
     const { result } = await renderHookInApp(
-      () =>
-        useEditorAiMenu({ path: 'notes/plan.md', privateNote: true, sessionEpoch: 1, editorRef }),
+      () => {
+        return useEditorAiMenu({
+          path: 'notes/plan.md',
+          privateNote: true,
+          sessionEpoch: 1,
+          editorRef,
+        })
+      },
       { settings: { aiProviders: [PROVIDER] } },
     )
     expect(result.current.onSelectionMenuSearch).toBeUndefined()
@@ -73,8 +81,14 @@ describe('useEditorAiMenu', () => {
   it('offers the menu for a public note (control)', async () => {
     const { editorRef, openSelectionMenu } = editorWithSelection()
     const { result } = await renderHookInApp(
-      () =>
-        useEditorAiMenu({ path: 'notes/plan.md', privateNote: false, sessionEpoch: 1, editorRef }),
+      () => {
+        return useEditorAiMenu({
+          path: 'notes/plan.md',
+          privateNote: false,
+          sessionEpoch: 1,
+          editorRef,
+        })
+      },
       { settings: { aiProviders: [PROVIDER] } },
     )
     expect(result.current.onSelectionMenuSearch).toBeDefined()
@@ -85,8 +99,9 @@ describe('useEditorAiMenu', () => {
   it('closes the menu as soon as the note turns private', async () => {
     const { editorRef } = editorWithSelection()
     const hook = await renderHookInApp(
-      ({ privateNote }: { privateNote: boolean } = { privateNote: false }) =>
-        useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef }),
+      ({ privateNote }: { privateNote: boolean } = { privateNote: false }) => {
+        return useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef })
+      },
       { settings: { aiProviders: [PROVIDER] }, initialProps: { privateNote: false } },
     )
     expect(hook.result.current.onSelectionMenuSearch).toBeDefined()
@@ -99,8 +114,9 @@ describe('useEditorAiMenu', () => {
     const key = Promise.withResolvers<string | null>()
     const { app, read, create } = appWithKey(key.promise)
     const hook = await renderHookInApp(
-      ({ privateNote }: { privateNote: boolean } = { privateNote: false }) =>
-        useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef }),
+      ({ privateNote }: { privateNote: boolean } = { privateNote: false }) => {
+        return useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef })
+      },
       { app, settings: { aiProviders: [PROVIDER] }, initialProps: { privateNote: false } },
     )
     const items = await hook.result.current.onSelectionMenuSearch?.('Rewrite', {
@@ -130,8 +146,14 @@ describe('useEditorAiMenu', () => {
     const key = Promise.withResolvers<string | null>()
     const { app, read, create } = appWithKey(key.promise)
     const hook = await renderHookInApp(
-      () =>
-        useEditorAiMenu({ path: 'notes/plan.md', privateNote: false, sessionEpoch: 1, editorRef }),
+      () => {
+        return useEditorAiMenu({
+          path: 'notes/plan.md',
+          privateNote: false,
+          sessionEpoch: 1,
+          editorRef,
+        })
+      },
       { app, settings: { aiProviders: [PROVIDER] } },
     )
     const items = await hook.result.current.onSelectionMenuSearch?.('Rewrite', {

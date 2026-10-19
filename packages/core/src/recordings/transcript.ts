@@ -136,10 +136,9 @@ export function dropEchoRepeats(
       return true
     }
     const nearby = them
-      .filter(
-        (other) =>
-          other.startMs < segment.endMs + slackMs && other.endMs > segment.startMs - slackMs,
-      )
+      .filter((other) => {
+        return other.startMs < segment.endMs + slackMs && other.endMs > segment.startMs - slackMs
+      })
       .map((other) => other.text)
       .join(' ')
     return echoScore(segment.text, nearby) < threshold
@@ -171,10 +170,11 @@ export function mergeTurns(
   segments: readonly RecordingSegment[],
   gapMs: number = TURN_GAP_MS,
 ): RecordingSegment[] {
-  const sorted = [...segments].sort(
-    (first, second) =>
-      first.startMs - second.startMs || speakerOrder(first.speaker) - speakerOrder(second.speaker),
-  )
+  const sorted = [...segments].sort((first, second) => {
+    return (
+      first.startMs - second.startMs || speakerOrder(first.speaker) - speakerOrder(second.speaker)
+    )
+  })
   const turns: RecordingSegment[] = []
   for (const segment of sorted) {
     const last = turns.at(-1)

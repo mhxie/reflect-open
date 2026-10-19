@@ -31,11 +31,9 @@ export function useAttachmentLibrary(): readonly AttachmentLibraryEntry[] | unde
     enabled,
   })
 
-  return useMemo(
-    () =>
-      files === undefined || index === undefined
-        ? undefined
-        : buildAttachmentLibrary(files, index.references, index.noteTags),
-    [files, index],
-  )
+  return useMemo(() => {
+    return files === undefined || index === undefined
+      ? undefined
+      : buildAttachmentLibrary(files, index.references, index.noteTags)
+  }, [files, index])
 }

@@ -1,6 +1,6 @@
 import { createTestWindowService } from '@reflect/app/testing'
 import { page, userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import {
   createTestCoreServices,
@@ -12,6 +12,7 @@ import { useRouter } from '@/routing/router.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { PeekPanel } from './peek-panel.tsx'
 import { PeekProvider, usePeek, usePeekNavigation } from './peek-provider.tsx'
 
@@ -59,11 +60,12 @@ function RouteProbe(): ReactElement {
 }
 
 async function renderPeek(): Promise<TestCoreServices> {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   app.clock.setToday('2026-10-03')
-  vi.spyOn(app.openDocuments, 'sessionFor').mockImplementation((path) =>
-    openPaths.has(path) ? createTestNoteSession({ path }) : null,
-  )
+  vi.spyOn(app.openDocuments, 'sessionFor').mockImplementation((path) => {
+    return openPaths.has(path) ? createTestNoteSession({ path }) : null
+  })
   await renderInApp(
     <PeekProvider>
       <Opener path={PAST} />

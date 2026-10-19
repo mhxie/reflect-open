@@ -51,12 +51,12 @@ export function TemplatesSection(): ReactElement {
               <li key={template.path} className="group flex items-center gap-2 px-3 py-2">
                 <button
                   type="button"
-                  onClick={(event) =>
+                  onClick={(event) => {
                     navigateNoteLink({
                       target: { kind: 'note', path: template.path },
                       openInNewWindow: isModEvent(event),
                     })
-                  }
+                  }}
                   className="min-w-0 flex-1 text-left"
                 >
                   <span className="block truncate text-sm text-text hover:text-accent">

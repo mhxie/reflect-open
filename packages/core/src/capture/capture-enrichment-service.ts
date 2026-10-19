@@ -220,14 +220,15 @@ class CaptureEnrichmentServiceImpl implements CaptureEnrichmentService {
       const stamped = await patchNote(
         noteFile,
         identity.notePath,
-        (source) =>
-          source !== null && pendingCaptureSnapshot(identity, source) !== null
+        (source) => {
+          return source !== null && pendingCaptureSnapshot(identity, source) !== null
             ? upsertFrontmatter(source, {
                 captureStatus: 'skipped',
                 captureDailyFromTitle: undefined,
                 captureFinalizeStatus: undefined,
               })
-            : null,
+            : null
+        },
         input.generation,
       )
       if (stamped.patched !== null) {

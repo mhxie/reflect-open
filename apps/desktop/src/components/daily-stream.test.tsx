@@ -18,6 +18,7 @@ import { createDayWindow, dateAtIndex, indexOfDate } from '@/lib/day-window.ts'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { DailyStream, ESTIMATED_DAY_HEIGHT } from './daily-stream.tsx'
 
 /**
@@ -47,7 +48,7 @@ function Stream({ children }: { children: ReactNode }): ReactElement {
  * Render `children` in a stream-sized box; the app runs on `clock` (the system clock by default).
  */
 async function renderStream(children: ReactNode, clock: ClockService = createSystemClock()) {
-  const app = createTestCoreServices({ clock })
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService(), clock })
   // Reads never resolve: every day stays a loading placeholder.
   vi.spyOn(app.noteFile, 'read').mockReturnValue(new Promise(() => {}))
   return await renderInApp(<Stream>{children}</Stream>, {
@@ -114,11 +115,11 @@ describe('DailyStream', () => {
     })
 
     const expected = indexOfDate(dayWindow, '2026-06-28') * ESTIMATED_DAY_HEIGHT
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(page.getByTestId('daily-stream').element().scrollTop).toBeGreaterThan(
         expected - ESTIMATED_DAY_HEIGHT,
-      ),
-    )
+      )
+    })
     await expect.element(page.getByText(formatDayLabel('2026-06-28', 'mdy'))).toBeVisible()
     await view.unmount()
   })
@@ -151,11 +152,11 @@ describe('DailyStream', () => {
 
     const dayWindow = createDayWindow('2026-06-27')
     const expected = indexOfDate(dayWindow, '2026-06-28') * ESTIMATED_DAY_HEIGHT
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(page.getByTestId('daily-stream').element().scrollTop).toBeGreaterThan(
         expected - ESTIMATED_DAY_HEIGHT,
-      ),
-    )
+      )
+    })
     await expect.element(page.getByText(formatDayLabel('2026-06-28', 'mdy'))).toBeVisible()
     await view.unmount()
   })
@@ -169,9 +170,9 @@ describe('DailyStream', () => {
       </Stream>,
     )
 
-    await vi.waitFor(() =>
-      expect(page.getByTestId('daily-stream').element().scrollTop).toBeCloseTo(4321, -1),
-    )
+    await vi.waitFor(() => {
+      expect(page.getByTestId('daily-stream').element().scrollTop).toBeCloseTo(4321, -1)
+    })
     await view.unmount()
   })
 
@@ -219,9 +220,9 @@ describe('DailyStream', () => {
   it('reserves the editor’s space on loading placeholders, with the hint delayed', async () => {
     const view = await renderStream(<DailyStream target={{ kind: 'today' }} />)
 
-    await vi.waitFor(() =>
-      expect(document.querySelectorAll('.reflect-note-loading').length).toBeGreaterThan(0),
-    )
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('.reflect-note-loading').length).toBeGreaterThan(0)
+    })
     const placeholders = document.querySelectorAll('.reflect-note-loading')
     expect(placeholders.length).toBeGreaterThan(0)
     for (const placeholder of placeholders) {

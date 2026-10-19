@@ -30,7 +30,10 @@ export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactEl
   const { platform } = useCoreServices()
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto text-text">
+    <div
+      data-testid="daily-context-sidebar"
+      className="flex h-full flex-col overflow-y-auto text-text"
+    >
       <div
         className={cn(
           // Half-size gaps: the calendar grid and the action buttons pad

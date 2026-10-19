@@ -64,24 +64,23 @@ export function createTauriNativeMenuHost(): NativeMenuHost {
   return {
     async buildAppMenu(layouts) {
       const submenus = await Promise.all(
-        layouts.map(
-          async (layout) =>
-            await Submenu.new({
-              text: layout.text,
-              items: await Promise.all(layout.items.map(menuEntry)),
-            }),
-        ),
+        layouts.map(async (layout) => {
+          return await Submenu.new({
+            text: layout.text,
+            items: await Promise.all(layout.items.map(menuEntry)),
+          })
+        }),
       )
       const menu = await Menu.new({ items: submenus })
       return new TauriNativeAppMenu(menu, layouts, submenus)
     },
     async popup(items) {
       const menuItems = await Promise.all(
-        items.map((item) =>
-          isNativeMenuSeparator(item)
+        items.map((item) => {
+          return isNativeMenuSeparator(item)
             ? PredefinedMenuItem.new({ item: 'Separator' })
-            : MenuItem.new({ text: item.text, action: item.action }),
-        ),
+            : MenuItem.new({ text: item.text, action: item.action })
+        }),
       )
       const menu = await Menu.new({ items: menuItems })
       await menu.popup()

@@ -26,11 +26,11 @@ export function useFlowViewport(
       frame = null
       const top = scrollElement.getBoundingClientRect().top - flow.getBoundingClientRect().top
       const bottom = top + scrollElement.clientHeight
-      setViewport((current) =>
-        current !== null && current.top === top && current.bottom === bottom
+      setViewport((current) => {
+        return current !== null && current.top === top && current.bottom === bottom
           ? current
-          : { top, bottom },
-      )
+          : { top, bottom }
+      })
     }
     const onScroll = (): void => {
       frame ??= requestAnimationFrame(measure)

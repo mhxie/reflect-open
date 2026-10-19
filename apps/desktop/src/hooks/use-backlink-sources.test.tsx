@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { BacklinkContext, BacklinkContextPage, BacklinkService } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useBacklinkSources } from './use-backlink-sources.ts'
 
 let app: TestCoreServices
@@ -30,7 +31,7 @@ async function mount() {
 }
 
 beforeEach(() => {
-  app = createTestCoreServices()
+  app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   getBacklinksWithContext = vi.spyOn(app.backlinks, 'getBacklinksWithContext')
 })
 
@@ -38,8 +39,8 @@ describe('useBacklinkSources', () => {
   it('loads source pages, deduplicates overlapping contexts, and preserves indexed metadata', async () => {
     const nextCursor = { recencyMs: 100, sourcePath: 'notes/a.md' }
     const nextPage = Promise.withResolvers<BacklinkContextPage>()
-    getBacklinksWithContext.mockImplementation((_path, options) =>
-      options.cursor === null
+    getBacklinksWithContext.mockImplementation((_path, options) => {
+      return options.cursor === null
         ? Promise.resolve({
             contexts: [
               context('notes/a.md', 'shared context', 1),
@@ -48,8 +49,8 @@ describe('useBacklinkSources', () => {
             nextCursor,
             indexedLinkCount: 12,
           })
-        : nextPage.promise,
-    )
+        : nextPage.promise
+    })
 
     const { result } = await mount()
 

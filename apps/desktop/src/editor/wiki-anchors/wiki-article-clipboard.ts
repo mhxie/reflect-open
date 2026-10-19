@@ -53,14 +53,14 @@ function proseSlice(slice: Slice): Slice {
         return
       }
       if (node.isTextblock) {
-        const spans = collectInlineElements(
-          parseInline(node.textContent),
-          (element) =>
+        const spans = collectInlineElements(parseInline(node.textContent), (element) => {
+          return (
             element.type === LEZER_NODE_IDS.Comment &&
             /^<!--[ \t]*\/?claim:c[1-9]\d*[ \t]*-->$/.test(
               node.textContent.slice(element.from, element.to),
-            ),
-        )
+            )
+          )
+        })
         let offset = 0
         const children: ProseMirrorNode[] = []
         node.content.forEach((child) => {
@@ -108,13 +108,13 @@ function formattedSlice(view: EditorView, from: number, to: number): Slice {
     const resolved = view.state.doc.resolve(position)
     const parent = resolved.parent
     if (!parent.isTextblock || parent.content.size !== parent.textContent.length) return ''
-    const containers = collectInlineElements(
-      parseInline(parent.textContent),
-      (element) =>
+    const containers = collectInlineElements(parseInline(parent.textContent), (element) => {
+      return (
         formatting.has(element.type) &&
         element.from < resolved.parentOffset &&
-        element.to > resolved.parentOffset,
-    )
+        element.to > resolved.parentOffset
+      )
+    })
     if (!opening) containers.reverse()
     return containers
       .map((element) => {
@@ -194,16 +194,17 @@ function transferLedgers(html: string): ClaimLedgerTransfer[] | null {
   try {
     const values: unknown = JSON.parse(raw)
     if (!Array.isArray(values) || values.length > 1000) return null
-    return values.filter(
-      (value: unknown): value is ClaimLedgerTransfer =>
+    return values.filter((value: unknown): value is ClaimLedgerTransfer => {
+      return (
         value !== null &&
         typeof value === 'object' &&
         'id' in value &&
         typeof value.id === 'string' &&
         /^c[1-9]\d*$/.test(value.id) &&
         'raw' in value &&
-        typeof value.raw === 'string',
-    )
+        typeof value.raw === 'string'
+      )
+    })
   } catch {
     return null
   }

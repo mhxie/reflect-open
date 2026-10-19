@@ -321,12 +321,12 @@ class NoteToolsServiceImpl implements NoteToolsService {
         return await privacy.cloudSafeNoteListings(entries)
       }
       return await Promise.all(
-        entries.map(async (entry) =>
-          localSafeNoteListing(localOnly, onDevice, {
+        entries.map(async (entry) => {
+          return localSafeNoteListing(localOnly, onDevice, {
             ...entry,
             isPrivate: entry.isPrivate || (await isPrivateLive(entry.path)),
-          }),
-        ),
+          })
+        }),
       )
     }
 
@@ -334,17 +334,17 @@ class NoteToolsServiceImpl implements NoteToolsService {
       hits: readonly RetrievalHit[],
     ): Promise<Array<CloudSafe<CloudSearchHit> | LocalSafe<CloudSearchHit>>> => {
       if (onDevice === null) {
-        return await privacy.cloudSafeSearchHits(hits, (hit, source) =>
-          restrictedSources(hit.path, source, hit),
-        )
+        return await privacy.cloudSafeSearchHits(hits, (hit, source) => {
+          return restrictedSources(hit.path, source, hit)
+        })
       }
       return await Promise.all(
-        hits.map(async (hit) =>
-          localSafeSearchHit(localOnly, onDevice, {
+        hits.map(async (hit) => {
+          return localSafeSearchHit(localOnly, onDevice, {
             ...hit,
             isPrivate: hit.isPrivate || (await isPrivateLive(hit.path, hit)),
-          }),
-        ),
+          })
+        }),
       )
     }
 
@@ -576,21 +576,21 @@ export function noteToolResult(part: TypedToolResult<NoteTools>): NoteToolResult
       return {
         tool: 'read',
         toolCallId: part.toolCallId,
-        notes: part.output.notes.map((entry) =>
-          entry.ok
+        notes: part.output.notes.map((entry) => {
+          return entry.ok
             ? { path: entry.note.path, title: entry.note.title, error: null }
-            : { path: entry.path, title: null, error: entry.error },
-        ),
+            : { path: entry.path, title: null, error: entry.error }
+        }),
       }
     case 'read_assets':
       return {
         tool: 'assets',
         toolCallId: part.toolCallId,
-        assets: part.output.assets.map((entry) =>
-          entry.ok
+        assets: part.output.assets.map((entry) => {
+          return entry.ok
             ? { path: entry.asset.path, error: null }
-            : { path: entry.path, error: entry.error },
-        ),
+            : { path: entry.path, error: entry.error }
+        }),
       }
     case 'list_recent_notes': {
       const output = part.output

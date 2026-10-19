@@ -1,6 +1,7 @@
 import { createTestCoreServices } from '@reflect/core/testing'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NotePreview } from './note-preview.tsx'
 
 /** The props each rendered preview received. */
@@ -16,7 +17,8 @@ const GRAPH = { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure
 
 async function renderedFor(path: string): Promise<{ remoteEmbeds?: boolean }> {
   previews.length = 0
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   vi.spyOn(app.noteDocuments, 'readSource').mockResolvedValue('A body with an embed.\n')
   const view = await renderInApp(
     <NotePreview

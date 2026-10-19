@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AppError } from '../errors.ts'
 import { createWikiResolverService } from '../indexing/wiki-resolver-service.ts'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createTestNoteFileService } from '../testing/graph.ts'
 import { createTestIdService } from '../testing/id.ts'
 import {
@@ -35,7 +35,7 @@ const FIRST_ID = ids.noteId()
 const SECOND_ID = ids.noteId()
 
 function setup({ indexed = [], files = {}, placeholders = [], readErrors = [] }: Graph = {}) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, indexed)
   const noteFile = createTestNoteFileService({ files, evicted: placeholders })
   for (const path of [...placeholders, ...readErrors]) {
@@ -71,8 +71,9 @@ function setup({ indexed = [], files = {}, placeholders = [], readErrors = [] }:
     /**
      * How many `note_claims` lookups ran.
      */
-    claimLookups: () =>
-      database.getQueries().filter((query) => query.sql.includes('note_claims')).length,
+    claimLookups: () => {
+      return database.getQueries().filter((query) => query.sql.includes('note_claims')).length
+    },
   }
 }
 
@@ -329,12 +330,12 @@ describe('resolveOrCreateNoteWithTitle', () => {
 
   it('re-resolves after the disk scan before creating', async () => {
     const graph = setup()
-    graph.listNotes.mockImplementationOnce(() =>
-      Promise.try(() => {
+    graph.listNotes.mockImplementationOnce(() => {
+      return Promise.try(() => {
         seedNotes(graph.database, [{ path: 'notes/synced.md', markdown: '# Synced\n' }])
         return []
-      }),
-    )
+      })
+    })
 
     await expect(graph.creation.resolveOrCreateNoteWithTitle('Synced', 7)).resolves.toEqual({
       kind: 'resolved',

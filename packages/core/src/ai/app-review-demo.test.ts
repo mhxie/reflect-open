@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import { APP_REVIEW_STUB_KEY, createDemoModel, DEMO_REPLY_TEXT } from './app-review-demo.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAssetStoreService,
-  createTestDatabaseService,
   createTestHttpService,
   createTestLoggerService,
   createTestNoteFileService,
@@ -59,7 +59,7 @@ describe('createDemoModel', () => {
     // No route answers: any request the demo sent would fail the turn.
     const http = createTestHttpService()
     const onDeviceHttp = createTestOnDeviceHttpService()
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     const noteFile = createTestNoteFileService()
     const assetStore = createTestAssetStoreService()
     const xArchive = createTestXArchiveService()

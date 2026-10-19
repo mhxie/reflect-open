@@ -1,14 +1,24 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteGitVersion } from './use-note-git-version.ts'
+
+/**
+ * The test core services of the running test, closed when it ends.
+ */
+function createApp(): TestCoreServices {
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
+  return app
+}
 
 /**
  * The test core services, with the Git double answering `version` for every note.
  */
 function appAnswering(version: string | null): TestCoreServices {
-  const app = createTestCoreServices()
+  const app = createApp()
   app.gitRepository.onNoteVersion(() => version)
   return app
 }
@@ -56,14 +66,15 @@ describe('useNoteGitVersion', () => {
     const app = appAnswering('abc123def4')
     let open = true
     const hook = await renderHookInApp(
-      () =>
-        useNoteGitVersion({
+      () => {
+        return useNoteGitVersion({
           root: '/g',
           generation: 12,
           path: 'notes/a.md',
           open,
           isLocalOnly: false,
-        }),
+        })
+      },
       { app },
     )
     await vi.waitFor(() => expect(hook.result.current.version).toBe('abc123def4'))
@@ -86,21 +97,22 @@ describe('useNoteGitVersion', () => {
 
   it('discards a late version from another graph with the same note path', async () => {
     const first = Promise.withResolvers<string | null>()
-    const app = createTestCoreServices()
-    app.gitRepository.onNoteVersion((_path, generation) =>
-      generation === 21 ? first.promise : 'newgraph123',
-    )
+    const app = createApp()
+    app.gitRepository.onNoteVersion((_path, generation) => {
+      return generation === 21 ? first.promise : 'newgraph123'
+    })
     let generation = 21
     let root = '/first'
     const hook = await renderHookInApp(
-      () =>
-        useNoteGitVersion({
+      () => {
+        return useNoteGitVersion({
           root,
           generation,
           path: 'notes/shared.md',
           open: true,
           isLocalOnly: false,
-        }),
+        })
+      },
       { app },
     )
     await vi.waitFor(() => expect(versionCalls(app)).toEqual([['notes/shared.md', 21]]))
@@ -118,19 +130,20 @@ describe('useNoteGitVersion', () => {
   })
 
   it('reports unavailable history without replacing it with a false version', async () => {
-    const app = createTestCoreServices()
+    const app = createApp()
     app.gitRepository.onNoteVersion(() => {
       throw new Error('Git history unavailable')
     })
     const hook = await renderHookInApp(
-      () =>
-        useNoteGitVersion({
+      () => {
+        return useNoteGitVersion({
           root: '/g',
           generation: 31,
           path: 'notes/a.md',
           open: true,
           isLocalOnly: false,
-        }),
+        })
+      },
       { app },
     )
 

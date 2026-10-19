@@ -227,11 +227,11 @@ function withPrivacy(
   if (!excludePrivateContent) {
     return hits
   }
-  return hits.map((hit) =>
-    localOnly === null || isPrivateNote(localOnly, hit)
+  return hits.map((hit) => {
+    return localOnly === null || isPrivateNote(localOnly, hit)
       ? { ...hit, snippet: '', heading: null }
-      : hit,
-  )
+      : hit
+  })
 }
 
 /**
@@ -416,13 +416,13 @@ class RetrievalServiceImpl implements RetrievalService {
    */
   async #everyTermHits(query: string, limit: number): Promise<RetrievalHit[]> {
     const hits = await this.#deps.search.searchWithFilters(literalSearchQuery(query), { limit })
-    return hits.map((hit, index) =>
-      retrievalHit(hit, {
+    return hits.map((hit, index) => {
+      return retrievalHit(hit, {
         score: 1 / (1 + index), // FTS rank order; raw bm25 scores are not exposed
         snippet: hit.snippet ?? '',
         heading: null,
-      }),
-    )
+      })
+    })
   }
 
   /**
@@ -459,16 +459,16 @@ class RetrievalServiceImpl implements RetrievalService {
     return result.rows
       .filter((row) => !exclude.has(row.path))
       .slice(0, limit)
-      .map((row) =>
-        retrievalHit(
+      .map((row) => {
+        return retrievalHit(
           {
             ...row,
             isPrivate: row.isPrivate !== 0,
             hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
           },
           { score: 0, snippet: row.snippet, heading: null },
-        ),
-      )
+        )
+      })
   }
 }
 

@@ -128,9 +128,9 @@ export function generateCorpus(options: CorpusOptions): CorpusNote[] {
   const titles = new Set<string>()
   while (titles.size < options.notes - dailyCount) {
     const length = 2 + Math.floor(generator.random() * 4)
-    const words = Array.from({ length }, () =>
-      generator.random() < 0.5 ? generator.pick(TOPIC_WORDS) : nextWord(generator, rareWords),
-    )
+    const words = Array.from({ length }, () => {
+      return generator.random() < 0.5 ? generator.pick(TOPIC_WORDS) : nextWord(generator, rareWords)
+    })
     titles.add(words.map(capitalize).join(' '))
   }
   const titleList = [...titles]

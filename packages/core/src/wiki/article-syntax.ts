@@ -71,12 +71,15 @@ export function wikiClaimFormattingCheck(
     let unmarked = source
     for (const marker of [...ordered].reverse())
       unmarked = unmarked.slice(0, marker.from) + unmarked.slice(marker.to)
-    const project = (position: number): number =>
-      position -
-      ordered.reduce(
-        (removed, marker) => removed + Math.max(0, Math.min(position, marker.to) - marker.from),
-        0,
+    const project = (position: number): number => {
+      return (
+        position -
+        ordered.reduce(
+          (removed, marker) => removed + Math.max(0, Math.min(position, marker.to) - marker.from),
+          0,
+        )
       )
+    }
     return projectedStructure(marked, project) === wikiMarkdownStructure(unmarked)
   }
 }

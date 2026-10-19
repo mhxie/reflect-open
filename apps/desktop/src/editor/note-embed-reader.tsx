@@ -104,14 +104,12 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
 
   const label = display || target
   const body = source.kind === 'ready' ? splitFrontmatter(source.source).body : ''
-  const outlineBlocks = useMemo(
-    () =>
-      sectionOutlineBlocks(
-        readEmbeddedOutlineBlocks(body, ancestors.length),
-        splitWikiLinkTarget(target).fragment,
-      ),
-    [body, ancestors.length, target],
-  )
+  const outlineBlocks = useMemo(() => {
+    return sectionOutlineBlocks(
+      readEmbeddedOutlineBlocks(body, ancestors.length),
+      splitWikiLinkTarget(target).fragment,
+    )
+  }, [body, ancestors.length, target])
   const requestOutlineReveal = useCallback((ordinal: number) => {
     outlineRevealRef.current = ordinal
     revealedRef.current = true

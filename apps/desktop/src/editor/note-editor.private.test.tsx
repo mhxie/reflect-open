@@ -1,10 +1,20 @@
 import type { LinkPreviewResolver } from '@meowdown/core'
 import type { EditorProps } from '@meowdown/react'
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+  type MockInstance,
+} from 'vitest'
 import type { EmbedMediaService } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { queryClient } from '@/lib/query-client.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteEditor } from './note-editor.tsx'
 
 /**
@@ -25,9 +35,9 @@ const YOUTUBE_URL = 'https://youtu.be/aqz-KE-bpKQ'
 /**
  * A host resolver that passes remote sources through, like the note pane's.
  */
-const hostResolver = vi.fn((src: string) =>
-  /^https?:/i.test(src) ? src : `reflect-asset://g/${src}`,
-)
+const hostResolver = vi.fn((src: string) => {
+  return /^https?:/i.test(src) ? src : `reflect-asset://g/${src}`
+})
 const resolveLinkPreview: LinkPreviewResolver = vi.fn(() => Promise.resolve(undefined))
 
 let app: TestCoreServices
@@ -57,7 +67,9 @@ function editor(privateNote: boolean) {
 beforeEach(() => {
   editorProps.length = 0
   vi.clearAllMocks()
-  app = createTestCoreServices()
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database })
   loadXPost = vi.spyOn(app.embedMedia, 'loadXPost').mockResolvedValue(null)
   resolveYouTubeVideo = vi.spyOn(app.embedMedia, 'resolveYouTubeVideo').mockResolvedValue(undefined)
 })

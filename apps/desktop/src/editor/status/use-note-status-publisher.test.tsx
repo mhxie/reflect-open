@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NoteState } from '@reflect/core'
 import {
   createTestClockService,
@@ -8,6 +8,7 @@ import {
   type TestCoreServices,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { NoteProtection } from './note-protection.ts'
 import { useNoteStatus, type NoteStatusScope } from './note-status-store.ts'
 import { useNoteStatusPublisher } from './use-note-status-publisher.ts'
@@ -35,7 +36,9 @@ let app: TestCoreServices
 
 beforeEach(() => {
   clock = createTestClockService()
-  app = createTestCoreServices({ clock })
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database, clock })
 })
 
 /**
@@ -56,11 +59,16 @@ describe('useNoteStatusPublisher', () => {
       isProtected: true,
       isReadOnly: true,
     }
-    const publisher = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/retry.md', generation), 'unsaved\n', protectedState, {
-        protection,
-      }),
-    )
+    const publisher = await renderHook(() => {
+      return useNoteStatusPublisher(
+        scope('notes/retry.md', generation),
+        'unsaved\n',
+        protectedState,
+        {
+          protection,
+        },
+      )
+    })
     const first = await renderHook(() => useNoteStatus(scope('notes/retry.md', 61)))
     const second = await renderHook(() => useNoteStatus(scope('notes/retry.md', 62)))
     const oldProtection = first.result.current?.protection
@@ -95,21 +103,21 @@ describe('useNoteStatusPublisher', () => {
       isProtected: true,
       isReadOnly: true,
     }
-    const first = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/retry.md'), 'first\n', protectedState, {
+    const first = await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/retry.md'), 'first\n', protectedState, {
         protection: { kind: 'save-blocked', message: 'First blocked', retrySave: firstRetry },
-      }),
-    )
+      })
+    })
     const reader = await renderHook(() => useNoteStatus(scope('notes/retry.md')))
     const oldProtection = reader.result.current?.protection
     if (oldProtection?.kind !== 'save-blocked') {
       throw new Error('Expected first blocked-save recovery')
     }
-    await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/retry.md'), 'second\n', protectedState, {
+    await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/retry.md'), 'second\n', protectedState, {
         protection: { kind: 'save-blocked', message: 'Second blocked', retrySave: secondRetry },
-      }),
-    )
+      })
+    })
     await reader.rerender()
     await first.unmount()
     oldProtection.retrySave()
@@ -133,11 +141,11 @@ describe('useNoteStatusPublisher', () => {
       isProtected: true,
       isReadOnly: true,
     }
-    const first = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/blocked.md', 63), 'first\n', protectedState, {
+    const first = await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/blocked.md', 63), 'first\n', protectedState, {
         protection: { kind: 'save-blocked', message: 'First blocked', retrySave: firstRetry },
-      }),
-    )
+      })
+    })
     const reader = await renderHook(() => useNoteStatus(scope('notes/blocked.md', generation)))
     const oldProtection = reader.result.current?.protection
     if (oldProtection?.kind !== 'save-blocked') {
@@ -148,11 +156,16 @@ describe('useNoteStatusPublisher', () => {
       message: 'Second blocked',
       retrySave: secondRetry,
     }
-    const second = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/blocked.md', generation), 'second\n', protectedState, {
-        protection,
-      }),
-    )
+    const second = await renderHook(() => {
+      return useNoteStatusPublisher(
+        scope('notes/blocked.md', generation),
+        'second\n',
+        protectedState,
+        {
+          protection,
+        },
+      )
+    })
     await reader.rerender()
     await first.unmount()
     oldProtection.retrySave()
@@ -183,9 +196,9 @@ describe('useNoteStatusPublisher', () => {
   })
 
   it('counts the loaded note, recounts after typing settles, and clears on unmount', async () => {
-    const publisher = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/a.md'), '**bold** and [[Foo]]\n', EDITABLE),
-    )
+    const publisher = await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/a.md'), '**bold** and [[Foo]]\n', EDITABLE)
+    })
     const reader = await renderHook(() => useNoteStatus(scope('notes/a.md')))
     expect(reader.result.current).toEqual({
       characters: 'bold and Foo'.length,
@@ -228,11 +241,11 @@ describe('useNoteStatusPublisher', () => {
     const paneRef = createRef<HTMLElement>() as { current: HTMLElement | null }
     paneRef.current = pane
     const getSelectedText = vi.fn(() => 'hello')
-    await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/c.md'), 'hello world\n', EDITABLE, {
+    await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/c.md'), 'hello world\n', EDITABLE, {
         selection: { pane: paneRef, getSelectedText },
-      }),
-    )
+      })
+    })
     const reader = await renderHook(() => useNoteStatus(scope('notes/c.md')))
 
     const select = (node: Node, end: number) => {
@@ -258,9 +271,9 @@ describe('useNoteStatusPublisher', () => {
 
   it('updates live privacy and protection without resetting counts or edit time', async () => {
     let state = EDITABLE
-    const publisher = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/state.md'), 'original\n', state),
-    )
+    const publisher = await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/state.md'), 'original\n', state)
+    })
     const reader = await renderHook(() => useNoteStatus(scope('notes/state.md')))
     publisher.result.current('a longer live buffer\n')
     await publisher.act(() => clock.advance(300))
@@ -281,12 +294,16 @@ describe('useNoteStatusPublisher', () => {
   })
 
   it('keeps same-path statuses separate across file generations', async () => {
-    await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/shared.md', 31), 'first graph\n', EDITABLE),
-    )
-    await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/shared.md', 32), 'second graph is different\n', EDITABLE),
-    )
+    await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/shared.md', 31), 'first graph\n', EDITABLE)
+    })
+    await renderHook(() => {
+      return useNoteStatusPublisher(
+        scope('notes/shared.md', 32),
+        'second graph is different\n',
+        EDITABLE,
+      )
+    })
     const first = await renderHook(() => useNoteStatus(scope('notes/shared.md', 31)))
     const second = await renderHook(() => useNoteStatus(scope('notes/shared.md', 32)))
 
@@ -297,9 +314,9 @@ describe('useNoteStatusPublisher', () => {
   it('discards old timers and old change callbacks after a same-path graph switch', async () => {
     let generation = 41
     let markdown = 'first graph\n'
-    const publisher = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/shared.md', generation), markdown, EDITABLE),
-    )
+    const publisher = await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/shared.md', generation), markdown, EDITABLE)
+    })
     const first = await renderHook(() => useNoteStatus(scope('notes/shared.md', 41)))
     const second = await renderHook(() => useNoteStatus(scope('notes/shared.md', 42)))
     const oldChange = publisher.result.current
@@ -324,12 +341,12 @@ describe('useNoteStatusPublisher', () => {
   })
 
   it('does not clear a successor pane when an older owner unmounts', async () => {
-    const first = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/shared.md'), 'first pane\n', EDITABLE),
-    )
-    await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/shared.md'), 'successor pane\n', EDITABLE),
-    )
+    const first = await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/shared.md'), 'first pane\n', EDITABLE)
+    })
+    await renderHook(() => {
+      return useNoteStatusPublisher(scope('notes/shared.md'), 'successor pane\n', EDITABLE)
+    })
     const reader = await renderHook(() => useNoteStatus(scope('notes/shared.md')))
 
     await first.unmount()

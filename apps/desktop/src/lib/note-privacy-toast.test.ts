@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import {
+  createNodeTestDatabaseService,
+  createTestCoreServices,
+  createTestNoteFileService,
+} from '@reflect/core/testing'
 import type { MockToastAddOptions } from '@/test-utils/toast.ts'
 import { setNotesPrivate, toggleNotePrivate } from './note-privacy-toast.ts'
 
@@ -13,7 +17,8 @@ afterEach(() => {
 
 function setup(files: Record<string, string>) {
   const noteFile = createTestNoteFileService({ files })
-  const core = createTestCoreServices({ noteFile })
+  const core = createTestCoreServices({ database: createNodeTestDatabaseService(), noteFile })
+  onTestFinished(() => core.database.close())
   core.graphSession.setGraph({ root: '/g', generation: 3 })
   return { noteActions: core.noteActions, noteFile }
 }

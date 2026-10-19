@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NoteFileService } from '../graph/note-file-service.ts'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createIndexQueryService } from '../indexing/index-query-service.ts'
 import { createNotePathService } from '../indexing/note-path-service.ts'
 import { createTestNoteMoveService, createTestNoteSession } from '../testing/documents.ts'
@@ -26,7 +26,7 @@ function setup(options?: {
   wrapNoteFile?: (files: TestNoteFileService) => NoteFileService
 }) {
   const noteFile = createTestNoteFileService({ files: options?.files ?? {} })
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(
     database,
     options?.indexed ??
@@ -188,8 +188,8 @@ describe('createTemplate', () => {
   it('keeps a file that claimed the probed path first and takes the next free one', async () => {
     let first = true
     const { templates, noteFile } = setup({
-      wrapNoteFile: (files) =>
-        overrideNoteFileService(files, {
+      wrapNoteFile: (files) => {
+        return overrideNoteFileService(files, {
           create: async (path, contents, generation) => {
             if (first) {
               // A sync pull lands on the path between the probe and the claim.
@@ -198,7 +198,8 @@ describe('createTemplate', () => {
             }
             return await files.create(path, contents, generation)
           },
-        }),
+        })
+      },
     })
 
     await expect(templates.createTemplate('Daily Review')).resolves.toBe(
@@ -212,8 +213,11 @@ describe('createTemplate', () => {
 
   it('gives up after three lost claims instead of probing forever', async () => {
     const { templates, noteFile } = setup({
-      wrapNoteFile: (files) =>
-        overrideNoteFileService(files, { create: () => Promise.resolve({ kind: 'collision' }) }),
+      wrapNoteFile: (files) => {
+        return overrideNoteFileService(files, {
+          create: () => Promise.resolve({ kind: 'collision' }),
+        })
+      },
     })
 
     await expect(templates.createTemplate('Daily Review')).rejects.toThrow(
@@ -304,8 +308,8 @@ describe('renameTemplate', () => {
     let first = true
     const { templates, noteFile } = setup({
       files: { 'templates/journal.md': '# Journal\n\nMood:\n' },
-      wrapNoteFile: (files) =>
-        overrideNoteFileService(files, {
+      wrapNoteFile: (files) => {
+        return overrideNoteFileService(files, {
           write: async (path, ...rest) => {
             if (first) {
               first = false
@@ -313,7 +317,8 @@ describe('renameTemplate', () => {
             }
             return await files.write(path, ...rest)
           },
-        }),
+        })
+      },
     })
 
     await templates.renameTemplate('templates/journal.md', 'Log')
@@ -325,14 +330,15 @@ describe('renameTemplate', () => {
     let edits = 0
     const { templates, noteFile } = setup({
       files: { 'templates/journal.md': '# Journal\n\nedit 0\n' },
-      wrapNoteFile: (files) =>
-        overrideNoteFileService(files, {
+      wrapNoteFile: (files) => {
+        return overrideNoteFileService(files, {
           write: async (path, ...rest) => {
             edits += 1
             files.set(path, `# Journal\n\nedit ${edits}\n`)
             return await files.write(path, ...rest)
           },
-        }),
+        })
+      },
     })
 
     await expect(templates.renameTemplate('templates/journal.md', 'Log')).rejects.toMatchObject({

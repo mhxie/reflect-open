@@ -146,8 +146,9 @@ export function MarkdownPreview({
   const navigates = interactive && onWikiLinkClick != null
 
   const onWikilinkClickStable = useCallback(
-    (payload: { target: string; event: MouseEvent | KeyboardEvent; mod: boolean }) =>
-      navigateRef.current?.({ target: payload.target, openInNewWindow: payload.mod }),
+    (payload: { target: string; event: MouseEvent | KeyboardEvent; mod: boolean }) => {
+      return navigateRef.current?.({ target: payload.target, openInNewWindow: payload.mod })
+    },
     [],
   )
   const noteIdentity = useWikiArticleIdentities(content)
@@ -189,8 +190,9 @@ export function MarkdownPreview({
         projection,
         {
           interactive: blockInteractive,
-          openUrl: (href, event) =>
-            activateLink({ href, event, mod: event.metaKey || event.ctrlKey }),
+          openUrl: (href, event) => {
+            activateLink({ href, event, mod: event.metaKey || event.ctrlKey })
+          },
           ...(navigates ? { openWikiLink: (options) => navigateRef.current?.(options) } : {}),
         },
         showClaimRanges,
@@ -209,12 +211,13 @@ export function MarkdownPreview({
           raw={node.textContent}
           options={{
             interactive: blockInteractive,
-            openUrl: (href, event) =>
+            openUrl: (href, event) => {
               activateLink({
                 href,
                 event,
                 mod: event.metaKey || event.ctrlKey,
-              }),
+              })
+            },
             ...(navigates ? { openWikiLink: (options) => navigateRef.current?.(options) } : {}),
           }}
         />

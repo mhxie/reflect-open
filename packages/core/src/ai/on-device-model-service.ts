@@ -63,9 +63,9 @@ class OnDeviceModelServiceImpl implements OnDeviceModelService {
     apiKey: string,
     signal?: AbortSignal,
   ): Promise<VerifiedModelTarget> {
-    return await verifyModelTarget(target, (onDevice) =>
-      this.verifyServer(onDevice, { apiKey, signal }),
-    )
+    return await verifyModelTarget(target, (onDevice) => {
+      return this.verifyServer(onDevice, { apiKey, signal })
+    })
   }
 
   async verifyServer(

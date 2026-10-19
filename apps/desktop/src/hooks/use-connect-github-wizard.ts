@@ -87,13 +87,14 @@ export function useConnectGithubWizard({
     latestRef.current = { sync, onClose }
   })
 
-  const [wizard] = useState(() =>
-    createConnectGithubWizardService(
+  const [wizard] = useState(() => {
+    return createConnectGithubWizardService(
       {
         backup: {
           connectNewRepo: (name) => latestRef.current.sync.connectNewRepo(name),
-          connectExistingRepo: (ref, options) =>
-            latestRef.current.sync.connectExistingRepo(ref, options),
+          connectExistingRepo: (ref, options) => {
+            return latestRef.current.sync.connectExistingRepo(ref, options)
+          },
         },
         githubAuth,
         opener,
@@ -101,8 +102,8 @@ export function useConnectGithubWizard({
         clock,
       },
       { suggestedRepoName, onClose: () => latestRef.current.onClose(), pollIntervalMs },
-    ),
-  )
+    )
+  })
 
   // The repo-existence poll only runs while the surface is mounted.
   useEffect(() => wizard.attach(), [wizard])

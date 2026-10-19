@@ -1,12 +1,13 @@
 import { createTestCoreServices, makeOpenTask } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NoteRow, OpenTask } from '@reflect/core'
 import type { ResolvedArchivedPost } from '@reflect/core/x-archive'
 import { queryKeys } from '@/lib/query-client.ts'
 import { act } from '@/test-utils/act.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { TaskEditor } from './task-editor.tsx'
 
 const X_URL = 'https://x.com/jack/status/101'
@@ -49,7 +50,8 @@ function archivedPost(id: string): ResolvedArchivedPost {
 }
 
 async function renderTaskEditor(task: OpenTask) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   const getNote = vi
     .spyOn(app.indexQuery, 'getNote')
     .mockImplementation((path) => Promise.resolve(noteRow(path, path === 'notes/locked.md')))

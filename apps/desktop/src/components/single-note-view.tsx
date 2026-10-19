@@ -32,13 +32,11 @@ interface SingleNoteViewProps {
 export function SingleNoteView({ path, dailyDate, heading }: SingleNoteViewProps): ReactElement {
   // A followed link's `#fragment` scrolls the arriving note to that heading.
   const { arrivalRevealHeading, arrivalSeq } = useRouter()
-  const reveal = useMemo(
-    (): NoteReveal | undefined =>
-      arrivalRevealHeading === null
-        ? undefined
-        : { fragment: arrivalRevealHeading, key: arrivalSeq },
-    [arrivalRevealHeading, arrivalSeq],
-  )
+  const reveal = useMemo((): NoteReveal | undefined => {
+    return arrivalRevealHeading === null
+      ? undefined
+      : { fragment: arrivalRevealHeading, key: arrivalSeq }
+  }, [arrivalRevealHeading, arrivalSeq])
   return (
     <ScrollRestored className="h-full overflow-auto px-0">
       <div className="mx-auto flex min-h-full w-full max-w-full flex-col py-8">

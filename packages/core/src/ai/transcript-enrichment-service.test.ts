@@ -55,13 +55,14 @@ beforeEach(() => {
 function modelAnswering(text: string): void {
   languageModelService.setModel(
     new MockLanguageModelV3({
-      doGenerate: () =>
-        Promise.resolve({
+      doGenerate: () => {
+        return Promise.resolve({
           content: [{ type: 'text', text: JSON.stringify({ title: text }) }],
           finishReason: { unified: 'stop' as const, raw: undefined },
           usage: USAGE,
           warnings: [],
-        }),
+        })
+      },
     }),
   )
 }
@@ -69,10 +70,11 @@ function modelAnswering(text: string): void {
 function modelThrowing(error: unknown): void {
   languageModelService.setModel(
     new MockLanguageModelV3({
-      doGenerate: () =>
-        Promise.try(() => {
+      doGenerate: () => {
+        return Promise.try(() => {
           throw error
-        }),
+        })
+      },
     }),
   )
 }
@@ -106,12 +108,16 @@ describe('TranscriptEnrichmentService.generateTitle', () => {
     })
 
     expect(config.model).toBe(originalModel)
-    expect(languageModelService.calls()).toContainEqual({
-      config: expect.objectContaining({
-        id: config.id,
-        provider: config.provider,
-        model: titleModel,
-      }),
+    const calls = languageModelService.calls().map((call) => ({
+      id: call.config.id,
+      provider: call.config.provider,
+      model: call.config.model,
+      apiKey: call.apiKey,
+    }))
+    expect(calls).toContainEqual({
+      id: config.id,
+      provider: config.provider,
+      model: titleModel,
       apiKey: 'sk-live-key',
     })
   })

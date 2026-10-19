@@ -17,6 +17,7 @@ import { createTestCoreServices, createTestPlatformService } from '@reflect/core
 import { createTestOperationsService, type TestOperationsService } from '@reflect/app/testing'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteActionsSection } from './note-actions-section.tsx'
 
 // What the app's fakes answer; each test sets them before `renderSection`.
@@ -50,6 +51,7 @@ function pinnedTitles(): string | null {
 async function renderSection(path: string, showTrash = false, copies = 1, width?: number) {
   operations = createTestOperationsService()
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     progress: operations,
     noteDocuments: {
       readSource: readNoteSource,
@@ -101,11 +103,11 @@ beforeEach(() => {
   getNote.mockReset().mockResolvedValue(noteRow('notes/a.md', false))
   noteSource = '# A\n'
   readNoteSource.mockReset().mockImplementation(() => Promise.resolve(noteSource))
-  commitNoteFrontmatter.mockReset().mockImplementation((_path, patch) =>
-    Promise.try(() => {
+  commitNoteFrontmatter.mockReset().mockImplementation((_path, patch) => {
+    return Promise.try(() => {
       noteSource = upsertFrontmatter(noteSource, frontmatterPatchToYaml(patch))
-    }),
-  )
+    })
+  })
 })
 
 function noteRow(path: string, isPrivate: boolean, title = 'A'): NoteRow {
@@ -180,12 +182,11 @@ describe('NoteActionsSection pin toggle', () => {
 
   it('reverts the pin when the write fails', async () => {
     let rejectToggle!: (cause: unknown) => void
-    commitNoteFrontmatter.mockImplementationOnce(
-      () =>
-        new Promise<void>((_resolve, reject) => {
-          rejectToggle = reject
-        }),
-    )
+    commitNoteFrontmatter.mockImplementationOnce(() => {
+      return new Promise<void>((_resolve, reject) => {
+        rejectToggle = reject
+      })
+    })
     const view = await renderSection('notes/a.md')
     await vi.waitFor(() => expect(getPinnedNotes).toHaveBeenCalledTimes(1))
 
@@ -234,12 +235,12 @@ describe('NoteActionsSection for a local-only note', () => {
       .toMatchTextContent('by way of a private holding folder')
     await userEvent.click(page.getByRole('dialog').getByRole('button', { name: 'Trash note' }))
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(operations.findByLabel('Trashing note')).toMatchObject({
         status: 'warning',
         message: KEPT_IN_GRAPH_TRASH,
-      }),
-    )
+      })
+    })
     expect(trash).toHaveBeenCalledWith('finance/secure/bank.md')
   })
 })

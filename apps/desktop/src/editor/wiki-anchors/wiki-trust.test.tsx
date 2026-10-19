@@ -8,10 +8,11 @@ import {
   type TestCoreServices,
 } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { todayIso } from '@/lib/dates.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
 import { savedFileRetryMs } from './use-wiki-trust-view.ts'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
@@ -128,8 +129,10 @@ beforeEach(async () => {
 function createApp(): TestCoreServices {
   // Today is the date a question records.
   const services = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     clock: createTestClockService({ today: todayIso() }),
   })
+  onTestFinished(() => services.database.close())
   services.ipc.onCommand('wiki_trust_report_read', (args) => ({
     stamp: report.stamp,
     // As Rust does: the caller's copy is current, so no contents.
@@ -172,11 +175,11 @@ async function editorFixture(source = SOURCE, path = PATH) {
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
   const editor = ref.current!.getEditor()!
-  await vi.waitFor(() =>
+  await vi.waitFor(() => {
     expect(
       rendered.container.querySelector('[data-wiki-claim="c2"][data-wiki-trust]'),
-    ).not.toBeNull(),
-  )
+    ).not.toBeNull()
+  })
   return { ...rendered, editor, ref }
 }
 
@@ -220,13 +223,13 @@ describe('claim trust from the harness report', () => {
           <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
         </MarkdownEditor>,
       )
-      await vi.waitFor(() =>
-        expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull(),
-      )
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull()
+      })
       if (display === 'inline')
-        await vi.waitFor(() =>
-          expect(container.querySelector('[data-wiki-trust-claim="c1"]')).not.toBeNull(),
-        )
+        await vi.waitFor(() => {
+          expect(container.querySelector('[data-wiki-trust-claim="c1"]')).not.toBeNull()
+        })
       const height = container
         .querySelector('[data-wiki-claim="c1"]')!
         .closest('p')!
@@ -252,11 +255,11 @@ describe('claim trust from the harness report', () => {
     delete c2.next
     report = { stamp: '2:2', contents: JSON.stringify(sound) }
     const { container } = await editorFixture()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('solid'),
-    )
+      ).toBe('solid')
+    })
     // One mark per claim, carrying meaning by shape alone: no text in the prose.
     const marks = [...container.querySelectorAll<HTMLElement>('.wiki-trust-mark')]
     expect(marks).toHaveLength(2)
@@ -374,8 +377,9 @@ describe('claim trust from the harness report', () => {
     supported.notes[PATH]!.claims['c1']!.tier = 'supported'
     report = { stamp: '7:7', contents: JSON.stringify(supported) }
     const { container } = await editorFixture()
-    const wrapper = (): HTMLElement =>
-      container.querySelector('[data-wiki-trust-claim="c1"]')!.parentElement!
+    const wrapper = (): HTMLElement => {
+      return container.querySelector('[data-wiki-trust-claim="c1"]')!.parentElement!
+    }
     await vi.waitFor(() => expect(wrapper().className).toContain('wiki-trust-on-demand'))
     expect(wrapper().getBoundingClientRect().width).toBe(0)
     // The claim to check keeps its mark.
@@ -403,10 +407,11 @@ describe('claim trust from the harness report', () => {
       { label: '中文', folder: 'wiki-zh' },
     ]
     const { editor, container } = await editorFixture(SOURCE, 'wiki-zh/Example.md')
-    const style = (id: string): string | null | undefined =>
-      container
+    const style = (id: string): string | null | undefined => {
+      return container
         .querySelector(`[data-wiki-claim="${CSS.escape(id)}"]`)
         ?.getAttribute('data-wiki-trust')
+    }
     // The source's verdict, checked against the source's saved text.
     await vi.waitFor(() => expect(style('c1')).toBe('solid'))
     const projection = wikiArticleKey.getState(editor.state)!
@@ -429,11 +434,11 @@ describe('claim trust from the harness report', () => {
       '@anchor: url:https://example.org/one | valid_at: 2020-01-02\n@pass: editor | status: pending | at: 2026-10-01\n',
     )
     const { container } = await editorFixture(source, 'wiki-zh/Example.md')
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('pending'),
-    )
+      ).toBe('pending')
+    })
   })
 
   it('shows a claim as changed as soon as its text moves on from the evaluated text', async () => {
@@ -444,11 +449,11 @@ describe('claim trust from the harness report', () => {
       editor.state.tr.insertText('Edited ', wikiEditorRange(projection.map, claim)!.from),
     )
     // Unsaved: the text differs from what was hashed.
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('pending'),
-    )
+      ).toBe('pending')
+    })
     expect(container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')).toBe(
       'solid',
     )
@@ -461,30 +466,30 @@ describe('claim trust from the harness report', () => {
     // Saved: the reindex re-reads the file, whose hash no longer matches.
     disk = ref.current!.getMarkdown()
     await queryClient.invalidateQueries({ queryKey: ['index'] })
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('pending'),
-    )
+      ).toBe('pending')
+    })
     // Evaluated as saved: the editor's own output reads clean against it.
     report = { stamp: '9:9', contents: await reportText(`Edited ${WEAK}`) }
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('needs-work'),
-    )
+      ).toBe('needs-work')
+    })
   })
 
   it('records a question as a reader flag in the claim ledger', async () => {
     const { ref } = await editorFixture()
     await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
     await page.getByRole('button', { name: 'Question this claim' }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(ref.current!.getMarkdown()).toMatch(
         /```anchors c2\n@pass: reader \| status: flagged \| at: \d{4}-\d{2}-\d{2}\n```/,
-      ),
-    )
+      )
+    })
     expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
     await expect.element(page.getByText('You questioned this claim today.')).toBeVisible()
     // An ordinary edit: ⌘Z from the card takes the flag back out, as the
@@ -503,11 +508,11 @@ describe('claim trust from the harness report', () => {
       .element(page.getByRole('button', { name: 'Question this claim' }))
       .not.toBeInTheDocument()
     await page.getByRole('button', { name: 'Dismiss the doubt' }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(ref.current!.getMarkdown()).toMatch(
         /```anchors c2\n@pass: reader \| status: verified \| at: \d{4}-\d{2}-\d{2}\n```/,
-      ),
-    )
+      )
+    })
     expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
     // The report still says disputed until the harness reads the record.
     await expect.element(page.getByText('You dismissed the doubt today.')).toBeVisible()
@@ -563,11 +568,11 @@ describe('claim trust from the harness report', () => {
       editor.state.tr.insertText('Edited ', wikiEditorRange(projection.map, claim)!.from),
     )
     release()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust'),
-      ).toBe('pending'),
-    )
+      ).toBe('pending')
+    })
     expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
       'needs-work',
     )
@@ -657,8 +662,9 @@ describe('claim trust from the harness report', () => {
 
   it('drops verdicts while the saved file cannot be read, then recovers', async () => {
     const { container } = await editorFixture()
-    const c1 = (): string | null | undefined =>
-      container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')
+    const c1 = (): string | null | undefined => {
+      return container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')
+    }
     expect(c1()).toBe('solid')
     // A reread that fails: the cache keeps the old hashes, which must not show.
     readFailures = 1
@@ -687,9 +693,9 @@ describe('claim trust from the harness report', () => {
   it('holds marks back on demand until Option reveals them', async () => {
     settings.wikiTrustDisplay = 'on-demand'
     const { container } = await editorFixture()
-    await vi.waitFor(() =>
-      expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeNull(),
-    )
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeNull()
+    })
     // Hidden: the mark's wrapper collapses to nothing (it stays focusable).
     const wrapper = container.querySelector('[data-wiki-trust-claim="c2"]')!.parentElement!
     expect(wrapper.getBoundingClientRect().width).toBe(0)
@@ -750,9 +756,9 @@ describe('claim trust from the harness report', () => {
     supported.notes[PATH]!.claims['c1']!.tier = 'supported'
     report = { stamp: '6:6', contents: JSON.stringify(supported) }
     const { container } = await editorFixture()
-    await vi.waitFor(() =>
-      expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2),
-    )
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('.wiki-trust-margin .wiki-trust-mark')).toHaveLength(2)
+    })
     // Both claims end on one line; the layout pass spaces their marks 24px
     // apart at any root size, so their 24px hit areas tile without overlap.
     for (const root of ['16px', '13px']) {

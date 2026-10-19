@@ -42,9 +42,9 @@ function entry(path: string, claims: number | null = 0): WikiEntry {
 
 /** The tree as nested `[key, children]` pairs, for readable assertions. */
 function shape(nodes: readonly WikiIndexNode[]): unknown[] {
-  return nodes.map((node) =>
-    node.children.length === 0 ? node.key : [node.key, shape(node.children)],
-  )
+  return nodes.map((node) => {
+    return node.children.length === 0 ? node.key : [node.key, shape(node.children)]
+  })
 }
 
 describe('isWikiIndex', () => {

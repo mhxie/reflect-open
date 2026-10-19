@@ -124,10 +124,9 @@ function embeddedHeadings(root: HTMLElement, position: number): OutlineHeading[]
         },
       })
     } else {
-      const index = children.findIndex(
-        (child) =>
-          (readers.get(child)?.target ?? child.dataset['noteEmbedTarget']) === block.target,
-      )
+      const index = children.findIndex((child) => {
+        return (readers.get(child)?.target ?? child.dataset['noteEmbedTarget']) === block.target
+      })
       if (index !== -1) {
         const child = children.splice(index, 1)[0]
         if (child !== undefined) headings.push(...embeddedHeadings(child, position))

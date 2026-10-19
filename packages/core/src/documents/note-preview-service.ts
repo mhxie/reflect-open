@@ -94,8 +94,9 @@ class NotePreviewServiceImpl implements NotePreviewService {
         titleMetadata: { displayTitle: data.display_title, lang: data.lang },
         privateNote:
           isLocalOnlyPath(localOnly, path) || frontmatterPrivacy(source).kind !== 'public',
-        resolveImageUrl: (imageSource) =>
-          attachments.resolvePreviewImageUrl(path, imageSource, generation),
+        resolveImageUrl: (imageSource) => {
+          return attachments.resolvePreviewImageUrl(path, imageSource, generation)
+        },
         resolveWikiEmbed: (embedTarget) => attachments.resolveWikiEmbed(embedTarget),
       }
     } catch {

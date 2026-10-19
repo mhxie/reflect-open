@@ -57,7 +57,8 @@ export function usePinnedTagFilters(): PinnedTagFilters {
       const tag = normalizePinnedTag(input)
       return tag !== null && updateTags((current) => movePinnedFilterTag(current, tag, move))
     },
-    reorderTags: (original, next) =>
-      updateTags((current) => reorderPinnedFilterTags(current, original, next)),
+    reorderTags: (original, next) => {
+      return updateTags((current) => reorderPinnedFilterTags(current, original, next))
+    },
   }
 }

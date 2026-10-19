@@ -72,13 +72,14 @@ export function WikiTable({
   onOpen,
 }: WikiTableProps): ReactElement {
   const handleToggle = useCallback(
-    (path: string, event: Pick<MouseEvent, 'shiftKey'>) =>
+    (path: string, event: Pick<MouseEvent, 'shiftKey'>) => {
       onSelect(
         path,
         event.shiftKey
           ? { metaKey: false, ctrlKey: false, shiftKey: true }
           : { metaKey: true, ctrlKey: true, shiftKey: false },
-      ),
+      )
+    },
     [onSelect],
   )
   const row = (entry: WikiEntry, treeRow?: WikiIndexRow, children?: ReactNode): ReactElement => (
@@ -103,8 +104,8 @@ export function WikiTable({
   const treeRows = new Map(
     layout.kind === 'tree' ? layout.rows.map((item) => [item.key, item]) : [],
   )
-  const branch = (nodes: readonly WikiIndexNode[]): ReactElement[] =>
-    nodes.flatMap((node) => {
+  const branch = (nodes: readonly WikiIndexNode[]): ReactElement[] => {
+    return nodes.flatMap((node) => {
       const treeRow = treeRows.get(node.key)
       if (treeRow === undefined) {
         return []
@@ -112,6 +113,7 @@ export function WikiTable({
       const children = treeRow.expanded ? <ul>{branch(node.children)}</ul> : null
       return [row(node.entry, treeRow, children)]
     })
+  }
 
   return (
     <>

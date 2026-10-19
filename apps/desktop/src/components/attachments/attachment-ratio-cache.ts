@@ -89,13 +89,11 @@ function readJson<T>(storage: Storage, key: string, schema: z.ZodType<T>): T | u
 
 /** The roots of every graph with a stored cache. */
 function storedGraphRoots(): string[] {
-  return withStorage(
-    (storage) =>
-      Object.keys(storage)
-        .filter((key) => key.startsWith(STORE_PREFIX))
-        .map((key) => key.slice(STORE_PREFIX.length)),
-    [],
-  )
+  return withStorage((storage) => {
+    return Object.keys(storage)
+      .filter((key) => key.startsWith(STORE_PREFIX))
+      .map((key) => key.slice(STORE_PREFIX.length))
+  }, [])
 }
 
 /** A cache that remembers nothing past this session, for when no graph is open. */

@@ -26,9 +26,9 @@ function outline(root: HTMLElement) {
   const doc = markdownToDoc('# Host\n\n![[Parent]]')
   const block = document.createElement('div')
   block.append(root)
-  return readOutlineWithEmbeds(doc, (position) =>
-    position === doc.firstChild!.nodeSize ? block : null,
-  )
+  return readOutlineWithEmbeds(doc, (position) => {
+    return position === doc.firstChild!.nodeSize ? block : null
+  })
 }
 
 describe('embedded outline collection', () => {
@@ -109,8 +109,11 @@ describe('section outline', () => {
     '# Report\n\n## Coverage\n\n### Audit\n\n## Findings\n\n### Detail\n\n![[Child]]\n\n## Gaps',
     1,
   )
-  const names = (list: ReturnType<typeof sectionOutlineBlocks>) =>
-    list.map((block) => (block.kind === 'heading' ? block.heading.text : `embed:${block.target}`))
+  const names = (list: ReturnType<typeof sectionOutlineBlocks>) => {
+    return list.map((block) => {
+      return block.kind === 'heading' ? block.heading.text : `embed:${block.target}`
+    })
+  }
 
   it('keeps the title and the named section, as the preview does', () => {
     const section = sectionOutlineBlocks(blocks, 'findings')

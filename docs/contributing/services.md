@@ -52,9 +52,9 @@ Two rules settle the hard cases:
   `ProgressPort` (the app's `OperationsService`). `ExceptionTelemetryService`
   has no caller in core, so it lives in app.
 
-Code in `packages/app` uses the same service shape as core. Lint stops both
-packages from importing React, TanStack or Tauri, and core from importing
-`@reflect/app`.
+Code in `packages/app` uses the same service shape as core. Neither package
+depends on React, TanStack or Tauri, and core does not depend on `@reflect/app`,
+so `package.json` stops those imports.
 
 ## 1. The interface, the class and the factory
 
@@ -245,8 +245,8 @@ Rules:
 - `TestXxxService extends XxxService`. The extra members only observe or seed
   and drive. They never change what the real methods mean.
 - A core double goes in the test factory table of
-  `packages/core/src/testing/services.ts`, so `createTestCoreServices()` builds
-  it. An app double goes in `packages/app/src/testing/`, exported from its
+  `packages/core/src/testing/services.ts`, so `createTestCoreServices({ database })`
+  builds it. An app double goes in `packages/app/src/testing/`, exported from its
   `index.ts`, and `createTestAppServices` uses it.
 
 ## 7. The test

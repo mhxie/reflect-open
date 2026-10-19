@@ -82,10 +82,11 @@ function answering(text: string, calls: LanguageModelV4CallOptions[] = []): Mock
 
 function throwing(error: unknown): MockLanguageModelV4 {
   return new MockLanguageModelV4({
-    doGenerate: () =>
-      Promise.try(() => {
+    doGenerate: () => {
+      return Promise.try(() => {
         throw error
-      }),
+      })
+    },
   })
 }
 

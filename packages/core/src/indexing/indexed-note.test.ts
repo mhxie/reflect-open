@@ -61,12 +61,13 @@ describe('buildIndexedNote', () => {
   })
 
   it('marks a note private when its frontmatter cannot be read', () => {
-    const build = (source: string) =>
-      buildIndexedNote(parseNote({ path: 'notes/a.md', source }), {
+    const build = (source: string) => {
+      return buildIndexedNote(parseNote({ path: 'notes/a.md', source }), {
         fileHash: 'h',
         mtime: 1,
         source,
       })
+    }
     expect(build('---\nprivate: maybe\n---\n# A\n').isPrivate).toBe(true)
     expect(build('---\nprivate: no\ntitle: [unclosed\n---\n# A\n').isPrivate).toBe(true)
     expect(build('\u{FEFF}---\nprivate: true\n---\n# A\n').isPrivate).toBe(true)
@@ -76,8 +77,14 @@ describe('buildIndexedNote', () => {
 
   it('marks a note inside a local-only folder private whatever its frontmatter says', () => {
     const source = '# Bank\n\nAccount details.\n'
-    const build = (path: string, localOnly: LocalOnlyFolders) =>
-      buildIndexedNote(parseNote({ path, source }), { fileHash: 'h', mtime: 1, source, localOnly })
+    const build = (path: string, localOnly: LocalOnlyFolders) => {
+      return buildIndexedNote(parseNote({ path, source }), {
+        fileHash: 'h',
+        mtime: 1,
+        source,
+        localOnly,
+      })
+    }
     const secure = createLocalOnlyFolders(['secure'])
     expect(build('finance/secure/bank.md', secure).isPrivate).toBe(true)
     expect(build('finance/bank.md', secure).isPrivate).toBe(false)
@@ -265,12 +272,13 @@ describe('buildIndexedNote', () => {
   })
 
   it('flags a note as empty only when nothing would render', () => {
-    const hasContentOf = (source: string): boolean =>
-      buildIndexedNote(parseNote({ path: 'daily/2026-06-09.md', source }), {
+    const hasContentOf = (source: string): boolean => {
+      return buildIndexedNote(parseNote({ path: 'daily/2026-06-09.md', source }), {
         fileHash: 'h',
         mtime: 0,
         source,
       }).hasContent
+    }
 
     expect(hasContentOf('')).toBe(false)
     expect(hasContentOf('\n  \n')).toBe(false)
@@ -293,13 +301,14 @@ describe('buildIndexedNote', () => {
   })
 
   it('sizes a note by its display text, not its syntax or asset descriptions', () => {
-    const bodyCharsOf = (source: string): number =>
-      buildIndexedNote(parseNote({ path: 'daily/2026-06-09.md', source }), {
+    const bodyCharsOf = (source: string): number => {
+      return buildIndexedNote(parseNote({ path: 'daily/2026-06-09.md', source }), {
         fileHash: 'h',
         mtime: 0,
         source,
         assetText: 'A long OCR description of an attached scan',
       }).bodyChars
+    }
 
     expect(bodyCharsOf('今天写了七个字\n')).toBe(7)
     expect(bodyCharsOf('**bold** and [[Foo]]\n')).toBe('bold and Foo'.length)
@@ -320,12 +329,13 @@ describe('buildIndexedNote', () => {
   })
 
   it('derives the note kind from the path', () => {
-    const kindOf = (path: string): string =>
-      buildIndexedNote(parseNote({ path, source: 'body' }), {
+    const kindOf = (path: string): string => {
+      return buildIndexedNote(parseNote({ path, source: 'body' }), {
         fileHash: 'h',
         mtime: 0,
         source: 'body',
       }).kind
+    }
     expect(kindOf('daily/2026-06-09.md')).toBe('daily')
     expect(kindOf('notes/n.md')).toBe('note')
     expect(kindOf('templates/journal.md')).toBe('template')
@@ -355,8 +365,9 @@ describe('buildIndexedNote', () => {
 
   it('projects the gist url and computes staleness from the body hash', () => {
     const body = '# N\n\npublished body\n'
-    const block = (hash: string): string =>
-      `---\ngist:\n  id: g1\n  url: https://gist.github.com/alex/g1\n  file: N.md\n  hash: ${hash}\n---\n`
+    const block = (hash: string): string => {
+      return `---\ngist:\n  id: g1\n  url: https://gist.github.com/alex/g1\n  file: N.md\n  hash: ${hash}\n---\n`
+    }
 
     const fresh = block(noteBodyHash(body)) + body
     const indexedFresh = buildIndexedNote(parseNote({ path: 'notes/n.md', source: fresh }), {
@@ -378,8 +389,9 @@ describe('buildIndexedNote', () => {
 
   it('keeps a fresh AI summary beside the plain preview and drops it once stale', () => {
     const body = '# N\n\nThe opening line of a long note.\n'
-    const block = (hash: string): string =>
-      `---\naiSummary:\n  text: A short summary.\n  hash: ${hash}\n---\n`
+    const block = (hash: string): string => {
+      return `---\naiSummary:\n  text: A short summary.\n  hash: ${hash}\n---\n`
+    }
 
     const fresh = block(noteBodyHash(body)) + body
     const indexedFresh = buildIndexedNote(parseNote({ path: 'notes/n.md', source: fresh }), {

@@ -1,5 +1,5 @@
 import { page } from 'vitest/browser'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, onTestFinished, vi } from 'vitest'
 import { createRef, useLayoutEffect, type RefObject } from 'react'
 import type { IndexQueryService, NoteRow } from '@reflect/core'
 import type { ResolvedArchivedPost } from '@reflect/core/x-archive'
@@ -16,6 +16,7 @@ import { queryClient } from '@/lib/query-client.ts'
 import { useRouter, type RouterNavigate } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { RouteContent } from './route-content.tsx'
 
 type ResolvedArchive = ResolvedArchivedPost | null
@@ -116,7 +117,8 @@ function MenuRequestProbe({ path }: { path: string }) {
  */
 async function renderNote(path: string, files: Record<string, string>) {
   noteFile = createTestNoteFileService({ files })
-  app = createTestCoreServices({ noteFile })
+  app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
+  onTestFinished(() => app.database.close())
   vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
   vi.spyOn(app.xArchive, 'resolve').mockImplementation(
     async (_generation, postId) => await resolveArchive(postId),
@@ -267,11 +269,11 @@ it('switches the policy live on a Lock toggle, without remounting the editor', a
   await expect.element(page.getByTestId('embed-link')).toHaveTextContent(X_URL)
   expect(remoteElements()).toBeNull()
   expect(editable()).toBe(editor)
-  await vi.waitFor(() =>
+  await vi.waitFor(() => {
     expect(noteFile.files().get(path)).toBe(
       `---\nprivate: true\n---\n\n# Tweets\n\n![](${X_URL})\n`,
-    ),
-  )
+    )
+  })
   expect(remoteCalls(beforeLock)).toEqual([])
   expect(resolveArchive).toHaveBeenCalledTimes(lookupsBeforeLock)
 

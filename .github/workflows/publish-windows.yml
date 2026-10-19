@@ -1,7 +1,6 @@
 name: Publish Windows
 
 on:
-  workflow_dispatch:
   workflow_call:
     inputs:
       tag:
@@ -12,11 +11,6 @@ on:
         description: Immutable commit targeted by the release tag.
         required: true
         type: string
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY:
-        required: false
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
-        required: false
 
 concurrency:
   group: publish-windows
@@ -33,6 +27,7 @@ jobs:
   windows:
     name: Build Windows ${{ matrix.name }}
     if: github.repository == 'team-reflect/reflect-open'
+    environment: release_app
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
@@ -50,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit }}
           persist-credentials: false
 
       - uses: ./.github/actions/setup-node
@@ -62,7 +57,6 @@ jobs:
       - name: Build Windows installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm release:windows --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/windows-artifacts"
 
       - name: Upload installer artifact
@@ -78,7 +72,6 @@ jobs:
 
       # Uploads clobber, so a failed run can be retried.
       - name: Upload the assets to the draft release
-        if: inputs.tag != ''
         working-directory: ${{ runner.temp }}/windows-artifacts
         env:
           GH_TOKEN: ${{ github.token }}

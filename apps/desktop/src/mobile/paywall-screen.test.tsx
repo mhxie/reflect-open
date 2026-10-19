@@ -21,6 +21,7 @@ import {
 } from '@reflect/core/testing'
 import { mutationKeys, mutationScopeIds } from '@/lib/query-client.ts'
 import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { PaywallScreen } from './paywall-screen.tsx'
 
 const YEARLY_PRODUCT = {
@@ -72,6 +73,7 @@ beforeEach(() => {
   syncs = 0
   redeems = 0
   const base = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     platform: createTestPlatformService({ appPlatform: 'ios' }),
   })
   logger = base.logger
@@ -409,9 +411,9 @@ describe('PaywallScreen Reflect Classic verification', () => {
       .element(view.getByText('No paid Reflect Classic subscription on this account'))
       .toBeVisible()
     await view.getByRole('button', { name: 'Use a different account' }).click()
-    await vi.waitFor(() =>
-      expect(classicAccess.signIns().at(-1)).toEqual(expect.objectContaining({ ephemeral: true })),
-    )
+    await vi.waitFor(() => {
+      expect(classicAccess.signIns().at(-1)).toEqual(expect.objectContaining({ ephemeral: true }))
+    })
   })
 
   it('shows a retryable failure and logs when the check fails', async () => {
@@ -421,7 +423,7 @@ describe('PaywallScreen Reflect Classic verification', () => {
     await expect.element(view.getByText(/Couldn't check your subscription/)).toBeVisible()
     expect(logger.getErrors()).toContainEqual({
       message: 'Verifying the Reflect Classic subscription failed',
-      cause: expect.any(Error),
+      cause: expect.any(Error) as Error,
     })
     await view.getByRole('button', { name: 'Back' }).click()
     await vi.waitFor(() => expect(progressScreen()).toBeNull())

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import type { LinkNavigationService } from '@reflect/app'
 import { createTestAppServices, type TestAppServices } from '@reflect/app/testing'
@@ -59,8 +59,10 @@ let openOrReveal: MockInstance<AttachmentService['openOrReveal']>
 let navigate: MockInstance<LinkNavigationService['openNoteLink']>
 let external: MockInstance<LinkNavigationService['followMarkdownLink']>
 
-beforeEach(async () => {
-  app = createTestCoreServices({ database: await createWasmTestDatabaseService() })
+beforeEach(() => {
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database })
   // Public index rows: a source's privacy then rests on its path, its header,
   // and the in-app overlay.
   seedNotes(app.database, [
@@ -75,15 +77,15 @@ beforeEach(async () => {
     ],
     ['notes/Child.md', '# Child\n\nChild paragraph'],
   ])
-  resolveWiki = vi.spyOn(app.noteLinkResolver, 'resolveWikiTarget').mockImplementation((target) =>
-    Promise.resolve({
+  resolveWiki = vi.spyOn(app.noteLinkResolver, 'resolveWikiTarget').mockImplementation((target) => {
+    return Promise.resolve({
       kind: 'resolved',
       path:
         target.replace(/^\//, '').split('#')[0] === 'Child'
           ? 'notes/Child.md'
           : 'notes/Original.md',
-    }),
-  )
+    })
+  })
   resolveMarkdown = vi
     .spyOn(app.noteLinkResolver, 'resolveMarkdownHref')
     .mockResolvedValue({ kind: 'resolved', path: 'notes/Sibling.md' })
@@ -165,7 +167,7 @@ describe('embedded note outline', () => {
     )
     const content = '# Host\n\n## Before\n\n![[Original]]\n\n## After'
     const { view, markdown } = await outlinedReader(content)
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         noteOutlineFor(OPTIONS.sourcePath)?.headings.map(({ level, text }) => ({ level, text })),
       ).toEqual([
@@ -174,8 +176,8 @@ describe('embedded note outline', () => {
         { level: 3, text: 'Details' },
         { level: 3, text: 'Later' },
         { level: 2, text: 'After' },
-      ]),
-    )
+      ])
+    })
     await expect
       .element(view.getByRole('button', { name: 'Original', exact: true }).first())
       .toHaveAttribute('aria-expanded', 'false')
@@ -196,7 +198,7 @@ describe('embedded note outline', () => {
     await expect.element(view.getByTestId('note-embed-full')).toBeInTheDocument()
     await expect.element(view.getByRole('heading', { name: 'Later', level: 3 })).toHaveFocus()
     const scroller = view.getByTestId('outline-scroller').element()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         Math.abs(
           view.getByRole('heading', { name: 'Later', level: 3 }).element().getBoundingClientRect()
@@ -204,22 +206,22 @@ describe('embedded note outline', () => {
             scroller.getBoundingClientRect().top -
             16,
         ),
-      ).toBeLessThanOrEqual(1),
-    )
+      ).toBeLessThanOrEqual(1)
+    })
     expect(markdown()).toBe(original)
     expect(read).toHaveBeenCalledTimes(reads)
   })
 
   it('keeps repeated source instances distinct and reveals only the selected instance', async () => {
     const { view } = await outlinedReader('# Host\n\n![[Original|First]]\n\n![[Original|Second]]')
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(noteOutlineFor(OPTIONS.sourcePath)?.headings.map((heading) => heading.text)).toEqual([
         'Original',
         'Details',
         'Original',
         'Details',
-      ]),
-    )
+      ])
+    })
     const outline = noteOutlineFor(OPTIONS.sourcePath)!
     expect(new Set(outline.headings.map((heading) => heading.embedded?.key)).size).toBe(4)
     outline.reveal(3)
@@ -241,7 +243,7 @@ describe('embedded note outline', () => {
       .element(view.getByRole('button', { name: 'Read original', exact: true }))
       .toHaveAttribute('aria-expanded', 'false')
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         noteOutlineFor(OPTIONS.sourcePath)?.headings.map(({ level, text }) => ({ level, text })),
       ).toEqual([
@@ -249,19 +251,19 @@ describe('embedded note outline', () => {
         { level: 3, text: 'Child' },
         { level: 4, text: 'Child chapter' },
         { level: 3, text: 'Details' },
-      ]),
-    )
+      ])
+    })
     await view.getByRole('button', { name: 'Child chapter', exact: true }).click()
     await expect
       .element(view.getByRole('heading', { name: 'Child chapter', level: 4 }))
       .toHaveFocus()
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(noteOutlineFor(OPTIONS.sourcePath)?.headings.map((heading) => heading.text)).toEqual([
         'Original',
         'Details',
-      ]),
-    )
+      ])
+    })
   })
 
   it('keeps a chapter jump pinned when expansion inserts nested chapters before it', async () => {
@@ -277,7 +279,7 @@ describe('embedded note outline', () => {
     await expect.element(view.getByRole('heading', { name: 'Details', level: 3 })).toHaveFocus()
     await vi.waitFor(() => expect(noteOutlineFor(OPTIONS.sourcePath)?.activeIndex).toBe(3))
     const scroller = view.getByTestId('outline-scroller').element()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         Math.abs(
           view.getByRole('heading', { name: 'Details', level: 3 }).element().getBoundingClientRect()
@@ -285,8 +287,8 @@ describe('embedded note outline', () => {
             scroller.getBoundingClientRect().top -
             16,
         ),
-      ).toBeLessThanOrEqual(1),
-    )
+      ).toBeLessThanOrEqual(1)
+    })
     const oldOutline = noteOutlineFor(OPTIONS.sourcePath)!
     await view.unmount()
     expect(() => oldOutline.reveal(3)).not.toThrow()
@@ -303,7 +305,7 @@ describe('embedded note outline', () => {
     await vi.waitFor(() => expect(noteOutlineFor(OPTIONS.sourcePath)?.headings).toHaveLength(3))
     await vi.waitFor(() => expect(noteOutlineFor(OPTIONS.sourcePath)?.activeIndex).toBe(2))
     const scroller = view.getByTestId('outline-scroller').element()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         Math.abs(
           view.getByRole('heading', { name: 'After', level: 2 }).element().getBoundingClientRect()
@@ -311,8 +313,8 @@ describe('embedded note outline', () => {
             scroller.getBoundingClientRect().top -
             16,
         ),
-      ).toBeLessThanOrEqual(1),
-    )
+      ).toBeLessThanOrEqual(1)
+    })
   })
 })
 
@@ -429,14 +431,14 @@ describe('NoteEmbedReader', () => {
     await expect.element(view.getByText('Original paragraph')).toBeVisible()
     expect(focusedText()).toBe('Details')
     await view.getByRole('button', { name: 'Open Read original', exact: true }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(resolveWiki).toHaveBeenLastCalledWith(
         '/notes/Original.md#Details',
         7,
         'notes/Original.md',
-      ),
-    )
-    await vi.waitFor(() =>
+      )
+    })
+    await vi.waitFor(() => {
       expect(navigate).toHaveBeenCalledWith(
         {
           target: { kind: 'note', path: 'notes/Original.md' },
@@ -444,8 +446,8 @@ describe('NoteEmbedReader', () => {
           revealHeading: 'Details',
         },
         expect.anything(),
-      ),
-    )
+      )
+    })
     expect(create).not.toHaveBeenCalled()
   })
 
@@ -459,10 +461,10 @@ describe('NoteEmbedReader', () => {
     await expect.element(view.getByText('Other note', { exact: true })).toBeVisible()
     resolveWiki.mockResolvedValue({ kind: 'resolved', path: 'notes/Other.md' })
     await view.getByText('Other note', { exact: true }).click()
-    await vi.waitFor(() =>
-      expect(resolveWiki).toHaveBeenLastCalledWith('Other#Next', 7, 'notes/Original.md'),
-    )
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
+      expect(resolveWiki).toHaveBeenLastCalledWith('Other#Next', 7, 'notes/Original.md')
+    })
+    await vi.waitFor(() => {
       expect(navigate).toHaveBeenCalledWith(
         {
           target: { kind: 'note', path: 'notes/Other.md' },
@@ -470,17 +472,17 @@ describe('NoteEmbedReader', () => {
           revealHeading: 'Next',
         },
         expect.anything(),
-      ),
-    )
+      )
+    })
     await view.getByRole('link', { name: /Sibling$/ }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(resolveMarkdown).toHaveBeenCalledWith(
         'notes/Original.md',
         './Sibling.md#Next%20steps',
         7,
-      ),
-    )
-    await vi.waitFor(() =>
+      )
+    })
+    await vi.waitFor(() => {
       expect(navigate).toHaveBeenLastCalledWith(
         {
           target: { kind: 'note', path: 'notes/Sibling.md' },
@@ -488,8 +490,8 @@ describe('NoteEmbedReader', () => {
           revealHeading: 'Next steps',
         },
         expect.anything(),
-      ),
-    )
+      )
+    })
     await view.getByRole('link', { name: /Site$/ }).click()
     // A link that names no note follows the external-link policy, as Markdown from no note.
     expect(external).toHaveBeenCalledWith(
@@ -532,9 +534,13 @@ describe('NoteEmbedReader', () => {
     const catalog = Promise.withResolvers<typeof listed>()
     let loaded = false
     loadCatalog.mockReturnValue(catalog.promise)
-    vi.spyOn(app.attachments, 'resolveAttachmentPath').mockImplementation((_notePath, href) =>
-      href.endsWith('bundle.zip') ? (loaded ? 'notes/attachments/bundle.zip' : 'bundle.zip') : null,
-    )
+    vi.spyOn(app.attachments, 'resolveAttachmentPath').mockImplementation((_notePath, href) => {
+      return href.endsWith('bundle.zip')
+        ? loaded
+          ? 'notes/attachments/bundle.zip'
+          : 'bundle.zip'
+        : null
+    })
     const view = await render(reader())
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
     await expect.element(view.getByTestId('file-pill')).toBeVisible()
@@ -543,14 +549,14 @@ describe('NoteEmbedReader', () => {
     expect(openOrReveal).not.toHaveBeenCalled()
     loaded = true
     catalog.resolve(listed)
-    await vi.waitFor(() =>
-      expect(openOrReveal).toHaveBeenCalledWith('notes/attachments/bundle.zip'),
-    )
+    await vi.waitFor(() => {
+      expect(openOrReveal).toHaveBeenCalledWith('notes/attachments/bundle.zip')
+    })
     openOrReveal.mockClear()
     await view.getByRole('link', { name: /Archive$/ }).click()
-    await vi.waitFor(() =>
-      expect(openOrReveal).toHaveBeenCalledWith('notes/attachments/bundle.zip'),
-    )
+    await vi.waitFor(() => {
+      expect(openOrReveal).toHaveBeenCalledWith('notes/attachments/bundle.zip')
+    })
     expect(external).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()
     expect(create).not.toHaveBeenCalled()
@@ -590,9 +596,9 @@ describe('NoteEmbedReader', () => {
     const listed = await emptyCatalog()
     const catalog = Promise.withResolvers<typeof listed>()
     loadCatalog.mockReturnValue(catalog.promise)
-    vi.spyOn(app.attachments, 'resolveAttachmentPath').mockImplementation((_notePath, href) =>
-      href.endsWith('bundle.zip') ? 'notes/attachments/bundle.zip' : null,
-    )
+    vi.spyOn(app.attachments, 'resolveAttachmentPath').mockImplementation((_notePath, href) => {
+      return href.endsWith('bundle.zip') ? 'notes/attachments/bundle.zip' : null
+    })
     const view = await render(reader())
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
     await expect.element(view.getByRole('link', { name: /Archive$/ })).toBeVisible()
@@ -633,11 +639,11 @@ describe('NoteEmbedReader', () => {
         .toBeVisible()
       expect(view.container.querySelector('img')).toBeNull()
       // The verdict is the resolved source's own.
-      await vi.waitFor(() =>
+      await vi.waitFor(() => {
         expect(
           privacyRead(restriction === 'local-only' ? 'secure/Original.md' : 'notes/Original.md'),
-        ).toBe(true),
-      )
+        ).toBe(true)
+      })
     },
   )
 

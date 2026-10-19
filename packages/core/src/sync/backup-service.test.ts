@@ -459,9 +459,9 @@ describe('createBackupService', () => {
       const backup = createBackup({ indexGeneration: 1, root })
       await backup.start()
       await vi.waitFor(() => {
-        expect(backup.getState()).toMatchObject({
-          status: { state: expect.stringMatching(/idle|waiting/) },
-        })
+        const state = backup.getState()
+        expect.assert(state.phase === 'connected')
+        expect(state.status.state).toMatch(/idle|waiting/)
       })
       return { ...services, backup }
     }
@@ -724,7 +724,7 @@ describe('createBackupService', () => {
     expect(calls).not.toContain('push')
     expect(logger.getErrors()).toContainEqual({
       message: 'reading the GitHub credential failed:',
-      cause: expect.any(String),
+      cause: expect.any(String) as string,
     })
     backup.dispose()
   })

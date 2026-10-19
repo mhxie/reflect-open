@@ -9,12 +9,13 @@ const levelSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal
 const relativePathSchema = z
   .string()
   .min(1)
-  .refine(
-    (path) =>
+  .refine((path) => {
+    return (
       !path.includes('\\') &&
       !path.includes(':') &&
-      path.split('/').every((part) => part !== '' && part !== '.' && part !== '..'),
-  )
+      path.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
+    )
+  })
 const ruleSchema = z
   .strictObject({
     path: relativePathSchema,

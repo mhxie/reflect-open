@@ -163,14 +163,15 @@ describe('commitFrontmatter', () => {
     let version = 0
     const { noteDocuments, noteFile } = setup({
       files: { 'notes/a.md': '# A\n' },
-      noteFile: (files) =>
-        overrideNoteFileService(files, {
+      noteFile: (files) => {
+        return overrideNoteFileService(files, {
           write: async (path, ...rest) => {
             version += 1
             files.set(path, `# A\n\nv${version}\n`)
             return await files.write(path, ...rest)
           },
-        }),
+        })
+      },
     })
 
     await expect(
@@ -254,9 +255,9 @@ describe('commitSourceEdit', () => {
   it('re-applies the transform to a concurrent change instead of clobbering it', async () => {
     const { noteDocuments, noteFile } = setup({
       files: { 'notes/a.md': '+ [ ] do it\n' },
-      noteFile: interleaveFirstWrite((files) =>
-        files.set('notes/a.md', '+ [ ] do it\n+ [ ] synced\n'),
-      ),
+      noteFile: interleaveFirstWrite((files) => {
+        files.set('notes/a.md', '+ [ ] do it\n+ [ ] synced\n')
+      }),
     })
     const toggleFirst = (source: string): string => source.replace('+ [ ]', '+ [x]')
     await noteDocuments.commitSourceEdit('notes/a.md', toggleFirst, { generation: 7 })

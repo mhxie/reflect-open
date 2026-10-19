@@ -11,9 +11,9 @@ describe('activityThresholds', () => {
   const day = (date: string, characters: number) => ({ date, characters })
 
   it('uses quartiles once there is enough history', () => {
-    const activity = Array.from({ length: 20 }, (_, index) =>
-      day(addDaysIso('2026-01-01', index), (index + 1) * 10),
-    )
+    const activity = Array.from({ length: 20 }, (_, index) => {
+      return day(addDaysIso('2026-01-01', index), (index + 1) * 10)
+    })
     expect(activityThresholds(activity)).toEqual([60, 110, 160])
   })
 

@@ -19,9 +19,9 @@ export function AllNotesAttachmentFiltersField(): ReactElement {
 
   const setEnabled = (type: NoteAttachmentType, checked: boolean): void => {
     updateSettings({
-      allNotesFilterAttachments: NOTE_ATTACHMENT_TYPES.filter((candidate) =>
-        candidate === type ? checked : enabled.includes(candidate),
-      ),
+      allNotesFilterAttachments: NOTE_ATTACHMENT_TYPES.filter((candidate) => {
+        return candidate === type ? checked : enabled.includes(candidate)
+      }),
     })
   }
 

@@ -9,6 +9,7 @@ import {
   type TestSettingsService,
 } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { CalendarIntegrationField } from './calendar-integration-field.tsx'
 
 const CALENDARS = [
@@ -25,7 +26,7 @@ let settings: TestSettingsService
 
 // The field renders only on macOS desktop, which is the test platform.
 async function renderSection(): Promise<void> {
-  const app = createTestCoreServices({ calendar })
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService(), calendar })
   settings = app.settings
   const view = await renderInApp(<CalendarIntegrationField />, { app, settings: stored })
   opener = view.appServices.opener
@@ -53,9 +54,12 @@ describe('CalendarIntegrationField', () => {
 
     await calendarSwitch().click()
 
-    await vi.waitFor(() =>
-      expect(settings.saves().at(-1)).toMatchObject({ calendarEnabled: true, calendarIds: [] }),
-    )
+    await vi.waitFor(() => {
+      expect(settings.saves().at(-1)).toMatchObject({
+        calendarEnabled: true,
+        calendarIds: [],
+      })
+    })
     await expect.element(page.getByText('0/2 calendars selected')).toBeInTheDocument()
     expect(page.getByText('Google').query()).toBeNull()
     expect(page.getByText('iCloud').query()).toBeNull()
@@ -97,9 +101,9 @@ describe('CalendarIntegrationField', () => {
 
     await page.getByRole('checkbox', { name: 'Work' }).click()
 
-    await vi.waitFor(() =>
-      expect(settings.saves().at(-1)).toMatchObject({ calendarIds: ['cal-work'] }),
-    )
+    await vi.waitFor(() => {
+      expect(settings.saves().at(-1)).toMatchObject({ calendarIds: ['cal-work'] })
+    })
     await expect.element(page.getByText('1/2 calendars selected')).toBeInTheDocument()
   })
 
@@ -120,11 +124,11 @@ describe('CalendarIntegrationField', () => {
     await expect.element(page.getByText(/can’t read your calendars/i)).toBeInTheDocument()
 
     await open.click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(opener.openedUrls()).toEqual([
         'x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars',
-      ]),
-    )
+      ])
+    })
   })
 
   it('not-yet-asked access shows a Grant button that prompts and recovers', async () => {

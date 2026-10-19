@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { NoteRow } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { queryKeys } from '@/lib/query-client.ts'
 import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { usePrivateNoteState, type PrivateNoteOptions } from './use-private-note.ts'
 
 /**
@@ -39,7 +40,9 @@ async function settledState(path: string, options: PrivateNoteOptions) {
 
 beforeEach(() => {
   rows = {}
-  app = createTestCoreServices()
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database })
   // Spied before the render: the hook reads the service when it mounts.
   getNote = vi
     .spyOn(app.indexQuery, 'getNote')
@@ -133,12 +136,13 @@ describe('usePrivateNoteState', () => {
 
   it('carries nothing across notes without a session', async () => {
     rows['notes/old.md'] = row('notes/old.md', false)
-    getNote.mockImplementation(async (path) =>
-      path === 'notes/other.md' ? await new Promise<never>(() => {}) : rows[path],
-    )
+    getNote.mockImplementation(async (path) => {
+      return path === 'notes/other.md' ? await new Promise<never>(() => {}) : rows[path]
+    })
     const hook = await renderHookInApp(
-      ({ path }: { path: string } = { path: 'notes/old.md' }) =>
-        usePrivateNoteState(path, noSession),
+      ({ path }: { path: string } = { path: 'notes/old.md' }) => {
+        return usePrivateNoteState(path, noSession)
+      },
       { app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
     )
     await vi.waitFor(() => expect(hook.result.current.privateNote).toBe(false))

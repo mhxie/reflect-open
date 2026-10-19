@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { createTestAppServices } from '@reflect/app/testing'
 import { createTestCoreServices } from '@reflect/core/testing'
@@ -12,6 +12,7 @@ import { clearNoteOutline, publishNoteOutline } from '@/editor/outline/outline-s
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { HeadingPickerProvider, useHeadingPicker } from '@/providers/heading-picker-provider.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { HeadingPicker } from './heading-picker.tsx'
 
 const PATH = 'notes/plan.md'
@@ -19,7 +20,8 @@ const owner = Symbol('test editor')
 const reveal = vi.fn()
 
 function commandContext(notePath: string | null): CommandContext {
-  const services = createTestCoreServices()
+  const services = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => services.database.close())
   return {
     services,
     app: createTestAppServices(services),

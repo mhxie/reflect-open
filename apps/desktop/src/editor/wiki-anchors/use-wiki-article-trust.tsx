@@ -160,8 +160,9 @@ export function useWikiArticleTrust(
         if (on) dom.dataset['wikiTrustReveal'] = ''
         else delete dom.dataset['wikiTrustReveal']
       }
-      const keydown = (event: KeyboardEvent): void =>
+      const keydown = (event: KeyboardEvent): void => {
         reveal(event.altKey && !inOtherField(event.target, dom))
+      }
       const keyup = (event: KeyboardEvent): void => {
         if (event.key === 'Alt') reveal(false)
       }

@@ -79,11 +79,11 @@ describe('attachOperationToasts', () => {
         id: 'operation-1',
         timeout: 0,
         data: { dismissible: false },
-        actionProps: expect.objectContaining({ children: 'Install' }),
       }),
     )
 
     const options = toast.add.mock.lastCall?.[0]
+    expect(options?.actionProps?.children).toBe('Install')
     options?.actionProps?.onClick()
     expect(run).toHaveBeenCalledTimes(1)
   })
@@ -91,9 +91,7 @@ describe('attachOperationToasts', () => {
   it('does not remove the operation when a toast is dismissed', () => {
     const handle = operations.start('Saving settings')
 
-    expect(toast.add).toHaveBeenLastCalledWith(
-      expect.not.objectContaining({ onClose: expect.any(Function) }),
-    )
+    expect(toast.add.mock.lastCall?.[0]?.onClose).toBeUndefined()
 
     handle.fail('disk full')
 
@@ -109,8 +107,8 @@ describe('attachOperationToasts', () => {
 
     const options = toast.add.mock.lastCall?.[0]
     options?.actionProps?.onClick()
-    await vi.waitFor(() =>
-      expect(logger.getErrors()).toEqual([{ message: 'operation action failed:', cause: error }]),
-    )
+    await vi.waitFor(() => {
+      expect(logger.getErrors()).toEqual([{ message: 'operation action failed:', cause: error }])
+    })
   })
 })

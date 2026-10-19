@@ -8,7 +8,7 @@ import {
   type WebFetchService,
   AppError,
 } from '@reflect/core'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createNodeTestDatabaseService, createTestCoreServices } from '@reflect/core/testing'
 
 /**
  * The boundaries of the resolver pipeline that `useLinkPreview` gets from `LinkPreviewService`.
@@ -40,7 +40,9 @@ function createNoteLinkPreviewResolver(
   currentSession: () => LinkPreviewSession | null,
   dependencies: LinkPreviewResolverDependencies,
 ): LinkPreviewResolver {
-  const { graphSession, noteDocuments, privacy, webFetch } = createTestCoreServices()
+  const { graphSession, noteDocuments, privacy, webFetch } = createTestCoreServices({
+    database: createNodeTestDatabaseService(),
+  })
   // The privacy gate fails closed while no graph is open.
   graphSession.setGraph({ generation: 7 })
   vi.spyOn(noteDocuments, 'readExisting').mockImplementation(dependencies.readSource)
