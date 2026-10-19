@@ -174,6 +174,23 @@ describe('createNoteFileService', () => {
     ipc.onCommand('list_files', () => [{ path: 'notes/a.md' }])
     await expect(noteFile.listNotes(3)).rejects.toMatchObject({ kind: 'parse' })
   })
+
+  it('keeps where an external attachment is and refuses an unknown answer', async () => {
+    const offline = {
+      path: 'research/big.pdf',
+      size: 9,
+      modifiedMs: 5,
+      placeholder: true,
+      external: 'offline',
+    }
+    const { ipc, noteFile } = setup(
+      createTestIpcBridgeService({ commands: { list_attachments: () => [offline] } }),
+    )
+
+    await expect(noteFile.listAttachments(3)).resolves.toEqual([offline])
+    ipc.onCommand('list_attachments', () => [{ ...offline, external: 'elsewhere' }])
+    await expect(noteFile.listAttachments(3)).rejects.toMatchObject({ kind: 'parse' })
+  })
 })
 describe('fork note reads and writes', () => {
   it('sends the sharing mark and keeps the local-only verdict of a local read', async () => {

@@ -29,9 +29,17 @@ mod guards;
 #[cfg(unix)]
 mod displacement;
 
+/// Links into a graph's external storage: never committed, parked by a pull.
+#[cfg(unix)]
+mod external;
+
 /// Commit with no local-only folders, as most tests need.
 fn commit_all(root: &Path, message: &str, max_file_bytes: u64) -> AppResult<CommitOutcome> {
-    super::commit_all(root, message, max_file_bytes, None)
+    let policy = super::CommitPolicy {
+        max_file_bytes,
+        ..super::CommitPolicy::default()
+    };
+    super::commit_all(root, message, &policy)
 }
 
 /// Push with no accepted history roots beyond the graph's own history.

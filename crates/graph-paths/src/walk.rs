@@ -9,6 +9,7 @@
 //! dot-name visible: iCloud eviction placeholders, which list as the logical
 //! file they stand in for.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -18,10 +19,11 @@ use std::time::UNIX_EPOCH;
 use ignore::gitignore::Gitignore;
 use ignore::{Match, WalkBuilder};
 
+use crate::external::{ExternalStore, graph_vacant};
 use crate::local_only::{LocalOnlyFolders, LocalOnlyLink};
 use crate::{
-    GraphPathKind, classify, evicted_logical_path, icloud_placeholder_target, is_dataless,
-    wire_path,
+    GraphPathKind, classify, evicted_logical_path, icloud_placeholder_target, is_attachment,
+    is_dataless, wire_path,
 };
 
 /// Per-directory ignore file for user-configured exclusions, same syntax and
@@ -52,7 +54,22 @@ pub struct FileEntry {
     pub modified_ms: u64,
     /// The file is currently an iCloud eviction placeholder: present in the
     /// vault but unreadable until re-downloaded (eviction is never deletion).
+    /// For an external file, any evicted copy: its bytes are with the
+    /// folder's provider.
     pub placeholder: bool,
+    /// The file lives in the graph's external storage ([`ExternalStore`]):
+    /// through a link at its path, or read from the folder because the graph
+    /// has no entry there.
+    pub external: bool,
+}
+
+/// What a walk lists beyond the graph's own entries ([`walk_catalog_in`]).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CatalogScope<'a> {
+    /// The graph's local-only folders, followed as [`walk_catalog_with`] does.
+    pub local_only: Option<&'a LocalOnlyFolders>,
+    /// The graph's external storage.
+    pub external: Option<&'a ExternalStore>,
 }
 
 /// One snapshot of every eligible note and supported attachment.
@@ -92,11 +109,41 @@ pub fn walk_catalog(root: &Path) -> FileCatalog {
 /// link applied to the composed path; nothing is followed further, and
 /// evicted (dataless) files are skipped.
 pub fn walk_catalog_with(root: &Path, local_only: &LocalOnlyFolders) -> FileCatalog {
+    walk_catalog_in(
+        root,
+        CatalogScope {
+            local_only: Some(local_only),
+            external: None,
+        },
+    )
+}
+
+/// [`walk_catalog`] plus what `scope` adds: the local-only folders, followed
+/// as [`walk_catalog_with`] does, and the graph's external attachments
+/// outside local-only folders. Allowed links ([`ExternalStore::link_copy`])
+/// list at their own paths with their copies' size and time; then each
+/// attachment in the folder whose graph path has no entry
+/// ([`ExternalStore::overlay_copy`]) lists unless the graph-side
+/// `.reflectignore` rules exclude it. Nothing in the folder is followed and
+/// its notes are skipped. External entries carry `external`, and an evicted
+/// one stays listed as a placeholder.
+pub fn walk_catalog_in(root: &Path, scope: CatalogScope<'_>) -> FileCatalog {
     let mut catalog = FileCatalog::default();
-    let (mut skipped, links) = walk_graph_and_links(root, local_only, &mut catalog);
-    for (link, ignores) in links {
+    let walked = walk_graph(root, scope, &mut catalog);
+    let mut skipped = walked.skipped;
+    for (link, ignores) in walked.local_only_links {
         skipped += TreeWalk::local_only(&link, ignores).run(&mut catalog);
         catalog.local_only_links.push(link);
+    }
+    if let Some(store) = scope.external {
+        skipped += list_external_links(
+            root,
+            store,
+            scope.local_only,
+            walked.leaf_links,
+            &mut catalog,
+        );
+        skipped += list_overlay(root, store, scope.local_only, &mut catalog);
     }
     finish(catalog, skipped)
 }
@@ -104,39 +151,199 @@ pub fn walk_catalog_with(root: &Path, local_only: &LocalOnlyFolders) -> FileCata
 /// Just the allowed local-only links [`walk_catalog_with`] would follow,
 /// without walking their targets (the desktop watcher's discovery).
 pub fn local_only_links(root: &Path, local_only: &LocalOnlyFolders) -> Vec<LocalOnlyLink> {
-    let (_, links) = walk_graph_and_links(root, local_only, &mut FileCatalog::default());
-    links.into_iter().map(|(link, _)| link).collect()
+    let scope = CatalogScope {
+        local_only: Some(local_only),
+        external: None,
+    };
+    walk_graph(root, scope, &mut FileCatalog::default())
+        .local_only_links
+        .into_iter()
+        .map(|(link, _)| link)
+        .collect()
 }
 
-/// The graph walk into `catalog`, then link discovery over the directories
-/// it entered (none without a raw-store root). Returns the refusal count.
-fn walk_graph_and_links(
-    root: &Path,
-    local_only: &LocalOnlyFolders,
-    catalog: &mut FileCatalog,
-) -> (u32, Vec<(LocalOnlyLink, AncestorIgnores)>) {
-    if local_only.raw_root().is_none() {
-        return (TreeWalk::graph(root, None).run(catalog), Vec::new());
+/// What the graph walk leaves for the passes after it.
+struct GraphWalk {
+    skipped: u32,
+    /// The allowed local-only links, with the ignore rules above each.
+    local_only_links: Vec<(LocalOnlyLink, AncestorIgnores)>,
+    /// Symlinks named like attachments, for the external store to judge.
+    leaf_links: Vec<PathBuf>,
+}
+
+/// The graph walk into `catalog`, then local-only link discovery over the
+/// directories it entered (none without a raw-store root). Symlinks named
+/// like attachments are collected for the external store when there is one.
+fn walk_graph(root: &Path, scope: CatalogScope<'_>, catalog: &mut FileCatalog) -> GraphWalk {
+    let local_only = scope
+        .local_only
+        .filter(|folders| folders.raw_root().is_some());
+    if local_only.is_none() && scope.external.is_none() {
+        return GraphWalk {
+            skipped: TreeWalk::graph(root, None).run(catalog),
+            local_only_links: Vec::new(),
+            leaf_links: Vec::new(),
+        };
     }
     let discovery = Discovery {
-        visited: Arc::new(Mutex::new(vec![root.to_path_buf()])),
-        folders: Arc::new(local_only.clone()),
+        visited: local_only.map(|_| Arc::new(Mutex::new(vec![root.to_path_buf()]))),
+        folders: local_only.map(|folders| Arc::new(folders.clone())),
+        leaf_links: scope.external.map(|_| Arc::default()),
     };
-    let visited = Arc::clone(&discovery.visited);
+    let visited = discovery.visited.clone();
+    let leaf_links = discovery.leaf_links.clone();
     let mut skipped = TreeWalk::graph(root, Some(discovery)).run(catalog);
-    let directories = std::mem::take(&mut *visited.lock().unwrap_or_else(PoisonError::into_inner));
-    let links = discover_links(root, &directories, local_only, &mut skipped);
-    (skipped, links)
+    let local_only_links = match (local_only, visited) {
+        (Some(folders), Some(visited)) => {
+            let directories = take_locked(&visited);
+            discover_links(root, &directories, folders, &mut skipped)
+        }
+        _ => Vec::new(),
+    };
+    GraphWalk {
+        skipped,
+        local_only_links,
+        leaf_links: leaf_links
+            .map(|links| take_locked(&links))
+            .unwrap_or_default(),
+    }
+}
+
+fn take_locked(list: &Mutex<Vec<PathBuf>>) -> Vec<PathBuf> {
+    std::mem::take(&mut *list.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
 /// What the graph walk gathers for link discovery.
 #[derive(Clone)]
 struct Discovery {
-    /// Directories the walk enters.
-    visited: Arc<Mutex<Vec<PathBuf>>>,
-    /// The configured names: a symlink carrying one is left to discovery to
-    /// judge (and count, if refused) instead of being counted here.
-    folders: Arc<LocalOnlyFolders>,
+    /// Directories the walk enters, for local-only link discovery.
+    visited: Option<Arc<Mutex<Vec<PathBuf>>>>,
+    /// The configured local-only names: a symlink carrying one is left to
+    /// discovery to judge (and count, if refused) instead of being counted
+    /// here.
+    folders: Option<Arc<LocalOnlyFolders>>,
+    /// Symlinks named like attachments, collected for the external store to
+    /// judge (and count, if refused); `None` without external storage.
+    leaf_links: Option<Arc<Mutex<Vec<PathBuf>>>>,
+}
+
+impl Discovery {
+    /// Take the symlink at `path` (under `start`, named `name`) for a later
+    /// pass to judge and count: a local-only name for link discovery, an
+    /// attachment name for the external store, which collects it here.
+    /// `false` leaves it for the walk to count as skipped.
+    fn take_symlink(&self, path: &Path, start: &Path, name: &str) -> bool {
+        if self
+            .folders
+            .as_ref()
+            .is_some_and(|folders| folders.is_folder_name(name))
+        {
+            return true;
+        }
+        let Some(leaf_links) = &self.leaf_links else {
+            return false;
+        };
+        let attachment = path
+            .strip_prefix(start)
+            .ok()
+            .and_then(wire_path)
+            .is_some_and(|wire| is_attachment(&wire));
+        if attachment {
+            leaf_links
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(path.to_path_buf());
+        }
+        attachment
+    }
+}
+
+/// List each collected leaf link that is an allowed external link outside
+/// local-only folders at its own path, with its copy's size and time;
+/// returns how many were refused.
+fn list_external_links(
+    root: &Path,
+    store: &ExternalStore,
+    local_only: Option<&LocalOnlyFolders>,
+    links: Vec<PathBuf>,
+    catalog: &mut FileCatalog,
+) -> u32 {
+    let covered = |path: &str| local_only.is_some_and(|folders| folders.covers(path));
+    let mut skipped = 0;
+    for link in links {
+        let listed = link
+            .strip_prefix(root)
+            .ok()
+            .and_then(wire_path)
+            .filter(|wire| !covered(wire))
+            .and_then(|wire| {
+                let copy = store.link_copy(root, &wire)?;
+                if covered(&copy.on_disk) {
+                    return None;
+                }
+                let meta = std::fs::symlink_metadata(copy.path()).ok()?;
+                Some(external_entry(wire, &meta))
+            });
+        match listed {
+            Some(entry) => catalog.attachments.push(entry),
+            None => skipped += 1,
+        }
+    }
+    skipped
+}
+
+/// List the attachments under the external root whose graph paths have no
+/// entry, outside local-only folders and the graph's `.reflectignore` rules;
+/// returns how many entries were refused (notes there count).
+fn list_overlay(
+    root: &Path,
+    store: &ExternalStore,
+    local_only: Option<&LocalOnlyFolders>,
+    catalog: &mut FileCatalog,
+) -> u32 {
+    let Some(start) = store.canonical_root(root) else {
+        return 0;
+    };
+    let mut found = FileCatalog::default();
+    let mut skipped = TreeWalk::graph(&start, None).run(&mut found);
+    skipped += found.notes.len() as u32;
+    let mut ignores: HashMap<PathBuf, AncestorIgnores> = HashMap::new();
+    for mut file in found.attachments {
+        let rel = Path::new(&file.path);
+        if local_only.is_some_and(|folders| folders.covers(&file.path)) {
+            continue;
+        }
+        let parent = rel.parent().unwrap_or(Path::new("")).to_path_buf();
+        let excluded = ignores
+            .entry(parent)
+            .or_insert_with(|| AncestorIgnores::above(root, rel))
+            .is_ignored(rel, false);
+        if excluded || !graph_vacant(root, rel) {
+            continue;
+        }
+        file.external = true;
+        catalog.attachments.push(file);
+    }
+    skipped
+}
+
+/// The entry for an external file, from its copy's metadata.
+fn external_entry(path: String, meta: &std::fs::Metadata) -> FileEntry {
+    FileEntry {
+        path,
+        size: meta.len(),
+        modified_ms: modified_ms(meta),
+        placeholder: is_dataless(meta),
+        external: true,
+    }
+}
+
+fn modified_ms(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Sort the listings into their canonical order and stamp the refusal count.
@@ -218,9 +425,9 @@ impl TreeWalk {
             }
             let name = entry.file_name().to_string_lossy();
             if entry.path_is_symlink() {
-                let deferred = discovery
-                    .as_ref()
-                    .is_some_and(|discovery| discovery.folders.is_folder_name(&name));
+                let deferred = discovery.as_ref().is_some_and(|discovery| {
+                    discovery.take_symlink(entry.path(), &filter_start, &name)
+                });
                 if !deferred {
                     filter_skipped.fetch_add(1, Ordering::Relaxed);
                 }
@@ -244,9 +451,12 @@ impl TreeWalk {
                     return false;
                 }
             }
-            if is_dir && let Some(discovery) = &discovery {
-                discovery
-                    .visited
+            if is_dir
+                && let Some(visited) = discovery
+                    .as_ref()
+                    .and_then(|discovery| discovery.visited.as_ref())
+            {
+                visited
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .push(entry.path().to_path_buf());
@@ -308,13 +518,9 @@ impl TreeWalk {
             let file = FileEntry {
                 path: wire,
                 size: meta.len(),
-                modified_ms: meta
-                    .modified()
-                    .ok()
-                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                    .map(|duration| duration.as_millis() as u64)
-                    .unwrap_or(0),
+                modified_ms: modified_ms(&meta),
                 placeholder,
+                external: false,
             };
             match kind {
                 GraphPathKind::Note => catalog.notes.push(file),
@@ -468,6 +674,8 @@ fn has_cachedir_tag(dir: &Path) -> bool {
 mod tests {
     use std::fs;
     use std::path::Path;
+    #[cfg(unix)]
+    use std::path::PathBuf;
 
     use tempfile::tempdir;
 
@@ -828,5 +1036,122 @@ mod tests {
             catalog.skipped >= 2,
             "node_modules and target must be counted"
         );
+    }
+
+    /// A graph beside an external folder (marked) and the raw store of
+    /// [`linked_graph`].
+    #[cfg(unix)]
+    fn external_store(linked: &LinkedGraph) -> (PathBuf, crate::ExternalStore) {
+        let external = linked.graph.parent().unwrap().join("ext");
+        fs::create_dir_all(&external).unwrap();
+        fs::write(external.join(crate::MARKER_FILE_NAME), "").unwrap();
+        let store = crate::ExternalStore::new(&external, Some(&linked.raw), None).unwrap();
+        (external, store)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_files_list_at_their_graph_paths_through_links_and_the_overlay() {
+        use std::os::unix::fs::symlink;
+        let linked = linked_graph();
+        let graph = &linked.graph;
+        let (external, store) = external_store(&linked);
+        write(&external, "research/linked.pdf", "linked bytes");
+        write(&external, "research/overlay.pdf", "overlay");
+        write(&external, "research/shadowed.pdf", "external");
+        write(&external, "research/ignored.pdf", "ignored");
+        write(&external, "research/stray.md", "note");
+        write(&external, ".reflect-versions/research/old.pdf", "old");
+        write(&external, "finance/secure/private.pdf", "private");
+        write(&external, "research/hidden-link.pdf", "hidden");
+        write(&external, "people/secure/scan.pdf", "scan");
+        write(graph, "research/shadowed.pdf", "local");
+        write(
+            graph,
+            "research/.reflectignore",
+            "ignored.pdf\nhidden-link.pdf\n",
+        );
+        // An excluded link, and one in a real folder carrying a local-only
+        // name, never list.
+        symlink(
+            external.join("research/hidden-link.pdf"),
+            graph.join("research/hidden-link.pdf"),
+        )
+        .unwrap();
+        fs::create_dir_all(graph.join("people/secure")).unwrap();
+        symlink(
+            external.join("people/secure/scan.pdf"),
+            graph.join("people/secure/scan.pdf"),
+        )
+        .unwrap();
+        symlink(
+            external.join("research/linked.pdf"),
+            graph.join("research/linked.pdf"),
+        )
+        .unwrap();
+        // A link to anything but the copy at its own path is not honored.
+        symlink(
+            external.join("research/overlay.pdf"),
+            graph.join("research/wrong.pdf"),
+        )
+        .unwrap();
+
+        let scope = super::CatalogScope {
+            local_only: Some(&folders(&linked.raw)),
+            external: Some(&store),
+        };
+        let catalog = super::walk_catalog_in(graph, scope);
+        let listed: Vec<(&str, bool)> = catalog
+            .attachments
+            .iter()
+            .map(|file| (file.path.as_str(), file.external))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                ("research/linked.pdf", true),
+                ("research/overlay.pdf", true),
+                ("research/shadowed.pdf", false),
+            ]
+        );
+        let linked_entry = &catalog.attachments[0];
+        assert_eq!(linked_entry.size, "linked bytes".len() as u64);
+        assert!(!linked_entry.placeholder);
+        let notes: Vec<&str> = catalog.notes.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(notes, vec!["finance/secure/bank.md", "notes/public.md"]);
+        // The refused links and the external note are counted.
+        assert!(catalog.skipped >= 3, "skipped {}", catalog.skipped);
+
+        // Without the store, the link counts as skipped and nothing external lists.
+        let plain = super::walk_catalog_with(graph, &folders(&linked.raw));
+        let paths: Vec<&str> = plain.attachments.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["research/shadowed.pdf"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unusable_external_folder_lists_nothing() {
+        use std::os::unix::fs::symlink;
+        let linked = linked_graph();
+        let graph = &linked.graph;
+        let (external, store) = external_store(&linked);
+        write(&external, "research/a.pdf", "a");
+        write(&external, "research/b.pdf", "b");
+        fs::create_dir_all(graph.join("research")).unwrap();
+        symlink(
+            external.join("research/a.pdf"),
+            graph.join("research/a.pdf"),
+        )
+        .unwrap();
+        fs::remove_file(external.join(crate::MARKER_FILE_NAME)).unwrap();
+
+        let scope = super::CatalogScope {
+            local_only: None,
+            external: Some(&store),
+        };
+        let catalog = super::walk_catalog_in(graph, scope);
+        assert!(catalog.attachments.is_empty());
+        // The refused link, and the local-only link no scope follows here.
+        assert_eq!(catalog.skipped, 2);
     }
 }

@@ -61,9 +61,17 @@ export const fileMetaSchema = z.object({
    * True when the file is an iCloud eviction placeholder (Plan 21): the file
    * exists but its content is offloaded until re-download. It must not be
    * read — and must not be treated as deleted. Rust omits the field for
-   * regular files.
+   * regular files. Also true for an external file whose bytes its folder's
+   * provider holds.
    */
   placeholder: z.boolean().optional(),
+  /**
+   * Set when the file lives in the graph's external storage folder rather
+   * than the graph itself: `local` when its bytes are on this device,
+   * `offline` when only the folder's provider has them. Rust omits the field
+   * for every graph file.
+   */
+  external: z.enum(['local', 'offline']).optional(),
 })
 export type FileMeta = z.infer<typeof fileMetaSchema>
 

@@ -755,6 +755,7 @@ fn reconcile_scan_classifies_candidates_orphans_and_skips() {
         size: 1,
         modified_ms,
         placeholder,
+        external: None,
     };
     let files = [
         meta("notes/settled.md", 1_000, false), // row matches, settled → skipped
@@ -2382,6 +2383,7 @@ fn root_for_generation_and_reconcile_scan_follow_the_sessions_generation() {
         size: 6,
         modified_ms: 1,
         placeholder: false,
+        external: None,
     };
     let scan = session
         .reconcile_scan(generation, &[listed("one.md")], 10_000)

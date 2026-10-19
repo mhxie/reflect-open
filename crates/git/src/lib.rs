@@ -37,12 +37,11 @@ mod tests;
 
 use std::path::Path;
 
-use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
 
 use reflect_types::AppResult;
 
-pub use self::commit::{CommitOutcome, SkippedFile};
+pub use self::commit::{CommitOutcome, CommitPolicy, SkippedFile};
 pub use self::displace::DisplacedFile;
 pub use self::history_roots::SETTINGS_KEY as ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY;
 pub use self::merge::{ChangeKind, ChangedFile, MergeKind, PullPolicy};
@@ -184,7 +183,7 @@ fn pull_locked(
 ) -> AppResult<PullOutcome> {
     #[cfg(test)]
     fault::trip(fault::FaultPoint::BeforeCommit)?;
-    let commit = commit::commit_locked(root, message, policy.max_file_bytes, policy.local_only)?;
+    let commit = commit::commit_locked(root, message, &policy.commit())?;
     let merge = merge::merge_locked(root, policy, displaced)?;
     let ahead = commit::ahead_of_remote(&repo::open_existing(root)?);
     Ok(PullOutcome {
@@ -234,16 +233,16 @@ pub fn push(
     remote::push(root, credential, accepted_roots)
 }
 
-/// Commit every pending change (no-op when clean), never staging the
-/// graph's local-only folders or changes to files at or above
-/// `max_file_bytes`. See `commit_all` in `commit.rs`.
+/// Commit every pending change (no-op when clean), never staging what
+/// `policy` keeps out: the graph's local-only folders, links into its
+/// external storage, and changes to files at or above its size limit. See
+/// `commit_all` in `commit.rs`.
 pub fn commit_all(
     root: &Path,
     message: &str,
-    max_file_bytes: u64,
-    local_only: Option<&LocalOnlyFolders>,
+    policy: &CommitPolicy<'_>,
 ) -> AppResult<CommitOutcome> {
-    commit::commit_all(root, message, max_file_bytes, local_only)
+    commit::commit_all(root, message, policy)
 }
 
 /// The short id of the last commit that changed the note at `path` (a

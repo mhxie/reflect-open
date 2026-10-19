@@ -22,8 +22,8 @@ use serde::Serialize;
 use tauri::State;
 
 use reflect_git::{
-    CommitOutcome, DisplacedFile, GitCredential, GitStatus, MAX_FILE_BYTES, PullOutcome,
-    PullPolicy, PushOutcome, RemoteDelta, RemoteTip,
+    CommitOutcome, CommitPolicy, DisplacedFile, GitCredential, GitStatus, MAX_FILE_BYTES,
+    PullOutcome, PullPolicy, PushOutcome, RemoteDelta, RemoteTip,
 };
 
 use crate::blocking::run_blocking;
@@ -113,7 +113,8 @@ pub async fn git_clone(
 }
 
 /// Commit every pending change (no-op when clean), never staging the graph's
-/// local-only folders or changes to files at or above its backup size limit.
+/// local-only folders, links into its external storage, or changes to files
+/// at or above its backup size limit.
 #[tauri::command]
 pub async fn git_commit_all(
     message: String,
@@ -122,9 +123,15 @@ pub async fn git_commit_all(
 ) -> AppResult<CommitOutcome> {
     let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
     let max_file_bytes = max_file_bytes(&state, generation)?;
+    let external = crate::fs::external_links(&state, generation)?;
     let started = std::time::Instant::now();
     let outcome = run_git(root, move |root| {
-        reflect_git::commit_all(root, &message, max_file_bytes, local_only.as_deref())
+        let policy = CommitPolicy {
+            max_file_bytes,
+            local_only: local_only.as_deref(),
+            external: external.as_deref(),
+        };
+        reflect_git::commit_all(root, &message, &policy)
     })
     .await;
     if let Ok(outcome) = &outcome {
@@ -190,6 +197,7 @@ pub async fn git_pull<R: tauri::Runtime>(
     let (root, local_only) = crate::fs::graph_for_sync(&state, generation)?;
     let accepted_roots = crate::fs::accepted_history_roots(&state, generation)?;
     let max_file_bytes = max_file_bytes(&state, generation)?;
+    let external = crate::fs::external_links(&state, generation)?;
     // Every attempt's moves, the stale-lock retry included.
     let displaced: Arc<Mutex<Vec<DisplacedFile>>> = Arc::default();
     let sink = Arc::clone(&displaced);
@@ -198,6 +206,7 @@ pub async fn git_pull<R: tauri::Runtime>(
             local_only: local_only.as_deref(),
             accepted_roots: &accepted_roots,
             max_file_bytes,
+            external: external.as_deref(),
         };
         // A retry carries the earlier attempt's moves back in, so the graph's
         // record of displaced revisions covers every move announced below.

@@ -19,7 +19,12 @@ pub(super) fn commit_with(
     max_file_bytes: u64,
     local_only: Option<&LocalOnlyFolders>,
 ) -> AppResult<CommitOutcome> {
-    super::super::commit_all(root, message, max_file_bytes, local_only)
+    let policy = super::super::CommitPolicy {
+        max_file_bytes,
+        local_only,
+        external: None,
+    };
+    super::super::commit_all(root, message, &policy)
 }
 
 /// Push with the graph's accepted history roots.
@@ -42,6 +47,7 @@ pub(super) fn pull_with(
         local_only,
         accepted_roots,
         max_file_bytes: MAX_FILE_BYTES,
+        external: None,
     };
     merge_remote_with(root, &policy)
 }
