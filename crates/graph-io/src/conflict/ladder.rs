@@ -109,7 +109,8 @@ fn normalized(content: &str) -> String {
     lines.join("\n")
 }
 
-/// Rule 5: identical bodies, divergent flat frontmatter → key-wise merge.
+/// Rule 5: identical bodies, divergent frontmatter → key-wise merge, a nested
+/// entry as one opaque value; both headers and the merged one must load.
 fn merge_frontmatter_only(
     base: Option<&str>,
     first: &ConflictSide,
@@ -376,6 +377,63 @@ mod tests {
         assert!(!content.contains("Later"), "{content}");
         let body = &content[header.len()..];
         assert!(body.contains("here") && body.contains("there"), "{content}");
+    }
+
+    /// The summaries settle first; only then can rule 5 merge the pin and the privacy change.
+    #[test]
+    fn summaries_and_header_edits_on_two_devices_merge_key_wise() {
+        fn header(content: &str) -> &str {
+            frontmatter::split(content).header.unwrap()
+        }
+        let note = |text: &str, generated_at: &str, keys: &str| {
+            format!(
+                "---\nid: abc\ntitle: Garden\naiSummary:\n  text: {text}\n  \
+                 hash: 0123456789abcdef\n  generatedAt: {generated_at}\n{keys}---\n\n\
+                 {SUMMARIZED_BODY}"
+            )
+        };
+        let base = format!("---\nid: abc\ntitle: Garden\n---\n\n{SUMMARIZED_BODY}");
+        let pinned = note("Later.", LATE, "pinned: true\n");
+        let private = note("First.", EARLY, "private: true\n");
+        assert_eq!(
+            frontmatter::merge_headers(Some(header(&base)), header(&pinned), header(&private)),
+            None,
+            "the settle must come first"
+        );
+
+        let merged = Resolution::Merged {
+            content: note("First.", EARLY, "pinned: true\nprivate: true\n"),
+        };
+        for sides in [
+            (side(&pinned, 1), side(&private, 2)),
+            (side(&private, 2), side(&pinned, 1)),
+        ] {
+            assert_eq!(resolve(input(Some(&base), sides)).unwrap(), merged);
+        }
+    }
+
+    /// Touching header hunks around an unchanged summary: diff3 refuses, rule 5 merges.
+    #[test]
+    fn a_header_conflict_around_an_unchanged_summary_merges_key_wise() {
+        let note = |keys: &str| {
+            format!(
+                "---\nid: abc\naiSummary:\n  text: Kept.\n  hash: 0123456789abcdef\n  \
+                 generatedAt: {EARLY}\n{keys}---\n\n{SUMMARIZED_BODY}"
+            )
+        };
+        let base = note("");
+        let pinned = note("pinned: true\n");
+        let private = note("private: true\n");
+        assert_eq!(
+            diff3(&base, &side(&pinned, 1), &side(&private, 2)).unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve(input(Some(&base), (side(&private, 2), side(&pinned, 1)))).unwrap(),
+            Resolution::Merged {
+                content: note("pinned: true\nprivate: true\n")
+            }
+        );
     }
 
     #[test]

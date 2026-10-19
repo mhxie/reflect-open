@@ -75,7 +75,11 @@ An edit beats a delete. A `.md` note runs the conflict ladder
 (`conflict::ladder`). Another file takes a clean three-way merge, or keeps
 the local file and writes the remote version beside it as
 `<stem> (conflict <UTC time> <hash8>).<ext>`. Both devices produce the same
-bytes and names, so they converge.
+bytes and names, so they converge. An older build still word-merges a
+header-only conflict whose header holds a nested entry, such as the AI
+summary block, and re-formats flat lines as `key: value`, so a hand-spaced
+line such as `pinned:   true` can differ between builds for a round before
+they converge.
 
 Two devices' AI summaries of the same body (equal `aiSummary.hash`) settle
 first: both sides keep the summary generated first, and the ladder merges
@@ -88,6 +92,9 @@ older build can still interleave two summaries.
 - Test: `git::tests::conflicting_edits_merge_without_markers`,
   `git::tests::daily_append_on_two_devices_merges_by_union`,
   `git::tests::frontmatter_only_conflict_merges_keywise`,
+  `git::tests::a_summarized_notes_header_conflict_merges_keywise`,
+  `conflict::ladder::tests::summaries_and_header_edits_on_two_devices_merge_key_wise`,
+  `conflict::ladder::tests::a_header_conflict_around_an_unchanged_summary_merges_key_wise`,
   `git::tests::both_devices_resolve_the_same_pair_to_the_same_bytes`,
   `git::tests::a_deletion_beside_an_append_is_reconciled_not_resurrected`,
   `git::tests::summaries_of_the_same_body_merge_to_the_first_generated`,
