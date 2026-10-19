@@ -49,6 +49,8 @@ export function DailyContextSidebar({ date }: DailyContextSidebarProps): ReactEl
         <PublishedUrlSection path={dailyPath(date)} />
       </div>
       {/* min-h-20: a few lines of sections; a shorter window scrolls the whole sidebar.
+          So does the default 650px window for a published daily note in a five- or
+          six-row month: its 55px link pushes the pinned parts past the floor.
           Keyed by day, so another day's sections start at the top. */}
       <div key={date} className="min-h-20 flex-1 overflow-y-auto">
         <div className="space-y-4 py-4">
