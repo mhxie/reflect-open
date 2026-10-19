@@ -10,7 +10,11 @@ import {
 import { cloudGoAhead } from '@/hooks/use-summary-model-choice.ts'
 import { createNoteSummaryOffer } from '@/lib/note-summary-offer.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
-import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
+import {
+  useAppServices,
+  useCoreServices,
+  useMaybeGraphServices,
+} from '@/services/services-provider.tsx'
 
 /**
  * Runs the AI note-summary lifecycle for the open graph: long notes get a
@@ -18,12 +22,14 @@ import { useAppServices, useCoreServices } from '@/services/services-provider.ts
  * opening text. Main window only — two summarizers would double-bill and race
  * the writes. The session follows the summary settings itself (`off` runs no
  * pass). Before the cloud engine sends anything it asks, naming the provider
- * and model; the go-ahead records exactly those.
+ * and model; the go-ahead records exactly those. Other devices summarize too,
+ * so a pass catches up with the graph's backup before its first model call.
  */
 export function useNoteSummaries(graph: GraphInfo): void {
   const { noteSummaries } = useCoreServices()
   const { operations, window } = useAppServices()
   const { settings, updateSettings } = useSettings()
+  const backup = useMaybeGraphServices()?.backup ?? null
   const offer = useMemo(() => createNoteSummaryOffer(operations), [operations])
   const providers: AiProvidersState = {
     providers: settings.aiProviders,
@@ -39,10 +45,13 @@ export function useNoteSummaries(graph: GraphInfo): void {
   const providersRef = useRef<AiProvidersState>(providers)
   const cloudModelRef = useRef<AiSummariesModel | null>(settings.aiSummariesCloudModel)
   const updateSettingsRef = useRef(updateSettings)
+  // Read at each pass, so the session catches up with the graph's current backup.
+  const backupRef = useRef(backup)
   useEffect(() => {
     providersRef.current = providers
     cloudModelRef.current = settings.aiSummariesCloudModel
     updateSettingsRef.current = updateSettings
+    backupRef.current = backup
   })
 
   // The ask outlives neither the cloud engine nor its answer.
@@ -71,6 +80,7 @@ export function useNoteSummaries(graph: GraphInfo): void {
           start: (choice) => updateSettingsRef.current(cloudGoAhead(choice)),
         })
       },
+      catchUp: () => backupRef.current?.catchUp(),
     })
     session.start()
     return () => {

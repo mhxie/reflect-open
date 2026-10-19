@@ -37,15 +37,18 @@ resolving the same conflict produce identical bytes and converge):
 1. **Same content** (or only whitespace differs): nothing to do.
 2. **A merge keeps coming back**: when the same two merge results collide
    again, the loop breaker keeps the newer side.
-3. **Different parts of the note**: merged three-ways over the note's last
+3. **Two devices summarized the same note**: when both carry an AI summary
+   of the same body, both keep the one generated first, and the rest of the
+   note goes on down the ladder.
+4. **Different parts of the note**: merged three-ways over the note's last
    synced state.
-4. **Only metadata differs** (pinned on the Mac, marked private on the
+5. **Only metadata differs** (pinned on the Mac, marked private on the
    phone): merged key by key.
-5. **Both devices only appended**: both tails are kept, oldest first. This
+6. **Both devices only appended**: both tails are kept, oldest first. This
    applies to any note. It is the daily-note case, and the most common one.
    Two devices creating the same day's note offline (iCloud leaves a
    `2026-07-04 2.md` behind) fold back into one file the same way.
-6. **Anything else**: a word-level merge keeps the words both sides added.
+7. **Anything else**: a word-level merge keeps the words both sides added.
    Reflect never writes conflict markers.
 
 The same ladder runs on every note path: a Git pull, the iCloud sweep, and an

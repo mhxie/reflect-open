@@ -185,6 +185,11 @@ export interface BackupService {
    */
   backUpNow(): MaybePromise<void>
   /**
+   * Pull before a background write: after a {@link start} in flight, one full cycle when the
+   * graph syncs with a remote outside iCloud that did not refuse the last one. Never rejects.
+   */
+  catchUp(): MaybePromise<void>
+  /**
    * A graph file the watcher does not report changed (one under a hidden
    * folder, such as an agent harness's trust report); schedules a backup the
    * way a note edit does.
@@ -208,6 +213,14 @@ class BackupServiceImpl implements BackupService {
   #state: BackupState = { phase: 'loading' }
   #disposed = false
   #engine: SyncEngine | null = null
+  /**
+   * The engine {@link catchUp} runs: the remote's, null for local history and iCloud's quiet mode.
+   */
+  #syncing: SyncEngine | null = null
+  /**
+   * Settles once the latest {@link start} knows whether the graph syncs with a remote.
+   */
+  #connecting: Promise<void> = Promise.resolve()
   #unlisten: Unlisten | null = null
   #unregisterBackupFlusher: (() => void) | null = null
   #probeTimer: TimerHandle | null = null
@@ -236,6 +249,10 @@ class BackupServiceImpl implements BackupService {
     if (this.#disposed) {
       return
     }
+    let connected = (): void => {}
+    this.#connecting = new Promise<void>((resolve) => {
+      connected = resolve
+    })
     this.#setState({ phase: 'loading' })
     try {
       const [status, auth] = await Promise.all([
@@ -254,6 +271,7 @@ class BackupServiceImpl implements BackupService {
       }
       if (!status.initialized || status.remoteUrl === null) {
         this.#setState({ phase: 'disconnected' })
+        connected()
         await this.#startLocalHistory(status.initialized)
         return
       }
@@ -264,6 +282,7 @@ class BackupServiceImpl implements BackupService {
         // Generic remotes adopt without it — their credentials live with the
         // user's own git tooling (ssh agent), not in our keychain.
         this.#setState({ phase: 'disconnected' })
+        connected()
         await this.#startLocalHistory(status.initialized)
         return
       }
@@ -285,6 +304,7 @@ class BackupServiceImpl implements BackupService {
             message: `Backup cannot sign in to ${host} over HTTPS. Switch the remote to its SSH form: git remote set-url origin git@${host}:<owner>/<repo>.git`,
           },
         })
+        connected()
         await this.#startLocalHistory(status.initialized)
         return
       }
@@ -339,6 +359,8 @@ class BackupServiceImpl implements BackupService {
       if (!coexisting && !this.#mobile && platform.isNativeShell) {
         this.#armProbe(next, getCredential)
       }
+      // In quiet mode `syncNow` only commits: iCloud brings other devices' notes.
+      this.#syncing = coexisting ? null : next
 
       void next.syncNow() // launch pull: pick up other devices' changes
     } catch (error) {
@@ -349,6 +371,8 @@ class BackupServiceImpl implements BackupService {
         logger.error('backup start failed:', errorMessage(error))
         this.#setState({ phase: 'disconnected' })
       }
+    } finally {
+      connected()
     }
   }
 
@@ -411,6 +435,20 @@ class BackupServiceImpl implements BackupService {
     await this.#engine?.syncNow()
   }
 
+  async catchUp(): Promise<void> {
+    await this.#connecting
+    const engine = this.#syncing
+    if (engine === null || this.#syncRefused()) {
+      return
+    }
+    // The contract guard: a catch-up never rejects; the sync status shows the failure.
+    try {
+      await engine.syncNow()
+    } catch (error) {
+      this.#deps.logger.info('catch-up sync failed:', errorMessage(error))
+    }
+  }
+
   fileChanged(): void {
     this.#engine?.noteChanged()
   }
@@ -439,6 +477,7 @@ class BackupServiceImpl implements BackupService {
     this.#clearProbe()
     this.#engine?.stop()
     this.#engine = null
+    this.#syncing = null
     this.#unlisten?.()
     this.#unlisten = null
     for (const dispose of this.#resumeDisposers.splice(0)) {
@@ -446,6 +485,18 @@ class BackupServiceImpl implements BackupService {
     }
     this.#unregisterBackupFlusher?.()
     this.#unregisterBackupFlusher = null
+  }
+
+  /**
+   * The remote refused the last cycle (`auth`, or `rejected`); only a resume trigger retries it.
+   */
+  #syncRefused(): boolean {
+    const state = this.#state
+    return (
+      state.phase === 'connected' &&
+      isSyncError(state.status) &&
+      (state.status.errorKind === 'auth' || state.status.errorKind === 'rejected')
+    )
   }
 
   #clearProbe(): void {

@@ -77,6 +77,11 @@ export const aiSummaryFrontmatterSchema = z.object({
   text: z.string(),
   /** {@link noteBodyHash} of the summarized body (coerced like `gist.hash`). */
   hash: z.coerce.string(),
+  /**
+   * When it was generated (`toISOString`): of two summaries of one body, the
+   * sync merge keeps the earlier.
+   */
+  generatedAt: z.string().optional().catch(undefined),
 })
 export type AiSummaryFrontmatter = z.infer<typeof aiSummaryFrontmatterSchema>
 

@@ -14,11 +14,19 @@
 //! 7. **Word-level merge** ([`total::merge`]) as [`Resolution::Reconciled`]:
 //!    both sides' words are kept.
 //!
-//! Every rule sees the sides ordered by `(modified_ms, content)`, so
-//! concurrent resolution on two devices converges.
+//! Between rules 3 and 4, two AI summaries of one body settle
+//! ([`ai_summary`]): when both sides hold an `aiSummary` entry with the same
+//! `hash` and the entries differ, both take the one generated first. Sides
+//! that then agree are [`Resolution::Merged`] as that content; otherwise
+//! rules 4–7 run on the settled pair.
+//!
+//! The sides are ordered once, by `(modified_ms, content)` as they arrive,
+//! and keep that order through the settling, so every rule sees the same
+//! pair on every device and concurrent resolution converges.
 
 use reflect_types::AppResult;
 
+use super::ai_summary;
 use super::frontmatter;
 use super::merge3::diff3;
 use super::total;
@@ -38,7 +46,7 @@ pub struct ConflictInput<'a> {
 
 /// Run the ladder. The same pair, in either order, gives the same bytes.
 pub fn resolve(input: ConflictInput<'_>) -> AppResult<Resolution> {
-    let (first, second) = ordered(input.sides.0, input.sides.1);
+    let (mut first, mut second) = ordered(input.sides.0, input.sides.1);
 
     if first.content == second.content {
         return Ok(Resolution::AlreadyResolved);
@@ -50,6 +58,14 @@ pub fn resolve(input: ConflictInput<'_>) -> AppResult<Resolution> {
     }
     if input.merge_loop_detected {
         return Ok(Resolution::Reconciled {
+            content: second.content,
+        });
+    }
+
+    // Sides that differed only in their summary of one body now agree.
+    ai_summary::settle(&mut first.content, &mut second.content);
+    if first.content == second.content {
+        return Ok(Resolution::Merged {
             content: second.content,
         });
     }
@@ -274,6 +290,92 @@ mod tests {
                 content: "merge B\n".to_string()
             }
         );
+    }
+
+    const SUMMARIZED_BODY: &str = "# Garden plan\n\nLong body both devices summarized.\n";
+    const EARLY: &str = "2026-01-02T08:00:00.000Z";
+    const LATE: &str = "2026-01-02T09:30:00.000Z";
+
+    /// A note whose AI summary has [`SUMMARIZED_BODY`]'s hash, laid out as the
+    /// summary pass writes it.
+    fn summarized(header: &str, text: &str, generated_at: &str, body: &str) -> String {
+        format!(
+            "---\n{header}aiSummary:\n  text: {text}\n  hash: 0123456789abcdef\n  \
+             generatedAt: {generated_at}\n---\n\n{body}"
+        )
+    }
+
+    /// Two devices summarized the same body: the first generated wins on
+    /// both, whichever side is newer, with a base or without.
+    #[test]
+    fn two_summaries_of_one_body_merge_to_the_first_generated() {
+        let base = format!("---\ntitle: Garden\n---\n\n{SUMMARIZED_BODY}");
+        let first = summarized("title: Garden\n", "First.", EARLY, SUMMARIZED_BODY);
+        let later = summarized("title: Garden\n", "Later.", LATE, SUMMARIZED_BODY);
+        let merged = Resolution::Merged {
+            content: first.clone(),
+        };
+        for base in [Some(base.as_str()), None] {
+            for sides in [
+                (side(&first, 1), side(&later, 2)),
+                (side(&later, 1), side(&first, 2)),
+            ] {
+                assert_eq!(resolve(input(base, sides)).unwrap(), merged);
+            }
+        }
+    }
+
+    /// The rest of the note merges around the settled summary as before.
+    #[test]
+    fn other_changes_merge_around_the_first_generated_summary() {
+        let base = format!("---\ntitle: Garden\npinned: 1\n---\n\n{SUMMARIZED_BODY}");
+        let appended = format!("{SUMMARIZED_BODY}\nAppended on this device.\n");
+        let ours = summarized("title: Garden\npinned: 1\n", "Ours.", LATE, &appended);
+        let theirs = summarized(
+            "title: Garden v2\npinned: 1\n",
+            "Theirs.",
+            EARLY,
+            SUMMARIZED_BODY,
+        );
+        assert_eq!(
+            resolve(input(Some(&base), (side(&ours, 2), side(&theirs, 1)))).unwrap(),
+            Resolution::Merged {
+                content: summarized("title: Garden v2\npinned: 1\n", "Theirs.", EARLY, &appended)
+            }
+        );
+    }
+
+    /// A body both sides rewrote still reaches the word-level merge, but the
+    /// summary comes out whole, never two summaries' words interleaved.
+    #[test]
+    fn the_word_level_merge_keeps_the_first_generated_summary_whole() {
+        let base = format!("---\ntitle: Garden\n---\n\n{SUMMARIZED_BODY}");
+        let ours = summarized(
+            "title: Garden\n",
+            "Later, here.",
+            LATE,
+            "# Garden plan\n\nRewritten here.\n",
+        );
+        let theirs = summarized(
+            "title: Garden\n",
+            "First, there.",
+            EARLY,
+            "# Garden plan\n\nRewritten there.\n",
+        );
+        let result = resolve(input(Some(&base), (side(&ours, 2), side(&theirs, 1)))).unwrap();
+        let Resolution::Reconciled { content } = result else {
+            panic!("expected Reconciled, got {result:?}");
+        };
+        let header = summarized("title: Garden\n", "First, there.", EARLY, "");
+        assert!(content.starts_with(&header), "{content}");
+        let entry = reflect_frontmatter::ai_summary_entry(&content).expect("a readable summary");
+        assert_eq!(
+            entry.generated_at,
+            Some(reflect_frontmatter::GeneratedAt::Instant(EARLY.to_string()))
+        );
+        assert!(!content.contains("Later"), "{content}");
+        let body = &content[header.len()..];
+        assert!(body.contains("here") && body.contains("there"), "{content}");
     }
 
     #[test]
