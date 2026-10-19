@@ -298,7 +298,7 @@ describe('NoteSummaryService.reconcile', () => {
     expect(calls).toHaveLength(1)
   })
 
-  it('never catches up for a pass that sends nothing', async () => {
+  it('skips the catch-up when every note is put off, no engine is ready or cloud consent is missing', async () => {
     const { service, calls } = await setup()
     const catchUp = vi.fn()
 
