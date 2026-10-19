@@ -1,3 +1,4 @@
+import { timeoutSignal } from '@reflect/utils'
 import { z } from 'zod'
 import type { HttpService } from '../ports/http-service.ts'
 import {
@@ -100,8 +101,7 @@ export async function listOllamaModels(
   http: HttpService,
   options: ListOllamaModelsOptions = {},
 ): Promise<OllamaModels> {
-  const timeout = AbortSignal.timeout(TIMEOUT_MS)
-  const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout
+  const signal = timeoutSignal(TIMEOUT_MS, options.signal)
   let installed: z.infer<typeof tagsSchema>['models']
   try {
     const response = await http.fetch(ollamaNativeUrl(OLLAMA_BASE_URL, 'tags'), { signal })
