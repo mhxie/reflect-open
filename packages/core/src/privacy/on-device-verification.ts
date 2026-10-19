@@ -1,3 +1,4 @@
+import { timeoutSignal } from '@reflect/utils'
 import { z } from 'zod'
 import type { HttpService } from '../ports/http-service.ts'
 import type { OnDeviceTarget } from './on-device-target.ts'
@@ -105,8 +106,7 @@ export async function verifyOnDeviceServer(
       'This model routes requests to Ollama cloud. Choose a model running on this Mac.',
     )
   }
-  const timeout = AbortSignal.timeout(TIMEOUT_MS)
-  const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout
+  const signal = timeoutSignal(TIMEOUT_MS, options.signal)
   const headers = new Headers()
   if (options.apiKey?.trim()) {
     headers.set('authorization', `Bearer ${options.apiKey}`)
