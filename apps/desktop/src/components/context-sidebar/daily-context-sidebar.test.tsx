@@ -249,16 +249,19 @@ describe('DailyContextSidebar sections', () => {
       .toHaveAttribute('aria-expanded', 'false')
   })
 
-  it("keeps the day's tasks directly under the calendar, above the graph-wide activity", async () => {
+  it("stacks the calendar, the note actions, the day's tasks, then the graph-wide activity", async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
     const view = await renderSidebar('2026-06-09')
     await expect.element(page.getByText('No tasks for this day')).toBeVisible()
     await expect.element(page.getByRole('button', { name: /Activity/ })).toBeVisible()
 
-    const headers = [
-      ...view.getByTestId('context-frame').element().querySelectorAll('button[aria-expanded]'),
-    ].map((header) => header.textContent)
-    expect(headers).toEqual(['Tasks', 'Note actions', 'Activity'])
+    const order = [
+      ...view
+        .getByTestId('context-frame')
+        .element()
+        .querySelectorAll('[aria-label="Calendar"], button[aria-expanded]'),
+    ].map((element) => element.getAttribute('aria-label') ?? element.textContent)
+    expect(order).toEqual(['Calendar', 'Note actions', 'Tasks', 'Activity'])
   })
 
   it('keeps the activity heatmap at the bottom of a sidebar taller than its sections', async () => {
@@ -275,28 +278,91 @@ describe('DailyContextSidebar sections', () => {
     const grid = heatmap.element().getBoundingClientRect()
     expect(grid.top).toBeGreaterThanOrEqual(scroller.getBoundingClientRect().bottom)
     // Only the footer's own padding lies between the heatmap and the bottom edge.
-    expect(frame.bottom - grid.bottom).toBeLessThan(20)
+    expect(frame.bottom - grid.bottom).toBeLessThan(24)
   })
 
-  it('scrolls the calendar and sections while the activity heatmap stays put', async () => {
+  it('scrolls only the sections between the pinned calendar, note actions and heatmap', async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
-    await renderSidebar('2026-06-09', createApp(), 320)
+    noteRowAnswer = noteRow({ gistUrl: 'https://gist.github.com/me/abc123' })
+    relatedNotes.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        path: `notes/neighbor-${index}.md`,
+        title: `Neighbor ${index}`,
+        score: 0.9,
+        snippet: 'a semantic neighbor of the day',
+        heading: null,
+        isPrivate: false,
+      })),
+    )
+    // Room for the pinned parts and a few lines of sections.
+    await renderSidebar('2026-06-09', createApp(), 720)
     const tasks = page.getByText('No tasks for this day')
     await expect.element(tasks).toBeVisible()
-    const activity = page.getByRole('button', { name: /Activity/ })
-    await expect.element(activity).toBeVisible()
+    await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
+    const heatmap = page.getByRole('grid', { name: 'Daily note activity' })
+    await expect.element(heatmap).toBeVisible()
+    await expect.element(page.getByText('Published URL')).toBeVisible()
+    const pinned = [
+      page.getByText(monthLabel(monthOf('2026-06-09'))).element(),
+      page.getByText('Pin this note').element(),
+      page.getByText('Published URL').element(),
+      heatmap.element(),
+    ]
 
-    const scroller = scrollContainerOf(tasks.element())
-    expect(scroller.contains(activity.element())).toBe(false)
+    const sections = scrollContainerOf(tasks.element())
+    const panel = scrollContainerOf(sections)
+    expect(panel.scrollHeight).toBeLessThanOrEqual(panel.clientHeight)
+    expect(sections.scrollHeight).toBeGreaterThan(sections.clientHeight)
+    const pinnedTops = pinned.map((element) => element.getBoundingClientRect().top)
     const tasksTop = tasks.element().getBoundingClientRect().top
-    const activityTop = activity.element().getBoundingClientRect().top
-    scroller.scrollTop = scroller.scrollHeight
-    expect(scroller.scrollTop).toBeGreaterThan(0)
+    sections.scrollTop = sections.scrollHeight
+    expect(sections.scrollTop).toBeGreaterThan(0)
     expect(tasks.element().getBoundingClientRect().top).toBeLessThan(tasksTop)
-    expect(activity.element().getBoundingClientRect().top).toBe(activityTop)
+    expect(pinned.map((element) => element.getBoundingClientRect().top)).toEqual(pinnedTops)
   })
 
-  it('keeps half of a minimum-height sidebar for the sections, and the heatmap scrolls in the rest', async () => {
+  it('keeps the parts pinned in a default-size window, even for a six-row month', async () => {
+    listDailyActivity.mockResolvedValue([{ date: '2026-08-08', characters: 120 }])
+    // The app's default window is 650px tall; August 2026 takes six calendar rows.
+    await renderSidebar('2026-08-09', createApp(), 650)
+    const tasks = page.getByText('No tasks for this day')
+    await expect.element(tasks).toBeVisible()
+    await expect.element(page.getByRole('grid', { name: 'Daily note activity' })).toBeVisible()
+
+    const panel = scrollContainerOf(scrollContainerOf(tasks.element()))
+    expect(panel.scrollHeight).toBeLessThanOrEqual(panel.clientHeight)
+  })
+
+  it("starts another day's sections at the top, even a day already loaded", async () => {
+    listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
+    relatedNotes.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        path: `notes/neighbor-${index}.md`,
+        title: `Neighbor ${index}`,
+        score: 0.9,
+        snippet: 'a semantic neighbor of the day',
+        heading: null,
+        isPrivate: false,
+      })),
+    )
+    const app = createApp()
+    noteFile.set('daily/2026-06-10.md', '- another entry\n')
+    const view = await renderSidebar('2026-06-10', app, 720)
+    await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
+    await view.rerender(sidebar('2026-06-09', 720))
+    await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
+    await expect.element(page.getByRole('grid', { name: 'Daily note activity' })).toBeVisible()
+    const sections = () => scrollContainerOf(page.getByText('No tasks for this day').element())
+    sections().scrollTop = sections().scrollHeight
+    expect(sections().scrollTop).toBeGreaterThan(0)
+
+    // Back to a day whose sections are cached, so they render at full height at once.
+    await view.rerender(sidebar('2026-06-10', 720))
+    await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
+    expect(sections().scrollTop).toBe(0)
+  })
+
+  it('scrolls the whole sidebar when the window is too short for the pinned parts', async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
     // Tauri's minimum window height.
     const view = await renderSidebar('2026-06-09', createApp(), 200)
@@ -307,12 +373,18 @@ describe('DailyContextSidebar sections', () => {
 
     const frame = view.getByTestId('context-frame').element()
     const sections = scrollContainerOf(tasks.element())
-    expect(sections.clientHeight).toBeGreaterThanOrEqual(frame.clientHeight / 2)
-    const footer = scrollContainerOf(heatmap.element())
-    expect(frame.contains(footer)).toBe(true)
-    expect(footer.contains(tasks.element())).toBe(false)
-    footer.scrollTop = footer.scrollHeight
-    expect(footer.scrollTop).toBeGreaterThan(0)
+    const panel = scrollContainerOf(sections)
+    expect(frame.contains(panel)).toBe(true)
+    // The sections keep room for their first lines instead of collapsing...
+    expect(tasks.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      sections.getBoundingClientRect().bottom,
+    )
+    // ...and the heatmap is a scroll away.
+    panel.scrollTop = panel.scrollHeight
+    expect(panel.scrollTop).toBeGreaterThan(0)
+    expect(heatmap.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      frame.getBoundingClientRect().bottom,
+    )
   })
 
   it('the calendar is not collapsible', async () => {
