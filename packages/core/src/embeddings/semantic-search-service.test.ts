@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createGraphSession, type GraphRole } from '../graph/graph-session.ts'
 import { isLocalOnlyPath, type LocalOnlyFolders } from '../graph/local-only.ts'
 import {
-  createTestDatabaseService,
+  createNodeTestDatabaseService,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
   createTestGraphSessionService,
@@ -91,14 +91,15 @@ async function setup(options?: {
     progress,
     graphSession: { getState: () => ({ session }), subscribe: () => () => {} },
     indexStore: createTestIndexStoreService({
-      fail: (call) =>
-        options?.failClear === true && call.method === 'clear'
+      fail: (call) => {
+        return options?.failClear === true && call.method === 'clear'
           ? new Error('index on fire')
-          : undefined,
+          : undefined
+      },
     }),
   })
   const notes = graphNotes(options?.notes ?? 0)
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, notes)
   const embeddingIndex = createTestEmbeddingIndexService({
     embeddingRuntime: runtime,
@@ -328,9 +329,9 @@ describe('start', () => {
 
     indexLifecycle.emitApplied([{ kind: 'remove', path: 'notes/a.md' }], 7)
 
-    await vi.waitFor(() =>
-      expect(embeddingIndex.removed()).toEqual([{ path: 'notes/a.md', generation: 7 }]),
-    )
+    await vi.waitFor(() => {
+      expect(embeddingIndex.removed()).toEqual([{ path: 'notes/a.md', generation: 7 }])
+    })
     stop()
   })
 
@@ -378,9 +379,9 @@ describe('start', () => {
     // The switch lands: the table refits to the new model's width and re-embeds.
     runtime.setStatus({ status: 'ready', model: GEMMA, dims: 768 })
     expect(embeddingIndex.follows()).toEqual([{ generation: 7, modelId: GEMMA }])
-    await vi.waitFor(() =>
-      expect(embeddingIndex.prepares()).toEqual([{ model: GEMMA, dims: 768, generation: 7 }]),
-    )
+    await vi.waitFor(() => {
+      expect(embeddingIndex.prepares()).toEqual([{ model: GEMMA, dims: 768, generation: 7 }])
+    })
     stop()
   })
 

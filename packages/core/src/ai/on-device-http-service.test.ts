@@ -43,7 +43,7 @@ describe('OnDeviceHttpService', () => {
     expect(await response.json()).toEqual({ ok: true })
     expect(server.requests()).toEqual([
       {
-        requestId: expect.any(String),
+        requestId: expect.any(String) as string,
         method: 'POST',
         url: URL_ON_THIS_MAC,
         headers: [
@@ -113,9 +113,9 @@ describe('OnDeviceHttpService', () => {
 
   it('cancels and rejects with an AbortError when aborted before the head', async () => {
     const head = Promise.withResolvers<unknown>()
-    const { ipc, http } = scripted(async (command) =>
-      command === 'on_device_http_send' ? await head.promise : null,
-    )
+    const { ipc, http } = scripted(async (command) => {
+      return command === 'on_device_http_send' ? await head.promise : null
+    })
     const controller = new AbortController()
 
     const pending = http.fetch(URL_ON_THIS_MAC, { signal: controller.signal })
@@ -160,9 +160,9 @@ describe('OnDeviceHttpService', () => {
     const reader = response.body!.getReader()
     expect(new TextDecoder().decode((await reader.read()).value)).toBe('hello')
     const next = reader.read()
-    await vi.waitFor(() =>
-      expect(commands(ipc).filter((command) => command === 'on_device_http_read')).toHaveLength(2),
-    )
+    await vi.waitFor(() => {
+      expect(commands(ipc).filter((command) => command === 'on_device_http_read')).toHaveLength(2)
+    })
     controller.abort()
 
     await expect(next).rejects.toMatchObject({ name: 'AbortError' })

@@ -1,5 +1,5 @@
 import { createTestCoreServices } from '@reflect/core/testing'
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import type { ReactElement } from 'react'
 import type { AttachmentService, FileMeta } from '@reflect/core'
@@ -7,6 +7,7 @@ import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { resetRatioCaches } from './attachment-ratio-cache.ts'
 import { AttachmentsScreen } from './attachments-screen.tsx'
 
@@ -103,12 +104,12 @@ function RoutedScreen(): ReactElement {
 }
 
 async function renderScreen() {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   vi.spyOn(app.attachments, 'listFiles').mockImplementation(() => Promise.resolve([...listing]))
-  vi.spyOn(app.attachments, 'assetUrl').mockImplementation(
-    (path, generation) =>
-      `${assets.broken.has(`${generation}/${path}`) ? assets.corrupt : assets.image}#reflect-asset/${generation}/${path}`,
-  )
+  vi.spyOn(app.attachments, 'assetUrl').mockImplementation((path, generation) => {
+    return `${assets.broken.has(`${generation}/${path}`) ? assets.corrupt : assets.image}#reflect-asset/${generation}/${path}`
+  })
   openOrReveal = vi.spyOn(app.attachments, 'openOrReveal').mockResolvedValue(undefined)
   vi.spyOn(app.noteList, 'listAttachmentReferences').mockResolvedValue(references)
   vi.spyOn(app.noteList, 'listAttachmentNoteTags').mockResolvedValue(noteTags)
@@ -137,9 +138,9 @@ function probedRoute(view: ScreenView): unknown {
 
 /** The card preview buttons, in DOM (reading) order. */
 function cardLabels(): (string | null)[] {
-  return [...document.querySelectorAll('[data-attachment-index]')].map((card) =>
-    card.getAttribute('aria-label'),
-  )
+  return [...document.querySelectorAll('[data-attachment-index]')].map((card) => {
+    return card.getAttribute('aria-label')
+  })
 }
 
 /** The element holding focus, if any. */
@@ -174,8 +175,10 @@ describe('AttachmentsScreen', () => {
       )
       .toBeVisible()
 
-    const thumbnails = [...document.querySelectorAll('[data-attachment-index] img')].map((image) =>
-      image.getAttribute('src'),
+    const thumbnails = [...document.querySelectorAll('[data-attachment-index] img')].map(
+      (image) => {
+        return image.getAttribute('src')
+      },
     )
     expect(thumbnails).toEqual([
       expect.stringMatching(
@@ -348,14 +351,16 @@ describe('AttachmentsScreen', () => {
     const focused = document.activeElement
 
     serve(
-      files.map((file) =>
-        file.path === 'assets/photo.png' ? { ...file, modifiedMs: file.modifiedMs + 1 } : file,
-      ),
+      files.map((file) => {
+        return file.path === 'assets/photo.png'
+          ? { ...file, modifiedMs: file.modifiedMs + 1 }
+          : file
+      }),
     )
     await view.queryClient.invalidateQueries()
-    await vi.waitFor(() =>
-      expect(focused?.querySelector('img')?.getAttribute('src')).toContain(`&v=${4 * DAY + 1}-10`),
-    )
+    await vi.waitFor(() => {
+      expect(focused?.querySelector('img')?.getAttribute('src')).toContain(`&v=${4 * DAY + 1}-10`)
+    })
     expect(document.activeElement).toBe(focused)
   })
 
@@ -422,9 +427,11 @@ describe('AttachmentsScreen', () => {
 
     assets.broken.clear()
     serve(
-      files.map((file) =>
-        file.path === 'assets/photo.png' ? { ...file, modifiedMs: file.modifiedMs + 1 } : file,
-      ),
+      files.map((file) => {
+        return file.path === 'assets/photo.png'
+          ? { ...file, modifiedMs: file.modifiedMs + 1 }
+          : file
+      }),
     )
     await view.queryClient.invalidateQueries()
 

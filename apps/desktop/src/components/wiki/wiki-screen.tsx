@@ -123,9 +123,9 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
     if (layout.kind === 'flat') {
       return layout.entries.map((entry) => entry.path)
     }
-    return layout.groups.flatMap((group) =>
-      folded.has(wikiTopicKey(group.topic)) ? [] : group.entries.map((entry) => entry.path),
-    )
+    return layout.groups.flatMap((group) => {
+      return folded.has(wikiTopicKey(group.topic)) ? [] : group.entries.map((entry) => entry.path)
+    })
   }, [layout, folded])
   const rowIndex = useMemo(
     () => new Map(orderedPaths.map((path, index) => [path, index])),
@@ -136,21 +136,23 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
   // Rows carry the path of the copy they show, so an entry opens in the
   // language it is listed in.
   const openEntry = useCallback(
-    (path: string, event?: ModClickEvent) =>
+    (path: string, event?: ModClickEvent) => {
       navigateNoteLink({
         target: routeForPath(path),
         openInNewWindow: event !== undefined && isModEvent(event),
-      }),
+      })
+    },
     [navigateNoteLink],
   )
 
   const handleSort = useCallback(
-    (key: WikiSortKey) =>
-      updateSettingsWith((current) => ({ wikiSort: chooseWikiSort(current.wikiSort, key) })),
+    (key: WikiSortKey) => {
+      updateSettingsWith((current) => ({ wikiSort: chooseWikiSort(current.wikiSort, key) }))
+    },
     [updateSettingsWith],
   )
   const handleToggleFold = useCallback(
-    (key: string, all: boolean) =>
+    (key: string, all: boolean) => {
       updateSettingsWith((current) => {
         const fold = !current.wikiFoldedTopics.includes(key)
         const keys =
@@ -159,21 +161,20 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
             : [key]
         const rest = current.wikiFoldedTopics.filter((topic) => !keys.includes(topic))
         return { wikiFoldedTopics: fold ? [...rest, ...keys] : rest }
-      }),
+      })
+    },
     [updateSettingsWith, layout],
   )
 
-  const handleToggleExpanded = useCallback(
-    (key: string) =>
-      setCollapsed((current) => {
-        const next = new Set(current)
-        if (!next.delete(key)) {
-          next.add(key)
-        }
-        return next
-      }),
-    [],
-  )
+  const handleToggleExpanded = useCallback((key: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (!next.delete(key)) {
+        next.add(key)
+      }
+      return next
+    })
+  }, [])
 
   const scrollToIndex = useCallback((index: number) => {
     rootRef.current

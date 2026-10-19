@@ -91,7 +91,6 @@ export function useEditorAiMenu({
   const runRef = useRef<ActiveRun | null>(null)
   const privateNoteRef = useRef(privateNote)
   // A keychain continuation can run before effects observe a Lock toggle.
-  // eslint-disable-next-line react-hooks/refs
   privateNoteRef.current = privateNote
   // The staged placement of the current run — state (not just the ref) so the
   // preview's alternate-placement button can label itself.
@@ -209,8 +208,9 @@ export function useEditorAiMenu({
           id: 'ad-hoc-query',
           label: adHoc,
           detail: 'Run as a prompt',
-          onSelect: (context) =>
-            runPrompt({ id: 'ad-hoc-query', label: adHoc, body: adHoc, mode: 'replace' }, context),
+          onSelect: (context) => {
+            runPrompt({ id: 'ad-hoc-query', label: adHoc, body: adHoc, mode: 'replace' }, context)
+          },
         })
       }
       return items

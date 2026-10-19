@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AttachmentPreviewImage } from './attachment-preview-image.tsx'
 
 /**
@@ -25,7 +26,8 @@ const BROKEN = URL.createObjectURL(new Blob(['not an image'], { type: 'image/png
  * blob URLs loadable.
  */
 async function renderPreview(ui: ReactNode) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   vi.spyOn(app.attachments, 'assetUrl').mockImplementation(
     (path) => `${path.includes('bad') ? BROKEN : IMAGE}#asset`,
   )

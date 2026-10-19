@@ -22,13 +22,13 @@ export function WikiAnchorsBridge({ onWikiLinkClick }: WikiAnchorsBridgeProps): 
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
   })
-  const [extension] = useState(() =>
-    defineWikiAnchorChips({
+  const [extension] = useState(() => {
+    return defineWikiAnchorChips({
       asOf: todayIso,
       openUrl: (url) => opener.openUrlSync(url),
       openWikiLink: (options) => navigateRef.current(options),
-    }),
-  )
+    })
+  })
   useExtension(extension)
   useKeymap(WIKI_ANCHORS_KEYMAP, { priority: Priority.high })
   return null

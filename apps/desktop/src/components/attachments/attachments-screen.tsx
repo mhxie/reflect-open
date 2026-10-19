@@ -92,22 +92,17 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
     [library, type, tag],
   )
   // Counted within the active type, so each tag says how many files it would show.
-  const tagFacets = useMemo(
-    () =>
-      library === undefined
-        ? []
-        : attachmentTagFacets(filterAttachments(library, { type, tag: null })),
-    [library, type],
-  )
+  const tagFacets = useMemo(() => {
+    return library === undefined
+      ? []
+      : attachmentTagFacets(filterAttachments(library, { type, tag: null }))
+  }, [library, type])
   // A tab per type the graph has, plus the active one even when it has none.
-  const types = useMemo(
-    () =>
-      NOTE_ATTACHMENT_TYPES.filter(
-        (candidate) =>
-          candidate === type || (library?.some((entry) => entry.type === candidate) ?? false),
-      ),
-    [library, type],
-  )
+  const types = useMemo(() => {
+    return NOTE_ATTACHMENT_TYPES.filter((candidate) => {
+      return candidate === type || (library?.some((entry) => entry.type === candidate) ?? false)
+    })
+  }, [library, type])
 
   const ready = entries !== undefined && (entries.length === 0 || flowWidth > 0)
   const { onScroll } = useScrollRestoration(scrollElement, ready)
@@ -118,8 +113,9 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
   }, [])
 
   const openNote = useCallback(
-    (path: string, event: MouseEvent) =>
-      navigateNoteLink({ target: routeForPath(path), openInNewWindow: isModEvent(event) }),
+    (path: string, event: MouseEvent) => {
+      navigateNoteLink({ target: routeForPath(path), openInNewWindow: isModEvent(event) })
+    },
     [navigateNoteLink],
   )
   const activate = useCallback(

@@ -1,5 +1,5 @@
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
+import { afterEach, beforeEach, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { OpenerService } from '@reflect/app'
 import { createTestAppServices, type TestAppServices } from '@reflect/app/testing'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
@@ -8,6 +8,7 @@ import { RouteContent } from '@/components/route-content.tsx'
 import { queryClient } from '@/lib/query-client.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 
 /**
  * A wiki entry through the real note view and editor: its `anchors` fences
@@ -42,7 +43,9 @@ let openUrlSync: MockInstance<OpenerService['openUrlSync']>
 
 beforeEach(() => {
   entrySource = ENTRY
-  app = createTestCoreServices()
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database })
   appLayer = createTestAppServices(app)
   openUrlSync = vi.spyOn(appLayer.opener, 'openUrlSync').mockImplementation(() => {})
 })
@@ -124,8 +127,9 @@ it('packs matching trailing source links once, retains locators, and reveals the
   ].join('\n')
   const view = await renderEntry()
   await expect.element(page.getByText('After the evidence.')).toBeVisible()
-  const folded = (): Element | null =>
-    view.container.querySelector('[data-wiki-source-links-folded]')
+  const folded = (): Element | null => {
+    return view.container.querySelector('[data-wiki-source-links-folded]')
+  }
   expect(folded()).not.toBeNull()
   expect(folded()?.checkVisibility()).toBe(false)
   expect(view.container.querySelector('.ProseMirror')?.textContent).toContain(suffix)
@@ -260,8 +264,9 @@ it('deletes an empty line beside the block instead of entering it', async () => 
   const withEmptyLine = paragraphs()
   await userEvent.keyboard('{ArrowUp}{Backspace}')
   await vi.waitFor(() => expect(paragraphs()).toBe(withEmptyLine - 1))
-  const fence = (): string =>
-    view.container.querySelector('pre[data-language="anchors"]')?.textContent ?? ''
+  const fence = (): string => {
+    return view.container.querySelector('pre[data-language="anchors"]')?.textContent ?? ''
+  }
   expect(fence()).toContain(evidence)
 
   // An empty line before the block: Delete removes the line and leaves the

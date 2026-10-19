@@ -17,6 +17,7 @@ import {
 } from '@reflect/core/testing'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AiProvidersSection } from './ai-providers-section.tsx'
 
 // The dialog verifies keys through the key validation service; the default
@@ -35,6 +36,7 @@ async function renderSection(): Promise<void> {
     settings.failLoad()
   }
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     settings,
     secretStore: secrets,
   })
@@ -259,12 +261,12 @@ describe('AiProvidersSection', () => {
 
     await page.getByRole('button', { name: 'Remove Anthropic — Claude Opus 4.8' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(lastSavedDoc()).toMatchObject({
         aiProviders: [entry({ id: 'b', provider: 'openai', model: 'gpt-5.5', keyHint: 'abcd2' })],
         defaultAiProviderId: 'b',
-      }),
-    )
+      })
+    })
     expect(secrets.snapshot()).not.toHaveProperty('ai-api-key:a')
   })
 
@@ -288,9 +290,9 @@ describe('AiProvidersSection', () => {
       page.getByRole('button', { name: 'Remove OpenAI — GPT-5.5' }).element() as HTMLElement
     ).click()
 
-    await vi.waitFor(() =>
-      expect(lastSavedDoc()).toMatchObject({ aiProviders: [], defaultAiProviderId: null }),
-    )
+    await vi.waitFor(() => {
+      expect(lastSavedDoc()).toMatchObject({ aiProviders: [], defaultAiProviderId: null })
+    })
     expect(secrets.snapshot()).toEqual({})
   })
 
@@ -452,9 +454,9 @@ describe('AiProvidersSection on this Mac', () => {
 
     await onDeviceSwitch().click()
     await page.getByRole('button', { name: 'Turn on' }).click()
-    await vi.waitFor(() =>
-      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ onDevice: ATTESTATION }),
-    )
+    await vi.waitFor(() => {
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ onDevice: ATTESTATION })
+    })
     await expect.element(onDeviceSwitch()).toBeChecked()
     await expect.element(badge()).toBeInTheDocument()
 
@@ -472,12 +474,12 @@ describe('AiProvidersSection on this Mac', () => {
     await page.getByRole('combobox', { name: 'Default model for OpenAI-compatible' }).click()
     await page.getByRole('option', { name: /Local model/ }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(lastSavedDoc().aiProviders[0]).toMatchObject({
         model: 'local-model',
         onDevice: null,
-      }),
-    )
+      })
+    })
     await expectLocatorToHaveCount(badge(), 0)
     await expect.element(onDeviceSwitch()).not.toBeChecked()
   })
@@ -514,9 +516,9 @@ describe('AiProvidersSection on this Mac', () => {
     await renderSection()
 
     await page.getByRole('checkbox', { name: 'Can read images' }).click()
-    await vi.waitFor(() =>
-      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ supportsImages: true }),
-    )
+    await vi.waitFor(() => {
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ supportsImages: true })
+    })
 
     const contextLength = page.getByLabelText('Context length (tokens)')
     await contextLength.fill('100')
@@ -526,9 +528,9 @@ describe('AiProvidersSection on this Mac', () => {
 
     await contextLength.fill('16384')
     await userEvent.keyboard('{Enter}')
-    await vi.waitFor(() =>
-      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ contextWindow: 16_384 }),
-    )
+    await vi.waitFor(() => {
+      expect(lastSavedDoc().aiProviders[0]).toMatchObject({ contextWindow: 16_384 })
+    })
     await expectLocatorToHaveCount(page.getByRole('alert'), 0)
   })
 })

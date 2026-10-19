@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react'
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { NoteDocumentService, NoteLinkResolverService } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import {
   MAX_NOTE_EMBED_DEPTH,
   useNoteEmbedSource,
@@ -70,7 +71,9 @@ function listeners(): { changes: number; ownWrites: number } {
 }
 
 beforeEach(() => {
-  app = createTestCoreServices()
+  const database = createWasmTestDatabaseService()
+  onTestFinished(() => database.close())
+  app = createTestCoreServices({ database })
   resolve = vi
     .spyOn(app.noteLinkResolver, 'resolveWikiTarget')
     .mockResolvedValue({ kind: 'resolved', path: 'notes/Original.md' })
@@ -86,12 +89,12 @@ describe('useNoteEmbedSource', () => {
 
     // Enabling subscribes once to each stream, so the disabled reader held none.
     await view.rerender(<Host options={OPTIONS} />)
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(listeners()).toEqual({
         changes: disabled.changes + 1,
         ownWrites: disabled.ownWrites + 1,
-      }),
-    )
+      })
+    })
   })
 
   it('resolves in the source note and reads only the pinned graph generation', async () => {

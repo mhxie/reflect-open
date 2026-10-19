@@ -214,11 +214,11 @@ class LocalAssetOcrServiceImpl implements LocalAssetOcrService {
       const requested = input.mode === 'backfill' ? [...referenced] : (input.changed ?? [])
       const candidates = [
         ...new Set(
-          requested.flatMap((path) =>
-            path.includes('/')
+          requested.flatMap((path) => {
+            return path.includes('/')
               ? path
-              : catalog.filter((file) => basename(file.path) === path).map((file) => file.path),
-          ),
+              : catalog.filter((file) => basename(file.path) === path).map((file) => file.path)
+          }),
         ),
       ].filter((path) => localOcrAssetTypeFor(path) !== null)
       outcome.pending = candidates.length

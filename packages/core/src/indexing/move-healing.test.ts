@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '../errors.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { createTestClockService } from '../testing/clock.ts'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createTestNoteFileService } from '../testing/graph.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
@@ -57,15 +57,16 @@ interface SetupOptions {
  * the pull displacements of the open file session 7.
  */
 function setup(options: SetupOptions = {}) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   databases.push(database)
   seedNotes(database, options.rows ?? [{ path: ORPHAN, markdown: CONTENT }])
   const onDisk = options.files ?? { [ARRIVAL]: CONTENT }
   const files = createTestNoteFileService({ files: onDisk })
-  const spellingOnDisk = (path: string): string =>
-    options.folding === true
+  const spellingOnDisk = (path: string): string => {
+    return options.folding === true
       ? (Object.keys(onDisk).find((file) => foldGraphPath(file) === foldGraphPath(path)) ?? path)
       : path
+  }
   const indexQuery = createIndexQueryService({ database })
   const calls: string[] = []
   const readFile = files.read.bind(files)

@@ -9,6 +9,7 @@ import {
 } from '@reflect/core/testing'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SuggestedContactCard } from './suggested-contact-card.tsx'
 
 const PATH = 'notes/Ada Lovelace.md'
@@ -29,7 +30,7 @@ let contacts: TestContactsService
  */
 async function renderCard(contactsEnabled = true): Promise<void> {
   await renderInApp(<SuggestedContactCard path={PATH} />, {
-    app: createTestCoreServices({ noteFile, contacts }),
+    app: createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile, contacts }),
     // The card writes with the generation of the open graph.
     graph: { root: '/g', generation: 3 },
     settings: { contactsEnabled },
@@ -83,9 +84,9 @@ describe('SuggestedContactCard', () => {
     noteFile.set(PATH, '---\nignoredContacts:\n  - ada lovelace\n---\n# Ada Lovelace\n')
     await renderCard()
     // The dismissal check needs the match's name, so the lookup does run.
-    await vi.waitFor(() =>
-      expect(contacts.lookups()).toEqual([{ kind: 'name', name: 'Ada Lovelace' }]),
-    )
+    await vi.waitFor(() => {
+      expect(contacts.lookups()).toEqual([{ kind: 'name', name: 'Ada Lovelace' }])
+    })
     expect(page.getByText('ada@example.com · +1 555 0100').query()).toBeNull()
   })
 

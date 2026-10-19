@@ -75,9 +75,9 @@ export function AttachmentPreviewImage({
       loading="lazy"
       decoding="async"
       draggable={false}
-      onLoad={(event) =>
+      onLoad={(event) => {
         onLoadSize?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
-      }
+      }}
       onError={() => {
         if (kind === 'image' && stage === 'thumbnail') {
           setStage('raster')

@@ -39,9 +39,9 @@ export function OnDeviceAttestationDialog({
   onConfirm,
   onCancel,
 }: OnDeviceAttestationDialogProps): ReactElement {
-  const [server, setServer] = useState<OnDeviceServerKind>(() =>
-    new URL(baseUrl).port === '11434' ? 'ollama' : 'openai-compatible',
-  )
+  const [server, setServer] = useState<OnDeviceServerKind>(() => {
+    return new URL(baseUrl).port === '11434' ? 'ollama' : 'openai-compatible'
+  })
   return (
     <Dialog
       open

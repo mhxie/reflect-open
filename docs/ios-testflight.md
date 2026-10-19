@@ -42,7 +42,7 @@ build, check, upload.
 
 3. **Sentry exception telemetry credentials.** Set the public `VITE_SENTRY_DSN` and the
    private, build-only `SENTRY_AUTH_TOKEN` for local TestFlight builds. Configure them in
-   GitHub as the repository secrets `SENTRY_DSN` and `SENTRY_AUTH_TOKEN`; the TestFlight
+   GitHub as the `release_app` environment secrets `SENTRY_DSN` and `SENTRY_AUTH_TOKEN`; the TestFlight
    workflow requires both before building. The DSN initializes the WebView SDK; the iOS
    native SDK embeds its DSN as a constant in `NativeDiagnostics.swift`. The token must
    be allowed to upload JavaScript source maps and native debug files to the
@@ -77,14 +77,11 @@ production project is a release error. The helper then uploads the IPA with
 `xcrun altool --upload-package --wait`, which returns after App Store Connect has
 processed the build.
 
-Pass `--export-method=release-testing` if App Store Connect or Xcode starts
-requiring the TestFlight-specific export method. The default remains
-`app-store-connect`, matching Tauri's App Store Connect distribution docs and
-the upload flow.
-
 ## GitHub Action
 
-Use **Actions -> TestFlight -> Run workflow**. The workflow builds on
+The TestFlight workflow runs as part of every release, called from
+`.github/workflows/publish-desktop.yml`. To retry it, re-run its failed job in
+the Release run. The workflow builds on
 `macos-26`, uploads the IPA to App Store Connect, and serializes runs so two
 uploads do not race each other. It keeps both the exported IPA and a
 metadata-preserving ZIP of the exact `.xcarchive` for 30 days. The archive holds
@@ -92,7 +89,7 @@ the matching binaries and dSYMs needed to symbolicate an Apple `.ips` report
 that arrives later; the archive is packaged even when the run failed, so the
 evidence survives a release blocker.
 
-Configure these repository secrets:
+Configure these secrets in the `release_app` environment, which only `master` can use:
 
 | Secret | Value |
 | --- | --- |

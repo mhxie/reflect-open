@@ -44,9 +44,9 @@ export function NoteRowList({ rows, onOpen }: NoteRowListProps): ReactElement {
               revealed={revealedPath === row.path}
               onReveal={() => setRevealedPath(row.path)}
               onClose={() => setRevealedPath(null)}
-              onBeginInteraction={() =>
+              onBeginInteraction={() => {
                 setRevealedPath((current) => (current === row.path ? current : null))
-              }
+              }}
               onOpen={() => onOpen(row.path)}
               onTogglePin={() => togglePin(row)}
               onDelete={() => {

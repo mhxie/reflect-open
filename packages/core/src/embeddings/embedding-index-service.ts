@@ -415,8 +415,8 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
         if (stopped.signal.aborted) {
           return
         }
-        const backfill = (): Promise<EmbeddingBackfillResult> =>
-          this.backfill({
+        const backfill = (): Promise<EmbeddingBackfillResult> => {
+          return this.backfill({
             generation,
             fileGeneration,
             modelId,
@@ -434,6 +434,7 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
                   },
                 }),
           })
+        }
         await (runBackfill === undefined ? backfill() : runBackfill(backfill))
       })
       .catch((cause: unknown) => {

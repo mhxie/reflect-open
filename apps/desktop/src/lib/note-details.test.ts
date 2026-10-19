@@ -117,12 +117,15 @@ describe('noteDetails', () => {
   })
 
   it('reports the version lookup without claiming a commit it has not seen', () => {
-    const version = (pending: boolean, unavailable: boolean): string =>
-      noteDetails({
-        state: EDITABLE,
-        backup: undefined,
-        version: { version: null, pending, unavailable },
-      }).backup[1]?.value ?? ''
+    const version = (pending: boolean, unavailable: boolean): string => {
+      return (
+        noteDetails({
+          state: EDITABLE,
+          backup: undefined,
+          version: { version: null, pending, unavailable },
+        }).backup[1]?.value ?? ''
+      )
+    }
     expect(version(true, false)).toBe('Loading')
     expect(version(false, true)).toBe('Unavailable')
     expect(version(false, false)).toBe('Uncommitted')

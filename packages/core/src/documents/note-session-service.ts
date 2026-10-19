@@ -140,8 +140,9 @@ function sessionIo(
     }
   }
   const generation = (): number => writeGenerationFor(graphSession, graph)
-  const read = async (forPath: string): Promise<string> =>
-    await noteFile.read(forPath, generation())
+  const read = async (forPath: string): Promise<string> => {
+    return await noteFile.read(forPath, generation())
+  }
   if (options.readOnly === true || isLocalOnlyReadOnlyPath(graph.localOnly, options.path)) {
     return { read, write: null, recovery: null }
   }
@@ -149,8 +150,9 @@ function sessionIo(
     forPath: string,
     contents: string,
     expectedContents: string | null,
-  ): Promise<NoteWriteResult> =>
-    await noteFile.write(forPath, contents, generation(), expectedContents)
+  ): Promise<NoteWriteResult> => {
+    return await noteFile.write(forPath, contents, generation(), expectedContents)
+  }
   if (!isEditableLocalOnlyPath(graph.localOnly, options.path)) {
     return { read, write, recovery: null }
   }
@@ -160,8 +162,15 @@ function sessionIo(
     read,
     write,
     recovery: {
-      preserve: async (forPath, contents, sourceRevision) =>
-        await noteFile.writeRecovery(forPath, contents, ownerId, sourceRevision, generation()),
+      preserve: async (forPath, contents, sourceRevision) => {
+        return await noteFile.writeRecovery(
+          forPath,
+          contents,
+          ownerId,
+          sourceRevision,
+          generation(),
+        )
+      },
       read: async (forPath) => await noteFile.readRecovery(forPath, generation()),
       clear: async (forPath, copy) => {
         await noteFile.clearRecovery(forPath, copy.ownerId, copy.token, generation())

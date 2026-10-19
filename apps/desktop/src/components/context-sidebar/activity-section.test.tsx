@@ -1,5 +1,5 @@
 import { page, userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { CoreServices, DailyActivityService, NoteListEntry } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
@@ -7,6 +7,7 @@ import { queryKeys } from '@/lib/query-client.ts'
 import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ActivitySection } from './activity-section.tsx'
 
 const TODAY = '2026-10-03'
@@ -22,7 +23,8 @@ function RouteProbe(): ReactNode {
 }
 
 async function renderSection(width = 300) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   app.clock.setToday(TODAY)
   vi.spyOn(app.dailyActivity, 'listDailyActivity').mockImplementation(listDailyActivity)
   vi.spyOn(app.dailyActivity, 'listDailyEditCounts').mockImplementation(listDailyEditCounts)
@@ -85,8 +87,9 @@ describe('ActivitySection', () => {
     const view = await renderSection()
     await expect.element(heatmap()).toBeVisible()
 
-    const cell = (date: string) =>
-      view.container.querySelector<HTMLElement>(`[data-date="${CSS.escape(date)}"]`)!
+    const cell = (date: string) => {
+      return view.container.querySelector<HTMLElement>(`[data-date="${CSS.escape(date)}"]`)!
+    }
     expect(cell('2026-10-02').className).toContain('bg-accent')
     await expect
       .element(page.getByRole('gridcell', { name: '2026-10-02 · 3 notes · 1,200 chars' }))

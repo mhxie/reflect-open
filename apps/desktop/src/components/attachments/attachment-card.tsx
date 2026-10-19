@@ -88,9 +88,9 @@ export const AttachmentCard = memo(function AttachmentCard({
         type="button"
         data-attachment-index={index}
         aria-label={`${action === 'open' ? 'Open' : 'Preview'} ${filename}`}
-        onClick={(event) =>
+        onClick={(event) => {
           onActivate(entry, action, event.currentTarget.querySelector('img') ?? event.currentTarget)
-        }
+        }}
         onKeyDown={handleKeyDown}
         className="relative block w-full flex-none cursor-default overflow-hidden bg-surface-sunken outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
         style={{ height: Math.max(0, height - CARD_FOOTER_HEIGHT) }}
@@ -99,9 +99,9 @@ export const AttachmentCard = memo(function AttachmentCard({
           entry={entry}
           generation={generation}
           width={width}
-          onLoadSize={(naturalWidth, naturalHeight) =>
+          onLoadSize={(naturalWidth, naturalHeight) => {
             onMediaSize(entry, naturalWidth, naturalHeight)
-          }
+          }}
           onError={() => setFailedVersion(version)}
         />
       </button>

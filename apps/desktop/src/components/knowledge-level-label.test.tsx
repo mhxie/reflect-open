@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { KNOWLEDGE_LEVELS_PATH } from '@reflect/core'
 import {
@@ -7,6 +7,7 @@ import {
   type TestNoteFileService,
 } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { KnowledgeLevelLabel } from './knowledge-level-label.tsx'
 
 const contract = {
@@ -33,10 +34,9 @@ async function renderLabels(ui: ReactNode, source: string | null = JSON.stringif
   const noteFile = createTestNoteFileService({
     files: source === null ? {} : { [KNOWLEDGE_LEVELS_PATH]: source },
   })
-  const view = await renderInApp(ui, {
-    app: createTestCoreServices({ noteFile }),
-    graph: { root: '/g', name: 'g', generation: 7 },
-  })
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
+  onTestFinished(() => app.database.close())
+  const view = await renderInApp(ui, { app, graph: { root: '/g', name: 'g', generation: 7 } })
   return Object.assign(view, { noteFile, contractReads: () => contractReads(noteFile) })
 }
 
@@ -109,9 +109,9 @@ it('reloads sidecar changes on window focus even while the cached copy is fresh'
     KNOWLEDGE_LEVELS_PATH,
     JSON.stringify({
       ...contract,
-      levels: contract.levels.map((level) =>
-        level.level === 4 ? { ...level, label: 'Updated wiki' } : level,
-      ),
+      levels: contract.levels.map((level) => {
+        return level.level === 4 ? { ...level, label: 'Updated wiki' } : level
+      }),
     }),
   )
   window.dispatchEvent(new Event('focus'))

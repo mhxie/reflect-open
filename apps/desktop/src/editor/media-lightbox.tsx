@@ -25,8 +25,8 @@ export function MediaLightbox({ lightbox, onOpenImage }: MediaLightboxProps): Re
 
   return (
     <LightboxRoot lightbox={lightbox} style={mobileSurface ? IMMERSIVE_STYLE : undefined}>
-      {(item) =>
-        item.type === 'image' ? (
+      {(item) => {
+        return item.type === 'image' ? (
           <ImageLightboxContent
             item={item}
             mobileSurface={mobileSurface}
@@ -36,7 +36,7 @@ export function MediaLightbox({ lightbox, onOpenImage }: MediaLightboxProps): Re
         ) : (
           <VideoLightboxContent item={item} mobileSurface={mobileSurface} onClose={onClose} />
         )
-      }
+      }}
     </LightboxRoot>
   )
 }

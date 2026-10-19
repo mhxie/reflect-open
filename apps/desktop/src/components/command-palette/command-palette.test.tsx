@@ -16,6 +16,7 @@ import type { CommandContext } from '@/lib/commands/types.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { CommandPalette } from './command-palette.tsx'
 import { PaletteProvider, usePalette } from './palette-provider.tsx'
 
@@ -28,14 +29,6 @@ const retrieve = vi.fn<RetrievalService['retrieve']>()
  * Receives the `reflect://` link of every note window a test opens.
  */
 const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
-// The preview keeps the stub from the route-content tests: hosting the real
-// ProseMirror editor is out of scope here; the preview's data path stays real.
-vi.mock('@/editor/markdown-preview.tsx', () => ({
-  MarkdownPreview: ({ content }: { content: string }) => (
-    <div data-testid="markdown-preview">{content}</div>
-  ),
-}))
-
 // The model is absent by default: the palette is exactly the lexical surface
 // it was before Plan 09 (hybrid mode is additive). The gating tests flip both
 // halves of the hybrid opt-in.
@@ -98,6 +91,7 @@ function PeekProbe(): ReactNode {
 async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const navigate = vi.fn()
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     suggestions: {
       suggestWikiTargets,
       suggestWikiLinkTargets: () => ({
@@ -430,14 +424,14 @@ describe('CommandPalette', () => {
       'notes/second.md': '# Second\n\nsecond body\n',
     }
     const { view } = await renderPalette('note')
-    await expect.element(view.getByText('First', { exact: true })).toBeInTheDocument()
+    await expect.element(view.getByRole('option', { name: 'First' })).toBeInTheDocument()
 
     // cmdk highlights the top hit; its content renders in the preview pane.
-    const preview = view.getByTestId('markdown-preview')
+    const preview = view.getByTestId('palette-preview')
     await expect.element(preview).toMatchTextContent('first body')
 
     await userEvent.keyboard('{ArrowDown}')
-    await expect.element(view.getByTestId('markdown-preview')).toMatchTextContent('second body')
+    await expect.element(view.getByTestId('palette-preview')).toMatchTextContent('second body')
   })
 
   it('frontmatter never reaches the preview', async () => {
@@ -447,7 +441,7 @@ describe('CommandPalette', () => {
     ])
     files = { 'notes/pinned.md': '---\npinned: true\n---\n# Pinned\n\nbody\n' }
     const { view } = await renderPalette('pinned')
-    const preview = view.getByTestId('markdown-preview')
+    const preview = view.getByTestId('palette-preview')
     await expect.element(preview).toMatchTextContent('body')
     expect(preview.element().textContent).not.toContain('pinned: true')
   })

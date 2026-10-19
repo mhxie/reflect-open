@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import { AppError, createLocalOnlyFolders, type NoteRecovery } from '@reflect/core'
 import {
   createTestCoreServices,
@@ -6,6 +6,7 @@ import {
   overrideNoteFileService,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteDocument } from './use-note-document.ts'
 
 const NOTE = 'secure/note.md'
@@ -34,8 +35,8 @@ function recoveryStore(blocked: () => boolean) {
       bases.push(expectedContents)
       return result
     },
-    writeRecovery: (path, contents, ownerId, sourceRevision, generation) =>
-      Promise.try(() => {
+    writeRecovery: (path, contents, ownerId, sourceRevision, generation) => {
+      return Promise.try(() => {
         expect({ path, generation }).toEqual({ path: NOTE, generation: 1 })
         expect(ownerId).toMatch(/^[a-f0-9]{32}$/)
         version += 1
@@ -49,14 +50,16 @@ function recoveryStore(blocked: () => boolean) {
         copies.delete(ownerId)
         copies.set(ownerId, copy)
         return copy
-      }),
+      })
+    },
     readRecovery: () => Promise.resolve([...copies.values()].at(-1) ?? null),
-    clearRecovery: (path, ownerId, token) =>
-      Promise.try(() => {
+    clearRecovery: (path, ownerId, token) => {
+      return Promise.try(() => {
         expect(path).toBe(NOTE)
         cleared.push(token)
         if (copies.get(ownerId)?.token === token) copies.delete(ownerId)
-      }),
+      })
+    },
   })
   return {
     noteFile,
@@ -71,7 +74,11 @@ function recoveryStore(blocked: () => boolean) {
 it('pins recovery ownership to the hook session and offers each closed window’s draft', async () => {
   let blocked = true
   const store = recoveryStore(() => blocked)
-  const app = createTestCoreServices({ noteFile: store.noteFile })
+  const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    noteFile: store.noteFile,
+  })
+  onTestFinished(() => app.database.close())
   const graph = {
     generation: 1,
     localOnlyFolders: ['secure'],

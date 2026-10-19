@@ -47,12 +47,12 @@ export function WikiBreadcrumb({ path, className }: WikiBreadcrumbProps): ReactE
             {index > 0 ? <ChevronRight aria-hidden className="size-3 flex-none" /> : null}
             <button
               type="button"
-              onClick={(event: MouseEvent) =>
+              onClick={(event: MouseEvent) => {
                 navigateNoteLink({
                   target: routeForPath(ancestor.path),
                   openInNewWindow: isModEvent(event),
                 })
-              }
+              }}
               className="rounded-sm transition-colors duration-100 hover:text-text focus-visible:text-text focus-visible:outline-none"
             >
               <NoteTitle

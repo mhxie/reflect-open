@@ -71,9 +71,9 @@ const readNotesSources = z
   .object({ notes: z.array(noteReadSchema) })
   .transform(({ notes }) => noteSources(notes.flatMap((entry) => (entry.ok ? [entry.note] : []))))
 
-const readNoteSources = noteReadSchema.transform((entry) =>
-  noteSources(entry.ok ? [entry.note] : []),
-)
+const readNoteSources = noteReadSchema.transform((entry) => {
+  return noteSources(entry.ok ? [entry.note] : [])
+})
 
 const readAssetsSources = z
   .object({ assets: z.array(assetReadSchema) })

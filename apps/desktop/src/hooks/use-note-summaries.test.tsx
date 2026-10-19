@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createGraphServices, type GraphInfo, type GraphLifecycleFlags } from '@reflect/core'
 import { createTestBackupService, createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteSummaries } from './use-note-summaries.ts'
 
 /**
@@ -31,7 +32,8 @@ const NO_LIFECYCLES: GraphLifecycleFlags = {
 describe('useNoteSummaries', () => {
   it('catches up with the graph’s backup before a pass summarizes', async () => {
     const backup = createTestBackupService({ state: { phase: 'disconnected' } })
-    const app = createTestCoreServices({ backup })
+    const app = createTestCoreServices({ database: createWasmTestDatabaseService(), backup })
+    onTestFinished(() => app.database.close())
     const openSession = vi.spyOn(app.noteSummaries, 'openSession')
 
     await renderHookInApp(() => useNoteSummaries(GRAPH), { app })
@@ -44,8 +46,10 @@ describe('useNoteSummaries', () => {
 
   it('still summarizes a graph without a backup: there is nothing to catch up with', async () => {
     const app = createTestCoreServices({
+      database: createWasmTestDatabaseService(),
       createGraphServices: (session, deps) => createGraphServices(session, deps, NO_LIFECYCLES),
     })
+    onTestFinished(() => app.database.close())
     const openSession = vi.spyOn(app.noteSummaries, 'openSession')
 
     await renderHookInApp(() => useNoteSummaries(GRAPH), { app })

@@ -1,8 +1,9 @@
 import { createTestCoreServices } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { DEFAULT_SETTINGS, type Settings, type WikiLanguage } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiSection } from './wiki-section.tsx'
 
 /**
@@ -11,7 +12,8 @@ import { WikiSection } from './wiki-section.tsx'
  * `useSettings` hands out the service's function itself.
  */
 async function renderSection({ captureEdits = false } = {}) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   // The trust report row has its own test (wiki-trust-fields.test.tsx).
   app.ipc.onCommand('wiki_trust_report_read', () => null)
   const updateWith = vi.spyOn(app.settings, 'updateWith')

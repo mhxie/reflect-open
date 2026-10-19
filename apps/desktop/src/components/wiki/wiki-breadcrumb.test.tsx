@@ -1,8 +1,9 @@
 import { createTestCoreServices } from '@reflect/core/testing'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { deepLinkForRoute } from '@reflect/app'
 import type { WikiAncestor, WikiLanguage } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiBreadcrumb } from './wiki-breadcrumb.tsx'
 
 const LANGUAGES: WikiLanguage[] = [
@@ -14,7 +15,8 @@ const wikiAncestors =
   vi.fn<(path: string, languages: readonly WikiLanguage[]) => Promise<WikiAncestor[]>>()
 
 async function renderBreadcrumb(path: string) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   vi.spyOn(app.wiki, 'ancestors').mockImplementation(wikiAncestors)
   return await renderInApp(
     <div data-testid="host">
@@ -65,11 +67,11 @@ describe('WikiBreadcrumb', () => {
       .getByRole('button', { name: 'Wiki 索引，中文' })
       .click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(view.appServices.window.openedNoteWindows()).toContain(
         deepLinkForRoute({ kind: 'note', path: 'wiki-cn/index.md' }),
-      ),
-    )
+      )
+    })
   })
 
   it('holds its line while the lookup runs, so the title below does not jump', async () => {

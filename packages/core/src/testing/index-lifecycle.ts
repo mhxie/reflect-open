@@ -28,7 +28,7 @@ import type { Unlisten } from '../unlisten.ts'
 import type { XArchiveService } from '../embeds/x-archive-service.ts'
 import { createTestXArchiveService } from './capture.ts'
 import { createTestClockService } from './clock.ts'
-import { createTestDatabaseService } from './database.ts'
+import { createNodeTestDatabaseService } from './database.ts'
 import { createTestFileChangeService } from './file-change.ts'
 import { createTestAssetStoreService, createTestNoteFileService } from './graph.ts'
 import { createTestIndexStoreService } from './index-store.ts'
@@ -188,8 +188,9 @@ class TestIndexLifecycleServiceImpl implements TestIndexLifecycleService {
     return this.#inner.onStalePlaceholders(listener)
   }
 
-  readonly fileProgress = (): IndexFileProgress | null =>
-    this.#seeded !== null ? this.#seeded.progress : this.#inner.fileProgress()
+  readonly fileProgress = (): IndexFileProgress | null => {
+    return this.#seeded !== null ? this.#seeded.progress : this.#inner.fileProgress()
+  }
 
   readonly subscribeFileProgress = (listener: () => void): Unlisten => {
     const unlisten = this.#inner.subscribeFileProgress(listener)
@@ -255,7 +256,7 @@ class TestIndexLifecycleServiceImpl implements TestIndexLifecycleService {
 export function createTestIndexLifecycleService(
   options?: TestIndexLifecycleServiceOptions,
 ): TestIndexLifecycleService {
-  const database = options?.database ?? createTestDatabaseService()
+  const database = options?.database ?? createNodeTestDatabaseService()
   const clock = options?.clock ?? createTestClockService()
   const logger = options?.logger ?? createTestLoggerService()
   const graphSession = options?.graphSession ?? {

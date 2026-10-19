@@ -89,15 +89,16 @@ afterEach(() => {
 function service(overrides: { watch?: boolean } = {}) {
   const indexLifecycle = createTestIndexLifecycleService()
   vi.spyOn(indexLifecycle, 'applyChanges').mockImplementation(
-    (changes, generation, _fileGeneration, canApply) =>
-      Promise.try(() => {
+    (changes, generation, _fileGeneration, canApply) => {
+      return Promise.try(() => {
         indexApplies.push({
           paths: changes.map((change) => change.path),
           generation,
           canApply: canApply?.() ?? true,
         })
         return changes.length
-      }),
+      })
+    },
   )
   const openDocuments = createOpenDocumentsService({ fileChanges: createTestFileChangeService() })
   vi.spyOn(openDocuments, 'dirtyPaths').mockImplementation(() => dirtyPaths)
@@ -487,7 +488,7 @@ describe('createICloudSyncService', () => {
     await settleScan(INGEST_SETTLE_MS)
     expect(scanCalls()[2]).toMatchObject({
       scope: 'full',
-      ingestedPaths: expect.arrayContaining(['notes/one.md', 'notes/two.md']),
+      ingestedPaths: expect.arrayContaining(['notes/one.md', 'notes/two.md']) as string[],
     })
   })
 

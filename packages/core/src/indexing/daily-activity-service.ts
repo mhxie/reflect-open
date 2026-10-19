@@ -106,9 +106,9 @@ class DailyActivityServiceImpl implements DailyActivityService {
       .orderBy('dailyDate')
       .execute()
     return rows
-      .map((row) =>
-        row.dailyDate === null ? null : { date: row.dailyDate, characters: row.characters },
-      )
+      .map((row) => {
+        return row.dailyDate === null ? null : { date: row.dailyDate, characters: row.characters }
+      })
       .filter(isNotNullish)
   }
 
@@ -142,16 +142,16 @@ class DailyActivityServiceImpl implements DailyActivityService {
       .orderBy('dailyDate', 'desc')
       .execute()
     return rows
-      .map((row) =>
-        row.dailyDate === null
+      .map((row) => {
+        return row.dailyDate === null
           ? null
           : {
               path: row.path,
               dailyDate: row.dailyDate,
               preview: row.preview,
               yearsAgo: Number(year) - Number(row.dailyDate.slice(0, 4)),
-            },
-      )
+            }
+      })
       .filter(isNotNullish)
   }
 }

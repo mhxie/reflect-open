@@ -92,14 +92,15 @@ function recordedOn(
   status: WikiReaderStatus,
   today: string,
 ): boolean {
-  return index.ledgers.some(
-    (ledger) =>
+  return index.ledgers.some((ledger) => {
+    return (
       ledger.valid &&
       ledger.owner === claimId &&
       ledger.block.passes.some(
         (pass) => pass.agent === 'reader' && pass.status === status && pass.at === today,
-      ),
-  )
+      )
+    )
+  })
 }
 
 function sourcesOf(

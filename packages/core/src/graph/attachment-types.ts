@@ -47,9 +47,9 @@ export function attachmentTypeOf(path: string): NoteAttachmentType | null {
     return null
   }
   const extension = name.slice(dot + 1).toLowerCase()
-  const type = NOTE_ATTACHMENT_TYPES.find((candidate) =>
-    ATTACHMENT_TYPE_EXTENSIONS[candidate].includes(extension),
-  )
+  const type = NOTE_ATTACHMENT_TYPES.find((candidate) => {
+    return ATTACHMENT_TYPE_EXTENSIONS[candidate].includes(extension)
+  })
   if (type === undefined) {
     return null
   }

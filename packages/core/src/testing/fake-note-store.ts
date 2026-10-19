@@ -47,16 +47,17 @@ export function fakeNoteStore(initial: Record<string, string> = {}): FakeNoteSto
     beforeWrite: () => {},
     // Each executor turns a synchronous throw into a rejection, as Rust's
     // commands answer.
-    readNote: (path) =>
-      new Promise((resolve) => {
+    readNote: (path) => {
+      return new Promise((resolve) => {
         const contents = files.get(path)
         if (contents === undefined) {
           throw new AppError('notFound', `no such note: ${path}`)
         }
         resolve(contents)
-      }),
-    writeNote: (path, contents, _generation, expectedContents) =>
-      new Promise((resolve) => {
+      })
+    },
+    writeNote: (path, contents, _generation, expectedContents) => {
+      return new Promise((resolve) => {
         store.beforeWrite(path)
         if ((files.get(path) ?? null) !== expectedContents) {
           store.refused += 1
@@ -65,9 +66,10 @@ export function fakeNoteStore(initial: Record<string, string> = {}): FakeNoteSto
         files.set(path, contents)
         store.landed.push({ path, contents })
         resolve()
-      }),
-    createNoteIfAbsent: (path, contents) =>
-      new Promise((resolve) => {
+      })
+    },
+    createNoteIfAbsent: (path, contents) => {
+      return new Promise((resolve) => {
         store.beforeWrite(path)
         if (files.has(path)) {
           resolve({ kind: 'collision' })
@@ -76,7 +78,8 @@ export function fakeNoteStore(initial: Record<string, string> = {}): FakeNoteSto
         files.set(path, contents)
         store.landed.push({ path, contents })
         resolve({ kind: 'created', modifiedMs: null })
-      }),
+      })
+    },
   }
   return store
 }

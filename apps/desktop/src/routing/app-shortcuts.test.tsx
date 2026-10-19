@@ -38,6 +38,7 @@ import { ShortcutsProvider, useShortcuts } from '@/providers/shortcuts-provider.
 import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
 import { MOD_KEY, NON_MOD_KEY } from '@/test-utils/mod-key.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { MockToastAddOptions } from '@/test-utils/toast.ts'
 import { useAppShortcuts } from './app-shortcuts.ts'
 import { useRouter } from './router.tsx'
@@ -113,6 +114,7 @@ interface ShortcutsHookOptions {
 async function shortcutsHook(options?: ShortcutsHookOptions) {
   const readSource = (): Promise<string> => Promise.resolve('# A\n')
   const services = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     platform: createTestPlatformService(platform),
     noteDocuments: {
       readSource,
@@ -129,13 +131,11 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
     .spyOn(appLayer.linkNavigation, 'openRouteInNewWindow')
     .mockResolvedValue(true)
   isNativeMenuInstalled = vi.spyOn(appLayer.nativeMenu, 'isInstalled').mockReturnValue(false)
-  getPinnedNotes = vi
-    .spyOn(services.indexQuery, 'getPinnedNotes')
-    .mockImplementation(() =>
-      Promise.resolve([
-        ...(options?.pinned?.[services.graphSession.getState().session?.root ?? ''] ?? []),
-      ]),
-    )
+  getPinnedNotes = vi.spyOn(services.indexQuery, 'getPinnedNotes').mockImplementation(() => {
+    return Promise.resolve([
+      ...(options?.pinned?.[services.graphSession.getState().session?.root ?? ''] ?? []),
+    ])
+  })
   const createChatSession = services.chatSessions.create.bind(services.chatSessions)
   vi.spyOn(services.chatSessions, 'create').mockImplementation((options) => {
     const session = createChatSession(options)
@@ -245,9 +245,9 @@ describe('app shortcuts', () => {
     const { result } = await shortcutsHook()
     await act(() => result.current.router.navigate({ kind: 'note', path: 'notes/a.md' }))
     await act(() => press('o'))
-    await vi.waitFor(() =>
-      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/a.md', { pinned: 1024 }, 1),
-    )
+    await vi.waitFor(() => {
+      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/a.md', { pinned: 1024 }, 1)
+    })
     expect(app.noteRows.getOverlay('notes/a.md')).toEqual({ isPinned: true, pinnedOrder: 1024 })
     await act(() => press('o'))
     expect(commitNoteFrontmatter).toHaveBeenCalledTimes(1)
@@ -273,23 +273,20 @@ describe('app shortcuts', () => {
     await act(() => result.current.router.navigate({ kind: 'daily', date: '2026-09-08' }))
     await act(() => result.current.setFocusedDailyDate('2026-09-07'))
     const action = result.current.context.togglePrivate()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith(
         'daily/2026-09-07.md',
         { private: true },
         1,
-      ),
-    )
+      )
+    })
     expect(app.noteRows.getOverlay('daily/2026-09-07.md')).toEqual({ isPrivate: true })
     write.resolve()
     await action
     // The toggle confirms itself with an Undo, as from every other privacy control.
-    expect(toast.add).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: 'Marked private',
-        actionProps: expect.objectContaining({ children: 'Undo' }),
-      }),
-    )
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Marked private' }))
+    const options = toast.add.mock.lastCall?.[0]
+    expect(options?.actionProps?.children).toBe('Undo')
   })
 
   it('pin and privacy no-op on note-less routes and without a graph', async () => {
@@ -305,7 +302,9 @@ describe('app shortcuts', () => {
   })
 
   it('registers the command keybindings in the central keymap registry', () => {
-    const { keymap } = createTestAppServices()
+    const { keymap } = createTestAppServices(
+      createTestCoreServices({ database: createWasmTestDatabaseService() }),
+    )
     registerAppKeymaps(keymap)
     const bindings = keymap.list()
     for (const key of [
@@ -506,13 +505,13 @@ describe('app shortcuts', () => {
 
   it('⌘F and note commands target a peeked note', async () => {
     const { result } = await shortcutsHook()
-    await act(() =>
-      result.current.peek?.openPeek({
+    await act(() => {
+      return result.current.peek?.openPeek({
         kind: 'note',
         path: 'notes/peeked.md',
         route: { kind: 'note', path: 'notes/peeked.md' },
-      }),
-    )
+      })
+    })
 
     expect(result.current.context.notePath()).toBe('notes/peeked.md')
     await act(() => press('f'))
@@ -670,12 +669,12 @@ describe('app shortcuts', () => {
   it('uses the optimistic pinned order immediately', async () => {
     const { result } = await pinnedShortcutsHook(pinnedNotes(2))
     // A reorder lands in the note-row overlay before the file write does.
-    await act(() =>
+    await act(() => {
       app.noteRows.setOverlay('notes/pin-2.md', GRAPH.generation, {
         isPinned: true,
         pinnedOrder: 0,
-      }),
-    )
+      })
+    })
 
     await act(() => press('1'))
 
@@ -688,9 +687,9 @@ describe('app shortcuts', () => {
     expect(result.current.router.route).toEqual({ kind: 'today' })
 
     // An unpin lands in the overlay first: the slot it frees opens nothing.
-    await act(() =>
-      app.noteRows.setOverlay('notes/pin-1.md', GRAPH.generation, { isPinned: false }),
-    )
+    await act(() => {
+      app.noteRows.setOverlay('notes/pin-1.md', GRAPH.generation, { isPinned: false })
+    })
     await act(() => press('1'))
     expect(result.current.router.route).toEqual({ kind: 'today' })
   })
@@ -715,9 +714,9 @@ describe('app shortcuts', () => {
     await vi.waitFor(() => expect(result.current.pinned).toHaveLength(1))
     const context = result.current.context
     await act(() => app.graphSession.setGraph({ root: '/other', name: 'Other', generation: 2 }))
-    await vi.waitFor(() =>
-      expect(result.current.pinned).toMatchObject([{ path: 'notes/other.md' }]),
-    )
+    await vi.waitFor(() => {
+      expect(result.current.pinned).toMatchObject([{ path: 'notes/other.md' }])
+    })
     await act(() => result.current.router.navigate({ kind: 'settings' }))
 
     await act(() => context.openPinnedNote(0))

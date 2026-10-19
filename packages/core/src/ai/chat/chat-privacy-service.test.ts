@@ -13,8 +13,8 @@ import { project } from '../../indexing/flow-test-harness.ts'
 import { cloudTarget, modelTarget } from '../../privacy/on-device.ts'
 import { overrideNoteFileService } from '../../testing/graph.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAssetStoreService,
-  createTestDatabaseService,
   createTestGraphSessionService,
   createTestNoteFileService,
   createTestOnDeviceModelService,
@@ -75,7 +75,7 @@ interface IndexOptions {
  * also answers the live reads) and the given asset references.
  */
 async function openIndex(notes: Record<string, string>, options: IndexOptions = {}) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   for (const [path, source] of Object.entries(notes)) {
     database.applyProjection(project(path, source, 1))
   }
@@ -103,10 +103,11 @@ async function openIndex(notes: Record<string, string>, options: IndexOptions = 
       }
       return Promise.resolve({ kind: 'content', content })
     },
-    listAttachments: () =>
-      Promise.resolve(
+    listAttachments: () => {
+      return Promise.resolve(
         (options.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 })),
-      ),
+      )
+    },
   })
   const xArchive = createTestXArchiveService()
   const assetReferences = createAssetReferences({ database, xArchive })
@@ -837,7 +838,7 @@ describe('historyForTarget fails closed', () => {
   it('leaves out an exchange whose stored tool message is malformed', async () => {
     const { privacy, scope } = await openIndex({ 'notes/atlas.md': PUBLIC })
     // Stored rows are validated by envelope only, so content can be anything.
-    const malformed: ModelMessage = JSON.parse('{"role":"tool","content":{"path":"notes/x.md"}}')
+    const malformed = JSON.parse('{"role":"tool","content":{"path":"notes/x.md"}}') as ModelMessage
     const history: ModelMessage[] = [user('corrupt'), malformed, user('next')]
 
     expect(await privacy.historyForTarget(history, CLOUD, scope)).toEqual({

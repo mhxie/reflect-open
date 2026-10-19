@@ -5,6 +5,7 @@ import {
   trackAssetDescriptionSessions,
   trackAssetOcrMaintenanceSessions,
 } from './testing/assets.ts'
+import { createNodeTestDatabaseService } from './testing/database.ts'
 import { createTestCoreServices, type TestCoreServices } from './testing/services.ts'
 import {
   createTestBackupService,
@@ -98,7 +99,7 @@ function sessionDeps(app: TestCoreServices) {
  * One graph session's services over recording doubles.
  */
 function setup(options?: SetupOptions) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createNodeTestDatabaseService() })
   const assetSessions = trackAssetDescriptionSessions(app.assetDescription)
   const ocrSessions = trackAssetOcrMaintenanceSessions(app.assetDescription)
   const controller = new AbortController()
@@ -304,7 +305,7 @@ describe('createGraphServices', () => {
   })
 
   it('leaves nothing running for a session that already ended', () => {
-    const app = createTestCoreServices()
+    const app = createTestCoreServices({ database: createNodeTestDatabaseService() })
     const controller = new AbortController()
     controller.abort()
     const session = createGraphSession(

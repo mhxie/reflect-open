@@ -28,6 +28,7 @@ import { createRecordingService, type RecordingService } from '../recordings/rec
 import type { SecretStoreService } from '../secrets/secret-store-service.ts'
 import type { SettingsService } from '../settings/settings-service.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAiKeyValidationService,
   createTestIdService,
   createTestAssetStoreService,
@@ -35,7 +36,6 @@ import {
   createTestCalendarService,
   createTestClockService,
   createTestContactsService,
-  createTestDatabaseService,
   createTestFileChangeService,
   createTestActivityPort,
   createTestIpcBridgeService,
@@ -166,11 +166,9 @@ export async function createAudioMemoTestKit(
   const aiCredentials = createAiCredentialService({ secretStore: secrets })
   const transcription = createTestTranscriptionService('memo transcript')
   const localTranscription = createTestLocalTranscriptionService()
-  const enrichMock = vi
-    .fn<TranscriptEnrichmentService['enrich']>()
-    .mockImplementation((input) =>
-      Promise.resolve({ title: 'Memo Transcript', body: input.transcript }),
-    )
+  const enrichMock = vi.fn<TranscriptEnrichmentService['enrich']>().mockImplementation((input) => {
+    return Promise.resolve({ title: 'Memo Transcript', body: input.transcript })
+  })
   const transcriptEnrichment = createTranscriptEnrichmentService({
     languageModel: createTestLanguageModelService(),
   })
@@ -230,8 +228,8 @@ export async function createAudioMemoTestKit(
       noteFile.set(path, 'x', { modifiedMs: recordingOptions?.modifiedMs ?? 0 })
       assets.set(path, 'audio-bytes')
     },
-    reconcile: (overrides = {}) =>
-      service.reconcile({
+    reconcile: (overrides = {}) => {
+      return service.reconcile({
         generation: 3,
         formatTranscript: false,
         transcriptionPrompt: '',
@@ -239,7 +237,8 @@ export async function createAudioMemoTestKit(
         localModel: 'large-v3-turbo',
         transcriptionLanguages: [],
         ...overrides,
-      }),
+      })
+    },
   }
 }
 
@@ -278,7 +277,7 @@ export function createTestRecordingStack(deps: TestRecordingStackDeps): {
     progress,
     logger,
   })
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   const contacts = createTestContactsService()
   const noteCreation = createTestNoteCreationService({ noteFile })
   const wikiResolver = createWikiResolverService({ database })

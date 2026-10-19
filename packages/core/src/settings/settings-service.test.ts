@@ -430,11 +430,11 @@ describe('createSettingsService', () => {
     disk.failSaves = true
 
     settings.update({ editorMarkdownSyntax: 'show' })
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(progress.snapshot()).toMatchObject([
         { label: 'Saving settings', status: 'failed', message: 'disk full' },
-      ]),
-    )
+      ])
+    })
     expect(settings.get().editorMarkdownSyntax).toBe('show')
   })
 

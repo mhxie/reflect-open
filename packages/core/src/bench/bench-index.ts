@@ -10,7 +10,7 @@ import { createSearchService, type SearchService } from '../indexing/search-serv
 import { createSuggestionService, type SuggestionService } from '../indexing/suggestion-service.ts'
 import { createWikiResolverService } from '../indexing/wiki-resolver-service.ts'
 import { parseNote } from '../markdown/index.ts'
-import { createTestDatabaseService } from '../testing/database.ts'
+import { createNodeTestDatabaseService } from '../testing/database.ts'
 import { generateCorpus, type CorpusNote } from './corpus.ts'
 
 /**
@@ -73,14 +73,15 @@ function sqliteParameter(value: unknown): SQLInputValue {
  */
 function openGraphDatabase(path: string): DatabaseService {
   const database = new DatabaseSync(path, { readOnly: true })
-  const runQuery = (sql: string, params: readonly unknown[]): Promise<unknown> =>
-    Promise.try(() => {
+  const runQuery = (sql: string, params: readonly unknown[]): Promise<unknown> => {
+    return Promise.try(() => {
       try {
         return database.prepare(sql).all(...params.map(sqliteParameter))
       } catch (error) {
         throw toAppError(error)
       }
     })
+  }
   return { db: createDb(runQuery), runQuery }
 }
 
@@ -89,7 +90,7 @@ function openGraphDatabase(path: string): DatabaseService {
  * migrations, through the same writer mirror the core tests use.
  */
 export function buildSyntheticIndex(notes: readonly CorpusNote[]): DatabaseService {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   for (const note of notes) {
     database.applyProjection(
       buildIndexedNote(parseNote({ path: note.path, source: note.source }), {

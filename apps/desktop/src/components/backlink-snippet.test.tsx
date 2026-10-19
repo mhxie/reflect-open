@@ -1,8 +1,9 @@
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { SnippetTask, TaskService } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { BacklinkSnippet } from './backlink-snippet.tsx'
 
 /**
@@ -45,7 +46,7 @@ async function renderSnippet(
   text: string = SNIPPET,
   onWikilinkClick: () => void = () => {},
 ) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   operations = app.progress
   writeTask = vi
     .spyOn(app.tasks, 'writeTask')
@@ -154,8 +155,9 @@ describe('BacklinkSnippet wiki-link chips', () => {
 
 describe('BacklinkSnippet saved embed snapshots', () => {
   const THUMBNAIL = 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg'
-  const showsImage = (container: HTMLElement, src: string): boolean =>
-    [...container.querySelectorAll('img')].some((img) => img.getAttribute('src') === src)
+  const showsImage = (container: HTMLElement, src: string): boolean => {
+    return [...container.querySelectorAll('img')].some((img) => img.getAttribute('src') === src)
+  }
   const SNAPSHOT = JSON.stringify({
     snapshot: {
       kind: 'youtube-video',
@@ -232,7 +234,8 @@ describe('BacklinkSnippet network policy', () => {
   let app: TestCoreServices
 
   beforeEach(() => {
-    app = createTestCoreServices()
+    app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    onTestFinished(() => app.database.close())
   })
 
   /**
@@ -247,10 +250,11 @@ describe('BacklinkSnippet network policy', () => {
     ...app.xArchive.syndicationRequests().map(() => 'x_syndication_fetch'),
   ]
 
-  const remoteImages = (container: HTMLElement): string[] =>
-    [...container.querySelectorAll('img')]
+  const remoteImages = (container: HTMLElement): string[] => {
+    return [...container.querySelectorAll('img')]
       .map((image) => image.getAttribute('src') ?? '')
       .filter((source) => /^https?:/i.test(source))
+  }
 
   function snippet(sourcePrivate: boolean) {
     return (

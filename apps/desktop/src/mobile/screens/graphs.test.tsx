@@ -10,6 +10,7 @@ import {
   createTestPlatformService,
 } from '@reflect/core/testing'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileGraphs } from './graphs.tsx'
 
 /**
@@ -53,6 +54,7 @@ let completeOnboarding: MockInstance<CompleteOnboarding>
  */
 async function mount(storage: MobileStorageInfo = STORAGE): Promise<void> {
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     platform: createTestPlatformService(MOBILE_PLATFORM),
     mobileStorage: createTestMobileStorageService({ storage }),
   })
@@ -83,9 +85,9 @@ describe('MobileGraphs', () => {
       .toHaveAttribute('aria-current', 'true')
 
     await userEvent.click(page.getByRole('button', { name: 'Work' }))
-    await vi.waitFor(() =>
-      expect(completeOnboarding).toHaveBeenCalledWith('icloud', '/iCloud/Documents/Work'),
-    )
+    await vi.waitFor(() => {
+      expect(completeOnboarding).toHaveBeenCalledWith('icloud', '/iCloud/Documents/Work')
+    })
   })
 
   it('ignores a tap on the graph that is already open', async () => {
@@ -109,9 +111,9 @@ describe('MobileGraphs', () => {
     await userEvent.fill(page.getByLabelText('Name'), 'Journal')
     await userEvent.click(page.getByRole('button', { name: 'Create' }))
 
-    await vi.waitFor(() =>
-      expect(completeOnboarding).toHaveBeenCalledWith('icloud', '/iCloud/Documents/Journal'),
-    )
+    await vi.waitFor(() => {
+      expect(completeOnboarding).toHaveBeenCalledWith('icloud', '/iCloud/Documents/Journal')
+    })
   })
 
   it('rejects a colliding name before it ever reaches the backend', async () => {

@@ -25,6 +25,7 @@ import { useChatSession, type ChatContextValue } from '@/providers/chat-provider
 import type { Route } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ChatScreen } from './chat-screen.tsx'
 import { deepLinkForRoute } from '@reflect/app'
 
@@ -138,6 +139,7 @@ async function renderChat() {
   probedSendRef.current = null
   probedRouteRef.current = null
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     secretStore: createTestSecretStoreService(
       settingsState.apiKey === null ? {} : { [aiKeySecretName(MODEL.id)]: settingsState.apiKey },
     ),
@@ -289,12 +291,12 @@ describe('ChatScreen', () => {
       .getByRole('button', { name: 'Brief', exact: true })
       .click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(noteWindows.openedNoteWindows()).toEqual([
         deepLinkForRoute({ kind: 'note', path: 'notes/atlas.md' }),
         deepLinkForRoute({ kind: 'note', path: 'notes/brief.md' }),
-      ]),
-    )
+      ])
+    })
     expect(probedRouteRef.current).toEqual({ kind: 'today' })
   })
 
@@ -312,9 +314,9 @@ describe('ChatScreen', () => {
     await userEvent.type(view.getByLabelText('Chat message'), 'what should I open?{Enter}')
     await view.getByTestId('wikilink').click()
 
-    await vi.waitFor(() =>
-      expect(probedRouteRef.current).toEqual({ kind: 'note', path: 'notes/atlas.md' }),
-    )
+    await vi.waitFor(() => {
+      expect(probedRouteRef.current).toEqual({ kind: 'note', path: 'notes/atlas.md' })
+    })
   })
 
   it('opens ⌘-clicked cited wiki links in a new window', async () => {
@@ -331,14 +333,14 @@ describe('ChatScreen', () => {
     await userEvent.type(view.getByLabelText('Chat message'), 'what should I open?{Enter}')
     await view.getByTestId('wikilink').click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(noteWindows.openedNoteWindows()).toContain(
         deepLinkForRoute({
           kind: 'note',
           path: 'notes/atlas.md',
         }),
-      ),
-    )
+      )
+    })
     expect(probedRouteRef.current).toEqual({ kind: 'today' })
   })
 
@@ -351,12 +353,12 @@ describe('ChatScreen', () => {
 
     await expect.element(page.getByText('OpenAI')).toBeInTheDocument()
     await expect
-      .poll(() =>
-        page
+      .poll(() => {
+        return page
           .getByRole('option')
           .elements()
-          .map((option) => option.textContent),
-      )
+          .map((option) => option.textContent)
+      })
       .toEqual([...aiProvider('openai').models.map((model) => model.label), MODEL.model])
   })
 
@@ -530,8 +532,8 @@ describe('ChatScreen', () => {
     const firstChunk = '# Streaming\n\n**markdown'
     const secondChunk = '**\n\n- First item\n- Second item\n\n```ts\nconst answer = 42'
     const finalChunk = '\n```\n\nSee [[Atlas]].'
-    chatEngine.setScript(() =>
-      (async function* (): AsyncGenerator<ChatStreamEvent> {
+    chatEngine.setScript(() => {
+      return (async function* (): AsyncGenerator<ChatStreamEvent> {
         yield { type: 'text-delta', text: firstChunk }
         await nextChunk.promise
         yield { type: 'text-delta', text: secondChunk }
@@ -541,8 +543,8 @@ describe('ChatScreen', () => {
           type: 'complete',
           messages: [{ role: 'assistant', content: firstChunk + secondChunk + finalChunk }],
         }
-      })(),
-    )
+      })()
+    })
     const view = await renderChat()
 
     await userEvent.type(view.getByLabelText('Chat message'), 'hi{Enter}')
@@ -591,14 +593,14 @@ describe('ChatScreen', () => {
   it('shows the withheld-history notice once, and keeps thinking under it', async () => {
     configureModel()
     const reply = Promise.withResolvers<void>()
-    chatEngine.setScript(() =>
-      (async function* (): AsyncGenerator<ChatStreamEvent> {
+    chatEngine.setScript(() => {
+      return (async function* (): AsyncGenerator<ChatStreamEvent> {
         yield { type: 'history-withheld' }
         await reply.promise
         yield { type: 'text-delta', text: 'First answer.' }
         yield { type: 'complete', messages: [{ role: 'assistant', content: 'First answer.' }] }
-      })(),
-    )
+      })()
+    })
     const view = await renderChat()
 
     await userEvent.type(view.getByLabelText('Chat message'), 'first{Enter}')

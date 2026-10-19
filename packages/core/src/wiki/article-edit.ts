@@ -133,12 +133,15 @@ export function planWikiClaimBoundary(
   if (claim?.open == null || claim.close === null)
     return { ok: false, message: 'Select an existing valid claim to adjust its boundaries.' }
   const markers = [claim.open, claim.close]
-  const offset = (position: number): number =>
-    position -
-    markers.reduce(
-      (removed, marker) => removed + Math.max(0, Math.min(marker.to, position) - marker.from),
-      0,
+  const offset = (position: number): number => {
+    return (
+      position -
+      markers.reduce(
+        (removed, marker) => removed + Math.max(0, Math.min(marker.to, position) - marker.from),
+        0,
+      )
     )
+  }
   let candidate = source
   for (const marker of [...markers].reverse())
     candidate = candidate.slice(0, marker.from) + candidate.slice(marker.to)
@@ -183,9 +186,9 @@ function wrapClaim(
   const numbers = [
     ...index.claims.map((claim) => claim.number),
     ...index.markers.flatMap((marker) => (marker.id === null ? [] : Number(marker.id.slice(1)))),
-    ...index.ledgers.flatMap((ledger) =>
-      ledger.owner === null ? [] : Number(ledger.owner.slice(1)),
-    ),
+    ...index.ledgers.flatMap((ledger) => {
+      return ledger.owner === null ? [] : Number(ledger.owner.slice(1))
+    }),
   ]
   const next = Math.max(0, ...numbers) + 1
   if (!Number.isSafeInteger(next))

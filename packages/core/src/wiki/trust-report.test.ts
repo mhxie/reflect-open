@@ -28,7 +28,7 @@ function exampleReport(): WikiTrustReport {
 }
 
 function withClaim(claim: unknown): string {
-  const json: Record<string, unknown> = JSON.parse(example)
+  const json = JSON.parse(example) as Record<string, unknown>
   return JSON.stringify({ ...json, notes: { [NOTE]: { claims: { c1: claim } } } })
 }
 
@@ -52,7 +52,7 @@ describe('parseWikiTrustReport', () => {
   })
 
   it('refuses another format or version, naming the field', () => {
-    const json: Record<string, unknown> = JSON.parse(example)
+    const json = JSON.parse(example) as Record<string, unknown>
     expect(parseWikiTrustReport(JSON.stringify({ ...json, version: 2 }))).toEqual({
       ok: false,
       error: 'The trust report does not match reflect-wiki-trust version 1 at version.',
@@ -62,7 +62,7 @@ describe('parseWikiTrustReport', () => {
   })
 
   it('drops a claim with a malformed id alone, keeping its valid siblings', () => {
-    const json: Record<string, unknown> = JSON.parse(example)
+    const json = JSON.parse(example) as Record<string, unknown>
     const notes = json['notes'] as Record<string, { claims: Record<string, unknown> }>
     const claims = notes[NOTE]!.claims
     const parsed = parseWikiTrustReport(
@@ -73,7 +73,7 @@ describe('parseWikiTrustReport', () => {
   })
 
   it('matches note keys whatever Unicode form the harness wrote', () => {
-    const json: Record<string, unknown> = JSON.parse(example)
+    const json = JSON.parse(example) as Record<string, unknown>
     const notes = json['notes'] as Record<string, unknown>
     const decomposed = 'wiki/Cafe\u{301}.md'
     const parsed = parseWikiTrustReport(
@@ -126,7 +126,7 @@ describe('parseWikiTrustReport', () => {
   })
 
   it('refuses a source weight outside 0 to 1', () => {
-    const json: Record<string, unknown> = JSON.parse(example)
+    const json = JSON.parse(example) as Record<string, unknown>
     const parsed = parseWikiTrustReport(
       JSON.stringify({ ...json, sources: { x: { label: 'X', weight: 3, trusted: true } } }),
     )

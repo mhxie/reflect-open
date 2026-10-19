@@ -32,8 +32,8 @@ import { createAssetPrivacyService } from '../../assets/asset-privacy-service.ts
 import { cloudTarget, modelTarget, type VerifiedModelTarget } from '../../privacy/on-device.ts'
 import { createPrivacyService, PrivateNoteError } from '../../privacy/privacy-service.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAssetStoreService,
-  createTestDatabaseService,
   createTestNoteFileService,
   createTestOnDeviceModelService,
   createTestRetrievalService,
@@ -125,10 +125,11 @@ function buildNoteTools(effects: ToolEffects = {}): NoteTools {
   const noteFile = createTestNoteFileService()
   vi.spyOn(noteFile, 'readShareable').mockImplementation(
     effects.readShareableFn ??
-      (async (path) =>
-        isLocalOnlyPath(localOnly, path)
+      (async (path) => {
+        return isLocalOnlyPath(localOnly, path)
           ? { kind: 'localOnly' }
-          : { kind: 'content', content: await readSource(path) }),
+          : { kind: 'content', content: await readSource(path) }
+      }),
   )
   vi.spyOn(noteFile, 'readForDevice').mockImplementation(
     effects.readDeviceNoteFn ??
@@ -137,14 +138,16 @@ function buildNoteTools(effects: ToolEffects = {}): NoteTools {
         localOnly: isLocalOnlyPath(localOnly, path),
       })),
   )
-  vi.spyOn(noteFile, 'listAttachments').mockImplementation(() =>
-    Promise.resolve((effects.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 }))),
-  )
+  vi.spyOn(noteFile, 'listAttachments').mockImplementation(() => {
+    return Promise.resolve(
+      (effects.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 })),
+    )
+  })
   const retrieval = createTestRetrievalService()
   vi.spyOn(retrieval, 'retrieve').mockImplementation(
     effects.retrieveFn ?? (() => Promise.resolve([])),
   )
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   const noteList = createNoteListService({ database })
   vi.spyOn(noteList, 'listRecentNotes').mockImplementation(
     effects.listRecentNotesFn ?? (() => Promise.resolve([])),
@@ -338,11 +341,12 @@ describe('search_notes', () => {
 
   it('drops private hits entirely — not even the title goes out', async () => {
     const tools = buildNoteTools({
-      retrieveFn: () =>
-        Promise.resolve([
+      retrieveFn: () => {
+        return Promise.resolve([
           hit({}),
           hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE, snippet: '', isPrivate: true }),
-        ]),
+        ])
+      },
       readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runSearch(tools, { query: 'diary' })
@@ -434,8 +438,9 @@ describe('read_notes', () => {
 
   it('returns the body without frontmatter, titled from the note', async () => {
     const tools = buildNoteTools({
-      readNoteFn: () =>
-        Promise.resolve('---\npinned: true\n---\n# Project Atlas\n\nLaunch plan.\n'),
+      readNoteFn: () => {
+        return Promise.resolve('---\npinned: true\n---\n# Project Atlas\n\nLaunch plan.\n')
+      },
     })
     const output = await runRead(tools, 'notes/atlas.md')
     if (!output.ok) {
@@ -641,10 +646,11 @@ describe('read_assets', () => {
 
   it('refuses an asset whose sidecar Rust keeps local-only', async () => {
     const tools = buildNoteTools({
-      readShareableFn: (path) =>
-        Promise.resolve(
+      readShareableFn: (path) => {
+        return Promise.resolve(
           path === SIDECAR ? { kind: 'localOnly' } : { kind: 'content', content: PUBLIC_REF },
-        ),
+        )
+      },
       assetReferencingNotePathsFn: () => Promise.resolve(['notes/deck.md']),
     })
     const output = await runReadAsset(tools, ASSET)
@@ -898,12 +904,13 @@ describe('read_assets', () => {
     it('marks a description whose sidecar Rust reports local-only', async () => {
       const tools = buildNoteTools({
         target: await onDeviceTarget(),
-        readDeviceNoteFn: (path) =>
-          Promise.resolve(
+        readDeviceNoteFn: (path) => {
+          return Promise.resolve(
             path.endsWith('.reflect.md')
               ? { content: 'Private caption', localOnly: true }
               : { content: '![photo](assets/photo.png)', localOnly: false },
-          ),
+          )
+        },
         assetReferencingNotePathsFn: () => Promise.resolve(['notes/public.md']),
       })
       const output = await runReadAsset(tools, 'assets/photo.png')
@@ -1036,11 +1043,12 @@ describe('list_recent_notes', () => {
 
   it('drops an indexed-private row entirely — not even the title goes out', async () => {
     const tools = buildNoteTools({
-      listRecentNotesFn: () =>
-        Promise.resolve([
+      listRecentNotesFn: () => {
+        return Promise.resolve([
           recentRow({}),
           recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE, isPrivate: true }),
-        ]),
+        ])
+      },
       readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runRecents(tools, {})
@@ -1055,8 +1063,9 @@ describe('list_recent_notes', () => {
 
   it('drops a row whose live frontmatter turned private before reindex (TOCTOU)', async () => {
     const tools = buildNoteTools({
-      listRecentNotesFn: () =>
-        Promise.resolve([recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE })]),
+      listRecentNotesFn: () => {
+        return Promise.resolve([recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE })])
+      },
       readNoteFn: () => Promise.resolve('---\nprivate: true\n---\n# Diary\n'),
     })
     const output = await runRecents(tools, {})
@@ -1128,9 +1137,9 @@ describe('list_daily_notes', () => {
   })
 
   it('cuts an over-cap range to the cap and flags the truncation', async () => {
-    const days = Array.from({ length: MAX_DAILY_NOTE_DAYS + 1 }, (_, index) =>
-      dailyRow(`2026-05-${String(index + 1).padStart(2, '0')}`),
-    )
+    const days = Array.from({ length: MAX_DAILY_NOTE_DAYS + 1 }, (_, index) => {
+      return dailyRow(`2026-05-${String(index + 1).padStart(2, '0')}`)
+    })
     const tools = buildNoteTools({
       listDailyNotesFn: () => Promise.resolve(days),
       readNoteFn: () => Promise.resolve('a public body\n'),
@@ -1142,8 +1151,11 @@ describe('list_daily_notes', () => {
 
   it('drops a daily whose live frontmatter turned private before reindex (TOCTOU)', async () => {
     const tools = buildNoteTools({
-      listDailyNotesFn: () =>
-        Promise.resolve([dailyRow('2026-06-10', { path: PRIVATE_PATH, title: PRIVATE_TITLE })]),
+      listDailyNotesFn: () => {
+        return Promise.resolve([
+          dailyRow('2026-06-10', { path: PRIVATE_PATH, title: PRIVATE_TITLE }),
+        ])
+      },
       readNoteFn: () => Promise.resolve('---\nprivate: true\n---\n# Diary\n'),
     })
     const output = await runDailies(tools, { start: '2026-06-01', end: '2026-06-30' })
@@ -1180,13 +1192,15 @@ describe('bound to a verified on-device model', () => {
   it('marks a stale public search snapshot whose sidecar Rust reports local-only', async () => {
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
-      retrieveFn: () =>
-        Promise.resolve([hit({ snippet: PRIVATE_BODY, assetTextHash: 'a'.repeat(64) })]),
-      readDeviceNoteFn: (path) =>
-        Promise.resolve({
+      retrieveFn: () => {
+        return Promise.resolve([hit({ snippet: PRIVATE_BODY, assetTextHash: 'a'.repeat(64) })])
+      },
+      readDeviceNoteFn: (path) => {
+        return Promise.resolve({
           content: path.endsWith('.reflect.md') ? PRIVATE_BODY : '# Public',
           localOnly: path.endsWith('.reflect.md'),
-        }),
+        })
+      },
       // The attachment check reads the sidecar through the tools' own reader.
       hasRestrictedSearchSourcesFn: async (_path, _source, { readNote }) => {
         await readNote(`people/${FOLDED_SECURE}/scan.png.reflect.md`)
@@ -1247,8 +1261,9 @@ describe('bound to a verified on-device model', () => {
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
       localOnlyFolders: ['secure'],
-      readDeviceNoteFn: (path) =>
-        Promise.resolve({ content: '# Visa\n', localOnly: path === folded }),
+      readDeviceNoteFn: (path) => {
+        return Promise.resolve({ content: '# Visa\n', localOnly: path === folded })
+      },
     })
     expect(await runRead(tools, folded)).toMatchObject({
       ok: true,
@@ -1284,10 +1299,11 @@ describe('bound to a verified on-device model', () => {
         dailies.push(range)
         return Promise.resolve([dailyRow('2026-06-10')])
       },
-      readNoteFn: (path) =>
-        Promise.resolve(
+      readNoteFn: (path) => {
+        return Promise.resolve(
           path === 'daily/2026-06-10.md' ? '---\nprivate: true\n---\n# Today\n' : 'a public body\n',
-        ),
+        )
+      },
     })
     const recent = await runRecents(tools, {})
     if (!recent.ok) {

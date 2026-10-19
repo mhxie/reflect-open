@@ -204,10 +204,9 @@ export interface AttendeeSuggestions {
 function meetingAlreadyLinked(source: string, title: string): boolean {
   const { headings, wikiLinks } = parseNote({ path: '', source })
   const sectionHeadings = topLevelHeadings(headings)
-  const heading = sectionHeadings.find(
-    (candidate) =>
-      candidate.level <= 2 && headingNamesSection(candidate, wikiLinks, [MEETINGS_HEADING]),
-  )
+  const heading = sectionHeadings.find((candidate) => {
+    return candidate.level <= 2 && headingNamesSection(candidate, wikiLinks, [MEETINGS_HEADING])
+  })
   if (!heading) {
     return false
   }
@@ -282,9 +281,9 @@ export function meetingLine(input: {
     parts.push(input.startTime ? 'met with ' : 'Met with ')
     parts.push(
       input.attendees
-        .map((attendee) =>
-          attendee.kind === 'linked' ? `[[${attendee.insertText}]]` : attendee.text,
-        )
+        .map((attendee) => {
+          return attendee.kind === 'linked' ? `[[${attendee.insertText}]]` : attendee.text
+        })
         .join(', '),
     )
     parts.push(' for ')
@@ -498,11 +497,11 @@ class MeetingServiceImpl implements MeetingService {
     ).filter(({ attendee }) => attendee.name.toLowerCase() !== title.toLowerCase())
     const line = meetingLine({
       title,
-      attendees: attendees.map((resolved) =>
-        resolved.kind === 'plain'
+      attendees: attendees.map((resolved) => {
+        return resolved.kind === 'plain'
           ? { kind: 'plain', text: resolved.attendee.name }
-          : { kind: 'linked', insertText: resolved.insertText },
-      ),
+          : { kind: 'linked', insertText: resolved.insertText }
+      }),
       backlinkMeeting: input.backlinkMeeting,
       startTime: input.startTime,
     })
@@ -512,14 +511,15 @@ class MeetingServiceImpl implements MeetingService {
     const appended = await patchNote(
       noteFile,
       daily,
-      (current) =>
-        input.backlinkMeeting && current !== null && meetingAlreadyLinked(current, title)
+      (current) => {
+        return input.backlinkMeeting && current !== null && meetingAlreadyLinked(current, title)
           ? null
           : appendListItem(current ?? '', {
               kind: 'bullet',
               markdown: line,
               section: MEETINGS_SECTION,
-            }),
+            })
+      },
       generation,
     )
     if (appended.patched === null) {

@@ -9,7 +9,7 @@ import {
 import { parseNote } from '../markdown/index.ts'
 import { createTestXArchiveService } from '../testing/capture.ts'
 import { createTestClockService } from '../testing/clock.ts'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createTestFileChangeService } from '../testing/file-change.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createTestAssetStoreService, createTestNoteFileService } from '../testing/graph.ts'
@@ -84,7 +84,7 @@ function setup(options?: {
   stored?: readonly StoredNote[]
   read?: (path: string) => void
 }) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   databases.push(database)
   seedNotes(database, options?.indexed ?? [])
   for (const { path, markdown, fileHash, mtime } of options?.stored ?? []) {
@@ -323,20 +323,19 @@ describe('rebuild', () => {
     const { indexer, store, methods } = setup({
       files: notes('notes/a.md', 'notes/b.md', 'notes/c.md'),
       store: {
-        fail: (call) =>
-          call.method === 'applyBatch' && call.notes.length > 1
+        fail: (call) => {
+          return call.method === 'applyBatch' && call.notes.length > 1
             ? new Error('batch payload refused')
-            : undefined,
+            : undefined
+        },
       },
     })
 
     await indexer.rebuild({ generation: 1, ...PASS })
 
-    const attempted = store
-      .calls()
-      .flatMap((call) =>
-        call.method === 'applyBatch' ? [call.notes.map((note) => note.path)] : [],
-      )
+    const attempted = store.calls().flatMap((call) => {
+      return call.method === 'applyBatch' ? [call.notes.map((note) => note.path)] : []
+    })
     expect(attempted).toEqual([
       ['notes/a.md', 'notes/b.md', 'notes/c.md'],
       ['notes/a.md', 'notes/b.md'],
@@ -356,10 +355,11 @@ describe('rebuild', () => {
     const { indexer, methods } = setup({
       files: notes('notes/bad.md'),
       store: {
-        fail: (call) =>
-          call.method === 'applyBatch'
+        fail: (call) => {
+          return call.method === 'applyBatch'
             ? new AppError('parse', 'unexpected end of hex escape')
-            : undefined,
+            : undefined
+        },
       },
     })
     const skipped: Array<{ path: string; message: string }> = []
@@ -380,8 +380,9 @@ describe('rebuild', () => {
     const { indexer, methods } = setup({
       files: notes('notes/bad.md'),
       store: {
-        fail: (call) =>
-          call.method === 'applyBatch' ? new Error('single note refused') : undefined,
+        fail: (call) => {
+          return call.method === 'applyBatch' ? new Error('single note refused') : undefined
+        },
       },
     })
 

@@ -1,11 +1,12 @@
 import { page, userEvent } from 'vitest/browser'
-import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { ReactNode } from 'react'
 import type { OpenTask, TaskService, TaskWriteResult } from '@reflect/core'
 import { createTestCoreServices, makeOpenTask, type TestCoreServices } from '@reflect/core/testing'
 import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { DayTasksSection } from './day-tasks-section.tsx'
 
 const TODAY = '2026-10-03'
@@ -56,7 +57,8 @@ function renderSection(date: string) {
 
 beforeEach(() => {
   // A fresh app per test, so its task service's recently-completed set starts empty.
-  app = createTestCoreServices()
+  app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   app.clock.setToday(TODAY)
   getOpenTasks = vi.spyOn(app.tasks, 'getOpenTasks').mockResolvedValue([])
   writeTask = vi.spyOn(app.tasks, 'writeTask').mockResolvedValue(WRITTEN)

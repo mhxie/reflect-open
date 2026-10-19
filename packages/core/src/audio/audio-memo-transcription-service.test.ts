@@ -740,9 +740,9 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
   it('keeps a daily edit that Rust merged with the backlink, writing it once', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    const write = mergeNextDailyWrite(kit, (contents) =>
-      contents.replace('morning thoughts\n', 'morning thoughts\nlunch with Ada\n'),
-    )
+    const write = mergeNextDailyWrite(kit, (contents) => {
+      return contents.replace('morning thoughts\n', 'morning thoughts\nlunch with Ada\n')
+    })
 
     const outcome = await kit.reconcile()
 

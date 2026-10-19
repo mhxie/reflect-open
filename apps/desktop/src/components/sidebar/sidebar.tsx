@@ -59,8 +59,9 @@ export function Sidebar({ graph, context }: SidebarProps): ReactElement {
 
   const generation = graph.generation
   const [dropping, setDropping] = useState(false)
-  const carriesFiles = (event: DragEvent<HTMLDivElement>): boolean =>
-    event.dataTransfer.types.includes('Files')
+  const carriesFiles = (event: DragEvent<HTMLDivElement>): boolean => {
+    return event.dataTransfer.types.includes('Files')
+  }
 
   return (
     <div

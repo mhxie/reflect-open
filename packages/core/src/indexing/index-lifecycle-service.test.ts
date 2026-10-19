@@ -4,7 +4,7 @@ import { createGraphSession, type GraphRole, type GraphSession } from '../graph/
 import type { AppPlatform } from '../ports/platform-facts.ts'
 import { createTestXArchiveService } from '../testing/capture.ts'
 import { createTestClockService } from '../testing/clock.ts'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createTestFileChangeService } from '../testing/file-change.ts'
 import { createTestAssetStoreService, createTestNoteFileService } from '../testing/graph.ts'
 import { createTestIndexLifecycleService } from '../testing/index-lifecycle.ts'
@@ -80,7 +80,7 @@ function setup(options?: {
   role?: GraphRole
   hidden?: boolean
 }) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   databases.push(database)
   seedNotes(database, options?.indexed ?? [])
   const steps: string[] = []
@@ -237,10 +237,11 @@ function heldScans() {
   const settles: Array<() => void> = []
   return {
     settles,
-    onScan: () =>
-      new Promise<void>((resolve) => {
+    onScan: () => {
+      return new Promise<void>((resolve) => {
         settles.push(resolve)
-      }),
+      })
+    },
   }
 }
 
@@ -371,8 +372,9 @@ describe('createIndexLifecycleService', () => {
   it('a superseded or failed pass never fires onReconciled', async () => {
     let fail = false
     const { index, reconciled } = setup({
-      failStore: (call) =>
-        fail && call.method === 'reconcileScan' ? new Error('boom') : undefined,
+      failStore: (call) => {
+        return fail && call.method === 'reconcileScan' ? new Error('boom') : undefined
+      },
     })
     index.sync(endedSessionAt(5)) // stale right after the reconcile
     await index.settled()
@@ -468,8 +470,9 @@ describe('createIndexLifecycleService', () => {
 
   it('logs a sync failure but stop() still settles', async () => {
     const { index, logger } = setup({
-      failStore: (call) =>
-        call.method === 'reconcileScan' ? new Error('reconcile boom') : undefined,
+      failStore: (call) => {
+        return call.method === 'reconcileScan' ? new Error('reconcile boom') : undefined
+      },
     })
     index.sync(sessionAt(5))
     await index.stop()
@@ -734,10 +737,11 @@ describe('rebuildVisibly', () => {
     const settles: Array<() => void> = []
     return {
       settles,
-      onClear: () =>
-        new Promise<void>((resolve) => {
+      onClear: () => {
+        return new Promise<void>((resolve) => {
           settles.push(resolve)
-        }),
+        })
+      },
     }
   }
 
@@ -839,10 +843,11 @@ describe('rebuildVisibly', () => {
   it('warns with a sample when a rebuild reports skipped notes', async () => {
     const { index, operations, logger, reconciled } = setup({
       files: { 'notes/bad.md': '# bad' },
-      failStore: (call) =>
-        call.method === 'applyBatch'
+      failStore: (call) => {
+        return call.method === 'applyBatch'
           ? new AppError('parse', 'unexpected end of hex escape')
-          : undefined,
+          : undefined
+      },
     })
 
     await expect(index.rebuildVisibly()).resolves.toBeUndefined()
@@ -865,8 +870,9 @@ describe('rebuildVisibly', () => {
   it('absorbs a failed rebuild, reports nothing, and releases the in-flight guard', async () => {
     let fail = true
     const { index, operations, reconciled, steps } = setup({
-      failStore: (call) =>
-        fail && call.method === 'clear' ? new Error('index on fire') : undefined,
+      failStore: (call) => {
+        return fail && call.method === 'clear' ? new Error('index on fire') : undefined
+      },
     })
 
     await expect(index.rebuildVisibly()).resolves.toBeUndefined()

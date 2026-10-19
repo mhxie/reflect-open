@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import { literalSearchQuery } from '../indexing/filter-query.ts'
 import {
-  createTestDatabaseService,
+  createNodeTestDatabaseService,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
   createTestGraphSessionService,
@@ -124,7 +124,7 @@ async function setup(options?: {
 }) {
   const notes = options?.notes ?? NOTES
   const modelId = options?.modelId ?? MODEL
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   await seedIndexed(database, notes)
   const noteFile = createTestNoteFileService({
     files: Object.fromEntries(notes.map((note) => [note.path, note.markdown])),
@@ -201,12 +201,12 @@ describe('retrieve', () => {
     expect(hits[0]).toMatchObject({ path: 'notes/rust.md', hasDeviceOnlyContent: true })
     expect(hits[0]!.snippet).toContain('borrow')
     // The flags ride on the palette search's own hits: retrieval reads nothing more.
-    const palette = await queriesDuring(database, () =>
-      search.searchWithFilters(literalSearchQuery('borrow checker'), { limit: 1 }),
-    )
-    const retrieved = await queriesDuring(database, () =>
-      retrieval.retrieve('borrow checker', { mode: 'lexical', limit: 1 }),
-    )
+    const palette = await queriesDuring(database, () => {
+      return search.searchWithFilters(literalSearchQuery('borrow checker'), { limit: 1 })
+    })
+    const retrieved = await queriesDuring(database, () => {
+      return retrieval.retrieve('borrow checker', { mode: 'lexical', limit: 1 })
+    })
     expect(retrieved.map((query) => query.sql)).toEqual(palette.map((query) => query.sql))
   })
 

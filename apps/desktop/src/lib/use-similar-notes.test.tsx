@@ -9,6 +9,7 @@ import {
   type TestNoteFileService,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { queryKeys } from './query-client.ts'
 import { useSimilarNotes } from './use-similar-notes.ts'
 
@@ -49,6 +50,7 @@ async function mount(path: string, client: QueryClient) {
   // The runtime has reported before the mount, as on a second visit to a note.
   await embeddingRuntime.status()
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     noteFile,
     retrieval: createTestRetrievalService({ relatedNotes }),
     embeddingRuntime,
@@ -176,9 +178,9 @@ describe('useSimilarNotes', () => {
     noteFile.set(DAILY, '- rewritten entry\n')
     relatedNotes.mockResolvedValue([hit('notes/c.md')])
     const refilled = await mount('daily/2026-06-09.md', client)
-    await vi.waitFor(() =>
-      expect(refilled.result.current.map((h) => h.path)).toEqual(['notes/c.md']),
-    )
+    await vi.waitFor(() => {
+      expect(refilled.result.current.map((h) => h.path)).toEqual(['notes/c.md'])
+    })
     expect(relatedNotes).toHaveBeenCalledTimes(2)
   })
 

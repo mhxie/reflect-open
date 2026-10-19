@@ -43,14 +43,15 @@ export function normalizeWikiFolder(input: string): string | null {
     .trim()
     .replaceAll(/^\/+|\/+$/g, '')
     .split('/')
-  const valid = segments.every(
-    (segment) =>
+  const valid = segments.every((segment) => {
+    return (
       segment.trim() === segment &&
       segment !== '' &&
       !segment.startsWith('.') &&
       !segment.includes('\\') &&
-      [...segment].every((char) => char.charCodeAt(0) >= 0x20),
-  )
+      [...segment].every((char) => char.charCodeAt(0) >= 0x20)
+    )
+  })
   return valid ? segments.join('/') : null
 }
 

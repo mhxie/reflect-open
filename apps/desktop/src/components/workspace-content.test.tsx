@@ -1,41 +1,26 @@
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
 import type { ReactElement } from 'react'
 import type { Route } from '@reflect/app'
 import type { GraphInfo } from '@reflect/core'
+import { createTestCoreServices, seedNotes } from '@reflect/core/testing'
+import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
+import { PeekProvider } from '@/components/peek/peek-provider.tsx'
+import { formatDayLabel } from '@/lib/dates.ts'
+import { AudioMemoProvider } from '@/providers/audio-memo-provider.tsx'
+import { DeepLinkProvider } from '@/providers/deep-link-provider.tsx'
+import { FocusedDailyProvider } from '@/providers/focused-daily-provider.tsx'
+import { HeadingPickerProvider } from '@/providers/heading-picker-provider.tsx'
+import { NoteFindProvider } from '@/providers/note-find-provider.tsx'
+import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
+import { RecorderProvider } from '@/providers/recorder-provider.tsx'
+import { ShortcutsProvider } from '@/providers/shortcuts-provider.tsx'
 import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
+import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { hover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-
-vi.mock('@/components/command-palette/command-palette.tsx', () => ({
-  CommandPalette: () => null,
-}))
-vi.mock('@/components/context-sidebar/daily-context-sidebar.tsx', () => ({
-  DailyContextSidebar: ({ date }: { date: string }) => (
-    <div data-testid="daily-context">{date}</div>
-  ),
-}))
-vi.mock('@/components/context-sidebar/note-context-sidebar.tsx', () => ({
-  NoteContextSidebar: ({ path }: { path: string }) => <div data-testid="note-context">{path}</div>,
-}))
-vi.mock('@/components/embeddings-sync.tsx', () => ({ EmbeddingsSync: () => null }))
-vi.mock('@/components/note-find-bar.tsx', () => ({ NoteFindBar: () => null }))
-vi.mock('@/components/note-status-bar.tsx', () => ({ NoteStatusBar: () => null }))
-vi.mock('@/components/peek/peek-panel.tsx', () => ({ PeekPanel: () => null }))
-vi.mock('@/components/route-content.tsx', () => ({ RouteContent: () => <div>Route content</div> }))
-vi.mock('@/components/search-ipc-responder.tsx', () => ({ SearchIpcResponder: () => null }))
-vi.mock('@/components/shortcuts-dialog.tsx', () => ({ ShortcutsDialog: () => null }))
-vi.mock('@/components/sidebar/sidebar.tsx', () => ({
-  Sidebar: () => <div data-testid="workspace-sidebar" />,
-}))
-vi.mock('@/components/templates/template-create-dialog.tsx', () => ({
-  TemplateCreateDialog: () => null,
-}))
-vi.mock('@/components/templates/template-picker.tsx', () => ({ TemplatePicker: () => null }))
-vi.mock('@/components/outline/heading-picker.tsx', () => ({ HeadingPicker: () => null }))
-vi.mock('@/routing/app-shortcuts.ts', () => ({ useAppShortcuts: () => ({}) }))
-
-const { WorkspaceContent } = await import('./workspace-content.tsx')
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
+import { WorkspaceContent } from './workspace-content.tsx'
 
 const GRAPH: GraphInfo = {
   root: '/notes',
@@ -46,7 +31,7 @@ const GRAPH: GraphInfo = {
 }
 
 /**
- * Stands in for the "Toggle sidebar" command, which lives in the mocked shortcuts.
+ * Toggles the sidebar the way the "Toggle sidebar" command does.
  */
 function SidebarToggle(): ReactElement {
   const { toggleSidebar } = useSidebar()
@@ -58,16 +43,46 @@ function SidebarToggle(): ReactElement {
 }
 
 function renderWorkspace(route: Route) {
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
+  // Pinned, so the sidebar of this note (and only this note) offers "Un-pin this note".
+  seedNotes(app.database, [
+    { path: 'notes/project.md', markdown: '---\npinned: true\n---\n# Project\n' },
+  ])
+  // The providers of `GraphWorkspace`, inside the router of `renderInApp`.
   return renderInApp(
-    <SidebarProvider>
-      <WorkspaceContent graph={GRAPH} />
-      <SidebarToggle />
-    </SidebarProvider>,
+    <PaletteProvider>
+      <ShortcutsProvider>
+        <NoteTemplatesProvider>
+          <HeadingPickerProvider>
+            <SidebarProvider>
+              <RecorderProvider graph={GRAPH}>
+                <AudioMemoProvider graph={GRAPH}>
+                  <DeepLinkProvider>
+                    <FocusedDailyProvider>
+                      <PeekProvider>
+                        <NoteFindProvider>
+                          <V1ImportProvider>
+                            <WorkspaceContent graph={GRAPH} />
+                            <SidebarToggle />
+                          </V1ImportProvider>
+                        </NoteFindProvider>
+                      </PeekProvider>
+                    </FocusedDailyProvider>
+                  </DeepLinkProvider>
+                </AudioMemoProvider>
+              </RecorderProvider>
+            </SidebarProvider>
+          </HeadingPickerProvider>
+        </NoteTemplatesProvider>
+      </ShortcutsProvider>
+    </PaletteProvider>,
     {
+      app,
       graph: GRAPH,
       route,
       // The AppShell asides mount resize handles, which read the persisted widths.
-      settings: { sidebarWidth: 260, contextSidebarWidth: 320 },
+      settings: { sidebarWidth: 260, contextSidebarWidth: 320, dateFormat: 'mdy' },
     },
   )
 }
@@ -89,7 +104,13 @@ describe('WorkspaceContent', () => {
 
     await expect.element(view.getByRole('complementary', { name: 'Workspace' })).toBeInTheDocument()
     await expect.element(view.getByRole('complementary', { name: 'Context' })).toBeInTheDocument()
-    expect(view.getByTestId('daily-context').element().textContent).toBe('2026-07-11')
+    await expect
+      .element(
+        view
+          .getByTestId('daily-context-sidebar')
+          .getByRole('button', { name: formatDayLabel('2026-07-11', 'mdy') }),
+      )
+      .toHaveAttribute('aria-pressed', 'true')
 
     await toggle.click()
     await expect
@@ -104,7 +125,11 @@ describe('WorkspaceContent', () => {
 
   it('applies the same collapsed state to ordinary note context', async () => {
     const view = await renderWorkspace({ kind: 'note', path: 'notes/project.md' })
-    expect(view.getByTestId('note-context').element().textContent).toBe('notes/project.md')
+    const context = view.getByRole('complementary', { name: 'Context' })
+    await expect.element(context.getByTestId('note-context-sidebar')).toBeInTheDocument()
+    await expect
+      .element(context.getByRole('button', { name: 'Un-pin this note' }))
+      .toBeInTheDocument()
 
     await view.getByRole('button', { name: 'Toggle sidebar' }).click()
     await expect
@@ -121,8 +146,9 @@ describe('WorkspaceContent', () => {
 
     await hover(view.getByTestId('sidebar-reveal-edge'))
 
-    await expect.element(view.getByTestId('workspace-sidebar')).toBeInTheDocument()
-    await expect.element(view.getByRole('complementary', { name: 'Workspace' })).toBeVisible()
+    const workspace = view.getByRole('complementary', { name: 'Workspace' })
+    await expect.element(workspace).toBeVisible()
+    await expect.element(workspace.getByRole('navigation', { name: 'Primary' })).toBeVisible()
     expect(view.getByRole('complementary', { name: 'Context' }).query()).toBeNull()
   })
 

@@ -60,13 +60,11 @@ async function renderSection(): Promise<HTMLElement> {
   return container
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   stored = { calendarEnabled: true, calendarIds: ['cal-work'] }
   calendar = createTestCalendarService()
   contacts = createTestContactsService({ status: 'unavailable' })
-  // Already open: the attendee field ignores Enter while its suggestions
-  // load, and the default test database opens on its first query.
-  database = await createWasmTestDatabaseService()
+  database = createWasmTestDatabaseService()
   app = createTestCoreServices({ calendar, contacts, database })
   addMeetingToDaily = vi.spyOn(app.meetings, 'addMeetingToDaily')
   return () => database.close()
@@ -145,7 +143,7 @@ describe('DailyEventsSection', () => {
     await userEvent.keyboard('{Enter}')
     await page.getByRole('button', { name: /add to daily note/i }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(addMeetingToDaily).toHaveBeenCalledWith({
         date: DATE,
         title: 'Standup',
@@ -153,8 +151,8 @@ describe('DailyEventsSection', () => {
         backlinkMeeting: false,
         lookupContacts: false,
         startTime: '9:00am',
-      }),
-    )
+      })
+    })
     await expectLocatorToHaveCount(page.getByLabelText('Meeting name'), 0)
   })
 
@@ -181,14 +179,14 @@ describe('DailyEventsSection', () => {
     await expect.element(page.getByText('Ada Lovelace')).toBeInTheDocument()
     await page.getByRole('button', { name: /add to daily note/i }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(addMeetingToDaily).toHaveBeenCalledWith(
         expect.objectContaining({
           attendees: [{ name: 'Ada Lovelace', emails: ['ada@example.com'] }],
           lookupContacts: true,
         }),
-      ),
-    )
+      )
+    })
   })
 
   it('upgrades a prefilled chip to the note that owns its invite email', async () => {
@@ -219,13 +217,13 @@ describe('DailyEventsSection', () => {
     expect(page.getByText('ada@example.com').query()).toBeNull()
 
     await page.getByRole('button', { name: /add to daily note/i }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(addMeetingToDaily).toHaveBeenCalledWith(
         expect.objectContaining({
           attendees: [{ name: 'Ada Lovelace', emails: ['ada@example.com'] }],
         }),
-      ),
-    )
+      )
+    })
   })
 
   it('a removed attendee chip stays out of the submission', async () => {
@@ -243,9 +241,9 @@ describe('DailyEventsSection', () => {
     await page.getByRole('button', { name: 'Remove Ada Lovelace' }).click()
     await page.getByRole('button', { name: /add to daily note/i }).click()
 
-    await vi.waitFor(() =>
-      expect(addMeetingToDaily).toHaveBeenCalledWith(expect.objectContaining({ attendees: [] })),
-    )
+    await vi.waitFor(() => {
+      expect(addMeetingToDaily).toHaveBeenCalledWith(expect.objectContaining({ attendees: [] }))
+    })
   })
 
   it('a failed submit surfaces the error and keeps the dialog open', async () => {

@@ -701,9 +701,9 @@ describe('CaptureDrainService (text captures)', () => {
   it('keeps a daily edit that Rust merged with the appended line, writing it once', async () => {
     kit.noteFile.set(DAILY, '- morning standup\n')
     addTextSpool(textEnvelope())
-    kit.mergeNextWrite(DAILY, (contents) =>
-      contents.replace('- call the bank\n', '- typed meanwhile\n- call the bank\n'),
-    )
+    kit.mergeNextWrite(DAILY, (contents) => {
+      return contents.replace('- call the bank\n', '- typed meanwhile\n- call the bank\n')
+    })
 
     await kit.drain()
 

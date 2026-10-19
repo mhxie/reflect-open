@@ -43,9 +43,9 @@ export function wikiAncestorIndexPaths(path: string, languages: readonly WikiLan
   if (location === null) {
     return []
   }
-  return ancestorIndexCandidates(location.relativePath).map((candidate) =>
-    wikiPathIn(location.language, candidate),
-  )
+  return ancestorIndexCandidates(location.relativePath).map((candidate) => {
+    return wikiPathIn(location.language, candidate)
+  })
 }
 
 /** One entry in the index tree, with the entries that belong under it. */

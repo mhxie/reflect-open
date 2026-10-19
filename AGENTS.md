@@ -119,6 +119,11 @@ pnpm --filter @reflect/desktop sidecar
 
 Otherwise tauri-build fails with `resource path binaries/<name>-<triple> doesn't exist`
 (`pnpm tauri dev`/`build` stage them automatically; details in [docs/cli.md](docs/cli.md)).
+Clippy and the tests never run the sidecars, so they can skip them instead, as CI does:
+`TAURI_CONFIG='{"bundle":{"externalBin":null}}' cargo clippy --workspace --all-targets`.
+
+`.cargo/config.toml` sets `build.warnings = "deny"`: lint warnings in workspace crates
+fail the build. Use `CARGO_BUILD_WARNINGS=warn` while iterating.
 
 ### Repo layout
 
@@ -216,7 +221,7 @@ The short version:
 - Rust-boundary wrappers (`NoteFileService`) take an explicit `generation`. User-facing
   services read the `GraphSession` once at method entry and pass its generations down.
 - Tests build services over `@reflect/core/testing` and `@reflect/app/testing`
-  (`createTestCoreServices()`, `createTestAppServices(core)`); desktop tests render with
+  (`createTestCoreServices({ database })`, `createTestAppServices(core)`); desktop tests render with
   `renderInApp`. `vi.mock` only for the allowlist in `eslint.config.js`. See
   [docs/contributing/testing.md](docs/contributing/testing.md).
 

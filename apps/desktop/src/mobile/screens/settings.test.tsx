@@ -10,6 +10,7 @@ import {
 } from '@reflect/core/testing'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileSettings } from './settings.tsx'
 
 /**
@@ -22,18 +23,12 @@ import { MobileSettings } from './settings.tsx'
 
 // The prompt editor's state and save wiring render through this open-state shell.
 vi.mock('@/components/ui/drawer.tsx', () => ({
-  Drawer: ({ open, children }: { open?: boolean; children?: import('react').ReactNode }) =>
-    open ? <div data-testid="drawer">{children}</div> : null,
+  Drawer: ({ open, children }: { open?: boolean; children?: import('react').ReactNode }) => {
+    return open ? <div data-testid="drawer">{children}</div> : null
+  },
   DrawerContent: ({ children }: { children?: import('react').ReactNode }) => <div>{children}</div>,
   DrawerBody: ({ children }: { children?: import('react').ReactNode }) => <div>{children}</div>,
   DrawerTitle: ({ children }: { children?: import('react').ReactNode }) => <h2>{children}</h2>,
-}))
-
-// The sheet itself is covered by connect-github-drawer.test.tsx; the screen
-// test only cares that Settings opens it.
-vi.mock('@/mobile/connect-github-drawer.tsx', () => ({
-  ConnectGithubDrawer: ({ open }: { open: boolean }) =>
-    open ? <div>connect-github-sheet</div> : null,
 }))
 
 function connected(status: Extract<BackupState, { phase: 'connected' }>['status']): BackupState {
@@ -68,6 +63,7 @@ async function mount(options?: MountOptions) {
     state: options?.backup ?? connected({ state: 'idle' }),
   })
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     appInfo: createTestAppInfoService('1.2.3-beta.4'),
     backup,
     // A note window's graph runs no backup.
@@ -136,9 +132,9 @@ describe('MobileSettings', () => {
 
     await user.click(page.getByRole('button', { name: 'Privacy Policy' }))
 
-    await vi.waitFor(() =>
-      expect(view.appServices.opener.openedUrls()).toEqual(['https://reflect.app/privacy']),
-    )
+    await vi.waitFor(() => {
+      expect(view.appServices.opener.openedUrls()).toEqual(['https://reflect.app/privacy'])
+    })
   })
 
   it('writes appearance choices to the settings document', async () => {
@@ -321,15 +317,15 @@ describe('MobileSettings', () => {
     await user.fill(sheet.getByRole('textbox', { name: 'Prompt' }), 'Shorten: {{selectedText}}')
     await user.click(sheet.getByRole('button', { name: 'Add prompt' }))
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(view.app.settings.get().aiPrompts).toEqual([
         expect.objectContaining({
           label: 'Shorten',
           body: 'Shorten: {{selectedText}}',
           mode: 'replace',
         }),
-      ]),
-    )
+      ])
+    })
   })
 
   it('edits a saved AI prompt through its row', async () => {
@@ -347,11 +343,11 @@ describe('MobileSettings', () => {
     await user.fill(sheet.getByRole('textbox', { name: 'Label' }), 'Translate to German')
     await user.click(sheet.getByRole('button', { name: 'Save' }))
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(view.app.settings.get().aiPrompts).toEqual([
         { ...saved, label: 'Translate to German' },
-      ]),
-    )
+      ])
+    })
   })
 
   it('removes a saved AI prompt from the edit sheet', async () => {
@@ -399,7 +395,7 @@ describe('MobileSettings', () => {
       .toBeVisible()
     await user.click(page.getByRole('button', { name: 'Connect GitHub' }))
 
-    await expect.element(page.getByText('connect-github-sheet')).toBeVisible()
+    await expect.element(page.getByRole('heading', { name: 'Connect GitHub' })).toBeVisible()
   })
 
   it('hides the connect row once the local graph is connected', async () => {

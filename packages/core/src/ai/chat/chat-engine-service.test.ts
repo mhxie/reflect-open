@@ -17,8 +17,8 @@ import { cloudTarget, modelTarget, type VerifiedModelTarget } from '../../privac
 import { cloudSafeGraphContext, createPrivacyService } from '../../privacy/privacy-service.ts'
 import type { AiProviderConfig } from '../../settings/schema.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAssetStoreService,
-  createTestDatabaseService,
   createTestLanguageModelService,
   createTestLoggerService,
   createTestNoteFileService,
@@ -88,7 +88,7 @@ function graphOver(
   notes: Readonly<Record<string, string>> = {},
   effects: GraphEffects = {},
 ): TestGraph {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   for (const [path, source] of Object.entries(notes)) {
     database.applyProjection(project(path, source, 1))
   }
@@ -519,7 +519,7 @@ describe('ChatEngineService.streamTurn history privacy', () => {
     }
     // chat_messages keeps a turn's messages as JSON text.
     const stored = JSON.stringify(complete.messages)
-    const responseMessages: ModelMessage[] = JSON.parse(stored)
+    const responseMessages = JSON.parse(stored) as ModelMessage[]
     return [
       ...buildHistory([
         {
@@ -590,7 +590,7 @@ describe('ChatEngineService.streamTurn history privacy', () => {
 
     const events = await collect(turn(over, CLOUD_CONFIG))
 
-    expect(events).toEqual([{ type: 'error', message: expect.any(String), messages: [] }])
+    expect(events).toEqual([{ type: 'error', message: expect.any(String) as string, messages: [] }])
     expect(languageModelService.calls()).toEqual([])
   })
 
@@ -835,9 +835,9 @@ describe('streamChatTurn', () => {
     // Every gathering step calls a tool; the model only writes its answer
     // once tools are disabled on the last permitted step. Without that force,
     // the turn would end on a tool result with no reply.
-    const gathering = Array.from({ length: MAX_STEPS - 1 }, (_unused, index) =>
-      toolCallTurn(`query-${index}`, `call-${index}`),
-    )
+    const gathering = Array.from({ length: MAX_STEPS - 1 }, (_unused, index) => {
+      return toolCallTurn(`query-${index}`, `call-${index}`)
+    })
     const model = new MockLanguageModelV3({
       doStream: sequence([...gathering, textTurn('Summary: [[Atlas Launch Plan]]')]),
     })

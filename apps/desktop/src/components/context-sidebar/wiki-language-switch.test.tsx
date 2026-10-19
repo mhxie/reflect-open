@@ -1,12 +1,13 @@
 import { deepLinkForRoute } from '@reflect/app'
 import { createTestWindowService } from '@reflect/app/testing'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { WikiService } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiLanguageSwitch } from './wiki-language-switch.tsx'
 
 const ENGLISH = { label: 'English', folder: 'wiki' }
@@ -22,7 +23,8 @@ function RouteProbe(): ReactNode {
 }
 
 async function renderSection(path: string) {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => app.database.close())
   vi.spyOn(app.wiki, 'copies').mockImplementation(wikiCopies)
   return await renderInApp(
     <>
@@ -77,11 +79,11 @@ describe('WikiLanguageSwitch', () => {
 
     await view.getByRole('button', { name: '简体中文' }).click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openNoteWindow).toHaveBeenCalledWith(
         deepLinkForRoute({ kind: 'note', path: 'wiki-cn/memory/Spacing Effect.md' }),
-      ),
-    )
+      )
+    })
   })
 
   it('dims a language without a copy', async () => {

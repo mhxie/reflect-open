@@ -203,12 +203,13 @@ export function withOnDeviceModel(
   newId: () => string,
 ): { state: AiProvidersState; id: string } {
   const url = normalizeOpenAICompatibleBaseUrl(baseUrl)
-  const sameModel = state.providers.filter(
-    (entry) =>
+  const sameModel = state.providers.filter((entry) => {
+    return (
       entry.provider === 'openai-compatible' &&
       normalizeOpenAICompatibleBaseUrl(entry.baseUrl) === url &&
-      entry.model === model,
-  )
+      entry.model === model
+    )
+  })
   const attested = sameModel.find((entry) => resolveOnDeviceTarget(entry) !== null)
   if (attested !== undefined) {
     return { state, id: attested.id }

@@ -114,9 +114,9 @@ function failing(message: string): () => Promise<never> {
 
 describe('listFiles and pdfInfo', () => {
   it('lists the attachment files of the given session, with their sizes and times', async () => {
-    const listAttachments = vi.fn((): Promise<FileMeta[]> =>
-      Promise.resolve([{ path: 'assets/a.png', size: 12, modifiedMs: 5 }]),
-    )
+    const listAttachments = vi.fn((): Promise<FileMeta[]> => {
+      return Promise.resolve([{ path: 'assets/a.png', size: 12, modifiedMs: 5 }])
+    })
     const noteFile = Object.assign(createTestNoteFileService(), { listAttachments })
     const { attachments } = setup({ noteFile })
 

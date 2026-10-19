@@ -20,6 +20,7 @@ import {
   type TestAttachmentServiceOptions,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useAssetPersistence, type AssetPersistence } from './use-asset-persistence.ts'
 
 let persistence: AssetPersistence | null = null
@@ -43,7 +44,10 @@ function renderPersistence({
   path?: string
   localOnly?: boolean
 }) {
-  app = createTestCoreServices({ attachments: attachmentService })
+  app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    attachments: attachmentService,
+  })
   return renderHookInApp(
     ({ path }: { path: string } = { path: 'notes/a.md' }) => {
       persistence = useAssetPersistence(path)

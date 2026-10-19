@@ -64,12 +64,13 @@ export function DescribeAssetsField(): ReactElement {
   const [running, setRunning] = useState(false)
 
   const hasProvider = settings.aiProviders.length > 0
-  const localModels = settings.aiProviders.filter(
-    (config) =>
+  const localModels = settings.aiProviders.filter((config) => {
+    return (
       config.provider === 'openai-compatible' &&
       config.supportsImages &&
-      resolveOnDeviceTarget(config) !== null,
-  )
+      resolveOnDeviceTarget(config) !== null
+    )
+  })
   const options = ocrModelOptions(localModels, settings.localOcrProviderId ?? null)
 
   const runBackfill = async (): Promise<void> => {
@@ -98,9 +99,11 @@ export function DescribeAssetsField(): ReactElement {
         <Select
           value={settings.localOcrProviderId ?? DEFAULT_OCR_MODEL}
           items={options}
-          onValueChange={(value) =>
-            updateSettings({ localOcrProviderId: value === DEFAULT_OCR_MODEL ? null : value })
-          }
+          onValueChange={(value) => {
+            updateSettings({
+              localOcrProviderId: value === DEFAULT_OCR_MODEL ? null : value,
+            })
+          }}
         >
           <SelectTrigger aria-label="OCR model">
             <SelectValue />

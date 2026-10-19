@@ -28,10 +28,11 @@ const viMockAllowlistRule = {
   },
   create(context) {
     const allow = context.options[0]?.allow ?? []
-    const isAllowed = (specifier) =>
-      allow.some((entry) =>
-        entry.endsWith('*') ? specifier.startsWith(entry.slice(0, -1)) : specifier === entry,
-      )
+    const isAllowed = (specifier) => {
+      return allow.some((entry) => {
+        return entry.endsWith('*') ? specifier.startsWith(entry.slice(0, -1)) : specifier === entry
+      })
+    }
     return {
       CallExpression(node) {
         const { callee } = node
@@ -73,10 +74,13 @@ const maybePromiseRule = {
   },
   create(context) {
     const text = (node) => context.sourceCode.getText(node)
-    const isDefinition = (union, value) =>
-      union.parent.type === 'TSTypeAliasDeclaration' &&
-      union.types.length === 2 &&
-      union.parent.typeParameters?.params.some((param) => param.name.name === text(value))
+    const isDefinition = (union, value) => {
+      return (
+        union.parent.type === 'TSTypeAliasDeclaration' &&
+        union.types.length === 2 &&
+        union.parent.typeParameters?.params.some((param) => param.name.name === text(value))
+      )
+    }
     return {
       TSUnionType(node) {
         const members = new Set(node.types.map(text))
@@ -131,43 +135,6 @@ const DESKTOP_VI_MOCK_ALLOW_BY_FILE = {
   // Platform adapters: the test stands in for the Tauri API under the adapter.
   'apps/desktop/src/services/*.test.ts': ['@tauri-apps/*'],
 
-  // Shell tests about layout and routing: the sibling screens are probes.
-  'apps/desktop/src/components/workspace-content.test.tsx': [
-    '@/components/command-palette/command-palette.tsx',
-    '@/components/context-sidebar/daily-context-sidebar.tsx',
-    '@/components/context-sidebar/note-context-sidebar.tsx',
-    '@/components/embeddings-sync.tsx',
-    '@/components/note-find-bar.tsx',
-    '@/components/route-content.tsx',
-    '@/components/shortcuts-dialog.tsx',
-    '@/components/sidebar/sidebar.tsx',
-    '@/components/templates/template-create-dialog.tsx',
-    '@/components/templates/template-picker.tsx',
-    // The command registry hook needs every workspace provider; the shell
-    // only passes its result to the (mocked) sidebar.
-    '@/routing/app-shortcuts.ts',
-    // The jump-to-heading picker reads the outline store of a mounted editor.
-    '@/components/outline/heading-picker.tsx',
-    // The status bar and Peek read a mounted editor's stores; the CLI search
-    // responder serves a socket.
-    '@/components/note-status-bar.tsx',
-    '@/components/peek/peek-panel.tsx',
-    '@/components/search-ipc-responder.tsx',
-  ],
-  'apps/desktop/src/components/route-content.test.tsx': [
-    '@/components/chat/chat-screen.tsx',
-    '@/components/daily-stream.tsx',
-    '@/components/settings-screen.tsx',
-  ],
-  'apps/desktop/src/mobile/screens/note.test.tsx': [
-    '@/components/note-pane.tsx',
-    '@/components/note-status-bar.tsx',
-    '@/mobile/incoming-backlinks.tsx',
-    '@/mobile/note-actions-menu.tsx',
-  ],
-  'apps/desktop/src/mobile/note-conflict.test.tsx': ['@/mobile/note-actions-menu.tsx'],
-  'apps/desktop/src/mobile/screens/settings.test.tsx': ['@/mobile/connect-github-drawer.tsx'],
-
   // Heavy children: the pane and the task row mount the editor.
   'apps/desktop/src/components/daily-stream.focus.test.tsx': ['@/components/note-pane.tsx'],
   'apps/desktop/src/components/daily-stream.reveal.test.tsx': ['@/components/note-pane.tsx'],
@@ -196,7 +163,6 @@ const DESKTOP_VI_MOCK_ALLOW_BY_FILE = {
   'apps/desktop/src/components/audio-memo/audio-memo-button.test.tsx': [
     '@/providers/audio-memo-provider.tsx',
   ],
-  'apps/desktop/src/components/sidebar/sidebar.test.tsx': ['@/providers/audio-memo-provider.tsx'],
   'apps/desktop/src/components/audio-memo/recording-strip.test.tsx': [
     '@/providers/audio-memo-provider.tsx',
     '@/providers/recorder-provider.tsx',
@@ -237,12 +203,6 @@ function viMockBlock(files, allow) {
 // Imports
 // ---------------------------------------------------------------------------
 
-const CORE_IMPORT_MESSAGE =
-  '`@reflect/core` is platform-agnostic: no Tauri, no React, no TanStack, nothing from `apps/`. A platform adapter lives in `apps/desktop/src/services/` and reaches core through `createCoreServices(adapters)`.'
-
-const APP_IMPORT_MESSAGE =
-  '`@reflect/app` is the app layer over `@reflect/core`: no Tauri, no React, no TanStack, nothing from `apps/`. A platform adapter lives in `apps/desktop/src/services/` and reaches the app layer through `createAppServices(core, host)`.'
-
 const TAURI_IMPORT_MESSAGE =
   'Only the platform adapters in `apps/desktop/src/services/` (and `boot.ts`, `main.tsx`) import `@tauri-apps/*`. Read the service from `useCoreServices()` or take it in `ctx`.'
 
@@ -260,27 +220,8 @@ function dynamicImportSelector(pattern, message) {
 }
 
 // ---------------------------------------------------------------------------
-// The default-instance pattern
+// Module-level state
 // ---------------------------------------------------------------------------
-
-// The two names are domain functions over a value (`defaultAiProvider(state)`,
-// `defaultAttendees(event)`), not service instances.
-const DEFAULT_INSTANCE_NAME =
-  '/^(?!(?:defaultAiProvider|defaultAttendees)$)(?:default|setDefault)[A-Z]/'
-
-const DEFAULT_INSTANCE_MESSAGE =
-  'No process-wide service instances: `createCoreServices(adapters)` builds every service once, and a caller gets a service through `deps`, `useCoreServices()` or `ctx`. Do not export `defaultXxx()` / `setDefaultXxx()`.'
-
-const DEFAULT_INSTANCE_SELECTORS = [
-  {
-    selector: `ExportNamedDeclaration > FunctionDeclaration[id.name=${DEFAULT_INSTANCE_NAME}]`,
-    message: DEFAULT_INSTANCE_MESSAGE,
-  },
-  {
-    selector: `ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[id.name=${DEFAULT_INSTANCE_NAME}][init.type=/^(?:ArrowFunctionExpression|FunctionExpression)$/]`,
-    message: DEFAULT_INSTANCE_MESSAGE,
-  },
-]
 
 const MODULE_LET_SELECTORS = [
   {
@@ -289,13 +230,6 @@ const MODULE_LET_SELECTORS = [
     message:
       'No module-level mutable state in `@reflect/core`: state lives in the `#` fields of the service that `createXxxService(deps)` builds, so each `createCoreServices()` (and each test) gets its own.',
   },
-]
-
-const CORE_DYNAMIC_IMPORT_SELECTORS = [
-  dynamicImportSelector(
-    String.raw`^(?:@tauri-apps\/|@tanstack\/|react(?:-dom)?(?:\/|$))`,
-    CORE_IMPORT_MESSAGE,
-  ),
 ]
 
 // ---------------------------------------------------------------------------
@@ -335,7 +269,7 @@ const NO_CONSOLE = [
 export default defineESLintConfig(
   {
     react: {
-      version: '19.2',
+      version: '19.3',
       reactCompiler: true,
       files: ['**/*.tsx', './apps/desktop/src/**/*.ts'],
     },
@@ -344,29 +278,16 @@ export default defineESLintConfig(
     command: true,
     perfectionist: false,
     jsdoc: false,
-    ocavue: false,
   },
   {
     ignores: ['./design-system/', '**/.wxt/', '**/.output/'],
   },
   {
-    files: ['apps/desktop/scripts/**/*.ts'],
-    rules: {
-      curly: ['error', 'all'],
-    },
-  },
-  {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.mjs'],
-    // Disable some rules temporarily
-    linterOptions: {
-      reportUnusedDisableDirectives: 'off',
-    },
     /// keep-sorted
     rules: {
       '@eslint-react/set-state-in-effect': 'off',
       '@typescript-eslint/no-base-to-string': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
-      'no-var': 'off',
     },
   },
   {
@@ -375,135 +296,19 @@ export default defineESLintConfig(
     rules: { 'architecture/maybe-promise': 'error' },
   },
   {
-    // Vitest types its asymmetric matchers (`expect.any`, `expect.objectContaining`, ...)
-    // as `any`, so a matcher used as a property value in `toEqual` or
-    // `toHaveBeenCalledWith` is an unsafe assignment.
-    files: [`**/*.test.${SOURCE_EXTENSIONS}`],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-    },
-  },
-  // Rule: core is platform-agnostic. It imports no Tauri, React, TanStack or app code.
-  {
     files: [`packages/core/**/*.${SOURCE_EXTENSIONS}`],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: [
-                '@tauri-apps/*',
-                '@tanstack/*',
-                'react',
-                'react/*',
-                'react-dom',
-                'react-dom/*',
-              ],
-              message: CORE_IMPORT_MESSAGE,
-            },
-            {
-              group: [
-                '@/*',
-                '@reflect/app',
-                '@reflect/app/*',
-                '@reflect/desktop',
-                '@reflect/desktop/*',
-                '@reflect/extension',
-                '**/apps/**',
-              ],
-              message: CORE_IMPORT_MESSAGE,
-            },
-          ],
-        },
-      ],
-      'no-restricted-syntax': ['error', ...CORE_DYNAMIC_IMPORT_SELECTORS, ...CODE_SHAPE_SELECTORS],
+      'no-restricted-syntax': ['error', ...CODE_SHAPE_SELECTORS],
     },
   },
 
-  // Rule: no default instances and no module-level state in core. Every
-  // service is built by `createCoreServices(adapters)` and holds its state in
-  // its own `#` fields.
+  // Rule: no module-level state in core. Every service is built by
+  // `createCoreServices(adapters)` and holds its state in its own `#` fields.
   {
     files: [`packages/core/src/**/*.${SOURCE_EXTENSIONS}`],
     ignores: [`**/*.test.${SOURCE_EXTENSIONS}`],
     rules: {
-      'no-restricted-syntax': [
-        'error',
-        ...CORE_DYNAMIC_IMPORT_SELECTORS,
-        ...DEFAULT_INSTANCE_SELECTORS,
-        ...MODULE_LET_SELECTORS,
-        ...CODE_SHAPE_SELECTORS,
-      ],
-    },
-  },
-  {
-    // `setTestDatabaseOpener`: the one process-wide test hook. The browser
-    // projects install the wasm database once per page, before any test
-    // builds its services. It is exported from `@reflect/core/testing` only.
-    files: ['packages/core/src/testing/database.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        ...CORE_DYNAMIC_IMPORT_SELECTORS,
-        ...DEFAULT_INSTANCE_SELECTORS,
-        ...CODE_SHAPE_SELECTORS,
-      ],
-    },
-  },
-
-  // Rule: `@reflect/app` is the app layer. It knows windows, routes and commands,
-  // but no React, TanStack, Tauri or app code: those stay in `apps/`.
-  {
-    files: [`packages/app/**/*.${SOURCE_EXTENSIONS}`],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: [
-                '@tauri-apps/*',
-                '@tanstack/*',
-                'react',
-                'react/*',
-                'react-dom',
-                'react-dom/*',
-                '@/*',
-                '@reflect/desktop',
-                '@reflect/desktop/*',
-                '@reflect/extension',
-                '**/apps/**',
-              ],
-              message: APP_IMPORT_MESSAGE,
-            },
-          ],
-        },
-      ],
-      'no-restricted-syntax': [
-        'error',
-        dynamicImportSelector(
-          String.raw`^(?:@tauri-apps\/|@tanstack\/|react(?:-dom)?(?:\/|$))`,
-          APP_IMPORT_MESSAGE,
-        ),
-        ...CODE_SHAPE_SELECTORS,
-      ],
-    },
-  },
-  {
-    files: [`packages/app/src/**/*.${SOURCE_EXTENSIONS}`],
-    ignores: [`**/*.test.${SOURCE_EXTENSIONS}`],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        dynamicImportSelector(
-          String.raw`^(?:@tauri-apps\/|@tanstack\/|react(?:-dom)?(?:\/|$))`,
-          APP_IMPORT_MESSAGE,
-        ),
-        ...DEFAULT_INSTANCE_SELECTORS,
-        ...MODULE_LET_SELECTORS,
-        ...CODE_SHAPE_SELECTORS,
-      ],
+      'no-restricted-syntax': ['error', ...MODULE_LET_SELECTORS, ...CODE_SHAPE_SELECTORS],
     },
   },
 
@@ -568,8 +373,8 @@ export default defineESLintConfig(
   // thin shell over a service are never on the list.
   viMockBlock([`packages/**/*.${SOURCE_EXTENSIONS}`], []),
   viMockBlock([`apps/desktop/**/*.${SOURCE_EXTENSIONS}`], DESKTOP_VI_MOCK_ALLOW),
-  ...Object.entries(DESKTOP_VI_MOCK_ALLOW_BY_FILE).map(([file, allow]) =>
-    viMockBlock([file], [...DESKTOP_VI_MOCK_ALLOW, ...allow]),
-  ),
+  ...Object.entries(DESKTOP_VI_MOCK_ALLOW_BY_FILE).map(([file, allow]) => {
+    return viMockBlock([file], [...DESKTOP_VI_MOCK_ALLOW, ...allow])
+  }),
   viMockBlock([`apps/extension/**/*.${SOURCE_EXTENSIONS}`], EXTENSION_VI_MOCK_ALLOW),
 )

@@ -255,14 +255,14 @@ class ChatPrivacyServiceImpl implements ChatPrivacyService {
     }
     const assetPaths = [
       ...new Set(
-        references.flatMap((reference) =>
-          reference.includes('/')
+        references.flatMap((reference) => {
+          return reference.includes('/')
             ? reference
             : [
                 resolveAttachmentLink(path, reference, catalog) ?? reference,
                 ...(catalog?.named(reference) ?? []),
-              ],
-        ),
+              ]
+        }),
       ),
     ]
     const descriptions = new Map<string, string>()

@@ -414,11 +414,12 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
     const isStale = input.isStale ?? (() => false)
     const { clock } = this.#deps
     try {
-      const candidates = (await this.#candidates()).filter(
-        (candidate) =>
+      const candidates = (await this.#candidates()).filter((candidate) => {
+        return (
           !isLocalOnlyPath(localOnly, candidate.path) &&
-          input.settled?.has(noteSummaryKey(candidate.path, candidate.fileHash)) !== true,
-      )
+          input.settled?.has(noteSummaryKey(candidate.path, candidate.fileHash)) !== true
+        )
+      })
       outcome.pending = candidates.length
       if (candidates.length === 0 || isStale()) {
         return outcome

@@ -71,7 +71,7 @@ async function mount(options: {
   const onToggleFilters = vi.fn()
   const onToggleSchedule = vi.fn()
   const onConvertToBullet = vi.fn()
-  await renderHook(() =>
+  await renderHook(() => {
     useTaskKeyboard({
       selection,
       actions,
@@ -85,8 +85,8 @@ async function mount(options: {
       onToggleFilters,
       onToggleSchedule,
       onConvertToBullet,
-    }),
-  )
+    })
+  })
   return {
     selection,
     actions,

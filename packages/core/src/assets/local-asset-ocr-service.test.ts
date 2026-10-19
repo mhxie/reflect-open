@@ -6,11 +6,11 @@ import { AppError } from '../errors.ts'
 import type { LocalOcrSupport } from '../graph/asset-store-service.ts'
 import type { OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
 import {
+  createNodeTestDatabaseService,
   createTestAiKeyValidationService,
   createTestAssetDescriberService,
   createTestAssetStoreService,
   createTestClockService,
-  createTestDatabaseService,
   createTestIdService,
   createTestLanguageModelService,
   createTestNoteFileService,
@@ -51,7 +51,7 @@ async function setup(
     notePath?: string
   } = {},
 ) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, [
     {
       path: options.notePath ?? 'private.md',
@@ -78,15 +78,15 @@ async function setup(
   const noteFile = createTestNoteFileService()
   // Rust serves any visible Markdown file to the device reads, a description
   // sidecar under `assets/` included; the double serves notes only.
-  vi.spyOn(noteFile, 'readForDevice').mockImplementation((path) =>
-    Promise.try(() => {
+  vi.spyOn(noteFile, 'readForDevice').mockImplementation((path) => {
+    return Promise.try(() => {
       const content = noteFile.files().get(path)
       if (content === undefined) {
         throw new AppError('notFound', `${path} does not exist`)
       }
       return { content, localOnly: false }
-    }),
-  )
+    })
+  })
   const provider = options.provider ?? CONFIG
   const settings = createTestSettingsService({
     aiProviders: [provider],
@@ -137,8 +137,13 @@ async function setup(
     describer,
     deviceReads,
     stored,
-    run: () =>
-      service.reconcile({ localOcrProviderId: 'vision', generation: GENERATION, mode: 'backfill' }),
+    run: () => {
+      return service.reconcile({
+        localOcrProviderId: 'vision',
+        generation: GENERATION,
+        mode: 'backfill',
+      })
+    },
   }
 }
 
@@ -240,14 +245,14 @@ describe('local OCR', () => {
   describe('a failure confined to one attachment', () => {
     it('skips an oversize source and still recognizes the next attachment', async () => {
       const { run, assetStore } = await setup({ photo: true })
-      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) =>
-        Promise.try(() => {
+      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) => {
+        return Promise.try(() => {
           if (path === 'assets/scan.pdf') {
             throw new AppError('unsupported', 'source exceeds 20971520 bytes')
           }
           return new Uint8Array([9])
-        }),
-      )
+        })
+      })
       const outcome = await run()
       expect(outcome.stopped).toBeNull()
       expect(outcome.skippedOversize).toBe(1)
@@ -256,14 +261,14 @@ describe('local OCR', () => {
 
     it('skips an offline source and a blank page instead of stopping the pass', async () => {
       const { run, assetStore, describer } = await setup({ photo: true })
-      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) =>
-        Promise.try(() => {
+      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) => {
+        return Promise.try(() => {
           if (path === 'assets/photo.png') {
             throw new AppError('io', 'the file is not available offline')
           }
           return new Uint8Array([1])
-        }),
-      )
+        })
+      })
       describer.setResult('   ')
       const outcome = await run()
       expect(outcome.stopped).toBeNull()

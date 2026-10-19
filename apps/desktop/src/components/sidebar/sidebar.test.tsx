@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import {
   DEFAULT_SETTINGS,
   isOstensiblyEmptyNoteSource,
+  type AiProviderConfig,
   type GraphSessionService,
   type NoteDocumentService,
   type PinnedNote,
@@ -27,25 +28,28 @@ import { createTestCoreServices, createTestBackupService } from '@reflect/core/t
 import type { CommandContext } from '@/lib/commands/types.ts'
 import type { Route } from '@/routing/route.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import { AudioMemoProvider } from '@/providers/audio-memo-provider.tsx'
+import { SidebarProvider } from '@/providers/sidebar-provider.tsx'
 import { UpdateProvider } from '@/providers/update-provider.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { deepLinkForRoute } from '@reflect/app'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { Sidebar } from './sidebar.tsx'
 
 /**
  * The native menu row the mocked menu "selects" when it opens.
  */
 const menuChoice = { text: 'Unpin Note' }
-const openNativeContextMenu = vi.fn((options: NativeContextMenuOptions) =>
-  Promise.try(() => {
+const openNativeContextMenu = vi.fn((options: NativeContextMenuOptions) => {
+  return Promise.try(() => {
     for (const item of options.items) {
       if (isMenuAction(item) && item.text === menuChoice.text) {
         item.action()
       }
     }
-  }),
-)
+  })
+})
 
 function isMenuAction(item: NativeContextMenuItem): item is NativeContextMenuItem & {
   text: string
@@ -62,23 +66,6 @@ function menuLabels(): (string | null)[] {
   return items.map((item) => (isMenuAction(item) ? item.text : null))
 }
 
-const audioMemo = vi.hoisted(() => ({
-  phase: 'idle' as const,
-  elapsedMs: 0,
-  stream: null,
-  available: true,
-  unavailableReason: null as string | null,
-  error: null,
-  canRetry: false,
-  toggle: vi.fn(),
-  cancel: vi.fn(),
-  retry: vi.fn(),
-  discard: vi.fn(),
-}))
-vi.mock('@/providers/audio-memo-provider.tsx', () => ({
-  useAudioMemo: () => audioMemo,
-}))
-
 const GRAPH = {
   root: '/notes',
   name: 'Notes',
@@ -93,11 +80,22 @@ const RUST_PIN: PinnedNote = {
   dailyDate: null,
 }
 
+/**
+ * A provider that can transcribe audio memos.
+ */
+const OPENAI: AiProviderConfig = {
+  id: 'cfg-openai',
+  provider: 'openai',
+  model: 'gpt-5.1',
+  keyHint: 'wxyz1',
+}
+
 // What the app's fakes answer; each test sets them before `renderSidebar`.
 const getPinnedNotes = vi.fn<() => Promise<PinnedNote[]>>()
 const hasWikiEntries = vi.fn<() => Promise<boolean>>()
 const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
+let aiProviders: AiProviderConfig[]
 
 // The services of the rendered app; set by `renderSidebar`.
 let opener: TestOpenerService
@@ -107,7 +105,9 @@ let operations: TestOperationsService
  * A fresh untitled placeholder path, as the new-note route has it.
  */
 function untitledNotePath(): string {
-  return createTestCoreServices().noteCreation.untitledNotePath()
+  return createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+  }).noteCreation.untitledNotePath()
 }
 
 let openRecent: MockInstance<GraphSessionService['openRecent']>
@@ -120,11 +120,7 @@ beforeEach(() => {
   hasWikiEntries.mockReset().mockResolvedValue(false)
   commitNoteFrontmatter.mockReset().mockResolvedValue(undefined)
   openNoteWindow.mockReset().mockResolvedValue(true)
-  // The hoisted mock is shared module state — restore it so mic-related cases
-  // can't inherit mutations from earlier tests.
-  audioMemo.available = true
-  audioMemo.unavailableReason = null
-  audioMemo.toggle.mockReset()
+  aiProviders = [OPENAI]
   openNativeContextMenu.mockClear()
   menuChoice.text = 'Unpin Note'
 })
@@ -147,6 +143,7 @@ async function renderSidebar(
   const readSource = (): Promise<string> => Promise.resolve('# Rust\n')
   operations = createTestOperationsService()
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     progress: operations,
     noteDocuments: {
       readSource,
@@ -219,15 +216,21 @@ async function renderSidebar(
         { label: 'English', folder: 'wiki' },
         { label: '简体中文', folder: 'wiki-cn' },
       ],
+      aiProviders,
+      defaultAiProviderId: aiProviders[0]?.id ?? null,
     },
     ...(initialRoute === undefined ? {} : { route: initialRoute }),
     wrapper: (children: ReactNode) => (
       <div style={{ width: 260, height: 560 }}>
         <UpdateProvider autoCheck={false}>
-          <PeekProvider enabled={peek}>
-            {children}
-            <PeekProbe />
-          </PeekProvider>
+          <SidebarProvider>
+            <AudioMemoProvider graph={GRAPH}>
+              <PeekProvider enabled={peek}>
+                {children}
+                <PeekProbe />
+              </PeekProvider>
+            </AudioMemoProvider>
+          </SidebarProvider>
         </UpdateProvider>
       </div>
     ),
@@ -243,9 +246,9 @@ describe('Sidebar', () => {
     // `restoreSurfaceScroll` makes even an off-surface return discard the
     // stream's saved position and re-anchor on today.
     await view.getByRole('button', { name: /daily notes/i }).click()
-    await vi.waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({ kind: 'today' }, { focusEditor: true }),
-    )
+    await vi.waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith({ kind: 'today' }, { focusEditor: true })
+    })
 
     await view.getByRole('button', { name: /settings/i }).click()
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: 'settings' }))
@@ -267,11 +270,14 @@ describe('Sidebar', () => {
     await expect.element(newNote).toHaveAttribute('aria-current', 'page')
 
     await newNote.click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: 'note', path: expect.stringMatching(/^notes\/.+\.md$/) }),
-      ),
-    )
+        expect.objectContaining({
+          kind: 'note',
+          path: expect.stringMatching(/^notes\/.+\.md$/) as string,
+        }),
+      )
+    })
   })
 
   it('New note is inactive on slug-named note routes', async () => {
@@ -302,9 +308,9 @@ describe('Sidebar', () => {
       .not.toHaveAttribute('aria-current')
 
     await attachments.click()
-    await vi.waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({ kind: 'attachments', type: null, tag: null }),
-    )
+    await vi.waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith({ kind: 'attachments', type: null, tag: null })
+    })
   })
 
   it('only "New note" — not "All notes" — lights for the untitled placeholder', async () => {
@@ -337,9 +343,9 @@ describe('Sidebar', () => {
     expect(rows[allNotes + 1]).toBe(wiki.element())
 
     await wiki.click()
-    await vi.waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({ kind: 'wiki', filter: null, language: null }),
-    )
+    await vi.waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith({ kind: 'wiki', filter: null, language: null })
+    })
   })
 
   it('lights Wiki, not All notes, while a wiki entry or its translation is open', async () => {
@@ -364,21 +370,22 @@ describe('Sidebar', () => {
   })
 
   it('the mic button starts an audio memo', async () => {
-    const { view } = await renderSidebar()
+    const { view, app } = await renderSidebar()
     await view.getByRole('button', { name: /record audio memo/i }).click()
-    expect(audioMemo.toggle).toHaveBeenCalled()
+    await vi.waitFor(() => {
+      expect(app.audioRecorder.calls().some((call) => call.method === 'start')).toBe(true)
+    })
   })
 
   it('the mic button disables (without vanishing) when no provider can transcribe', async () => {
-    audioMemo.available = false
-    audioMemo.unavailableReason = 'Add an OpenAI or Gemini model in Settings to record audio memos'
-    const { view } = await renderSidebar()
+    aiProviders = []
+    const { view, app } = await renderSidebar()
     const micButton = view.getByRole('button', { name: /record audio memo/i })
     await expect.element(micButton).toHaveAttribute('aria-disabled', 'true')
     // `aria-disabled` fails Playwright's enabled actionability check, but the
     // element still receives real clicks — force past the check.
     await micButton.click({ force: true })
-    expect(audioMemo.toggle).not.toHaveBeenCalled()
+    expect(app.audioRecorder.calls().some((call) => call.method === 'start')).toBe(false)
   })
 
   it('pinned notes render their own section', async () => {
@@ -433,14 +440,14 @@ describe('Sidebar', () => {
 
     await roadmap.click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openNoteWindow).toHaveBeenCalledWith(
         deepLinkForRoute({
           kind: 'note',
           path: 'notes/roadmap.md',
         }),
-      ),
-    )
+      )
+    })
     expect(openNoteWindow).toHaveBeenCalledTimes(1)
     await expect.element(roadmap).not.toHaveAttribute('aria-current')
   })
@@ -556,11 +563,11 @@ describe('Sidebar', () => {
 
     await view.getByRole('button', { name: 'Rust' }).click({ button: 'right' })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openNoteWindow).toHaveBeenCalledWith(
         deepLinkForRoute({ kind: 'note', path: 'notes/rust.md' }),
-      ),
-    )
+      )
+    })
   })
 
   it('Copy Deep Link copies the pinned note address', async () => {
@@ -592,9 +599,9 @@ describe('Sidebar', () => {
 
     await rust.click({ button: 'right' })
 
-    await vi.waitFor(() =>
-      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/rust.md', { pinned: false }, 1),
-    )
+    await vi.waitFor(() => {
+      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/rust.md', { pinned: false }, 1)
+    })
     await expect.element(view.getByRole('button', { name: 'Rust' })).toBeInTheDocument()
     expect(operations.snapshot()).toMatchObject([
       { label: 'Updating pin', status: 'failed', message: 'disk failed' },
@@ -764,11 +771,14 @@ describe('Sidebar', () => {
     nav.dispatchEvent(
       new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }),
     )
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: 'note', path: expect.stringMatching(/^notes\/.+\.md$/) }),
-      ),
-    )
+        expect.objectContaining({
+          kind: 'note',
+          path: expect.stringMatching(/^notes\/.+\.md$/) as string,
+        }),
+      )
+    })
     expect(view.getByText('Drop to create a note').query()).toBeNull()
   })
 })

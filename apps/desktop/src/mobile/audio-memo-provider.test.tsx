@@ -15,6 +15,7 @@ import {
   createTestPlatformService,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileAudioMemoProvider, useMobileAudioMemo } from './audio-memo-provider.tsx'
 
 const GRAPH: GraphInfo = {
@@ -60,6 +61,7 @@ async function setup(provider: AiProviderConfig = OPENAI) {
   audioRecorder.setStopResult(RECORDING)
   const assetStore = createTestAssetStoreService({ sources: { [STAGED]: 'audio' } })
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     audioRecorder,
     assetStore,
     platform: createTestPlatformService({ appPlatform: 'ios' }),
@@ -73,8 +75,9 @@ async function setup(provider: AiProviderConfig = OPENAI) {
       <MobileAudioMemoProvider graph={GRAPH}>{children}</MobileAudioMemoProvider>
     ),
   })
-  const count = (method: string): number =>
-    audioRecorder.calls().filter((call) => call.method === method).length
+  const count = (method: string): number => {
+    return audioRecorder.calls().filter((call) => call.method === method).length
+  }
   return { ...hook, audioRecorder, assetStore, count }
 }
 

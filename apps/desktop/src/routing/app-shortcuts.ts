@@ -120,12 +120,12 @@ export function useAppShortcuts(): CommandContext {
   // The note being worked on: a peeked note, else the focused stream day (so a
   // note-scoped command targets the day the context sidebar shows — see
   // `effectiveDailyDate`), else the routed note.
-  const workingNotePath = useCallback(
-    (): string | null =>
+  const workingNotePath = useCallback((): string | null => {
+    return (
       peekedPathRef.current ??
-      focusedNotePathForRoute(routeRef.current, todayIso(), focusedDailyDateRef.current),
-    [],
-  )
+      focusedNotePathForRoute(routeRef.current, todayIso(), focusedDailyDateRef.current)
+    )
+  }, [])
   useEffect(() => {
     paletteOpenRef.current = paletteOpen
     shortcutsOpenRef.current = shortcutsOpen
@@ -206,8 +206,9 @@ export function useAppShortcuts(): CommandContext {
         // retries on an explicit action like this command.
         void semanticSearch.retryFailedModel()
       },
-      sortAllNotes: (update) =>
-        updateSettingsWith((current) => ({ allNotesSort: update(current.allNotesSort) })),
+      sortAllNotes: (update) => {
+        updateSettingsWith((current) => ({ allNotesSort: update(current.allNotesSort) }))
+      },
       wikiLanguages: () => wikiLanguagesRef.current,
     }),
     [

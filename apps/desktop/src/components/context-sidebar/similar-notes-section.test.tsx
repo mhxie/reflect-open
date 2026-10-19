@@ -12,6 +12,7 @@ import type { ReactNode } from 'react'
 import { deepLinkForRoute } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SimilarNotesSection } from './similar-notes-section.tsx'
 
 const relatedNotes = vi.fn<RetrievalService['relatedNotes']>()
@@ -25,6 +26,7 @@ function RouteProbe(): ReactNode {
 
 async function renderSimilar(path: string, probe: boolean = true) {
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { 'daily/2026-06-09.md': '- daily entry\n' } }),
     retrieval: createTestRetrievalService({ relatedNotes }),
   })
@@ -176,14 +178,14 @@ describe('SimilarNotesSection', () => {
 
     await view.getByRole('button', { name: 'Gardening' }).click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openNoteWindow).toHaveBeenCalledWith(
         deepLinkForRoute({
           kind: 'note',
           path: 'notes/gardening.md',
         }),
-      ),
-    )
+      )
+    })
     await expect.element(view.getByTestId('route')).toMatchTextContent('"kind":"today"')
   })
 })

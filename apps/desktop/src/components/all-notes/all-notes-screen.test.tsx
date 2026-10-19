@@ -19,6 +19,7 @@ import { act } from '@/test-utils/act.ts'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { hover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AllNotesScreen } from './all-notes-screen.tsx'
 import { deepLinkForRoute } from '@reflect/app'
 
@@ -161,6 +162,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
     files[KNOWLEDGE_LEVELS_PATH] = options.knowledgeLevels
   }
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({
       files,
       // A delete pinned to another generation rejects.
@@ -370,11 +372,11 @@ describe('AllNotesScreen', () => {
       .getByRole('button', { name: 'Health Stacked' })
       .click({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openedNoteWindows(view)).toContain(
         deepLinkForRoute({ kind: 'note', path: 'notes/health.md' }),
-      ),
-    )
+      )
+    })
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     expect(view.getByRole('button', { name: /Trash \(/ }).query()).toBeNull()
     await view.unmount()
@@ -386,11 +388,11 @@ describe('AllNotesScreen', () => {
 
     await subject.dblClick({ modifiers: ['ControlOrMeta'] })
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openedNoteWindows(view)).toContain(
         deepLinkForRoute({ kind: 'note', path: 'notes/health.md' }),
-      ),
-    )
+      )
+    })
     expect(openedNoteWindows(view)).toHaveLength(1)
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
@@ -711,12 +713,12 @@ describe('AllNotesScreen — pinned tag management', () => {
     expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
     await page.getByRole('option', { name: /#person/ }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(probedRoute(view)).toEqual({
         kind: 'allNotes',
         filter: { kind: 'tag', tag: 'person' },
-      }),
-    )
+      })
+    })
     await expect.element(view.getByText('No notes tagged #person.')).toBeInTheDocument()
     await view.unmount()
   })
@@ -1060,9 +1062,9 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect
       .element(group.getByRole('button', { name: 'PDF', exact: true }))
       .toBeInTheDocument()
-    const strip = [...group.element().querySelectorAll('div')].find((element) =>
-      ['auto', 'scroll'].includes(getComputedStyle(element).overflowX),
-    )
+    const strip = [...group.element().querySelectorAll('div')].find((element) => {
+      return ['auto', 'scroll'].includes(getComputedStyle(element).overflowX)
+    })
     expect(strip).toBeDefined()
     expect(strip?.clientWidth).toBeGreaterThan(0)
     expect(strip?.scrollWidth).toBeGreaterThan(strip?.clientWidth ?? 0)
@@ -1080,12 +1082,12 @@ describe('AllNotesScreen — pinned tag management', () => {
     expect(selectedCustom.right).toBeLessThanOrEqual(newNote.left)
     await group.getByRole('button', { name: 'Custom' }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(probedRoute(view)).toEqual({
         kind: 'allNotes',
         filter: { kind: 'tag', tag: 'travel' },
-      }),
-    )
+      })
+    })
     await view.unmount()
   })
 })
@@ -1144,11 +1146,12 @@ describe('AllNotesScreen — selection and bulk trash', () => {
   it('sorts by subject from the header, flipping direction on a second click', async () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
-    const order = (): number =>
-      Math.sign(
+    const order = (): number => {
+      return Math.sign(
         (view.container.textContent ?? '').indexOf('Tokyo Gâteau') -
           (view.container.textContent ?? '').indexOf('Health Stacked'),
       )
+    }
     expect(order()).toBe(1) // newest first: Health (Jan 15) above Tokyo (Jan 10)
 
     await view.getByRole('button', { name: 'Sort by subject' }).click()
@@ -1239,11 +1242,11 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     await userEvent.keyboard('{ControlOrMeta>}{Enter}{/ControlOrMeta}')
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(openedNoteWindows(view)).toContain(
         deepLinkForRoute({ kind: 'note', path: 'notes/health.md' }),
-      ),
-    )
+      )
+    })
     expect(openedNoteWindows(view)).toHaveLength(1)
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
@@ -1343,13 +1346,13 @@ describe('AllNotesScreen — selection and bulk trash', () => {
 
     // The confirm closes either way; the reason lands in the operations toast.
     await expectLocatorToHaveCount(page.getByText('Trash 1 note?'), 0)
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(
         view.app.progress
           .getAll()
           .map((operation) => `${operation.status}:${operation.message ?? ''}`),
-      ).toContain('failed:disk on fire'),
-    )
+      ).toContain('failed:disk on fire')
+    })
     // The note that failed to trash is left in the list and stays selected, so
     // the bulk action is still available for an immediate retry (no re-select).
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()

@@ -149,16 +149,14 @@ export function NoteTitlePresentationBridge({
   const { logger } = useCoreServices()
   const [extension] = useState(() => defineTitlePresentation(metadata ?? {}))
   useExtension(extension)
-  useEffect(
-    () =>
-      whenEditorMounted(logger, editor, () => {
-        editor.view.dispatch(
-          editor.state.tr
-            .setMeta(titleKey, { metadata: metadata ?? {} })
-            .setMeta('addToHistory', false),
-        )
-      }),
-    [editor, logger, metadata],
-  )
+  useEffect(() => {
+    return whenEditorMounted(logger, editor, () => {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta(titleKey, { metadata: metadata ?? {} })
+          .setMeta('addToHistory', false),
+      )
+    })
+  }, [editor, logger, metadata])
   return null
 }

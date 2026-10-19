@@ -269,13 +269,13 @@ class AssetOcrMaintenanceServiceImpl implements AssetOcrMaintenanceService {
     const catalog = await noteFile.listAttachments(generation)
     const paths = [
       ...new Set(
-        references.flatMap((reference) =>
-          reference.includes('/')
+        references.flatMap((reference) => {
+          return reference.includes('/')
             ? reference
             : catalog
                 .filter((file) => assetReferenceMatches(reference, file.path))
-                .map((file) => file.path),
-        ),
+                .map((file) => file.path)
+        }),
       ),
     ]
     const metaByPath = new Map(catalog.map((file) => [file.path, file]))
@@ -352,8 +352,9 @@ class AssetOcrMaintenanceServiceImpl implements AssetOcrMaintenanceService {
         clock,
         logger,
         emitIndexed,
-        reconcile: (generation, changed, reconcileOptions) =>
-          this.reconcile(generation, changed, reconcileOptions),
+        reconcile: (generation, changed, reconcileOptions) => {
+          return this.reconcile(generation, changed, reconcileOptions)
+        },
       },
       options,
     )

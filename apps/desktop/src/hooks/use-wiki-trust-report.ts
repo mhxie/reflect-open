@@ -136,13 +136,15 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
     queryKey: key,
     // A real fetcher even when this observer is idle: the always-on watcher
     // and a display-off editor share the key.
-    queryFn: () =>
-      open
+    queryFn: () => {
+      return open
         ? loadReport(wiki, client, key, path, () => syncRef.current?.fileChanged())
-        : Promise.reject(new Error('No graph is open.')),
+        : Promise.reject(new Error('No graph is open.'))
+    },
     enabled,
-    refetchInterval: (query) =>
-      query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS,
+    refetchInterval: (query) => {
+      return query.state.data?.status === 'missing' ? MISSING_POLL_MS : POLL_MS
+    },
     // The backup watcher polls with the window hidden too: the file watcher
     // skips the report's folder, so nothing else tells backup it changed.
     refetchIntervalInBackground: always,

@@ -15,10 +15,9 @@ export async function wikiClaimTextHashes(
   const text = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
   const claims = readWikiClaimIndex(text, asOf).claims.filter((claim) => claim.kind === 'range')
   const hashes = await Promise.all(
-    claims.map(
-      async (claim) =>
-        [claim.id, await wikiClaimTextSha256(text.slice(claim.from, claim.to))] as const,
-    ),
+    claims.map(async (claim) => {
+      return [claim.id, await wikiClaimTextSha256(text.slice(claim.from, claim.to))] as const
+    }),
   )
   return new Map(hashes)
 }

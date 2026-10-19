@@ -42,8 +42,11 @@ interface PinnedTagSortableListProps {
   menuFinalFocus: (tag: string) => HTMLElement | null
 }
 
-const detectPinnedTagCollision: CollisionDetection = (arguments_) =>
-  arguments_.pointerCoordinates === null ? closestCenter(arguments_) : pointerWithin(arguments_)
+const detectPinnedTagCollision: CollisionDetection = (arguments_) => {
+  return arguments_.pointerCoordinates === null
+    ? closestCenter(arguments_)
+    : pointerWithin(arguments_)
+}
 
 function sessionFromEvent(event: Event): PinnedTagDragSession | null {
   const target = event.target
@@ -135,14 +138,17 @@ export function PinnedTagSortableList({
   }
   const position = (tag: string): number => tags.indexOf(tag) + 1
   const announcements: Announcements = {
-    onDragStart: ({ active }) =>
-      `Picked up #${active.id}, position ${position(String(active.id))} of ${tags.length}.`,
-    onDragOver: ({ active, over }) =>
-      over === null
+    onDragStart: ({ active }) => {
+      return `Picked up #${active.id}, position ${position(String(active.id))} of ${tags.length}.`
+    },
+    onDragOver: ({ active, over }) => {
+      return over === null
         ? `#${active.id} is outside the pinned list.`
-        : `#${active.id} will move to position ${position(String(over.id))} of ${tags.length}.`,
-    onDragEnd: ({ active, over }) =>
-      `Dropped #${active.id}${over === null ? ' without changing order' : ` at position ${position(String(over.id))} of ${tags.length}`}.`,
+        : `#${active.id} will move to position ${position(String(over.id))} of ${tags.length}.`
+    },
+    onDragEnd: ({ active, over }) => {
+      return `Dropped #${active.id}${over === null ? ' without changing order' : ` at position ${position(String(over.id))} of ${tags.length}`}.`
+    },
     onDragCancel: ({ active }) => `Cancelled moving #${active.id}. Order unchanged.`,
   }
   const sourceIndex = activeTag === null ? -1 : tags.indexOf(activeTag)

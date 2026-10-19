@@ -15,6 +15,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { act } from '@/test-utils/act.ts'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteActionsMenu } from './note-actions-menu.tsx'
 
 // What the app's fakes answer; each test sets them before `mount`.
@@ -116,18 +117,18 @@ function noteRow(path: string, isPrivate: boolean, title = 'Meeting'): NoteRow {
 beforeEach(() => {
   currentNoteRow = noteRow('notes/meeting.md', false)
   currentNoteRowSettled = true
-  getNote
-    .mockReset()
-    .mockImplementation(() =>
-      currentNoteRowSettled ? Promise.resolve(currentNoteRow ?? undefined) : new Promise(() => {}),
-    )
+  getNote.mockReset().mockImplementation(() => {
+    return currentNoteRowSettled
+      ? Promise.resolve(currentNoteRow ?? undefined)
+      : new Promise(() => {})
+  })
   noteSource.value = '# A\n'
   readNoteSource.mockReset().mockImplementation(() => Promise.resolve(noteSource.value))
-  commitNoteFrontmatter.mockReset().mockImplementation((_path, patch) =>
-    Promise.try(() => {
+  commitNoteFrontmatter.mockReset().mockImplementation((_path, patch) => {
+    return Promise.try(() => {
       noteSource.value = upsertFrontmatter(noteSource.value, frontmatterPatchToYaml(patch))
-    }),
-  )
+    })
+  })
   shareMock.mockReset().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'share', { configurable: true, value: shareMock })
 })
@@ -138,6 +139,7 @@ afterEach(() => {
 
 async function mount(path = 'notes/meeting.md', onDeleted = vi.fn()) {
   const created = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     noteDocuments: {
       readSource: readNoteSource,
       readExisting: async (notePath) => await readNoteSource(notePath),
@@ -179,9 +181,9 @@ describe('NoteActionsMenu', () => {
 
     await view.getByRole('button', { name: 'Make this note private' }).click()
 
-    await vi.waitFor(() =>
-      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { private: true }, 7),
-    )
+    await vi.waitFor(() => {
+      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { private: true }, 7)
+    })
     await expect
       .element(view.getByRole('button', { name: 'Make this note private' }))
       .not.toBeInTheDocument()
@@ -205,13 +207,13 @@ describe('NoteActionsMenu', () => {
 
     await view.getByRole('button', { name: 'Make this note standard' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith(
         'daily/2026-06-10.md',
         { private: false },
         7,
-      ),
-    )
+      )
+    })
   })
 
   it('shows unreadable frontmatter as locked and disables the privacy action', async () => {
@@ -270,12 +272,12 @@ describe('NoteActionsMenu', () => {
     await openActions()
     await view.getByRole('button', { name: 'Make this note private' }).click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(app.progress.findByLabel('Updating privacy')).toMatchObject({
         status: 'failed',
         message: 'disk on fire',
-      }),
-    )
+      })
+    })
     await expect
       .element(view.getByRole('button', { name: 'Make this note private' }))
       .not.toBeInTheDocument()
@@ -303,9 +305,9 @@ describe('NoteActionsMenu', () => {
     await openActions()
     await view.getByRole('button', { name: 'Make this note private' }).click()
 
-    await vi.waitFor(() =>
-      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { private: true }, 7),
-    )
+    await vi.waitFor(() => {
+      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { private: true }, 7)
+    })
   })
 
   it('shows Unpin on reopening while the pin write is still pending', async () => {
@@ -314,9 +316,11 @@ describe('NoteActionsMenu', () => {
     const { view } = await mount()
     await openActions()
     await view.getByRole('button', { name: 'Pin', exact: true }).click()
-    await vi.waitFor(() =>
-      expect(view.app.noteRows.getOverlay('notes/meeting.md')).toMatchObject({ isPinned: true }),
-    )
+    await vi.waitFor(() => {
+      expect(view.app.noteRows.getOverlay('notes/meeting.md')).toMatchObject({
+        isPinned: true,
+      })
+    })
     await openActions()
     await expect
       .element(view.getByRole('button', { name: 'Unpin', exact: true }))
@@ -331,9 +335,9 @@ describe('NoteActionsMenu', () => {
     await openActions()
     await view.getByRole('button', { name: 'Pin' }).click()
 
-    await vi.waitFor(() =>
-      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { pinned: 1024 }, 7),
-    )
+    await vi.waitFor(() => {
+      expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { pinned: 1024 }, 7)
+    })
     await expect.element(view.getByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
   })
 

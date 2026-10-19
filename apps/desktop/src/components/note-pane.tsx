@@ -228,13 +228,11 @@ export function NotePaneComponent({
   })
   // A double-clicked PDF reads in Peek where the workspace offers it.
   const openPeek = usePeek()?.openPeek
-  const openPdf = useMemo(
-    () =>
-      openPeek === undefined
-        ? undefined
-        : (pdfPath: string) => openPeek({ kind: 'pdf', path: pdfPath }),
-    [openPeek],
-  )
+  const openPdf = useMemo(() => {
+    return openPeek === undefined
+      ? undefined
+      : (pdfPath: string) => openPeek({ kind: 'pdf', path: pdfPath })
+  }, [openPeek])
   const {
     resolveImageUrl,
     resolveEmbed,
@@ -255,13 +253,11 @@ export function NotePaneComponent({
   const onLinkClick = useMarkdownLinkClick(path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
-  const linkPreviewSession = useMemo(
-    () =>
-      graphKey === null || localOnly
-        ? null
-        : { path, graphKey, sessionEpoch: document.sessionEpoch },
-    [path, graphKey, localOnly, document.sessionEpoch],
-  )
+  const linkPreviewSession = useMemo(() => {
+    return graphKey === null || localOnly
+      ? null
+      : { path, graphKey, sessionEpoch: document.sessionEpoch }
+  }, [path, graphKey, localOnly, document.sessionEpoch])
   const resolveLinkPreview = useLinkPreview(linkPreviewSession)
 
   const bindEditor = document.bindEditor
@@ -416,8 +412,9 @@ export function NotePaneComponent({
         ...claims.map((id) => ({
           id: `adjust-${id}`,
           label: `Set ${id.toUpperCase()} boundaries to selection`,
-          onSelect: (selection: { from: number; to: number }) =>
-            article?.adjustSelection(id, selection.from, selection.to),
+          onSelect: (selection: { from: number; to: number }) => {
+            return article?.adjustSelection(id, selection.from, selection.to)
+          },
         })),
         {
           id: 'copy-source',
@@ -462,16 +459,14 @@ export function NotePaneComponent({
   }
   // Read-only views (protected, local-only) are counted too, from the file they show.
   const getSelectedText = useCallback(() => aiEditorRef.current?.getSelectedText() ?? '', [])
-  const protection = useMemo(
-    () =>
-      noteProtection({
-        protected: document.protected,
-        saveBlocked: document.saveBlocked,
-        error: document.error,
-        retrySave: document.retrySave,
-      }),
-    [document.protected, document.saveBlocked, document.error, document.retrySave],
-  )
+  const protection = useMemo(() => {
+    return noteProtection({
+      protected: document.protected,
+      saveBlocked: document.saveBlocked,
+      error: document.error,
+      retrySave: document.retrySave,
+    })
+  }, [document.protected, document.saveBlocked, document.error, document.retrySave])
   const publishStatus = useNoteStatusPublisher(
     generation === null ? null : { generation, path },
     document.status === 'ready' ? document.initialContent : null,

@@ -40,9 +40,12 @@ export function useSummaryModelChoice(): SummaryModelChoice {
   const { updateSettings, updateSettingsWith } = useSettings()
   const { id: ids } = useCoreServices()
   return {
-    chooseLocal: (config) =>
-      updateSettings({ aiSummariesLocalModel: { configId: config.id, modelId: config.model } }),
-    chooseOllamaModel: (model, server) =>
+    chooseLocal: (config) => {
+      updateSettings({
+        aiSummariesLocalModel: { configId: config.id, modelId: config.model },
+      })
+    },
+    chooseOllamaModel: (model, server) => {
       updateSettingsWith((current) => {
         const { state, id } = withOnDeviceModel(
           { providers: current.aiProviders, defaultProviderId: current.defaultAiProviderId },
@@ -56,7 +59,8 @@ export function useSummaryModelChoice(): SummaryModelChoice {
           defaultAiProviderId: state.defaultProviderId,
           aiSummariesLocalModel: { configId: id, modelId: model },
         }
-      }),
+      })
+    },
     chooseCloud: (choice) => updateSettings({ aiSummariesCloudModel: choice }),
     startCloud: (choice) => updateSettings(cloudGoAhead(choice)),
   }

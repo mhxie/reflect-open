@@ -10,10 +10,10 @@ import { createSuggestionService } from '../indexing/suggestion-service.ts'
 import { createWikiResolverService } from '../indexing/wiki-resolver-service.ts'
 import { createBackgroundReconcilerFactory } from '../reconcile/background-reconciler.ts'
 import {
+  createNodeTestDatabaseService,
   createTestActivityPort,
   createTestCalendarService,
   createTestContactsService,
-  createTestDatabaseService,
   createTestGraphSessionService,
   createTestIpcBridgeService,
   createTestLocalTranscriptionService,
@@ -161,7 +161,7 @@ function setup(
   const calendar = createTestCalendarService({ events: options.events ?? [SYNC] })
   const contacts = createTestContactsService()
   const settings = createTestSettingsService()
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   const noteCreation = createTestNoteCreationService({ noteFile })
   const wikiResolver = createWikiResolverService({ database })
   const meetings = createMeetingService({
@@ -354,7 +354,9 @@ describe('RecordingService.reconcile', () => {
     expect(outcome.stopped?.reason).toBe('config')
     expect(outcome.written).toEqual(['inbox/recordings/recording-2026-10-01-160000.md'])
     expect(transcribed).toHaveLength(1)
-    expect(archives).toEqual([{ sessionId: `session-${later}`, destination: expect.any(String) }])
+    expect(archives).toEqual([
+      { sessionId: `session-${later}`, destination: expect.any(String) as string },
+    ])
   })
 
   it('links a recording with no calendar event as a memo', async () => {
@@ -431,7 +433,9 @@ describe('RecordingService.reconcile', () => {
       `inbox/recordings/${BASE}.md`,
       'inbox/recordings/recording-2026-10-01-160000.md',
     ])
-    expect(archives).toEqual([{ sessionId: `session-${later}`, destination: expect.any(String) }])
+    expect(archives).toEqual([
+      { sessionId: `session-${later}`, destination: expect.any(String) as string },
+    ])
   })
 })
 
@@ -446,9 +450,9 @@ describe('RecordingService.openSession', () => {
 
     session.start()
 
-    await vi.waitFor(() =>
-      expect(service.getState().lastTranscript).toBe(`inbox/recordings/${BASE}.md`),
-    )
+    await vi.waitFor(() => {
+      expect(service.getState().lastTranscript).toBe(`inbox/recordings/${BASE}.md`)
+    })
     service.dismissTranscript()
     expect(service.getState().lastTranscript).toBeNull()
     session.dispose()
@@ -465,9 +469,9 @@ describe('RecordingService.openSession', () => {
     service.subscribe(changes)
 
     session.start()
-    await vi.waitFor(() =>
-      expect(ipc.calls().some((call) => call.command === 'recorder_sessions')).toBe(true),
-    )
+    await vi.waitFor(() => {
+      expect(ipc.calls().some((call) => call.command === 'recorder_sessions')).toBe(true)
+    })
 
     expect(changes).not.toHaveBeenCalled()
     expect(service.getState()).toEqual({ transcribing: false, lastTranscript: null })

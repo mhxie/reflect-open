@@ -132,12 +132,12 @@ export function DayCalendar({ selectedDate, today }: DayCalendarProps): ReactEle
                     aria-label={formatDayLabel(cell.date, settings.dateFormat)}
                     aria-current={isToday ? 'date' : undefined}
                     aria-pressed={isSelected}
-                    onClick={(event) =>
+                    onClick={(event) => {
                       navigateNoteLink({
                         target: { kind: 'daily', date: cell.date },
                         openInNewWindow: isModEvent(event),
                       })
-                    }
+                    }}
                     className={cn(
                       'relative cursor-default py-1.5 text-xs',
                       // Today stays fully visible even as an adjacent-month

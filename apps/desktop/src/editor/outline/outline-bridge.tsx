@@ -45,9 +45,9 @@ export function OutlineBridge({ path }: OutlineBridgeProps): null {
   // reload). Doc-change handlers do not fire on mount; the effect reads the
   // initial outline itself.
   const docChangedRef = useRef<(() => void) | null>(null)
-  const [docChangeExtension] = useState(() =>
-    defineDocChangeHandler(() => docChangedRef.current?.()),
-  )
+  const [docChangeExtension] = useState(() => {
+    return defineDocChangeHandler(() => docChangedRef.current?.())
+  })
   useExtension(docChangeExtension)
 
   useEffect(() => {

@@ -201,14 +201,14 @@ class RecorderServiceImpl implements RecorderService {
 
   constructor(deps: RecorderServiceDeps) {
     this.#deps = deps
-    this.#levels = createFanOut<number>((emit) =>
-      this.#listen('recorder:level', (payload) => {
+    this.#levels = createFanOut<number>((emit) => {
+      return this.#listen('recorder:level', (payload) => {
         const parsed = z.number().safeParse(payload)
         if (parsed.success) {
           emit(parsed.data)
         }
-      }),
-    )
+      })
+    })
   }
 
   readonly getState = (): RecorderStatus => this.#status

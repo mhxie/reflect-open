@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { WikilinkHoverHit } from '@meowdown/core'
 import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiLinkHoverPreview } from './wiki-link-hover-preview.tsx'
 
 const YOUTUBE_URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
@@ -64,8 +65,10 @@ describe('wiki-link hover card over a private target', () => {
     ['a locked target', 'notes/locked.md', `---\nprivate: true\n---\n${REMOTE_BODY}`],
   ])('reaches nothing remote for %s', async (_label, path, source) => {
     const app = createTestCoreServices({
+      database: createWasmTestDatabaseService(),
       noteFile: createTestNoteFileService({ files: { [path]: source } }),
     })
+    onTestFinished(() => app.database.close())
     vi.spyOn(app.noteLinkResolver, 'resolveWikiTarget').mockResolvedValue({
       kind: 'resolved',
       path,

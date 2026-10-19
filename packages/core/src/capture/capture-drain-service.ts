@@ -166,10 +166,9 @@ class CaptureDrainServiceImpl implements CaptureDrainService {
     }
     const spools = entries
       .filter((entry) => entry.path.endsWith('.json'))
-      .sort(
-        (first, second) =>
-          first.modifiedMs - second.modifiedMs || first.path.localeCompare(second.path),
-      )
+      .sort((first, second) => {
+        return first.modifiedMs - second.modifiedMs || first.path.localeCompare(second.path)
+      })
 
     let xPostStop: ReconcileStop | null = null
     let drained = 0
@@ -422,12 +421,13 @@ class CaptureDrainServiceImpl implements CaptureDrainService {
         .filter((entry) => entry.path.endsWith('.json'))
         .map((entry) => entry.path.replace(/\.json$/, '')),
     )
-    const orphans = entries.filter(
-      (entry) =>
+    const orphans = entries.filter((entry) => {
+      return (
         entry.path.endsWith('.jpg') &&
         !jsonStems.has(entry.path.replace(/\.jpg$/, '')) &&
-        clock.now() - entry.modifiedMs > ORPHAN_SPOOL_MAX_AGE_MS,
-    )
+        clock.now() - entry.modifiedMs > ORPHAN_SPOOL_MAX_AGE_MS
+      )
+    })
     for (const orphan of orphans) {
       await captureInbox.remove(captureSpoolName(orphan.path), input.generation)
     }

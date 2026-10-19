@@ -351,8 +351,8 @@ class SearchServiceImpl implements SearchService {
     const rankedDb = db
       .with(
         (cte) => cte('lexical').materialized(),
-        (queryDb) =>
-          queryDb
+        (queryDb) => {
+          return queryDb
             .selectFrom('searchFts')
             .select([
               'searchFts.path',
@@ -361,7 +361,8 @@ class SearchServiceImpl implements SearchService {
               // `snippet()` over the body would carry a highlight.
               sql<number>`bm25(search_fts, 0, 0.0, 1.0, 0.0)`.as('bodyRank'),
             ])
-            .where(sql<boolean>`search_fts MATCH ${match}`),
+            .where(sql<boolean>`search_fts MATCH ${match}`)
+        },
       )
       .with(
         (cte) => cte('ranked').materialized(),
@@ -408,8 +409,8 @@ class SearchServiceImpl implements SearchService {
       )
       .with(
         (cte) => cte('display').materialized(),
-        (queryDb) =>
-          queryDb
+        (queryDb) => {
+          return queryDb
             .selectFrom('searchFts')
             .select([
               'searchFts.path',
@@ -422,7 +423,8 @@ class SearchServiceImpl implements SearchService {
               cjkSnippetSql(parsed.text, HIGHLIGHT_START, HIGHLIGHT_END).as('cjkSnippet'),
             ])
             .where(sql<boolean>`search_fts MATCH ${match}`)
-            .where('searchFts.path', 'in', queryDb.selectFrom('ranked').select('ranked.path')),
+            .where('searchFts.path', 'in', queryDb.selectFrom('ranked').select('ranked.path'))
+        },
       )
     const rankedQuery = rankedDb
       .selectFrom('ranked')

@@ -122,9 +122,9 @@ describe('placeOldTitleAlias', () => {
     const { deps, noteFile } = setup()
     let version = 0
     // Every read sees a newer version than the file the write is checked against.
-    vi.spyOn(noteFile, 'read').mockImplementation(() =>
-      Promise.resolve(`# Old Title\n\nv${version++}\n`),
-    )
+    vi.spyOn(noteFile, 'read').mockImplementation(() => {
+      return Promise.resolve(`# Old Title\n\nv${version++}\n`)
+    })
     const writes = vi.spyOn(noteFile, 'write')
 
     await expect(placeOldTitleAlias(deps, PATH, RENAME, GENERATION)).rejects.toMatchObject(

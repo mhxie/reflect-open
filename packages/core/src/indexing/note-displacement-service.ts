@@ -96,15 +96,16 @@ class NoteDisplacementServiceImpl implements NoteDisplacementService {
   onDisplaced(listener: (displacement: NoteDisplacement) => void): Unlisten {
     const { ipc, logger } = this.#deps
     return listenNow(
-      () =>
-        ipc.listen(NOTE_DISPLACED_EVENT, (payload) => {
+      () => {
+        return ipc.listen(NOTE_DISPLACED_EVENT, (payload) => {
           const parsed = noteDisplacedSchema.safeParse(payload)
           if (parsed.success) {
             listener(parsed.data)
           } else {
             logger.error(`invalid ${NOTE_DISPLACED_EVENT} payload:`, parsed.error)
           }
-        }),
+        })
+      },
       (cause) => {
         logger.warn(`failed to listen for "${NOTE_DISPLACED_EVENT}"`, cause)
       },

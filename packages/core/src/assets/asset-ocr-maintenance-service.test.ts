@@ -214,14 +214,14 @@ describe('AssetOcrMaintenanceService.reconcile', () => {
     const other = 'secure/other.png'
     const { service, assetStore } = await setup()
     await assetStore.writeOcrCache(await sha256Hex(other), await completeEntry(other), GENERATION)
-    vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) =>
-      Promise.try(() => {
+    vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) => {
+      return Promise.try(() => {
         if (path === PATH) {
           throw new AppError('io', 'the file is not available offline')
         }
         return new Uint8Array([3, 4])
-      }),
-    )
+      })
+    })
 
     expect(await service.reconcile(GENERATION, undefined, { reindexCached: false })).toEqual([
       other,

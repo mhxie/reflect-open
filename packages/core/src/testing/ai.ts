@@ -503,9 +503,9 @@ class TestOnDeviceModelServiceImpl implements TestOnDeviceModelService {
     signal?: AbortSignal,
   ): Promise<VerifiedModelTarget> {
     this.#verifyLog.push({ target, apiKey })
-    return await verifyModelTarget(target, (onDevice) =>
-      this.verifyServer(onDevice, { apiKey, signal }),
-    )
+    return await verifyModelTarget(target, (onDevice) => {
+      return this.verifyServer(onDevice, { apiKey, signal })
+    })
   }
 
   verifyServer(

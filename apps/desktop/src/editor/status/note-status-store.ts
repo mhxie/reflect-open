@@ -85,7 +85,8 @@ function subscribe(listener: () => void): () => void {
 
 /** The scoped mounted editor's live status, or null when none is published. */
 export function useNoteStatus(scope: NoteStatusScope | null): NoteStatus | null {
-  const read = (): NoteStatus | null =>
-    scope === null ? null : (entries.get(scope.generation)?.get(scope.path)?.status ?? null)
+  const read = (): NoteStatus | null => {
+    return scope === null ? null : (entries.get(scope.generation)?.get(scope.path)?.status ?? null)
+  }
   return useSyncExternalStore(subscribe, read, read)
 }

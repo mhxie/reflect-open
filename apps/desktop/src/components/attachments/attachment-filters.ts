@@ -29,10 +29,11 @@ export function filterAttachments(
   if (type === null && tagKey === null) {
     return entries
   }
-  return entries.filter(
-    (entry) =>
-      (type === null || entry.type === type) && (tagKey === null || linkedWithTag(entry, tagKey)),
-  )
+  return entries.filter((entry) => {
+    return (
+      (type === null || entry.type === type) && (tagKey === null || linkedWithTag(entry, tagKey))
+    )
+  })
 }
 
 /**

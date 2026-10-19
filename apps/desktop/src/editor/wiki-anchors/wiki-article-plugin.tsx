@@ -142,8 +142,9 @@ function decorations(
   if (!index.article) return DecorationSet.empty
   const result: Decoration[] = []
   const trustView = options.trust?.() ?? null
-  const claimTrust = (id: string | null | undefined): WikiClaimTrust | null =>
-    trustView === null || id === null || id === undefined ? null : trustView.claim(id)
+  const claimTrust = (id: string | null | undefined): WikiClaimTrust | null => {
+    return trustView === null || id === null || id === undefined ? null : trustView.claim(id)
+  }
   /** Textblocks holding a margin mark, which position it. */
   const marginHosts = new Set<number>()
   for (const marker of index.markers) {
@@ -524,14 +525,15 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
         appendTransaction: (transactions, oldState, state) => {
           if (
             !transactions.some((transaction) => transaction.docChanged) ||
-            transactions.some(
-              (transaction) =>
+            transactions.some((transaction) => {
+              return (
                 transaction.getMeta('wiki-review-pending') ||
                 isHistoryTransaction(transaction) ||
                 // A reload of the file (a sync pull, an agent's write) is not
                 // an edit made here, so it records no review work.
-                isHostContentTransaction(transaction),
-            )
+                isHostContentTransaction(transaction)
+              )
+            })
           )
             return null
           const old = wikiArticleKey.getState(oldState)
@@ -567,13 +569,14 @@ export function defineWikiArticle(options: WikiArticlePluginOptions): PlainExten
               const value = wikiArticleKey.getState(view.state)
               const group = value?.index.groups
                 .map((item) => wikiEditorRange(value.map, item))
-                .find(
-                  (range) =>
+                .find((range) => {
+                  return (
                     range !== null &&
                     view.state.selection.from >= range.from &&
                     view.state.selection.to <= range.to &&
-                    view.state.selection.from < range.to,
-                )
+                    view.state.selection.from < range.to
+                  )
+                })
               if (group != null) {
                 view.dispatch(
                   view.state.tr

@@ -10,6 +10,7 @@ import {
 } from '@reflect/core/testing'
 import { queryKeys } from '@/lib/query-client.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AgentsSection } from './agents-section.tsx'
 
 const GRAPH = { root: '/graphs/Personal', name: 'Personal', generation: 7 }
@@ -49,7 +50,11 @@ interface SectionView {
 }
 
 async function renderSection(platform?: TestPlatformOptions): Promise<SectionView> {
-  const app = createTestCoreServices({ agentSkill, platform: createTestPlatformService(platform) })
+  const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
+    agentSkill,
+    platform: createTestPlatformService(platform),
+  })
   const { queryClient } = await renderInApp(<AgentsSection />, { app, graph: GRAPH })
   return { graphSession: app.graphSession, queryClient }
 }
@@ -148,22 +153,22 @@ describe('AgentsSection', () => {
 
     const nextGraph = { root: '/graphs/Work', name: 'Work', generation: 11 }
     graphSession.setGraph(nextGraph)
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(queryClient.getQueryState(queryKeys.agentSkill.status(nextGraph.root))?.status).toBe(
         'success',
-      ),
-    )
+      )
+    })
     await expect.element(page.getByRole('button', { name: 'Install skill' })).toBeEnabled()
     const nextStatus = { ...statusPayload(), skillPath: '/work/SKILL.md' }
     queryClient.setQueryData(queryKeys.agentSkill.status(nextGraph.root), nextStatus)
 
     installState = 'current'
     pendingInstall.resolve(statusPayload())
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(queryClient.getQueryData(queryKeys.agentSkill.status(GRAPH.root))).toEqual(
         statusPayload(),
-      ),
-    )
+      )
+    })
     expect(queryClient.getQueryData(queryKeys.agentSkill.status(nextGraph.root))).toEqual(
       nextStatus,
     )

@@ -115,9 +115,9 @@ describe('article source projection', () => {
 
   it('keeps two claims in one paragraph with formatting and identical editor/preview numbering', async () => {
     const editable = await editorFixture()
-    await vi.waitFor(() =>
-      expect(editable.container.querySelectorAll('.wiki-article-reference')).toHaveLength(3),
-    )
+    await vi.waitFor(() => {
+      expect(editable.container.querySelectorAll('.wiki-article-reference')).toHaveLength(3)
+    })
     expect(editable.container.querySelector('.wiki-article-reference')?.checkVisibility()).toBe(
       true,
     )
@@ -154,9 +154,9 @@ describe('article source projection', () => {
     const { editor, ref, container, onDocChange } = await editorFixture()
     const before = ref.current!.getMarkdown()
     noteArticleFor('wiki/Example.md')!.toggleRanges()
-    await vi.waitFor(() =>
-      expect(container.querySelectorAll('[data-wiki-claim-visible]').length).toBeGreaterThan(0),
-    )
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('[data-wiki-claim-visible]').length).toBeGreaterThan(0)
+    })
     expect(ref.current!.getMarkdown()).toBe(before)
     expect(onDocChange).not.toHaveBeenCalled()
     expect(undo(editor.state)).toBe(false)
@@ -478,16 +478,16 @@ describe('article source projection', () => {
       'Third paragraph. [[Related#^c1|ref]]<!-- {"metadata":{"citation":{"valid_at":"2020-01-02"}}} -->',
     )
     const { container } = await editorFixture(content)
-    await vi.waitFor(() =>
-      expect(container.querySelectorAll('.wiki-article-reference')).toHaveLength(4),
-    )
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('.wiki-article-reference')).toHaveLength(4)
+    })
     const native = container.querySelector('.md-wikilink-view-preview.meowdown-reference')
     expect(native).not.toBeNull()
     expect(native?.checkVisibility()).toBe(false)
     expect(
-      [...container.querySelectorAll('.wiki-article-reference')].every((node) =>
-        node.checkVisibility(),
-      ),
+      [...container.querySelectorAll('.wiki-article-reference')].every((node) => {
+        return node.checkVisibility()
+      }),
     ).toBe(true)
   })
 

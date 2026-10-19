@@ -12,6 +12,7 @@ import { useState, type ReactElement, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
 import { pointer, swipe, translateX } from '@/test-utils/swipe.ts'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteRowList } from './note-row-list.tsx'
 import { SwipeableNoteRow, type NoteRowModel } from './swipeable-note-row.tsx'
 
@@ -23,6 +24,7 @@ const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 function mount(ui: ReactNode): Promise<InAppRenderResult<CoreServices>> {
   const readSource = (): Promise<string> => Promise.resolve('# A\n')
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     platform: createTestPlatformService({ reducedMotion: true }),
     noteDocuments: {
       readSource,
@@ -151,9 +153,11 @@ describe('NoteRowList', () => {
       { x: rect.right - 120, y: rect.top + 32 },
     )
     await view.getByRole('button', { name: 'Pin Alpha', exact: true }).click()
-    await vi.waitFor(() =>
-      expect(view.app.noteRows.getOverlay('notes/alpha.md')).toMatchObject({ isPinned: true }),
-    )
+    await vi.waitFor(() => {
+      expect(view.app.noteRows.getOverlay('notes/alpha.md')).toMatchObject({
+        isPinned: true,
+      })
+    })
     await expect.element(view.getByText('Pinned', { exact: true })).toBeInTheDocument()
     expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/alpha.md', { pinned: 1024 }, 1)
     write.resolve()

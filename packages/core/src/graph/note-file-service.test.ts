@@ -398,8 +398,9 @@ describe('createTestNoteFileService', () => {
  */
 function installEcho(
   echoOwnWrites: boolean,
-  invoke: (command: string) => unknown = (command) =>
-    command === 'note_write' ? { modifiedMs: null, merged: null } : null,
+  invoke: (command: string) => unknown = (command) => {
+    return command === 'note_write' ? { modifiedMs: null, merged: null } : null
+  },
 ) {
   const ipc = createTestIpcBridgeService()
   ipc.onCommand('note_write', () => invoke('note_write'))
@@ -440,9 +441,9 @@ describe('local write echo (Plan 19, decision 5)', () => {
   it('stamps the echo with the on-disk mtime the write returned', async () => {
     // The reconcile's read-free skip compares the stored row's mtime against
     // the file listing — only the write's own on-disk stamp can ever match.
-    const { noteFile, fileChanges } = installEcho(true, (command) =>
-      command === 'note_write' ? { modifiedMs: 1_234, merged: null } : null,
-    )
+    const { noteFile, fileChanges } = installEcho(true, (command) => {
+      return command === 'note_write' ? { modifiedMs: 1_234, merged: null } : null
+    })
     const seen: FileChange[][] = []
     const unlisten = fileChanges.subscribe(({ changes }) => {
       seen.push([...changes])

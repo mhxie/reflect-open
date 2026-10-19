@@ -302,12 +302,13 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
       continue
     }
     if (
-      citationUnits.some(
-        (unit) =>
+      citationUnits.some((unit) => {
+        return (
           unit.from < last.from &&
           unit.to > first.to &&
-          (unit.from < first.to || unit.to > last.from),
-      )
+          (unit.from < first.to || unit.to > last.from)
+        )
+      })
     ) {
       invalidIds.add(id)
       diagnostic(first.from, last.to, `${id} splits a citation from its date metadata.`, id)
@@ -407,13 +408,14 @@ export function readWikiClaimIndex(source: string, asOf: string): WikiClaimIndex
   const resolvedLedgers = ledgers.map((ledger): WikiClaimLedger => {
     if (ledger.owner === null) {
       if (!legacyLedgers.has(ledger.from)) return ledger
-      const legacy = claims.find(
-        (claim) =>
+      const legacy = claims.find((claim) => {
+        return (
           claim.kind === 'legacy' &&
           !invalidIds.has(claim.id) &&
           ledger.from >= claim.from &&
-          ledger.to <= claim.to,
-      )
+          ledger.to <= claim.to
+        )
+      })
       return legacy === undefined ? ledger : { ...ledger, owner: legacy.id, valid: true }
     }
     const own = ledgers.filter((other) => other.owner === ledger.owner)

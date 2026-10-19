@@ -184,9 +184,9 @@ function notesWithAttachment(db: Kysely<Database>, type: NoteAttachmentType) {
     .select('assets.notePath as path')
     .where((eb) => {
       const byExtension = eb.or(
-        ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) =>
-          eb('assets.assetPath', 'like', `%.${extension}`),
-        ),
+        ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) => {
+          return eb('assets.assetPath', 'like', `%.${extension}`)
+        }),
       )
       const isAudioMemo = eb.or(
         AUDIO_MEMO_PATTERNS.map((pattern) => eb('assets.assetPath', 'like', pattern)),
@@ -204,13 +204,13 @@ function notesWithAttachment(db: Kysely<Database>, type: NoteAttachmentType) {
       .selectFrom('links')
       .select('links.sourcePath as path')
       .where('links.kind', '=', 'md')
-      .where((eb) =>
-        eb.or(
-          YOUTUBE_VIDEO_URL_FRAGMENTS.map((fragment) =>
-            eb('links.targetRaw', 'like', `%${fragment}%`),
-          ),
-        ),
-      ),
+      .where((eb) => {
+        return eb.or(
+          YOUTUBE_VIDEO_URL_FRAGMENTS.map((fragment) => {
+            return eb('links.targetRaw', 'like', `%${fragment}%`)
+          }),
+        )
+      }),
   )
 }
 
@@ -312,9 +312,11 @@ function mediaReferences(db: Kysely<Database>) {
     .selectFrom('assets')
     .innerJoin('notes', 'notes.path', 'assets.notePath')
     .where('notes.kind', 'in', ['note', 'daily'])
-    .where((eb) =>
-      eb.or(MEDIA_EXTENSIONS.map((extension) => eb('assets.assetPath', 'like', `%.${extension}`))),
-    )
+    .where((eb) => {
+      return eb.or(
+        MEDIA_EXTENSIONS.map((extension) => eb('assets.assetPath', 'like', `%.${extension}`)),
+      )
+    })
 }
 
 export interface NoteListServiceDeps {
@@ -492,13 +494,13 @@ class NoteListServiceImpl implements NoteListService {
     const rows = await db
       .selectFrom('assets')
       .select(['assets.notePath', 'assets.assetPath'])
-      .where((eb) =>
-        eb.or(
-          ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) =>
-            eb('assets.assetPath', 'like', `%.${extension}`),
-          ),
-        ),
-      )
+      .where((eb) => {
+        return eb.or(
+          ATTACHMENT_TYPE_EXTENSIONS[type].map((extension) => {
+            return eb('assets.assetPath', 'like', `%.${extension}`)
+          }),
+        )
+      })
       // Rows are written in document order, each reference's spellings in
       // resolution order.
       .orderBy(sql`"assets"."rowid"`)

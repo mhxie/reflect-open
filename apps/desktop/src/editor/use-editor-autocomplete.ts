@@ -41,8 +41,9 @@ export function useEditorAutocomplete(sourcePath: string | null): EditorAutocomp
   const { autocompleteSuggestions } = useAppServices()
 
   const onWikilinkSearch = useCallback(
-    (query: string): Promise<WikilinkItem[]> =>
-      autocompleteSuggestions.suggestLinks(query, { sourcePath }),
+    (query: string): Promise<WikilinkItem[]> => {
+      return autocompleteSuggestions.suggestLinks(query, { sourcePath })
+    },
     [autocompleteSuggestions, sourcePath],
   )
 

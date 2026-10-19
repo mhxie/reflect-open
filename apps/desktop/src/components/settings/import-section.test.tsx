@@ -4,6 +4,7 @@ import { createTestDialogService, type TestDialogService } from '@reflect/app/te
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ImportSection } from './import-section.tsx'
 
 const IMPORT_COMMAND = 'graph_import_reflect_v1_zip'
@@ -18,7 +19,7 @@ beforeEach(() => {
  * The section under the workspace's real V1 import, whose native import never finishes.
  */
 async function renderSection(): Promise<TestCoreServices> {
-  const app = createTestCoreServices()
+  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   app.ipc.onCommand(IMPORT_COMMAND, () => new Promise<never>(() => {}))
   await renderInApp(<ImportSection />, {
     app,
@@ -46,7 +47,7 @@ describe('ImportSection', () => {
 
     await importButton().click()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(dialog.calls()).toEqual([
         {
           kind: 'files',
@@ -56,13 +57,13 @@ describe('ImportSection', () => {
             filters: [{ name: 'Zip archives', extensions: ['zip'] }],
           },
         },
-      ]),
-    )
-    await vi.waitFor(() =>
+      ])
+    })
+    await vi.waitFor(() => {
       expect(importCalls(app)).toEqual([
         { path: '/Users/alex/Downloads/reflect-v1.zip', generation: 4 },
-      ]),
-    )
+      ])
+    })
   })
 
   it('does nothing when the picker is cancelled', async () => {

@@ -1,11 +1,11 @@
 import { createDb } from '@reflect/db'
 import { describe, expect, it } from 'vitest'
-import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createDailyActivityService } from './daily-activity-service.ts'
 import type { DatabaseService } from './database-service.ts'
 
 function setup(notes: TestNote[]) {
-  const database = createTestDatabaseService()
+  const database = createNodeTestDatabaseService()
   seedNotes(database, notes)
   return { database, activity: createDailyActivityService({ database }) }
 }

@@ -43,8 +43,8 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
   useEffect(() => {
     navigateRef.current = onWikiLinkClick
   }, [onWikiLinkClick])
-  const [extension] = useState(() =>
-    defineWikiArticle({
+  const [extension] = useState(() => {
+    return defineWikiArticle({
       asOf: todayIso,
       evidence: {
         interactive: true,
@@ -54,8 +54,8 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       onUpdate: () => updateRef.current(),
       noteIdentity: (title) => identitiesRef.current(title),
       trust: trustView,
-    }),
-  )
+    })
+  })
   useExtension(extension)
   useEffect(() => {
     identitiesRef.current = noteIdentity
@@ -159,10 +159,9 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
           return sourceFrom === null || sourceTo === null
             ? []
             : value.index.claims
-                .filter(
-                  (claim) =>
-                    claim.kind === 'range' && sourceFrom < claim.to && sourceTo > claim.from,
-                )
+                .filter((claim) => {
+                  return claim.kind === 'range' && sourceFrom < claim.to && sourceTo > claim.from
+                })
                 .map((claim) => claim.id)
         },
         adjustSelection: (id, from, to) => {

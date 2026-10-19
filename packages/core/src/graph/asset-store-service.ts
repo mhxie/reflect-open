@@ -182,16 +182,13 @@ class AssetStoreServiceImpl implements AssetStoreService {
     generation: number,
   ): Promise<string> {
     const { ipc } = this.#deps
-    const path = await this.#streamUpload(
-      contents,
-      generation,
-      async (id) =>
-        await ipc.call(
-          'asset_upload_commit',
-          { id, desiredName, notePath, generation },
-          z.string(),
-        ),
-    )
+    const path = await this.#streamUpload(contents, generation, async (id) => {
+      return await ipc.call(
+        'asset_upload_commit',
+        { id, desiredName, notePath, generation },
+        z.string(),
+      )
+    })
     this.#reportWrite(path)
     return path
   }
@@ -203,12 +200,9 @@ class AssetStoreServiceImpl implements AssetStoreService {
       await this.writeBase64(path, bytesToBase64(bytes), generation)
       return
     }
-    await this.#streamUpload(
-      contents,
-      generation,
-      async (id) =>
-        await ipc.call('asset_upload_commit_path', { id, path, generation }, voidSchema),
-    )
+    await this.#streamUpload(contents, generation, async (id) => {
+      return await ipc.call('asset_upload_commit_path', { id, path, generation }, voidSchema)
+    })
     this.#reportWrite(path)
   }
 

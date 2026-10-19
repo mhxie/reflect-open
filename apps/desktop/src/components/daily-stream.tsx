@@ -82,13 +82,14 @@ export function DailyStream({ target }: DailyStreamProps): ReactElement {
   // arrival day to that heading, once: a day row that scrolls out and back
   // remounts its pane, which must not jump to the heading again.
   const [revealedKey, setRevealedKey] = useState<number | null>(null)
-  const arrivalReveal = useMemo(
-    (): { readonly date: string; readonly reveal: NoteReveal } | null =>
-      arrivalRevealHeading === null || arrivalSeq === revealedKey
-        ? null
-        : { date: targetDate, reveal: { fragment: arrivalRevealHeading, key: arrivalSeq } },
-    [arrivalRevealHeading, arrivalSeq, revealedKey, targetDate],
-  )
+  const arrivalReveal = useMemo((): {
+    readonly date: string
+    readonly reveal: NoteReveal
+  } | null => {
+    return arrivalRevealHeading === null || arrivalSeq === revealedKey
+      ? null
+      : { date: targetDate, reveal: { fragment: arrivalRevealHeading, key: arrivalSeq } }
+  }, [arrivalRevealHeading, arrivalSeq, revealedKey, targetDate])
 
   // Mirrored like targetDate: the focus request belongs to the arrival that
   // bumped `arrivalSeq`, so the anchor effect reads it through a ref instead

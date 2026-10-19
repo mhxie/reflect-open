@@ -151,9 +151,9 @@ describe('verifyModelTarget', () => {
 
   it('refuses with the reason when the server is refused, never falling back to cloud', async () => {
     await expect(
-      verifyModelTarget(modelTarget(attested()), () =>
-        Promise.resolve({ kind: 'refused', reason: 'Choose a model running on this Mac.' }),
-      ),
+      verifyModelTarget(modelTarget(attested()), () => {
+        return Promise.resolve({ kind: 'refused', reason: 'Choose a model running on this Mac.' })
+      }),
     ).rejects.toMatchObject({ kind: 'auth', message: 'Choose a model running on this Mac.' })
   })
 })

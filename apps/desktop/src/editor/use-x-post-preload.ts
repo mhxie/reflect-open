@@ -37,13 +37,11 @@ export function useXPostPreload(markdown: string | null, privacy: XPostPreloadPr
     }
     return [...ids]
   }, [markdown])
-  const queries = useMemo(
-    () =>
-      root === null || privacy !== 'public'
-        ? []
-        : postIds.map((id) => xPostQueryOptions(embedMedia, root, id)),
-    [embedMedia, postIds, root, privacy],
-  )
+  const queries = useMemo(() => {
+    return root === null || privacy !== 'public'
+      ? []
+      : postIds.map((id) => xPostQueryOptions(embedMedia, root, id))
+  }, [embedMedia, postIds, root, privacy])
   // The resolver reads the shared client, so the preload must fill that one.
   const loaded = useQueries(
     {

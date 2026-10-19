@@ -60,9 +60,12 @@ export function DayTaskRow({
       </button>
       <button
         type="button"
-        onClick={(event) =>
-          onNavigate({ target: routeForPath(task.notePath), openInNewWindow: isModEvent(event) })
-        }
+        onClick={(event) => {
+          onNavigate({
+            target: routeForPath(task.notePath),
+            openInNewWindow: isModEvent(event),
+          })
+        }}
         className="flex min-w-0 flex-1 flex-col text-left text-xs leading-5"
       >
         <span

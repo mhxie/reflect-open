@@ -9,7 +9,7 @@ import {
   type IndexQueryService,
   type PinnedNote,
 } from '../indexing/index-query-service.ts'
-import { createTestDatabaseService } from '../testing/database.ts'
+import { createNodeTestDatabaseService } from '../testing/database.ts'
 import { createTestIndexLifecycleService } from '../testing/index-lifecycle.ts'
 import { createTestNoteSession, type TestNoteSessionOptions } from '../testing/documents.ts'
 import { createTestFileChangeService } from '../testing/file-change.ts'
@@ -98,7 +98,7 @@ function createNoteActions(deps: {
     openDocuments,
     indexLifecycle: deps.indexLifecycle ?? recordingIndexLifecycle(indexLog),
     indexQuery:
-      deps.indexQuery ?? createIndexQueryService({ database: createTestDatabaseService() }),
+      deps.indexQuery ?? createIndexQueryService({ database: createNodeTestDatabaseService() }),
     noteRows: deps.noteRows ?? createNoteRowService({ graphSession: graph }),
     progress: deps.progress ?? createTestProgressPort(),
     path: createPathService({ transport: createPosixPathTransport('/home/test') }),
@@ -133,7 +133,7 @@ function setup(options?: {
   const graph = createTestGraph(options?.graph)
   const noteRows = createNoteRowService({ graphSession: graph })
   const pinned = options?.pinned ?? []
-  const indexQuery = createIndexQueryService({ database: createTestDatabaseService() })
+  const indexQuery = createIndexQueryService({ database: createNodeTestDatabaseService() })
   vi.spyOn(indexQuery, 'getPinnedNotes').mockImplementation(
     typeof pinned === 'function' ? pinned : () => Promise.resolve([...pinned]),
   )
@@ -156,13 +156,15 @@ function shelfNote(path: string, pinnedOrder: number | null): PinnedNote {
 }
 
 function failing(method: 'read' | 'write' | 'delete', error: unknown) {
-  return (files: NoteFileService): NoteFileService =>
-    overrideNoteFileService(files, {
-      [method]: () =>
-        Promise.try(() => {
+  return (files: NoteFileService): NoteFileService => {
+    return overrideNoteFileService(files, {
+      [method]: () => {
+        return Promise.try(() => {
           throw error
-        }),
+        })
+      },
     })
+  }
 }
 
 describe('togglePinned', () => {
@@ -320,15 +322,16 @@ describe('togglePinned', () => {
     let fail = true
     const { actions, files, progress, noteRows } = setup({
       files: { 'notes/a.md': '# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           read: async (...args) => {
             if (fail) {
               throw new AppError('io', 'disk on fire')
             }
             return await inner.read(...args)
           },
-        }),
+        })
+      },
     })
 
     await expect(actions.togglePinned('notes/a.md')).resolves.toEqual({ status: 'failed' })
@@ -360,8 +363,8 @@ describe('togglePinned', () => {
     let first = true
     const { actions, files } = setup({
       files: { 'notes/a.md': '# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           write: async (...args) => {
             if (first) {
               first = false
@@ -369,7 +372,8 @@ describe('togglePinned', () => {
             }
             return await inner.write(...args)
           },
-        }),
+        })
+      },
     })
 
     await expect(actions.togglePinned('notes/a.md')).resolves.toMatchObject({ status: 'done' })
@@ -463,13 +467,14 @@ describe('reorderPinned', () => {
     const gate = Promise.withResolvers<void>()
     const { actions, files, noteRows } = setup({
       files: { 'notes/a.md': '# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           write: async (...args) => {
             await gate.promise
             return await inner.write(...args)
           },
-        }),
+        })
+      },
     })
 
     const first = actions.reorderPinned([{ path: 'notes/a.md', pinnedOrder: 1024 }])
@@ -574,8 +579,8 @@ describe('togglePrivate', () => {
     let overlayAtWrite: unknown = 'unwritten'
     const { actions, noteRows, files } = setup({
       files: { 'notes/a.md': '---\nprivate: true\n---\n# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           read: async (...args) => {
             overlaysAtRead.push(noteRows.getOverlay('notes/a.md'))
             return await inner.read(...args)
@@ -584,7 +589,8 @@ describe('togglePrivate', () => {
             overlayAtWrite = noteRows.getOverlay('notes/a.md')
             return await inner.write(...args)
           },
-        }),
+        })
+      },
     })
 
     await actions.togglePrivate('notes/a.md')
@@ -599,8 +605,8 @@ describe('togglePrivate', () => {
     let first = true
     const { actions, files } = setup({
       files: { 'notes/a.md': '# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           write: async (...args) => {
             if (first) {
               first = false
@@ -608,7 +614,8 @@ describe('togglePrivate', () => {
             }
             return await inner.write(...args)
           },
-        }),
+        })
+      },
     })
 
     await actions.togglePrivate('notes/a.md')
@@ -635,7 +642,7 @@ describe('togglePrivate', () => {
         {
           label: 'Updating privacy',
           status: 'failed',
-          message: expect.stringContaining("can't be read"),
+          message: expect.stringContaining("can't be read") as string,
         },
       ])
       // Never predicted unlocked, not even for a moment.
@@ -700,13 +707,14 @@ describe('togglePrivate', () => {
     const gate = Promise.withResolvers<void>()
     const { actions, files } = setup({
       files: { 'notes/a.md': '# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           read: async (...args) => {
             await gate.promise
             return await inner.read(...args)
           },
-        }),
+        })
+      },
     })
     const first = actions.togglePrivate('notes/a.md')
     const second = actions.togglePrivate('notes/a.md')
@@ -795,15 +803,16 @@ describe('setNotesPrivate', () => {
         'notes/c.md': '# C\n',
       },
       graph: { localOnlyFolders: ['secure'], localOnlyEditableFolders: ['secure'] },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           write: async (path, ...rest) => {
             if (path === 'notes/c.md') {
               throw new Error('disk full')
             }
             return await inner.write(path, ...rest)
           },
-        }),
+        })
+      },
     })
 
     await expect(
@@ -821,13 +830,14 @@ describe('setNotesPrivate', () => {
     const gate = Promise.withResolvers<void>()
     const { actions, files } = setup({
       files: { 'notes/a.md': '# A\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           write: async (...args) => {
             await gate.promise
             return await inner.write(...args)
           },
-        }),
+        })
+      },
     })
     const toggle = actions.togglePrivate('notes/a.md')
 
@@ -854,8 +864,9 @@ describe('setNotesPrivate', () => {
 })
 
 describe('hasUnreadableLock', () => {
-  const lockOf = (source: string): boolean =>
-    hasUnreadableLock(parseNote({ path: 'notes/a.md', source }))
+  const lockOf = (source: string): boolean => {
+    return hasUnreadableLock(parseNote({ path: 'notes/a.md', source }))
+  }
 
   it("freezes a locked note whose frontmatter can't be parsed", () => {
     expect(lockOf('---\nprivate: maybe\n---\n# A\n')).toBe(true)
@@ -921,13 +932,14 @@ describe('trash', () => {
   it('says when the graph’s own trash kept a note the system Trash refused', async () => {
     const { actions } = setup({
       files: { 'secure/bank.md': '# Bank\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           delete: async (path, generation) => {
             await inner.delete(path, generation)
             return { trashed: 'graph' }
           },
-        }),
+        })
+      },
     })
 
     await expect(actions.trash('secure/bank.md')).resolves.toEqual({
@@ -1114,13 +1126,14 @@ describe('trashMany', () => {
   })
 
   it('says when the system Trash refused notes and the graph’s trash kept them', async () => {
-    const graphTrash = (inner: NoteFileService): NoteFileService =>
-      overrideNoteFileService(inner, {
+    const graphTrash = (inner: NoteFileService): NoteFileService => {
+      return overrideNoteFileService(inner, {
         delete: async (path, generation) => {
           const outcome = await inner.delete(path, generation)
           return path.startsWith('secure/') ? { trashed: 'graph' } : outcome
         },
       })
+    }
     const one = setup({
       files: { 'notes/a.md': '# A\n', 'secure/bank.md': '# Bank\n' },
       wrapNoteFile: graphTrash,
@@ -1152,15 +1165,16 @@ describe('trashMany', () => {
   it('keeps going past a failure and fails the operation with the last error', async () => {
     const { actions, files, progress, noteRows } = setup({
       files: { 'notes/a.md': '# A\n', 'notes/b.md': '# B\n', 'notes/c.md': '# C\n' },
-      wrapNoteFile: (inner) =>
-        overrideNoteFileService(inner, {
+      wrapNoteFile: (inner) => {
+        return overrideNoteFileService(inner, {
           delete: async (path, generation) => {
             if (path === 'notes/b.md') {
               throw new Error('locked')
             }
             return await inner.delete(path, generation)
           },
-        }),
+        })
+      },
     })
     const result = await actions.trashMany([
       'notes/a.md',

@@ -47,7 +47,7 @@ import {
 import { createTestClockService } from './clock.ts'
 import { createTestContactsService } from './contacts.ts'
 import { createTestRecorderService } from './recordings.ts'
-import { createTestDatabaseService } from './database.ts'
+import type { TestDatabaseService } from './database.ts'
 import { createTestDeepLinkIntakeService } from './deep-link.ts'
 import { createTestNoteMoveService } from './documents.ts'
 import {
@@ -121,6 +121,11 @@ export type TestCoreServiceOverrides = Partial<CoreServices & CoreInternalServic
    * {@link createGraphServices} with the lifecycles of {@link testGraphLifecycles}.
    */
   readonly createGraphServices?: (session: GraphSession, deps: GraphServicesDeps) => GraphServices
+  /**
+   * The index database: `createNodeTestDatabaseService()` in Node.js tests,
+   * `createWasmTestDatabaseService()` in desktop browser tests.
+   */
+  readonly database: TestDatabaseService
 }
 
 /**
@@ -163,9 +168,8 @@ type TestEdgeServices = ReturnType<typeof createTestEdgeServices>
 /**
  * The services whose test double is not the real service: in-memory, scripted, or recording.
  */
-function createTestServiceFactories(overrides: TestCoreServiceOverrides | undefined) {
+function createTestServiceFactories(overrides: TestCoreServiceOverrides) {
   return {
-    database: () => createTestDatabaseService(),
     settings: ({ progress }) => createTestSettingsService({}, { progress }),
     storage: () => createTestStorageService(),
     fileChanges: () => createTestFileChangeService(),
@@ -200,10 +204,11 @@ function createTestServiceFactories(overrides: TestCoreServiceOverrides | undefi
     assetDescriber: () => createTestAssetDescriberService(),
     indexLifecycle: (deps) => createTestIndexLifecycleService(deps),
     // The test graph session answers the graph commands on its own bridge unless a test gives one.
-    graphSession: ({ ipc: _ipc, ...deps }) =>
-      createTestGraphSessionService(
-        overrides?.ipc === undefined ? deps : { ...deps, ipc: overrides.ipc },
-      ),
+    graphSession: ({ ipc: _ipc, ...deps }) => {
+      return createTestGraphSessionService(
+        overrides.ipc === undefined ? deps : { ...deps, ipc: overrides.ipc },
+      )
+    },
     attachments: ({ graphSession }) => createTestAttachmentService({ graphSession }),
     persistenceFlush: ({ openDocuments }) => createTestPersistenceFlushService({ openDocuments }),
     gitRepository: () => createTestGitRepositoryService(),
@@ -256,6 +261,7 @@ export type TestCoreServices = Override<
   CoreServices & CoreInternalServices,
   Built<TestServiceFactories> &
     TestEdgeServices & {
+      readonly database: TestDatabaseService
       readonly ipc: TestIpcBridgeService
       readonly mobile: TestMobileServices
       readonly platform: TestPlatformService
@@ -273,12 +279,12 @@ const TEST_ADAPTER_KEYS = new Set(['backup', 'progress', 'role', 'createGraphSer
  * service that has one and `overrides` in place of the matching services.
  */
 export function createTestCoreServices<
-  Overrides extends TestCoreServiceOverrides = Record<never, never>,
->(overrides?: Overrides & TestCoreServiceOverrides): TestCoreServices & NoInfer<Overrides> {
+  Overrides extends Partial<TestCoreServiceOverrides> = Record<never, never>,
+>(overrides: Overrides & TestCoreServiceOverrides): TestCoreServices & NoInfer<Overrides> {
   const defaults = createTestEdgeServices()
   const edge = { ...defaults, ...overrides }
   const platform = edge.platform ?? createTestPlatformService()
-  const backup = overrides?.backup
+  const backup = overrides.backup
   const adapters: CoreAdapters = {
     ipc: edge.ipc ?? createTestIpcBridgeService({ logger: edge.logger }),
     platform,
@@ -294,16 +300,17 @@ export function createTestCoreServices<
     imageCodec: edge.imageCodec,
     createGraphServices:
       edge.createGraphServices ??
-      ((session, deps) =>
-        createGraphServices(
+      ((session, deps) => {
+        return createGraphServices(
           session,
           deps,
           testGraphLifecycles(session, platform),
           backup === undefined ? {} : { backup: () => backup },
-        )),
+        )
+      }),
   }
   const fixed: Record<string, () => unknown> = {}
-  for (const [key, service] of Object.entries(overrides ?? {})) {
+  for (const [key, service] of Object.entries(overrides)) {
     if (!TEST_ADAPTER_KEYS.has(key)) {
       fixed[key] = () => service
     }

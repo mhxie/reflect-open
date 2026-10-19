@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { page } from 'vitest/browser'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useSync, useSyncContext } from './sync-provider.tsx'
 
 function Probe(): ReactElement {
@@ -37,7 +38,10 @@ describe('useSync', () => {
   })
 
   it('reads loading, and no context, where the graph runs no backup', async () => {
-    const app = createTestCoreServices({ role: 'note-window' })
+    const app = createTestCoreServices({
+      database: createWasmTestDatabaseService(),
+      role: 'note-window',
+    })
     await renderInApp(<Probe />, { app })
 
     const button = page.getByRole('button', { name: 'loading' })
@@ -58,7 +62,12 @@ describe('useSync', () => {
     expect(backup?.calls()).toEqual([{ method: 'start' }, { method: 'fileChanged' }])
 
     // A note window runs no backup: the same call is a no-op, not a throw.
-    await renderInApp(<ChangedProbe />, { app: createTestCoreServices({ role: 'note-window' }) })
+    const noteWindow = createTestCoreServices({
+      database: createWasmTestDatabaseService(),
+      role: 'note-window',
+    })
+    onTestFinished(() => noteWindow.database.close())
+    await renderInApp(<ChangedProbe />, { app: noteWindow })
     await page.getByRole('button', { name: 'changed' }).last().click()
   })
 })

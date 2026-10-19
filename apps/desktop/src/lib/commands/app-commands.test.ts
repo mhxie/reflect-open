@@ -6,6 +6,7 @@ import {
 } from '@reflect/app/testing'
 import { buildIndexedNote, parseNote, type NoteListSort, type WikiCopy } from '@reflect/core'
 import {
+  createNodeTestDatabaseService,
   createTestCoreServices,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
@@ -28,7 +29,11 @@ function createApp() {
   const embeddingIndex: TestEmbeddingIndexService = createTestEmbeddingIndexService({
     backfill: () => Promise.resolve('completed'),
   })
-  return createTestCoreServices({ embeddingRuntime, embeddingIndex })
+  return createTestCoreServices({
+    database: createNodeTestDatabaseService(),
+    embeddingRuntime,
+    embeddingIndex,
+  })
 }
 
 let app: ReturnType<typeof createApp>
@@ -523,6 +528,7 @@ describe('app commands', () => {
 
   it('dev.toggleDevtools no-ops without a native shell (plain-browser dev)', async () => {
     const browser = createTestCoreServices({
+      database: createNodeTestDatabaseService(),
       platform: createTestPlatformService({ isNativeShell: false }),
     })
     const { context } = fakeContext({ services: browser })
@@ -634,12 +640,12 @@ describe('wiki.switchLanguage', () => {
     await command('wiki.switchLanguage').run(outside.context)
     expect(outside.navigated).toEqual([])
 
-    lookups.mockImplementation(() =>
-      Promise.resolve([
+    lookups.mockImplementation(() => {
+      return Promise.resolve([
         { language: english, path: 'wiki/memory/A.md' },
         { language: chinese, path: null },
-      ]),
-    )
+      ])
+    })
     const alone = fakeContext({ route: () => ({ kind: 'note', path: 'wiki/memory/A.md' }) })
     await command('wiki.switchLanguage').run(alone.context)
     expect(alone.navigated).toEqual([])

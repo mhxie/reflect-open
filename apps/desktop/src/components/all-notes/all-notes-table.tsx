@@ -56,13 +56,14 @@ export function AllNotesTable({
   const { clickSelect, isSelected } = selection
   const virtualizerRef = useRef<VirtualizerHandle>(null)
   const handleToggle = useCallback(
-    (path: string, event: Pick<MouseEvent, 'shiftKey'>) =>
+    (path: string, event: Pick<MouseEvent, 'shiftKey'>) => {
       clickSelect(
         path,
         event.shiftKey
           ? { metaKey: false, ctrlKey: false, shiftKey: true }
           : { metaKey: true, ctrlKey: true, shiftKey: false },
-      ),
+      )
+    },
     [clickSelect],
   )
 

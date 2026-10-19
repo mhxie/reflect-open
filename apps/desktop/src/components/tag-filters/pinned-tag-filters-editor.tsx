@@ -42,10 +42,11 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
   })
 
   const findFocusTarget = useCallback(
-    (target: TagFocusTarget | 'input' | null): HTMLElement | null =>
-      target === null || target === 'input'
+    (target: TagFocusTarget | 'input' | null): HTMLElement | null => {
+      return target === null || target === 'input'
         ? inputRef.current
-        : (controlsRef.current.get(`${target.control}:${target.tag}`) ?? inputRef.current),
+        : (controlsRef.current.get(`${target.control}:${target.tag}`) ?? inputRef.current)
+    },
     [],
   )
   const registerControl = useCallback(
@@ -100,9 +101,9 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
   const unpin = (tag: string): void => {
     const index = tags.indexOf(tag)
     const nextTag = tags[index + 1] ?? tags[index - 1]
-    editWithFocus(nextTag === undefined ? 'input' : { tag: nextTag, control: 'menu' }, () =>
-      unpinTag(tag),
-    )
+    editWithFocus(nextTag === undefined ? 'input' : { tag: nextTag, control: 'menu' }, () => {
+      return unpinTag(tag)
+    })
     setAnnouncement(`Unpinned #${tag}.`)
   }
 
@@ -122,9 +123,11 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
           onMove={move}
           onUnpin={unpin}
           registerControl={registerControl}
-          menuFinalFocus={(tag) =>
-            controlsRef.current.get(`menu:${tag}`) ?? findFocusTarget(finalFocusTargetRef.current)
-          }
+          menuFinalFocus={(tag) => {
+            return (
+              controlsRef.current.get(`menu:${tag}`) ?? findFocusTarget(finalFocusTargetRef.current)
+            )
+          }}
         />
       )}
       <form

@@ -34,10 +34,11 @@ export function useNoteGitVersion({
   const enabled = open && !isLocalOnly && root !== null && generation !== null && path !== null
   const query = useQuery({
     queryKey: queryKeys.git.noteVersion(root ?? undefined, generation, path),
-    queryFn: async () =>
-      generation === null || path === null
+    queryFn: async () => {
+      return generation === null || path === null
         ? null
-        : await gitRepository.noteVersion(path, generation),
+        : await gitRepository.noteVersion(path, generation)
+    },
     enabled,
     staleTime: 0,
     gcTime: 60_000,

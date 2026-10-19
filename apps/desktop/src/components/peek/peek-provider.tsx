@@ -103,17 +103,15 @@ export function PeekProvider({ enabled = true, children }: PeekProviderProps): R
   // A peeked note renamed while open (its title edited here) follows its file,
   // as the router's routes do — "Open" and note commands must not act on the
   // path it left behind.
-  useEffect(
-    () =>
-      noteMove.onMoved((from, to) => {
-        setState((current) =>
-          current.target?.kind === 'note' && current.target.path === from
-            ? { ...current, target: { ...current.target, path: to, route: routeForPath(to) } }
-            : current,
-        )
-      }),
-    [noteMove],
-  )
+  useEffect(() => {
+    return noteMove.onMoved((from, to) => {
+      setState((current) => {
+        return current.target?.kind === 'note' && current.target.path === from
+          ? { ...current, target: { ...current.target, path: to, route: routeForPath(to) } }
+          : current
+      })
+    })
+  }, [noteMove])
 
   const value = useMemo(
     () => ({ target: state.target, targetKey: state.key, openPeek, closePeek }),

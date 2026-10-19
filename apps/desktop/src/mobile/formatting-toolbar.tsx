@@ -105,9 +105,9 @@ export function MobileFormattingToolbar(): ReactElement | null {
             // `commands` is read here, not after the picker returns: the
             // sheet takes focus from the editor, which clears the published
             // toolbar, but the command still holds its own editor.
-            onPress={() =>
+            onPress={() => {
               void pickFiles({ accept: 'image/*', multiple: true }).then(commands.attachFiles)
-            }
+            }}
           />
         ) : null}
       </div>

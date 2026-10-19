@@ -405,8 +405,9 @@ export function NoteEditor({
       setSelection: (position) => innerRef.current?.setSelection(position),
       getSelectedText: () => innerRef.current?.getSelectedText() ?? '',
       openSelectionMenu: () => innerRef.current?.openSelectionMenu(),
-      startPendingReplacement: (options) =>
-        innerRef.current?.startPendingReplacement(options) ?? false,
+      startPendingReplacement: (options) => {
+        return innerRef.current?.startPendingReplacement(options) ?? false
+      },
       appendPendingReplacementText: (text) => innerRef.current?.appendPendingReplacementText(text),
       acceptPendingReplacement: (options) => innerRef.current?.acceptPendingReplacement(options),
       discardPendingReplacement: () => innerRef.current?.discardPendingReplacement(),
@@ -444,12 +445,13 @@ export function NoteEditor({
   )
 
   const handleWikilinkClick = useCallback(
-    (payload: { target: string; event: MouseEvent | KeyboardEvent; mod: boolean }) =>
-      onWikiLinkClickRef.current?.({
+    (payload: { target: string; event: MouseEvent | KeyboardEvent; mod: boolean }) => {
+      return onWikiLinkClickRef.current?.({
         target: payload.target,
         openInNewWindow: payload.mod,
         peek: !payload.mod && payload.event.altKey,
-      }),
+      })
+    },
     [],
   )
   const handleTagClick = useCallback(
@@ -466,11 +468,11 @@ export function NoteEditor({
     (url) => (privateNoteRef.current ? resolveNoXPost : graphXPostResolverRef.current)(url),
     [],
   )
-  const handleResolveYouTubeVideo: YouTubeVideoResolver = useCallback(
-    (url) =>
-      (privateNoteRef.current ? resolveNoYouTubeVideo : graphYouTubeVideoResolverRef.current)(url),
-    [],
-  )
+  const handleResolveYouTubeVideo: YouTubeVideoResolver = useCallback((url) => {
+    return (privateNoteRef.current ? resolveNoYouTubeVideo : graphYouTubeVideoResolverRef.current)(
+      url,
+    )
+  }, [])
   const handleResolveEmbed: EmbedResolver = useCallback((src) => resolveEmbedRef.current?.(src), [])
   const handleResolveWikiEmbed: WikiEmbedResolver = useCallback(
     (embed) => resolveWikiEmbedRef.current?.(embed),
@@ -510,15 +512,15 @@ export function NoteEditor({
         }
         const openPath = resolveAssetOpenPathRef.current?.(src) ?? null
         const openImage = openAssetRef.current ?? null
-        setOpenLightboxImage(() =>
-          openPath !== null && openImage !== null
+        setOpenLightboxImage(() => {
+          return openPath !== null && openImage !== null
             ? () => {
                 void Promise.resolve(openImage(openPath)).catch((cause) => {
                   logger.error('open image failed:', errorMessage(cause))
                 })
               }
-            : null,
-        )
+            : null
+        })
         openLightbox({ type: 'image', src: displayUrl, alt }, element)
       })
     },

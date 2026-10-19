@@ -13,6 +13,7 @@ import {
 import { createTestOperationsService } from '@reflect/app/testing'
 import { describe, expect, it, vi } from 'vitest'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useEditorAutocomplete } from './use-editor-autocomplete.ts'
 
 /**
@@ -73,7 +74,7 @@ async function setup(options?: SetupOptions) {
     status: options?.authorization ?? 'authorized',
     contacts: [ADA],
   })
-  const base = createTestCoreServices()
+  const base = createTestCoreServices({ database: createWasmTestDatabaseService() })
   const personNotes: typeof base.personNotes = {
     ...base.personNotes,
     resolvePersonContact: (contact) => ({
@@ -81,16 +82,21 @@ async function setup(options?: SetupOptions) {
       contact,
       insertText: contact.fullName,
     }),
-    ensurePersonNote: async (input) =>
-      await noteCreation.resolveOrCreateNoteWithTitle(input.title, input.generation),
+    ensurePersonNote: async (input) => {
+      return await noteCreation.resolveOrCreateNoteWithTitle(input.title, input.generation)
+    },
   }
   const graphSession = createTestGraphSessionService()
   const app = createTestCoreServices({
+    database: createWasmTestDatabaseService(),
     graphSession,
     suggestions: {
       ...base.suggestions,
-      suggestWikiLinkTargets: () =>
-        options?.wikiLinks ?? { suggestions: [], claimedTargetKeys: [], queryReadsAsDate: false },
+      suggestWikiLinkTargets: () => {
+        return (
+          options?.wikiLinks ?? { suggestions: [], claimedTargetKeys: [], queryReadsAsDate: false }
+        )
+      },
       suggestTags: () => [
         { tag: 'work', count: 2 },
         { tag: 'home', count: 1 },
@@ -133,13 +139,13 @@ describe('useEditorAutocomplete', () => {
 
     items[0]!.onSelect?.()
 
-    await vi.waitFor(() =>
+    await vi.waitFor(() => {
       expect(operations.findByLabel('Creating note')).toMatchObject({
         status: 'failed',
         message:
           'Couldn’t safely choose one note matching “Business ideas”. Rename conflicting notes or wait for unavailable notes to become available, then try again.',
-      }),
-    )
+      })
+    })
   })
 
   it('does not offer create when the exact query has an unaddressable claim', async () => {
@@ -152,11 +158,11 @@ describe('useEditorAutocomplete', () => {
   it('adds Contact rows once the integration is on and the permission readable', async () => {
     const { result } = await setup({ contactsEnabled: true })
     // The permission state arrives through a query; the row joins once it settles.
-    await vi.waitFor(async () =>
+    await vi.waitFor(async () => {
       expect(await result.current.onWikilinkSearch('Ada Lovelace')).toMatchObject([
         { target: 'Ada Lovelace', label: 'Ada Lovelace', detail: 'ada@example.com' },
-      ]),
-    )
+      ])
+    })
   })
 
   it('keeps Contact rows out while the integration is off', async () => {
@@ -193,11 +199,11 @@ describe('useEditorAutocomplete', () => {
       sourcePath: LOCAL_ONLY_SOURCE,
     })
 
-    await vi.waitFor(async () =>
+    await vi.waitFor(async () => {
       expect(await result.current.onWikilinkSearch('Ada Lovelace')).toEqual([
         { target: 'Ada Lovelace', label: 'Ada Lovelace', detail: 'ada@example.com' },
-      ]),
-    )
+      ])
+    })
     expect(created).toEqual([])
   })
 

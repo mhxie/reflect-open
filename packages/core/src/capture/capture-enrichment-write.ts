@@ -141,10 +141,11 @@ export async function finishCaptureWrite(
   await patchNote(
     ctx.noteFile,
     dailyNotePath,
-    (dailySource) =>
-      dailySource === null || notePrivate(dailySource)
+    (dailySource) => {
+      return dailySource === null || notePrivate(dailySource)
         ? null
-        : retitleDailyEntry(dailySource, identity.base, transaction.fromTitle, snapshot.title),
+        : retitleDailyEntry(dailySource, identity.base, transaction.fromTitle, snapshot.title)
+    },
     generation,
   )
 

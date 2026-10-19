@@ -22,9 +22,9 @@ export function noteMarkdownForFiles(
   assetPaths: readonly string[],
 ): string {
   const title = files.map(noteTitleFromFile).find((name) => name !== undefined)
-  const links = files.map((file, index) =>
-    buildFileMarkdown(file, assetPaths[index]!, shouldEmbedFile),
-  )
+  const links = files.map((file, index) => {
+    return buildFileMarkdown(file, assetPaths[index]!, shouldEmbedFile)
+  })
   // The heading is spelled out: the blank note's empty one is replaced, not filled.
   return [title === undefined ? '#' : `# ${title}`, ...links].join('\n\n')
 }

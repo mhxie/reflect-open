@@ -102,9 +102,9 @@ describe('dropEchoRepeats', () => {
     const question = [
       segment('them', 10_000, 14_000, 'Can you send them now, or are you sure it can wait? 可以吗'),
     ]
-    const replies = ['No.', 'Yes.', 'Sure.', 'Right.', '可以。'].map((reply) =>
-      segment('me', 14_200, 14_800, reply),
-    )
+    const replies = ['No.', 'Yes.', 'Sure.', 'Right.', '可以。'].map((reply) => {
+      return segment('me', 14_200, 14_800, reply)
+    })
     expect(dropEchoRepeats(replies, question)).toEqual(replies)
   })
 

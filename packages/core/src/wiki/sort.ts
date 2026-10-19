@@ -66,11 +66,14 @@ function sortValue(entry: WikiEntry, key: Exclude<WikiSortKey, 'title'>): number
  */
 export function sortWikiEntries(entries: readonly WikiEntry[], sort: WikiSort): WikiEntry[] {
   const sign = sort.direction === 'asc' ? 1 : -1
-  const byTitle = (left: WikiEntry, right: WikiEntry): number =>
-    collator.compare(
-      noteTitlePresentation(left.title, left).text,
-      noteTitlePresentation(right.title, right).text,
-    ) || left.path.localeCompare(right.path)
+  const byTitle = (left: WikiEntry, right: WikiEntry): number => {
+    return (
+      collator.compare(
+        noteTitlePresentation(left.title, left).text,
+        noteTitlePresentation(right.title, right).text,
+      ) || left.path.localeCompare(right.path)
+    )
+  }
   const { key } = sort
   if (key === 'title') {
     return [...entries].sort((left, right) => sign * byTitle(left, right))

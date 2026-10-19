@@ -19,8 +19,9 @@ export function useUnreadableFrontmatter(path: string, isPrivate: boolean): bool
   const localOnly = useLocalOnlyFolders()
   const { data } = useQuery({
     queryKey: queryKeys.index.noteFrontmatterPrivacy(graph?.root, path),
-    queryFn: async () =>
-      hasUnreadableLock(parseNote({ path, source: await noteDocuments.readSource(path) })),
+    queryFn: async () => {
+      return hasUnreadableLock(parseNote({ path, source: await noteDocuments.readSource(path) }))
+    },
     enabled: graph !== null && isPrivate && !isLocalOnlyPath(localOnly, path),
   })
   return isPrivate && data === true

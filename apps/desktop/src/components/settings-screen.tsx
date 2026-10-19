@@ -27,7 +27,7 @@ import { useCoreServices } from '@/services/services-provider.tsx'
 export function SettingsScreen(): ReactElement {
   const { platform } = useCoreServices()
   return (
-    <div aria-label="Settings">
+    <div aria-label="Settings" data-testid="settings-screen">
       <h1 className="text-lg font-semibold text-text">Settings</h1>
       <div className="mt-6">
         <AppearanceSection />

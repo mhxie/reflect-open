@@ -18,9 +18,7 @@ export function useDailyEditCounts(enabled: boolean): ReadonlyMap<string, number
     queryFn: () => dailyActivity.listDailyEditCounts(),
     enabled: enabled && graph !== null,
   })
-  return useMemo(
-    () =>
-      data === undefined ? NO_COUNTS : new Map(data.map((entry) => [entry.date, entry.notes])),
-    [data],
-  )
+  return useMemo(() => {
+    return data === undefined ? NO_COUNTS : new Map(data.map((entry) => [entry.date, entry.notes]))
+  }, [data])
 }

@@ -22,14 +22,14 @@ export function WikiArticleBibliography({
               <button
                 type="button"
                 className="text-left text-text-secondary underline-offset-2 hover:underline"
-                onClick={(event) =>
-                  reference.kind === 'note'
+                onClick={(event) => {
+                  return reference.kind === 'note'
                     ? options.openWikiLink?.({
                         target: reference.target,
                         openInNewWindow: event.metaKey || event.ctrlKey,
                       })
                     : options.openUrl?.(reference.target, event.nativeEvent)
-                }
+                }}
               >
                 {reference.kind === 'note'
                   ? reference.target

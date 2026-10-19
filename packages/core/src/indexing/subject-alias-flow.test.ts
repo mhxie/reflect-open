@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import { parseNote, upsertFrontmatter } from '../markdown/index.ts'
-import { createTestDatabaseService } from '../testing/database.ts'
+import { createNodeTestDatabaseService } from '../testing/database.ts'
 import {
   connectIndex,
   expectSuggestionOpensItsPath,
@@ -13,7 +13,7 @@ import { nextAliases, rewriteLinksForTitleChange } from './rename.ts'
 
 describe('v1 subject alias flow', () => {
   it('keeps `[[segment]]` links resolving after a `//` title is renamed away', async () => {
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     const aliases = nextAliases([], {
       from: 'Tim MacCaw // Dad',
       to: 'Timothy MacCaw',
@@ -44,7 +44,7 @@ describe('v1 subject alias flow', () => {
   })
 
   it('retitles a display reached through a stable subject alias', async () => {
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     const subjectPath = 'notes/capture.md'
     const sourcePath = 'daily/2026-07-23.md'
     const source = '[[capture-2026-07-23-154848|Old Title]]\n'
@@ -81,7 +81,7 @@ describe('v1 subject alias flow', () => {
   })
 
   it('projects, resolves, backlinks, and autocompletes Dad through the real schema', async () => {
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     const person = project('notes/tim-maccaw-dad.md', '# Tim MacCaw // Dad\n', 20)
     const source = project('notes/family.md', '# Family\n\nCall [[Dad]].\n', 10)
 
@@ -172,7 +172,7 @@ describe('v1 subject alias flow', () => {
   })
 
   it('offers only suggestions whose serialized address resolves to the selected note', async () => {
-    const database = createTestDatabaseService()
+    const database = createNodeTestDatabaseService()
     const projections = [
       // A calendar-valid daily address outranks a regular note with that title,
       // even when the daily's custom H1 keeps it out of the title search hits.

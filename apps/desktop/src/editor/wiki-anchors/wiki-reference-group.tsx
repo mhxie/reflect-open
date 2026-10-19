@@ -31,8 +31,8 @@ export function WikiReferenceGroupView({
 }: WikiReferenceGroupProps): ReactElement {
   return (
     <span className="wiki-article-references" contentEditable={false} data-wiki-reference-group="">
-      {group.occurrences.map((reference) =>
-        options.interactive ? (
+      {group.occurrences.map((reference) => {
+        return options.interactive ? (
           <Popover key={reference.from}>
             <PopoverTrigger
               render={
@@ -111,8 +111,8 @@ export function WikiReferenceGroupView({
           >
             [{reference.number}]
           </span>
-        ),
-      )}
+        )
+      })}
     </span>
   )
 }

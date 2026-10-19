@@ -83,8 +83,9 @@ describe('SubscriptionService', () => {
   })
 
   it('takes either confirmed plan without waiting on its sibling', async () => {
-    owned = (productId) =>
-      productId === IAP_PRODUCT_IDS.yearly ? Promise.resolve(true) : never<boolean>()
+    owned = (productId) => {
+      return productId === IAP_PRODUCT_IDS.yearly ? Promise.resolve(true) : never<boolean>()
+    }
     await expect(service().activeSubscription()).resolves.toBe('yearly')
   })
 
@@ -129,7 +130,10 @@ describe('SubscriptionService', () => {
     await expect(answer).resolves.toBeNull()
     expect(subscription.getState()).toEqual({ value: null, isLoading: false, isError: true })
     expect(logger.getWarnings()).toEqual([
-      { message: 'Looking up the App Store subscription failed', cause: expect.any(Error) },
+      {
+        message: 'Looking up the App Store subscription failed',
+        cause: expect.any(Error) as Error,
+      },
     ])
     expect(lookups).toHaveLength(2)
     expect(storage.local.get(ACTIVE_SUBSCRIPTION_STORAGE_KEY)).toBeNull()
@@ -145,10 +149,11 @@ describe('SubscriptionService', () => {
 
   it('does not remember null when one lookup fails and the sibling is negative', async () => {
     seed('yearly', NOW)
-    owned = (productId) =>
-      productId === IAP_PRODUCT_IDS.yearly
+    owned = (productId) => {
+      return productId === IAP_PRODUCT_IDS.yearly
         ? Promise.reject(new Error('StoreKit unavailable'))
         : Promise.resolve(false)
+    }
     const subscription = service()
 
     const answer = subscription.activeSubscription()
