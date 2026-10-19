@@ -57,8 +57,12 @@ fn write(root: &Path, rel: &str, contents: &str) {
 }
 
 fn commit_and_push(root: &Path) {
+    let policy = reflect_git::CommitPolicy {
+        max_file_bytes: MAX_FILE_BYTES,
+        ..reflect_git::CommitPolicy::default()
+    };
     assert!(
-        reflect_git::commit_all(root, "edit", MAX_FILE_BYTES, None)
+        reflect_git::commit_all(root, "edit", &policy)
             .unwrap()
             .committed
     );

@@ -26,5 +26,6 @@ pub use graph_lock::holders as graph_lock_holders;
 pub use graph_lock::with_graph_lock;
 pub use resolve::{
     EditTarget, LocalOnlyEntry, ReadTarget, TargetKind, ensure_relative, entry_is_local_only,
-    resolve, resolve_note_edit, resolve_read, resolve_shareable, resolve_write,
+    resolve, resolve_attachment_read, resolve_note_edit, resolve_read, resolve_shareable,
+    resolve_shareable_attachment, resolve_write,
 };

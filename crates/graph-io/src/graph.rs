@@ -15,13 +15,18 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-use reflect_graph_paths::{LocalOnlyFolders, eviction_placeholder};
+use reflect_graph_paths::{
+    CatalogScope, ExternalLinks, ExternalStore, LocalOnlyFolders, eviction_placeholder,
+};
 use reflect_types::{AppError, AppResult, FileMeta};
 
 use crate::graph_lock::with_graph_lock;
 use crate::io::{self, AtomicCreateOutcome, atomic_write, modified_ms};
 use crate::own_writes;
-use crate::resolve::{EditTarget, LocalOnlyEntry, TargetKind, resolve_note_edit, resolve_write};
+use crate::resolve::{
+    EditTarget, LocalOnlyEntry, ReadTarget, TargetKind, resolve_attachment_read, resolve_note_edit,
+    resolve_shareable_attachment, resolve_write,
+};
 
 /// Why a write refuses when the file no longer holds what its writer read
 /// (it appeared or went missing). The app's idempotent patches re-read and
@@ -59,8 +64,14 @@ pub struct GraphConfig {
     /// The history roots Git sync may join.
     pub accepted_history_roots: Vec<git2::Oid>,
     /// The backup settings' configuration problems found at open (the size
-    /// limit and the accepted history roots).
+    /// limit, the accepted history roots, and the external storage).
     pub backup_warnings: Vec<String>,
+    /// The graph's external storage folder (desktop only), which attachment
+    /// reads and the catalog reach into.
+    pub external: Option<Arc<ExternalStore>>,
+    /// Every folder the external storage has used, by every spelling seen:
+    /// Git never stages a link into one.
+    pub external_links: Option<Arc<ExternalLinks>>,
 }
 
 /// The open graph root plus a monotonic generation, kept **under one lock** so
@@ -121,6 +132,13 @@ impl GraphInner {
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_accepted_history_roots(&mut self, roots: Vec<git2::Oid>) {
         self.config.accepted_history_roots = roots;
+    }
+
+    /// Install external storage directly, for command-tier tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_external(&mut self, store: Option<ExternalStore>) {
+        self.config.external = store.map(Arc::new);
+        self.catalog = None;
     }
 }
 
@@ -323,6 +341,83 @@ pub fn backup_max_file_bytes(state: &GraphState, generation: u64) -> AppResult<O
     let inner = lock_graph(state)?;
     inner.check_generation(Some(generation))?;
     Ok(inner.config.backup_max_file_bytes)
+}
+
+/// The folders the open graph's external storage has used, verified against
+/// the generation the sync command was issued for (like
+/// [`root_for_generation`]); `None` when it has used none.
+pub fn external_links(
+    state: &GraphState,
+    generation: u64,
+) -> AppResult<Option<Arc<ExternalLinks>>> {
+    let inner = lock_graph(state)?;
+    inner.check_generation(Some(generation))?;
+    Ok(inner.config.external_links.clone())
+}
+
+/// What an attachment read may reach in the open graph, read under one lock
+/// so it always describes one graph: the root, its local-only folders, and
+/// its external storage.
+#[derive(Clone, Debug)]
+pub struct AttachmentScope {
+    pub root: PathBuf,
+    pub local_only: Option<Arc<LocalOnlyFolders>>,
+    pub external: Option<Arc<ExternalStore>>,
+}
+
+impl AttachmentScope {
+    /// Resolve an attachment for a read ([`resolve_attachment_read`]).
+    pub fn resolve(&self, rel: &str) -> AppResult<ReadTarget> {
+        resolve_attachment_read(
+            &self.root,
+            rel,
+            self.local_only.as_deref(),
+            self.external.as_deref(),
+        )
+    }
+
+    /// Resolve an attachment about to leave this device
+    /// ([`resolve_shareable_attachment`]).
+    pub fn resolve_shareable(&self, rel: &str) -> AppResult<ReadTarget> {
+        resolve_shareable_attachment(
+            &self.root,
+            rel,
+            self.local_only.as_deref(),
+            self.external.as_deref(),
+        )
+    }
+}
+
+/// [`graph_for`] plus the external storage, for attachment reads.
+pub fn graph_for_attachments(
+    state: &GraphState,
+    generation: Option<u64>,
+) -> AppResult<AttachmentScope> {
+    let inner = lock_graph(state)?;
+    inner.check_generation(generation)?;
+    attachment_scope(&inner)
+}
+
+/// [`graph_for_sharing`] plus the external storage, for attachment bytes
+/// about to leave this device.
+pub fn graph_for_sharing_attachments(
+    state: &GraphState,
+    generation: Option<u64>,
+) -> AppResult<AttachmentScope> {
+    let inner = lock_graph(state)?;
+    inner.check_generation(generation)?;
+    if inner.config.local_only_unknown {
+        return Err(AppError::io(SHARING_PAUSED));
+    }
+    attachment_scope(&inner)
+}
+
+fn attachment_scope(inner: &GraphInner) -> AppResult<AttachmentScope> {
+    Ok(AttachmentScope {
+        root: inner.root.clone().ok_or_else(AppError::no_graph)?,
+        local_only: inner.config.local_only.clone(),
+        external: inner.config.external.clone(),
+    })
 }
 
 /// The open graph's accepted history roots, verified against the generation
@@ -879,7 +974,7 @@ pub fn note_and_attachment_files(root: &Path) -> (Vec<FileMeta>, Vec<FileMeta>) 
 /// write may serve its own caller but must never be pinned. No retry loop:
 /// under sustained writes every caller simply keeps paying for its own scan.
 pub fn file_catalog(state: &GraphState, generation: Option<u64>) -> AppResult<io::FileCatalog> {
-    file_catalog_with(state, generation, io::collect_file_catalog)
+    file_catalog_with(state, generation, io::collect_file_catalog_in)
 }
 
 fn file_catalog_with<F>(
@@ -888,9 +983,9 @@ fn file_catalog_with<F>(
     scan: F,
 ) -> AppResult<io::FileCatalog>
 where
-    F: FnOnce(&Path, Option<&LocalOnlyFolders>) -> io::FileCatalog,
+    F: FnOnce(&Path, CatalogScope<'_>) -> io::FileCatalog,
 {
-    let (root, local_only, expected_generation, expected_revision) = {
+    let (root, local_only, external, expected_generation, expected_revision) = {
         let inner = lock_graph(state)?;
         inner.check_generation(generation)?;
         if let Some(catalog) = &inner.catalog {
@@ -899,12 +994,17 @@ where
         (
             inner.root.clone().ok_or_else(AppError::no_graph)?,
             inner.config.local_only.clone(),
+            inner.config.external.clone(),
             inner.generation,
             inner.catalog_revision,
         )
     };
 
-    let catalog = scan(&root, local_only.as_deref());
+    let scope = CatalogScope {
+        local_only: local_only.as_deref(),
+        external: external.as_deref(),
+    };
+    let catalog = scan(&root, scope);
     let mut inner = lock_graph(state)?;
     if inner.generation == expected_generation
         && inner.root.as_deref() == Some(root.as_path())
@@ -985,8 +1085,9 @@ mod transcript_cache_tests {
 mod file_catalog_tests {
     use super::{
         GraphConfig, GraphInner, GraphState, file_catalog, file_catalog_with,
-        invalidate_file_catalog,
+        graph_for_attachments, invalidate_file_catalog,
     };
+    use reflect_graph_paths::ExternalStore;
     use std::fs;
     use std::sync::Mutex;
 
@@ -998,6 +1099,41 @@ mod file_catalog_tests {
             catalog: None,
             catalog_revision: 0,
         }))
+    }
+
+    #[test]
+    fn the_catalog_lists_external_attachments_with_their_availability() {
+        let dir = tempfile::tempdir().expect("dir");
+        let (vault, external) = (dir.path().join("graph"), dir.path().join("ext"));
+        fs::create_dir_all(&vault).expect("graph");
+        fs::create_dir_all(external.join("research")).expect("external");
+        fs::write(external.join(reflect_graph_paths::MARKER_FILE_NAME), "").expect("marker");
+        fs::write(external.join("research/big.pdf"), "pdf").expect("external file");
+        let graph = graph_at(&vault, 5);
+        graph
+            .0
+            .lock()
+            .expect("graph lock")
+            .set_external(ExternalStore::new(&external, None, None));
+
+        let catalog = file_catalog(&graph, Some(5)).expect("catalog");
+        let listed: Vec<(&str, Option<reflect_types::ExternalAvailability>)> = catalog
+            .attachments
+            .iter()
+            .map(|file| (file.path.as_str(), file.external))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![(
+                "research/big.pdf",
+                Some(reflect_types::ExternalAvailability::Local)
+            )]
+        );
+        let target = graph_for_attachments(&graph, Some(5))
+            .expect("scope")
+            .resolve("research/big.pdf")
+            .expect("target");
+        assert!(target.external);
     }
 
     #[test]
@@ -1081,8 +1217,8 @@ mod file_catalog_tests {
         fs::write(vault.path().join("README.md"), "# Root\n").expect("write root note");
         let graph = graph_at(vault.path(), 5);
 
-        let stale = file_catalog_with(&graph, Some(5), |root, local_only| {
-            let scanned = super::io::collect_file_catalog(root, local_only);
+        let stale = file_catalog_with(&graph, Some(5), |root, scope| {
+            let scanned = super::io::collect_file_catalog_in(root, scope);
             // A write lands while the scan is in flight: the scan's snapshot
             // may serve its own caller, but must not become the cache.
             fs::write(root.join("arrived.md"), "# Arrived\n").expect("write racing note");

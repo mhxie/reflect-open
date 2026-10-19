@@ -20,10 +20,15 @@
 //! filesystem resolves it to: APFS folds Unicode case and normalization
 //! (`ſecure` opens `secure`), and an in-graph symlink can alias a real
 //! local-only folder under another name.
+//!
+//! Attachments may also live in the graph's external storage
+//! ([`ExternalStore`]): [`resolve_attachment_read`] serves one through a
+//! link at its path, or from the folder when the graph has no entry there,
+//! and only for reads.
 
 use std::path::{Component, Path, PathBuf};
 
-use reflect_graph_paths::LocalOnlyFolders;
+use reflect_graph_paths::{ExternalCopy, ExternalStore, LocalOnlyFolders, is_attachment};
 
 use reflect_types::{AppError, AppResult};
 
@@ -231,6 +236,9 @@ pub struct ReadTarget {
     /// The entry lies in a local-only folder: through a link, or in a real
     /// directory whose on-disk name (or requested name) is configured.
     pub local_only: bool,
+    /// The entry is the graph's external storage copy: `base` is the
+    /// folder's canonical root ([`resolve_attachment_read`]).
+    pub external: bool,
 }
 
 impl ReadTarget {
@@ -239,15 +247,41 @@ impl ReadTarget {
         self.base.join(&self.rest)
     }
 
-    /// Open the file for reading. A local-only entry opens from its
-    /// raw-store directory with every component below it policed
+    /// Open the file for reading. A local-only or external entry opens from
+    /// its folder's directory with every component below it policed
     /// (`io::open_no_follow`); anything else opens the ordinary way, already
     /// vetted by the symlink-aware guard that produced this target.
+    ///
+    /// An external file whose bytes are not on this device fails with
+    /// [`std::io::ErrorKind::Deadlock`], the error a read gets with
+    /// materialization off (`io::NoMaterialize`): nothing downloads it but
+    /// an explicit request.
     pub fn open(&self) -> std::io::Result<std::fs::File> {
-        if self.local_only {
+        if self.external {
+            // Downloads stay off for the open: an evicted file refuses here
+            // instead of being fetched, and one that opens is local.
+            let _no_materialize = super::io::NoMaterialize::engage();
+            let file = super::io::open_no_follow(&self.base, &self.rest)?;
+            if reflect_graph_paths::is_dataless(&file.metadata()?) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Deadlock,
+                    "the file is not on this device",
+                ));
+            }
+            Ok(file)
+        } else if self.local_only {
             super::io::open_no_follow(&self.base, &self.rest)
         } else {
             std::fs::File::open(self.path())
+        }
+    }
+
+    fn external(copy: ExternalCopy) -> Self {
+        Self {
+            base: copy.root,
+            rest: copy.rel,
+            local_only: false,
+            external: true,
         }
     }
 }
@@ -273,7 +307,62 @@ pub fn resolve_read(
             .is_some_and(|folders| folders.covers(rel) || folders.covers(&resolved.on_disk)),
         base: resolved.canonical_root,
         rest: ensure_relative(rel)?,
+        external: false,
     })
+}
+
+/// [`resolve_read`] for an attachment, which may also be in the graph's
+/// external storage. An allowed link at the path
+/// ([`ExternalStore::link_copy`]) reads the folder's copy; otherwise the path
+/// resolves like [`resolve_read`], and when the graph has no entry there the
+/// folder's copy at that path ([`ExternalStore::overlay_copy`]) is read
+/// instead. Local-only paths, notes, and other non-attachments never come
+/// from the folder. Every check runs on every call. Never use this for a
+/// write.
+pub fn resolve_attachment_read(
+    root: &Path,
+    rel: &str,
+    local_only: Option<&LocalOnlyFolders>,
+    external: Option<&ExternalStore>,
+) -> AppResult<ReadTarget> {
+    let Some(store) = external.filter(|_| is_attachment(rel)) else {
+        return resolve_read(root, rel, local_only);
+    };
+    // A local-only path never reads the folder, by the graph's spelling of
+    // it ([`entry_is_local_only`], which fails closed) or the folder's.
+    if local_only.is_some_and(|folders| entry_is_local_only(root, rel, folders)) {
+        return resolve_read(root, rel, local_only);
+    }
+    let private =
+        |copy: &ExternalCopy| local_only.is_some_and(|folders| folders.covers(&copy.on_disk));
+    if let Some(copy) = store.link_copy(root, rel).filter(|copy| !private(copy)) {
+        return Ok(ReadTarget::external(copy));
+    }
+    let target = resolve_read(root, rel, local_only)?;
+    if !target.local_only
+        && let Some(copy) = store.overlay_copy(root, rel).filter(|copy| !private(copy))
+    {
+        return Ok(ReadTarget::external(copy));
+    }
+    Ok(target)
+}
+
+/// [`resolve_attachment_read`] for bytes about to leave this machine:
+/// refuses anything in a local-only folder, like [`resolve_shareable`]. An
+/// external file is ordinary graph content and may leave.
+pub fn resolve_shareable_attachment(
+    root: &Path,
+    rel: &str,
+    local_only: Option<&LocalOnlyFolders>,
+    external: Option<&ExternalStore>,
+) -> AppResult<ReadTarget> {
+    let target = resolve_attachment_read(root, rel, local_only, external)?;
+    if target.local_only {
+        return Err(AppError::traversal(format!(
+            "local-only notes and files never leave this machine: {rel}"
+        )));
+    }
+    Ok(target)
 }
 
 /// The read target through the first allowed local-only link on `rel`'s
@@ -289,6 +378,7 @@ fn local_only_read_target(
         base: hop.target,
         rest: hop.rest,
         local_only: true,
+        external: false,
     }))
 }
 
@@ -655,6 +745,7 @@ mod tests {
                 base: linked.raw.join("finance/secure"),
                 rest: PathBuf::from("sub/bank.md"),
                 local_only: true,
+                external: false,
             }
         );
         assert_eq!(target.path(), linked.raw.join("finance/secure/sub/bank.md"));
@@ -1226,5 +1317,139 @@ mod tests {
         // A symlink inside the graph pointing out of it.
         symlink(outside.path(), graph.path().join("notes/escape")).unwrap();
         assert!(resolve(graph.path(), "notes/escape/evil.md").is_err());
+    }
+
+    /// [`linked`] plus a marked external folder beside the graph.
+    #[cfg(unix)]
+    fn with_external() -> (Linked, PathBuf, ExternalStore) {
+        let linked = linked();
+        let external = linked.graph.parent().unwrap().join("ext");
+        std::fs::create_dir_all(external.join("research")).unwrap();
+        std::fs::write(external.join(reflect_graph_paths::MARKER_FILE_NAME), "").unwrap();
+        let store = ExternalStore::new(&external, Some(&linked.raw), None).unwrap();
+        (linked, external, store)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attachment_reads_reach_the_external_copy_through_a_link_or_the_overlay() {
+        use std::io::Read;
+        use std::os::unix::fs::symlink;
+        let (linked, external, store) = with_external();
+        let (graph, folders) = (&linked.graph, Some(&linked.folders));
+        std::fs::write(external.join("research/linked.pdf"), "linked").unwrap();
+        std::fs::write(external.join("research/overlay.pdf"), "overlay").unwrap();
+        std::fs::create_dir_all(graph.join("research")).unwrap();
+        symlink(
+            external.join("research/linked.pdf"),
+            graph.join("research/linked.pdf"),
+        )
+        .unwrap();
+
+        let read = |rel: &str| {
+            let target = resolve_attachment_read(graph, rel, folders, Some(&store)).unwrap();
+            let mut text = String::new();
+            target.open().unwrap().read_to_string(&mut text).unwrap();
+            (target.external, text)
+        };
+        assert_eq!(read("research/linked.pdf"), (true, "linked".into()));
+        assert_eq!(read("research/overlay.pdf"), (true, "overlay".into()));
+
+        // Without the store the link is an escape and the overlay is absent.
+        assert!(resolve_attachment_read(graph, "research/linked.pdf", folders, None).is_err());
+        assert!(
+            resolve_attachment_read(graph, "research/overlay.pdf", folders, None)
+                .unwrap()
+                .open()
+                .is_err()
+        );
+        // The ordinary read guard never reaches the folder.
+        assert!(resolve_read(graph, "research/linked.pdf", folders).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn notes_and_local_only_paths_never_come_from_the_external_folder() {
+        let (linked, external, store) = with_external();
+        let (graph, folders) = (&linked.graph, Some(&linked.folders));
+        std::fs::write(external.join("research/note.md"), "external note").unwrap();
+        std::fs::create_dir_all(external.join("finance/secure")).unwrap();
+        std::fs::write(external.join("finance/secure/scan.pdf"), "external").unwrap();
+
+        let note =
+            resolve_attachment_read(graph, "research/note.md", folders, Some(&store)).unwrap();
+        assert!(!note.external);
+        assert_eq!(note.path(), graph.join("research/note.md"));
+
+        let private =
+            resolve_attachment_read(graph, "finance/secure/scan.pdf", folders, Some(&store))
+                .unwrap();
+        assert!(private.local_only && !private.external);
+        assert!(
+            resolve_shareable_attachment(graph, "finance/secure/scan.pdf", folders, Some(&store))
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_retargeted_link_is_refused_on_the_next_read() {
+        use std::os::unix::fs::symlink;
+        let (linked, external, store) = with_external();
+        let graph = &linked.graph;
+        std::fs::write(external.join("research/a.pdf"), "a").unwrap();
+        std::fs::write(external.join("research/b.pdf"), "b").unwrap();
+        std::fs::create_dir_all(graph.join("research")).unwrap();
+        let link = graph.join("research/a.pdf");
+        symlink(external.join("research/a.pdf"), &link).unwrap();
+        assert!(resolve_attachment_read(graph, "research/a.pdf", None, Some(&store)).is_ok());
+
+        std::fs::remove_file(&link).unwrap();
+        symlink(external.join("research/b.pdf"), &link).unwrap();
+        assert!(resolve_attachment_read(graph, "research/a.pdf", None, Some(&store)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_a_real_local_only_folder_never_reads_the_external_folder() {
+        use std::os::unix::fs::symlink;
+        let (linked, external, store) = with_external();
+        let (graph, folders) = (&linked.graph, Some(&linked.folders));
+        std::fs::create_dir_all(graph.join("people/secure")).unwrap();
+        std::fs::create_dir_all(external.join("people/secure")).unwrap();
+        std::fs::write(external.join("people/secure/scan.pdf"), "scan").unwrap();
+        symlink(
+            external.join("people/secure/scan.pdf"),
+            graph.join("people/secure/scan.pdf"),
+        )
+        .unwrap();
+
+        for rel in ["people/secure/scan.pdf", "people/SECURE/scan.pdf"] {
+            let read = resolve_attachment_read(graph, rel, folders, Some(&store));
+            assert!(
+                read.is_err() || read.is_ok_and(|target| !target.external),
+                "{rel}"
+            );
+            assert!(
+                resolve_shareable_attachment(graph, rel, folders, Some(&store)).is_err(),
+                "{rel}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folded_spelling_of_a_local_only_name_never_reads_the_external_folder() {
+        let (linked, external, store) = with_external();
+        let (graph, folders) = (&linked.graph, Some(&linked.folders));
+        std::fs::create_dir_all(external.join("people/secure")).unwrap();
+        std::fs::write(external.join("people/secure/scan.pdf"), "scan").unwrap();
+        let folded = "people/\u{17f}ecure/scan.pdf";
+        if !external.join(folded).exists() {
+            return; // a filesystem that keeps the spellings apart
+        }
+        let read = resolve_attachment_read(graph, folded, folders, Some(&store)).unwrap();
+        assert!(!read.external);
+        assert!(read.open().is_err());
     }
 }

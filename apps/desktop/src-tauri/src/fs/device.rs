@@ -114,8 +114,7 @@ pub async fn asset_read_for_device(
     {
         return Err(AppError::traversal("not a supported OCR attachment"));
     }
-    let (root, local_only) = graph_for(&state, Some(generation))?;
-    let target = resolve_read(&root, &path, local_only.as_deref())?;
+    let target = super::graph_for_attachments(&state, Some(generation))?.resolve(&path)?;
     crate::blocking::run_blocking(move || {
         Ok(tauri::ipc::Response::new(read_source_for_device(&target)?))
     })

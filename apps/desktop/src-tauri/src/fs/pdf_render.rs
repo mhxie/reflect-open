@@ -18,7 +18,7 @@ use tokio::sync::Semaphore;
 
 use super::GraphState;
 use super::preview_cache;
-use super::{ReadTarget, resolve_read, resolve_write};
+use super::{ReadTarget, resolve_write};
 use crate::error::{AppError, AppResult};
 
 #[cfg(target_os = "macos")]
@@ -166,11 +166,7 @@ impl PdfError {
             Self::Locked => StatusCode::LOCKED,
             Self::Invalid(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::PageOutOfRange { .. } => StatusCode::NOT_FOUND,
-            Self::Io(err) => match err.kind() {
-                std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
-                std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            },
+            Self::Io(err) => super::asset_protocol::io_status(err),
         }
     }
 }
@@ -296,7 +292,7 @@ pub async fn pdf_info(
     state: State<'_, GraphState>,
 ) -> AppResult<PdfInfo> {
     super::ensure_readable_attachment_path(&path)?;
-    let (root, local_only) = super::graph_for(&state, Some(generation))?;
+    let scope = super::graph_for_attachments(&state, Some(generation))?;
     if !engine::SUPPORTED {
         return Err(PdfError::Unsupported.into());
     }
@@ -305,7 +301,7 @@ pub async fn pdf_info(
         .await
         .expect("render semaphore stays open");
     crate::blocking::run_blocking(move || {
-        let target = resolve_read(&root, &path, local_only.as_deref())?;
+        let target = scope.resolve(&path)?;
         let (file, metadata) = open_pdf(&target)?;
         let bytes = read_pdf(file, metadata.len())?;
         let pages = engine::page_boxes(&bytes)?
@@ -340,7 +336,7 @@ pub async fn pdf_info_for_device(
     state: State<'_, GraphState>,
 ) -> AppResult<PdfInfo> {
     super::ensure_readable_attachment_path(&path)?;
-    let (root, local_only) = super::graph_for(&state, Some(generation))?;
+    let scope = super::graph_for_attachments(&state, Some(generation))?;
     if !engine::SUPPORTED {
         return Err(PdfError::Unsupported.into());
     }
@@ -349,7 +345,7 @@ pub async fn pdf_info_for_device(
         .await
         .expect("render semaphore stays open");
     crate::blocking::run_blocking(move || {
-        let target = resolve_read(&root, &path, local_only.as_deref())?;
+        let target = scope.resolve(&path)?;
         let bytes = read_device_pdf(&target, &source_hash)?;
         let pages = engine::page_boxes(&bytes)?
             .into_iter()
@@ -373,7 +369,7 @@ pub async fn pdf_page_read_for_device(
     if page == 0 {
         return Err(AppError::invalid("PDF page numbers start at 1"));
     }
-    let (root, local_only) = super::graph_for(&state, Some(generation))?;
+    let scope = super::graph_for_attachments(&state, Some(generation))?;
     if !engine::SUPPORTED {
         return Err(PdfError::Unsupported.into());
     }
@@ -382,7 +378,7 @@ pub async fn pdf_page_read_for_device(
         .await
         .expect("render semaphore stays open");
     crate::blocking::run_blocking(move || {
-        let target = resolve_read(&root, &path, local_only.as_deref())?;
+        let target = scope.resolve(&path)?;
         let bytes = read_device_pdf(&target, &source_hash)?;
         let png = engine::render_png(
             &bytes,
@@ -626,6 +622,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+    use crate::fs::resolve_read;
 
     #[cfg(target_os = "macos")]
     #[test]

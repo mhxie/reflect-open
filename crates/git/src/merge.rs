@@ -41,7 +41,7 @@ use std::path::Path;
 
 use git2::build::CheckoutBuilder;
 use git2::{Index, IndexEntry, IndexTime, MergeOptions, Repository};
-use reflect_graph_paths::{LocalOnlyFolders, to_slash_lossy};
+use reflect_graph_paths::{ExternalLinks, LocalOnlyFolders, to_slash_lossy};
 use serde::Serialize;
 
 use reflect_graph_io::conflict::copy::{free_conflict_copy_path, utc_stamp};
@@ -146,6 +146,21 @@ pub struct PullPolicy<'a> {
     /// committed (history keeps this device's version and the merged text
     /// stays on disk, an edit every later commit withholds and reports).
     pub max_file_bytes: u64,
+    /// The folders the graph's external storage has used: links into them
+    /// are never committed, and a pull writing a file where one stands parks
+    /// the link (the folder keeps its copy).
+    pub external: Option<&'a ExternalLinks>,
+}
+
+impl<'a> PullPolicy<'a> {
+    /// What the pull's own commit may stage.
+    pub(super) fn commit(&self) -> super::CommitPolicy<'a> {
+        super::CommitPolicy {
+            max_file_bytes: self.max_file_bytes,
+            local_only: self.local_only,
+            external: self.external,
+        }
+    }
 }
 
 impl Default for PullPolicy<'_> {
@@ -154,6 +169,7 @@ impl Default for PullPolicy<'_> {
             local_only: None,
             accepted_roots: &[],
             max_file_bytes: super::MAX_FILE_BYTES,
+            external: None,
         }
     }
 }
@@ -368,14 +384,7 @@ fn merge_into_head(
                 plan.allowed.iter().map(|change| change.path.as_str()),
             )?;
         }
-        let moves = match displace(
-            repo,
-            root,
-            &plan.allowed,
-            &new_tree,
-            policy.max_file_bytes,
-            displaced,
-        )? {
+        let moves = match displace(repo, root, &plan.allowed, &new_tree, policy, displaced)? {
             Displacement::Ready(moves) => moves,
             Displacement::Deferred => return Ok(MergeOutcome::nothing(MergeKind::Deferred)),
         };
@@ -458,7 +467,7 @@ fn merge_into_head(
             });
         }
     }
-    let moves = match displace(repo, root, &writes, &tree, policy.max_file_bytes, displaced)? {
+    let moves = match displace(repo, root, &writes, &tree, policy, displaced)? {
         Displacement::Ready(moves) => moves,
         // The merge commit stays dangling; the next pull makes another.
         Displacement::Deferred => return Ok(MergeOutcome::nothing(MergeKind::Deferred)),

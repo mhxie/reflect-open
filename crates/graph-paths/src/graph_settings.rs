@@ -6,6 +6,9 @@ use std::path::Path;
 /// The settings-document key holding every graph's local-only configuration.
 pub const LOCAL_ONLY_SETTINGS_KEY: &str = "localOnlyFolders";
 
+/// The settings-document key holding every graph's external storage folder.
+pub const EXTERNAL_STORAGE_SETTINGS_KEY: &str = "externalStorage";
+
 /// The key among `keys` that configures the graph at `root`: the exact root
 /// string or, failing that, one naming the same folder (recents may hold a
 /// non-canonical spelling). An exact key wins over a canonical match, so two

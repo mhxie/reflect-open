@@ -196,6 +196,34 @@ summarized usually isn't sent again.
   [local-only folders](#local-only-folders-macos). A value outside that range, or an
   entry for a path that does not exist, is shown as a warning when the graph opens,
   and the 95 MiB limit applies.
+- **An external folder can hold what the backup doesn't** (this fork, desktop). Give
+  a graph a folder outside it: a cloud client's folder, an external disk, a network
+  share. Files kept there at their graph paths (`<folder>/research/paper.pdf` for
+  `research/paper.pdf`) show and render in notes as if they sat in the graph. Reflect
+  reads one from the folder when the graph has nothing at that path, or through a
+  link at that path pointing at the copy at that same path; a link anywhere else is
+  not followed. Only attachments count: notes, hidden files, and anything in a
+  local-only folder (however its name is spelled) always come from the graph. A link
+  into the folder is never committed: Reflect remembers every spelling of the folder
+  it has seen in the graph's `.reflect/`, so this holds while the folder is unmounted,
+  after it moves, and once it is no longer configured, and a link an earlier commit
+  took leaves the next one. When a pull brings a file to a linked path, that file
+  takes the path and the folder keeps its copy. A new attachment never takes a name
+  the folder already shows. A file whose bytes the folder's provider holds
+  ("online-only") lists but never downloads through a preview; opening it in its app
+  downloads it. The folder must hold a file named `.reflect-external-storage`, so a
+  typo can't turn a whole drive into part of the graph; it can't contain or lie
+  inside the graph or the local-only `rawRoot`, and it can't be or contain your home
+  folder. Add the folder under the graph's root path in the settings file:
+
+  ```json
+  "externalStorage": { "/Users/me/Notes": { "root": "/Volumes/Archive/Notes files" } }
+  ```
+
+  It applies the next time the graph opens, and Reflect keeps the entry as written
+  when it saves its own settings. A folder it can't use is shown as a warning when
+  the graph opens; links into it stay out of commits. Reflect only reads the folder;
+  whatever syncs or stores it gets the files you put there.
 - **Separate histories are never joined on their own** (this fork). Every backup
   history starts from a root commit. Reflect pauses sync instead of pulling in commits
   that start from a root this graph has not accepted, whether they arrive as a merge
@@ -480,6 +508,7 @@ API keys and tokens live in the **OS keychain only** — never in markdown, neve
 | Embeddings | Nowhere (on-device) | — | Yes (opt-in download) |
 | Model download | Hugging Face | No | Yes (opt-in) |
 | Backup | Your git repository | Yes — including private notes, never local-only folders | Yes (needs connecting) |
+| External folder | Nowhere (Reflect only reads the folder you choose) | — (the folder's provider has what you put there) | Yes (needs configuring) |
 | Key validation | The provider | No | — (only when adding a key) |
 | Update check | GitHub Releases | No | On in packaged builds |
 | Browser capture | Nowhere (local host on disk) | — (stays on your machine) | — (only when you capture) |
