@@ -27,7 +27,6 @@ A failure between the checkout and the ref move makes the next cycle retry
 the pull instead of committing a stale tree.
 
 - Test: `git::tests::fast_forward_checkout_failure_never_reverts_pulled_notes`,
-  `git::tests::stale_head_lock_fast_forward_never_reverts_pulled_notes`,
   `git::tests::fast_forward_with_a_stale_head_lock_succeeds`,
   `git::tests::merge_crash_before_checkout_converges_next_cycle`,
   `git::tests::merge_crash_after_checkout_before_ref_move_converges_next_cycle`.
@@ -104,7 +103,6 @@ older build can still interleave two summaries.
   `git::tests::a_text_conflict_that_diff3_merges_takes_the_merge`,
   `git::tests::edit_vs_delete_keeps_the_edit`,
   `git::tests::a_json_conflict_keeps_both_copies`,
-  `git::tests::a_md_conflict_never_gets_a_copy`,
   `git::tests::binary_conflict_keeps_both_copies`,
   `git::tests::two_devices_name_the_same_copy`,
   `git::tests::a_conflict_copy_never_overwrites_an_existing_file`,
@@ -118,8 +116,8 @@ An external change to a dirty buffer saves it at once as a checked write,
 which `note_write` merges with the disk text under the graph lock. A result
 the editor cannot round-trip opens the note protected.
 
-- Test: `fs::tests::a_checked_write_against_a_moved_file_merges_under_the_lock`,
-  `fs::tests::a_reconciled_write_keeps_both_words`;
+- Test: `graph::note_revision_tests::a_checked_write_against_a_moved_file_merges_under_the_lock`,
+  `graph::note_revision_tests::stale_revision_does_not_replace_newer_text`;
   `note-session-service.test.ts` "a dirty buffer saves at once when an
   external change arrives", "an exact merge adopts the merged text and the
   session is clean", "a lossy merged result opens protected", "a merged title
