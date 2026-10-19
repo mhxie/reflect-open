@@ -215,7 +215,8 @@ headers, ghost hints, and meta**.
   `--text-muted`, `tracking-wide` — never uppercase.
 - Context-sidebar sections collapse from a quiet sentence-case header whose chevron
   sits on the **right** and, while open, only appears on hover. No borders between
-  sections, no count badges.
+  sections (a hairline separates only the pinned parts from the scrolling ones), no
+  count badges.
 - The calendar is not a collapsible section: month title 14px semibold, prev /
   **jump-to-today (calendar glyph)** / next controls in `--text-muted`, weekday row
   with a bottom hairline, adjacent-month days at 20% opacity, and note-presence dots
