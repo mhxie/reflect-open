@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { AiCredentialService } from '../ai/ai-credential-service.ts'
 import type { AiProviderConfigService } from '../ai/ai-provider-config-service.ts'
 import type { LanguageModelService, TargetModel } from '../ai/language-model-service.ts'
@@ -71,6 +72,9 @@ import type { SettingsService } from '../settings/settings-service.ts'
  * is checked against the bytes that were summarized: a note edited meanwhile
  * keeps the edit and is retried once its new body settles. Short notes keep
  * their plain snippet: they show most of themselves already.
+ *
+ * A pass first catches up with other devices (`catchUp`), skipping what they
+ * summarized; the sync merge keeps a body's first summary (`generatedAt`).
  */
 
 /**
@@ -101,6 +105,11 @@ const CONFIG_BACKOFF_MS = 10 * 60_000
  * Floor for the quiet-period timer, so a due-now note can't spin it.
  */
 const MIN_TIMER_MS = 1_000
+
+/**
+ * How long a pass waits for its catch-up before summarizing without it.
+ */
+const CATCH_UP_TIMEOUT_MS = 30_000
 
 export interface ReconcileNoteSummariesInput {
   /**
@@ -146,6 +155,11 @@ export interface ReconcileNoteSummariesInput {
    * of path and indexed file hash); skipped until the file changes.
    */
   settled?: ReadonlySet<string>
+  /**
+   * Pulls other devices' changes, awaited before the first model call; a failure, or
+   * 30 s without an answer, leaves the pass to go on without them.
+   */
+  catchUp?: () => MaybePromise<void>
 }
 
 export interface ReconcileNoteSummariesOutcome {
@@ -269,6 +283,10 @@ export interface NoteSummarySessionOptions {
    * and model; a change of the summary settings may ask again.
    */
   onConsentNeeded: (consent: NoteSummaryConsent) => void
+  /**
+   * The graph's pull (`BackupService.catchUp`), handed to the first pass of each burst.
+   */
+  catchUp?: () => MaybePromise<void>
 }
 
 /**
@@ -406,18 +424,26 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
         return outcome
       }
 
+      // A note open with edits, or edited within the quiet period, waits; true when it does.
+      const putOff = (candidate: SummaryCandidate): boolean => {
+        const dueAt = candidate.mtime + SUMMARY_QUIET_MS
+        const busy = input.isBusy?.(candidate.path) === true
+        if (!busy && dueAt <= clock.now()) {
+          return false
+        }
+        const retryAt = busy ? clock.now() + SUMMARY_QUIET_MS : dueAt
+        outcome.nextDueAt = Math.min(outcome.nextDueAt ?? retryAt, retryAt)
+        return true
+      }
       let engine: SummaryEngine | null = null
       let handled = 0
+      let { catchUp } = input
       for (const candidate of candidates) {
         if (isStale()) {
           outcome.stopped = STALE
           return outcome
         }
-        const dueAt = candidate.mtime + SUMMARY_QUIET_MS
-        const busy = input.isBusy?.(candidate.path) === true
-        if (busy || dueAt > clock.now()) {
-          const retryAt = busy ? clock.now() + SUMMARY_QUIET_MS : dueAt
-          outcome.nextDueAt = Math.min(outcome.nextDueAt ?? retryAt, retryAt)
+        if (putOff(candidate)) {
           continue
         }
         if (engine === null) {
@@ -447,6 +473,18 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
         if (handled >= MAX_SUMMARIES_PER_PASS) {
           outcome.remaining = true
           return outcome
+        }
+        if (catchUp !== undefined) {
+          await this.#catchUp(catchUp)
+          catchUp = undefined
+          if (isStale()) {
+            outcome.stopped = STALE
+            return outcome
+          }
+          // The catch-up can take a while: the note may be open with edits by now.
+          if (putOff(candidate)) {
+            continue
+          }
         }
         handled += 1
         const step = await this.#summarize(candidate, engine, input, localOnly)
@@ -482,6 +520,30 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
       requireGraphSession(this.#deps.graphSession),
       options,
     )
+  }
+
+  /**
+   * Await `catchUp` for at most {@link CATCH_UP_TIMEOUT_MS}; a failure is logged, not thrown.
+   */
+  async #catchUp(catchUp: () => MaybePromise<void>): Promise<void> {
+    const { clock, logger } = this.#deps
+    let timer: TimerHandle | undefined
+    const timedOut = new Promise<true>((resolve) => {
+      timer = clock.setTimeout(() => {
+        resolve(true)
+      }, CATCH_UP_TIMEOUT_MS)
+    })
+    try {
+      if ((await Promise.race([Promise.resolve().then(catchUp), timedOut])) === true) {
+        logger.info('note summaries: catching up with other devices timed out; going on without')
+      }
+    } catch (cause) {
+      logger.warn('note summaries: catching up with other devices failed:', errorMessage(cause))
+    } finally {
+      if (timer !== undefined) {
+        clock.clearTimeout(timer)
+      }
+    }
   }
 
   /**
@@ -647,7 +709,8 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
       return { kind: 'settled' }
     }
 
-    const summary: AiSummaryFrontmatter = { text, hash }
+    const generatedAt = new Date(this.#deps.clock.now()).toISOString()
+    const summary: AiSummaryFrontmatter = { text, hash, generatedAt }
     const next = upsertFrontmatter(source, { [AI_SUMMARY_KEY]: summary })
     try {
       await noteFile.writeKeepingModified(candidate.path, next, input.generation, source)
@@ -693,6 +756,10 @@ class NoteSummarySessionImpl implements NoteSummarySession {
    * The model the open ask names; a pass naming another asks again.
    */
   #askedChoice: AiSummariesModel | null = null
+  /**
+   * The last pass left a backlog: its continuation does not catch up again.
+   */
+  #continuing = false
   /**
    * The summary settings and providers the session last saw.
    */
@@ -792,6 +859,7 @@ class NoteSummarySessionImpl implements NoteSummarySession {
       this.#seenConsent = consent
       this.#settled = new Set()
       this.#blocked = null
+      this.#continuing = false
       this.#clearTimer()
     }
     this.#askedChoice = null
@@ -831,6 +899,8 @@ class NoteSummarySessionImpl implements NoteSummarySession {
 
   async #pass(isStale: () => boolean): Promise<void | 'stop'> {
     const { settings, aiProviderConfig, openDocuments, clock, reconcile } = this.#deps
+    const continuing = this.#continuing
+    this.#continuing = false
     const current = settings.get()
     const mode = current.aiSummaries
     if (mode === 'off') {
@@ -847,6 +917,7 @@ class NoteSummarySessionImpl implements NoteSummarySession {
     this.#blocked = null
     const passIsStale = (): boolean => isStale() || this.#snapshot() !== passSnapshot
     const { generation } = this.#session
+    const catchUp = continuing ? undefined : this.#options.catchUp
     const outcome = await reconcile({
       providers: aiProviderConfig.state(),
       mode,
@@ -857,7 +928,9 @@ class NoteSummarySessionImpl implements NoteSummarySession {
       isStale: passIsStale,
       isBusy: (path) => openDocuments.sessionFor(path, generation)?.isDirty() === true,
       settled: this.#settled,
+      ...(catchUp === undefined ? {} : { catchUp }),
     })
+    this.#continuing = outcome.remaining
     for (const key of outcome.settled) {
       this.#settled.add(key)
     }

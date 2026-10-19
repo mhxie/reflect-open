@@ -39,6 +39,7 @@ import {
   noteSummaryKey,
   SUMMARY_QUIET_MS,
   type NoteSummaryConsent,
+  type NoteSummarySessionOptions,
   type ReconcileNoteSummariesInput,
   type ReconcileNoteSummariesOutcome,
 } from './note-summary-service.ts'
@@ -267,8 +268,125 @@ describe('NoteSummaryService.reconcile', () => {
     expect(parseNote({ path, source: written }).frontmatter.aiSummary).toEqual({
       text: 'Summary from on-device.',
       hash: noteBodyHash(body),
+      generatedAt: new Date(NOW).toISOString(),
     })
     expect(noteFile.files().get(path)).toBe(written)
+  })
+
+  it('catches up with other devices before its first model call', async () => {
+    const { service, noteFile, writeKeepingModified, calls } = await setup()
+    const order: string[] = []
+    const body = splitFrontmatter(LONG_BODY).body
+    // The pull lands another device's summary of the public note's body.
+    const catchUp = vi.fn(() => {
+      order.push('catch up')
+      noteFile.set(
+        PUBLIC,
+        upsertFrontmatter(LONG_BODY, {
+          aiSummary: { text: 'From the other Mac.', hash: noteBodyHash(body) },
+        }),
+      )
+    })
+    writeKeepingModified.mockImplementation((path) => {
+      order.push(`write ${path}`)
+      return Promise.resolve()
+    })
+
+    const result = await service.reconcile(input({ catchUp }))
+
+    expect(catchUp).toHaveBeenCalledTimes(1)
+    expect(order).toEqual(['catch up', `write ${PRIVATE}`])
+    expect(result.summarized).toBe(1)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('never catches up for a pass that sends nothing', async () => {
+    const { service, calls } = await setup()
+    const catchUp = vi.fn()
+
+    await service.reconcile(input({ catchUp, isBusy: () => true }))
+    await service.reconcile(
+      input({ catchUp, providers: { providers: [CLOUD], defaultProviderId: CLOUD.id } }),
+    )
+    await service.reconcile(input({ catchUp, mode: 'cloud', cloudConsent: null }))
+
+    expect(catchUp).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('stops before any model call when the pass went stale while catching up', async () => {
+    const { service, writeKeepingModified, calls } = await setup()
+    let stale = false
+
+    const result = await service.reconcile(
+      input({
+        isStale: () => stale,
+        catchUp: () => {
+          stale = true
+        },
+      }),
+    )
+
+    expect(result.stopped?.reason).toBe('stale')
+    expect(calls).toHaveLength(0)
+    expect(writeKeepingModified).not.toHaveBeenCalled()
+  })
+
+  it('puts off a note opened for editing while the pass caught up', async () => {
+    const { service, addNote, readPaths, writtenPaths, calls } = await setup({ seed: false })
+    addNote(PUBLIC, LONG_BODY)
+    addNote(PRIVATE, `---\nprivate: true\n---\n${LONG_BODY}`)
+    let editing = false
+    // The private note, first in line, is opened and typed in meanwhile.
+    const catchUp = vi.fn(() => {
+      editing = true
+    })
+
+    const result = await service.reconcile(
+      input({ catchUp, isBusy: (path) => editing && path === PRIVATE }),
+    )
+
+    expect(catchUp).toHaveBeenCalledTimes(1)
+    expect(readPaths()).not.toContain(PRIVATE)
+    expect(writtenPaths()).toEqual([PUBLIC])
+    expect(calls).toHaveLength(1)
+    expect(result.nextDueAt).toBe(NOW + SUMMARY_QUIET_MS)
+  })
+
+  it('goes on without other devices once catching up takes 30 seconds', async () => {
+    const { service, clock, calls } = await setup()
+    const asked = Promise.withResolvers<void>()
+    const unanswered = Promise.withResolvers<void>()
+
+    const pass = service.reconcile(
+      input({
+        catchUp: () => {
+          asked.resolve()
+          return unanswered.promise // a remote that never answers
+        },
+      }),
+    )
+    await asked.promise
+    await flush()
+    expect(calls).toHaveLength(0)
+    await clock.advance(30_000)
+    const result = await pass
+
+    expect(result.stopped).toBeNull()
+    expect(result.summarized).toBe(2)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('summarizes as it would offline when catching up fails', async () => {
+    const { service, calls } = await setup()
+
+    const result = await service.reconcile(
+      input({ catchUp: () => Promise.reject(new AppError('network', 'offline')) }),
+    )
+
+    expect(result.stopped).toBeNull()
+    expect(result.summarized).toBe(2)
+    expect(calls).toHaveLength(2)
   })
 
   it('stops without a usable on-device model in local mode', async () => {
@@ -545,13 +663,45 @@ describe('NoteSummaryService.reconcile', () => {
 describe('NoteSummaryService.openSession', () => {
   const NOTE_CHANGE = [{ path: 'notes/a.md', kind: 'upsert' as const, modifiedMs: 1 }]
 
-  async function openSession(options: SetupOptions = {}) {
+  async function openSession(
+    options: SetupOptions = {},
+    sessionOptions: Pick<NoteSummarySessionOptions, 'catchUp'> = {},
+  ) {
     const kit = await setup({ seed: false, ...options })
     const reconcile = vi.spyOn(kit.service, 'reconcile').mockResolvedValue(outcome())
     const onConsentNeeded = vi.fn<(consent: NoteSummaryConsent) => void>()
-    const session = kit.service.openSession({ onConsentNeeded })
+    const session = kit.service.openSession({ onConsentNeeded, ...sessionOptions })
     return { ...kit, reconcile, onConsentNeeded, session }
   }
+
+  it('hands every pass the catch-up with other devices', async () => {
+    const catchUp = vi.fn()
+    const { session, reconcile, indexLifecycle } = await openSession({}, { catchUp })
+    session.start()
+    await flush()
+    indexLifecycle.emitApplied(NOTE_CHANGE, INDEX_GENERATION)
+    await flush()
+
+    // Other devices' summaries arrive through the backup's pull.
+    expect(reconcile.mock.calls.map(([passInput]) => passInput.catchUp)).toEqual([catchUp, catchUp])
+  })
+
+  it('catches up once per burst: a backlog goes on without catching up again', async () => {
+    const catchUp = vi.fn()
+    const { session, reconcile, indexLifecycle } = await openSession({}, { catchUp })
+    reconcile.mockResolvedValueOnce(outcome({ remaining: true }))
+    session.start()
+    await flush()
+    indexLifecycle.emitApplied(NOTE_CHANGE, INDEX_GENERATION)
+    await flush()
+
+    // The launch pass, its continuation, then the pass after a note change.
+    expect(reconcile.mock.calls.map(([passInput]) => passInput.catchUp)).toEqual([
+      catchUp,
+      undefined,
+      catchUp,
+    ])
+  })
 
   it('throws when no graph is open', async () => {
     const { service, graphSession } = await setup({ seed: false })

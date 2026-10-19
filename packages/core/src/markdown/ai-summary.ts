@@ -7,7 +7,7 @@ import { aiSummaryFrontmatterSchema, type Frontmatter } from './model.ts'
 /**
  * The `aiSummary` frontmatter block's read side: whether it still describes
  * the body, and whether the block is Reflect's to rewrite. The block is
- * written by the background summary pass (`actions/note-summaries.ts`).
+ * written by the background summary pass (`capture/note-summary-service.ts`).
  */
 
 /** Longest summary a row preview carries; longer text is clipped with an ellipsis. */

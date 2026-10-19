@@ -480,6 +480,7 @@ export type BackupCall =
         | 'disconnectGraph'
         | 'signOut'
         | 'backUpNow'
+        | 'catchUp'
         | 'fileChanged'
         | 'dispose'
     }
@@ -570,6 +571,10 @@ class TestBackupServiceImpl implements TestBackupService {
 
   backUpNow(): void {
     this.#log.push({ method: 'backUpNow' })
+  }
+
+  catchUp(): void {
+    this.#log.push({ method: 'catchUp' })
   }
 
   fileChanged(): void {

@@ -1,6 +1,8 @@
 # Git backup safety invariants
 
 The rules every change to the sync path must keep. "The sync path" is
+`crates/git/src/`, the conflict ladder in `crates/graph-io/src/conflict/`,
+the desktop commands in `apps/desktop/src-tauri/src/git.rs` and
 `apps/desktop/src-tauri/src/git/`, `packages/core/src/sync/`, the backup
 flusher in `packages/core/src/graph/persistence-flush-service.ts`, and the
 external-change handling in
@@ -76,11 +78,29 @@ the local file and writes the remote version beside it as
 `<stem> (conflict <UTC time> <hash8>).<ext>`. Both devices produce the same
 bytes and names, so they converge.
 
+Two devices' AI summaries of the same body (equal `aiSummary.hash`) settle
+first: both sides keep the summary generated first, and the ladder merges
+the settled pair. An entry without `generatedAt` predates the field and
+comes first, then valid instants by time, then a stamp that isn't one; ties
+fall to the entry lines. The choice reads only the two entries, so devices
+converge on the same bytes once they all run a build with this rule; an
+older build can still interleave two summaries.
+
 - Test: `git::tests::conflicting_edits_merge_without_markers`,
   `git::tests::daily_append_on_two_devices_merges_by_union`,
   `git::tests::frontmatter_only_conflict_merges_keywise`,
   `git::tests::both_devices_resolve_the_same_pair_to_the_same_bytes`,
   `git::tests::a_deletion_beside_an_append_is_reconciled_not_resurrected`,
+  `git::tests::summaries_of_the_same_body_merge_to_the_first_generated`,
+  `git::tests::this_devices_first_generated_summary_stays_put`,
+  `git::tests::both_devices_settle_summaries_on_the_same_bytes`,
+  `git::tests::a_summary_conflict_beside_a_body_conflict_settles_the_summary`,
+  `conflict::ladder::tests::two_summaries_of_one_body_merge_to_the_first_generated`,
+  `conflict::ladder::tests::other_changes_merge_around_the_first_generated_summary`,
+  `conflict::ladder::tests::the_word_level_merge_keeps_the_first_generated_summary_whole`,
+  `conflict::ai_summary::tests::a_stamp_that_is_not_an_instant_loses`,
+  `conflict::ai_summary::tests::an_interleaved_stamp_loses_to_a_valid_one`,
+  `conflict::ai_summary::tests::a_settle_that_would_break_the_frontmatter_is_skipped`,
   `git::tests::a_text_conflict_that_diff3_merges_takes_the_merge`,
   `git::tests::edit_vs_delete_keeps_the_edit`,
   `git::tests::a_json_conflict_keeps_both_copies`,

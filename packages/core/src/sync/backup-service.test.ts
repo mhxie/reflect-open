@@ -1618,3 +1618,158 @@ describe('createBackupService', () => {
     unlisten()
   })
 })
+
+describe('BackupService.catchUp', () => {
+  /**
+   * Full sync cycles run so far: each fetches before it pulls.
+   */
+  function fetches(calls: string[]): number {
+    return calls.filter((command) => command === 'fetch').length
+  }
+
+  it('runs a full cycle for a background writer while the graph syncs', async () => {
+    const { calls } = fakeServices()
+    const backup = createBackup({ indexGeneration: 1 })
+    await backup.start()
+    await vi.waitFor(() => {
+      expect(calls).toContain('pull') // the launch pull
+    })
+    expect(fetches(calls)).toBe(1)
+
+    await backup.catchUp()
+    expect(fetches(calls)).toBe(2)
+
+    backup.dispose()
+    // Torn down: a catch-up does nothing.
+    await backup.catchUp()
+    expect(fetches(calls)).toBe(2)
+  })
+
+  it('waits for a start in flight, then runs a cycle', async () => {
+    const { calls } = fakeServices()
+    const backup = createBackup({ indexGeneration: 1 })
+    // The launch summary pass can ask before the engine exists.
+    const started = backup.start()
+    await backup.catchUp()
+    await started
+
+    // The launch pull, then this one.
+    expect(fetches(calls)).toBe(2)
+    backup.dispose()
+  })
+
+  it('leaves a failed sign-in to the resume triggers', async () => {
+    const { calls } = fakeServices({
+      pullOutcome: { ...PULLED, kind: 'merged', ahead: 1 },
+      pushError: new AppError('auth', 'authentication required'),
+    })
+    const backup = createBackup({ indexGeneration: 1 })
+    await backup.start()
+    await vi.waitFor(() => {
+      expect(backup.getState()).toMatchObject({
+        phase: 'connected',
+        status: { state: 'error', errorKind: 'auth' },
+      })
+    })
+    const commands = calls.length
+
+    await backup.catchUp()
+
+    expect(calls).toHaveLength(commands)
+    backup.dispose()
+  })
+
+  it('leaves a sync the remote refused to the resume triggers', async () => {
+    const { calls } = fakeServices({
+      pullOutcome: { ...PULLED, kind: 'merged', ahead: 1 },
+      pushError: new AppError('auth', 'request failed with status code: 403'),
+    })
+    // The token is good: GitHub refused the repository, not the sign-in.
+    http.on('GET', USER_URL, jsonResponse({ login: 'alex' }))
+    const backup = createBackup({ indexGeneration: 1 })
+    await backup.start()
+    await vi.waitFor(() => {
+      expect(backup.getState()).toMatchObject({
+        phase: 'connected',
+        status: { state: 'error', errorKind: 'rejected' },
+      })
+    })
+    const commands = calls.length
+
+    await backup.catchUp()
+
+    expect(calls).toHaveLength(commands)
+    backup.dispose()
+  })
+
+  it('has nothing to catch up with for a graph without a remote', async () => {
+    const { calls } = fakeServices({ auth: null, remoteUrl: null })
+    const backup = createBackup({ indexGeneration: 1 })
+    await backup.start()
+    await vi.waitFor(() => {
+      expect(calls).toContain('commitAll') // local history's first snapshot
+    })
+    const commands = calls.length
+
+    await backup.catchUp()
+
+    expect(calls).toHaveLength(commands)
+    backup.dispose()
+  })
+
+  it('does not wait for local history to set up a graph without a remote', async () => {
+    const { calls, releaseSetup } = fakeServices({
+      auth: null,
+      remoteUrl: null,
+      initialized: false,
+      gateSetup: true,
+    })
+    const backup = createBackup({ indexGeneration: 1 })
+    const started = backup.start()
+    await vi.waitFor(() => {
+      expect(calls).toContain('setup')
+    })
+
+    // Settles while the setup is still held.
+    await backup.catchUp()
+    expect(calls).toEqual(['status', 'setup'])
+
+    releaseSetup()
+    await started
+    backup.dispose()
+  })
+
+  it('leaves an iCloud graph to iCloud, where a sync only commits', async () => {
+    const { calls } = fakeServices()
+    const backup = createBackup({ indexGeneration: 1, root: ICLOUD_ROOT })
+    await backup.start()
+    await vi.waitFor(() => {
+      expect(backup.getState()).toMatchObject({
+        phase: 'connected',
+        status: { state: 'waiting' },
+      })
+    })
+    const commands = calls.length
+
+    await backup.catchUp()
+
+    expect(calls).toHaveLength(commands)
+    expect(calls).not.toContain('fetch')
+    backup.dispose()
+  })
+
+  it('never rejects when the cycle fails', async () => {
+    const { calls, git } = fakeServices()
+    const backup = createBackup({ indexGeneration: 1 })
+    await backup.start()
+    await vi.waitFor(() => {
+      expect(calls).toContain('pull')
+    })
+    git.onFetch(() => {
+      throw new AppError('network', 'offline')
+    })
+
+    await expect(backup.catchUp()).resolves.toBeUndefined()
+    backup.dispose()
+  })
+})

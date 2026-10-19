@@ -152,11 +152,14 @@ go-ahead given in an earlier build named no model, so this build asks once
 more. It leaves that earlier answer as it is for those builds, and never gives
 one of its own.
 
-The summary is written into the note's `aiSummary` frontmatter, so it travels
-with the note, including to Git backup, like the rest of the note's text. In
-Reflect it shows only in the All Notes list. Search results, *On this day*,
-and the note listings AI chat reads keep showing the note's own opening text,
-so AI-written text doesn't feed back into AI context.
+The summary is written into the note's `aiSummary` frontmatter, with the time
+it was generated, so it travels with the note, including to Git backup, like
+the rest of the note's text. In Reflect it shows only in the All Notes list.
+Search results, *On this day*, and the note listings AI chat reads keep showing
+the note's own opening text, so AI-written text doesn't feed back into AI
+context. With Git backup connected (and the graph not also in iCloud), Reflect
+first pulls other devices' changes, so a note another device already
+summarized usually isn't sent again.
 
 ## Semantic search (off by default)
 

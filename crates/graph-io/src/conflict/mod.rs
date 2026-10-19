@@ -3,18 +3,22 @@
 //! iCloud reports a concurrent edit as the current file plus one or more
 //! unresolved `NSFileVersion`s. This module turns one such pair into a single
 //! resolved note through a **deterministic ladder** ([`ladder::resolve`]):
-//! identical/whitespace → three-way merge over the shadow base ([`shadow`]) →
-//! structural rules (key-wise frontmatter, append-union) → a word-level merge
-//! that always yields text. The ladder never writes conflict markers.
+//! identical/whitespace → two devices' AI summaries of one body settled to
+//! the first generated ([`ai_summary`]) → three-way merge over the shadow
+//! base ([`shadow`]) → structural rules (key-wise frontmatter, append-union)
+//! → a word-level merge that always yields text. The ladder never writes
+//! conflict markers.
 //!
 //! **Determinism is a sync property, not a nicety**: both devices may resolve
 //! the same conflict concurrently (each sees itself as the current version),
 //! and only byte-identical outputs converge instead of ping-ponging. Every
-//! rule therefore orders the two sides by `(modified_ms, content)`, data both
-//! devices share, never by which side is local.
+//! rule therefore decides by data both devices share, the sides'
+//! `(modified_ms, content)` order or, for two summaries, the entries
+//! themselves, never by which side is local.
 //!
 //! Pure text in, text out: no iCloud types here.
 
+mod ai_summary;
 pub mod copy;
 mod frontmatter;
 pub mod ladder;

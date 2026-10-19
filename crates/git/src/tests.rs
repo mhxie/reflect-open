@@ -1,6 +1,6 @@
 use std::fs;
 use std::panic::AssertUnwindSafe;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -762,6 +762,181 @@ fn a_deletion_beside_an_append_is_reconciled_not_resurrected() {
     let content = read(root_a, rel);
     assert_eq!(content, expected);
     assert_eq!(content, "a\nb\nd\n", "the deletion must stay deleted");
+}
+
+const SUMMARIZED_BODY: &str = "# Shared\n\nA long body both devices summarized.\n";
+
+/// The shared note with an AI summary of [`SUMMARIZED_BODY`], laid out as the
+/// background summary pass writes it.
+fn summarized(text: &str, generated_at: &str, body: &str) -> String {
+    format!(
+        "---\ntitle: Shared\naiSummary:\n  text: {text}\n  hash: 0123456789abcdef\n  \
+         generatedAt: {generated_at}\n---\n\n{body}"
+    )
+}
+
+/// The summary the second device generated first, over `body`.
+fn first_summary(body: &str) -> String {
+    summarized("Summarized first, on b.", "2026-01-02T08:00:00.000Z", body)
+}
+
+/// A base note both devices have, then each device's own summary of it,
+/// committed on both: returns the second device's root. Nothing is pushed
+/// past the base.
+fn summarized_on_both_devices(fixture: &Fixture, body_a: &str, body_b: &str) -> PathBuf {
+    let root_a = &fixture.graph_a;
+    write(
+        root_a,
+        "notes/shared.md",
+        &format!("---\ntitle: Shared\n---\n\n{SUMMARIZED_BODY}"),
+    );
+    commit_all(root_a, "base", MAX_FILE_BYTES).unwrap();
+    push(root_a, None).unwrap();
+    let root_b = second_device(fixture);
+    write(&root_b, "notes/shared.md", &first_summary(body_b));
+    commit_all(&root_b, "b summary", MAX_FILE_BYTES).unwrap();
+    write(
+        root_a,
+        "notes/shared.md",
+        &summarized(
+            "Summarized later, on a.",
+            "2026-01-02T09:30:00.000Z",
+            body_a,
+        ),
+    );
+    commit_all(root_a, "a summary", MAX_FILE_BYTES).unwrap();
+    root_b
+}
+
+/// Two devices that summarized the same body before either's summary
+/// synced: the pull keeps the summary generated first, and the other device
+/// fast-forwards to the same bytes.
+#[test]
+fn summaries_of_the_same_body_merge_to_the_first_generated() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let root_b = summarized_on_both_devices(&fixture, SUMMARIZED_BODY, SUMMARIZED_BODY);
+    push(&root_b, None).unwrap();
+    let first = first_summary(SUMMARIZED_BODY);
+
+    fetch(root_a, None).unwrap();
+    let merged = merge_remote(root_a).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert!(merged.review_paths.is_empty(), "{merged:?}");
+    assert!(
+        merged
+            .changed_files
+            .iter()
+            .any(|change| change.path == "notes/shared.md"),
+        "{merged:?}"
+    );
+    assert_eq!(read(root_a, "notes/shared.md"), first);
+    assert_eq!(head_blob(root_a, "notes/shared.md"), first);
+    assert_eq!(head_message(root_a), "Merge changes from other devices");
+
+    assert!(push(root_a, None).unwrap().pushed);
+    fetch(&root_b, None).unwrap();
+    let converged = merge_remote(&root_b).unwrap();
+    assert!(
+        matches!(converged.kind, MergeKind::FastForward),
+        "{converged:?}"
+    );
+    assert_eq!(read(&root_b, "notes/shared.md"), first);
+}
+
+/// This device's summary, generated first, stays: the pull leaves the note
+/// as this device wrote it, so nothing reindexes.
+#[test]
+fn this_devices_first_generated_summary_stays_put() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let root_b = summarized_on_both_devices(&fixture, SUMMARIZED_BODY, SUMMARIZED_BODY);
+    assert!(push(root_a, None).unwrap().pushed);
+    let kept = read(&root_b, "notes/shared.md");
+
+    fetch(&root_b, None).unwrap();
+    let merged = merge_remote(&root_b).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert_eq!(read(&root_b, "notes/shared.md"), kept);
+    assert_eq!(head_blob(&root_b, "notes/shared.md"), kept);
+    assert!(
+        !merged
+            .changed_files
+            .iter()
+            .any(|change| change.path == "notes/shared.md"),
+        "{merged:?}"
+    );
+}
+
+/// Point `root`'s `origin/main` at `other`'s `main`: what each device holds
+/// when both fetched the other's commit before either pushed a merge.
+fn fetch_from_device(root: &Path, other: &Path) {
+    let repo = Repository::open(root).unwrap();
+    let mut remote = repo.remote_anonymous(&other.to_string_lossy()).unwrap();
+    remote
+        .fetch(&["+refs/heads/main:refs/remotes/origin/main"], None, None)
+        .unwrap();
+}
+
+/// Each device merging the other's summary settles on the same bytes, the
+/// body edit one of them made merging around the kept summary, so their two
+/// merges then merge cleanly.
+#[test]
+fn both_devices_settle_summaries_on_the_same_bytes() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let edited = format!("{SUMMARIZED_BODY}\nAppended on a.\n");
+    let root_b = summarized_on_both_devices(&fixture, &edited, SUMMARIZED_BODY);
+    fetch_from_device(root_a, &root_b);
+    fetch_from_device(&root_b, root_a);
+
+    let on_a = merge_remote(root_a).unwrap();
+    let on_b = merge_remote(&root_b).unwrap();
+    assert!(matches!(on_a.kind, MergeKind::Merged), "{on_a:?}");
+    assert!(matches!(on_b.kind, MergeKind::Merged), "{on_b:?}");
+    let settled = first_summary(&edited);
+    assert_eq!(read(root_a, "notes/shared.md"), settled);
+    assert_eq!(read(&root_b, "notes/shared.md"), settled);
+
+    // The push checks the server's branch against the fetched one.
+    fetch(root_a, None).unwrap();
+    assert!(push(root_a, None).unwrap().pushed);
+    fetch(&root_b, None).unwrap();
+    let converged = merge_remote(&root_b).unwrap();
+    assert!(matches!(converged.kind, MergeKind::Merged), "{converged:?}");
+    assert_eq!(read(&root_b, "notes/shared.md"), settled);
+}
+
+/// A body both devices rewrote still goes down the ladder to the word-level
+/// merge, but around one summary: the first generated, whole.
+#[test]
+fn a_summary_conflict_beside_a_body_conflict_settles_the_summary() {
+    let fixture = fixture();
+    let root_a = &fixture.graph_a;
+    let root_b = summarized_on_both_devices(
+        &fixture,
+        "# Shared\n\nRewritten on a.\n",
+        "# Shared\n\nRewritten on b.\n",
+    );
+    push(&root_b, None).unwrap();
+
+    fetch(root_a, None).unwrap();
+    let merged = merge_remote(root_a).unwrap();
+    assert!(matches!(merged.kind, MergeKind::Merged), "{merged:?}");
+    assert!(merged.review_paths.is_empty(), "{merged:?}");
+    let content = read(root_a, "notes/shared.md");
+    assert_eq!(head_blob(root_a, "notes/shared.md"), content);
+    let header = first_summary("");
+    assert!(content.starts_with(&header), "{content}");
+    let entry = reflect_frontmatter::ai_summary_entry(&content).expect("a readable summary");
+    assert_eq!(
+        entry.generated_at,
+        Some(reflect_frontmatter::GeneratedAt::Instant(
+            "2026-01-02T08:00:00.000Z".to_string()
+        ))
+    );
+    assert!(!content.contains("Summarized later"), "{content}");
+    assert_merged_without_markers(&content[header.len()..], &["Rewritten on", "a.", "b."]);
 }
 
 /// The one path in `paths` that starts with `prefix`.

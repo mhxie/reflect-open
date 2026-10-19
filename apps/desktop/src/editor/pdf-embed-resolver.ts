@@ -65,8 +65,11 @@ async function resolvePdfEmbed(
 ): Promise<HostEmbed | undefined> {
   const { attachments, noteAttachments, mobileApp, openAsset } = options
   if (attachments.peekCatalog() === null) {
-    // Waits for the first listing; a failed one still resolves the vault-root reading.
-    await Promise.try(() => attachments.loadCatalog()).catch(() => null)
+    try {
+      await attachments.loadCatalog()
+    } catch {
+      // Waits for the first listing; a failed one still resolves the vault-root reading.
+    }
   }
   const path = noteAttachments.resolveAttachmentPath(src)
   if (path === null) {
