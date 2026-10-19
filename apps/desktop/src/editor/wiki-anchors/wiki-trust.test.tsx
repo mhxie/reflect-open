@@ -79,6 +79,18 @@ async function reportText(weak = WEAK): Promise<string> {
   })
 }
 
+/** The report `contents` with claim c2 disputed. */
+function disputingC2(contents: string): string {
+  const parsed = JSON.parse(contents) as {
+    notes: Record<string, { claims: Record<string, { tier: string; overlays?: string[] }> }>
+  }
+  parsed.notes[PATH]!.claims['c2'] = {
+    ...parsed.notes[PATH]!.claims['c2']!,
+    overlays: ['disputed'],
+  }
+  return JSON.stringify(parsed)
+}
+
 let app: TestCoreServices
 let queryClient: QueryClient
 /** The settings the next render starts from. */
@@ -480,6 +492,50 @@ describe('claim trust from the harness report', () => {
     await userEvent.keyboard('{Control>}z{/Control}')
     await vi.waitFor(() => expect(ref.current!.getMarkdown()).not.toContain('@pass: reader'))
     await expect.element(page.getByRole('button', { name: 'Question this claim' })).toBeVisible()
+  })
+
+  it("records a dismissal of a disputed claim's doubt as a reader verification", async () => {
+    report = { stamp: '8:8', contents: disputingC2(report.contents) }
+    const { ref } = await editorFixture()
+    await page.getByRole('button', { name: 'Claim C2: Disputed' }).click()
+    // A disputed claim offers the dismissal instead of a second doubt.
+    await expect
+      .element(page.getByRole('button', { name: 'Question this claim' }))
+      .not.toBeInTheDocument()
+    await page.getByRole('button', { name: 'Dismiss the doubt' }).click()
+    await vi.waitFor(() =>
+      expect(ref.current!.getMarkdown()).toMatch(
+        /```anchors c2\n@pass: reader \| status: verified \| at: \d{4}-\d{2}-\d{2}\n```/,
+      ),
+    )
+    expect(ref.current!.getMarkdown()).not.toContain('@pass: editor')
+    // The report still says disputed until the harness reads the record.
+    await expect.element(page.getByText('You dismissed the doubt today.')).toBeVisible()
+    await userEvent.keyboard('{Control>}z{/Control}')
+    await vi.waitFor(() => expect(ref.current!.getMarkdown()).not.toContain('@pass: reader'))
+    await expect.element(page.getByRole('button', { name: 'Dismiss the doubt' })).toBeVisible()
+  })
+
+  it('still offers the dismissal on a disputed claim questioned earlier today', async () => {
+    report = { stamp: '8:8', contents: disputingC2(report.contents) }
+    await editorFixture(
+      SOURCE.replace(
+        '## Evidence\n',
+        `## Evidence\n\n\`\`\`anchors c2\n@pass: reader | status: flagged | at: ${todayIso()}\n\`\`\`\n`,
+      ),
+    )
+    await page.getByRole('button', { name: 'Claim C2: Disputed' }).click()
+    await expect.element(page.getByRole('button', { name: 'Dismiss the doubt' })).toBeVisible()
+  })
+
+  it('offers a question, not a dismissal, on a disputed claim edited since its evaluation', async () => {
+    report = { stamp: '8:8', contents: disputingC2(await reportText(`Earlier ${WEAK}`)) }
+    await editorFixture()
+    await page.getByRole('button', { name: 'Claim C2: Changed since evaluation' }).click()
+    await expect.element(page.getByRole('button', { name: 'Question this claim' })).toBeVisible()
+    await expect
+      .element(page.getByRole('button', { name: 'Dismiss the doubt' }))
+      .not.toBeInTheDocument()
   })
 
   it('marks a claim edited while the saved file is still being read', async () => {

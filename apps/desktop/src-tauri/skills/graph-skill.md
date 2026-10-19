@@ -99,8 +99,10 @@ displays it.
   turned into `\n`. When the text changes, Reflect shows the claim as awaiting
   evaluation until your next report.
 - Reflect writes back only `@pass: editor | status: pending` (the user edited
-  a claim) and `@pass: reader | status: flagged` (the user questioned one)
-  into the claim's `anchors cN` ledger. Read those on your next pass.
+  a claim), `@pass: reader | status: flagged` (the user questioned one) and
+  `@pass: reader | status: verified` (the user dismissed a dispute: resolve it
+  without raising the tier) into the claim's `anchors cN` ledger. Read those
+  on your next pass.
 - Leave notes in local-only folders (`reflect trust-report --json` lists
   them as `localOnlyFolders`), and private notes, out of the report.
 
