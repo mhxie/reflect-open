@@ -1,7 +1,13 @@
 import { createRef } from 'react'
-import { cleanup, renderHook } from 'vitest-browser-react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoteState } from '@reflect/core'
+import {
+  createTestClockService,
+  createTestCoreServices,
+  type TestClockService,
+  type TestCoreServices,
+} from '@reflect/core/testing'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import type { NoteProtection } from './note-protection.ts'
 import { useNoteStatus, type NoteStatusScope } from './note-status-store.ts'
 import { useNoteStatusPublisher } from './use-note-status-publisher.ts'
@@ -18,10 +24,26 @@ function scope(path: string, generation = 17): NoteStatusScope {
   return { generation, path }
 }
 
-afterEach(async () => {
-  await cleanup()
-  vi.useRealTimers()
+/**
+ * Runs the recount delay.
+ */
+let clock: TestClockService
+/**
+ * One app per test, so every publisher and reader of it shares {@link clock}.
+ */
+let app: TestCoreServices
+
+beforeEach(() => {
+  clock = createTestClockService()
+  app = createTestCoreServices({ clock })
 })
+
+/**
+ * Render `hook` in the app of the running test.
+ */
+function renderHook<Result>(hook: () => Result) {
+  return renderHookInApp(hook, { app })
+}
 
 describe('useNoteStatusPublisher', () => {
   it('expires recovery callbacks across graph changes and unmounts', async () => {
@@ -191,12 +213,9 @@ describe('useNoteStatusPublisher', () => {
       protection: null,
     })
 
-    vi.useFakeTimers()
     publisher.result.current('今天写了七个字\n')
     expect(reader.result.current?.characters).toBe(12)
-    await publisher.act(async () => {
-      vi.advanceTimersByTime(300)
-    })
+    await publisher.act(() => clock.advance(300))
     await reader.rerender()
     expect(reader.result.current?.characters).toBe(7)
     expect(reader.result.current?.editedAt).toBeGreaterThan(0)
@@ -261,11 +280,8 @@ describe('useNoteStatusPublisher', () => {
       useNoteStatusPublisher(scope('notes/state.md'), 'original\n', state),
     )
     const reader = await renderHook(() => useNoteStatus(scope('notes/state.md')))
-    vi.useFakeTimers()
     publisher.result.current('a longer live buffer\n')
-    await publisher.act(async () => {
-      vi.advanceTimersByTime(300)
-    })
+    await publisher.act(() => clock.advance(300))
     await reader.rerender()
     const edited = reader.result.current
     expect(edited?.characters).toBe('a longer live buffer'.length)
@@ -305,16 +321,13 @@ describe('useNoteStatusPublisher', () => {
     const first = await renderHook(() => useNoteStatus(scope('notes/shared.md', 41)))
     const second = await renderHook(() => useNoteStatus(scope('notes/shared.md', 42)))
     const oldChange = publisher.result.current
-    vi.useFakeTimers()
     oldChange('an old queued recount\n')
 
     generation = 42
     markdown = 'second graph\n'
     await publisher.rerender()
     oldChange('an old callback delivered after switching\n')
-    await publisher.act(async () => {
-      vi.advanceTimersByTime(300)
-    })
+    await publisher.act(() => clock.advance(300))
     await first.rerender()
     await second.rerender()
 

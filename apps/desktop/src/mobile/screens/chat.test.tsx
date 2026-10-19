@@ -1,64 +1,36 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactElement, ReactNode } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import {
+  aiKeySecretName,
   HISTORY_WITHHELD_NOTICE,
   type AiProviderConfig,
-  type ChatModelSelection,
   type ChatStreamEvent,
-  type Settings,
-  type StreamChatOptions,
 } from '@reflect/core'
-import { ChatProvider } from '@/providers/chat-provider.tsx'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import {
+  createTestCoreServices,
+  createTestChatEngineService,
+  createTestSecretStoreService,
+  type TestChatEngineService,
+} from '@reflect/core/testing'
+import { useRouter } from '@/routing/router.tsx'
 import { fireEvent } from '@/test-utils/fire-event.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { MobileChat } from './chat.tsx'
 
 /**
  * The Chat tab over a faked engine (the desktop chat-screen harness, mobile
  * shell): the no-provider call-to-action into Settings, a full send through
  * the mobile composer, and the Plan 23 contract that the draft and turns
- * survive the screen unmounting — the provider holds them, tab switches only
+ * survive the screen unmounting — the session holds them, tab switches only
  * unmount the screen.
  */
 
-const streamChat = vi.hoisted(() =>
-  vi.fn<(options: StreamChatOptions) => AsyncGenerator<ChatStreamEvent>>(),
-)
-const aiApiKeyForConfig = vi.hoisted(() =>
-  vi.fn<(config: AiProviderConfig) => Promise<string | null>>(),
-)
-const loadChatGraphContext = vi.hoisted(() => vi.fn<(graphName: string) => Promise<null>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  streamChat,
-  aiApiKeyForConfig,
-  loadChatGraphContext,
-}))
-
-const settingsState = vi.hoisted(() => ({
+// The settings document each test starts from.
+const settingsState = {
   models: [] as AiProviderConfig[],
   defaultId: null as string | null,
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      aiProviders: settingsState.models,
-      defaultAiProviderId: settingsState.defaultId,
-      chatModelSelection: null as ChatModelSelection | null,
-      chatSystemPrompt: '',
-    },
-    updateSettings: (_patch: Partial<Settings>) => {},
-  }),
-}))
-
-// No open index → persistence stays inert; chat-provider.test.tsx covers it.
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ indexGeneration: null, graph: null }),
-}))
-
-vi.mock('@/lib/provider-fetch.ts', () => ({ providerFetch: vi.fn() }))
+}
 
 // Keep sheet content inline so this suite isolates the chat flow.
 vi.mock('@/components/ui/drawer.tsx', () => ({
@@ -68,20 +40,16 @@ vi.mock('@/components/ui/drawer.tsx', () => ({
   DrawerTitle: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
 }))
 
-const { MobileChat } = await import('./chat.tsx')
-
-afterEach(async () => {
-  await cleanup()
-})
+const GRAPH = { root: '/graphs/test', name: 'test-graph', generation: 1 }
 
 const MODEL: AiProviderConfig = { id: 'm1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' }
+
+let chatEngine: TestChatEngineService
 
 beforeEach(() => {
   settingsState.models = []
   settingsState.defaultId = null
-  streamChat.mockReset()
-  aiApiKeyForConfig.mockReset().mockResolvedValue('sk-test')
-  loadChatGraphContext.mockReset().mockResolvedValue(null)
+  chatEngine = createTestChatEngineService()
 })
 
 function configureModel() {
@@ -90,11 +58,7 @@ function configureModel() {
 }
 
 function scriptTurn(events: ChatStreamEvent[]) {
-  streamChat.mockImplementation(function script() {
-    return (async function* () {
-      yield* events
-    })()
-  })
+  chatEngine.setScript(events)
 }
 
 let probedRoute: unknown = null
@@ -113,32 +77,39 @@ function FocusChatProbe(): ReactElement {
   )
 }
 
-/** The screen inside the real provider stack, unmountable like a tab switch. */
-function Harness({ showScreen }: { showScreen: boolean }): ReactElement {
+/**
+ * The screen over the graph's chat session, unmountable like a tab switch.
+ */
+function Harness(): ReactElement {
+  const [showScreen, setShowScreen] = useState(true)
   return (
-    <QueryClientProvider client={new QueryClient()}>
-      <RouterProvider>
-        <RouteProbe />
-        <FocusChatProbe />
-        <ChatProvider
-          graph={{
-            root: '/graphs/test',
-            name: 'test-graph',
-            generation: 1,
-            localOnlyFolders: [],
-            localOnlyEditableFolders: [],
-          }}
-        >
-          {showScreen ? <MobileChat /> : null}
-        </ChatProvider>
-      </RouterProvider>
-    </QueryClientProvider>
+    <>
+      <RouteProbe />
+      <FocusChatProbe />
+      <button type="button" onClick={() => setShowScreen((shown) => !shown)}>
+        switch tab
+      </button>
+      {showScreen ? <MobileChat /> : null}
+    </>
   )
+}
+
+async function renderHarness() {
+  const app = createTestCoreServices({
+    secretStore: createTestSecretStoreService({ [aiKeySecretName(MODEL.id)]: 'sk-test' }),
+    chatEngine,
+  })
+  // The index is not open, so the history drawer reads nothing.
+  return await renderInApp(<Harness />, {
+    app,
+    graph: { ...GRAPH, indexGeneration: null },
+    settings: { aiProviders: settingsState.models, defaultAiProviderId: settingsState.defaultId },
+  })
 }
 
 describe('MobileChat', () => {
   it('with no provider, the call-to-action navigates to Settings', async () => {
-    await render(<Harness showScreen />)
+    await renderHarness()
 
     await page.getByRole('button', { name: 'Add an AI provider' }).click()
 
@@ -151,7 +122,7 @@ describe('MobileChat', () => {
       { type: 'text-delta', text: 'Grounded answer.' },
       { type: 'complete', messages: [{ role: 'assistant', content: 'Grounded answer.' }] },
     ])
-    await render(<Harness showScreen />)
+    await renderHarness()
 
     const composer = page.getByLabelText('Chat message')
     fireEvent.change(composer, { target: { value: 'what did I write?' } })
@@ -170,7 +141,7 @@ describe('MobileChat', () => {
       { type: 'text-delta', text: 'Answered without them.' },
       { type: 'complete', messages: [{ role: 'assistant', content: 'Answered without them.' }] },
     ])
-    await render(<Harness showScreen />)
+    await renderHarness()
 
     fireEvent.change(page.getByLabelText('Chat message'), { target: { value: 'go on' } })
     await page.getByRole('button', { name: 'Send' }).click()
@@ -185,7 +156,7 @@ describe('MobileChat', () => {
       { type: 'text-delta', text: 'Kept.' },
       { type: 'complete', messages: [{ role: 'assistant', content: 'Kept.' }] },
     ])
-    const { rerender } = await render(<Harness showScreen />)
+    await renderHarness()
 
     fireEvent.change(page.getByLabelText('Chat message'), {
       target: { value: 'sent question' },
@@ -197,9 +168,9 @@ describe('MobileChat', () => {
       target: { value: 'half-typed follow-up' },
     })
 
-    await rerender(<Harness showScreen={false} />)
+    await page.getByRole('button', { name: 'switch tab' }).click()
     await expect.element(page.getByLabelText('Chat message')).not.toBeInTheDocument()
-    await rerender(<Harness showScreen />)
+    await page.getByRole('button', { name: 'switch tab' }).click()
 
     await expect.element(page.getByLabelText('Chat message')).toHaveValue('half-typed follow-up')
     await expect.element(page.getByText('sent question')).toBeVisible()
@@ -207,7 +178,7 @@ describe('MobileChat', () => {
 
   it('focuses the composer when a chat tab capture arrival requests it', async () => {
     configureModel()
-    await render(<Harness showScreen />)
+    await renderHarness()
 
     const composer = page.getByLabelText('Chat message')
     await page.getByRole('button', { name: 'focus chat input' }).click()

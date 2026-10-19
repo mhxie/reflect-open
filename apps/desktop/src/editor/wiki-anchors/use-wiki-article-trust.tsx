@@ -14,6 +14,7 @@ import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { todayIso } from '@/lib/dates.ts'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { useWikiTrustView, type WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 import { wikiQuestionTransaction } from './wiki-claim-question.ts'
 import { WikiClaimTrustCard } from './wiki-claim-trust-card.tsx'
@@ -95,6 +96,7 @@ export function useWikiArticleTrust(
   published: { readonly current: () => void },
 ): WikiArticleTrust {
   const display = useSettings().settings.wikiTrustDisplay
+  const { logger } = useCoreServices()
   const question = useCallback(
     (claimId: string) => {
       const view = editableView(editor)
@@ -139,7 +141,7 @@ export function useWikiArticleTrust(
   }, [editor, published, trust.view, trust.summary, openClaim])
   useEffect(() => {
     let detach = (): void => {}
-    const cancel = whenEditorMounted(editor, () => {
+    const cancel = whenEditorMounted(logger, editor, () => {
       const dom = editor.view.dom
       dom.dataset['wikiTrustDisplay'] = display
       const click = (event: MouseEvent): void => {
@@ -176,7 +178,7 @@ export function useWikiArticleTrust(
       cancel()
       detach()
     }
-  }, [editor, display])
+  }, [editor, logger, display])
 
   const open = cardFor === null ? null : (trust.view?.claim(cardFor) ?? null)
   const card =

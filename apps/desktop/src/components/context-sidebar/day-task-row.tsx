@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { Circle, CircleCheck } from 'lucide-react'
 import { displayNoteTitle, isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
 import { isModEvent } from '@meowdown/core'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import type { NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { formatShortDate } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
@@ -33,6 +34,7 @@ export function DayTaskRow({
   togglePending,
 }: DayTaskRowProps): ReactElement {
   const { settings } = useSettings()
+  const localOnly = useLocalOnlyFolders()
   const label = task.text || 'Empty task'
   const source =
     task.dailyDate === day
@@ -46,7 +48,7 @@ export function DayTaskRow({
       <button
         type="button"
         aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
-        disabled={togglePending || isLocalOnlyReadOnlyPath(task.notePath)}
+        disabled={togglePending || isLocalOnlyReadOnlyPath(localOnly, task.notePath)}
         onClick={onToggle}
         className="flex h-5 shrink-0 items-center text-text-muted transition-colors hover:text-text focus-visible:text-text focus-visible:outline-none disabled:cursor-default"
       >

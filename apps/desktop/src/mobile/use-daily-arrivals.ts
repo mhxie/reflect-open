@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { dailyArrivalIntent } from '@reflect/app'
 
 export interface DailyArrivalsOptions {
   /** The router's navigation counter — bumped on every `navigate`. */
@@ -49,12 +50,13 @@ export function useDailyArrivals({
   useEffect(() => {
     const last = lastArrival.current
     lastArrival.current = { seq: arrivalSeq, date }
-    if (arrivalSeq !== last.seq && arrivalFocusEditor) {
+    const intent = dailyArrivalIntent(last, lastArrival.current, arrivalFocusEditor)
+    if (intent.focus === 'request') {
       setFocusDate(date)
-    } else if (arrivalSeq !== last.seq) {
+    } else if (intent.focus === 'clear') {
       setFocusDate(null)
     }
-    if (arrivalSeq !== last.seq && date === last.date) {
+    if (intent.reanchor) {
       setResetSeq((seq) => seq + 1)
     }
   }, [arrivalSeq, arrivalFocusEditor, date])

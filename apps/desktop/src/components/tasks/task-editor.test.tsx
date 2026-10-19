@@ -1,38 +1,13 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
+import { createTestCoreServices, makeOpenTask } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act } from 'react'
-import { setBridge, type NoteRow, type OpenTask } from '@reflect/core'
-import type { resolveArchivedPost } from '@reflect/core/x-archive'
-import { queryClient, queryKeys } from '@/lib/query-client.ts'
-import { makeOpenTask } from '@/lib/tasks/open-task-fixture.ts'
-import { RouterProvider } from '@/routing/router.tsx'
+import { describe, expect, it, vi } from 'vitest'
+import type { NoteRow, OpenTask } from '@reflect/core'
+import type { ResolvedArchivedPost } from '@reflect/core/x-archive'
+import { queryKeys } from '@/lib/query-client.ts'
+import { act } from '@/test-utils/act.ts'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { TaskEditor } from './task-editor.tsx'
-
-vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (path: string) => `reflect-asset://${path}`,
-}))
-const getNote = vi.hoisted(() => vi.fn<(path: string) => Promise<NoteRow | undefined>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getNote,
-  // The graph's local-only folders are `secure`.
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: { editorMarkdownSyntax: 'hide', dateFormat: 'mdy', contactsEnabled: false },
-  }),
-}))
-
-type ResolvedArchive = Awaited<ReturnType<typeof resolveArchivedPost>>
 
 const X_URL = 'https://x.com/jack/status/101'
 /** What reaches the network, or writes the X archive, on a note's behalf. */
@@ -43,8 +18,8 @@ const REMOTE_COMMANDS = [
   'capture_oembed_fetch',
 ]
 
-let commands: string[]
-let client: QueryClient
+// The graph's local-only folders are `secure`.
+const GRAPH = { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] }
 
 function noteRow(path: string, isPrivate: boolean): NoteRow {
   return {
@@ -58,7 +33,7 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
   }
 }
 
-function archivedPost(id: string): NonNullable<ResolvedArchive> {
+function archivedPost(id: string): ResolvedArchivedPost {
   return {
     archive: {
       kind: 'x-post',
@@ -74,49 +49,49 @@ function archivedPost(id: string): NonNullable<ResolvedArchive> {
   }
 }
 
-beforeEach(() => {
-  commands = []
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  getNote.mockImplementation(async (path) => noteRow(path, path === 'notes/locked.md'))
-  setBridge({
-    invoke: async (command, args) => {
-      commands.push(command)
-      if (command === 'x_archive_resolve') return archivedPost(String(args.postId))
-      if (command === 'db_query') return []
-      return null
-    },
-    listen: async () => () => {},
-  })
-})
-
-afterEach(async () => {
-  await cleanup()
-  setBridge(null)
-  queryClient.clear()
-  vi.resetAllMocks()
-})
-
-function renderTaskEditor(task: OpenTask) {
+async function renderTaskEditor(task: OpenTask) {
+  const app = createTestCoreServices()
+  const getNote = vi
+    .spyOn(app.indexQuery, 'getNote')
+    .mockImplementation(async (path) => noteRow(path, path === 'notes/locked.md'))
+  app.xArchive.setPost('101', archivedPost('101'))
   const noop = (): void => {}
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'tasks' }}>
-        <TaskEditor
-          task={task}
-          onCommit={noop}
-          onContinue={noop}
-          onDelete={noop}
-          onDeleteEmpty={noop}
-          onCancel={noop}
-          onComplete={noop}
-          onCheckboxToggle={noop}
-          onConvertToBullet={noop}
-          onFlush={noop}
-          onNavigate={noop}
-        />
-      </RouterProvider>
-    </QueryClientProvider>,
+  const view = await renderInApp(
+    <TaskEditor
+      task={task}
+      onCommit={noop}
+      onContinue={noop}
+      onDelete={noop}
+      onDeleteEmpty={noop}
+      onCancel={noop}
+      onComplete={noop}
+      onCheckboxToggle={noop}
+      onConvertToBullet={noop}
+      onFlush={noop}
+      onNavigate={noop}
+    />,
+    {
+      app,
+      graph: GRAPH,
+      route: { kind: 'tasks' },
+      settings: { editorMarkdownSyntax: 'hide', dateFormat: 'mdy', contactsEnabled: false },
+    },
   )
+  return { view, getNote }
+}
+
+/**
+ * What reached the network or the X archive so far: bridge commands, plus the
+ * X archive's resolves, writes and syndication fetches.
+ */
+function commands(view: Awaited<ReturnType<typeof renderTaskEditor>>['view']): string[] {
+  const { app } = view
+  return [
+    ...app.ipc.calls().map((call) => call.command),
+    ...app.xArchive.resolves().map(() => 'x_archive_resolve'),
+    ...app.xArchive.writes().map(() => 'x_archive_write'),
+    ...app.xArchive.syndicationRequests().map(() => 'x_syndication_fetch'),
+  ]
 }
 
 function editable(): Element | null {
@@ -131,7 +106,7 @@ function remoteElements(): Element | null {
 
 describe('TaskEditor network policy', () => {
   it('reaches nothing remote for a task in a locked note', async () => {
-    await renderTaskEditor(
+    const { view, getNote } = await renderTaskEditor(
       makeOpenTask({
         notePath: 'notes/locked.md',
         markdown: `watch ![](${X_URL}) and ![chart](https://example.com/chart.png)`,
@@ -142,37 +117,38 @@ describe('TaskEditor network policy', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(remoteElements()).toBeNull()
     for (const command of REMOTE_COMMANDS) {
-      expect(commands).not.toContain(command)
+      expect(commands(view)).not.toContain(command)
     }
   })
 
   it('switches live when the note is locked, without remounting', async () => {
     const path = 'notes/plan.md'
-    await renderTaskEditor(makeOpenTask({ notePath: path, markdown: `watch ![](${X_URL})` }))
+    const { view } = await renderTaskEditor(
+      makeOpenTask({ notePath: path, markdown: `watch ![](${X_URL})` }),
+    )
     await expect.element(page.getByText('Archived post')).toBeVisible()
     const editor = editable()
     expect(editor).not.toBeNull()
 
-    const beforeLock = commands.length
+    const beforeLock = commands(view).length
     act(() => {
-      client.setQueryData(queryKeys.index.note('/g', path), noteRow(path, true))
+      view.queryClient.setQueryData(queryKeys.index.note('/g', path), noteRow(path, true))
     })
     await expect.element(page.getByTestId('embed-link')).toHaveTextContent(X_URL)
     expect(remoteElements()).toBeNull()
     expect(editable()).toBe(editor)
     for (const command of REMOTE_COMMANDS) {
-      expect(commands.slice(beforeLock)).not.toContain(command)
+      expect(commands(view).slice(beforeLock)).not.toContain(command)
     }
   })
 
   it('never creates a note from a link in a local-only task', async () => {
-    await renderTaskEditor(
+    const { view } = await renderTaskEditor(
       makeOpenTask({ notePath: 'finance/secure/bank.md', markdown: 'call [[Brand New Idea]]' }),
     )
     await page.getByTestId('wikilink').getByText('Brand New Idea').click()
-    await vi.waitFor(() => expect(commands).toContain('db_query'))
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(commands).not.toContain('note_create')
-    expect(commands).not.toContain('note_write')
+    expect(view.app.noteFile.writes()).toEqual([])
+    expect([...view.app.noteFile.files().keys()]).toEqual([])
   })
 })

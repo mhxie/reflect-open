@@ -6,15 +6,16 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./capture-envelope": "./src/actions/capture-envelope.ts",
-    "./x-archive": "./src/x-archive.ts"
+    "./capture-envelope": "./src/capture/capture-envelope.ts",
+    "./x-archive": "./src/embeds/x-archive-service.ts",
+    "./testing": "./src/testing/index.ts"
   },
   "scripts": {
-    "test": "vitest run --config ../../vitest.config.ts --project core-browser --project core-node",
+    "test": "vitest run --config ../../vitest.config.ts --project core-node",
     "bench": "vitest bench --run --config vitest.node.config.ts --reporter=verbose"
   },
   "dependencies": {
-    "@meowdown/markdown": "^0.76.1",
+    "@meowdown/markdown": "^0.77.0",
     "@ocavue/utils": "^1.8.0",
     "@post-embed/exporter": "^0.5.0",
     "@post-embed/schema": "^0.5.2",
@@ -22,6 +23,7 @@
     "@reflect/db": "workspace:*",
     "@reflect/modules": "workspace:*",
     "@reflect/utils": "workspace:*",
+    "date-fns": "^4.4.0",
     "kysely": "^0.28.17",
     "pkce-challenge": "^6.0.0",
     "ulidx": "^2.4.1",
@@ -31,10 +33,10 @@
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.21",
     "@ocavue/tsconfig": "^0.7.1",
-    "@vitest/browser-playwright": "^5.0.3",
-    "playwright": "^1.63.0",
+    "jsdom": "^30.1.2",
     "sqlite-vec": "^0.1.9",
     "typescript": "~6.0.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "vitest-fail-on-console": "^0.10.1"
   }
 }

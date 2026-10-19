@@ -1,43 +1,35 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import { cleanup, renderHook } from 'vitest-browser-react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import { actAsync } from '@/test-utils/act.ts'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useNoteGitVersion } from './use-note-git-version.ts'
 
-const gitNoteVersion = vi.hoisted(() =>
-  vi.fn<(path: string, generation: number) => Promise<string | null>>(),
-)
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  gitNoteVersion,
-}))
-
-const clients: QueryClient[] = []
-
-function makeWrapper() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  clients.push(client)
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  )
+/**
+ * The test core services, with the Git double answering `version` for every note.
+ */
+function appAnswering(version: string | null): TestCoreServices {
+  const app = createTestCoreServices()
+  app.gitRepository.onNoteVersion(() => version)
+  return app
 }
 
-beforeEach(() => {
-  gitNoteVersion.mockReset()
-  gitNoteVersion.mockResolvedValue('abc123def4')
-})
+/**
+ * The `noteVersion` lookups the Git double has answered so far.
+ */
+function versionCalls(app: TestCoreServices): unknown[][] {
+  return app.gitRepository
+    .calls()
+    .filter((call) => call.method === 'noteVersion')
+    .map((call) => [...call.args])
+}
 
-afterEach(async () => {
-  await cleanup()
-  for (const client of clients.splice(0)) {
-    client.clear()
-  }
+afterEach(() => {
   vi.useRealTimers()
 })
 
 describe('useNoteGitVersion', () => {
   it('does not query a closed detail view or a Local-only note', async () => {
+    const app = appAnswering('abc123def4')
     let options = {
       root: '/g',
       generation: 11,
@@ -45,24 +37,25 @@ describe('useNoteGitVersion', () => {
       open: false,
       isLocalOnly: false,
     }
-    const hook = await renderHook(() => useNoteGitVersion(options), { wrapper: makeWrapper() })
-    expect(gitNoteVersion).not.toHaveBeenCalled()
+    const hook = await renderHookInApp(() => useNoteGitVersion(options), { app })
+    expect(versionCalls(app)).toEqual([])
 
     options = { ...options, open: true, isLocalOnly: true }
     await hook.rerender()
-    expect(gitNoteVersion).not.toHaveBeenCalled()
+    expect(versionCalls(app)).toEqual([])
     expect(hook.result.current.version).toBeNull()
 
     options = { ...options, isLocalOnly: false }
     await hook.rerender()
     await vi.waitFor(() => expect(hook.result.current.version).toBe('abc123def4'))
-    expect(gitNoteVersion).toHaveBeenCalledWith('notes/a.md', 11)
+    expect(versionCalls(app)).toEqual([['notes/a.md', 11]])
   })
 
   it('fetches afresh on reopening without polling while details remain open', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const app = appAnswering('abc123def4')
     let open = true
-    const hook = await renderHook(
+    const hook = await renderHookInApp(
       () =>
         useNoteGitVersion({
           root: '/g',
@@ -71,16 +64,16 @@ describe('useNoteGitVersion', () => {
           open,
           isLocalOnly: false,
         }),
-      { wrapper: makeWrapper() },
+      { app },
     )
     await vi.waitFor(() => expect(hook.result.current.version).toBe('abc123def4'))
-    expect(gitNoteVersion).toHaveBeenCalledTimes(1)
+    expect(versionCalls(app)).toHaveLength(1)
 
-    gitNoteVersion.mockResolvedValue('def456abc9')
-    await hook.act(async () => {
+    app.gitRepository.onNoteVersion(() => 'def456abc9')
+    await actAsync(async () => {
       await vi.advanceTimersByTimeAsync(45_000)
     })
-    expect(gitNoteVersion).toHaveBeenCalledTimes(1)
+    expect(versionCalls(app)).toHaveLength(1)
     expect(hook.result.current.version).toBe('abc123def4')
 
     open = false
@@ -88,20 +81,18 @@ describe('useNoteGitVersion', () => {
     open = true
     await hook.rerender()
     await vi.waitFor(() => expect(hook.result.current.version).toBe('def456abc9'))
-    expect(gitNoteVersion).toHaveBeenCalledTimes(2)
+    expect(versionCalls(app)).toHaveLength(2)
   })
 
   it('discards a late version from another graph with the same note path', async () => {
-    let finishFirst: ((version: string | null) => void) | undefined
-    const firstVersion = new Promise<string | null>((resolve) => {
-      finishFirst = resolve
-    })
-    gitNoteVersion.mockImplementation(async (_path, generation) =>
-      generation === 21 ? await firstVersion : 'newgraph123',
+    const first = Promise.withResolvers<string | null>()
+    const app = createTestCoreServices()
+    app.gitRepository.onNoteVersion((_path, generation) =>
+      generation === 21 ? first.promise : 'newgraph123',
     )
     let generation = 21
     let root = '/first'
-    const hook = await renderHook(
+    const hook = await renderHookInApp(
       () =>
         useNoteGitVersion({
           root,
@@ -110,25 +101,28 @@ describe('useNoteGitVersion', () => {
           open: true,
           isLocalOnly: false,
         }),
-      { wrapper: makeWrapper() },
+      { app },
     )
-    await vi.waitFor(() => expect(gitNoteVersion).toHaveBeenCalledWith('notes/shared.md', 21))
+    await vi.waitFor(() => expect(versionCalls(app)).toEqual([['notes/shared.md', 21]]))
 
     generation = 22
     root = '/second'
     await hook.rerender()
     await vi.waitFor(() => expect(hook.result.current.version).toBe('newgraph123'))
-    await hook.act(async () => {
-      finishFirst?.('oldgraph456')
-      await firstVersion
+    await actAsync(async () => {
+      first.resolve('oldgraph456')
+      await first.promise
     })
 
     expect(hook.result.current.version).toBe('newgraph123')
   })
 
   it('reports unavailable history without replacing it with a false version', async () => {
-    gitNoteVersion.mockRejectedValue(new Error('Git history unavailable'))
-    const hook = await renderHook(
+    const app = createTestCoreServices()
+    app.gitRepository.onNoteVersion(() => {
+      throw new Error('Git history unavailable')
+    })
+    const hook = await renderHookInApp(
       () =>
         useNoteGitVersion({
           root: '/g',
@@ -137,11 +131,11 @@ describe('useNoteGitVersion', () => {
           open: true,
           isLocalOnly: false,
         }),
-      { wrapper: makeWrapper() },
+      { app },
     )
 
     await vi.waitFor(() => expect(hook.result.current.unavailable).toBe(true))
     expect(hook.result.current.version).toBeNull()
-    expect(gitNoteVersion).toHaveBeenCalledTimes(1)
+    expect(versionCalls(app)).toHaveLength(1)
   })
 })

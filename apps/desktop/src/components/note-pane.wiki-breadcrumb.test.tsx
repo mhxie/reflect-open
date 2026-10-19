@@ -1,84 +1,47 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { setBridge } from '@reflect/core'
+import { expect, it, vi } from 'vitest'
+import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
-import { queryClient } from '@/lib/query-client.ts'
-import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { RouteContent } from './route-content.tsx'
 
 /** Every way the pane renders a note — editor, protected, read-only preview — leads with the wiki trail. */
 
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getBacklinksWithContext: async () => ({ contexts: [], nextCursor: null, indexedLinkCount: 0 }),
-  relatedNotes: async () => [],
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-  isLocalOnlyReadOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-  wikiAncestors: async () => [
-    { path: 'wiki/index.md', title: 'Wiki Index', displayTitle: null, lang: null },
-  ],
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
-    indexing: false,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      editorMarkdownSyntax: 'hide',
-      allNotesFilterTags: [],
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
-
-let files: Record<string, string>
-
-beforeEach(() => {
-  files = {}
-  setBridge({
-    invoke: async (command, args) => {
-      if (command === 'note_read') {
-        return files[String(args.path)]
-      }
-      if (command === 'db_query') {
-        return []
-      }
-      return null
-    },
-    listen: async () => () => {},
+/**
+ * The note route for `path` holding `content`, in a graph whose read-only
+ * local-only folder is `secure`; the wiki index `wiki/index.md` sits above
+ * every wiki note. `conflicted` is what the index says of the note's markers.
+ */
+async function renderNote(path: string, content: string, conflicted = false) {
+  const app = createTestCoreServices({
+    noteFile: createTestNoteFileService({ files: { [path]: content } }),
   })
-})
-
-afterEach(async () => {
-  await cleanup()
-  setBridge(null)
-  queryClient.clear()
-})
-
-async function renderNote(path: string, content: string) {
-  files[path] = content
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return await render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'note', path }}>
-        <PaletteProvider>
-          <RouteContent />
-        </PaletteProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+  vi.spyOn(app.wiki, 'ancestors').mockResolvedValue([
+    { path: 'wiki/index.md', title: 'Wiki Index', displayTitle: null, lang: null },
+  ])
+  vi.spyOn(app.indexQuery, 'getNote').mockResolvedValue({
+    path,
+    title: '',
+    dailyDate: null,
+    isPrivate: false,
+    hasConflict: conflicted,
+    gistUrl: null,
+    gistStale: false,
+  })
+  return await renderInApp(
+    <PaletteProvider>
+      <RouteContent />
+    </PaletteProvider>,
+    {
+      app,
+      graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
+      settings: {
+        editorMarkdownSyntax: 'hide',
+        wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+      },
+      route: { kind: 'note', path },
+    },
   )
 }
 
@@ -99,6 +62,7 @@ it('leads a protected, sync-conflicted note with the trail', async () => {
   await renderNote(
     'wiki/topic/Clash.md',
     '<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n',
+    true,
   )
 
   await expect.element(page.getByText(/edited on two devices/i)).toBeVisible()

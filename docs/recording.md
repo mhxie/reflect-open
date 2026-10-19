@@ -68,7 +68,7 @@ Raw first, like audio memos: nothing is lost if a later step fails.
    one it heard last (at first, the first listed). Short replies are where
    unrestricted detection lands on a third language. The result is cached per
    model in staging.
-4. **Notes** (`packages/core/src/recordings/reconcile.ts`). Residual echo that
+4. **Notes** (`packages/core/src/recordings/recording-service.ts`). Residual echo that
    survived the gate is dropped by text (`dropEchoRepeats`: a Me segment that
    restates overlapping Them speech; short replies are kept), segments merge
    into turns, and the transcript note is written to

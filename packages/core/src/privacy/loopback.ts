@@ -1,11 +1,13 @@
 /**
  * Loopback detection for model servers on this Mac (Ollama, LM Studio, any
- * OpenAI-compatible endpoint). A leaf module on purpose: the settings schema
- * reaches it through `ai/openai-compatible.ts`, so it must not import
- * anything that imports the schema back. `./on-device.ts` re-exports it.
+ * OpenAI-compatible endpoint). A leaf module on purpose: the provider rules
+ * (`ai/provider-config.ts`, `ai/openai-compatible.ts`) and the on-device
+ * transport all import it, so it must not import anything back.
  */
 
-/** An IPv4 host as WHATWG serializes it (always a dotted quad) in 127.0.0.0/8. */
+/**
+ * An IPv4 host as WHATWG serializes it (always a dotted quad) in 127.0.0.0/8.
+ */
 const LOOPBACK_IPV4_HOST = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u
 
 /**

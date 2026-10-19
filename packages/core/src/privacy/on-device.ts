@@ -1,70 +1,82 @@
 import { resolveChatModel, type ChatModelOption } from '../ai/chat/model-options.ts'
-import { normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
 import {
   defaultAiProvider,
   withAiProviderAdded,
   withAiProviderOnDevice,
   type AiProvidersState,
 } from '../ai/provider-config.ts'
+import { normalizeOpenAICompatibleBaseUrl } from '../lib/http-url.ts'
 import type {
   AiProviderConfig,
+  HostedAiProviderConfig,
   OnDeviceServerKind,
   OpenAiCompatibleProviderConfig,
 } from '../settings/schema.ts'
 import { ReflectError } from '../errors.ts'
 import { isLoopbackHttpUrl } from './loopback.ts'
 import type { OnDeviceTarget } from './on-device-target.ts'
-import { verifyOnDeviceServer } from './on-device-verification.ts'
+import type { OnDeviceServerVerdict } from './on-device-verification.ts'
 
 /**
  * Which tier a resolved model belongs to. A model counts as running on this
  * Mac only when the user attested it: an OpenAI-compatible entry on a literal
  * loopback host whose `onDevice` attestation names exactly the endpoint and
  * model being called. Reflect can prove only that requests reach a loopback
- * socket (the transport in `ai/on-device-fetch.ts`); whether the server keeps
- * them there rests on that attestation. Everything else is cloud tier.
+ * socket (the transport in `ai/on-device-http-service.ts`); whether the server
+ * keeps them there rests on that attestation. Everything else is cloud tier.
  *
  * The proof is a branded {@link OnDeviceTarget}, minted only here, holding a
  * frozen copy of the config it was minted for. Building the model from that
- * copy (`languageModelFor`) means a target cannot be paired with another
- * entry, such as an undeclared tunnel on another loopback port.
+ * copy (`LanguageModelService.createFor`) means a target cannot be paired with
+ * another entry, such as an undeclared tunnel on another loopback port.
  */
 
-export { isLoopbackHttpUrl } from './loopback.ts'
-export { verifyOnDeviceServer } from './on-device-verification.ts'
-
-/** Any other resolved model: content bound for it must pass the cloud gate. */
+/**
+ * Any other resolved model: content bound for it must pass the cloud gate.
+ */
 export interface CloudTarget {
   readonly kind: 'cloud'
   readonly config: Readonly<AiProviderConfig>
 }
 
-/** Where a resolved model runs, as far as Reflect can tell. */
+/**
+ * Where a resolved model runs, as far as Reflect can tell.
+ */
 export type ModelTarget = OnDeviceTarget | CloudTarget
 
 declare const verifiedOnDeviceBrand: unique symbol
 
-/** An attested model whose server passed the private-content check for this turn or action. */
+/**
+ * An attested model whose server passed the private-content check for this turn or action.
+ */
 export interface VerifiedOnDeviceTarget extends OnDeviceTarget {
   readonly [verifiedOnDeviceBrand]: true
 }
 
-/** A cloud destination or an on-device destination verified before reading private content. */
+/**
+ * A cloud destination or an on-device destination verified before reading private content.
+ */
 export type VerifiedModelTarget = CloudTarget | VerifiedOnDeviceTarget
 
-/** Verify a turn's destination before any private content is read; never fall back to cloud. */
+/**
+ * Verify a turn's destination before any private content is read: a cloud
+ * target passes as it is, an on-device target only once `verifyServer`
+ * (`OnDeviceModelService.verifyServer`) accepts its server. A refusal throws
+ * `ReflectError('auth', reason)`; it never falls back to cloud.
+ */
 export async function verifyModelTarget(
   target: ModelTarget,
-  apiKey: string,
-  signal?: AbortSignal,
+  verifyServer: (target: OnDeviceTarget) => Promise<OnDeviceServerVerdict>,
 ): Promise<VerifiedModelTarget> {
   if (target.kind === 'cloud') {
     return target
   }
-  const verdict = await verifyOnDeviceServer(target, { apiKey, signal })
+  const verdict = await verifyServer(target)
   if (verdict !== 'ok') {
     throw new ReflectError('auth', verdict.reason)
   }
+  // The brand has no runtime representation, so this assertion is the whole
+  // verification mint; the guarantee is the accepted verdict above.
   return target as VerifiedOnDeviceTarget
 }
 
@@ -84,7 +96,9 @@ function frozenConfig(config: AiProviderConfig): Readonly<AiProviderConfig> {
     : Object.freeze({ ...config })
 }
 
-/** The one place an {@link OnDeviceTarget} is born. Private by design. */
+/**
+ * The one place an {@link OnDeviceTarget} is born. Private by design.
+ */
 function mintOnDeviceTarget(config: OpenAiCompatibleProviderConfig): OnDeviceTarget {
   // The brand has no runtime representation, so this assertion is the whole
   // mint; the guarantees live in resolveOnDeviceTarget's checks.
@@ -121,13 +135,18 @@ export function resolveOnDeviceTarget(resolved: AiProviderConfig): OnDeviceTarge
 }
 
 /**
+ * The cloud target of a hosted provider entry: a frozen copy of its config.
+ * Hosted providers never run on this Mac.
+ */
+export function cloudTarget(config: HostedAiProviderConfig): CloudTarget {
+  const cloud: CloudTarget = { kind: 'cloud', config: Object.freeze({ ...config }) }
+  return Object.freeze(cloud)
+}
+
+/**
  * The target for `resolved`: on-device when {@link resolveOnDeviceTarget}
  * allows it, cloud otherwise. The config is a frozen copy either way.
  */
-export function modelTarget(
-  resolved: AiProviderConfig & { provider: 'openai' | 'anthropic' | 'google' | 'openrouter' },
-): CloudTarget
-export function modelTarget(resolved: AiProviderConfig): ModelTarget
 export function modelTarget(resolved: AiProviderConfig): ModelTarget {
   const onDevice = resolveOnDeviceTarget(resolved)
   if (onDevice !== null) {

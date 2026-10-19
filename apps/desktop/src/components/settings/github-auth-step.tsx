@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import { isDeviceFlowConfigured, saveGithubAuth, type GithubUser } from '@reflect/core'
+import { isDeviceFlowConfigured, type GithubUser } from '@reflect/core'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
 import { useAsyncAction } from '@/hooks/use-async-action.ts'
 import { useDeviceFlowAuth } from '@/hooks/use-device-flow-auth.ts'
-import { fetchSignedInUser } from '@/lib/github-account.ts'
-import { invalidateGithubAuth } from '@/lib/github-auth-state.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 interface GithubAuthStepProps {
   /**
@@ -30,11 +28,13 @@ const FIELD_LABEL_CLASS = 'text-xs font-medium text-text-secondary'
  * The shared "sign in to GitHub" step (desktop's connect dialog and the
  * mobile connect drawer): the guided device flow when the GitHub App is
  * registered, fine-grained-PAT entry otherwise. Every path ends in a `GET /user` round-trip
- * ({@link fetchSignedInUser}), so the step only completes with a credential
+ * (`GithubAuthService.getSignedInUser`), so the step only completes with a credential
  * GitHub actually accepts — and the caller learns *who* signed in, which the
  * wizard uses to connect `owner/name` without ever asking for the owner.
  */
 export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): ReactElement {
+  const { githubAuth } = useCoreServices()
+  const { clipboard, opener } = useAppServices()
   const deviceFlow = useDeviceFlowAuth()
   const pat = useAsyncAction()
   const [patValue, setPatValue] = useState('')
@@ -59,10 +59,11 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
 
   // Already signed in with a working credential (e.g. connecting a second
   // graph) → skip the step. A stored-but-rejected credential is cleared by
-  // fetchSignedInUser, so the step stays visible and explains itself.
+  // getSignedInUser, so the step stays visible and explains itself.
   useEffect(() => {
     let cancelled = false
-    void fetchSignedInUser()
+    void githubAuth
+      .getSignedInUser()
       .then((user) => {
         if (!cancelled && user !== null) {
           reportAuthed(user)
@@ -79,7 +80,7 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
   }, [])
 
   async function verifyAndFinish(): Promise<void> {
-    const user = await fetchSignedInUser()
+    const user = await githubAuth.getSignedInUser()
     if (user === null) {
       throw new Error('GitHub rejected that token — check it and try again.')
     }
@@ -106,7 +107,7 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
   }): Promise<void> {
     if (copyState !== 'failed') {
       try {
-        await navigator.clipboard.writeText(flow.userCode)
+        await clipboard.writeText(flow.userCode)
         setCopyState('copied')
       } catch {
         setCopyState('failed')
@@ -116,7 +117,7 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
     setOpenFailed(false)
     const uri = flow.verificationUri
     if (uri.startsWith('https://') || uri.startsWith('http://')) {
-      void openUrl(uri).catch(() => {
+      void opener.openUrl(uri).catch(() => {
         setOpenFailed(true)
       })
     }
@@ -131,8 +132,7 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
     // Keychain writes can fail (locked keychain, denied access) and GitHub
     // can reject the token — the action envelope surfaces both inline.
     await pat.run(async () => {
-      await saveGithubAuth({ kind: 'pat', token })
-      invalidateGithubAuth()
+      await githubAuth.save({ kind: 'pat', token })
       await verifyAndFinish()
     })
   }

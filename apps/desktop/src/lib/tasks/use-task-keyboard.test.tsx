@@ -1,10 +1,9 @@
-import { act } from 'react'
+import { act, actAsync } from '@/test-utils/act.ts'
 import { cleanup, renderHook } from 'vitest-browser-react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { OpenTask } from '@reflect/core'
+import { getTaskKey, type OpenTask } from '@reflect/core'
+import { makeOpenTask as task } from '@reflect/core/testing'
 import { MOD_KEY } from '@/test-utils/mod-key.ts'
-import { makeOpenTask as task } from './open-task-fixture.ts'
-import { getTaskKey } from './task-identity.ts'
 import type { TaskActions } from './use-task-actions.ts'
 import type { TaskSelection } from './use-task-selection.ts'
 import { useTaskKeyboard } from './use-task-keyboard.ts'
@@ -99,9 +98,11 @@ async function mount(options: {
   }
 }
 
-/** Let the `void insert(...).then(...)` microtask settle before asserting. */
+/**
+ * Let the `void insert(...).then(...)` microtask settle before asserting.
+ */
 async function flush(): Promise<void> {
-  await act(async () => {
+  await actAsync(async () => {
     await Promise.resolve()
   })
 }

@@ -1,50 +1,34 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { OnThisDayEntry } from '@reflect/core'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import type { DailyActivityService } from '@reflect/core'
+import { createTestCoreServices } from '@reflect/core/testing'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { OnThisDaySection } from './on-this-day-section.tsx'
 
-const listOnThisDay = vi.hoisted(() => vi.fn<(date: string) => Promise<OnThisDayEntry[]>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  listOnThisDay,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'mdy' }, updateSettings: () => {} }),
-}))
+const listOnThisDay = vi.fn<DailyActivityService['listOnThisDay']>()
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function renderSection(date: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider>
-        <OnThisDaySection date={date} />
-        <RouteProbe />
-      </RouterProvider>
-    </QueryClientProvider>,
+async function renderSection(date: string) {
+  const app = createTestCoreServices()
+  vi.spyOn(app.dailyActivity, 'listOnThisDay').mockImplementation(listOnThisDay)
+  return await renderInApp(
+    <>
+      <OnThisDaySection date={date} />
+      <RouteProbe />
+    </>,
+    { app, graph: { root: '/g', name: 'g' }, settings: { dateFormat: 'mdy' } },
   )
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear()
   listOnThisDay.mockReset().mockResolvedValue([])
-})
-
-afterEach(async () => {
-  await cleanup()
 })
 
 describe('OnThisDaySection', () => {

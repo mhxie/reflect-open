@@ -1,25 +1,22 @@
-import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
-import { TooltipProvider } from '@/components/ui/tooltip.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WorkspaceHeader } from './workspace-header.tsx'
 
 async function renderHeader(overrides: Partial<Parameters<typeof WorkspaceHeader>[0]> = {}) {
   const onToggleTheme = vi.fn()
   const onOpenSettings = vi.fn()
-  const view = await render(
-    <TooltipProvider>
-      <WorkspaceHeader
-        graphName="My Graph"
-        graphRoot="/graphs/mine"
-        indexing={false}
-        version="1.2.3"
-        resolvedTheme="light"
-        onToggleTheme={onToggleTheme}
-        onOpenSettings={onOpenSettings}
-        {...overrides}
-      />
-    </TooltipProvider>,
+  const view = await renderInApp(
+    <WorkspaceHeader
+      graphName="My Graph"
+      graphRoot="/graphs/mine"
+      indexing={false}
+      version="1.2.3"
+      resolvedTheme="light"
+      onToggleTheme={onToggleTheme}
+      onOpenSettings={onOpenSettings}
+      {...overrides}
+    />,
   )
   return { view, onToggleTheme, onOpenSettings }
 }

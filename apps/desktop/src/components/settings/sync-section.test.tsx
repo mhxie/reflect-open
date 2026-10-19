@@ -1,68 +1,88 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render } from 'vitest-browser-react'
+import { createTestWindowService } from '@reflect/app/testing'
 import { page, type Locator } from 'vitest/browser'
 import type { ReactElement } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GraphInfo } from '@reflect/core'
-import type { BackupState } from '@/lib/backup-controller.ts'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import {
+  ReflectError,
+  type BackupService,
+  type BackupState,
+  type ConflictedNote,
+  type DuplicateIdGroup,
+  type GraphSessionService,
+  type IcloudStatus,
+} from '@reflect/core'
+import {
+  createTestCoreServices,
+  createTestICloudNativeService,
+  createTestPlatformService,
+  createTestBackupService,
+  type TestOpenGraph,
+  type TestPlatformOptions,
+  type TestBackupService,
+} from '@reflect/core/testing'
+import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SyncSection } from './sync-section.tsx'
 
-const core = vi.hoisted(() => ({
-  status: {
-    available: true,
-    documentsRoot: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents',
-    existingGraphRoots: [] as string[],
-  },
-  pendingNotes: 0,
-  conflictedNotes: [] as Array<{ path: string; title: string }>,
-  duplicateIds: [] as Array<{ id: string; paths: string[] }>,
-}))
+const ICLOUD_DOCUMENTS = '/Users/alex/Library/Mobile Documents/iCloud~app/Documents'
+const ICLOUD_GRAPH: TestOpenGraph = { root: `${ICLOUD_DOCUMENTS}/Notes`, name: 'Notes' }
 
-const graph = vi.hoisted(() => ({
-  current: null as GraphInfo | null,
-  openRecent: vi.fn<(root: string) => Promise<boolean>>(async () => true),
-}))
+const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
 
-const sync = vi.hoisted(() => ({
-  backup: { phase: 'disconnected' } as BackupState,
-  disconnectGraph: vi.fn(async () => {}),
-  signOut: vi.fn(async () => {}),
-  backUpNow: vi.fn(async () => {}),
-}))
+// What the app's fakes answer; each test sets them before `renderSection`.
+let icloud: {
+  status: IcloudStatus
+  pendingNotes: number
+  /**
+   * The native copy of a graph move rejects, though iCloud reports available.
+   */
+  copyFails: boolean
+}
+let conflictedNotes: ConflictedNote[]
+let duplicateIds: DuplicateIdGroup[]
+let graph: TestOpenGraph
+let platform: TestPlatformOptions
+let backupState: BackupState
 
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
-
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  icloudStatus: vi.fn(async () => core.status),
-  icloudPendingCount: vi.fn(async () => core.pendingNotes),
-  getConflictedNotes: vi.fn(async () => core.conflictedNotes),
-  getDuplicateNoteIds: vi.fn(async () => core.duplicateIds),
-}))
-// A browser-mode module mock materializes value exports once, so this file
-// keeps the flag statically true; the platform-hidden test lives in
-// `sync-section-non-macos.test.tsx`.
-vi.mock('@/lib/platform.ts', () => ({ isMacosDesktop: true, isNativeShell: () => true }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: graph.current, openRecent: graph.openRecent }),
-}))
-vi.mock('@/providers/sync-provider.tsx', () => ({ useSync: () => sync }))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openRouteInNewWindow,
-}))
+// The services of the app under test.
+let backup: TestBackupService
+let disconnectGraph: MockInstance<BackupService['disconnectGraph']>
+let openRecent: MockInstance<GraphSessionService['openRecent']>
+// What the next `openRecent` of the rendered app resolves.
+let reopens: boolean
 
 async function renderSection(): Promise<void> {
-  await render(
-    <QueryClientProvider client={new QueryClient()}>
-      <RouterProvider initialRoute={{ kind: 'settings' }}>
-        <SyncSection />
-        <RouteProbe />
-      </RouterProvider>
-    </QueryClientProvider>,
+  const icloudNative = createTestICloudNativeService({
+    status: icloud.status,
+    pendingCount: icloud.pendingNotes,
+  })
+  if (icloud.copyFails) {
+    vi.spyOn(icloudNative, 'adoptGraph').mockRejectedValue(
+      new ReflectError('io', 'test iCloud: the container is unavailable'),
+    )
+  }
+  backup.setState(backupState)
+  const app = createTestCoreServices({
+    icloudNative,
+    backup,
+    platform: createTestPlatformService(platform),
+  })
+  vi.spyOn(app.indexQuery, 'getConflictedNotes').mockImplementation(async () => conflictedNotes)
+  vi.spyOn(app.indexQuery, 'getDuplicateNoteIds').mockImplementation(async () => duplicateIds)
+  openRecent = vi.spyOn(app.graphSession, 'openRecent').mockImplementation(async () => reopens)
+  await renderInApp(
+    <>
+      <SyncSection />
+      <RouteProbe />
+    </>,
+    {
+      app,
+      appServices: { window: createTestWindowService({ openNoteWindow }) },
+      graph,
+      route: { kind: 'settings' },
+    },
   )
 }
 
@@ -76,27 +96,24 @@ function legend(section: Locator, text: string): Locator {
 }
 
 beforeEach(() => {
-  graph.current = {
-    root: '/Users/alex/Documents/Notes',
-    name: 'Notes',
-    generation: 1,
-    localOnlyFolders: [],
-    localOnlyEditableFolders: [],
+  platform = {}
+  graph = { root: '/Users/alex/Documents/Notes', name: 'Notes' }
+  icloud = {
+    status: {
+      available: true,
+      documentsRoot: ICLOUD_DOCUMENTS,
+      existingGraphRoots: [`${ICLOUD_DOCUMENTS}/Personal`],
+    },
+    pendingNotes: 0,
+    copyFails: false,
   }
-  core.status = {
-    available: true,
-    documentsRoot: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents',
-    existingGraphRoots: ['/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Personal'],
-  }
-  core.pendingNotes = 0
-  core.conflictedNotes = []
-  core.duplicateIds = []
-  sync.backup = { phase: 'disconnected' }
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
-})
-
-afterEach(() => {
-  vi.clearAllMocks()
+  conflictedNotes = []
+  duplicateIds = []
+  backupState = { phase: 'disconnected' }
+  reopens = true
+  openNoteWindow.mockReset().mockResolvedValue(true)
+  backup = createTestBackupService()
+  disconnectGraph = vi.spyOn(backup, 'disconnectGraph')
 })
 
 describe('SyncSection', () => {
@@ -113,13 +130,7 @@ describe('SyncSection', () => {
   })
 
   it('keeps GitHub sync visible when the graph syncs through iCloud', async () => {
-    graph.current = {
-      root: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Notes',
-      name: 'Notes',
-      generation: 1,
-      localOnlyFolders: [],
-      localOnlyEditableFolders: [],
-    }
+    graph = ICLOUD_GRAPH
 
     await renderSection()
 
@@ -134,16 +145,10 @@ describe('SyncSection', () => {
   })
 
   it('surfaces iCloud download and review counts', async () => {
-    graph.current = {
-      root: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Notes',
-      name: 'Notes',
-      generation: 1,
-      localOnlyFolders: [],
-      localOnlyEditableFolders: [],
-    }
-    core.pendingNotes = 2
-    core.conflictedNotes = [{ path: 'notes/a.md', title: 'A' }]
-    core.duplicateIds = [{ id: 'note-1', paths: ['notes/a.md', 'notes/a 2.md'] }]
+    graph = ICLOUD_GRAPH
+    icloud.pendingNotes = 2
+    conflictedNotes = [{ path: 'notes/a.md', title: 'A' }]
+    duplicateIds = [{ id: 'note-1', paths: ['notes/a.md', 'notes/a 2.md'] }]
 
     await renderSection()
 
@@ -158,8 +163,8 @@ describe('SyncSection', () => {
   })
 
   it('opens the conflicted note listed under GitHub sync', async () => {
-    core.conflictedNotes = [{ path: 'notes/conflicted.md', title: 'Conflicted note' }]
-    sync.backup = {
+    conflictedNotes = [{ path: 'notes/conflicted.md', title: 'Conflicted note' }]
+    backupState = {
       phase: 'connected',
       remoteUrl: 'https://github.com/alex/notes.git',
       repo: { owner: 'alex', name: 'notes' },
@@ -175,8 +180,8 @@ describe('SyncSection', () => {
   })
 
   it('opens a ⌘-clicked conflicted note in a new window', async () => {
-    core.conflictedNotes = [{ path: 'notes/conflicted.md', title: 'Conflicted note' }]
-    sync.backup = {
+    conflictedNotes = [{ path: 'notes/conflicted.md', title: 'Conflicted note' }]
+    backupState = {
       phase: 'connected',
       remoteUrl: 'https://github.com/alex/notes.git',
       repo: { owner: 'alex', name: 'notes' },
@@ -191,11 +196,95 @@ describe('SyncSection', () => {
       .click({ modifiers: ['ControlOrMeta'] })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({
-        kind: 'note',
-        path: 'notes/conflicted.md',
-      }),
+      expect(openNoteWindow).toHaveBeenCalledWith(
+        deepLinkForRoute({
+          kind: 'note',
+          path: 'notes/conflicted.md',
+        }),
+      ),
     )
     expect(page.getByTestId('route').element().textContent).toBe('settings')
+  })
+})
+
+describe('moving a graph to iCloud', () => {
+  const NEW_ROOT = `${ICLOUD_DOCUMENTS}/Notes`
+
+  /**
+   * Confirm the move dialog; `copyFails` makes the native copy reject.
+   */
+  async function confirmMove(options?: { copyFails?: boolean }): Promise<Locator> {
+    icloud.copyFails = options?.copyFails === true
+    await renderSection()
+    const section = page.getByRole('region', { name: 'Sync' })
+    await section.getByRole('button', { name: 'Move graph to iCloud…' }).click()
+    await page.getByRole('button', { name: 'Move to iCloud' }).click()
+    return section
+  }
+
+  it('copies the graph, disconnects the backup, and reopens it in iCloud', async () => {
+    backupState = {
+      phase: 'connected',
+      remoteUrl: 'https://github.com/alex/notes.git',
+      repo: { owner: 'alex', name: 'notes' },
+      status: { state: 'idle' },
+    }
+
+    await confirmMove()
+
+    await vi.waitFor(() => expect(openRecent).toHaveBeenCalledWith(NEW_ROOT))
+    expect(disconnectGraph).toHaveBeenCalledOnce()
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('leaves a disconnected backup alone', async () => {
+    await confirmMove()
+
+    await vi.waitFor(() => expect(openRecent).toHaveBeenCalledWith(NEW_ROOT))
+    expect(disconnectGraph).not.toHaveBeenCalled()
+  })
+
+  it('reports a backup that could not be disconnected and a graph that did not reopen', async () => {
+    backupState = {
+      phase: 'connected',
+      remoteUrl: 'https://github.com/alex/notes.git',
+      repo: { owner: 'alex', name: 'notes' },
+      status: { state: 'idle' },
+    }
+    disconnectGraph.mockRejectedValueOnce(new ReflectError('io', 'remote locked'))
+    reopens = false
+
+    const section = await confirmMove()
+
+    await expect
+      .element(
+        section.getByText(
+          'The graph moved to iCloud, but GitHub sync could not be disconnected from the original folder: remote locked The copy landed in iCloud but could not be opened — open it from Saved graphs.',
+        ),
+      )
+      .toBeInTheDocument()
+  })
+
+  it('keeps the dialog open and reports a copy that failed', async () => {
+    await confirmMove({ copyFails: true })
+
+    await expect
+      .element(page.getByText('test iCloud: the container is unavailable'))
+      .toBeInTheDocument()
+    await expect.element(page.getByRole('dialog')).toBeInTheDocument()
+    expect(openRecent).not.toHaveBeenCalled()
+  })
+})
+
+describe('SyncSection off macOS desktop', () => {
+  it('keeps backup visible when the iCloud row is platform-hidden', async () => {
+    platform = { isMacosDesktop: false }
+    graph = ICLOUD_GRAPH
+    icloud.status = { ...icloud.status, existingGraphRoots: [] }
+    await renderSection()
+
+    const section = page.getByRole('region', { name: 'Sync' })
+    expect(legend(section, 'iCloud Drive').query()).toBeNull()
+    await expect.element(legend(section, 'GitHub sync')).toBeInTheDocument()
   })
 })

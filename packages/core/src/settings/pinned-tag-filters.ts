@@ -2,10 +2,14 @@ import { z } from 'zod'
 import { isTagName } from '../markdown/extract.ts'
 import { foldTag } from '../markdown/keys.ts'
 
-/** A menu action that changes a pinned filter's display position. */
+/**
+ * A menu action that changes a pinned filter's display position.
+ */
 export type PinnedTagMove = 'top' | 'up' | 'down' | 'bottom'
 
-/** Parse a typed tag using the same grammar and folding as the note index. */
+/**
+ * Parse a typed tag using the same grammar and folding as the note index.
+ */
 export function normalizePinnedTag(input: unknown): string | null {
   const parsed = z.string().safeParse(input)
   if (!parsed.success) {
@@ -15,7 +19,9 @@ export function normalizePinnedTag(input: unknown): string | null {
   return isTagName(tag) ? tag : null
 }
 
-/** Normalize stored pins, retaining their first occurrence and display order. */
+/**
+ * Normalize stored pins, retaining their first occurrence and display order.
+ */
 export function normalizePinnedTags(input: unknown): string[] {
   const parsed = z.array(z.string()).safeParse(input)
   if (!parsed.success) {
@@ -31,14 +37,18 @@ export function normalizePinnedTags(input: unknown): string[] {
   return [...tags]
 }
 
-/** Append a valid, previously unpinned tag, including tags with no indexed notes. */
+/**
+ * Append a valid, previously unpinned tag, including tags with no indexed notes.
+ */
 export function pinFilterTag(tags: readonly string[], input: unknown): string[] {
   const normalized = normalizePinnedTags(tags)
   const tag = normalizePinnedTag(input)
   return tag === null || normalized.includes(tag) ? normalized : [...normalized, tag]
 }
 
-/** Remove a filter preference without changing any note's tags. */
+/**
+ * Remove a filter preference without changing any note's tags.
+ */
 export function unpinFilterTag(tags: readonly string[], input: unknown): string[] {
   const tag = normalizePinnedTag(input)
   return normalizePinnedTags(tags).filter((existing) => existing !== tag)
@@ -54,7 +64,9 @@ function moveToIndex(tags: string[], source: number, target: number): string[] {
   return tags
 }
 
-/** Move a pinned filter through one of the row's explicit ordering actions. */
+/**
+ * Move a pinned filter through one of the row's explicit ordering actions.
+ */
 export function movePinnedFilterTag(
   tags: readonly string[],
   input: unknown,
@@ -74,7 +86,9 @@ export function movePinnedFilterTag(
   return moveToIndex(normalized, source, target)
 }
 
-/** Preview or drop a sortable filter at another pinned filter's position. */
+/**
+ * Preview or drop a sortable filter at another pinned filter's position.
+ */
 export function orderPinnedFilterTags(
   tags: readonly string[],
   input: unknown,
@@ -90,7 +104,9 @@ export function orderPinnedFilterTags(
   )
 }
 
-/** Compare the exact order of two canonical pin lists. */
+/**
+ * Compare the exact order of two canonical pin lists.
+ */
 export function pinnedTagOrdersEqual(first: readonly string[], second: readonly string[]): boolean {
   return first.length === second.length && first.every((tag, index) => tag === second[index])
 }

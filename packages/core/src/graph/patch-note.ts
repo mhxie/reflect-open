@@ -1,9 +1,9 @@
 import { isAppError, ReflectError } from '../errors.ts'
-import { readNote, writeNote } from './commands.ts'
+import type { NoteFileService } from './note-file-service.ts'
 
 /**
  * Read-modify-write for a note on disk. Every note write is checked (see
- * `writeNote`): it names the source it replaces and Rust refuses it when the
+ * `NoteFileService.write`): it names the source it replaces and Rust refuses it when the
  * file changed in between. A patch therefore never clobbers a concurrent
  * change — a sync pull, another device, an editor save. It re-reads the note
  * and re-applies itself to the new bytes, a bounded number of times, and then
@@ -23,7 +23,7 @@ export const PATCH_NOTE_ATTEMPTS = 3
  */
 export type NotePatch = (source: string | null) => string | null | Promise<string | null>
 
-/** The file access a patch needs; {@link patchNote} binds the note commands. */
+/** The file access a patch needs; {@link patchNote} binds a {@link NoteFileService}. */
 export interface NotePatchIo {
   /** The note's current source, or `null` when no file exists. */
   read: (path: string) => Promise<string | null>
@@ -76,9 +76,13 @@ export function isNoteChangedError(value: unknown): value is NoteChangedError {
  * A note's source at `generation`, or `null` when the file does not exist —
  * the value a checked write names for "must not exist yet".
  */
-export async function readNoteOrNull(path: string, generation: number): Promise<string | null> {
+export async function readNoteOrNull(
+  noteFile: NoteFileService,
+  path: string,
+  generation: number,
+): Promise<string | null> {
   try {
-    return await readNote(path, generation)
+    return await noteFile.read(path, generation)
   } catch (cause) {
     if (isAppError(cause) && cause.kind === 'notFound') {
       return null
@@ -154,6 +158,7 @@ export async function patchNoteWith(
  * writes, and then the conflict surfaces as {@link NoteChangedError}.
  */
 export async function patchNote(
+  noteFile: NoteFileService,
   path: string,
   patch: NotePatch,
   generation: number,
@@ -161,9 +166,10 @@ export async function patchNote(
 ): Promise<PatchNoteResult> {
   return await patchNoteWith(
     {
-      read: (notePath) => readNoteOrNull(notePath, generation),
-      write: (notePath, contents, expectedContents) =>
-        writeNote(notePath, contents, generation, expectedContents),
+      read: (notePath) => readNoteOrNull(noteFile, notePath, generation),
+      write: async (notePath, contents, expectedContents) => {
+        await noteFile.write(notePath, contents, generation, expectedContents)
+      },
     },
     path,
     patch,

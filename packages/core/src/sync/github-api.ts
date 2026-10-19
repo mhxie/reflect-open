@@ -1,8 +1,6 @@
 import type { z } from 'zod'
 import { ReflectError } from '../errors.ts'
 
-export type FetchFn = typeof fetch
-
 export const JSON_HEADERS = { Accept: 'application/json', 'Content-Type': 'application/json' }
 
 /**

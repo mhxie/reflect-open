@@ -5,7 +5,11 @@ import {
   wikiNoteReference,
 } from '../graph/note-reference.ts'
 import { ATTACHMENT_TYPE_EXTENSIONS } from '../graph/attachment-types.ts'
-import { isLocalOnlyPath } from '../graph/local-only.ts'
+import {
+  isLocalOnlyPath,
+  NO_LOCAL_ONLY_FOLDERS,
+  type LocalOnlyFolders,
+} from '../graph/local-only.ts'
 import {
   dateFromDailyPath,
   foldGraphPath,
@@ -15,11 +19,11 @@ import {
 } from '../graph/paths.ts'
 import { hasSearchableChar } from '../lib/searchable-char.ts'
 import {
+  canonicalEmail,
   countDisplayChars,
   detectConflictMarkers,
   encodeTaskPath,
   extractEmailFields,
-  foldEmail,
   foldKey,
   foldTag,
   freshAiSummary,
@@ -50,7 +54,7 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
 /**
  * Version of the projection {@link buildIndexedNote} produces. Bump it whenever
  * the rows derived from an *unchanged* file change — a new column, a changed
- * derivation — so `syncIndex` rebuilds graphs whose rows predate it. The
+ * derivation — so `NoteIndexer.sync` rebuilds graphs whose rows predate it. The
  * hash-based reconcile alone would never re-index an unchanged file, leaving
  * new columns at their migration defaults forever.
  *
@@ -199,7 +203,7 @@ export type IndexedAlias = z.infer<typeof indexedAliasSchema>
 export const indexedEmailSchema = z.object({
   /** Display casing (as written in the field bullet). */
   email: z.string(),
-  /** Case-folded match key ({@link foldEmail}) — what resolution compares against. */
+  /** Case-folded match key ({@link canonicalEmail}) — what resolution compares against. */
   emailKey: z.string(),
 })
 export type IndexedEmail = z.infer<typeof indexedEmailSchema>
@@ -397,6 +401,9 @@ export function projectNoteClaims(
  * Flatten a parsed note into the index payload. `meta.source` is the raw
  * markdown the note was parsed from — conflict markers are detected on it
  * (not on the extracted plain text, which may reshape marker lines).
+ * `meta.localOnly` is the graph's local-only folders: a note inside one is
+ * private whatever its frontmatter says. The indexer always passes its
+ * session's folders; the default (none) is for callers outside a graph.
  */
 export function buildIndexedNote(
   parsed: ParsedNote,
@@ -406,6 +413,7 @@ export function buildIndexedNote(
     source: string
     assetText?: string
     hasDeviceOnlyContent?: boolean
+    localOnly?: LocalOnlyFolders
   },
 ): IndexedNote {
   const wikiLinks: IndexedLink[] = parsed.wikiLinks.map((link) => {
@@ -462,7 +470,9 @@ export function buildIndexedNote(
     // classifier's withheld bit), or a note inside a local-only folder whatever
     // its frontmatter says: every `is_private` filter and gate downstream
     // covers all three.
-    isPrivate: parsed.frontmatter.private || isLocalOnlyPath(parsed.path),
+    isPrivate:
+      parsed.frontmatter.private ||
+      isLocalOnlyPath(meta.localOnly ?? NO_LOCAL_ONLY_FOLDERS, parsed.path),
     isPinned: isPinned(parsed.frontmatter),
     pinnedOrder: pinnedOrder(parsed.frontmatter),
     hasConflict: detectConflictMarkers(meta.source),
@@ -486,7 +496,7 @@ export function buildIndexedNote(
     tags: parsed.tags.map((tag) => ({ tag, tagKey: foldTag(tag) })),
     aliases,
     claims: projectNoteClaims(parsed, aliases),
-    emails: extractEmailFields(body).map((email) => ({ email, emailKey: foldEmail(email) })),
+    emails: extractEmailFields(body).map((email) => ({ email, emailKey: canonicalEmail(email) })),
     // One reference can contribute several candidate spellings; the
     // projection stores each path once.
     assets: [

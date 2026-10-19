@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteEditor, type NoteEditorHandle } from '../note-editor.tsx'
 import { OutlineBridge } from './outline-bridge.tsx'
 import { noteOutlineFor, type NoteOutline } from './outline-store.ts'
@@ -36,7 +36,7 @@ interface Setup {
 
 async function setup(markdown: string = NOTE): Promise<Setup> {
   const grabbed: { current: NoteEditorHandle | null } = { current: null }
-  const screen = await render(
+  const screen = await renderInApp(
     // No scroll anchoring: Chromium's would hold a heading in place by itself,
     // and WebKit, the production engine, has none.
     <div

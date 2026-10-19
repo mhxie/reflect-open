@@ -1,7 +1,7 @@
-import { act } from 'react'
-import { cleanup, renderHook } from 'vitest-browser-react'
+import { act } from '@/test-utils/act.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDayWindow, dateAtIndex } from '@/lib/day-window.ts'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import {
   CAROUSEL_RADIUS,
   reconcileCarousel,
@@ -95,7 +95,6 @@ vi.mock('embla-carousel-react', () => ({
 }))
 
 afterEach(() => {
-  cleanup()
   embla.reset()
 })
 
@@ -204,7 +203,7 @@ describe('useDayCarousel', () => {
   async function mountCarousel() {
     const onSelect = vi.fn()
     const onTarget = vi.fn()
-    const hook = await renderHook(
+    const hook = await renderHookInApp(
       (
         { date, navigationKey }: { date: string; navigationKey: string } = {
           date: DATE,

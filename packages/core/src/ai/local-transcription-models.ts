@@ -16,7 +16,9 @@ export const LOCAL_TRANSCRIPTION_MODEL_IDS = [
 
 export type LocalTranscriptionModelId = (typeof LOCAL_TRANSCRIPTION_MODEL_IDS)[number]
 
-/** The model a fresh install downloads when on-device transcription is chosen. */
+/**
+ * The model a fresh install downloads when on-device transcription is chosen.
+ */
 export const DEFAULT_LOCAL_TRANSCRIPTION_MODEL: LocalTranscriptionModelId = 'large-v3-turbo'
 
 export interface LocalTranscriptionModel {
@@ -65,7 +67,9 @@ export const LOCAL_TRANSCRIPTION_MODELS: readonly LocalTranscriptionModel[] = [
   },
 ]
 
-/** The catalog entry for `id`. */
+/**
+ * The catalog entry for `id`.
+ */
 export function localTranscriptionModel(id: LocalTranscriptionModelId): LocalTranscriptionModel {
   return (
     LOCAL_TRANSCRIPTION_MODELS.find((model) => model.id === id) ?? LOCAL_TRANSCRIPTION_MODELS[0]!

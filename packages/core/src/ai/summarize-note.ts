@@ -1,8 +1,8 @@
 import { ReflectError } from '../errors.ts'
 import { AI_SUMMARY_MAX_CHARS } from '../markdown/ai-summary.ts'
-import type { CloudNoteContent, CloudSafe } from '../privacy/checkers.ts'
+import type { CloudNoteContent, CloudSafe } from '../privacy/privacy-service.ts'
 import type { CloudTarget, VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
-import type { TargetModel } from './language-model.ts'
+import type { TargetModel } from './language-model-service.ts'
 import { skipsReasoning } from './reasoning.ts'
 import { clipAtWordBoundary } from './text.ts'
 
@@ -15,16 +15,22 @@ import { clipAtWordBoundary } from './text.ts'
 
 const SUMMARY_TIMEOUT_MS = 60_000
 
-/** Body characters sent to the model; local models often have small contexts. */
+/**
+ * Body characters sent to the model; local models often have small contexts.
+ */
 export const MAX_SUMMARY_SOURCE_CHARS = 12_000
 
-/** A note as the summarizer reads it: its title and (capped) Markdown body. */
+/**
+ * A note as the summarizer reads it: its title and (capped) Markdown body.
+ */
 export interface NoteSummarySource {
   readonly title: string
   readonly content: string
 }
 
-/** Who summarizes: a verified on-device model, or a cloud model over gated content. */
+/**
+ * Who summarizes: a verified on-device model, or a cloud model over gated content.
+ */
 export type SummarizeNoteRequest =
   | {
       readonly model: TargetModel<VerifiedOnDeviceTarget>

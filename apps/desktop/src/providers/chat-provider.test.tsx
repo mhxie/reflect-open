@@ -1,88 +1,28 @@
-import { renderHook } from 'vitest-browser-react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import type {
-  AiProviderConfig,
-  ChatConversation,
-  ChatModelSelection,
-  ChatStreamEvent,
-  ChatTurn,
-  EmbedStatus,
-  GraphInfo,
-  Settings,
-  StreamChatOptions,
-} from '@reflect/core'
-import { NO_REPLY_NOTICE } from '@reflect/core'
-import { ChatProvider, useChatSession } from '@/providers/chat-provider.tsx'
+import { describe, expect, it, vi } from 'vitest'
+import type { ReactElement } from 'react'
+import { aiKeySecretName, type AiProviderConfig, type ChatTurn, type Settings } from '@reflect/core'
+import {
+  createTestCoreServices,
+  createTestChatEngineService,
+  createTestChatHistoryService,
+  createTestSecretStoreService,
+  createTestSettingsService,
+  type TestChatConversation,
+  type TestOpenGraph,
+} from '@reflect/core/testing'
+import { useChatSession } from '@/providers/chat-provider.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 
 /**
- * The provider's persistence lifecycle over a fully scripted store: resuming
- * the latest conversation (and not resuming a stale one), the send/settle
- * save pair, conversation switching, and the deleted-conversation guard.
- * The engine (`streamChat`) and the store functions are mocks — the Rust
- * round-trip is covered by the store and `db` tests.
+ * The hook as a shell over the open graph's chat session: it publishes the
+ * session state and controls. The session's own lifecycle is covered by
+ * `chat-session-service.test.ts`, and its creation by
+ * `create-graph-services.test.ts`.
  */
 
-const core = vi.hoisted(() => ({
-  streamChat: vi.fn<(options: StreamChatOptions) => AsyncGenerator<ChatStreamEvent>>(),
-  aiApiKeyForConfig: vi.fn<(config: AiProviderConfig) => Promise<string | null>>(),
-  getSecret: vi.fn<(name: string) => Promise<string | null>>(),
-  hasBridge: vi.fn<() => boolean>(),
-  loadChatGraphContext: vi.fn<(graphName: string) => Promise<null>>(),
-  listChatConversations: vi.fn<(limit?: number) => Promise<ChatConversation[]>>(),
-  loadChatMessages: vi.fn<(id: string) => Promise<ChatTurn[]>>(),
-  saveChatMessage: vi.fn<(input: unknown) => Promise<void>>(),
-  deleteChatConversation: vi.fn<(id: string, generation: number) => Promise<void>>(),
-}))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  ...core,
-}))
-
-const embedState = vi.hoisted(() => ({ status: { status: 'uninitialized' } as EmbedStatus }))
-vi.mock('@/lib/use-embed-status.ts', () => ({ useEmbedStatus: () => embedState.status }))
-
-const settingsState = vi.hoisted(() => ({
-  models: [] as AiProviderConfig[],
-  defaultId: null as string | null,
-  selection: null as ChatModelSelection | null,
-  semanticSearchEnabled: false,
-  chatSystemPrompt: '',
-}))
-const updateSettings = vi.hoisted(() => vi.fn<(patch: Partial<Settings>) => void>())
-// Stateful like the real provider: a chatModelSelection patch re-renders with
-// the new value, so selectModel applies instantly here too.
-vi.mock('@/providers/settings-provider.tsx', async () => {
-  const { useState } = await import('react')
-  return {
-    useSettings: () => {
-      const [selection, setSelection] = useState(settingsState.selection)
-      return {
-        settings: {
-          aiProviders: settingsState.models,
-          defaultAiProviderId: settingsState.defaultId,
-          chatModelSelection: selection,
-          semanticSearchEnabled: settingsState.semanticSearchEnabled,
-          chatSystemPrompt: settingsState.chatSystemPrompt,
-        },
-        updateSettings: (patch: Partial<Settings>) => {
-          updateSettings(patch)
-          if (patch.chatModelSelection !== undefined) {
-            setSelection(patch.chatModelSelection)
-          }
-        },
-      }
-    },
-  }
-})
-
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ indexGeneration: 7, graph: { root: '/g' } }),
-}))
-
-vi.mock('@/lib/provider-fetch.ts', () => ({ providerFetch: vi.fn() }))
-
 const MODEL: AiProviderConfig = { id: 'm1', provider: 'openai', model: 'gpt-5.4', keyHint: '12345' }
+
+const GRAPH: TestOpenGraph = { root: '/g', name: 'test-graph', generation: 1, indexGeneration: 7 }
 
 const RESTORED_TURN: ChatTurn = {
   id: 'turn-old',
@@ -93,406 +33,116 @@ const RESTORED_TURN: ChatTurn = {
   status: 'done',
 }
 
-function conversation(overrides: Partial<ChatConversation> = {}): ChatConversation {
-  return {
-    id: 'conv-1',
-    title: 'what did I write yesterday?',
-    createdMs: 1,
-    updatedMs: Date.now(),
-    ...overrides,
-  }
-}
-
 let session: ReturnType<typeof useChatSession> | null = null
 
-const GRAPH: GraphInfo = {
-  root: '/g',
-  name: 'test-graph',
-  generation: 1,
-  localOnlyFolders: [],
-  localOnlyEditableFolders: [],
+function SessionProbe(): ReactElement | null {
+  session = useChatSession()
+  return null
 }
 
-function renderProvider() {
+async function renderProvider(options?: {
+  conversations?: readonly TestChatConversation[]
+  settings?: Partial<Settings>
+}) {
   session = null
-  return renderHook(
-    () => {
-      session = useChatSession()
-      return session
-    },
-    {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <ChatProvider graph={GRAPH}>{children}</ChatProvider>
-      ),
-    },
-  )
-}
-
-function scriptTurn(events: ChatStreamEvent[]) {
-  core.streamChat.mockImplementation(function script() {
-    return (async function* () {
-      yield* events
-    })()
+  const settings = createTestSettingsService({
+    aiProviders: [MODEL],
+    defaultAiProviderId: 'm1',
+    ...options?.settings,
   })
+  await settings.whenLoaded()
+  const chatHistory = createTestChatHistoryService(
+    options?.conversations === undefined ? {} : { conversations: options.conversations },
+  )
+  const chatEngine = createTestChatEngineService([
+    { type: 'text-delta', text: 'Hi.' },
+    { type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] },
+  ])
+  const app = createTestCoreServices({
+    settings,
+    secretStore: createTestSecretStoreService({ [aiKeySecretName(MODEL.id)]: 'sk-test' }),
+    chatHistory,
+    chatEngine,
+  })
+  const view = await renderInApp(<SessionProbe />, { app, graph: GRAPH, route: null })
+  return { view, app, chatHistory, chatEngine }
 }
 
-beforeEach(() => {
-  embedState.status = { status: 'uninitialized' }
-  vi.clearAllMocks()
-  settingsState.models = [MODEL]
-  settingsState.defaultId = 'm1'
-  settingsState.selection = null
-  settingsState.semanticSearchEnabled = false
-  settingsState.chatSystemPrompt = ''
-  core.hasBridge.mockReturnValue(true)
-  core.aiApiKeyForConfig.mockResolvedValue('sk-test')
-  core.getSecret.mockResolvedValue('sk-test')
-  core.loadChatGraphContext.mockResolvedValue(null)
-  core.listChatConversations.mockResolvedValue([])
-  core.loadChatMessages.mockResolvedValue([RESTORED_TURN])
-  core.saveChatMessage.mockResolvedValue(undefined)
-  core.deleteChatConversation.mockResolvedValue(undefined)
-})
-
-describe('ChatProvider persistence', () => {
-  it('resumes the latest conversation when it is fresh enough', async () => {
-    core.listChatConversations.mockResolvedValue([conversation()])
-    await renderProvider()
+describe('useChatSession', () => {
+  it('resumes the latest conversation of the graph on mount', async () => {
+    await renderProvider({
+      conversations: [
+        {
+          conversation: {
+            id: 'conv-1',
+            title: 'what did I write yesterday?',
+            createdMs: 1,
+            updatedMs: 0,
+          },
+          turns: [RESTORED_TURN],
+        },
+      ],
+    })
 
     await vi.waitFor(() => expect(session?.turns).toEqual([RESTORED_TURN]))
     expect(session?.activeConversationId).toBe('conv-1')
-    expect(core.loadChatMessages).toHaveBeenCalledWith('conv-1')
   })
 
-  it('starts fresh when the latest conversation idled past the cutoff', async () => {
-    core.listChatConversations.mockResolvedValue([
-      conversation({ updatedMs: Date.now() - 7 * 60 * 60 * 1000 }),
-    ])
-    await renderProvider()
+  it('publishes a sent turn and saves it under the index generation', async () => {
+    const { chatHistory, chatEngine } = await renderProvider()
 
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-    expect(core.loadChatMessages).not.toHaveBeenCalled()
-    expect(session?.turns).toEqual([])
-    expect(session?.activeConversationId).not.toBe('conv-1')
-  })
+    await session?.send('hello there')
 
-  it('saves the user half at send and the settled turn after the stream', async () => {
-    scriptTurn([
-      { type: 'text-delta', text: 'Hi.' },
-      { type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] },
-    ])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    await act(() => session?.send('hello there'))
-
-    expect(core.saveChatMessage).toHaveBeenCalledTimes(2)
-    const first = core.saveChatMessage.mock.calls[0]![0]
-    const second = core.saveChatMessage.mock.calls[1]![0]
-    expect(first).toMatchObject({
+    await vi.waitFor(() => expect(session?.turns.at(-1)?.status).toBe('done'))
+    expect(session?.turns.at(-1)).toMatchObject({
+      userText: 'hello there',
+      parts: [{ kind: 'text', text: 'Hi.' }],
+    })
+    expect(session?.status).toBe('idle')
+    expect(chatEngine.calls()).toHaveLength(1)
+    await vi.waitFor(() => expect(chatHistory.getSaves()).toHaveLength(2))
+    expect(chatHistory.getSaves()[0]).toMatchObject({
       generation: 7,
       conversation: { id: session?.activeConversationId, title: 'hello there' },
-      turn: { userText: 'hello there', responseMessages: [] },
-    })
-    expect(second).toMatchObject({
-      turn: {
-        status: 'done',
-        responseMessages: [{ role: 'assistant', content: 'Hi.' }],
-        parts: [{ kind: 'text', text: 'Hi.' }],
-      },
     })
   })
-
-  it('backstops a reply-less turn with a notice, on screen and in the save', async () => {
-    // Regression: the forced final step can still yield no text. The provider
-    // must fold `complete` so a turn that ends on tool activity shows a notice
-    // instead of silent chips — and persists it, not a notice-less parts list.
-    scriptTurn([
-      { type: 'tool-call', call: { tool: 'read', toolCallId: 't1', paths: ['notes/a.md'] } },
-      {
-        type: 'tool-result',
-        result: {
-          tool: 'read',
-          toolCallId: 't1',
-          notes: [{ path: 'notes/a.md', title: 'A', error: null }],
-        },
-      },
-      { type: 'complete', messages: [{ role: 'assistant', content: 'noop' }] },
-    ])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    await act(() => session?.send('summarize my notes'))
-
-    const notice = { kind: 'notice', tone: 'info', text: NO_REPLY_NOTICE }
-    expect(session?.turns.at(-1)?.parts.at(-1)).toEqual(notice)
-    const saved = core.saveChatMessage.mock.calls.at(-1)![0] as { turn: ChatTurn }
-    expect(saved.turn.parts.at(-1)).toEqual(notice)
-  })
-
-  it('saves the withheld-history notice on the first turn that withheld, not later ones', async () => {
-    const withheldTurn = (text: string): ChatStreamEvent[] => [
-      { type: 'history-withheld' },
-      { type: 'text-delta', text },
-      { type: 'complete', messages: [{ role: 'assistant', content: text }] },
-    ]
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    scriptTurn(withheldTurn('First.'))
-    await act(() => session?.send('one'))
-    scriptTurn(withheldTurn('Second.'))
-    await act(() => session?.send('two'))
-
-    expect(session?.turns.map((turn) => turn.parts)).toEqual([
-      [{ kind: 'history-withheld' }, { kind: 'text', text: 'First.' }],
-      [{ kind: 'text', text: 'Second.' }],
-    ])
-    const saved = core.saveChatMessage.mock.calls.at(-1)![0] as { turn: ChatTurn }
-    expect(saved.turn.parts).toEqual([{ kind: 'text', text: 'Second.' }])
-  })
-
-  it('does not repeat a withheld-history notice a restored conversation already shows', async () => {
-    core.listChatConversations.mockResolvedValue([conversation()])
-    core.loadChatMessages.mockResolvedValue([
-      { ...RESTORED_TURN, parts: [{ kind: 'history-withheld' }, ...RESTORED_TURN.parts] },
-    ])
-    scriptTurn([
-      { type: 'history-withheld' },
-      { type: 'text-delta', text: 'More.' },
-      { type: 'complete', messages: [{ role: 'assistant', content: 'More.' }] },
-    ])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(session?.turns).toHaveLength(1))
-
-    await act(() => session?.send('and today?'))
-
-    expect(session?.turns.at(-1)?.parts).toEqual([{ kind: 'text', text: 'More.' }])
-  })
-
-  it('saves later turns into the restored conversation', async () => {
-    core.listChatConversations.mockResolvedValue([conversation()])
-    scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'More.' }] }])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(session?.turns).toHaveLength(1))
-
-    await act(() => session?.send('and today?'))
-
-    expect(core.saveChatMessage.mock.calls[0]![0]).toMatchObject({
-      conversation: { id: 'conv-1', title: 'what did I write yesterday?' },
-      turn: { userText: 'and today?' },
-    })
-  })
-
-  it('passes the semantic search setting into chat turns', async () => {
-    settingsState.semanticSearchEnabled = true
-    embedState.status = { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
-    scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    await act(() => session?.send('hello'))
-
-    expect(core.streamChat).toHaveBeenCalledWith(
-      expect.objectContaining({ semanticSearchEnabled: true }),
-    )
-  })
-
-  it('passes the latest configured system prompt into the next chat turn', async () => {
-    const { act, rerender } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-    settingsState.chatSystemPrompt = 'Answer like a rigorous research partner.'
-    await rerender()
-    scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-
-    await act(() => session?.send('hello'))
-
-    expect(core.streamChat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customSystemPrompt: 'Answer like a rigorous research partner.',
-      }),
-    )
-  })
-
-  it.each<EmbedStatus>([
-    { status: 'unsupported' },
-    { status: 'uninitialized' },
-    { status: 'loading' },
-    { status: 'failed', message: 'offline' },
-  ])(
-    'forces lexical search while the runtime is $status, over an enabled setting',
-    async (status) => {
-      settingsState.semanticSearchEnabled = true
-      embedState.status = status
-      try {
-        scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-        const { act } = await renderProvider()
-        await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-        await act(() => session?.send('hello'))
-
-        expect(core.streamChat).toHaveBeenCalledWith(
-          expect.objectContaining({ semanticSearchEnabled: false }),
-        )
-      } finally {
-        embedState.status = { status: 'uninitialized' }
-      }
-    },
-  )
 
   it('holds the composer draft and clears it when a send goes through', async () => {
-    scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
+    await renderProvider()
 
-    await act(() => session?.setDraft('half-typed question'))
-    expect(session?.draft).toBe('half-typed question')
+    session?.setDraft('half-typed question')
+    await vi.waitFor(() => expect(session?.draft).toBe('half-typed question'))
 
-    await act(() => session?.send('half-typed question'))
-    expect(session?.draft).toBe('')
+    await session?.send('half-typed question')
+    await vi.waitFor(() => expect(session?.draft).toBe(''))
     expect(session?.turns.at(-1)?.userText).toBe('half-typed question')
   })
 
-  it('opens a past conversation and switches the active id', async () => {
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    await act(() => session?.openConversation('conv-9'))
-
-    expect(core.loadChatMessages).toHaveBeenCalledWith('conv-9')
-    expect(session?.activeConversationId).toBe('conv-9')
-    expect(session?.turns).toEqual([RESTORED_TURN])
-  })
-
-  it('abandons a switch when a send settled while the rows loaded', async () => {
-    // The send both starts AND finishes during the load — the in-flight slot
-    // is already clear when the rows arrive, but the switch must still be
-    // abandoned: swapping the transcript would hide the turn the user just
-    // streamed into the on-screen conversation.
-    const pendingLoad = Promise.withResolvers<ChatTurn[]>()
-    core.loadChatMessages.mockImplementation(() => pendingLoad.promise)
-    scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-    const homeConversation = session?.activeConversationId
-
-    let openDone: Promise<void> | undefined
-    await act(async () => {
-      openDone = session?.openConversation('conv-9')
-      await Promise.resolve()
-    })
-    await act(() => session?.send('hello'))
-    expect(session?.turns.at(-1)?.status).toBe('done')
-
-    pendingLoad.resolve([RESTORED_TURN])
-    await act(async () => {
-      await openDone
-    })
-
-    expect(session?.activeConversationId).toBe(homeConversation)
-    expect(session?.turns.map((turn) => turn.userText)).toEqual(['hello'])
-  })
-
-  it('deleting the active conversation starts a fresh chat', async () => {
-    core.listChatConversations.mockResolvedValue([conversation()])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(session?.activeConversationId).toBe('conv-1'))
-
-    await act(() => session?.deleteConversation('conv-1'))
-
-    expect(core.deleteChatConversation).toHaveBeenCalledWith('conv-1', 7)
-    expect(session?.turns).toEqual([])
-    expect(session?.activeConversationId).not.toBe('conv-1')
-  })
-
-  it('never saves into a conversation deleted mid-stream', async () => {
-    const gate = Promise.withResolvers<void>()
-    core.streamChat.mockImplementation(function script() {
-      return (async function* () {
-        yield { type: 'text-delta', text: 'Half…' } satisfies ChatStreamEvent
-        await gate.promise
-        yield {
-          type: 'complete',
-          messages: [{ role: 'assistant', content: 'Done.' }],
-        } satisfies ChatStreamEvent
-      })()
-    })
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    let sendDone: Promise<void> | undefined
-    await act(async () => {
-      sendDone = session?.send('hello')
-      await Promise.resolve()
-    })
-    const sentInto = core.saveChatMessage.mock.calls[0]![0] as { conversation: { id: string } }
-
-    // Delete the conversation while the turn is streaming, then let it settle:
-    // the settle-time save must not resurrect the deleted row.
-    await act(() => session?.deleteConversation(sentInto.conversation.id))
-    gate.resolve()
-    await act(async () => {
-      await sendDone
-    })
-
-    expect(core.saveChatMessage).toHaveBeenCalledTimes(1)
-  })
-
-  it('lets an in-flight save land before deleting its conversation', async () => {
-    // The delete and a dispatched save are independent IPC commands with no
-    // ordering guarantee — the provider must hold the delete until the
-    // conversation's save chain settles, or the upsert could resurrect it.
-    const pendingSave = Promise.withResolvers<void>()
-    core.saveChatMessage.mockImplementation(() => pendingSave.promise)
-    scriptTurn([{ type: 'complete', messages: [{ role: 'assistant', content: 'Hi.' }] }])
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    await act(() => session?.send('hello'))
-    const sentInto = core.saveChatMessage.mock.calls[0]![0] as { conversation: { id: string } }
-
-    let deleteDone: Promise<void> | undefined
-    await act(async () => {
-      deleteDone = session?.deleteConversation(sentInto.conversation.id)
-      await Promise.resolve()
-    })
-    expect(core.deleteChatConversation).not.toHaveBeenCalled()
-
-    pendingSave.resolve()
-    await act(async () => {
-      await deleteDone
-    })
-    expect(core.deleteChatConversation).toHaveBeenCalledWith(sentInto.conversation.id, 7)
-  })
-})
-
-describe('ChatProvider model selection', () => {
-  it('starts on the persisted model selection', async () => {
-    settingsState.selection = { configId: 'm1', modelId: 'gpt-5.5' }
-    await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
-
-    expect(session?.activeModel).toEqual({ ...MODEL, model: 'gpt-5.5' })
-  })
-
   it('persists a picked model and applies it to the session', async () => {
-    const { act } = await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
+    const { app } = await renderProvider()
     expect(session?.activeModel).toEqual(MODEL)
 
-    await act(() => session?.selectModel({ configId: 'm1', modelId: 'gpt-5.5' }))
+    session?.selectModel({ configId: 'm1', modelId: 'gpt-5.5' })
 
-    expect(updateSettings).toHaveBeenCalledWith({
-      chatModelSelection: { configId: 'm1', modelId: 'gpt-5.5' },
-    })
-    expect(session?.activeModel).toEqual({ ...MODEL, model: 'gpt-5.5' })
+    await vi.waitFor(() => expect(session?.activeModel).toEqual({ ...MODEL, model: 'gpt-5.5' }))
+    expect(app.settings.get().chatModelSelection).toEqual({ configId: 'm1', modelId: 'gpt-5.5' })
   })
 
-  it('falls back to the default model when the persisted selection dangles', async () => {
-    settingsState.selection = { configId: 'gone', modelId: 'gpt-5.5' }
-    await renderProvider()
-    await vi.waitFor(() => expect(core.listChatConversations).toHaveBeenCalled())
+  it('aborts the in-flight turn when the graph session ends', async () => {
+    const { app, chatEngine } = await renderProvider()
+    let signal: AbortSignal | undefined
+    chatEngine.setScript(async function* (request) {
+      signal = request.signal
+      yield { type: 'text-delta', text: 'Hi' }
+      // Never settles — the turn only ends through the abort signal.
+      await new Promise<never>(() => {})
+    })
 
-    expect(session?.activeModel).toEqual(MODEL)
+    void session?.send('hey')
+    await vi.waitFor(() => expect(signal).toBeDefined())
+    expect(signal?.aborted).toBe(false)
+
+    app.graphSession.setGraph({ root: '/other' })
+    expect(signal?.aborted).toBe(true)
   })
 })

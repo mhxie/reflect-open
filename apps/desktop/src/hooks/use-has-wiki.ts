@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { hasWikiEntries, wikiSourceLanguage } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import { wikiSourceLanguage } from '@reflect/core'
 import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * Whether the open graph has a wiki — any note in the source language's
@@ -12,12 +12,12 @@ import { useGraph } from '@/providers/graph-provider.tsx'
  */
 export function useHasWiki(): boolean {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { wiki } = useCoreServices()
   const languages = useWikiLanguages()
   const { data } = useQuery({
     queryKey: queryKeys.index.hasWiki(graph?.root, wikiSourceLanguage(languages).folder),
-    queryFn: () => hasWikiEntries(languages),
-    enabled: bridgeReady && graph !== null,
+    queryFn: () => wiki.hasEntries(languages),
+    enabled: graph !== null,
   })
   return data === true
 }

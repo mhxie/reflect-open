@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { addDaysIso, formatDayLabel, parseIsoDate } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
+import { useMobileAppServices } from '@/mobile/mobile-services.ts'
 import { useDateFormat } from '@/hooks/use-date-format.ts'
 
 interface WeekRowProps {
@@ -33,6 +34,7 @@ function WeekRowComponent({
   dailyNoteDates,
   onSelect,
 }: WeekRowProps): ReactElement {
+  const { haptics } = useMobileAppServices()
   const dateFormat = useDateFormat()
   const days = Array.from({ length: 7 }, (_, index) => addDaysIso(weekStart, index))
   const selectedIndex = selectedDay ? days.indexOf(selectedDay) : -1
@@ -70,7 +72,7 @@ function WeekRowComponent({
             aria-label={`${formatDayLabel(day, dateFormat)}${hasDailyNote ? ', has daily note' : ''}`}
             aria-current={selected ? 'date' : undefined}
             onClick={() => {
-              hapticImpactLight()
+              hapticImpactLight(haptics)
               onSelect(day)
             }}
             className="relative flex flex-1 flex-col items-center gap-0.5 py-1"

@@ -1,21 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render } from 'vitest-browser-react'
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
+import { createTestAppServices, createTestWindowService } from '@reflect/app/testing'
+import { createTestCoreServices } from '@reflect/core/testing'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { type FollowDeepLink, useFollowDeepLink } from './use-follow-deep-link.ts'
 import { isModEvent } from '@meowdown/core'
 
-const dispatchDeepLink = vi.hoisted(() => vi.fn())
-const openDeepLinkInNewWindow = vi.hoisted(() => vi.fn<(href: string) => Promise<boolean>>())
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
+const dispatchDeepLink = vi.fn<(url: string) => void>()
+const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
 
-vi.mock('@/lib/deep-links/intake.ts', () => ({ dispatchDeepLink }))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openDeepLinkInNewWindow,
-  openRouteInNewWindow,
-}))
+/**
+ * Render over a native shell whose note windows and deep-link intake are the spies above.
+ */
+async function render(ui: ReactNode) {
+  const app = createTestCoreServices()
+  const appServices = createTestAppServices(app, {
+    window: createTestWindowService({ openNoteWindow }),
+  })
+  vi.spyOn(appServices.deepLinkRouter, 'dispatch').mockImplementation(dispatchDeepLink)
+  return await renderInApp(ui, { app, appServices })
+}
+
+const OLDER_LINK = 'reflect://note/older'
+const NEWER_NOTE_LINK = 'reflect://note/notes%2Fnewer-link.md'
 
 let followDeepLink: FollowDeepLink | null = null
 
@@ -48,10 +57,10 @@ function NavigateAway(): ReactElement {
 
 function Harness({ showHost = true }: { readonly showHost?: boolean }): ReactElement {
   return (
-    <RouterProvider>
+    <>
       {showHost ? <Host /> : null}
       <NavigateAway />
-    </RouterProvider>
+    </>
   )
 }
 
@@ -66,14 +75,13 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   dispatchDeepLink.mockReset()
-  openDeepLinkInNewWindow.mockReset().mockResolvedValue(true)
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
+  openNoteWindow.mockReset().mockResolvedValue(true)
   followDeepLink = null
 })
 
 describe('useFollowDeepLink', () => {
   it('falls back to in-window dispatch when the window open is declined', async () => {
-    openDeepLinkInNewWindow.mockResolvedValue(false)
+    openNoteWindow.mockResolvedValue(false)
     await render(<Harness />)
 
     modifierClick()
@@ -82,7 +90,7 @@ describe('useFollowDeepLink', () => {
   })
 
   it('falls back to in-window dispatch when the window open rejects', async () => {
-    openDeepLinkInNewWindow.mockRejectedValue(new Error('window creation failed'))
+    openNoteWindow.mockRejectedValue(new Error('window creation failed'))
     await render(<Harness />)
 
     modifierClick()
@@ -92,11 +100,11 @@ describe('useFollowDeepLink', () => {
 
   it('drops a failed fallback after a newer router navigation', async () => {
     const pendingOpen = Promise.withResolvers<boolean>()
-    openDeepLinkInNewWindow.mockReturnValue(pendingOpen.promise)
+    openNoteWindow.mockReturnValueOnce(pendingOpen.promise)
     const view = await render(<Harness />)
 
     modifierClick()
-    expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/older')
+    expect(openNoteWindow).toHaveBeenCalledWith(OLDER_LINK)
     await view.getByRole('button', { name: 'Navigate away' }).click()
     pendingOpen.resolve(false)
     await settle()
@@ -106,15 +114,15 @@ describe('useFollowDeepLink', () => {
 
   it('drops a failed fallback after a newer note-link window intent', async () => {
     const pendingOpen = Promise.withResolvers<boolean>()
-    openDeepLinkInNewWindow.mockReturnValue(pendingOpen.promise)
+    openNoteWindow.mockReturnValueOnce(pendingOpen.promise)
     const view = await render(<Harness />)
 
     modifierClick()
-    expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/older')
+    expect(openNoteWindow).toHaveBeenCalledWith(OLDER_LINK)
     await view.getByRole('button', { name: 'Open newer note link' }).click({
       modifiers: ['ControlOrMeta'],
     })
-    await vi.waitFor(() => expect(openRouteInNewWindow).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(openNoteWindow).toHaveBeenCalledWith(NEWER_NOTE_LINK))
     pendingOpen.resolve(false)
     await settle()
 
@@ -123,7 +131,7 @@ describe('useFollowDeepLink', () => {
 
   it('drops a rejected fallback after a newer note-link window intent', async () => {
     let rejectOpen: (cause: Error) => void = () => {}
-    openDeepLinkInNewWindow.mockReturnValue(
+    openNoteWindow.mockReturnValueOnce(
       new Promise((_resolve, reject) => {
         rejectOpen = reject
       }),
@@ -131,11 +139,11 @@ describe('useFollowDeepLink', () => {
     const view = await render(<Harness />)
 
     modifierClick()
-    expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/older')
+    expect(openNoteWindow).toHaveBeenCalledWith(OLDER_LINK)
     await view.getByRole('button', { name: 'Open newer note link' }).click({
       modifiers: ['ControlOrMeta'],
     })
-    await vi.waitFor(() => expect(openRouteInNewWindow).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(openNoteWindow).toHaveBeenCalledWith(NEWER_NOTE_LINK))
     rejectOpen(new Error('window creation failed'))
     await settle()
 
@@ -148,16 +156,16 @@ describe('useFollowDeepLink', () => {
     'reflect://edit-notes?content=invalid',
   ])('does not cancel a pending failed fallback for non-address URL %s', async (url) => {
     const pendingOpen = Promise.withResolvers<boolean>()
-    openDeepLinkInNewWindow.mockReturnValue(pendingOpen.promise)
+    openNoteWindow.mockReturnValueOnce(pendingOpen.promise)
     await render(<Harness />)
 
     modifierClick()
-    expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/older')
+    expect(openNoteWindow).toHaveBeenCalledWith(OLDER_LINK)
     followDeepLink?.({ href: url, openInNewWindow: true })
     pendingOpen.resolve(false)
     await settle()
 
-    expect(openDeepLinkInNewWindow).toHaveBeenCalledTimes(1)
+    expect(openNoteWindow).toHaveBeenCalledTimes(1)
     expect(dispatchDeepLink.mock.calls).toEqual([[url], ['reflect://note/older']])
   })
 
@@ -165,11 +173,11 @@ describe('useFollowDeepLink', () => {
     'cancels a pending failed fallback for newer address URL %s',
     async (url) => {
       const pendingOpen = Promise.withResolvers<boolean>()
-      openDeepLinkInNewWindow.mockReturnValue(pendingOpen.promise)
+      openNoteWindow.mockReturnValueOnce(pendingOpen.promise)
       await render(<Harness />)
 
       modifierClick()
-      expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/older')
+      expect(openNoteWindow).toHaveBeenCalledWith(OLDER_LINK)
       followDeepLink?.({ href: url, openInNewWindow: false })
       pendingOpen.resolve(false)
       await settle()
@@ -181,11 +189,11 @@ describe('useFollowDeepLink', () => {
 
   it('drops a failed fallback after its rendered-link host unmounts', async () => {
     const pendingOpen = Promise.withResolvers<boolean>()
-    openDeepLinkInNewWindow.mockReturnValue(pendingOpen.promise)
+    openNoteWindow.mockReturnValueOnce(pendingOpen.promise)
     const view = await render(<Harness />)
 
     modifierClick()
-    expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/older')
+    expect(openNoteWindow).toHaveBeenCalledWith(OLDER_LINK)
     await view.rerender(<Harness showHost={false} />)
     pendingOpen.resolve(false)
     await settle()

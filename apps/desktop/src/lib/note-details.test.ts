@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { NoteState } from '@reflect/core'
-import type { BackupState } from '@/lib/backup-controller.ts'
+import type { BackupState, NoteState } from '@reflect/core'
 import { noteDetails } from './note-details.ts'
 
 const EDITABLE: NoteState = {

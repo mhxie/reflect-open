@@ -1,16 +1,12 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  icloudRequestDownloads,
-  readNoteLocal,
   readWikiArticle,
   wikiClaimStanding,
-  wikiClaimTextHashes,
   wikiLocation,
   wikiPathIn,
   wikiSourceLanguage,
   type WikiArticleIndex,
-  type FileChange,
   type WikiClaimStanding,
   type WikiTrustReport,
 } from '@reflect/core'
@@ -18,10 +14,10 @@ import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { shownWikiTrustReport, useWikiTrustReport } from '@/hooks/use-wiki-trust-report.ts'
 import { todayIso } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useFileChanges } from '@/lib/use-file-changes.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
 import { wikiClaimPending } from './wiki-article-pending.ts'
 import { wikiStandingStyle } from './wiki-trust-labels.ts'
@@ -132,6 +128,7 @@ export function useWikiTrustView(
   asEditor: (markdown: string) => string,
 ): TrustViewResult {
   const { graph } = useGraph()
+  const { wiki, icloudNative, fileChanges } = useCoreServices()
   const { settings } = useSettings()
   const languages = useWikiLanguages()
   const report = shownWikiTrustReport(useWikiTrustReport())
@@ -159,15 +156,10 @@ export function useWikiTrustView(
     // source share the key, and an idle observer must not strip the other's.
     queryFn: async () => {
       if (graph === null) throw new Error('No graph is open.')
-      const read = await readNoteLocal(sourcePath, graph.generation)
-      if (read.kind === 'content')
-        return {
-          content: read.content,
-          hashes: await wikiClaimTextHashes(read.content, todayIso()),
-        }
+      const saved = await wiki.readSavedClaims(sourcePath, todayIso())
       // Materializing an unchanged file reindexes nothing, so poll for it.
-      await icloudRequestDownloads([sourcePath])
-      return 'evicted' as const
+      if (saved === 'evicted') await icloudNative.requestDownloads([sourcePath])
+      return saved
     },
     enabled: active && graph !== null,
     refetchInterval: (query) => savedFileRetryMs(query.state),
@@ -183,18 +175,17 @@ export function useWikiTrustView(
   // A change to the file itself (a save here, an edit elsewhere) rereads it
   // without waiting for the index, which may be unavailable.
   const sourceKey = sourcePath.normalize('NFC')
-  const onFileChanges = useCallback(
-    (changes: FileChange[]) => {
+  useEffect(() => {
+    if (!active) return
+    return fileChanges.subscribe(({ changes }) => {
       // Cancel a read already in flight, even the first one, then read again:
       // it may predate this change.
       if (changes.some((change) => change.path.normalize('NFC') === sourceKey))
         void client
           .cancelQueries({ queryKey: savedKey, exact: true })
           .then(() => client.refetchQueries({ queryKey: savedKey, exact: true }))
-    },
-    [client, savedKey, sourceKey],
-  )
-  useFileChanges(active ? onFileChanges : null)
+    })
+  }, [active, client, fileChanges, savedKey, sourceKey])
   // Returning to the window rereads too: a source edited in another app
   // reaches no index invalidation while the index is unavailable.
   useEffect(() => {

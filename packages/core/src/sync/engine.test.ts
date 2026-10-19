@@ -1,68 +1,102 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setBridge } from '../ipc/bridge.ts'
-import { createSyncEngine, isSyncError, type SyncStatus } from './engine.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ReflectError } from '../errors.ts'
+import { createTestClockService, type TestClockService } from '../testing/clock.ts'
+import { createTestGitRepositoryService, type TestGitRepositoryService } from '../testing/sync.ts'
+import {
+  createSyncEngineFactory,
+  isSyncError,
+  type SyncEngine,
+  type SyncEngineOptions,
+  type SyncStatus,
+} from './engine.ts'
+import type {
+  CommitOutcome,
+  DisplacedFile,
+  MergeOutcome,
+  PushOutcome,
+  RemoteDelta,
+  SkippedFile,
+} from './git-repository-service.ts'
+
+let clock: TestClockService
+let activeGit: TestGitRepositoryService
 
 beforeEach(() => {
-  vi.useFakeTimers()
+  clock = createTestClockService()
+  activeGit = createTestGitRepositoryService()
 })
 
-afterEach(() => {
-  vi.useRealTimers()
-  setBridge(null)
-})
+/**
+ * An engine over the git fake of the last {@link fakeGit} call and the test clock.
+ */
+function createSyncEngine(options: SyncEngineOptions): SyncEngine {
+  return createSyncEngineFactory({ git: activeGit, clock }).create(options)
+}
+
+/**
+ * Let every promise chain that is already runnable settle.
+ */
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/**
+ * Move the clock by `ms`, running the timers that come due, then settle.
+ */
+async function advance(ms: number): Promise<void> {
+  await clock.advance(ms)
+  await flush()
+}
+
+/**
+ * Run every scheduled timer, however far away, then settle.
+ */
+async function runAllTimers(): Promise<void> {
+  await flush()
+  while (clock.pendingTimers() > 0) {
+    await clock.advance(60_000)
+    await flush()
+  }
+}
 
 const CRED = { username: 'x-access-token', secret: 'tok' }
-const CLEAN_COMMIT = { committed: false, sha: null, ahead: 0, skippedLargeFiles: [] }
-const COMMITTED = { committed: true, sha: 'abc', ahead: 1, skippedLargeFiles: [] }
-const PUSHED = { pushed: true, nonFastForward: false, rejectionMessage: null }
-const NON_FAST_FORWARD = {
+const CLEAN_COMMIT: CommitOutcome = { committed: false, sha: null, ahead: 0, skippedLargeFiles: [] }
+const COMMITTED: CommitOutcome = { committed: true, sha: 'abc', ahead: 1, skippedLargeFiles: [] }
+const PUSHED: PushOutcome = { pushed: true, nonFastForward: false, rejectionMessage: null }
+const NON_FAST_FORWARD: PushOutcome = {
   pushed: false,
   nonFastForward: true,
   rejectionMessage: 'fetch first',
 }
-const MERGED = { kind: 'merged', conflictedPaths: [], changedFiles: [] }
+const MERGED: MergeOutcome = {
+  kind: 'merged',
+  conflictedPaths: [],
+  changedFiles: [],
+  frozenPaths: [],
+  displaced: [],
+}
+const DEFERRED: MergeOutcome = { ...MERGED, kind: 'deferred' }
 const DELTA = { ahead: 1, behind: 0 }
 
-interface Call {
-  command: string
-  args: Record<string, unknown>
+/**
+ * A git fake that commits, reports a delta, merges and pushes; every call recorded.
+ */
+function fakeGit(): TestGitRepositoryService {
+  const git = createTestGitRepositoryService()
+  git.onCommitAll(() => COMMITTED)
+  git.onFetch(() => DELTA)
+  git.onMergeRemote(() => MERGED)
+  activeGit = git
+  return git
 }
 
-/** Bridge fake: scripted responses per command, every call recorded. */
-function fakeGit(respond: (command: string, calls: Call[]) => unknown) {
-  const calls: Call[] = []
-  setBridge({
-    invoke: async (command, args) => {
-      calls.push({ command, args })
-      return respond(command, calls)
-    },
-    listen: async () => () => {},
-  })
-  return calls
+function methodsOf(git: TestGitRepositoryService): string[] {
+  return git.calls().map((call) => call.method)
 }
 
-function defaultResponses(command: string): unknown {
-  switch (command) {
-    case 'git_commit_all':
-      return COMMITTED
-    case 'git_push':
-      return PUSHED
-    case 'git_fetch':
-      return DELTA
-    case 'git_merge_remote':
-      return MERGED
-    default:
-      return null
-  }
-}
-
-function commandsOf(calls: Call[]): string[] {
-  return calls.map((call) => call.command)
-}
-
-describe('createSyncEngine', () => {
+describe('createSyncEngineFactory', () => {
   it('debounces edits into one commit→push cycle pinned to the generation', async () => {
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 7,
@@ -76,20 +110,21 @@ describe('createSyncEngine', () => {
 
     engine.noteChanged()
     engine.noteChanged() // coalesces into the same cycle
-    await vi.advanceTimersByTimeAsync(99)
-    expect(calls).toHaveLength(0)
-    await vi.advanceTimersByTimeAsync(1)
-    await vi.runAllTimersAsync()
+    await advance(99)
+    expect(git.calls()).toHaveLength(0)
+    await advance(1)
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
-    expect(calls[0]!.args['generation']).toBe(7)
-    expect(calls[1]!.args['credential']).toEqual(CRED)
+    expect(git.calls()).toEqual([
+      { method: 'commitAll', args: ['Update notes', 7] },
+      { method: 'push', args: [CRED, 7] },
+    ])
     expect(statuses.map((status) => status.state)).toEqual(['syncing', 'idle'])
     engine.stop()
   })
 
   it('keeps deferring while edits continue, but never past maxWaitMs', async () => {
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const engine = createSyncEngine({
       generation: 1,
       getCredential: async () => null,
@@ -99,26 +134,24 @@ describe('createSyncEngine', () => {
 
     // An edit every 80ms keeps resetting the idle window…
     engine.noteChanged()
-    await vi.advanceTimersByTimeAsync(80)
+    await advance(80)
     engine.noteChanged()
-    await vi.advanceTimersByTimeAsync(80)
+    await advance(80)
     engine.noteChanged()
-    expect(calls).toHaveLength(0)
+    expect(git.calls()).toHaveLength(0)
     // …but the 250ms ceiling forces the cycle anyway.
-    await vi.advanceTimersByTimeAsync(100)
-    await vi.runAllTimersAsync()
-    expect(commandsOf(calls)).toContain('git_commit_all')
+    await advance(100)
+    await runAllTimers()
+    expect(methodsOf(git)).toContain('commitAll')
     engine.stop()
   })
 
   it('recovers from a non-fast-forward push by fetch+merge+retry', async () => {
     let pushes = 0
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        pushes += 1
-        return pushes === 1 ? NON_FAST_FORWARD : PUSHED
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      pushes += 1
+      return pushes === 1 ? NON_FAST_FORWARD : PUSHED
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -131,15 +164,15 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_push',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'push',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
     ])
     expect(statuses.at(-1)?.state).toBe('idle')
     engine.stop()
@@ -149,12 +182,11 @@ describe('createSyncEngine', () => {
     // getGithubToken throws ReflectError (an Error subclass) for transient
     // refresh failures — the engine must read it like any AppError, or the
     // offline/auth UX silently degrades to a generic error.
-    const { ReflectError } = await import('../errors.ts')
     for (const [kind, expected] of [
       ['network', { state: 'offline' }],
       ['auth', { state: 'error', errorKind: 'auth' }],
     ] as const) {
-      fakeGit(defaultResponses)
+      fakeGit()
       const statuses: SyncStatus[] = []
       const engine = createSyncEngine({
         generation: 1,
@@ -167,18 +199,16 @@ describe('createSyncEngine', () => {
         idleMs: 10,
       })
       engine.noteChanged()
-      await vi.runAllTimersAsync()
+      await runAllTimers()
       expect(statuses.at(-1)).toMatchObject(expected)
       engine.stop()
     }
   })
 
   it('maps a network failure to the offline state', async () => {
-    fakeGit((command) => {
-      if (command === 'git_push') {
-        throw { kind: 'network', message: 'could not resolve github.com' }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      throw { kind: 'network', message: 'could not resolve github.com' }
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -191,18 +221,16 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
     expect(statuses.at(-1)?.state).toBe('offline')
     engine.stop()
   })
 
   it('maps an auth failure to an auth error state', async () => {
-    fakeGit((command) => {
-      if (command === 'git_push') {
-        throw { kind: 'auth', message: 'token rejected' }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      throw { kind: 'auth', message: 'token rejected' }
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -215,7 +243,7 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
     expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'auth' })
     engine.stop()
@@ -223,30 +251,28 @@ describe('createSyncEngine', () => {
 
   it('commitNow joins the single-flight queue and never touches the network', async () => {
     const gate: { release: () => void } = { release: () => {} }
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        return new Promise((resolve) => {
-          gate.release = () => resolve(MERGED)
-        })
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      return new Promise((resolve) => {
+        gate.release = () => resolve(MERGED)
+      })
     })
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     const full = engine.syncNow()
-    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    await vi.waitFor(() => expect(methodsOf(git)).toContain('mergeRemote'))
     const flushed = engine.commitNow()
     await Promise.resolve()
     // The pull is mid-merge (a full cycle commits before its fetch and again
     // before its merge): the flush commit waits instead of interleaving.
-    expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(2)
+    expect(methodsOf(git).filter((method) => method === 'commitAll')).toHaveLength(2)
 
     gate.release()
     await full
     await flushed
-    const commands = commandsOf(calls)
-    expect(commands.filter((command) => command === 'git_commit_all')).toHaveLength(3)
-    expect(commands.lastIndexOf('git_commit_all')).toBeGreaterThan(commands.indexOf('git_push'))
+    const commands = methodsOf(git)
+    expect(commands.filter((method) => method === 'commitAll')).toHaveLength(3)
+    expect(commands.lastIndexOf('commitAll')).toBeGreaterThan(commands.indexOf('push'))
     engine.stop()
   })
 
@@ -255,13 +281,11 @@ describe('createSyncEngine', () => {
     // follow-up. The app goes to the background and the flush joins that
     // follow-up. The gate must not swallow the commit the flush is owed.
     const gate: { release: () => void } = { release: () => {} }
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        return new Promise((resolve) => {
-          gate.release = () => resolve(MERGED)
-        })
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      return new Promise((resolve) => {
+        gate.release = () => resolve(MERGED)
+      })
     })
     let canStartCycle = true
     const engine = createSyncEngine({
@@ -270,7 +294,7 @@ describe('createSyncEngine', () => {
       canStartCycle: () => canStartCycle,
     })
     const first = engine.syncNow()
-    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    await vi.waitFor(() => expect(methodsOf(git)).toContain('mergeRemote'))
     const second = engine.syncNow()
     canStartCycle = false
     const flushed = engine.commitNow()
@@ -278,15 +302,13 @@ describe('createSyncEngine', () => {
     await first
     await flushed
     await second
-    const commands = commandsOf(calls)
+    const commands = methodsOf(git)
     // The running sync stopped at the gate after its merge, and the queued
     // full follow-up ran as the commit the flush was owed: no push, and the
     // sync's two commits (before its fetch and its merge) plus the flush's.
-    expect(commands.filter((command) => command === 'git_push')).toHaveLength(0)
-    expect(commands.filter((command) => command === 'git_commit_all')).toHaveLength(3)
-    expect(commands.lastIndexOf('git_commit_all')).toBeGreaterThan(
-      commands.indexOf('git_merge_remote'),
-    )
+    expect(commands.filter((method) => method === 'push')).toHaveLength(0)
+    expect(commands.filter((method) => method === 'commitAll')).toHaveLength(3)
+    expect(commands.lastIndexOf('commitAll')).toBeGreaterThan(commands.indexOf('mergeRemote'))
     engine.stop()
   })
 
@@ -294,13 +316,11 @@ describe('createSyncEngine', () => {
     // The follow-up starts visible, so it runs as a full sync; the app hides
     // while the credential is being resolved. The commit has already landed.
     const gate: { release: () => void } = { release: () => {} }
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        return new Promise((resolve) => {
-          gate.release = () => resolve(MERGED)
-        })
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      return new Promise((resolve) => {
+        gate.release = () => resolve(MERGED)
+      })
     })
     const credentialGate = Promise.withResolvers<void>()
     let credentials = 0
@@ -317,7 +337,7 @@ describe('createSyncEngine', () => {
       canStartCycle: () => canStartCycle,
     })
     const first = engine.syncNow()
-    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    await vi.waitFor(() => expect(methodsOf(git)).toContain('mergeRemote'))
     const second = engine.syncNow()
     const flushed = engine.commitNow()
     gate.release()
@@ -325,44 +345,42 @@ describe('createSyncEngine', () => {
     // The follow-up is running: its commit landed before it asked for a credential
     // (after the first sync's commits before its fetch and its merge).
     await vi.waitFor(() => expect(credentials).toBe(2))
-    expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(3)
+    expect(methodsOf(git).filter((method) => method === 'commitAll')).toHaveLength(3)
     canStartCycle = false
     credentialGate.resolve()
     await flushed
     await second
-    expect(commandsOf(calls).filter((command) => command === 'git_push')).toHaveLength(1) // the first sync only
+    expect(methodsOf(git).filter((method) => method === 'push')).toHaveLength(1) // the first sync only
     engine.stop()
   })
 
   it('requests queued behind a running cycle merge into one follow-up that does their union', async () => {
     const gate: { release: () => void } = { release: () => {} }
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        return new Promise((resolve) => {
-          gate.release = () => resolve(MERGED)
-        })
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      return new Promise((resolve) => {
+        gate.release = () => resolve(MERGED)
+      })
     })
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
     const first = engine.syncNow()
-    await vi.waitFor(() => expect(commandsOf(calls)).toContain('git_merge_remote'))
+    await vi.waitFor(() => expect(methodsOf(git)).toContain('mergeRemote'))
     engine.noteChanged() // the debounce asks for a push
-    await vi.advanceTimersByTimeAsync(10)
+    await advance(10)
     const flushed = engine.commitNow() // the flush asks for a commit
     gate.release()
     await first
     await flushed
     // One follow-up: its commit, then the push the debounce asked for; no
     // fetch, because nobody asked to pull.
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-      'git_commit_all',
-      'git_push',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
+      'commitAll',
+      'push',
     ])
     engine.stop()
   })
@@ -370,16 +388,16 @@ describe('createSyncEngine', () => {
   it('commitNow runs even when the owner gates cycles (the hidden-app flush)', async () => {
     // iOS fires the background flush after the document is hidden, exactly
     // when canStartCycle says no to network cycles.
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const engine = createSyncEngine({
       generation: 1,
       getCredential: async () => CRED,
       canStartCycle: () => false,
     })
     await engine.commitNow()
-    expect(commandsOf(calls)).toEqual(['git_commit_all'])
+    expect(methodsOf(git)).toEqual(['commitAll'])
     await engine.syncNow()
-    expect(commandsOf(calls)).toEqual(['git_commit_all']) // still gated
+    expect(methodsOf(git)).toEqual(['commitAll']) // still gated
     engine.stop()
   })
 
@@ -388,12 +406,10 @@ describe('createSyncEngine', () => {
     // between keystrokes: per-edit retries would only repeat the error and
     // the reconnect prompt. Local history keeps accumulating meanwhile.
     let pushes = 0
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        pushes += 1
-        throw { kind: 'auth', message: 'token rejected' }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      pushes += 1
+      throw { kind: 'auth', message: 'token rejected' }
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -406,13 +422,13 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
     expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'auth' })
     const emitted = statuses.length
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
-    expect(commandsOf(calls).filter((command) => command === 'git_commit_all')).toHaveLength(2)
+    await runAllTimers()
+    expect(methodsOf(git).filter((method) => method === 'commitAll')).toHaveLength(2)
     expect(pushes).toBe(1)
     expect(statuses).toHaveLength(emitted) // the auth error stays on screen
 
@@ -422,15 +438,13 @@ describe('createSyncEngine', () => {
   })
 
   it('surfaces a non-divergence rejection (e.g. push protection) as an error', async () => {
-    fakeGit((command) => {
-      if (command === 'git_push') {
-        return {
-          pushed: false,
-          nonFastForward: false,
-          rejectionMessage: 'GH013: secret detected in notes/keys.md',
-        }
+    const git = fakeGit()
+    git.onPush(() => {
+      return {
+        pushed: false,
+        nonFastForward: false,
+        rejectionMessage: 'GH013: secret detected in notes/keys.md',
       }
-      return defaultResponses(command)
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -443,7 +457,7 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
     const last = statuses.at(-1)
     if (last === undefined || !isSyncError(last)) {
@@ -455,11 +469,9 @@ describe('createSyncEngine', () => {
   })
 
   it('gives up after repeated non-fast-forward rounds instead of looping forever', async () => {
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        return NON_FAST_FORWARD
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      return NON_FAST_FORWARD
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -472,9 +484,9 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(calls.filter((call) => call.command === 'git_push')).toHaveLength(3)
+    expect(git.calls().filter((call) => call.method === 'push')).toHaveLength(3)
     expect(statuses.at(-1)?.state).toBe('error')
     engine.stop()
   })
@@ -483,11 +495,9 @@ describe('createSyncEngine', () => {
     // Rust pauses a pull that would join a history the graph has not accepted.
     const paused =
       'Sync paused: the backup’s history starts from a commit this graph has not accepted.'
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        throw { kind: 'io', message: paused }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      throw new ReflectError('io', paused)
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -499,14 +509,9 @@ describe('createSyncEngine', () => {
     })
 
     await engine.syncNow()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote'])
     expect(statuses).toEqual([
       { state: 'syncing' },
       { state: 'error', errorKind: 'other', message: paused },
@@ -518,12 +523,8 @@ describe('createSyncEngine', () => {
     // Rust refuses to upload a history the graph has not accepted, as data.
     const refused =
       'Sync paused: this graph’s history starts from a commit the backup does not have.'
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        return { pushed: false, nonFastForward: false, rejectionMessage: refused }
-      }
-      return defaultResponses(command)
-    })
+    const git = fakeGit()
+    git.onPush(() => ({ pushed: false, nonFastForward: false, rejectionMessage: refused }))
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -535,9 +536,9 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
+    expect(methodsOf(git)).toEqual(['commitAll', 'push'])
     expect(statuses).toEqual([
       { state: 'syncing' },
       { state: 'error', errorKind: 'rejected', message: refused },
@@ -551,14 +552,10 @@ describe('createSyncEngine', () => {
     // cycle pulls, and the pull's pause (not a push refusal) is what shows.
     const paused =
       'Sync paused: the backup brings in history that starts from a commit this graph has not accepted.'
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        return NON_FAST_FORWARD
-      }
-      if (command === 'git_merge_remote') {
-        throw { kind: 'io', message: paused }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => NON_FAST_FORWARD)
+    git.onMergeRemote(() => {
+      throw new ReflectError('io', paused)
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -571,15 +568,9 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_push',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'push', 'fetch', 'commitAll', 'mergeRemote'])
     expect(statuses).toEqual([
       { state: 'syncing' },
       { state: 'error', errorKind: 'other', message: paused },
@@ -588,52 +579,52 @@ describe('createSyncEngine', () => {
   })
 
   it('preserves the full-cycle mode when syncNow lands mid-cycle', async () => {
-    const pushGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
-    const calls = fakeGit((command) => {
-      if (command === 'git_push' && pushGate.resolve === null) {
+    const pushGate: { resolve: ((value: PushOutcome) => void) | null } = { resolve: null }
+    const git = fakeGit()
+    git.onPush(() => {
+      if (pushGate.resolve === null) {
         return new Promise((resolve) => {
           pushGate.resolve = resolve
         })
       }
-      return defaultResponses(command)
+      return PUSHED
     })
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
 
     engine.noteChanged()
-    await vi.advanceTimersByTimeAsync(10)
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
+    await advance(10)
+    expect(methodsOf(git)).toEqual(['commitAll', 'push'])
 
     // A focus/manual sync arrives mid-cycle: its fetch+merge must not be
     // downgraded to a push-only follow-up.
     void engine.syncNow()
     pushGate.resolve?.(PUSHED)
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_push',
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'push',
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
     ])
     engine.stop()
   })
 
   it('hands merge-changed files to the reindex callback', async () => {
-    fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'merged',
-            conflictedPaths: [],
-            changedFiles: [
-              { path: 'notes/from-b.md', kind: 'upsert' },
-              { path: 'notes/gone.md', kind: 'remove' },
-            ],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'merged',
+      conflictedPaths: [],
+      changedFiles: [
+        { path: 'notes/from-b.md', kind: 'upsert' },
+        { path: 'notes/gone.md', kind: 'remove' },
+      ],
+      frozenPaths: [],
+      displaced: [],
+    }))
     const batches: Array<Array<{ path: string }>> = []
     const engine = createSyncEngine({
       generation: 1,
@@ -655,15 +646,14 @@ describe('createSyncEngine', () => {
   })
 
   it('continues through push while remote-change handling runs, then waits before idle', async () => {
-    const calls = fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'merged',
-            conflictedPaths: [],
-            changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'merged',
+      conflictedPaths: [],
+      changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
+      frozenPaths: [],
+      displaced: [],
+    }))
     const remoteChangesGate = Promise.withResolvers<void>()
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -676,17 +666,11 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
+    await advance(0)
 
     // The projection is still gated, but the merge's Markdown has already
     // continued through the durable Git push. Only the idle boundary waits.
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
     remoteChangesGate.resolve()
@@ -699,20 +683,20 @@ describe('createSyncEngine', () => {
   it('starts every remote-change callback immediately while repeated Git convergence continues', async () => {
     let mergeCount = 0
     let pushCount = 0
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        mergeCount += 1
-        return {
-          kind: 'merged',
-          conflictedPaths: [],
-          changedFiles: [{ path: `notes/remote-${mergeCount}.md`, kind: 'upsert' }],
-        }
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      mergeCount += 1
+      return {
+        kind: 'merged',
+        conflictedPaths: [],
+        changedFiles: [{ path: `notes/remote-${mergeCount}.md`, kind: 'upsert' }],
+        frozenPaths: [],
+        displaced: [],
       }
-      if (command === 'git_push') {
-        pushCount += 1
-        return pushCount === 1 ? NON_FAST_FORWARD : PUSHED
-      }
-      return defaultResponses(command)
+    })
+    git.onPush(() => {
+      pushCount += 1
+      return pushCount === 1 ? NON_FAST_FORWARD : PUSHED
     })
     const firstBatchGate = Promise.withResolvers<void>()
     const started: string[] = []
@@ -732,18 +716,18 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
+    await advance(0)
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
     ])
     // Both merges notify synchronously even though the first returned task is
     // still gated. Their async work can overlap; only idle waits for both.
@@ -758,15 +742,14 @@ describe('createSyncEngine', () => {
   })
 
   it('finishes async remote-change handling before applying a suppression gate', async () => {
-    const calls = fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'merged',
-            conflictedPaths: [],
-            changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'merged',
+      conflictedPaths: [],
+      changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
+      frozenPaths: [],
+      displaced: [],
+    }))
     const remoteChangesGate = Promise.withResolvers<void>()
     const statuses: SyncStatus[] = []
     let canStartCycle = true
@@ -781,45 +764,33 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    await advance(0)
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
 
     canStartCycle = false
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
     remoteChangesGate.resolve()
     await syncing
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing', 'idle'])
     engine.stop()
   })
 
   it('surfaces an async remote-change failure only after the push finishes', async () => {
-    const pushGate = Promise.withResolvers<unknown>()
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        return {
-          kind: 'merged',
-          conflictedPaths: [],
-          changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
-        }
+    const pushGate = Promise.withResolvers<PushOutcome>()
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      return {
+        kind: 'merged',
+        conflictedPaths: [],
+        changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
+        frozenPaths: [],
+        displaced: [],
       }
-      if (command === 'git_push') {
-        return pushGate.promise
-      }
-      return defaultResponses(command)
+    })
+    git.onPush(() => {
+      return pushGate.promise
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -834,17 +805,11 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
+    await advance(0)
 
     // The projection has already rejected, but that failure must not strand
     // the merged Markdown before its required push.
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
     pushGate.resolve(PUSHED)
@@ -859,12 +824,10 @@ describe('createSyncEngine', () => {
   })
 
   it('stop while merge is in flight never starts its remote-change callback', async () => {
-    const mergeGate = Promise.withResolvers<unknown>()
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        return mergeGate.promise
-      }
-      return defaultResponses(command)
+    const mergeGate = Promise.withResolvers<MergeOutcome>()
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      return mergeGate.promise
     })
     const remoteChanges = vi.fn()
     const statuses: SyncStatus[] = []
@@ -878,42 +841,33 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-    ])
+    await advance(0)
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote'])
 
     engine.stop()
     mergeGate.resolve({
       kind: 'merged',
       conflictedPaths: [],
       changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
+      frozenPaths: [],
+      displaced: [],
     })
     await syncing
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote'])
     expect(remoteChanges).not.toHaveBeenCalled()
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
   })
 
   it('stop after a remote-change task starts emits no later status or Git work', async () => {
-    const calls = fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'merged',
-            conflictedPaths: [],
-            changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'merged',
+      conflictedPaths: [],
+      changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
+      frozenPaths: [],
+      displaced: [],
+    }))
     const remoteChangesGate = Promise.withResolvers<void>()
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -926,35 +880,28 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
-    const commandsBeforeStop = commandsOf(calls)
-    expect(commandsBeforeStop).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    await advance(0)
+    const commandsBeforeStop = methodsOf(git)
+    expect(commandsBeforeStop).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
 
     engine.stop()
     remoteChangesGate.resolve()
     await syncing
 
-    expect(commandsOf(calls)).toEqual(commandsBeforeStop)
+    expect(methodsOf(git)).toEqual(commandsBeforeStop)
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
   })
 
   it('stop from a synchronous remote-change callback prevents the later push', async () => {
-    const calls = fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'merged',
-            conflictedPaths: [],
-            changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'merged',
+      conflictedPaths: [],
+      changedFiles: [{ path: 'notes/from-remote.md', kind: 'upsert' }],
+      frozenPaths: [],
+      displaced: [],
+    }))
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -967,44 +914,29 @@ describe('createSyncEngine', () => {
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
   })
 
   it('syncNow pulls and merges even with nothing to push (launch/focus)', async () => {
-    const calls = fakeGit((command) =>
-      command === 'git_commit_all' ? CLEAN_COMMIT : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onCommitAll(() => CLEAN_COMMIT)
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     engine.stop()
   })
 
   it('reports files withheld by the size guardrail', async () => {
-    fakeGit((command) =>
-      command === 'git_commit_all'
-        ? {
-            committed: true,
-            sha: 'abc',
-            ahead: 1,
-            skippedLargeFiles: [{ path: 'assets/movie.mp4', size: 200_000_000 }],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onCommitAll(() => ({
+      committed: true,
+      sha: 'abc',
+      ahead: 1,
+      skippedLargeFiles: [{ path: 'assets/movie.mp4', size: 200_000_000 }],
+    }))
     const skipped: Array<{ path: string }[]> = []
     const engine = createSyncEngine({
       generation: 1,
@@ -1016,23 +948,21 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
     expect(skipped).toEqual([[{ path: 'assets/movie.mp4', size: 200_000_000 }]])
     engine.stop()
   })
 
   it('reports remote changes a pull left frozen in local-only folders', async () => {
-    fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'fastForward',
-            conflictedPaths: [],
-            changedFiles: [{ path: 'notes/a.md', kind: 'upsert' }],
-            frozenPaths: ['finance/secure/remote.md'],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'fastForward',
+      conflictedPaths: [],
+      changedFiles: [{ path: 'notes/a.md', kind: 'upsert' }],
+      frozenPaths: ['finance/secure/remote.md'],
+      displaced: [],
+    }))
     const frozen: string[][] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -1049,7 +979,7 @@ describe('createSyncEngine', () => {
   })
 
   it('stays quiet when a pull froze nothing (control)', async () => {
-    fakeGit(defaultResponses)
+    fakeGit()
     const onLocalOnlyChangesSkipped = vi.fn()
     const engine = createSyncEngine({
       generation: 1,
@@ -1064,14 +994,12 @@ describe('createSyncEngine', () => {
   })
 
   it('runs one cycle at a time and schedules a follow-up for mid-cycle edits', async () => {
-    const pushGate: { resolve: ((value: unknown) => void) | null } = { resolve: null }
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        return new Promise((resolve) => {
-          pushGate.resolve = resolve
-        })
-      }
-      return defaultResponses(command)
+    const pushGate: { resolve: ((value: PushOutcome) => void) | null } = { resolve: null }
+    const git = fakeGit()
+    git.onPush(() => {
+      return new Promise((resolve) => {
+        pushGate.resolve = resolve
+      })
     })
     const engine = createSyncEngine({
       generation: 1,
@@ -1080,63 +1008,55 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.advanceTimersByTimeAsync(10)
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
+    await advance(10)
+    expect(methodsOf(git)).toEqual(['commitAll', 'push'])
 
     engine.noteChanged() // lands mid-cycle: must not start a second commit
-    await vi.advanceTimersByTimeAsync(50)
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
+    await advance(50)
+    expect(methodsOf(git)).toEqual(['commitAll', 'push'])
 
     pushGate.resolve?.(PUSHED)
-    await vi.runAllTimersAsync()
+    await runAllTimers()
     // The mid-cycle edit got its own follow-up cycle.
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push', 'git_commit_all', 'git_push'])
+    expect(methodsOf(git)).toEqual(['commitAll', 'push', 'commitAll', 'push'])
     engine.stop()
   })
 
   it('skips the push when a debounced pass finds nothing committed and nothing ahead', async () => {
     // The watcher re-reports a pull's own writes; the resulting cycle must
     // not buy a network round-trip for them.
-    const calls = fakeGit((command) =>
-      command === 'git_commit_all' ? CLEAN_COMMIT : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onCommitAll(() => CLEAN_COMMIT)
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all'])
+    expect(methodsOf(git)).toEqual(['commitAll'])
     engine.stop()
   })
 
   it('skips the push when a launch pull finds both sides already in step', async () => {
-    const calls = fakeGit((command) => {
-      if (command === 'git_commit_all') {
-        return CLEAN_COMMIT
-      }
-      if (command === 'git_fetch') {
-        return { ahead: 0, behind: 0 }
-      }
-      if (command === 'git_merge_remote') {
-        return { kind: 'upToDate', conflictedPaths: [], changedFiles: [] }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onCommitAll(() => {
+      return CLEAN_COMMIT
+    })
+    git.onFetch(() => {
+      return { ahead: 0, behind: 0 }
+    })
+    git.onMergeRemote(() => {
+      return { ...MERGED, kind: 'upToDate' }
     })
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote'])
     engine.stop()
   })
 
   it('a full sync cancels a pending debounced pass instead of double-running', async () => {
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const engine = createSyncEngine({
       generation: 1,
       getCredential: async () => CRED,
@@ -1145,20 +1065,14 @@ describe('createSyncEngine', () => {
 
     engine.noteChanged() // schedules a debounced pass…
     await engine.syncNow() // …which this full cycle already covers
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     engine.stop()
   })
 
   it('localOnly commits and never touches the network — even for a full sync', async () => {
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const engine = createSyncEngine({
       generation: 1,
       getCredential: async () => null,
@@ -1167,33 +1081,31 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_commit_all'])
+    expect(methodsOf(git)).toEqual(['commitAll', 'commitAll'])
     engine.stop()
   })
 
   it('stop() cancels pending work', async () => {
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, idleMs: 10 })
 
     engine.noteChanged()
     engine.stop()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(calls).toHaveLength(0)
+    expect(git.calls()).toHaveLength(0)
   })
 
   it('passes a missing credential through as null (Rust owns the failure)', async () => {
     // The engine has no null-credential special case on purpose: only the remote
     // knows whether it needs auth. A push refused for a missing credential
     // must still land on the reconnect affordance.
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        throw { kind: 'auth', message: 'authentication required' }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      throw { kind: 'auth', message: 'authentication required' }
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -1206,16 +1118,16 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    const push = calls.find((call) => call.command === 'git_push')
-    expect(push?.args['credential']).toBeNull()
+    const push = git.calls().find((call) => call.method === 'push')
+    expect(push?.args[0]).toBeNull()
     expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'auth' })
     engine.stop()
   })
 
   it('ignores edits arriving after stop() — the abort is sticky', async () => {
-    const calls = fakeGit(defaultResponses)
+    const git = fakeGit()
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -1229,67 +1141,57 @@ describe('createSyncEngine', () => {
     engine.stop()
     engine.noteChanged()
     await engine.syncNow()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(calls).toHaveLength(0)
+    expect(git.calls()).toHaveLength(0)
     expect(statuses).toHaveLength(0)
   })
 
   it('serializes concurrent syncNow calls into one cycle plus one follow-up', async () => {
-    const pushGates: Array<(value: unknown) => void> = []
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        return new Promise((resolve) => {
-          pushGates.push(resolve)
-        })
-      }
-      return defaultResponses(command)
+    const pushGates: Array<(value: PushOutcome) => void> = []
+    const git = fakeGit()
+    git.onPush(() => {
+      return new Promise((resolve) => {
+        pushGates.push(resolve)
+      })
     })
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     const first = engine.syncNow()
     const second = engine.syncNow()
     const third = engine.syncNow()
-    await vi.runAllTimersAsync()
+    await runAllTimers()
     // Only the first cycle has started; the others coalesced, not interleaved.
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
 
     pushGates.shift()?.(PUSHED)
-    await vi.runAllTimersAsync()
+    await runAllTimers()
     pushGates.shift()?.(PUSHED)
-    await vi.runAllTimersAsync()
+    await runAllTimers()
     await Promise.all([first, second, third])
 
     // The two queued requests collapsed into a single full follow-up cycle.
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'push',
     ])
     engine.stop()
   })
 
   it('stops at the next command boundary when cycles become suppressed', async () => {
     let canStartCycle = true
-    const fetchGate = Promise.withResolvers<unknown>()
-    const calls = fakeGit((command) => {
-      if (command === 'git_fetch') {
-        return fetchGate.promise
-      }
-      return defaultResponses(command)
+    const fetchGate = Promise.withResolvers<RemoteDelta>()
+    const git = fakeGit()
+    git.onFetch(() => {
+      return fetchGate.promise
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -1302,8 +1204,8 @@ describe('createSyncEngine', () => {
     })
 
     const syncing = engine.syncNow()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch'])
+    await advance(0)
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch'])
 
     canStartCycle = false
     fetchGate.resolve(DELTA)
@@ -1311,18 +1213,16 @@ describe('createSyncEngine', () => {
 
     // Fetch began while allowed, but merge/push must not start after the
     // lifecycle becomes hidden. Suppression is an idle pause, not an error.
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_fetch'])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing', 'idle'])
     engine.stop()
   })
 
   it('stop() mid-cycle issues no further commands and emits no further status', async () => {
-    const pushGate = Promise.withResolvers<unknown>()
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        return pushGate.promise
-      }
-      return defaultResponses(command)
+    const pushGate = Promise.withResolvers<PushOutcome>()
+    const git = fakeGit()
+    git.onPush(() => {
+      return pushGate.promise
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -1335,28 +1235,26 @@ describe('createSyncEngine', () => {
     })
 
     engine.noteChanged()
-    await vi.advanceTimersByTimeAsync(10)
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
+    await advance(10)
+    expect(methodsOf(git)).toEqual(['commitAll', 'push'])
 
     // Disconnect/teardown while the push is in flight: the resolution would
     // normally trigger fetch+merge+retry (non-fast-forward) and a status
     // emission — a stopped engine must do neither.
     engine.stop()
     pushGate.resolve(NON_FAST_FORWARD)
-    await vi.runAllTimersAsync()
+    await runAllTimers()
 
-    expect(commandsOf(calls)).toEqual(['git_commit_all', 'git_push'])
+    expect(methodsOf(git)).toEqual(['commitAll', 'push'])
     expect(statuses.map((status) => status.state)).toEqual(['syncing'])
   })
 
   it('commits before every merge, the push-retry merge included', async () => {
     let pushes = 0
-    const calls = fakeGit((command) => {
-      if (command === 'git_push') {
-        pushes += 1
-        return pushes === 1 ? NON_FAST_FORWARD : PUSHED
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onPush(() => {
+      pushes += 1
+      return pushes === 1 ? NON_FAST_FORWARD : PUSHED
     })
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
@@ -1365,22 +1263,19 @@ describe('createSyncEngine', () => {
     // Saves made while a fetch was on the network are committed before the
     // merge that follows it, so a pull meets as few uncommitted bytes as
     // possible.
-    const commands = commandsOf(calls)
+    const commands = methodsOf(git)
     for (const [position, command] of commands.entries()) {
-      if (command === 'git_merge_remote') {
-        expect(commands[position - 1]).toBe('git_commit_all')
+      if (command === 'mergeRemote') {
+        expect(commands[position - 1]).toBe('commitAll')
       }
     }
-    expect(commands.filter((command) => command === 'git_merge_remote')).toHaveLength(2)
+    expect(commands.filter((command) => command === 'mergeRemote')).toHaveLength(2)
     engine.stop()
   })
 
   it('retries a deferred pull with a fresh commit, at most twice per cycle', async () => {
-    const calls = fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? { kind: 'deferred', conflictedPaths: [], changedFiles: [] }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => DEFERRED)
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -1392,15 +1287,15 @@ describe('createSyncEngine', () => {
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_commit_all',
-      'git_merge_remote',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'commitAll',
+      'mergeRemote',
+      'commitAll',
+      'mergeRemote',
     ])
     expect(statuses.at(-1)).toMatchObject({ state: 'error', errorKind: 'other' })
     engine.stop()
@@ -1408,12 +1303,10 @@ describe('createSyncEngine', () => {
 
   it('carries on once a deferred pull lands on its retry', async () => {
     let merges = 0
-    const calls = fakeGit((command) => {
-      if (command === 'git_merge_remote') {
-        merges += 1
-        return merges === 1 ? { kind: 'deferred', conflictedPaths: [], changedFiles: [] } : MERGED
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onMergeRemote(() => {
+      merges += 1
+      return merges === 1 ? DEFERRED : MERGED
     })
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
@@ -1426,40 +1319,38 @@ describe('createSyncEngine', () => {
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
+    expect(methodsOf(git)).toEqual([
+      'commitAll',
+      'fetch',
+      'commitAll',
+      'mergeRemote',
+      'commitAll',
+      'mergeRemote',
+      'push',
     ])
     expect(statuses.at(-1)).toEqual({ state: 'idle' })
     engine.stop()
   })
 
   it('hands displaced pairs over before the pull’s changed files', async () => {
-    const displaced = {
+    const displaced: DisplacedFile = {
       from: 'daily/2026-10-04.md',
       to: 'daily/2026-10-04 (this device).md',
       keptOut: false,
       tracked: false,
       differentNote: false,
     }
-    fakeGit((command) =>
-      command === 'git_merge_remote'
-        ? {
-            kind: 'fastForward',
-            conflictedPaths: [],
-            changedFiles: [
-              { path: displaced.from, kind: 'upsert' },
-              { path: displaced.to, kind: 'upsert' },
-            ],
-            displaced: [displaced],
-          }
-        : defaultResponses(command),
-    )
+    const git = fakeGit()
+    git.onMergeRemote(() => ({
+      kind: 'fastForward',
+      conflictedPaths: [],
+      changedFiles: [
+        { path: displaced.from, kind: 'upsert' },
+        { path: displaced.to, kind: 'upsert' },
+      ],
+      frozenPaths: [],
+      displaced: [displaced],
+    }))
     const order: string[] = []
     const engine = createSyncEngine({
       generation: 1,
@@ -1479,7 +1370,7 @@ describe('createSyncEngine', () => {
   })
 
   it('stays quiet about displacement when a pull moved nothing (control)', async () => {
-    fakeGit(defaultResponses)
+    fakeGit()
     const onDisplaced = vi.fn()
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED, onDisplaced })
 
@@ -1490,17 +1381,14 @@ describe('createSyncEngine', () => {
   })
 
   it('reports a withheld file once per cycle, however many commits it makes', async () => {
-    fakeGit((command) =>
-      command === 'git_commit_all'
-        ? {
-            committed: true,
-            sha: 'abc',
-            ahead: 1,
-            skippedLargeFiles: [{ path: 'assets/movie.mp4', size: 200_000_000 }],
-          }
-        : defaultResponses(command),
-    )
-    const skipped: Array<{ path: string }[]> = []
+    const git = fakeGit()
+    git.onCommitAll(() => ({
+      committed: true,
+      sha: 'abc',
+      ahead: 1,
+      skippedLargeFiles: [{ path: 'assets/movie.mp4', size: 200_000_000 }],
+    }))
+    const skipped: SkippedFile[][] = []
     const engine = createSyncEngine({
       generation: 1,
       getCredential: async () => CRED,
@@ -1511,36 +1399,25 @@ describe('createSyncEngine', () => {
 
     await engine.syncNow()
 
+    expect(methodsOf(git).filter((method) => method === 'commitAll')).toHaveLength(2)
     expect(skipped).toEqual([[{ path: 'assets/movie.mp4', size: 200_000_000 }]])
     engine.stop()
   })
 
   it('pushes what the commit after the fetch recorded, even on a clean fast-forward', async () => {
     let commits = 0
-    const calls = fakeGit((command) => {
-      if (command === 'git_commit_all') {
-        commits += 1
-        return commits === 1 ? CLEAN_COMMIT : COMMITTED
-      }
-      if (command === 'git_fetch') {
-        return { ahead: 0, behind: 1 }
-      }
-      if (command === 'git_merge_remote') {
-        return { kind: 'fastForward', conflictedPaths: [], changedFiles: [] }
-      }
-      return defaultResponses(command)
+    const git = fakeGit()
+    git.onCommitAll(() => {
+      commits += 1
+      return commits === 1 ? CLEAN_COMMIT : COMMITTED
     })
+    git.onFetch(() => ({ ahead: 0, behind: 1 }))
+    git.onMergeRemote(() => ({ ...MERGED, kind: 'fastForward' }))
     const engine = createSyncEngine({ generation: 1, getCredential: async () => CRED })
 
     await engine.syncNow()
 
-    expect(commandsOf(calls)).toEqual([
-      'git_commit_all',
-      'git_fetch',
-      'git_commit_all',
-      'git_merge_remote',
-      'git_push',
-    ])
+    expect(methodsOf(git)).toEqual(['commitAll', 'fetch', 'commitAll', 'mergeRemote', 'push'])
     engine.stop()
   })
 })

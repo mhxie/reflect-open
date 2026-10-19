@@ -1,4 +1,4 @@
-import { transcriptFallbackTitle } from '../ai/audio-memo-title.ts'
+import { transcriptFallbackTitle } from '../ai/transcript-enrichment-service.ts'
 import { upsertFrontmatter } from '../markdown/frontmatter.ts'
 
 /**
@@ -9,10 +9,14 @@ import { upsertFrontmatter } from '../markdown/frontmatter.ts'
  * speaker turns, and render the note. Pure functions, no I/O.
  */
 
-/** Which channel a segment came from: the microphone or the system audio. */
+/**
+ * Which channel a segment came from: the microphone or the system audio.
+ */
 export type RecordingSpeaker = 'me' | 'them'
 
-/** One transcribed span of a channel, timed from the start of the recording. */
+/**
+ * One transcribed span of a channel, timed from the start of the recording.
+ */
 export interface RecordingSegment {
   readonly startMs: number
   readonly endMs: number
@@ -52,7 +56,9 @@ function isWideCharacter(character: string): boolean {
 
 const SPEAKER_LABELS: Readonly<Record<RecordingSpeaker, string>> = { me: 'Me', them: 'Them' }
 
-/** Lowercased letters and digits, one entry per code point. */
+/**
+ * Lowercased letters and digits, one entry per code point.
+ */
 function normalizedCodePoints(text: string): string[] {
   return text.toLowerCase().match(LETTERS_AND_DIGITS) ?? []
 }
@@ -98,11 +104,17 @@ export function textWeight(text: string): number {
   return weight
 }
 
-/** Tuning for {@link dropEchoRepeats}. */
+/**
+ * Tuning for {@link dropEchoRepeats}.
+ */
 export interface EchoFilterOptions {
-  /** Minimum {@link echoScore} that marks a Me segment as echo. Defaults to 0.6. */
+  /**
+   * Minimum {@link echoScore} that marks a Me segment as echo. Defaults to 0.6.
+   */
   readonly threshold?: number | undefined
-  /** How far around a Me segment Them speech counts as nearby. Defaults to 2000. */
+  /**
+   * How far around a Me segment Them speech counts as nearby. Defaults to 2000.
+   */
   readonly slackMs?: number | undefined
 }
 
@@ -138,7 +150,9 @@ function isAsciiCodePoint(codePoint: number | undefined): boolean {
   return codePoint !== undefined && codePoint <= 0x7f
 }
 
-/** A space between Latin-script words; CJK text joins directly. */
+/**
+ * A space between Latin-script words; CJK text joins directly.
+ */
 function joinSeparator(previous: string, next: string): string {
   const lastCodePoint = previous.codePointAt(previous.length - 1)
   return isAsciiCodePoint(lastCodePoint) && isAsciiCodePoint(next.codePointAt(0)) ? ' ' : ''
@@ -186,7 +200,9 @@ function pad(value: number, width = 2): string {
   return String(value).padStart(width, '0')
 }
 
-/** `HH:MM:SS` for an offset in milliseconds, flooring to whole seconds. */
+/**
+ * `HH:MM:SS` for an offset in milliseconds, flooring to whole seconds.
+ */
 export function formatClock(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
   const hours = Math.floor(totalSeconds / 3600)
@@ -194,22 +210,36 @@ export function formatClock(ms: number): string {
   return `${pad(hours)}:${pad(minutes)}:${pad(totalSeconds % 60)}`
 }
 
-/** Graph-relative folder that holds every recording's transcript note. */
+/**
+ * Graph-relative folder that holds every recording's transcript note.
+ */
 export const RECORDING_TRANSCRIPTS_DIR = 'inbox/recordings'
 
-/** Everything derived from a recording's local start time. */
+/**
+ * Everything derived from a recording's local start time.
+ */
 export interface RecordingIdentity {
-  /** Unique basename, e.g. `recording-2026-07-01-090507`, also the note's alias. */
+  /**
+   * Unique basename, e.g. `recording-2026-07-01-090507`, also the note's alias.
+   */
   readonly base: string
-  /** Local ISO day of the recording, `YYYY-MM-DD`. */
+  /**
+   * Local ISO day of the recording, `YYYY-MM-DD`.
+   */
   readonly date: string
-  /** Local 24-hour start time, `HH:MM`. */
+  /**
+   * Local 24-hour start time, `HH:MM`.
+   */
   readonly time: string
-  /** Graph-relative path of the transcript note. */
+  /**
+   * Graph-relative path of the transcript note.
+   */
   readonly notePath: string
 }
 
-/** The identity of a recording that started at `startedAt`, in local time. */
+/**
+ * The identity of a recording that started at `startedAt`, in local time.
+ */
 export function recordingIdentity(startedAt: Date): RecordingIdentity {
   const date = `${pad(startedAt.getFullYear(), 4)}-${pad(startedAt.getMonth() + 1)}-${pad(startedAt.getDate())}`
   const hours = pad(startedAt.getHours())
@@ -241,19 +271,29 @@ export function recordingTitle(
   return transcriptFallbackTitle(transcript, `Recording ${identity.date} ${identity.time}`)
 }
 
-/** Everything a transcript note records. */
+/**
+ * Everything a transcript note records.
+ */
 export interface RecordingNoteInput {
   readonly identity: RecordingIdentity
   readonly title: string
   readonly durationMs: number
-  /** The speech recognition model that produced the segments. */
+  /**
+   * The speech recognition model that produced the segments.
+   */
   readonly model: string
-  /** Where the recording's audio lives. */
+  /**
+   * Where the recording's audio lives.
+   */
   readonly audioPath: string
-  /** The matched calendar event's title, or `null` when none matched. */
+  /**
+   * The matched calendar event's title, or `null` when none matched.
+   */
   readonly eventTitle: string | null
   readonly attendees: readonly string[]
-  /** Capture problems worth surfacing, such as a silent system channel. */
+  /**
+   * Capture problems worth surfacing, such as a silent system channel.
+   */
   readonly warnings: readonly string[]
   readonly turns: readonly RecordingSegment[]
 }
@@ -262,7 +302,9 @@ function turnParagraph(turn: RecordingSegment): string {
   return `**[${formatClock(turn.startMs)}] ${SPEAKER_LABELS[turn.speaker]}:** ${turn.text}`
 }
 
-/** Whether both channels spoke: only then do turns carry speaker labels. */
+/**
+ * Whether both channels spoke: only then do turns carry speaker labels.
+ */
 export function isConversation(turns: readonly RecordingSegment[]): boolean {
   return new Set(turns.map((turn) => turn.speaker)).size > 1
 }

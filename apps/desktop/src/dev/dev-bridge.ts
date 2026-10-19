@@ -3,13 +3,17 @@ import { z } from 'zod'
 import type { DevFileStore } from '@/dev/dev-file-store.ts'
 import type { DevIndexDb } from '@/dev/dev-index-db.ts'
 
-/** The fixed fake graph root the dev bridge reports (mirrors `mobile_storage`). */
+/**
+ * The fixed fake graph root the dev bridge reports (mirrors `mobile_storage`).
+ */
 export const DEV_GRAPH_ROOT = '/dev-graph'
 
-/** Everything the command router needs. */
+/**
+ * Everything the command router needs.
+ */
 export interface DevBridgeBackend {
-  files: DevFileStore
-  index: DevIndexDb
+  readonly files: DevFileStore
+  readonly index: DevIndexDb
 }
 
 const dbQueryArgsSchema = z.object({ sql: z.string(), params: z.array(z.unknown()) })
@@ -65,35 +69,28 @@ const iapProducts = [
   { productId: IAP_PRODUCT_IDS.yearly, formattedPrice: '$99999.99' },
 ]
 
-/**
- * The in-browser stand-in for the Rust shell (dev builds only): answers the
- * command surface the desktop and mobile trees exercise from an in-memory
- * file map and the wasm SQLite index. The in-memory graph has one fixed
- * generation (`1`); the
- * no-clobber note-create command validates that value before touching the
- * store, matching its native race-safety contract.
- *
- * Anything unimplemented rejects loudly with the command name — a surface
- * quietly rendering empty because a stub answered wrong is worse than an
- * error naming the gap.
- */
-export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
-  const { files, index } = backend
-  const graphInfo = {
+class DevBridgeImpl implements IpcBridge {
+  readonly #deps: DevBridgeBackend
+  readonly #graphInfo = {
     root: DEV_GRAPH_ROOT,
     name: 'Dev Graph',
     generation: 1,
     localOnlyFolders: [],
     localOnlyEditableFolders: [],
   }
-  let settingsDocument: Record<string, unknown> = { mobileOnboarded: true }
-  const assets = new Map<string, string>()
-  let ownedProductId: string | null = null
+  #settingsDocument: Record<string, unknown> = { mobileOnboarded: true }
+  readonly #assets = new Map<string, string>()
+  #ownedProductId: string | null = null
   // In-memory keychain stand-in so the AI-provider settings flow (and chat,
   // against a CORS-permissive provider) works end-to-end in the harness.
-  const secrets = new Map<string, string>()
+  readonly #secrets = new Map<string, string>()
 
-  async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
+  constructor(deps: DevBridgeBackend) {
+    this.#deps = deps
+  }
+
+  async invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
+    const { files, index } = this.#deps
     switch (command) {
       case 'app_version':
         return '0.0.0-dev'
@@ -119,14 +116,14 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       }
       case 'plugin:iap|get_product_status': {
         const { payload } = iapProductArgsSchema.parse(args)
-        return { productId: payload.productId, isOwned: payload.productId === ownedProductId }
+        return { productId: payload.productId, isOwned: payload.productId === this.#ownedProductId }
       }
       case 'plugin:iap|purchase': {
         const { payload } = iapProductArgsSchema.parse(args)
         if (!iapProducts.some((product) => product.productId === payload.productId)) {
           throw new ReflectError('notFound', `unknown preview product: ${payload.productId}`)
         }
-        ownedProductId = payload.productId
+        this.#ownedProductId = payload.productId
         return null
       }
       case 'mobile_storage':
@@ -141,11 +138,11 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         return 0
       case 'graph_open':
       case 'graph_create':
-        return graphInfo
+        return this.#graphInfo
       case 'recent_graphs':
         // One seeded recent so the desktop chooser has something to open —
         // the browser has no folder picker, so this is the only entry point.
-        return [{ root: graphInfo.root, name: graphInfo.name, openedMs: Date.now() }]
+        return [{ root: this.#graphInfo.root, name: this.#graphInfo.name, openedMs: Date.now() }]
       case 'icloud_status':
         // No iCloud container in a browser; the chooser's iCloud card hides.
         return { available: false, documentsRoot: null, existingGraphRoots: [] }
@@ -214,7 +211,7 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       }
       case 'note_create': {
         const { path, contents, generation } = createArgsSchema.parse(args)
-        if (generation !== graphInfo.generation) {
+        if (generation !== this.#graphInfo.generation) {
           throw new ReflectError(
             'io',
             'the graph changed since this command was issued; dropping it',
@@ -255,12 +252,12 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
         const { path, contentsBase64 } = z
           .object({ path: z.string(), contentsBase64: z.string() })
           .parse(args)
-        assets.set(path, contentsBase64)
+        this.#assets.set(path, contentsBase64)
         return null
       }
       case 'asset_read': {
         const { path } = pathArgsSchema.parse(args)
-        const contents = assets.get(path)
+        const contents = this.#assets.get(path)
         if (contents === undefined) {
           throw new ReflectError('notFound', `asset not found: ${path}`)
         }
@@ -326,20 +323,20 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
       }
 
       case 'settings_load':
-        return settingsDocument
+        return this.#settingsDocument
       case 'settings_save': {
-        settingsDocument = settingsArgsSchema.parse(args).settings
+        this.#settingsDocument = settingsArgsSchema.parse(args).settings
         return null
       }
       case 'secret_get':
-        return secrets.get(secretNameArgsSchema.parse(args).name) ?? null
+        return this.#secrets.get(secretNameArgsSchema.parse(args).name) ?? null
       case 'secret_set': {
         const { name, value } = secretSetArgsSchema.parse(args)
-        secrets.set(name, value)
+        this.#secrets.set(name, value)
         return null
       }
       case 'secret_delete': {
-        secrets.delete(secretNameArgsSchema.parse(args).name)
+        this.#secrets.delete(secretNameArgsSchema.parse(args).name)
         return null
       }
 
@@ -391,19 +388,37 @@ export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
     }
   }
 
-  return {
-    invoke,
-    // Native event streams (watcher, embeddings, EventKit) don't exist in the
-    // browser; subscriptions succeed and simply never fire. Local writes still
-    // refresh the UI through core's in-process local-write echo. Plugin event
-    // registrations get the same treatment, so the keyboard and recorder
-    // hooks mount cleanly in the harness.
-    listen: async () => () => {},
-    listenPlugin: async () => {},
+  // Native event streams (watcher, embeddings, EventKit) don't exist in the
+  // browser; subscriptions succeed and simply never fire. Local writes still
+  // refresh the UI through core's in-process local-write echo. Plugin event
+  // registrations get the same treatment, so the keyboard and recorder
+  // hooks mount cleanly in the harness.
+  async listen(): Promise<() => void> {
+    return () => {}
   }
+
+  async listenPlugin(): Promise<void> {}
 }
 
-/** Mirrors `MTIME_TRUST_AGE_MS` in core's hash.ts and Rust's scan.rs. */
+/**
+ * The in-browser stand-in for the Rust shell (dev builds only): answers the
+ * command surface the desktop and mobile trees exercise from an in-memory
+ * file map and the wasm SQLite index. The in-memory graph has one fixed
+ * generation (`1`); the
+ * no-clobber note-create command validates that value before touching the
+ * store, matching its native race-safety contract.
+ *
+ * Anything unimplemented rejects loudly with the command name — a surface
+ * quietly rendering empty because a stub answered wrong is worse than an
+ * error naming the gap.
+ */
+export function createDevBridge(backend: DevBridgeBackend): IpcBridge {
+  return new DevBridgeImpl(backend)
+}
+
+/**
+ * Mirrors `MTIME_TRUST_AGE_MS` in core's hash.ts and Rust's scan.rs.
+ */
 const MTIME_TRUST_AGE_MS = 5_000
 
 /**

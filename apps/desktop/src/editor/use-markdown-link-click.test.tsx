@@ -1,55 +1,65 @@
-import { act, type ReactNode } from 'react'
-import { cleanup, renderHook } from 'vitest-browser-react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
+import { act } from '@/test-utils/act.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import type { LinkClickHandler } from '@meowdown/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import { dispatchDeepLink } from '@/lib/deep-links/intake.ts'
+import {
+  createTestAppServices,
+  createTestOpenerService,
+  createTestWindowService,
+  type TestOpenerService,
+} from '@reflect/app/testing'
+import {
+  createTestCoreServices,
+  createTestAttachmentService,
+  createTestGraphSessionService,
+  type TestAttachmentService,
+} from '@reflect/core/testing'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 
-const openDeepLinkInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
-const resolveExistingMarkdownTarget = vi.hoisted(() => vi.fn())
-const openAsset = vi.hoisted(() => vi.fn(async () => {}))
-
-vi.mock('@tauri-apps/plugin-opener', () => ({
-  openUrl: vi.fn(async () => {}),
-}))
-
-vi.mock('@/lib/deep-links/intake.ts', () => ({
-  dispatchDeepLink: vi.fn(),
-}))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openDeepLinkInNewWindow,
-}))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  resolveExistingMarkdownTarget,
-  openAsset,
-}))
+const dispatchDeepLink = vi.fn<(url: string) => void>()
+const resolveMarkdownHref = vi.fn()
+// Receives the `reflect://` link of every note window a test opens.
+const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function Providers({ children }: { children: ReactNode }): ReactNode {
-  return (
-    <RouterProvider>
-      {children}
-      <RouteProbe />
-    </RouterProvider>
-  )
-}
-
 const route = page.getByTestId('route')
 
 let onLinkClick: LinkClickHandler
 
-async function mount(generation: number | null, sourcePath: string | null): Promise<void> {
-  const { result } = await renderHook(() => useMarkdownLinkClick(generation, sourcePath), {
-    wrapper: Providers,
+async function mount(sourcePath: string | null): Promise<void> {
+  const graphSession = createTestGraphSessionService()
+  const app = createTestCoreServices({ attachments, graphSession })
+  const linkNavigation = createTestAppServices(
+    createTestCoreServices({
+      graphSession,
+      noteLinkResolver: { resolveWikiTarget: vi.fn(), resolveMarkdownHref },
+      attachments,
+    }),
+    {
+      window: createTestWindowService({ openNoteWindow }),
+      opener,
+      deepLinkRouter: Object.assign(createTestAppServices().deepLinkRouter, {
+        dispatch: dispatchDeepLink,
+      }),
+    },
+  ).linkNavigation
+  const { result } = await renderHookInApp(() => useMarkdownLinkClick(sourcePath), {
+    app,
+    appServices: { linkNavigation },
+    graph: { generation: 7 },
+    wrapper: (children) => (
+      <>
+        {children}
+        <RouteProbe />
+      </>
+    ),
   })
   onLinkClick = result.current
 }
@@ -60,20 +70,23 @@ function click(href: string, metaKey = false): MouseEvent {
   return event
 }
 
+let opener: TestOpenerService
+let attachments: TestAttachmentService
+
 beforeEach(async () => {
   vi.clearAllMocks()
-  openDeepLinkInNewWindow.mockResolvedValue(true)
-  resolveExistingMarkdownTarget.mockResolvedValue({ kind: 'missing' })
-  await mount(7, 'projects/TASKS.md')
+  opener = createTestOpenerService()
+  attachments = createTestAttachmentService()
+  openNoteWindow.mockResolvedValue(true)
+  resolveMarkdownHref.mockResolvedValue({ kind: 'missing' })
+  await mount('projects/TASKS.md')
 })
-
-afterEach(cleanup)
 
 describe('useMarkdownLinkClick', () => {
   it('opens an http(s) link in the OS browser and blocks the frame navigation', async () => {
     const event = click('https://example.com')
 
-    expect(openUrl).toHaveBeenCalledWith('https://example.com')
+    expect(opener.openedUrls()).toEqual(['https://example.com'])
     expect(event.defaultPrevented).toBe(true)
   })
 
@@ -81,22 +94,22 @@ describe('useMarkdownLinkClick', () => {
     click('reflect://note/abc123')
 
     expect(dispatchDeepLink).toHaveBeenCalledWith('reflect://note/abc123')
-    expect(openUrl).not.toHaveBeenCalled()
+    expect(opener.openedUrls()).toEqual([])
   })
 
   it('⌘-clicks a rendered reflect:// link into a secondary window', async () => {
     click('reflect://note/abc123', true)
 
-    await vi.waitFor(() =>
-      expect(openDeepLinkInNewWindow).toHaveBeenCalledWith('reflect://note/abc123'),
-    )
+    await vi.waitFor(() => expect(openNoteWindow).toHaveBeenCalledWith('reflect://note/abc123'))
     expect(dispatchDeepLink).not.toHaveBeenCalled()
   })
 
   it('opens a custom app scheme in its OS default app', async () => {
     const event = click('x-devonthink-item://40C88434-68B6-4DCB-A258-754679764C3C')
 
-    expect(openUrl).toHaveBeenCalledWith('x-devonthink-item://40C88434-68B6-4DCB-A258-754679764C3C')
+    expect(opener.openedUrls()).toEqual([
+      'x-devonthink-item://40C88434-68B6-4DCB-A258-754679764C3C',
+    ])
     expect(event.defaultPrevented).toBe(true)
   })
 
@@ -109,47 +122,43 @@ describe('useMarkdownLinkClick', () => {
   ])('drops the unsafe scheme %s without opening anything', (href) => {
     const event = click(href)
 
-    expect(openUrl).not.toHaveBeenCalled()
+    expect(opener.openedUrls()).toEqual([])
     expect(dispatchDeepLink).not.toHaveBeenCalled()
     expect(event.defaultPrevented).toBe(true)
   })
 
   it('opens a relative note link from the source note', async () => {
-    resolveExistingMarkdownTarget.mockResolvedValue({
+    resolveMarkdownHref.mockResolvedValue({
       kind: 'resolved',
       path: 'projects/roadmap/plan.md',
     })
     const event = click('./roadmap/plan.md')
 
-    expect(resolveExistingMarkdownTarget).toHaveBeenCalledWith(
-      './roadmap/plan.md',
-      'projects/TASKS.md',
-      7,
-    )
+    expect(resolveMarkdownHref).toHaveBeenCalledWith('projects/TASKS.md', './roadmap/plan.md', 7)
     await expect
       .element(route)
       .toMatchTextContent('{"kind":"note","path":"projects/roadmap/plan.md"}')
-    expect(openUrl).not.toHaveBeenCalled()
+    expect(opener.openedUrls()).toEqual([])
     expect(event.defaultPrevented).toBe(true)
   })
 
   it('opens an attachment link through the graph asset opener, not the URL opener', async () => {
     click('assets/cat.png')
 
-    await vi.waitFor(() => expect(openAsset).toHaveBeenCalledWith('assets/cat.png', 7))
-    expect(openUrl).not.toHaveBeenCalled()
-    expect(resolveExistingMarkdownTarget).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(attachments.opened()).toEqual(['assets/cat.png']))
+    expect(opener.openedUrls()).toEqual([])
+    expect(resolveMarkdownHref).not.toHaveBeenCalled()
   })
 
   it('drops attachment and note links when the Markdown belongs to no note', async () => {
-    await mount(7, null)
+    await mount(null)
 
     const asset = click('assets/cat.png')
     const note = click('notes/foo.md')
 
-    expect(openAsset).not.toHaveBeenCalled()
-    expect(resolveExistingMarkdownTarget).not.toHaveBeenCalled()
-    expect(openUrl).not.toHaveBeenCalled()
+    expect(attachments.opened()).toEqual([])
+    expect(resolveMarkdownHref).not.toHaveBeenCalled()
+    expect(opener.openedUrls()).toEqual([])
     expect(dispatchDeepLink).not.toHaveBeenCalled()
     expect(asset.defaultPrevented).toBe(true)
     expect(note.defaultPrevented).toBe(true)

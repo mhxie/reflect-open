@@ -1,9 +1,8 @@
 import type { ReactElement } from 'react'
-import { SEMANTIC_MODELS, type SemanticModelId } from '@reflect/core'
-import { formatModelSize } from '@/lib/format-model-size.ts'
-import { retryFailedEmbeddings } from '@/lib/semantic.ts'
+import { formatModelSize, SEMANTIC_MODELS, type SemanticModelId } from '@reflect/core'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
 
@@ -14,14 +13,16 @@ import { SettingsOptionCard } from './option-card.tsx'
  */
 export function SemanticModelField(): ReactElement {
   const { settings, updateSettings } = useSettings()
+  const { semanticSearch } = useCoreServices()
   const model = settings.semanticModel
 
   function choose(next: SemanticModelId): void {
     updateSettings({ semanticModel: next })
     // EmbeddingsSync never retries a failed load on its own; choosing a model
-    // is an explicit action, so it does.
+    // is an explicit action, so it does (the update above is synchronous, so
+    // the retry reads the new model).
     if (settings.semanticSearchEnabled) {
-      void retryFailedEmbeddings(next)
+      void semanticSearch.retryFailedModel()
     }
   }
 

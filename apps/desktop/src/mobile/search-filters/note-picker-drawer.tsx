@@ -1,12 +1,12 @@
 import { useDeferredValue, useState, type ReactElement } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { parseSearchQuery, searchWithFilters } from '@reflect/core'
+import { parseSearchQuery } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Drawer, DrawerBody, DrawerContent, DrawerTitle } from '@/components/ui/drawer.tsx'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { SearchInput } from '@/mobile/search-input.tsx'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import type { NoteFilterRef } from './filter-state.ts'
 import { useNoteLabel } from '@/hooks/use-note-label.ts'
 
@@ -35,14 +35,15 @@ export function NotePickerDrawer({
   onPick,
 }: NotePickerDrawerProps): ReactElement {
   const { graph } = useGraph()
+  const { search } = useCoreServices()
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
 
-  const bridgeReady = useBridgeReady()
   const { data: hits } = useQuery({
     queryKey: queryKeys.index.mobileNotePicker(graph?.root, deferredQuery),
-    queryFn: () => searchWithFilters(parseSearchQuery(deferredQuery), { limit: PICKER_LIMIT }),
-    enabled: open && bridgeReady && graph !== null,
+    queryFn: () =>
+      search.searchWithFilters(parseSearchQuery(deferredQuery), { limit: PICKER_LIMIT }),
+    enabled: open && graph !== null,
     // Typing re-keys the query as the deferred value settles; holding the
     // previous rows avoids a "No matches" flash between keystrokes.
     placeholderData: keepPreviousData,

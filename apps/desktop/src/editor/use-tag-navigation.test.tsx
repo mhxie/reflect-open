@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render } from 'vitest-browser-react'
 import type { ReactNode } from 'react'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { useTagNavigation } from './use-tag-navigation.ts'
 
 let lastHandler: ((tag: string) => void) | null = null
@@ -17,11 +17,11 @@ function RouteProbe(): ReactNode {
 }
 
 function renderHost() {
-  return render(
-    <RouterProvider>
+  return renderInApp(
+    <>
       <Host />
       <RouteProbe />
-    </RouterProvider>,
+    </>,
   )
 }
 
@@ -39,6 +39,5 @@ describe('useTagNavigation', () => {
         filter: { kind: 'tag', tag: 'book' },
       })
     })
-    await view.unmount()
   })
 })

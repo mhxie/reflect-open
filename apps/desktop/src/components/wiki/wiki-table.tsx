@@ -13,7 +13,7 @@ import {
 import { SortHeader } from '@/components/all-notes/sort-header.tsx'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { WIKI_GRID, WikiEntryRow } from './wiki-entry-row.tsx'
 import { WIKI_SIGNALS_GRID } from './wiki-signals.tsx'
 import { WikiTopicHeader } from './wiki-topic-header.tsx'

@@ -1,13 +1,12 @@
+import { createTestAppServices } from '@reflect/app/testing'
 import type { ReactElement } from 'react'
-import { render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { NoteTemplatesProvider, useNoteTemplates } from '@/providers/note-templates-provider.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { TemplateCreateDialog } from './template-create-dialog.tsx'
-
-const { createTemplateMock } = vi.hoisted(() => ({ createTemplateMock: vi.fn() }))
-vi.mock('@/lib/note-templates.ts', () => ({ createTemplate: createTemplateMock }))
 
 function Opener(): ReactElement {
   const { openTemplateCreate } = useNoteTemplates()
@@ -18,8 +17,12 @@ function Opener(): ReactElement {
   )
 }
 
-async function renderDialog(): Promise<CommandContext> {
+async function renderDialog(): Promise<{ context: CommandContext; app: TestCoreServices }> {
+  const app = createTestCoreServices()
+  app.graphSession.setGraph({ generation: 1 })
   const context: CommandContext = {
+    services: app,
+    app: createTestAppServices(app),
     navigate: vi.fn(),
     route: () => ({ kind: 'today' }),
     notePath: () => null,
@@ -38,8 +41,6 @@ async function renderDialog(): Promise<CommandContext> {
     switchGraph: vi.fn(),
     openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
-    generation: () => 1,
-    graphRoot: () => '/notes',
     openPalette: vi.fn(),
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
@@ -49,13 +50,14 @@ async function renderDialog(): Promise<CommandContext> {
     sortAllNotes: vi.fn(),
     wikiLanguages: () => [],
   }
-  await render(
+  await renderInApp(
     <NoteTemplatesProvider>
       <Opener />
       <TemplateCreateDialog context={context} />
     </NoteTemplatesProvider>,
+    { app, servicesOnly: true },
   )
-  return context
+  return { context, app }
 }
 
 async function openDialog(): Promise<void> {
@@ -67,10 +69,6 @@ async function closeAndWaitForExit(): Promise<void> {
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect.element(page.getByRole('dialog', { name: 'New template' })).not.toBeInTheDocument()
 }
-
-beforeEach(() => {
-  createTemplateMock.mockReset()
-})
 
 it('starts empty again after cancelling a typed name', async () => {
   await renderDialog()
@@ -94,9 +92,9 @@ it('drops the validation error between opens', async () => {
 })
 
 it('starts empty after a successful create, and drops a stale submit error', async () => {
-  createTemplateMock.mockRejectedValueOnce(new Error('disk full'))
-  createTemplateMock.mockResolvedValueOnce('templates/meeting-notes.md')
-  const context = await renderDialog()
+  const { context, app } = await renderDialog()
+  // The template is claimed with the no-clobber create.
+  vi.spyOn(app.noteFile, 'create').mockRejectedValueOnce(new Error('disk full'))
   await openDialog()
 
   // First attempt fails and surfaces the submit error inline.
@@ -111,6 +109,13 @@ it('starts empty after a successful create, and drops a stale submit error', asy
     kind: 'note',
     path: 'templates/meeting-notes.md',
   })
+  expect(app.noteFile.writes()).toEqual([
+    {
+      path: 'templates/meeting-notes.md',
+      contents: '---\ntitle: Meeting notes\n---\n\n',
+      generation: 1,
+    },
+  ])
 
   await openDialog()
   await expect.element(page.getByPlaceholder('Template name')).toHaveValue('')

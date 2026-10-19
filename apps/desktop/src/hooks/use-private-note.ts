@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { isLocalOnlyPath } from '@reflect/core'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { useNoteRowState } from '@/hooks/use-note-row.ts'
 
 export interface PrivateNoteOptions {
@@ -39,6 +40,7 @@ export function usePrivateNoteState(
   { sessionEpoch, privateHeader }: PrivateNoteOptions,
 ): PrivateNoteState {
   const { row, settled } = useNoteRowState(path)
+  const localOnly = useLocalOnlyFolders()
   // The last row this session resolved, adjusted during render (the
   // note-pane seed pattern).
   const [resolved, setResolved] = useState<{ epoch: number; isPrivate: boolean } | null>(null)
@@ -51,7 +53,7 @@ export function usePrivateNoteState(
   }
   const carried = sessionEpoch !== null && resolved?.epoch === sessionEpoch ? resolved : null
   const rowPrivate = row?.isPrivate ?? carried?.isPrivate
-  const allowedElsewhere = !isLocalOnlyPath(path) && !privateHeader
+  const allowedElsewhere = !isLocalOnlyPath(localOnly, path) && !privateHeader
   return {
     privateNote: !allowedElsewhere || (rowPrivate ?? true),
     pending: allowedElsewhere && rowPrivate === undefined && !settled,

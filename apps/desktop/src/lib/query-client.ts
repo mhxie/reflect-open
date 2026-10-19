@@ -4,7 +4,9 @@ import type { NoteAttachmentType, WikiLanguage } from '@reflect/core'
 type GraphRoot = string | undefined
 type PaletteSearchMode = 'hybrid' | 'lexical'
 
-/** The single source of truth for every TanStack Query cache identity. */
+/**
+ * The single source of truth for every TanStack Query cache identity.
+ */
 export const queryKeys = {
   index: {
     all: ['index'] as const,
@@ -106,12 +108,6 @@ export const queryKeys = {
     noteFrontmatterPrivacy(root: GraphRoot, path: string) {
       return [...this.graph(root), 'note-frontmatter-privacy', path] as const
     },
-    openTasks(root: GraphRoot) {
-      return [...this.graph(root), 'tasks'] as const
-    },
-    completedTasks(root: GraphRoot) {
-      return [...this.graph(root), 'tasks-completed'] as const
-    },
     backlinks(root: GraphRoot, path: string) {
       return [...this.graph(root), 'backlinks', path] as const
     },
@@ -166,18 +162,8 @@ export const queryKeys = {
   },
   xPost: {
     all: ['x-post'] as const,
-    archive(generation: number, postId: string) {
-      return [...this.all, generation, postId] as const
-    },
-  },
-  xSyndication: {
-    post(postId: string) {
-      return ['x-syndication', postId] as const
-    },
-  },
-  youTubeVideo: {
-    video(url: string) {
-      return ['youtube-video', url] as const
+    archive(root: GraphRoot, postId: string) {
+      return [...this.all, root, postId] as const
     },
   },
   chat: {
@@ -188,9 +174,6 @@ export const queryKeys = {
   },
   attachments: {
     all: ['attachments'] as const,
-    catalog(generation: number) {
-      return [...this.all, generation] as const
-    },
     /** The raw attachment listing (with mtimes) behind the Attachments library. */
     files(generation: number) {
       return [...this.all, 'files', generation] as const
@@ -202,25 +185,15 @@ export const queryKeys = {
       return [...this.all, generation, path, size ?? null] as const
     },
   },
-  settings: {
-    all: ['settings'] as const,
+  /** The graph's knowledge-level contract; outside `index`, so note edits never refetch it. */
+  knowledgeLevels(root: GraphRoot, generation: number | undefined) {
+    return ['knowledge-levels', root, generation] as const
   },
   calendar: {
     all: ['calendar'] as const,
-    get authorization() {
-      return [...this.all, 'authorization'] as const
-    },
-    get calendars() {
-      return [...this.all, 'calendars'] as const
-    },
+    calendars: ['calendar', 'calendars'] as const,
     events(date: string, calendarIds: readonly string[]) {
       return [...this.all, 'events', date, calendarIds] as const
-    },
-  },
-  contacts: {
-    all: ['contacts'] as const,
-    get authorization() {
-      return [...this.all, 'authorization'] as const
     },
   },
   git: {
@@ -230,17 +203,9 @@ export const queryKeys = {
       return [...this.all, root, 'note-version', generation, path] as const
     },
   },
-  github: {
-    all: ['github'] as const,
-    get authentication() {
-      return [...this.all, 'authentication'] as const
-    },
-  },
   icloud: {
     all: ['icloud'] as const,
-    get status() {
-      return [...this.all, 'status'] as const
-    },
+    status: ['icloud', 'status'] as const,
     pendingNotes(root: GraphRoot) {
       return [...this.all, root, 'pending-notes'] as const
     },
@@ -260,80 +225,27 @@ export const queryKeys = {
   },
   /** The models installed in the Ollama server on this Mac; not graph data. */
   ollamaModels: ['ollama-models'] as const,
-  appStore: {
-    all: ['app-store'] as const,
-    get environment() {
-      return [...this.all, 'environment'] as const
-    },
-  },
-  classic: {
-    all: ['classic'] as const,
-    get access() {
-      return [...this.all, 'access'] as const
-    },
-    get recheck() {
-      return [...this.all, 'recheck'] as const
-    },
-  },
   iap: {
     all: ['iap'] as const,
-    get products() {
-      return [...this.all, 'products'] as const
-    },
-    get entitlements() {
-      return [...this.all, 'entitlement'] as const
-    },
+    products: ['iap', 'products'] as const,
   },
   mobile: {
     all: ['mobile'] as const,
-    get storage() {
-      return [...this.all, 'storage'] as const
-    },
+    storage: ['mobile', 'storage'] as const,
   },
 } as const
 
-/** Stable identities for mutations that are observed outside their owning hook. */
+/**
+ * Stable identities for mutations that are observed outside their owning hook.
+ */
 export const mutationKeys = {
   tasks: {
     all: ['tasks'] as const,
     graph(root: GraphRoot) {
       return [...this.all, root] as const
     },
-    complete(root: GraphRoot) {
-      return [...this.graph(root), 'complete'] as const
-    },
-    reopen(root: GraphRoot) {
-      return [...this.graph(root), 'reopen'] as const
-    },
-    delete(root: GraphRoot) {
-      return [...this.graph(root), 'delete'] as const
-    },
-    edit(root: GraphRoot) {
-      return [...this.graph(root), 'edit'] as const
-    },
-    schedule(root: GraphRoot) {
-      return [...this.graph(root), 'schedule'] as const
-    },
-    convert(root: GraphRoot) {
-      return [...this.graph(root), 'convert'] as const
-    },
-    editAndConvert(root: GraphRoot) {
-      return [...this.graph(root), 'edit-and-convert'] as const
-    },
-    insert(root: GraphRoot) {
-      return [...this.graph(root), 'insert'] as const
-    },
-    editAndToggle(root: GraphRoot) {
-      return [...this.graph(root), 'edit-and-toggle'] as const
-    },
     snippetToggle(root: GraphRoot) {
       return [...this.graph(root), 'snippet-toggle'] as const
-    },
-  },
-  pinnedNotes: {
-    all: ['pinned-notes'] as const,
-    reorder(root: GraphRoot) {
-      return [...this.all, root, 'reorder'] as const
     },
   },
   agentSkill: {
@@ -344,38 +256,20 @@ export const mutationKeys = {
   },
   classic: {
     all: ['classic'] as const,
-    get signIn() {
-      return [...this.all, 'sign-in'] as const
-    },
-    get signOut() {
-      return [...this.all, 'sign-out'] as const
-    },
+    signIn: ['classic', 'sign-in'] as const,
+    signOut: ['classic', 'sign-out'] as const,
   },
   iap: {
     all: ['iap'] as const,
-    get purchase() {
-      return [...this.all, 'purchase'] as const
-    },
-    get restore() {
-      return [...this.all, 'restore'] as const
-    },
-    get redeem() {
-      return [...this.all, 'redeem'] as const
-    },
-  },
-  settings: {
-    all: ['settings'] as const,
-    get save() {
-      return [...this.all, 'save'] as const
-    },
+    purchase: ['iap', 'purchase'] as const,
+    restore: ['iap', 'restore'] as const,
+    redeem: ['iap', 'redeem'] as const,
   },
 } as const
 
 export const mutationScopeIds = {
-  pinnedNotesReorder: (root: GraphRoot) => `pinned-notes:reorder:${root ?? 'none'}`,
   agentSkillWrite: (root: GraphRoot) => `agent-skill:write:${root ?? 'none'}`,
   iapAction: 'iap:action',
-  settingsSave: 'settings:save',
 } as const
 
 /**
@@ -403,10 +297,12 @@ export const queryClient = new QueryClient({
 // Settings load freshness lives with its shared query options.
 queryClient.setQueryDefaults(queryKeys.index.all, { staleTime: Infinity })
 queryClient.setQueryDefaults(queryKeys.chat.all, { staleTime: Infinity })
-// The watcher invalidates the attachment listings (`invalidateAttachmentCatalog`).
+// The watcher invalidates the attachment listing (`invalidateAttachmentFiles`).
 queryClient.setQueryDefaults(queryKeys.attachments.all, { staleTime: Infinity })
 
-/** Refetch all index-backed queries; called after index rows change. */
+/**
+ * Refetch all index-backed queries; called after index rows change.
+ */
 export function invalidateIndexQueries(): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.index.all })
 }
@@ -476,16 +372,27 @@ export function dropIcloudStatusQuery(): void {
   queryClient.removeQueries({ queryKey: queryKeys.icloud.status })
 }
 
-/** Refetch chat-history queries; called after a turn save or a delete. */
+/**
+ * Refetch chat-history queries; called after a turn save or a delete.
+ */
 export function invalidateChatQueries(): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.chat.all })
 }
 
 /**
- * Re-list the vault's attachments; called when the watcher reports an
- * attachment file (or a folder) appearing, moving, or disappearing.
+ * Forget the archived X posts when their graph session ends: their media URLs
+ * name that session, so a reopen of the same graph must read them again.
  */
-export function invalidateAttachmentCatalog(): void {
+export function dropXPostQueries(): void {
+  queryClient.removeQueries({ queryKey: queryKeys.xPost.all })
+}
+
+/**
+ * Re-list the graph's attachment files (the Attachments library); called when
+ * the watcher reports an attachment appearing, changing or disappearing, and
+ * on every reconcile request.
+ */
+export function invalidateAttachmentFiles(): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.attachments.all })
 }
 
@@ -497,7 +404,9 @@ export function resetPdfInfo(): void {
   queryClient.removeQueries({ queryKey: queryKeys.pdf.all })
 }
 
-/** Re-read archived X posts; called after a capture pass writes archive JSON. */
+/**
+ * Re-read archived X posts; called after a capture pass writes archive JSON.
+ */
 export function invalidateXPostQueries(): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.xPost.all })
 }

@@ -5,10 +5,8 @@ import { errorMessage, notePrivate, splitFrontmatter } from '@reflect/core'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
-import { loadAttachmentCatalog } from '@/lib/attachment-catalog.ts'
-import { openAttachment } from '@/lib/open-attachment.ts'
-import { startOperation } from '@/lib/operations.ts'
 import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteEmbedBodyProps {
   readonly source: string
@@ -21,7 +19,9 @@ interface NoteEmbedBodyProps {
   readonly onLinkClick: LinkClickHandler
 }
 
-/** Only mounted after expansion; the source note's live privacy verdict also governs descendants. */
+/**
+ * Only mounted after expansion; the source note's live privacy verdict also governs descendants.
+ */
 export function NoteEmbedBody({
   source,
   sourcePath,
@@ -32,12 +32,14 @@ export function NoteEmbedBody({
   onWikiLinkClick,
   onLinkClick,
 }: NoteEmbedBodyProps): ReactElement {
+  const { attachments } = useCoreServices()
+  const { operations } = useAppServices()
   const { privateNote, pending } = usePrivateNoteState(sourcePath, {
     sessionEpoch: null,
     privateHeader: notePrivate(source),
   })
   const allowRemote = remoteEmbeds && !privateNote && !pending
-  const attachments = useNoteAttachments(generation, sourcePath)
+  const noteAttachments = useNoteAttachments(sourcePath)
   const beginLinkIntent = useLinkIntentGuard()
   const scope = JSON.stringify([generation, sourcePath])
   const currentScope = useRef(scope)
@@ -52,22 +54,22 @@ export function NoteEmbedBody({
         try {
           // A bare filename can resolve differently once the source folder's
           // catalog is available. Never open a guessed vault-root fallback.
-          await loadAttachmentCatalog(generation)
+          await attachments.loadCatalog()
           if (isStale() || currentScope.current !== scope) return
-          const path = attachments.resolveAttachmentPath(href)
+          const path = noteAttachments.resolveAttachmentPath(href)
           if (path === null) {
-            startOperation('Opening attachment').fail('Attachment not found.')
+            operations.fail('Opening attachment', 'Attachment not found.')
             return
           }
-          await openAttachment(path, generation)
+          await attachments.openOrReveal(path)
         } catch (cause) {
           if (!isStale() && currentScope.current === scope) {
-            startOperation('Opening attachment').fail(errorMessage(cause))
+            operations.fail('Opening attachment', errorMessage(cause))
           }
         }
       })()
     },
-    [generation, scope, attachments, beginLinkIntent],
+    [generation, scope, attachments, noteAttachments, operations, beginLinkIntent],
   )
   const onFileClick = useCallback<FileClickHandler>(
     ({ href, event }) => {
@@ -78,12 +80,12 @@ export function NoteEmbedBody({
   )
   const onSourceLinkClick = useCallback<LinkClickHandler>(
     (payload) => {
-      if (attachments.resolveAttachmentPath(payload.href) !== null) {
+      if (noteAttachments.resolveAttachmentPath(payload.href) !== null) {
         payload.event.preventDefault()
         openFile(payload.href)
       } else onLinkClick(payload)
     },
-    [attachments, openFile, onLinkClick],
+    [noteAttachments, openFile, onLinkClick],
   )
   const renderNested = useCallback<NoteEmbedRenderer>(
     (payload) => renderNoteEmbed(payload, allowRemote),
@@ -94,8 +96,8 @@ export function NoteEmbedBody({
       content={splitFrontmatter(source).body}
       sourcePath={sourcePath}
       headingOffset={headingOffset}
-      resolveImageUrl={attachments.resolveImageUrl}
-      resolveWikiEmbed={attachments.resolveWikiEmbed}
+      resolveImageUrl={noteAttachments.resolveImageUrl}
+      resolveWikiEmbed={noteAttachments.resolveWikiEmbed}
       renderNoteEmbed={renderNested}
       onWikiLinkClick={onWikiLinkClick}
       onLinkClick={onSourceLinkClick}

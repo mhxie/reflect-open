@@ -1,12 +1,17 @@
-import { createRef } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createRef, type ReactNode } from 'react'
+import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
+import type { EmbedMediaService } from '@reflect/core'
+import {
+  createTestCoreServices,
+  createTestPlatformService,
+  type TestPlatformOptions,
+} from '@reflect/core/testing'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { pasteFiles } from '@/test-utils/file-events.ts'
 import '@/test-utils/locator.ts'
 import { hover, unhover } from '@/test-utils/mouse.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import type { XPost } from '@post-embed/types'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 import { createPdfPagesView } from './pdf-pages-view.ts'
@@ -34,13 +39,40 @@ const resolveXPost = vi.hoisted(() =>
     ],
   })),
 )
+// The real resolver only lets `reflect-asset:` media through, which no test
+// browser can load.
 vi.mock('@/editor/use-x-post-resolver.ts', () => ({
   X_MEDIA_URL_PROTOCOLS: ['data:'],
   useXPostResolver: () => resolveXPost,
 }))
 
-const resolveYouTubeVideo = vi.hoisted(() => vi.fn(() => undefined))
-vi.mock('@/editor/youtube-video-resolver.ts', () => ({ resolveYouTubeVideo }))
+/**
+ * The YouTube lookups of the latest {@link render}. None answers: no test may
+ * ask YouTube, so a card renders only from a saved snapshot.
+ */
+let resolveYouTubeVideo: MockInstance<EmbedMediaService['resolveYouTubeVideo']>
+
+/**
+ * Render `ui` in the app, on a platform with the facts `platform`.
+ */
+async function render(ui: ReactNode, platform?: TestPlatformOptions) {
+  const app = createTestCoreServices({ platform: createTestPlatformService(platform) })
+  resolveYouTubeVideo = vi.spyOn(app.embedMedia, 'resolveYouTubeVideo').mockResolvedValue(undefined)
+  return await renderInApp(ui, { app })
+}
+
+const TOUCH_EDITOR: TestPlatformOptions = { surface: { touchEditor: true } }
+const MOBILE_APP: TestPlatformOptions = { surface: { mobileApp: true } }
+
+/**
+ * Wait until the lightbox's view transition has finished. The dialog is in
+ * (or out of) the DOM while the transition is still preparing, and React
+ * warns when a synchronous update, such as the unmount after a test, cancels
+ * a preparing transition.
+ */
+async function settleViewTransition(): Promise<void> {
+  await document.activeViewTransition?.finished
+}
 
 const pmRoot = page.locate('.ProseMirror')
 
@@ -67,6 +99,7 @@ const IMAGE_NOTE = 'A photo\n\n![Cat](assets/cat.png)'
 
 function renderEditor(
   openAsset: (path: string) => Promise<void> | void = vi.fn(async () => {}),
+  platform?: TestPlatformOptions,
 ): ReturnType<typeof render> {
   return render(
     <NoteEditor
@@ -76,6 +109,7 @@ function renderEditor(
       resolveAssetOpenPath={(src) => (src === 'assets/cat.png' ? 'assets/cat.png' : null)}
       openAsset={openAsset}
     />,
+    platform,
   )
 }
 
@@ -83,8 +117,8 @@ function firePointer(element: Element, type: string, init: PointerEventInit): vo
   element.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, ...init }))
 }
 
-afterEach(() => {
-  setPlatformSurface({ touchEditor: false, mobileApp: false })
+afterEach(async () => {
+  await settleViewTransition()
   vi.clearAllMocks()
 })
 
@@ -109,6 +143,10 @@ describe('NoteEditor wiki-link hover card', () => {
   })
 
   it('shows the host-rendered card body when a wiki link is hovered', async () => {
+    // Park the mouse first: the previous test left it where this wiki link
+    // renders, and a pointer that is already on a mark while the editor
+    // mounts reports its `mouseover` before the hover handlers are attached.
+    await unhover()
     await render(
       <NoteEditor
         privateNote={false}
@@ -149,6 +187,8 @@ describe('NoteEditor link preview', () => {
       title: 'Example Domain',
       description: 'An example description.',
     }))
+    // Park the mouse first, for the same reason as the wiki-link hover card.
+    await unhover()
     await render(
       <NoteEditor
         privateNote={false}
@@ -229,8 +269,10 @@ describe('NoteEditor touch-surface input hygiene', () => {
   })
 
   it('pins spellcheck off on the touch surface (iOS smart-punctuation gate)', async () => {
-    setPlatformSurface({ touchEditor: true })
-    await render(<NoteEditor privateNote={false} initialContent="Hello" spellCheck={true} />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="Hello" spellCheck={true} />,
+      TOUCH_EDITOR,
+    )
     await expect.element(pmRoot).toBeVisible()
     const editable = pmRoot.element()
     expect(editable).toBeInstanceOf(HTMLElement)
@@ -253,17 +295,18 @@ describe('NoteEditor touch-surface input hygiene', () => {
   })
 
   it('pins the block handle off on the touch surface', async () => {
-    setPlatformSurface({ touchEditor: true })
     await unhover()
-    await render(<NoteEditor privateNote={false} initialContent="Hello" blockHandle={true} />)
+    await render(
+      <NoteEditor privateNote={false} initialContent="Hello" blockHandle={true} />,
+      TOUCH_EDITOR,
+    )
     await hover(pmRoot.getByText('Hello'))
     await expect.element(pmRoot.getByText('Hello')).toBeVisible()
     await expectLocatorToHaveCount(page.getByTestId('block-handle'), 0)
   })
 
   it('sets explicit input traits on the contenteditable on the touch surface', async () => {
-    setPlatformSurface({ touchEditor: true })
-    await render(<NoteEditor privateNote={false} initialContent="Hello" />)
+    await render(<NoteEditor privateNote={false} initialContent="Hello" />, TOUCH_EDITOR)
     await expect.element(pmRoot).toHaveAttribute('autocapitalize', 'sentences')
     await expect.element(pmRoot).toHaveAttribute('autocorrect', 'on')
   })
@@ -330,8 +373,7 @@ describe('NoteEditor image lightbox', () => {
   })
 
   it('shows mobile close chrome inside iOS safe-area bounds', async () => {
-    setPlatformSurface({ mobileApp: true })
-    await renderEditor()
+    await renderEditor(undefined, MOBILE_APP)
 
     await pmRoot.getByAltText('Cat').click()
     const close = page.getByRole('button', { name: 'Close', exact: true })
@@ -348,8 +390,7 @@ describe('NoteEditor image lightbox', () => {
   })
 
   it('dismisses the mobile image lightbox with a downward drag', async () => {
-    setPlatformSurface({ mobileApp: true })
-    await renderEditor()
+    await renderEditor(undefined, MOBILE_APP)
 
     await pmRoot.getByAltText('Cat').click()
     const preview = page.getByRole('button', { name: 'Close image preview' })
@@ -427,6 +468,8 @@ describe('NoteEditor image lightbox', () => {
 
     await pmRoot.getByAltText('Cat').click()
     await expect.element(page.getByRole('dialog', { name: 'Image preview' })).toBeVisible()
+    // The rerender is a synchronous update too.
+    await settleViewTransition()
 
     await screen.rerender(
       <NoteEditor

@@ -1,27 +1,25 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { renderHook } from 'vitest-browser-react'
+import { describe, expect, it } from 'vitest'
+import { createTestCoreServices } from '@reflect/core/testing'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useSessionFlag } from './use-session-flag.ts'
-
-beforeEach(() => {
-  window.sessionStorage.clear()
-})
 
 describe('useSessionFlag', () => {
   it('falls back to the default until set, then persists for the session', async () => {
-    const first = await renderHook(() => useSessionFlag('reflect.test-flag', true))
+    const app = createTestCoreServices()
+    const first = await renderHookInApp(() => useSessionFlag('reflect.test-flag', true), { app })
     expect(first.result.current[0]).toBe(true)
 
     await first.act(() => first.result.current[1](false))
     expect(first.result.current[0]).toBe(false)
     await first.unmount()
 
-    const second = await renderHook(() => useSessionFlag('reflect.test-flag', true))
+    const second = await renderHookInApp(() => useSessionFlag('reflect.test-flag', true), { app })
     expect(second.result.current[0]).toBe(false)
     await second.unmount()
   })
 
   it('updates every mounted subscriber of the same key', async () => {
-    const view = await renderHook(() => ({
+    const view = await renderHookInApp(() => ({
       one: useSessionFlag('reflect.test-flag', true),
       other: useSessionFlag('reflect.test-flag', true),
       unrelated: useSessionFlag('reflect.other-flag', true),

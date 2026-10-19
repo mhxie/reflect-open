@@ -3,7 +3,7 @@
 //! meta-scrape fetch, and the native-messaging plumbing (pointer file +
 //! browser host manifests) that lets the `reflect-capture-host` sidecar spool
 //! captures while this app is closed. Policy — what gets written where, the
-//! privacy gate, enrichment — lives in `@reflect/core` (`actions/capture`);
+//! privacy gate, enrichment — lives in `@reflect/core` (`capture/`);
 //! this module only moves bytes.
 
 use std::fs;
@@ -552,7 +552,7 @@ const OEMBED_FETCH_MAX_BYTES: usize = 64 * 1024;
 
 /// Fetch an oEmbed endpoint's JSON answer for the capture meta scrape. Which
 /// URLs are oEmbed endpoints is policy and lives in `@reflect/core`
-/// (`actions/oembed`), behind the same privacy gate as `capture_meta_fetch`;
+/// (`embeds/oembed`), behind the same privacy gate as `capture_meta_fetch`;
 /// this side only bounds the transport, strictly tighter than the HTML
 /// fetch: https only, JSON only, a small byte cap, and no redirects (oEmbed
 /// endpoints answer directly, so a redirect is a failure).

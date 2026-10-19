@@ -1,23 +1,14 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import { setBridge } from '@reflect/core'
-import { renderHook } from 'vitest-browser-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { QueryClient } from '@tanstack/react-query'
+import {
+  createTestBackupService,
+  createTestCoreServices,
+  type TestBackupService,
+  type TestCoreServices,
+} from '@reflect/core/testing'
+import { act, actAsync } from '@/test-utils/act.ts'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useWikiTrustReport } from './use-wiki-trust-report.ts'
-
-const fileChanged = vi.hoisted(() => vi.fn())
-/** The sync context the provider hands out; null before backup starts. */
-const sync = vi.hoisted(() => ({ context: null as { fileChanged: () => void } | null }))
-vi.mock('@/providers/sync-provider.tsx', () => ({ useSyncContext: () => sync.context }))
-vi.mock('@/hooks/use-bridge-ready.ts', () => ({ useBridgeReady: () => true }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: { wikiTrustDisplay: 'off', wikiTrustReportPath: '.harness/wiki-trust.json' },
-  }),
-}))
 
 const VALID = JSON.stringify({
   format: 'reflect-wiki-trust',
@@ -27,86 +18,114 @@ const VALID = JSON.stringify({
   notes: {},
 })
 
+const SETTINGS = {
+  wikiTrustDisplay: 'off',
+  wikiTrustReportPath: '.harness/wiki-trust.json',
+} as const
+
 /** The report file: absent when null. */
 let file: { stamp: string; contents: string } | null
-let client: QueryClient
 /** Holds report reads until it resolves, when a test sets it. */
 let readGate: Promise<void> | null
 
-function wrapper({ children }: { children: ReactNode }): ReactNode {
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+/**
+ * Core services whose bridge answers `wiki_trust_report_read` from `file`, with
+ * `backup` as the graph's backup service (none when it is null).
+ */
+function appWith(backup: TestBackupService | null): TestCoreServices {
+  const app: TestCoreServices =
+    backup === null ? createTestCoreServices() : createTestCoreServices({ backup })
+  app.ipc.onCommand('wiki_trust_report_read', async (args) => {
+    await readGate
+    if (file === null) return null
+    const known = args['knownStamp']
+    return { stamp: file.stamp, contents: known === file.stamp ? null : file.contents }
+  })
+  return app
+}
+
+/**
+ * How often the hook told `backup` that a graph file changed.
+ */
+function changes(backup: TestBackupService): number {
+  return backup.calls().filter((call) => call.method === 'fileChanged').length
+}
+
+async function poll(client: QueryClient): Promise<void> {
+  await actAsync(async () => {
+    await client.refetchQueries({ queryKey: ['wiki-trust'] })
+  })
 }
 
 beforeEach(() => {
-  fileChanged.mockClear()
-  sync.context = { fileChanged }
   readGate = null
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   file = { stamp: '1:1', contents: VALID }
-  setBridge({
-    invoke: async (command, args) => {
-      await readGate
-      if (command !== 'wiki_trust_report_read' || file === null) return null
-      const known = (args as { knownStamp: string | null }).knownStamp
-      return { stamp: file.stamp, contents: known === file.stamp ? null : file.contents }
-    },
-    listen: async () => () => {},
-  })
 })
-
-async function poll(): Promise<void> {
-  await client.refetchQueries({ queryKey: ['wiki-trust'] })
-}
 
 describe('useWikiTrustReport and backup', () => {
   it('tells backup once per new version or deletion, never for an unchanged file', async () => {
-    const { result } = await renderHook(() => useWikiTrustReport(true), { wrapper })
+    const backup = createTestBackupService()
+    const { result, queryClient } = await renderHookInApp(() => useWikiTrustReport(true), {
+      app: appWith(backup),
+      settings: SETTINGS,
+    })
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
     // The first version seen may be one backup has not committed.
-    expect(fileChanged).toHaveBeenCalledTimes(1)
-    await poll()
-    expect(fileChanged).toHaveBeenCalledTimes(1)
+    expect(changes(backup)).toBe(1)
+    await poll(queryClient)
+    expect(changes(backup)).toBe(1)
 
     file = { stamp: '2:2', contents: VALID }
-    await poll()
-    expect(fileChanged).toHaveBeenCalledTimes(2)
+    await poll(queryClient)
+    expect(changes(backup)).toBe(2)
 
     // A rejected report counts once, not on every poll.
     file = { stamp: '3:3', contents: '{' }
-    await poll()
-    await poll()
+    await poll(queryClient)
+    await poll(queryClient)
     await vi.waitFor(() => expect(result.current.status).toBe('invalid'))
-    expect(fileChanged).toHaveBeenCalledTimes(3)
+    expect(changes(backup)).toBe(3)
 
     file = null
-    await poll()
-    await poll()
+    await poll(queryClient)
+    await poll(queryClient)
     await vi.waitFor(() => expect(result.current.status).toBe('missing'))
-    expect(fileChanged).toHaveBeenCalledTimes(4)
+    expect(changes(backup)).toBe(4)
   })
 })
 
 describe('useWikiTrustReport and a backup that starts mid-read', () => {
   it('tells the backup running when the report arrives', async () => {
-    sync.context = null
+    const backup = createTestBackupService()
+    const app = appWith(backup)
     let release = (): void => {}
     readGate = new Promise((resolve) => (release = resolve))
-    const { result, rerender } = await renderHook(() => useWikiTrustReport(true), { wrapper })
-    sync.context = { fileChanged }
-    await rerender()
+    // The graph opens without its services, so no backup runs yet.
+    const { result } = await renderHookInApp(() => useWikiTrustReport(true), {
+      app,
+      settings: SETTINGS,
+      graphState: { services: null },
+    })
+    await vi.waitFor(() =>
+      expect(app.ipc.calls().map((call) => call.command)).toContain('wiki_trust_report_read'),
+    )
+    // The graph's services (with its backup) start while the read is out.
+    act(() => {
+      app.graphSession.setGraph({})
+    })
     release()
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
-    expect(fileChanged).toHaveBeenCalledTimes(1)
+    expect(changes(backup)).toBe(1)
   })
 })
 
 describe('useWikiTrustReport with an idle observer', () => {
   it('still refetches on window focus for the active one', async () => {
     // Display is off, so the first observer idles; the second always watches.
-    const { result } = await renderHook(
+    const { result } = await renderHookInApp(
       // The idle observer renders last, so its options are the query's latest.
       () => ({ watching: useWikiTrustReport(true), idle: useWikiTrustReport() }),
-      { wrapper },
+      { app: appWith(null), settings: SETTINGS },
     )
     await vi.waitFor(() => expect(result.current.watching.status).toBe('ready'))
     expect(result.current.idle.status).toBe('off')

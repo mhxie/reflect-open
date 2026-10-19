@@ -1,4 +1,8 @@
-import { isLocalOnlyPath, isLocalOnlyReadOnlyPath } from '../graph/local-only.ts'
+import {
+  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
+  type LocalOnlyFolders,
+} from '../graph/local-only.ts'
 import { patchNoteWith } from '../graph/patch-note.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
@@ -46,6 +50,8 @@ export interface TitleRenameRewriteOptions {
   path: string
   from: string
   to: string
+  /** The graph's local-only folders, which bound the rewrite (see below). */
+  localOnly: LocalOnlyFolders
   io: RenameIo
   onProgress?: (done: number, total: number) => void
 }
@@ -99,7 +105,7 @@ export interface TitleRenameRewriteResult {
 export async function rewriteLinksForTitleChange(
   options: TitleRenameRewriteOptions,
 ): Promise<TitleRenameRewriteResult> {
-  const { path, from, to, io, onProgress } = options
+  const { path, from, to, localOnly, io, onProgress } = options
   // Links carry the linkable form of a title, not the raw title — for a rich
   // title (`Meeting with [[Ada]]`) the two differ, and only the linkable form
   // ever appears inside `[[…]]`. Rewrite in that space.
@@ -192,15 +198,15 @@ export async function rewriteLinksForTitleChange(
   // stay as they are (the old-title alias keeps them resolving), and that is
   // not a failure to report.
   const candidates = [...new Set([...titleSources, ...backlinkSources])]
-    .filter((source) => source !== path && !isLocalOnlyReadOnlyPath(source))
+    .filter((source) => source !== path && !isLocalOnlyReadOnlyPath(localOnly, source))
     .sort()
   // A local-only note's new title stays out of backed-up notes.
-  const renamedLocalOnly = isLocalOnlyPath(path)
+  const renamedLocalOnly = isLocalOnlyPath(localOnly, path)
   const keptInBackup = renamedLocalOnly
-    ? candidates.filter((source) => !isLocalOnlyPath(source))
+    ? candidates.filter((source) => !isLocalOnlyPath(localOnly, source))
     : []
   const sources = renamedLocalOnly
-    ? candidates.filter((source) => isLocalOnlyPath(source))
+    ? candidates.filter((source) => isLocalOnlyPath(localOnly, source))
     : candidates
   const repoint =
     collision || destinationBlocked ? null : { fromKey: foldKey(fromTarget), to: toTarget }
@@ -294,6 +300,7 @@ export async function rewritePathLinksForMove(
   fromPath: string,
   toPath: string,
   io: PathLinkRewriteIo,
+  localOnly: LocalOnlyFolders,
 ): Promise<PathLinkRewriteResult> {
   const to = toPath.replace(/\.md$/, '')
   // The destination is a `slugForTitle` product today (lowercase word
@@ -307,7 +314,7 @@ export async function rewritePathLinksForMove(
   // links dangle like any unwritable source's, without being read or
   // reported. An editable folder's notes are retargeted like any other.
   const sources = (await io.pathLinkSources(fromPathKey))
-    .filter((source) => source !== fromPath && !isLocalOnlyReadOnlyPath(source))
+    .filter((source) => source !== fromPath && !isLocalOnlyReadOnlyPath(localOnly, source))
     .sort()
   const rewritten: string[] = []
   const failed: string[] = []

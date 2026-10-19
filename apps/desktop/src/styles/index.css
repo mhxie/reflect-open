@@ -17,7 +17,7 @@ Cascade layer order, low to high priority.
 @import '@meowdown/react/style.css';
 
 /* Tailwind v4 dark variant keyed to the design-system `.dark` scope set by the
-   ThemeProvider on <html>. */
+   ThemeEffect on <html>. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Controls that sit inside the overlaid macOS title-bar drag strip must share

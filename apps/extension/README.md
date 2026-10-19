@@ -20,7 +20,7 @@ before store review finishes.
 
 popup → `chrome.storage` queue → background `sendNativeMessage` →
 `reflect-capture-host` (Tauri sidecar, registered by the desktop app on every
-launch) → capture inbox → desktop drain (`@reflect/core` `actions/capture`):
+launch) → capture inbox → desktop drain (`@reflect/core` `CaptureService`):
 raw note + daily `## [[Links]]` entry now (resolving or creating that category
 note), meta-scrape + BYOK AI title + description async. The extension stores no
 keys and makes no AI or network calls; its only honest status is **queued** — it

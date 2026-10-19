@@ -1,36 +1,37 @@
-import { APICallError } from '@reflect/modules/ai'
+import { APICallError, type LanguageModel } from '@reflect/modules/ai'
 import { MockLanguageModelV4 } from '@reflect/modules/ai/test'
 import type { LanguageModelV4CallOptions, LanguageModelV4Usage } from '@ai-sdk/provider'
-import { describe, expect, it, vi } from 'vitest'
-import { cloudSafeNoteContent } from '../privacy/checkers.ts'
+import { describe, expect, it } from 'vitest'
+import { NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
+import { cloudSafeNoteContent } from '../privacy/privacy-service.ts'
 import {
+  cloudTarget,
   modelTarget,
-  verifyModelTarget,
+  type ModelTarget,
   type VerifiedOnDeviceTarget,
 } from '../privacy/on-device.ts'
-import type { AiProviderConfig, OnDeviceServerKind } from '../settings/schema.ts'
-import { testTargetModel } from '../testing/target-model.ts'
+import type { HostedAiProviderConfig, OnDeviceServerKind } from '../settings/schema.ts'
+import { createTestLanguageModelService, createTestOnDeviceModelService } from '../testing/ai.ts'
+import type { TargetModel } from './language-model-service.ts'
 import { normalizedNoteSummary, summarizeNote } from './summarize-note.ts'
-
-vi.mock('../privacy/on-device-verification', () => ({ verifyOnDeviceServer: async () => 'ok' }))
 
 const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 }
 
-const CONFIG: AiProviderConfig = {
+const CONFIG: HostedAiProviderConfig = {
   id: 'cfg-anthropic',
   provider: 'anthropic',
   model: 'claude-haiku-4-5',
   keyHint: 'wxyz1',
 }
 
-const CLOUD = modelTarget({ ...CONFIG, provider: 'anthropic' })
+const CLOUD = cloudTarget(CONFIG)
 
 async function localTarget(server: OnDeviceServerKind): Promise<VerifiedOnDeviceTarget> {
   const baseUrl = 'http://localhost:11434/v1'
-  const target = await verifyModelTarget(
+  const target = await createTestOnDeviceModelService().verify(
     modelTarget({
       id: 'cfg-local',
       provider: 'openai-compatible',
@@ -47,8 +48,16 @@ async function localTarget(server: OnDeviceServerKind): Promise<VerifiedOnDevice
   return target
 }
 
+/** `model` bound to `target`, as the language model service binds it. */
+async function bound<TTarget extends ModelTarget>(
+  target: TTarget,
+  model: LanguageModel,
+): Promise<TargetModel<TTarget>> {
+  return await createTestLanguageModelService(model).createFor(target, '')
+}
+
 function note(content: string): ReturnType<typeof cloudSafeNoteContent> {
-  return cloudSafeNoteContent({
+  return cloudSafeNoteContent(NO_LOCAL_ONLY_FOLDERS, {
     path: 'notes/plan.md',
     isPrivate: false,
     title: 'Plan',
@@ -107,7 +116,7 @@ describe('normalizedNoteSummary', () => {
 describe('summarizeNote', () => {
   it('sends the title and body and returns the normalized answer', async () => {
     const calls: LanguageModelV4CallOptions[] = []
-    const model = testTargetModel(CLOUD, answering('Plans the beta launch.', calls))
+    const model = await bound(CLOUD, answering('Plans the beta launch.', calls))
     await expect(summarizeNote({ model, note: note('Ship it in May.') })).resolves.toBe(
       'Plans the beta launch.',
     )
@@ -122,18 +131,18 @@ describe('summarizeNote', () => {
     const otherServer: LanguageModelV4CallOptions[] = []
     const cloud: LanguageModelV4CallOptions[] = []
     await summarizeNote({
-      model: testTargetModel(await localTarget('ollama'), answering('Plans it.', ollama)),
+      model: await bound(await localTarget('ollama'), answering('Plans it.', ollama)),
       note: source,
     })
     await summarizeNote({
-      model: testTargetModel(
+      model: await bound(
         await localTarget('openai-compatible'),
         answering('Plans it.', otherServer),
       ),
       note: source,
     })
     await summarizeNote({
-      model: testTargetModel(CLOUD, answering('Plans it.', cloud)),
+      model: await bound(CLOUD, answering('Plans it.', cloud)),
       note: note('Ship it in May.'),
     })
 
@@ -143,16 +152,16 @@ describe('summarizeNote', () => {
   })
 
   it('resolves null when the provider refuses the note', async () => {
-    const model = testTargetModel(CLOUD, throwing(apiError(400)))
+    const model = await bound(CLOUD, throwing(apiError(400)))
     await expect(summarizeNote({ model, note: note('x') })).resolves.toBeNull()
   })
 
   it('throws retryable errors for credentials and outages', async () => {
     await expect(
-      summarizeNote({ model: testTargetModel(CLOUD, throwing(apiError(401))), note: note('x') }),
+      summarizeNote({ model: await bound(CLOUD, throwing(apiError(401))), note: note('x') }),
     ).rejects.toMatchObject({ kind: 'auth' })
     await expect(
-      summarizeNote({ model: testTargetModel(CLOUD, throwing(apiError(503))), note: note('x') }),
+      summarizeNote({ model: await bound(CLOUD, throwing(apiError(503))), note: note('x') }),
     ).rejects.toMatchObject({ kind: 'network' })
   })
 })

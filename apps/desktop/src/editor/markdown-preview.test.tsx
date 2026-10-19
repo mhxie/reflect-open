@@ -1,23 +1,19 @@
-import { render } from 'vitest-browser-react'
 import { describe, expect, it, vi } from 'vitest'
-import { RouterProvider } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { MarkdownPreview } from './markdown-preview.tsx'
 
-// One graph object, as the app holds it, so render identities stay stable.
-const graphState = vi.hoisted(() => ({ graph: { root: '/g', name: 'g', generation: 7 } }))
-vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => graphState }))
+const GRAPH = { graph: { root: '/g', name: 'g', generation: 7 } }
 
 describe('MarkdownPreview wiki-link chips', () => {
   it('labels chips through the host resolver and reports the full target', async () => {
     const onWikiLinkClick = vi.fn()
-    const view = await render(
-      <RouterProvider>
-        <MarkdownPreview
-          content={'see [[Tim MacCaw // Dad|Dad]] and [[Tim MacCaw // Dad]]'}
-          sourcePath={null}
-          onWikiLinkClick={onWikiLinkClick}
-        />
-      </RouterProvider>,
+    const view = await renderInApp(
+      <MarkdownPreview
+        content={'see [[Tim MacCaw // Dad|Dad]] and [[Tim MacCaw // Dad]]'}
+        sourcePath={null}
+        onWikiLinkClick={onWikiLinkClick}
+      />,
+      GRAPH,
     )
     const chips = view.getByTestId('wikilink')
     await expect.element(chips.first()).toMatchTextContent(/^Dad$/)
@@ -27,9 +23,7 @@ describe('MarkdownPreview wiki-link chips', () => {
       target: 'Tim MacCaw // Dad',
       openInNewWindow: false,
     })
-    await view.unmount()
   })
-
   it('renders inline and legacy citations with the same reference appearance and canonical navigation', async () => {
     const onWikiLinkClick = vi.fn()
     const content = [
@@ -42,9 +36,9 @@ describe('MarkdownPreview wiki-link chips', () => {
       '@pass: reviewer | status: verified | at: 2020-01-03',
       '```',
     ].join('\n')
-    const view = await render(
+    const view = await renderInApp(
       <MarkdownPreview sourcePath={null} content={content} onWikiLinkClick={onWikiLinkClick} />,
-      { wrapper: RouterProvider },
+      GRAPH,
     )
     await vi.waitFor(() =>
       expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(3),
@@ -73,27 +67,23 @@ describe('MarkdownPreview wiki-link chips', () => {
       .element(view.getByText('reviewer: verified · 2020-01-03', { exact: true }))
       .toBeVisible()
     expect(view.container.querySelector('[data-language="anchors"]')).toBeNull()
-    await view.unmount()
   })
 
   it('keeps mixed prose and malformed legacy citations visible', async () => {
     const content =
       '@cite: [[Source]] | valid_at: 2020-01-02\nAn important qualification.\n\n@cite: [[Other]] | valid_at: unknown'
-    const view = await render(<MarkdownPreview sourcePath={null} content={content} />, {
-      wrapper: RouterProvider,
-    })
+    const view = await renderInApp(<MarkdownPreview sourcePath={null} content={content} />, GRAPH)
     expect(view.container.querySelector('[data-wiki-anchors]')).toBeNull()
     expect(view.container.textContent).toContain('An important qualification.')
     expect(view.container.textContent).toContain('valid_at: unknown')
-    await view.unmount()
   })
 
   it('groups matched source links with evidence in previews and updates when the fence changes', async () => {
     const prose = 'A supported claim. [Author, p2](https://example.org/paper).'
     const fence = '```anchors\n@anchor: url:https://example.org/paper | valid_at: 2020-01-02\n```'
-    const view = await render(
+    const view = await renderInApp(
       <MarkdownPreview sourcePath={null} content={`${prose}\n\n${fence}`} />,
-      { wrapper: RouterProvider },
+      GRAPH,
     )
     await vi.waitFor(() =>
       expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(1),
@@ -113,7 +103,6 @@ describe('MarkdownPreview wiki-link chips', () => {
     await vi.waitFor(() =>
       expect(view.container.querySelector('p')?.textContent).toContain('Author, p2'),
     )
-    await view.unmount()
   })
 
   it('renumbers a distant citation when an earlier one changes', async () => {
@@ -136,18 +125,18 @@ describe('MarkdownPreview wiki-link chips', () => {
       [...view.container.querySelectorAll('p')]
         .find((paragraph) => paragraph.textContent.startsWith('Later'))
         ?.querySelector('.wiki-article-reference')?.textContent
-    const view = await render(<MarkdownPreview sourcePath={null} content={article('one')} />, {
-      wrapper: RouterProvider,
-    })
+    const view = await renderInApp(
+      <MarkdownPreview sourcePath={null} content={article('one')} />,
+      GRAPH,
+    )
     await vi.waitFor(() => expect(later()).toBe('[2]'))
     // Now the earlier claim cites `two` first, so the later citation is [1].
     await view.rerender(<MarkdownPreview sourcePath={null} content={article('two')} />)
     await vi.waitFor(() => expect(later()).toBe('[1]'))
-    await view.unmount()
   })
 
   it('keeps passive evidence previews free of focusable controls', async () => {
-    const view = await render(
+    const view = await renderInApp(
       <MarkdownPreview
         sourcePath={null}
         interactive={false}
@@ -155,13 +144,12 @@ describe('MarkdownPreview wiki-link chips', () => {
           '@cite: [[Source]] | valid_at: 2020-01-02\n\n```anchors\n@anchor: arxiv:2501.13956 | valid_at: 2020-01-02\n```'
         }
       />,
-      { wrapper: RouterProvider },
+      GRAPH,
     )
     await vi.waitFor(() =>
       expect(view.container.querySelectorAll('.meowdown-reference')).toHaveLength(2),
     )
     expect(view.container.querySelector('a, button, summary, [tabindex]')).toBeNull()
-    await view.unmount()
   })
 })
 
@@ -188,13 +176,13 @@ describe('MarkdownPreview saved embed snapshots', () => {
   const CONTENT = `![](https://www.youtube.com/watch?v=dQw4w9WgXcQ)<!-- ${SNAPSHOT} -->`
 
   it('shows embeds as their source URLs when remote embeds are off', async () => {
-    const view = await render(
+    const view = await renderInApp(
       <MarkdownPreview
         sourcePath={null}
         content={`${CONTENT}\n\n![](https://x.com/jack/status/20)\n\n![](https://example.com/a.png)`}
         remoteEmbeds={false}
       />,
-      { wrapper: RouterProvider },
+      GRAPH,
     )
     // Meowdown's remoteMedia is off: no card renders, from the snapshot or a
     // resolver, so the thumbnail never loads; nor does the remote image.
@@ -206,16 +194,12 @@ describe('MarkdownPreview saved embed snapshots', () => {
     expect(view.container.querySelector('[data-meowdown-embed]')).toBeNull()
     expect(showsImage(view.container, THUMBNAIL)).toBe(false)
     expect(view.container.querySelector('img[src^="https:"]')).toBeNull()
-    await view.unmount()
   })
 
   it('renders the snapshot card when remote embeds are on (control)', async () => {
-    const view = await render(<MarkdownPreview sourcePath={null} content={CONTENT} />, {
-      wrapper: RouterProvider,
-    })
+    const view = await renderInApp(<MarkdownPreview sourcePath={null} content={CONTENT} />, GRAPH)
     await vi.waitFor(() => {
       expect(showsImage(view.container, THUMBNAIL)).toBe(true)
     })
-    await view.unmount()
   })
 })

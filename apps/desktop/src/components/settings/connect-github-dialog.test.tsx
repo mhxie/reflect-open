@@ -1,35 +1,38 @@
-import { render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setBridge } from '@reflect/core'
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import type { ConnectExistingResult } from '@/lib/backup-controller.ts'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { createSystemClock, type BackupService, type ConnectExistingResult } from '@reflect/core'
+import { createTestOpenerService, type TestOpenerService } from '@reflect/app/testing'
+import {
+  createTestCoreServices,
+  createTestHttpService,
+  createTestPlatformService,
+  createTestBackupService,
+  createTestSecretStoreService,
+} from '@reflect/core/testing'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { ConnectGithubDialog } from './connect-github-dialog.tsx'
 
-const sync = vi.hoisted(() => ({
-  connectNewRepo: vi.fn(async (): Promise<'connected' | 'manualCreateNeeded'> => 'connected'),
-  connectExistingRepo: vi.fn(async (): Promise<ConnectExistingResult> => 'connected'),
-}))
-vi.mock('@/providers/sync-provider.tsx', () => ({ useSync: () => sync }))
-vi.mock('@tauri-apps/plugin-http', () => ({ fetch: vi.fn() }))
-vi.mock('@/lib/platform.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/platform.ts')>()),
-  isNativeShell: () => true,
-}))
-vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
-const httpFetch = vi.mocked(tauriFetch)
-const openedUrls = vi.mocked(openUrl)
-
-/** A keychain holding the given credential; GET /user accepting it makes the auth step skip itself. */
-function storeCredential(auth: Record<string, unknown>): void {
-  setBridge({
-    invoke: async (command) => (command === 'secret_get' ? JSON.stringify(auth) : null),
-    listen: async () => () => {},
-  })
+// The connect actions of the graph's backup service, scripted per test.
+const sync = {
+  connectNewRepo: vi.fn<BackupService['connectNewRepo']>(),
+  connectExistingRepo: vi.fn<BackupService['connectExistingRepo']>(),
 }
 
-/** A device-flow (GitHub App) credential with a comfortably unexpired token. */
+let opener: TestOpenerService
+let openedUrls: MockInstance<(url: string) => Promise<void>>
+// The credential in the keychain of the next `renderWizard`.
+let credential: Record<string, unknown>
+
+/**
+ * A keychain holding the given credential; GET /user accepting it makes the auth step skip itself.
+ */
+function storeCredential(auth: Record<string, unknown>): void {
+  credential = auth
+}
+
+/**
+ * A device-flow (GitHub App) credential with a comfortably unexpired token.
+ */
 function appCredential(): Record<string, unknown> {
   return {
     kind: 'app',
@@ -44,30 +47,39 @@ beforeEach(() => {
   // skip itself, so a Continue lands straight on the finish step. PAT by
   // default; app-credential tests re-store before rendering.
   storeCredential({ kind: 'pat', token: 'ghp_abc' })
-  // A fresh Response per call — bodies are single-use, and a wizard run can
-  // pass through the auth step more than once.
-  httpFetch.mockImplementation(
-    async () =>
-      new Response(JSON.stringify({ login: 'alex' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-  )
   sync.connectNewRepo.mockResolvedValue('connected')
   sync.connectExistingRepo.mockResolvedValue('connected')
-  openedUrls.mockResolvedValue(undefined)
+  opener = createTestOpenerService()
+  openedUrls = vi.spyOn(opener, 'openUrl')
 })
 
 afterEach(() => {
-  setBridge(null)
   // Reset (not just clear): a failed test must not leak queued one-shot
   // implementations into its neighbors. Defaults are re-applied above.
   vi.resetAllMocks()
 })
 
 async function renderWizard(onClose = vi.fn()): Promise<ReturnType<typeof vi.fn>> {
-  await render(
+  const backup = createTestBackupService({ state: { phase: 'disconnected' } })
+  backup.onConnectNewRepo(sync.connectNewRepo)
+  backup.onConnectExistingRepo(sync.connectExistingRepo)
+  const app = createTestCoreServices({
+    backup,
+    // The wizard polls on the clock: real time, so `pollIntervalMs` elapses.
+    clock: createSystemClock(),
+    platform: createTestPlatformService({ isMacosDesktop: false, hasMacosTitleBarOverlay: false }),
+    secretStore: createTestSecretStoreService({ 'github-auth': JSON.stringify(credential) }),
+    http: createTestHttpService([
+      {
+        method: 'GET',
+        url: 'https://api.github.com/user',
+        reply: { status: 200, json: { login: 'alex' } },
+      },
+    ]),
+  })
+  await renderInApp(
     <ConnectGithubDialog suggestedRepoName="g-backup" onClose={onClose} pollIntervalMs={15} />,
+    { app, appServices: { opener } },
   )
   return onClose
 }

@@ -1,8 +1,8 @@
 import type { ReactElement } from 'react'
-import { open } from '@tauri-apps/plugin-dialog'
 import { FolderOpen } from 'lucide-react'
 import { RECORDING_TRANSCRIPTS_DIR } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
+import { useAppServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 
 interface RecordingsFolderFieldProps {
@@ -20,14 +20,14 @@ export function RecordingsFolderField({
   defaultFolder,
   onChange,
 }: RecordingsFolderFieldProps): ReactElement {
+  const { dialog } = useAppServices()
+
   async function choose(): Promise<void> {
-    const result = await open({
-      multiple: false,
-      directory: true,
+    const result = await dialog.pickFolder({
       title: 'Choose where recordings are kept',
       defaultPath: folder || defaultFolder,
     })
-    if (typeof result === 'string') {
+    if (result !== null) {
       onChange(result)
     }
   }

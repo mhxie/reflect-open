@@ -65,7 +65,7 @@ touches a Reflect server, because there isn't one.
   on-device engine is fully offline: its transcripts skip the text-model pass
   and are titled from their own first words.
   The reconciler
-  (`apps/desktop/src/lib/transcription-reconciler.ts`) writes a dedicated
+  (`packages/core/src/audio/audio-memo-transcription-service.ts`) writes a dedicated
   transcript note, resolves or creates the `Audio memos` category note, and
   backlinks both from the daily note under `## [[Audio memos]]`. Pending memos
   retry in the background.

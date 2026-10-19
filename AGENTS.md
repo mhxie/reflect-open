@@ -97,9 +97,9 @@ Desktop JS tests are split into Vitest projects (details in
   logic test that drives the DOM is named `.test.tsx` so it lands in the
   browser project.
 - `console.warn` / `console.error` fail tests (`vitest-fail-on-console`).
-  Pre-existing noise is allowlisted in
-  `apps/desktop/src/test-utils/allowed-console.ts`; PRs may only shrink that
-  list, and a new entry needs a stated reason.
+  This covers the core, app and desktop projects. The allowlist in
+  `apps/desktop/src/test-utils/allowed-console.ts` holds one browser artifact;
+  a new entry needs a measured reason in that file.
 
 Rust tests (the Cargo workspace: desktop shell, `reflect` CLI, index-schema crate):
 
@@ -130,8 +130,9 @@ crates form a single **Cargo workspace** rooted at the repository root.
 reflect-open/
 ├── apps/
 │   ├── desktop/            # @reflect/desktop — the Tauri 2 app
-│   │   ├── src/            # React frontend (main.tsx, app.tsx, components/, editor/,
-│   │   │                   #   hooks/, providers/, routing/); calls Rust via @tauri-apps/api
+│   │   ├── src/            # React frontend (main.tsx, boot.ts, components/, editor/,
+│   │   │                   #   hooks/, providers/, routing/, services/); reaches Rust
+│   │   │                   #   only through @reflect/core services
 │   │   ├── src-tauri/      # Tauri native shell (Rust crate `reflect-open`)
 │   │   │   ├── src/        # lib.rs (#[tauri::command] handlers, plugins), db/, fs/,
 │   │   │   │               #   watcher.rs, embed.rs, recents.rs, secrets.rs, settings.rs
@@ -148,8 +149,11 @@ reflect-open/
 │   ├── extension/          # @reflect/extension — Chrome MV3 capture extension (WXT; see its README)
 │   └── native-host/        # `reflect-capture-host` — native-messaging spooler sidecar (Plan 11)
 ├── packages/
-│   ├── core/               # @reflect/core — ALL TS business logic (markdown/, indexing/,
-│   │                       #   graph/, embeddings/, ai/, settings/, ipc/)
+│   ├── core/               # @reflect/core — ALL TS business logic as services (app/,
+│   │                       #   graph/, documents/, indexing/, markdown/, embeddings/,
+│   │                       #   ai/, sync/, settings/, ipc/, testing/)
+│   ├── app/                # @reflect/app: the app layer (windows, routes, commands,
+│   │                       #   menus, update, theme, boot flows); no React, no Tauri
 │   └── db/                 # @reflect/db — generated Kysely schema + the IPC dialect
 ├── crates/
 │   └── index-schema/       # Shared SQLite migrations for <graph>/.reflect/index.sqlite
@@ -179,10 +183,38 @@ All UI work should follow the Reflect design system documented in [`design-syste
 - `design-system/guidelines/` — color, type, spacing, and brand specimens
 - `design-system/styles.css` — global entry point that imports all tokens
 
-**Frontend ↔ Rust bridge**
+**Services (how TypeScript code is wired)**
+
+Read [docs/plans/architecture-conventions.md](docs/plans/architecture-conventions.md) §3
+and [docs/contributing/services.md](docs/contributing/services.md) before adding logic.
+The short version:
+
+- Three packages: `@reflect/core` (business logic, platform primitive interfaces),
+  `@reflect/app` (windows, routes, commands, menus, update, theme, boot flows),
+  `apps/desktop` (React, Tauri adapters). Lint keeps React, TanStack and Tauri out of
+  both packages. A service is `createXxxService(deps)` in
+  `<package>/src/<domain>/<name>-service.ts`; it gets other services only through `deps`.
+- Two roots: `createCoreServices(adapters: CoreAdapters)` and
+  `createAppServices(core, host: AppHost)`. `apps/desktop/src/boot.ts` builds the
+  primitives, the host, core, then app. Core's ports (`progress`, `activity` in
+  `packages/core/src/ports/activity-port.ts`, `progress-port.ts`, and `role`) are implemented by app services.
+- React reads `useCoreServices()` and `useAppServices()`; commands read
+  `CommandContext.services` and `.app`. Never import from `boot.ts` outside
+  `main.tsx` and the platform roots.
+- Core, app, or desktop? A product rule every client needs goes in core; windows,
+  routes, menus and pixels go in app; React goes in desktop. See
+  [docs/contributing/services.md](docs/contributing/services.md).
+- Rust-boundary wrappers (`NoteFileService`) take an explicit `generation`. User-facing
+  services read the `GraphSession` once at method entry and pass its generations down.
+- Tests build services over `@reflect/core/testing` and `@reflect/app/testing`
+  (`createTestCoreServices()`, `createTestAppServices(core)`); desktop tests render with
+  `renderInApp`. `vi.mock` only for the allowlist in `eslint.config.js`. See
+  [docs/contributing/testing.md](docs/contributing/testing.md).
+
+**Frontend ↔ Rust**
 
 - Define commands in `apps/desktop/src-tauri/src/` (registered in `lib.rs`'s `invoke_handler`) with `#[tauri::command]`.
-- Call commands from the frontend with `invoke` from `@tauri-apps/api/core`.
+- Bind each command as a method of the core service that owns the domain, through `ipc.call(command, args, zodSchema)`. Components never call `invoke`. See [docs/contributing/adding-a-command.md](docs/contributing/adding-a-command.md).
 - Add Tauri plugins in `apps/desktop/src-tauri/Cargo.toml` (Rust) and grant permissions in `apps/desktop/src-tauri/capabilities/`.
 
 **Common commands** (run from the repo root)
@@ -190,7 +222,7 @@ All UI work should follow the Reflect design system documented in [`design-syste
 ```bash
 pnpm dev              # turbo dev across packages (Vite on http://localhost:1420)
                       #   add ?platform=ios to the URL to preview the MOBILE tree in a
-                      #   plain browser (dev-only in-memory bridge + seeded demo graph)
+                      #   plain browser (dev-only in-memory IPC backend + seeded demo graph)
 pnpm tauri dev        # Full Tauri app with hot reload (stages the CLI sidecar first)
 pnpm tauri:dev        # `pnpm tauri dev` with the dev overlay → the "Reflect Dev" flavor (green icon, own identifier; coexists with Reflect / Reflect Beta)
 pnpm build            # turbo build pipeline → apps/desktop/dist/
@@ -259,7 +291,8 @@ document behavior, and the existing local patterns over new abstractions.
 - Prefer function declarations for named functions and arrow functions for
   callbacks.
 - Prefer async/await over Promise chains.
-- Prefer functional patterns over classes.
+- A service is a class behind an interface and a factory; everything else prefers
+  functions over classes.
 
 ## Data Boundaries
 

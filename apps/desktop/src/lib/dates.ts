@@ -1,70 +1,30 @@
-import { format, isSameDay, isSameWeek, parse } from 'date-fns'
-import type { DateFormat, TimeFormat } from '@reflect/core'
-import { addDaysIso, isIsoDate } from '@reflect/utils'
+import { format, isSameDay, isSameWeek } from 'date-fns'
+import {
+  formatDayLabel,
+  formatMonthDay,
+  formatShortDate,
+  parseIsoDate,
+  todayIso,
+  type DateFormat,
+  type TimeFormat,
+} from '@reflect/core'
 
 /**
  * The app's date layer (Plan 06). Daily notes are keyed by **local** calendar
  * dates as ISO `YYYY-MM-DD` strings — "today" follows the user's clock. Pure
  * calendar arithmetic (`addDaysIso`, `isIsoDate`) lives in `@reflect/utils` and
- * is re-exported here; this module owns the date-fns-backed *display* formatting
- * and the local clock. Nothing else in the app may compute dates by hand.
+ * the local clock helpers (`todayIso`, `parseIsoDate`) live in `@reflect/core`;
+ * both are re-exported here. This module owns the date-fns-backed *display*
+ * formatting. Nothing else in the app may compute dates by hand.
  */
 
 // Pure calendar math is shared with the indexing layer — one implementation.
-export { addDaysIso, isIsoDate }
+export { addDaysIso, isIsoDate } from '@reflect/utils'
+export { parseIsoDate, todayIso }
+// The ISO-date labels are shared with the core services that build menu rows.
+export { formatDayLabel, formatMonthDay, formatShortDate }
 
 const ISO_DATE_FORMAT = 'yyyy-MM-dd'
-
-/** Parse an ISO `YYYY-MM-DD` string as a local Date (the one parsing path). */
-export function parseIsoDate(date: string): Date {
-  return parse(date, ISO_DATE_FORMAT, new Date())
-}
-
-/** Today's local calendar date as `YYYY-MM-DD`. */
-export function todayIso(): string {
-  return format(new Date(), ISO_DATE_FORMAT)
-}
-
-/**
- * Render an ISO date with the date-fns pattern of the chosen format; `iso`
- * renders the date itself. A date-shaped string that names no real day (a
- * file called `daily/2026-13-45.md`) also renders as itself.
- */
-function formatIsoDate(
-  date: string,
-  dateFormat: DateFormat,
-  patterns: Record<Exclude<DateFormat, 'iso'>, string>,
-): string {
-  return dateFormat === 'iso' || !isIsoDate(date)
-    ? date
-    : format(parseIsoDate(date), patterns[dateFormat])
-}
-
-/**
- * Label for an ISO date per the user's date-format setting. `mdy` and `dmy`
- * keep the original app's daily-subject form (`Tue, June 9th, 2026` /
- * `Tue, 9th June, 2026`); `iso` renders the daily-note key itself.
- */
-export function formatDayLabel(date: string, dateFormat: DateFormat): string {
-  return formatIsoDate(date, dateFormat, { dmy: 'EEE, do MMMM, yyyy', mdy: 'EEE, MMMM do, yyyy' })
-}
-
-/**
- * Compact date for inline chips (the Tasks view's `[[YYYY-MM-DD]]` due link,
- * V1's blue date): `12/31/2025` for `mdy`, `31/12/2025` for `dmy`, and
- * `2025-12-31` for `iso`.
- */
-export function formatShortDate(date: string, dateFormat: DateFormat): string {
-  return formatIsoDate(date, dateFormat, { dmy: 'd/M/yyyy', mdy: 'M/d/yyyy' })
-}
-
-/**
- * Month and day without the year, for labels short on room (a filter chip's
- * range): `Jun 9` for `mdy`, `9 Jun` for `dmy`, and `2026-06-09` for `iso`.
- */
-export function formatMonthDay(date: string, dateFormat: DateFormat): string {
-  return formatIsoDate(date, dateFormat, { dmy: 'd MMM', mdy: 'MMM d' })
-}
 
 /**
  * The shortest unambiguous date label: `10/2` for `mdy`, `2/10` for `dmy`,

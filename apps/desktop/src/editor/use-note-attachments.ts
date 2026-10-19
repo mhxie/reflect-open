@@ -1,21 +1,16 @@
-import { useMemo } from 'react'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
-import {
-  isLocalOnlyPath,
-  isPdfAttachmentPath,
-  pdfPageWidthBucket,
-  resolveAttachmentLink,
-  resolveWikiEmbedTarget,
-  type AttachmentCatalog,
-} from '@reflect/core'
-import { loadAttachmentCatalog, peekAttachmentCatalog } from '@/lib/attachment-catalog.ts'
+import type { AttachmentService, GraphInfo, GraphSessionService } from '@reflect/core'
+import { useMaybeGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
-/** How one note's images, `![[embeds]]`, and attachment links render. */
+/**
+ * How one note's images, `![[embeds]]`, and attachment links render.
+ */
 export interface NoteAttachments {
   /**
-   * The graph-relative attachment a link or image destination names — the
-   * path to display and open — or null for URLs, notes, and unsafe paths.
+   * The graph-relative attachment a link or image destination names (the
+   * path to display and open), or null for URLs, notes, and unsafe paths.
    * Reads the catalog as loaded so far.
    */
   resolveAttachmentPath: (destination: string) => string | null
@@ -27,86 +22,52 @@ export interface NoteAttachments {
    * for it before that.
    */
   resolveImageUrl: ImageUrlResolver
-  /** Classifies an Obsidian `![[target]]` embed. */
+  /**
+   * Classifies an Obsidian `![[target]]` embed: an attachment renders as an
+   * image, a PDF preview (through the editor's `resolveEmbed`), or a file
+   * pill; a note renders as a link chip unless the host supplies a standalone
+   * note reader; an unsafe path stays literal.
+   */
   resolveWikiEmbed: WikiEmbedResolver
 }
 
-/** The `reflect-asset://` URL serving a graph-relative attachment off the UI thread. */
-export function attachmentUrl(generation: number, path: string): string {
-  return convertFileSrc(`${generation}/${path}`, 'reflect-asset')
-}
-
-/** The `reflect-asset://` URL of a PDF page rendered at a width bucket. */
-export function pdfPageUrl(generation: number, path: string, page: number, width: number): string {
-  return `${attachmentUrl(generation, path)}?reflect-preview=pdf-page&page=${page}&width=${width}`
-}
-
 /**
- * The `reflect-asset://` URL of a raster image's thumbnail at a width bucket:
- * decoded, oriented, and re-encoded by the shell, cached on disk.
+ * Attachment resolution for rendering `notePath` in the open `graph`; only a
+ * remote image resolves while no graph is open, and nothing local resolves
+ * once another graph session replaced `graph`.
  */
-export function imageThumbnailUrl(generation: number, path: string, width: number): string {
-  return `${attachmentUrl(generation, path)}?reflect-preview=thumb&width=${width}`
-}
-
-/**
- * An attachment renders as an image, a PDF preview (through the image view's
- * `resolveEmbed`), or a file pill. A note renders as a link chip unless the
- * host supplies a standalone note reader; an unsafe path stays literal.
- */
-const resolveWikiEmbed: WikiEmbedResolver = ({ target }) => {
-  const embed = resolveWikiEmbedTarget(target)
-  if (embed === null) {
-    return
-  }
-  if (embed.kind === 'note') {
-    return { kind: 'note' }
-  }
-  return embed.kind === 'file'
-    ? { kind: 'file', href: embed.source }
-    : { kind: 'image', src: embed.source }
-}
-
-/** Attachment resolution for rendering `notePath` in graph session `generation`. */
 export function createNoteAttachments(
-  generation: number | null,
+  graph: GraphInfo | null,
   notePath: string,
+  attachments: AttachmentService,
+  graphSession: GraphSessionService,
 ): NoteAttachments {
-  const resolvePath = (destination: string, catalog: AttachmentCatalog | null): string | null =>
-    generation === null ? null : resolveAttachmentLink(notePath, destination, catalog)
-  const remoteAllowed = !isLocalOnlyPath(notePath)
+  const isCurrent = (): boolean =>
+    graph !== null && graphSession.getState().session?.generation === graph.generation
   return {
     resolveAttachmentPath: (destination) =>
-      resolvePath(destination, generation === null ? null : peekAttachmentCatalog(generation)),
-    resolveImageUrl: (src) => {
-      if (/^https?:\/\//i.test(src)) {
-        return remoteAllowed ? src : undefined
-      }
-      if (generation === null) {
-        return
-      }
-      // The editor previews a PDF's pages through `resolveEmbed` first; a
-      // read-only preview shows its first page at the smallest width. Its
-      // bytes never reach an <img>.
-      const url = (catalog: AttachmentCatalog | null): string | undefined => {
-        const path = resolvePath(src, catalog)
-        if (path === null) {
-          return
-        }
-        return isPdfAttachmentPath(path)
-          ? pdfPageUrl(generation, path, 1, pdfPageWidthBucket(0))
-          : attachmentUrl(generation, path)
-      }
-      const catalog = peekAttachmentCatalog(generation)
-      return catalog === null
-        ? loadAttachmentCatalog(generation).then(url, () => url(null))
-        : url(catalog)
-    },
-    resolveWikiEmbed,
+      isCurrent() ? attachments.resolveAttachmentPath(notePath, destination) : null,
+    resolveImageUrl: (source) =>
+      graph === null || isCurrent() ? attachments.resolveImageUrl(notePath, source) : undefined,
+    resolveWikiEmbed: ({ target }) => attachments.resolveWikiEmbed(target),
   }
 }
 
-/** {@link createNoteAttachments} memoized per note and graph session. */
-export function useNoteAttachments(generation: number | null, notePath: string): NoteAttachments {
-  return useMemo(() => createNoteAttachments(generation, notePath), [generation, notePath])
+/**
+ * {@link createNoteAttachments} memoized per note and open graph: an image
+ * URL carries the graph's generation, so a reopened graph gets new resolvers.
+ * The caller re-renders whenever the catalog changes.
+ */
+export function useNoteAttachments(notePath: string): NoteAttachments {
+  const graph = useMaybeGraph()?.graph ?? null
+  const { attachments, graphSession } = useCoreServices()
+  const subscribeCatalog = useCallback(
+    (listener: () => void) => attachments.onCatalogChanged(listener),
+    [attachments],
+  )
+  useSyncExternalStore(subscribeCatalog, () => attachments.peekCatalog())
+  return useMemo(
+    () => createNoteAttachments(graph, notePath, attachments, graphSession),
+    [attachments, graph, graphSession, notePath],
+  )
 }

@@ -29,7 +29,7 @@ describe('checkRoundTrip', () => {
     // heading. The bytes still change, and `>>>>>>> ` is the prefix conflict
     // resolution matches on, so protection for conflicted notes lives in the
     // note session's own `detectConflictMarkers` gate (see
-    // `note-session-state.ts`), not in this classifier. This case is here to
+    // core's `note-session-service.ts`), not in this classifier. This case is here to
     // notice if meowdown's verdict moves again.
     const conflicted = [
       '# Shared',

@@ -1,12 +1,14 @@
 import type { ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { isAppError, isLocalOnlyPath, notePrivate, readNote, splitFrontmatter } from '@reflect/core'
+import { isLocalOnlyPath, notePrivate, splitFrontmatter } from '@reflect/core'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import type { NoteEntry } from './entries.ts'
 
 /**
@@ -23,34 +25,23 @@ interface NotePreviewProps {
   entry: NoteEntry
 }
 
-async function readNoteForPreview(path: string): Promise<string | null> {
-  try {
-    return await readNote(path)
-  } catch (cause) {
-    if (isAppError(cause) && cause.kind === 'notFound') {
-      return null
-    }
-    throw cause
-  }
-}
-
 export function NotePreview({ entry }: NotePreviewProps): ReactElement {
   const { graph } = useGraph()
   const { settings } = useSettings()
-  const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(
-    graph?.generation ?? null,
-    entry.path,
-  )
+  const { noteDocuments } = useCoreServices()
+  const localOnly = useLocalOnlyFolders()
+  const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(entry.path)
   const { data, isError } = useQuery({
     queryKey: queryKeys.index.notePreview(graph?.root, entry.path),
-    queryFn: () => readNoteForPreview(entry.path),
+    queryFn: () => noteDocuments.readSource(entry.path),
     enabled: graph !== null,
   })
 
   const body = data === null || data === undefined ? null : splitFrontmatter(data).body
   // A private note's preview stays off the network: no embed lookups, no
   // remote images.
-  const privateNote = isLocalOnlyPath(entry.path) || (typeof data === 'string' && notePrivate(data))
+  const privateNote =
+    isLocalOnlyPath(localOnly, entry.path) || (typeof data === 'string' && notePrivate(data))
 
   let content: ReactElement | null
   if (isError) {

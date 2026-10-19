@@ -1,5 +1,4 @@
 import { useState, type ReactElement } from 'react'
-import { untitledNotePath } from '@reflect/core'
 import { Plus, Square } from 'lucide-react'
 import { MicIcon } from '@/components/icons/mic-icon.tsx'
 import { PencilIcon } from '@/components/icons/pencil-icon.tsx'
@@ -8,6 +7,7 @@ import { Spinner } from '@/components/ui/spinner.tsx'
 import { cn } from '@/lib/utils.ts'
 import { useMobileAudioMemo } from '@/mobile/audio-memo-provider.tsx'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
+import { useMobileAppServices } from '@/mobile/mobile-services.ts'
 import { useRouter } from '@/routing/router.tsx'
 
 const ACTIONS_ID = 'daily-capture-actions'
@@ -28,6 +28,7 @@ interface DailyCaptureMenuProps {
  * live on-screen transforms instead of restarting or jumping.
  */
 export function DailyCaptureMenu({ contentInset = 0 }: DailyCaptureMenuProps): ReactElement {
+  const { haptics, noteCreation } = useMobileAppServices()
   const [expanded, setExpanded] = useState(false)
   const memo = useMobileAudioMemo()
   const { navigate } = useRouter()
@@ -44,13 +45,13 @@ export function DailyCaptureMenu({ contentInset = 0 }: DailyCaptureMenuProps): R
   }
 
   const toggleExpanded = (): void => {
-    hapticImpactLight()
+    hapticImpactLight(haptics)
     setExpanded((current) => !current)
   }
 
   const createNote = (): void => {
     close()
-    navigate({ kind: 'note', path: untitledNotePath() })
+    navigate({ kind: 'note', path: noteCreation.untitledNotePath() })
   }
 
   const toggleAudioMemo = (): void => {

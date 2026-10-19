@@ -1,6 +1,5 @@
-import type { NoteState } from '@reflect/core'
+import type { BackupState, NoteState } from '@reflect/core'
 import type { NoteGitVersion } from '@/hooks/use-note-git-version.ts'
-import type { BackupState } from '@/lib/backup-controller.ts'
 
 interface NoteDetailRow<Name extends string, Status extends string> {
   readonly name: Name

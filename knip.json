@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "rules": { "exports": "off", "types": "off" },
+  "workspaces": {
+    ".": { "entry": ["fixtures/*.mjs"] },
+    "design-system": { "ignore": "./**/*" },
+    "apps/desktop": {
+      "entry": ["scripts/vendor-meowdown.mjs"],
+      "ignoreBinaries": ["ditto", "osascript", "pgrep"],
+      "ignoreDependencies": ["@sentry/cli"],
+      "ignore": "src-tauri/gen/**"
+    },
+    "apps/extension": { "ignoreUnresolved": ["#imports"] }
+  }
+}

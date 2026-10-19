@@ -1,9 +1,15 @@
 import { useEffect, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GraphInfo } from '@reflect/core'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import type { MobileOnboardingService } from '@reflect/app'
+import { createTestAppServices } from '@reflect/app/testing'
+import type { MobileStorageInfo } from '@reflect/core'
+import {
+  createTestCoreServices,
+  createTestMobileStorageService,
+  createTestPlatformService,
+} from '@reflect/core/testing'
+import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { MobileGraphs } from './graphs.tsx'
 
 /**
@@ -32,60 +38,41 @@ vi.mock('@/components/ui/drawer.tsx', () => ({
   DrawerTitle: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
 }))
 
-const storageInfo = vi.hoisted(() => ({
-  current: {
-    localRoot: '/Documents',
-    icloudDocumentsRoot: null as string | null,
-    icloudGraphRoots: [] as string[],
-  },
-}))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  mobileStorage: vi.fn(async () => storageInfo.current),
-}))
+const STORAGE: MobileStorageInfo = {
+  localRoot: '/Documents',
+  icloudDocumentsRoot: '/iCloud/Documents',
+  icloudGraphRoots: ['/iCloud/Documents/Notes', '/iCloud/Documents/Work'],
+}
 
-const completeOnboarding = vi.hoisted(() => vi.fn(async (_kind: string, _root?: string) => {}))
-const graphState = vi.hoisted(() => ({ root: '/iCloud/Documents/Notes' }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: graphState.root, name: 'Notes', generation: 1 } as GraphInfo,
-    completeOnboarding,
-  }),
-}))
+type CompleteOnboarding = MobileOnboardingService['completeOnboarding']
 
-const navigate = vi.hoisted(() => vi.fn())
-const back = vi.hoisted(() => vi.fn())
-vi.mock('@/routing/router.tsx', () => ({
-  useRouter: () => ({ navigate, back, canBack: true }),
-}))
+let completeOnboarding: MockInstance<CompleteOnboarding>
 
-let queryClient: QueryClient
+/**
+ * Render the screen on the mobile platform, with the switch flow observed and answered by the spy.
+ */
+async function mount(storage: MobileStorageInfo = STORAGE): Promise<void> {
+  const app = createTestCoreServices({
+    platform: createTestPlatformService(MOBILE_PLATFORM),
+    mobileStorage: createTestMobileStorageService({ storage }),
+  })
+  const appServices = createTestAppServices(app)
+  completeOnboarding = vi
+    .spyOn(appServices.mobileOnboarding, 'completeOnboarding')
+    .mockImplementation(completeOnboardingResult)
+  await renderInApp(<MobileGraphs />, {
+    app,
+    appServices,
+    graph: { root: '/iCloud/Documents/Notes', name: 'Notes' },
+    route: { kind: 'graphs' },
+  })
+}
+
+let completeOnboardingResult: CompleteOnboarding
 
 beforeEach(() => {
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  graphState.root = '/iCloud/Documents/Notes'
-  storageInfo.current = {
-    localRoot: '/Documents',
-    icloudDocumentsRoot: '/iCloud/Documents',
-    icloudGraphRoots: ['/iCloud/Documents/Notes', '/iCloud/Documents/Work'],
-  }
-  completeOnboarding.mockImplementation(async () => {})
+  completeOnboardingResult = async () => {}
 })
-
-afterEach(async () => {
-  await cleanup()
-  queryClient.clear()
-  vi.clearAllMocks()
-})
-
-async function mount(): Promise<void> {
-  await render(
-    <QueryClientProvider client={queryClient}>
-      <MobileGraphs />
-    </QueryClientProvider>,
-  )
-}
 
 describe('MobileGraphs', () => {
   it('checkmarks the open graph and switches on tapping another', async () => {
@@ -140,7 +127,9 @@ describe('MobileGraphs', () => {
   })
 
   it('surfaces a failed switch and stays on the list', async () => {
-    completeOnboarding.mockRejectedValueOnce(new Error('clone failed'))
+    completeOnboardingResult = async () => {
+      throw new Error('clone failed')
+    }
     await mount()
 
     await userEvent.click(page.getByRole('button', { name: 'Work' }))
@@ -148,12 +137,7 @@ describe('MobileGraphs', () => {
   })
 
   it('says so when iCloud Drive is unavailable', async () => {
-    storageInfo.current = {
-      localRoot: '/Documents',
-      icloudDocumentsRoot: null,
-      icloudGraphRoots: [],
-    }
-    await mount()
+    await mount({ localRoot: '/Documents', icloudDocumentsRoot: null, icloudGraphRoots: [] })
 
     await expect.element(page.getByText(/iCloud Drive isn’t available/)).toBeVisible()
     await expect.element(page.getByRole('button', { name: 'New graph' })).not.toBeInTheDocument()

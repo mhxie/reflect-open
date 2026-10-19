@@ -1,32 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, renderHook } from 'vitest-browser-react'
+import { describe, expect, it, vi } from 'vitest'
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { WikilinkHoverHit } from '@meowdown/core'
-import { setBridge } from '@reflect/core'
+import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
-import { queryClient } from '@/lib/query-client.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiLinkHoverPreview } from './wiki-link-hover-preview.tsx'
-import { RouterProvider } from '@/routing/router.tsx'
-
-vi.mock('@tauri-apps/api/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tauri-apps/api/core')>()),
-  convertFileSrc: (filePath: string) => `reflect-asset://${filePath}`,
-}))
-const mocks = vi.hoisted(() => ({
-  resolveExistingWikiTarget: vi.fn(),
-  readExistingNoteSource: vi.fn(),
-}))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  resolveExistingWikiTarget: mocks.resolveExistingWikiTarget,
-  // The graph's local-only folders are `secure`.
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-}))
-vi.mock('@/lib/read-existing-note-source.ts', () => ({
-  readExistingNoteSource: mocks.readExistingNoteSource,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/graph', name: 'g', generation: 7 } }),
-}))
 
 const YOUTUBE_URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
 // A saved card whose poster would load from the network if it rendered.
@@ -60,8 +38,6 @@ const REMOTE_COMMANDS = [
   'capture_oembed_fetch',
 ]
 
-let commands: string[]
-
 function remoteElements(): Element | null {
   return document.querySelector(
     'img[src^="https:"], img[src^="http:"], iframe, meowdown-embed-x, meowdown-embed-youtube',
@@ -72,40 +48,37 @@ function hoverHit(target: string): WikilinkHoverHit {
   return { target, from: 0, to: 0, element: document.createElement('span') }
 }
 
-beforeEach(() => {
-  commands = []
-  setBridge({
-    invoke: async (command) => {
-      commands.push(command)
-      return null
-    },
-    listen: async () => () => {},
-  })
-})
-
-afterEach(() => {
-  setBridge(null)
-  queryClient.clear()
-  vi.clearAllMocks()
-})
+/** The hover card's body for `target`, as the editor would render it. */
+function HoverCard({ target }: { target: string }): ReactElement {
+  const renderCard = useWikiLinkHoverPreview({ dateFormat: 'mdy' })
+  const [card, setCard] = useState<ReactNode>(null)
+  useEffect(() => {
+    void renderCard(hoverHit(target)).then(setCard)
+  }, [renderCard, target])
+  return <>{card}</>
+}
 
 describe('wiki-link hover card over a private target', () => {
   it.each([
     ['a local-only target', 'finance/secure/bank.md', REMOTE_BODY],
     ['a locked target', 'notes/locked.md', `---\nprivate: true\n---\n${REMOTE_BODY}`],
   ])('reaches nothing remote for %s', async (_label, path, source) => {
-    mocks.resolveExistingWikiTarget.mockResolvedValue({ kind: 'resolved', path })
-    mocks.readExistingNoteSource.mockResolvedValue(source)
-    const { result } = await renderHook(() =>
-      useWikiLinkHoverPreview({ generation: 7, graphKey: '/graph', dateFormat: 'mdy' }),
-    )
-
-    const screen = await render(<>{await result.current(hoverHit('Target'))}</>, {
-      wrapper: RouterProvider,
+    const app = createTestCoreServices({
+      noteFile: createTestNoteFileService({ files: { [path]: source } }),
     })
+    vi.spyOn(app.noteLinkResolver, 'resolveWikiTarget').mockResolvedValue({
+      kind: 'resolved',
+      path,
+    })
+    const screen = await renderInApp(<HoverCard target="Target" />, {
+      app,
+      graph: { root: '/graph', name: 'g', generation: 7, localOnlyFolders: ['secure'] },
+    })
+
     await expect.element(screen.getByText('Body')).toBeVisible()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(remoteElements()).toBeNull()
+    const commands = app.ipc.calls().map((call) => call.command)
     for (const command of REMOTE_COMMANDS) {
       expect(commands).not.toContain(command)
     }
@@ -113,7 +86,7 @@ describe('wiki-link hover card over a private target', () => {
 
   it('loads no remote image even through a resolver that would pass one', async () => {
     const resolveImageUrl = vi.fn((src: string) => src)
-    const screen = await render(
+    const screen = await renderInApp(
       <WikiLinkHoverPreview
         path="notes/locked.md"
         markdown={REMOTE_BODY}
@@ -121,7 +94,6 @@ describe('wiki-link hover card over a private target', () => {
         dateFormat="mdy"
         resolveImageUrl={resolveImageUrl}
       />,
-      { wrapper: RouterProvider },
     )
     await expect.element(screen.getByText('Body')).toBeVisible()
     expect(remoteElements()).toBeNull()

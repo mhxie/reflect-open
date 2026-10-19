@@ -1,30 +1,33 @@
-import { render } from 'vitest-browser-react'
+import { formatBinding } from '@reflect/app'
+import { createTestAppServices, createTestWindowService } from '@reflect/app/testing'
 import { userEvent } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect, type ReactNode } from 'react'
-import type { CommandContext } from '@/lib/commands/types.ts'
-import { formatBinding, isApplePlatform } from '@/lib/keybindings.ts'
-import type { NoteRoute } from '@/routing/route.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
-import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
+import type { RetrievalService, SearchService, SuggestionService } from '@reflect/core'
+import {
+  createTestCoreServices,
+  createTestEmbeddingRuntimeService,
+  createTestNoteFileService,
+  createTestRetrievalService,
+} from '@reflect/core/testing'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import type { CommandContext } from '@/lib/commands/types.ts'
+import { useRouter } from '@/routing/router.tsx'
+import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { CommandPalette } from './command-palette.tsx'
 import { PaletteProvider, usePalette } from './palette-provider.tsx'
+import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
 
-const suggestWikiTargets = vi.hoisted(() => vi.fn())
-const searchWithFilters = vi.hoisted(() => vi.fn())
-const retrieve = vi.hoisted(() => vi.fn())
-const readNote = vi.hoisted(() => vi.fn<(path: string) => Promise<string>>())
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<(route: NoteRoute) => Promise<boolean>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  suggestWikiTargets,
-  searchWithFilters,
-  retrieve,
-  readNote,
-}))
+// The palette runs on the real `PaletteSearchService` of the test app
+// services; each test scripts the index reads below it.
+const suggestWikiTargets = vi.fn<SuggestionService['suggestWikiTargets']>()
+const searchWithFilters = vi.fn<SearchService['searchWithFilters']>()
+const retrieve = vi.fn<RetrievalService['retrieve']>()
+/**
+ * Receives the `reflect://` link of every note window a test opens.
+ */
+const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
 // The preview keeps the stub from the route-content tests: hosting the real
 // ProseMirror editor is out of scope here; the preview's data path stays real.
 vi.mock('@/editor/markdown-preview.tsx', () => ({
@@ -32,97 +35,48 @@ vi.mock('@/editor/markdown-preview.tsx', () => ({
     <div data-testid="markdown-preview">{content}</div>
   ),
 }))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openRouteInNewWindow,
-}))
+
 // The model is absent by default: the palette is exactly the lexical surface
 // it was before Plan 09 (hybrid mode is additive). The gating tests flip both
 // halves of the hybrid opt-in.
-const embedReady = vi.hoisted(() => ({ value: false }))
-vi.mock('@/lib/use-embed-status.ts', () => ({
-  useEmbedStatus: () =>
-    embedReady.value ? { status: 'ready', model: 'all-MiniLM-L6-v2' } : { status: 'uninitialized' },
-}))
-const semanticSetting = vi.hoisted(() => ({ enabled: false }))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: { semanticSearchEnabled: semanticSetting.enabled, dateFormat: 'mdy' },
-    updateSettings: () => {},
-  }),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-// Register after the core mock is installed so commands see the mocked graph.
-const { registerAppCommands } = await import('@/lib/commands/app-commands.ts')
-registerAppCommands()
+let embedReady = false
+let semanticEnabled = false
+/**
+ * The note files the preview pane reads; a missing one previews as Empty.
+ */
+let files: Record<string, string> = {}
 
 beforeEach(() => {
-  embedReady.value = false
-  semanticSetting.enabled = false
-  readNote.mockReset().mockResolvedValue('')
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
+  embedReady = false
+  semanticEnabled = false
+  files = {}
+  suggestWikiTargets.mockReset().mockResolvedValue([])
+  searchWithFilters.mockReset().mockResolvedValue([])
+  retrieve.mockReset().mockResolvedValue([])
+  openNoteWindow.mockReset().mockResolvedValue(true)
 })
 
-it.each(['title', 'body', 'related'])(
-  'shows Private metadata on %s palette results and preserves navigation',
-  async (source) => {
-    suggestWikiTargets.mockResolvedValue(
-      source === 'title'
-        ? [
-            {
-              target: 'Private note',
-              path: 'notes/private.md',
-              title: 'Private note',
-              alias: null,
-              date: null,
-              isPrivate: true,
-              hasConflict: false,
-            },
-          ]
-        : [],
-    )
-    searchWithFilters.mockResolvedValue(
-      source === 'body'
-        ? [
-            {
-              path: 'notes/private.md',
-              title: 'Private note',
-              snippet: null,
-              dailyDate: null,
-              isPrivate: true,
-              hasConflict: false,
-            },
-          ]
-        : [],
-    )
-    retrieve.mockResolvedValue(
-      source === 'related'
-        ? [
-            {
-              path: 'notes/private.md',
-              title: 'Private note',
-              score: 1,
-              heading: null,
-              snippet: 'related',
-              isPrivate: true,
-              hasConflict: false,
-              matchedBy: 'semantic',
-            },
-          ]
-        : [],
-    )
-    embedReady.value = source === 'related'
-    semanticSetting.enabled = source === 'related'
-    const { view } = await renderPalette('private')
-    await expect.element(view.getByRole('img', { name: 'Private', exact: true })).toBeVisible()
-    await view.getByText('Private note', { exact: true }).click()
-    await expect
-      .element(view.getByTestId('route'))
-      .toHaveTextContent(JSON.stringify({ kind: 'note', path: 'notes/private.md' }))
-  },
-)
+/**
+ * A search hit with the fields the palette does not read filled in.
+ */
+function hit(fields: {
+  path: string
+  title: string
+  snippet: string | null
+  dailyDate: string | null
+}) {
+  return {
+    ...fields,
+    highlightedTitle: fields.title,
+    preview: '',
+    summary: '',
+    mtime: 0,
+    isPinned: false,
+    hasConflict: false,
+    isPrivate: false,
+    hasDeviceOnlyContent: false,
+  }
+}
 
 function OpenOnMount({ query }: { query: string }) {
   const { openPalette } = usePalette()
@@ -144,7 +98,31 @@ function PeekProbe(): ReactNode {
 
 async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const navigate = vi.fn()
+  const app = createTestCoreServices({
+    suggestions: {
+      suggestWikiTargets,
+      suggestWikiLinkTargets: async () => ({
+        suggestions: [],
+        claimedTargetKeys: [],
+        queryReadsAsDate: false,
+      }),
+      suggestTags: async () => [],
+    },
+    search: { searchWithFilters },
+    retrieval: createTestRetrievalService({ retrieve }),
+    embeddingRuntime: createTestEmbeddingRuntimeService({
+      status: embedReady
+        ? { status: 'ready', model: 'all-MiniLM-L6-v2', dims: 384 }
+        : { status: 'uninitialized' },
+    }),
+    noteFile: createTestNoteFileService({ files }),
+  })
+  const appLayer = createTestAppServices(app, {
+    window: createTestWindowService({ openNoteWindow }),
+  })
   const fullContext: CommandContext = {
+    services: app,
+    app: appLayer,
     navigate,
     route: () => ({ kind: 'today' }),
     notePath: () => null,
@@ -163,8 +141,6 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     switchGraph: vi.fn(),
     openPinnedNote: vi.fn(),
     toggleAudioMemo: vi.fn(),
-    generation: () => 1,
-    graphRoot: () => '/g',
     openPalette: vi.fn(),
     openShortcuts: vi.fn(),
     openTemplatePicker: vi.fn(),
@@ -175,22 +151,23 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     wikiLanguages: () => [],
     ...context,
   }
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const view = await render(
-    <QueryClientProvider client={client}>
-      <RouterProvider>
-        <PeekProvider>
-          <PaletteProvider>
-            <OpenOnMount query={query} />
-            <CommandPalette context={fullContext} />
-            <RouteProbe />
-            <PeekProbe />
-          </PaletteProvider>
-        </PeekProvider>
-      </RouterProvider>
-    </QueryClientProvider>,
+  const view = await renderInApp(
+    <PeekProvider>
+      <PaletteProvider>
+        <OpenOnMount query={query} />
+        <CommandPalette context={fullContext} />
+        <RouteProbe />
+        <PeekProbe />
+      </PaletteProvider>
+    </PeekProvider>,
+    {
+      app,
+      appServices: appLayer,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      settings: { semanticSearchEnabled: semanticEnabled, dateFormat: 'mdy' },
+    },
   )
-  return { view, navigate }
+  return { view, navigate, app }
 }
 
 describe('CommandPalette', () => {
@@ -244,14 +221,12 @@ describe('CommandPalette', () => {
   it('a typed query shows ranked notes with highlighted snippets and Enter opens the top hit', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
+      hit({
         path: 'notes/rust.md',
         title: 'Rust Notes',
         snippet: 'about rust things',
         dailyDate: null,
-      },
+      }),
     ])
     const { view } = await renderPalette('rust')
     await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
@@ -259,21 +234,19 @@ describe('CommandPalette', () => {
 
     await userEvent.keyboard('{Enter}')
     await expect.element(view.getByTestId('route')).toMatchTextContent('notes/rust.md')
-    expect(openRouteInNewWindow).not.toHaveBeenCalled()
+    expect(openNoteWindow).not.toHaveBeenCalled()
     expect(view.getByTestId('palette-overlay').query()).toBeNull()
   })
 
   it('Shift-Enter peeks the highlighted note instead of navigating', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
+      hit({
         path: 'notes/rust.md',
         title: 'Rust Notes',
         snippet: null,
         dailyDate: null,
-      },
+      }),
     ])
     const { view } = await renderPalette('rust')
     await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
@@ -288,14 +261,12 @@ describe('CommandPalette', () => {
   it('shows snippets without Markdown syntax', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
+      hit({
         path: 'notes/clear.md',
         title: 'James Clear',
         snippet: '# James Clear\n- Author of [[Atomic \u{1}Habits\u{2}]]',
         dailyDate: null,
-      },
+      }),
     ])
     const { view } = await renderPalette('habits')
     await expect.element(view.getByText('Habits', { exact: true })).toBeInTheDocument()
@@ -307,28 +278,23 @@ describe('CommandPalette', () => {
   it('modifier-click opens one note window and closes the palette synchronously', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/rust.md',
-        title: 'Rust Notes',
-        snippet: null,
-        dailyDate: null,
-      },
+      hit({ path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null }),
     ])
     const pendingOpen = Promise.withResolvers<boolean>()
-    openRouteInNewWindow.mockReturnValue(pendingOpen.promise)
+    openNoteWindow.mockReturnValue(pendingOpen.promise)
     const { view } = await renderPalette('rust')
     const result = view.getByText('Rust Notes')
 
     await result.click({ modifiers: ['ControlOrMeta'] })
 
     expect(view.getByTestId('palette-overlay').query()).toBeNull()
-    expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
-    expect(openRouteInNewWindow).toHaveBeenCalledWith({
-      kind: 'note',
-      path: 'notes/rust.md',
-    })
+    expect(openNoteWindow).toHaveBeenCalledTimes(1)
+    expect(openNoteWindow).toHaveBeenCalledWith(
+      deepLinkForRoute({
+        kind: 'note',
+        path: 'notes/rust.md',
+      }),
+    )
     expect(view.getByTestId('route').element().textContent).toBe(JSON.stringify({ kind: 'today' }))
     pendingOpen.resolve(true)
   })
@@ -336,16 +302,9 @@ describe('CommandPalette', () => {
   it('falls back in-window after a declined modifier-click even though the palette closed', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/rust.md',
-        title: 'Rust Notes',
-        snippet: null,
-        dailyDate: null,
-      },
+      hit({ path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null }),
     ])
-    openRouteInNewWindow.mockResolvedValue(false)
+    openNoteWindow.mockResolvedValue(false)
     const { view } = await renderPalette('rust')
     const result = view.getByText('Rust Notes')
 
@@ -358,14 +317,7 @@ describe('CommandPalette', () => {
   it('Mod+Enter opens the highlighted note in one note window', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/rust.md',
-        title: 'Rust Notes',
-        snippet: null,
-        dailyDate: null,
-      },
+      hit({ path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null }),
     ])
     const { view } = await renderPalette('rust')
     await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
@@ -373,27 +325,22 @@ describe('CommandPalette', () => {
     await userEvent.keyboard('{ControlOrMeta>}{Enter}{/ControlOrMeta}')
 
     expect(view.getByTestId('palette-overlay').query()).toBeNull()
-    expect(openRouteInNewWindow).toHaveBeenCalledTimes(1)
-    expect(openRouteInNewWindow).toHaveBeenCalledWith({
-      kind: 'note',
-      path: 'notes/rust.md',
-    })
+    expect(openNoteWindow).toHaveBeenCalledTimes(1)
+    expect(openNoteWindow).toHaveBeenCalledWith(
+      deepLinkForRoute({
+        kind: 'note',
+        path: 'notes/rust.md',
+      }),
+    )
     expect(view.getByTestId('route').element().textContent).toBe(JSON.stringify({ kind: 'today' }))
   })
 
   it('falls back in-window after a declined Mod+Enter', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/rust.md',
-        title: 'Rust Notes',
-        snippet: null,
-        dailyDate: null,
-      },
+      hit({ path: 'notes/rust.md', title: 'Rust Notes', snippet: null, dailyDate: null }),
     ])
-    openRouteInNewWindow.mockResolvedValue(false)
+    openNoteWindow.mockResolvedValue(false)
     const { view } = await renderPalette('rust')
     await expect.element(view.getByText('Rust Notes')).toBeInTheDocument()
 
@@ -414,57 +361,42 @@ describe('CommandPalette', () => {
   it('bound commands show keycap hints', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([])
-    const { view } = await renderPalette('> go to today')
+    const { view, app } = await renderPalette('> go to today')
     const row = view.getByText('Go to today')
     await expect.element(row).toBeInTheDocument()
     const item = row.element().closest('[cmdk-item]')
-    for (const key of formatBinding('Mod-d', isApplePlatform())) {
+    for (const key of formatBinding('Mod-d', app.platform.isApplePlatform)) {
       expect(item?.textContent).toContain(key)
     }
   })
 
   it('filter tokens run the constrained search and render its rows', async () => {
-    suggestWikiTargets.mockClear()
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
+      hit({
         path: 'daily/2026-06-08.md',
         title: '2026-06-08',
         dailyDate: '2026-06-08',
         snippet: null,
-      },
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/w.md',
-        title: 'Work log',
-        dailyDate: null,
-        snippet: null,
-      },
+      }),
+      hit({ path: 'notes/w.md', title: 'Work log', dailyDate: null, snippet: null }),
     ])
     const { view } = await renderPalette('#work is:daily')
     await expect.element(view.getByText('Work log')).toBeInTheDocument()
     // The label renders in the row and again as the preview pane's header.
     await expectLocatorToHaveCount(view.getByText('Mon, June 8th, 2026'), 2)
-    expect(searchWithFilters).toHaveBeenCalledWith(
-      expect.objectContaining({
-        filtered: true,
-        filters: expect.objectContaining({ tags: ['work'], dailyOnly: true }),
-      }),
-    )
+    expect(searchWithFilters.mock.calls.at(-1)?.[0]).toMatchObject({
+      filtered: true,
+      filters: { tags: ['work'], dailyOnly: true },
+    })
 
     await userEvent.keyboard('{Enter}')
     await expect.element(view.getByTestId('route')).toMatchTextContent('2026-06-08')
   })
 
   it('stays lexical when the model is ready but semantic search is disabled', async () => {
-    embedReady.value = true
-    semanticSetting.enabled = false
-    suggestWikiTargets.mockResolvedValue([])
-    searchWithFilters.mockClear().mockResolvedValue([])
-    retrieve.mockClear()
+    embedReady = true
+    semanticEnabled = false
     await renderPalette('rust')
     // Disabling must bite immediately, even while the model is still loaded.
     await vi.waitFor(() => expect(searchWithFilters).toHaveBeenCalled())
@@ -472,10 +404,9 @@ describe('CommandPalette', () => {
   })
 
   it('blends semantic hits once enabled and the model is ready', async () => {
-    embedReady.value = true
-    semanticSetting.enabled = true
-    suggestWikiTargets.mockResolvedValue([])
-    retrieve.mockClear().mockResolvedValue([
+    embedReady = true
+    semanticEnabled = true
+    retrieve.mockResolvedValue([
       {
         hasConflict: false,
         path: 'notes/rust.md',
@@ -494,26 +425,13 @@ describe('CommandPalette', () => {
   it('previews the highlighted note and follows arrow-key selection', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/first.md',
-        title: 'First',
-        dailyDate: null,
-        snippet: null,
-      },
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/second.md',
-        title: 'Second',
-        dailyDate: null,
-        snippet: null,
-      },
+      hit({ path: 'notes/first.md', title: 'First', dailyDate: null, snippet: null }),
+      hit({ path: 'notes/second.md', title: 'Second', dailyDate: null, snippet: null }),
     ])
-    readNote.mockImplementation(async (path) =>
-      path === 'notes/first.md' ? '# First\n\nfirst body\n' : '# Second\n\nsecond body\n',
-    )
+    files = {
+      'notes/first.md': '# First\n\nfirst body\n',
+      'notes/second.md': '# Second\n\nsecond body\n',
+    }
     const { view } = await renderPalette('note')
     await expect.element(view.getByText('First', { exact: true })).toBeInTheDocument()
 
@@ -523,23 +441,14 @@ describe('CommandPalette', () => {
 
     await userEvent.keyboard('{ArrowDown}')
     await expect.element(view.getByTestId('markdown-preview')).toMatchTextContent('second body')
-    expect(readNote).toHaveBeenCalledWith('notes/first.md')
-    expect(readNote).toHaveBeenCalledWith('notes/second.md')
   })
 
   it('frontmatter never reaches the preview', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([
-      {
-        isPrivate: false,
-        hasConflict: false,
-        path: 'notes/pinned.md',
-        title: 'Pinned',
-        dailyDate: null,
-        snippet: null,
-      },
+      hit({ path: 'notes/pinned.md', title: 'Pinned', dailyDate: null, snippet: null }),
     ])
-    readNote.mockResolvedValue('---\npinned: true\n---\n# Pinned\n\nbody\n')
+    files = { 'notes/pinned.md': '---\npinned: true\n---\n# Pinned\n\nbody\n' }
     const { view } = await renderPalette('pinned')
     const preview = view.getByTestId('markdown-preview')
     await expect.element(preview).toMatchTextContent('body')
@@ -551,7 +460,6 @@ describe('CommandPalette', () => {
       { target: '2026-06-16', path: null, title: '2026-06-16', alias: null, date: '2026-06-16' },
     ])
     searchWithFilters.mockResolvedValue([])
-    readNote.mockRejectedValue({ kind: 'notFound', message: 'no such note' })
     const { view } = await renderPalette('2026-06-16')
     const preview = view.getByTestId('palette-preview')
     await expect.element(preview).toMatchTextContent('Empty')

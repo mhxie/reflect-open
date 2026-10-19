@@ -1,9 +1,10 @@
 import { createElement, type ReactElement } from 'react'
 import { deriveNoteState } from '@reflect/core'
 import { useNoteStatus } from '@/editor/status/note-status-store.ts'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { activeNoteStateKinds, noteStatePresentation } from '@/lib/note-state-presentation.ts'
 import { cn } from '@/lib/utils.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useMaybeGraph } from '@/providers/graph-provider.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 
 interface NoteStateIndicatorProps {
@@ -25,10 +26,10 @@ export function NoteStateIndicator({
   hasConflict = false,
   className,
 }: NoteStateIndicatorProps): ReactElement | null {
-  const context = useGraph({ optional: true })
-  const graph = context?.graph
+  const graph = useMaybeGraph()?.graph
+  const localOnly = useLocalOnlyFolders()
   const live = useNoteStatus(graph ? { generation: graph.generation, path } : null)
-  const state = live?.state ?? deriveNoteState({ path, isPrivate, hasConflict })
+  const state = live?.state ?? deriveNoteState(localOnly, { path, isPrivate, hasConflict })
   if (state.kind === 'editable') {
     return null
   }

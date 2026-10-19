@@ -23,8 +23,8 @@ interface WorkspaceHeaderProps {
 
 /**
  * The workspace title bar: graph name, indexing status, version, and the
- * theme/settings controls. Purely presentational — the workspace passes state
- * down so this renders (and tests) without any provider.
+ * theme/settings controls. The workspace passes its state down as props; the
+ * settings tooltip's shortcut hint reads the platform from the core services.
  */
 export function WorkspaceHeader({
   graphName,

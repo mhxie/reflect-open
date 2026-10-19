@@ -4,7 +4,7 @@ import type { DateFormat, NoteListEntry, NoteListSort, NoteListSortKey } from '@
 import { formatShortDate } from '@/lib/dates.ts'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import type { AllNotesFilter } from '@/routing/route.ts'
 import { ALL_NOTES_GRID, AllNotesRow } from './all-notes-row.tsx'
@@ -13,7 +13,7 @@ import { SortHeader } from './sort-header.tsx'
 
 interface AllNotesTableProps {
   /** `undefined` while the index query settles (renders nothing, not "empty"). */
-  notes: NoteListEntry[] | undefined
+  notes: readonly NoteListEntry[] | undefined
   /** The active filter, for the empty state's wording. */
   filter: AllNotesFilter | null
   /** The order `notes` arrive in, shown on the sortable column headers. */

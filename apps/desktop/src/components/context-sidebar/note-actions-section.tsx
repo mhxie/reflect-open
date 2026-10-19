@@ -1,19 +1,19 @@
 import type { ReactElement } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { isLocalOnlyPath, isLocalOnlyReadOnlyPath } from '@reflect/core'
+import {
+  isLocalOnlyPath,
+  isLocalOnlyReadOnlyPath,
+  UNREADABLE_FRONTMATTER_HINT,
+  UNREADABLE_FRONTMATTER_LABEL,
+} from '@reflect/core'
 import { Shield, ShieldOff } from 'lucide-react'
 import { PinIcon } from '@/components/icons/pin-icon.tsx'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { useUnreadableFrontmatter } from '@/hooks/use-unreadable-frontmatter.ts'
 import { keybindingFor } from '@/lib/commands/app-commands.ts'
-import { toggleNotePinned } from '@/lib/note-pin.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import {
-  toggleNotePrivate,
-  UNREADABLE_FRONTMATTER_HINT,
-  UNREADABLE_FRONTMATTER_LABEL,
-} from '@/lib/note-private.ts'
+import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { NoteActionButton } from './note-action-button.tsx'
 import { NoteGistAction } from './note-gist-action.tsx'
 import { NoteTrashAction } from './note-trash-action.tsx'
@@ -45,13 +45,13 @@ const UNREADABLE_LABELS = {
  * "Note actions" as a context-sidebar section: mouse-reachable counterparts
  * to the note-scoped commands — pin/unpin and the `private` flag. Shared by
  * the daily and note context sidebars; dailies are valid targets for both.
- * Pin reads the shared shelf cache, updated immediately by every pin entrypoint.
- * Privacy reads the note row cache shared by the palette and mobile actions;
- * a note whose frontmatter can't be read shows as locked with the toggle
- * disabled. A note inside a read-only local-only folder gets no section:
- * every action would write or publish it. One in an editable local-only
- * folder keeps Pin (its frontmatter stays in the folder) and Trash; privacy is
- * gone because its privacy is not a toggle, and Gist because it publishes.
+ * Pin reads the pinned shelf and privacy reads the note row, both with the
+ * note-row overlay every entrypoint writes merged over them; a note whose
+ * frontmatter can't be read shows as locked with the toggle disabled. A note
+ * inside a read-only local-only folder gets no section: every action would
+ * write or publish it. One in an editable local-only folder keeps Pin (its
+ * frontmatter stays in the folder) and Trash; privacy is gone because its
+ * privacy is not a toggle, and Gist because it publishes.
  */
 export function NoteActionsSection({
   path,
@@ -61,29 +61,20 @@ export function NoteActionsSection({
   const noteRow = useNoteRow(path)
   const isPrivate = noteRow?.isPrivate ?? false
   const unreadable = useUnreadableFrontmatter(path, isPrivate)
-  const { graph } = useGraph()
-  const queryClient = useQueryClient()
+  const localOnlyFolders = useLocalOnlyFolders()
+  const { noteActions } = useCoreServices()
   const togglePin = async (): Promise<void> => {
-    if (graph !== null) {
-      await toggleNotePinned({
-        queryClient,
-        root: graph.root,
-        generation: graph.generation,
-        path,
-      })
-    }
+    await noteActions.togglePinned(path)
   }
 
   const togglePrivate = async (): Promise<void> => {
-    if (graph !== null) {
-      await toggleNotePrivate({ queryClient, root: graph.root, generation: graph.generation, path })
-    }
+    await toggleNotePrivate(noteActions, path)
   }
 
-  if (isLocalOnlyReadOnlyPath(path)) {
+  if (isLocalOnlyReadOnlyPath(localOnlyFolders, path)) {
     return null
   }
-  const localOnly = isLocalOnlyPath(path)
+  const localOnly = isLocalOnlyPath(localOnlyFolders, path)
 
   return (
     <SidebarSection storageKey="note-actions" title="Note actions">

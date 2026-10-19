@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { gitNoteVersion } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { queryKeys } from '@/lib/query-client.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteGitVersionOptions {
   readonly root: string | null
@@ -31,13 +30,14 @@ export function useNoteGitVersion({
   open,
   isLocalOnly,
 }: NoteGitVersionOptions): NoteGitVersion {
-  const bridgeReady = useBridgeReady()
-  const enabled =
-    open && !isLocalOnly && bridgeReady && root !== null && generation !== null && path !== null
+  const { gitRepository } = useCoreServices()
+  const enabled = open && !isLocalOnly && root !== null && generation !== null && path !== null
   const query = useQuery({
     queryKey: queryKeys.git.noteVersion(root ?? undefined, generation, path),
     queryFn: async () =>
-      generation === null || path === null ? null : await gitNoteVersion(path, generation),
+      generation === null || path === null
+        ? null
+        : await gitRepository.noteVersion(path, generation),
     enabled,
     staleTime: 0,
     gcTime: 60_000,

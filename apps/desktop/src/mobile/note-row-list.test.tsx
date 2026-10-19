@@ -1,26 +1,43 @@
-import type { FilteredSearchHit, PinnedNote } from '@reflect/core'
+import {
+  isOstensiblyEmptyNoteSource,
+  type CoreServices,
+  type FilteredSearchHit,
+  type NoteDocumentService,
+} from '@reflect/core'
+import { createTestCoreServices, createTestPlatformService } from '@reflect/core/testing'
 import { queryKeys } from '@/lib/query-client.ts'
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { useState, type ReactElement } from 'react'
-import { render } from 'vitest-browser-react'
+import { useQuery } from '@tanstack/react-query'
+import { useNoteRows } from '@/hooks/note-row-overlay.ts'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
 import { pointer, swipe, translateX } from '@/test-utils/swipe.ts'
 import { NoteRowList } from './note-row-list.tsx'
 import { SwipeableNoteRow, type NoteRowModel } from './swipeable-note-row.tsx'
 
-const commitNoteFrontmatter = vi.hoisted(() => vi.fn(async () => {}))
-vi.mock('@/lib/note-frontmatter.ts', () => ({
-  commitNoteFrontmatter,
-  readNoteSource: async () => '# A\n',
-}))
+const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'mdy', timeFormat: '12h' } }),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/mobile/use-reduced-motion.ts', () => ({ usePrefersReducedMotion: () => true }))
+/**
+ * Render `ui` in the graph `/g` with reduced motion, so a swipe settles at once.
+ */
+function mount(ui: ReactNode): Promise<InAppRenderResult<CoreServices>> {
+  const readSource = async (): Promise<string> => '# A\n'
+  const app = createTestCoreServices({
+    platform: createTestPlatformService({ reducedMotion: true }),
+    noteDocuments: {
+      readSource,
+      readExisting: readSource,
+      commitFrontmatter: commitNoteFrontmatter,
+      commitSourceEdit: () => Promise.reject(new Error('commitSourceEdit is not stubbed')),
+      isOstensiblyEmpty: isOstensiblyEmptyNoteSource,
+    },
+  })
+  return renderInApp(ui, {
+    app,
+    graph: { root: '/g', name: 'g', generation: 1 },
+    settings: { dateFormat: 'mdy', timeFormat: '12h' },
+  })
+}
 
 const onOpen = vi.fn()
 const onTogglePin = vi.fn()
@@ -61,36 +78,32 @@ function SwipeHarness({ note = row() }: { note?: NoteRowModel }): ReactElement {
 const mobileKey = queryKeys.index.mobileAllNotesWithSearch('/g', { text: '' })
 
 function CachedNoteList(): ReactElement {
-  const { data = [] } = useQuery<FilteredSearchHit[]>({
+  const { data } = useQuery<FilteredSearchHit[]>({
     queryKey: mobileKey,
     queryFn: async () => [],
     enabled: false,
   })
+  const hits = useNoteRows(data) ?? []
   return (
     <NoteRowList
-      rows={data.map((hit) =>
-        row({
-          isPinned: hit.isPinned,
-          isPrivate: hit.isPrivate,
-          hasConflict: hit.hasConflict,
-        }),
+      rows={hits.map((hit) =>
+        row({ isPinned: hit.isPinned, isPrivate: hit.isPrivate, hasConflict: hit.hasConflict }),
       )}
       onOpen={onOpen}
-      onDeleted={onDelete}
     />
   )
 }
 
 beforeEach(() => {
-  commitNoteFrontmatter.mockReset().mockResolvedValue(undefined)
   onOpen.mockReset()
   onTogglePin.mockReset()
   onDelete.mockReset()
+  commitNoteFrontmatter.mockReset().mockResolvedValue(undefined)
 })
 
 describe('NoteRowList', () => {
   it('leaves an ordinary note row unmarked', async () => {
-    const view = await render(<SwipeHarness note={row({})} />)
+    const view = await mount(<SwipeHarness note={row({})} />)
     await expect.element(view.getByRole('button')).toBeVisible()
     expect(view.container.querySelector('[role="img"]')).toBeNull()
   })
@@ -99,40 +112,38 @@ describe('NoteRowList', () => {
     { label: 'Private', overrides: { isPrivate: true } },
     { label: 'Protected', overrides: { hasConflict: true } },
   ])('shows $label in a note row without adding another button', async ({ label, overrides }) => {
-    const view = await render(<SwipeHarness note={row(overrides)} />)
+    const view = await mount(<SwipeHarness note={row(overrides)} />)
     await expect.element(view.getByRole('img', { name: label, exact: true })).toBeVisible()
     expect(view.getByRole('button').elements()).toHaveLength(1)
     await view.getByRole('button').click()
     expect(onOpen).toHaveBeenCalledOnce()
   })
 
-  it('a swipe pin updates the cached row marker while persistence is pending', async () => {
-    const client = new QueryClient()
+  it('a swipe pin updates the row marker through the overlay while persistence is pending', async () => {
+    const write = Promise.withResolvers<void>()
+    commitNoteFrontmatter.mockReturnValueOnce(write.promise)
+    const view = await mount(
+      <div style={{ width: 360, height: 300, display: 'flex' }}>
+        <CachedNoteList />
+      </div>,
+    )
+    const client = view.queryClient
     client.setQueryData<FilteredSearchHit[]>(mobileKey, [
       {
         path: 'notes/alpha.md',
         title: 'Alpha',
         highlightedTitle: 'Alpha',
-        isPrivate: false,
-        hasDeviceOnlyContent: false,
         dailyDate: null,
         snippet: null,
         preview: '',
-        summary: '',
         mtime: 0,
         isPinned: false,
+        isPrivate: false,
         hasConflict: false,
+        hasDeviceOnlyContent: false,
+        summary: '',
       },
     ])
-    const write = Promise.withResolvers<void>()
-    commitNoteFrontmatter.mockReturnValueOnce(write.promise)
-    const view = await render(
-      <QueryClientProvider client={client}>
-        <div style={{ width: 360, height: 300, display: 'flex' }}>
-          <CachedNoteList />
-        </div>
-      </QueryClientProvider>,
-    )
     await expect
       .element(view.getByRole('button', { name: /Alpha.*First line/ }))
       .toBeInTheDocument()
@@ -144,12 +155,11 @@ describe('NoteRowList', () => {
       { x: rect.right - 120, y: rect.top + 32 },
     )
     await view.getByRole('button', { name: 'Pin Alpha', exact: true }).click()
-    expect(client.getQueryData<FilteredSearchHit[]>(mobileKey)?.[0]?.isPinned).toBe(true)
-    expect(client.getQueryData<PinnedNote[]>(queryKeys.index.pinnedNotes('/g'))?.[0]?.path).toBe(
-      'notes/alpha.md',
+    await vi.waitFor(() =>
+      expect(view.app.noteRows.getOverlay('notes/alpha.md')).toMatchObject({ isPinned: true }),
     )
     await expect.element(view.getByText('Pinned', { exact: true })).toBeInTheDocument()
-    expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/alpha.md', { pinned: true }, 1)
+    expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/alpha.md', { pinned: 1024 }, 1)
     write.resolve()
     await write.promise
   })
@@ -169,11 +179,7 @@ describe('NoteRowList', () => {
       snippet: [],
     }
 
-    const view = await render(
-      <QueryClientProvider client={new QueryClient()}>
-        <NoteRowList rows={[row]} onOpen={() => {}} onDeleted={() => {}} />
-      </QueryClientProvider>,
-    )
+    const view = await mount(<NoteRowList rows={[row]} onOpen={() => {}} />)
     const match = view.getByText('Tim Mac')
 
     await expect.element(match).toBeInTheDocument()
@@ -183,7 +189,7 @@ describe('NoteRowList', () => {
   })
 
   it('tracks a leftward touch and reveals pin and delete actions', async () => {
-    const view = await render(<SwipeHarness />)
+    const view = await mount(<SwipeHarness />)
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 
@@ -200,7 +206,7 @@ describe('NoteRowList', () => {
   })
 
   it('leaves vertical scrolling in control and keeps the actions closed', async () => {
-    const view = await render(<SwipeHarness />)
+    const view = await mount(<SwipeHarness />)
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 
@@ -215,7 +221,7 @@ describe('NoteRowList', () => {
   })
 
   it('closes an open row when its note surface is tapped', async () => {
-    const view = await render(<SwipeHarness />)
+    const view = await mount(<SwipeHarness />)
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 
@@ -233,7 +239,7 @@ describe('NoteRowList', () => {
   })
 
   it('runs the revealed delete action without opening the note', async () => {
-    const view = await render(<SwipeHarness />)
+    const view = await mount(<SwipeHarness />)
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
     swipe(
@@ -249,7 +255,7 @@ describe('NoteRowList', () => {
   })
 
   it('does not offer delete for a daily note', async () => {
-    const view = await render(
+    const view = await mount(
       <SwipeHarness note={row({ path: 'daily/2026-08-15.md', canDelete: false })} />,
     )
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
@@ -265,7 +271,7 @@ describe('NoteRowList', () => {
   })
 
   it('recovers when a pre-threshold touch is abandoned outside the row', async () => {
-    const view = await render(<SwipeHarness />)
+    const view = await mount(<SwipeHarness />)
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 

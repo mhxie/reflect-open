@@ -1,33 +1,9 @@
-import { render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getNote, readNote, type GraphInfo } from '@reflect/core'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
+import { describe, expect, it, vi, type MockInstance } from 'vitest'
+import type { ConflictResolutionService, IndexQueryService, NoteFileService } from '@reflect/core'
+import { createTestCoreServices, createTestPlatformService } from '@reflect/core/testing'
+import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SyncConflictNotice } from './sync-conflict-notice.tsx'
-
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getNote: vi.fn(),
-  readNote: vi.fn(),
-}))
-
-const graphState = vi.hoisted(() => ({
-  graph: { root: '/g', name: 'G', generation: 3 } as GraphInfo | null,
-  indexGeneration: 7 as number | null,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => graphState }))
-
-const resolution = vi.hoisted(() => ({
-  busy: false,
-  error: null as string | null,
-  resolve: vi.fn(async () => {}),
-}))
-const useConflictResolution = vi.hoisted(() =>
-  vi.fn((_path: string, _shownContent?: string) => resolution),
-)
-vi.mock('@/hooks/use-conflict-resolution.ts', () => ({ useConflictResolution }))
 
 const NOTE = {
   path: 'notes/clash.md',
@@ -39,102 +15,72 @@ const NOTE = {
   gistStale: false,
 }
 
-let queryClient: QueryClient
+const SESSION = { generation: 3, indexGeneration: 7 }
 
-beforeEach(() => {
-  resolution.error = null
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+// The spies of the rendered app; set by `renderNotice`.
+let getNote: MockInstance<IndexQueryService['getNote']>
+let resolve: MockInstance<ConflictResolutionService['resolve']>
+
+async function renderNotice(options?: {
+  note?: typeof NOTE
+  source?: string
+  mobile?: boolean
+}): Promise<void> {
+  const app = createTestCoreServices({
+    platform: createTestPlatformService(options?.mobile ? MOBILE_PLATFORM : {}),
   })
-})
-
-afterEach(() => {
-  queryClient.clear()
-  setPlatformSurface({ mobileApp: false })
-  vi.clearAllMocks()
-})
-
-async function renderNotice(
-  props: { shownContent?: string; compact?: boolean } = {},
-): Promise<void> {
-  await render(
-    <QueryClientProvider client={queryClient}>
-      <SyncConflictNotice path="notes/clash.md" {...props} />
-    </QueryClientProvider>,
-  )
+  getNote = vi.spyOn(app.indexQuery, 'getNote').mockResolvedValue(options?.note ?? NOTE)
+  const source = options?.source
+  if (source !== undefined) {
+    const read: NoteFileService['read'] = async () => source
+    vi.spyOn(app.noteFile, 'read').mockImplementation(read)
+  }
+  resolve = vi
+    .spyOn(app.conflictResolution, 'resolve')
+    .mockResolvedValue({ wrote: false, error: null })
+  await renderInApp(<SyncConflictNotice path="notes/clash.md" />, {
+    app,
+    graph: { root: '/g', name: 'G', ...SESSION },
+  })
 }
 
 describe('SyncConflictNotice', () => {
-  it('offers compact recovery for the shown conflict before the index catches up', async () => {
-    vi.mocked(getNote).mockResolvedValue({ ...NOTE, hasConflict: false })
-    const shown = '<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n'
-    await renderNotice({ shownContent: shown, compact: true })
-
-    await page.getByRole('button', { name: /keep this device’s version/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('ours')
-    await page.getByRole('button', { name: /keep the other device’s/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('theirs')
-    await page.getByRole('button', { name: /keep both/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('both')
-    expect(useConflictResolution).toHaveBeenCalledWith('notes/clash.md', shown)
-    expect(getNote).not.toHaveBeenCalled()
-    expect(readNote).not.toHaveBeenCalled()
-    expect(page.getByText(/edited on two devices/i).query()).toBeNull()
-  })
-
   it('renders nothing for a note without conflict markers', async () => {
-    vi.mocked(getNote).mockResolvedValue({ ...NOTE, hasConflict: false })
-    await renderNotice()
+    await renderNotice({ note: { ...NOTE, hasConflict: false } })
 
     await vi.waitFor(() => expect(getNote).toHaveBeenCalled()) // let the query settle
     expect(page.getByText(/edited on two devices/i).query()).toBeNull()
   })
 
   it('offers mine/theirs/both resolutions for a conflicted note', async () => {
-    vi.mocked(getNote).mockResolvedValue(NOTE)
     await renderNotice()
 
     await expect.element(page.getByText(/edited on two devices/i)).toBeInTheDocument()
 
     await page.getByRole('button', { name: /keep this device’s version/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('ours')
+    expect(resolve).toHaveBeenCalledWith('notes/clash.md', 'ours')
 
     await page.getByRole('button', { name: /keep the other device’s/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('theirs')
+    expect(resolve).toHaveBeenCalledWith('notes/clash.md', 'theirs')
 
     await page.getByRole('button', { name: /keep both/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('both')
-    // No conflict view beside it: resolution reads the file at click.
-    expect(useConflictResolution).toHaveBeenCalledWith('notes/clash.md', undefined)
-  })
-
-  it('resolves exactly the text the conflict view shows', async () => {
-    vi.mocked(getNote).mockResolvedValue(NOTE)
-    const shown = '<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n'
-    await renderNotice({ shownContent: shown })
-    await expect.element(page.getByText(/edited on two devices/i)).toBeInTheDocument()
-
-    expect(useConflictResolution).toHaveBeenCalledWith('notes/clash.md', shown)
-    expect(useConflictResolution).not.toHaveBeenCalledWith('notes/clash.md', undefined)
+    expect(resolve).toHaveBeenCalledWith('notes/clash.md', 'both')
   })
 
   it('offers the same resolution actions on mobile', async () => {
-    setPlatformSurface({ mobileApp: true })
-    vi.mocked(getNote).mockResolvedValue(NOTE)
-    await renderNotice()
+    await renderNotice({ mobile: true })
 
     await expect.element(page.getByText(/choose what to keep/i)).toBeInTheDocument()
 
     await page.getByRole('button', { name: /keep this device’s version/i }).click()
-    expect(resolution.resolve).toHaveBeenCalledWith('ours')
+    expect(resolve).toHaveBeenCalledWith('notes/clash.md', 'ours')
   })
 
   it('pluralizes the buttons for a stacked three-plus-way conflict', async () => {
-    vi.mocked(getNote).mockResolvedValue(NOTE)
-    vi.mocked(readNote).mockResolvedValue(
-      '<<<<<<< Mac\nmac\n=======\nphone\n>>>>>>> iPhone\n<<<<<<< Mac\n=======\nipad\n>>>>>>> iPad\n',
-    )
-    await renderNotice()
+    await renderNotice({
+      source:
+        '<<<<<<< Mac\nmac\n=======\nphone\n>>>>>>> iPhone\n<<<<<<< Mac\n=======\nipad\n>>>>>>> iPad\n',
+    })
 
     // `theirs` splices in every non-first side — naming one device would lie.
     await expect

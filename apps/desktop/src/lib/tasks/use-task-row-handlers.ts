@@ -1,8 +1,6 @@
 import { useCallback } from 'react'
-import type { OpenTask } from '@reflect/core'
+import { getTaskKey, previousTaskKey, type OpenTask } from '@reflect/core'
 import type { TaskNavigate } from '@/components/tasks/task-editor.tsx'
-import { previousTaskKey } from '@/lib/tasks/task-navigation.ts'
-import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import type { TaskActions } from '@/lib/tasks/use-task-actions.ts'
 import type { TaskSelection } from '@/lib/tasks/use-task-selection.ts'
 

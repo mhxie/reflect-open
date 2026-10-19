@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
-import { countDisplayChars, parseNote, type NoteState } from '@reflect/core'
+import { countDisplayChars, parseNote, type NoteState, type TimerHandle } from '@reflect/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import type { NoteProtection } from './note-protection.ts'
 import {
   clearNoteStatus,
@@ -30,7 +31,7 @@ interface PublishingSession {
   status: NoteStatus
   loaded: boolean
   active: boolean
-  timer: ReturnType<typeof setTimeout> | null
+  timer: TimerHandle | null
 }
 
 function countChars(path: string, markdown: string): number {
@@ -49,6 +50,7 @@ export function useNoteStatusPublisher(
   options: NoteStatusPublisherOptions = {},
 ): (markdown: string) => void {
   const { selection, protection = null } = options
+  const { clock } = useCoreServices()
   const generation = scope?.generation ?? null
   const path = scope?.path ?? null
   const current = useRef<PublishingSession | null>(null)
@@ -93,14 +95,14 @@ export function useNoteStatusPublisher(
     return () => {
       session.active = false
       if (session.timer !== null) {
-        clearTimeout(session.timer)
+        clock.clearTimeout(session.timer)
       }
       if (current.current === session) {
         current.current = null
       }
       clearNoteStatus(session.scope, session.owner)
     }
-  }, [generation, path])
+  }, [clock, generation, path])
 
   useLayoutEffect(() => {
     const session = current.current
@@ -181,16 +183,16 @@ export function useNoteStatusPublisher(
         return
       }
       if (session.timer !== null) {
-        clearTimeout(session.timer)
+        clock.clearTimeout(session.timer)
       }
-      session.timer = setTimeout(() => {
+      session.timer = clock.setTimeout(() => {
         session.timer = null
         update(session, {
           characters: countChars(session.scope.path, markdown),
-          editedAt: Date.now(),
+          editedAt: clock.now(),
         })
       }, RECOUNT_DELAY_MS)
     },
-    [generation, path, update],
+    [clock, generation, path, update],
   )
 }

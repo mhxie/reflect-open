@@ -1,4 +1,4 @@
-import { act } from 'react'
+import { act } from '@/test-utils/act.ts'
 
 /** Dispatch one primary-touch pointer event on `node`. */
 export function pointer(

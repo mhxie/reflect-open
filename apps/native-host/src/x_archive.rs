@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn matches_the_shared_envelope_fixtures() {
         let fixtures: Value = serde_json::from_str(include_str!(
-            "../../../packages/core/src/actions/bookmark-envelope.fixtures.json"
+            "../../../packages/core/src/capture/bookmark-envelope.fixtures.json"
         ))
         .unwrap();
         let directory = tempfile::tempdir().unwrap();

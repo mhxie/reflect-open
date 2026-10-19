@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { getNoteMtime } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * When `path`'s file was last modified per the index (epoch ms), kept fresh
@@ -10,11 +9,11 @@ import { useGraph } from '@/providers/graph-provider.tsx'
  */
 export function useNoteMtime(path: string | null): number | null {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { indexQuery } = useCoreServices()
   const { data } = useQuery({
     queryKey: queryKeys.index.noteMtime(graph?.root, path ?? ''),
-    queryFn: async () => (await getNoteMtime(path ?? '')) ?? null,
-    enabled: path !== null && bridgeReady && graph !== null,
+    queryFn: async () => (path === null ? null : ((await indexQuery.getNoteMtime(path)) ?? null)),
+    enabled: path !== null && graph !== null,
   })
   return data ?? null
 }

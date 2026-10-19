@@ -2,16 +2,14 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElem
 import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
 import type { SelectionMenuSearchHandler } from '@meowdown/react'
 import {
+  deferredCreationPolicy,
   deriveNoteState,
   detectConflictMarkers,
   isDaily,
   isLocalOnlyPath,
   isLocalOnlyReadOnlyPath,
-  isTemplatePath,
-  isUntitledNotePath,
   splitFrontmatter,
   splitWikiLinkTarget,
-  untitledNoteSeed,
   wikiClaimHeadingText,
   findWikiClaim,
   readWikiClaimIndex,
@@ -63,13 +61,14 @@ import { useLinkPreview } from '@/editor/use-link-preview.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
 import { formatRecencyLabel, todayIso } from '@/lib/dates.ts'
-import { isTouchEditorSurface } from '@/lib/platform-surface.ts'
 import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useNoteSearchQuery, useNoteSearchReport } from '@/providers/note-find-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NotePaneProps {
   /** Graph-relative path of the note to edit. */
@@ -195,35 +194,33 @@ export function NotePaneComponent({
 }: NotePaneProps): ReactElement {
   const { graph } = useGraph()
   const { settings } = useSettings()
+  const { noteCreation, platform } = useCoreServices()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const dailyNote = isDaily(path)
   // Every leak guard follows `localOnly`; only the edit gates relax for an
   // editable folder (`readOnlyLocal` is false there).
-  const localOnly = isLocalOnlyPath(path)
-  const readOnlyLocal = isLocalOnlyReadOnlyPath(path)
-  const lazyCreate = lazy && !localOnly && (dailyNote || isUntitledNotePath(path))
-  // Templates rename via file operations only (settings, or outside the app):
-  // the rename pipeline's slug targets live under `notes/`, so tracking a
-  // template's title would move it out of `templates/`. The untitled `id:`
-  // seed is skipped for the same reason — it exists to feed that pipeline.
-  const template = isTemplatePath(path)
+  const localOnlyFolders = useLocalOnlyFolders()
+  const localOnly = isLocalOnlyPath(localOnlyFolders, path)
+  const readOnlyLocal = isLocalOnlyReadOnlyPath(localOnlyFolders, path)
+  const policy = deferredCreationPolicy(path)
+  const lazyCreate = lazy && !localOnly && policy.lazyCreatable
   // One seed per (pane, path): a fresh seed carries a fresh `id:`, and a mere
   // re-render must not mint a new identity (the session is keyed on the seed).
   // Re-mint during render when the path changes — only the committed render's
   // seed reaches the session, so the transient stale render is harmless, and
   // this avoids writing a ref during render.
-  const needsSeed = lazyCreate && !dailyNote && !template
-  const [seed, setSeed] = useState(() => ({ path, seed: untitledNoteSeed() }))
+  const needsSeed = lazyCreate && policy.seedsUntitled
+  const [seed, setSeed] = useState(() => ({ path, seed: noteCreation.untitledNoteSeed() }))
   if (needsSeed && seed.path !== path) {
-    setSeed({ path, seed: untitledNoteSeed() })
+    setSeed({ path, seed: noteCreation.untitledNoteSeed() })
   }
-  const document = useNoteDocument(path, generation, {
+  const document = useNoteDocument(path, {
     createIfMissing: lazyCreate,
     // Every editable regular note maintains title-addressed links and
     // title-mirroring backlink displays. The coordinator separately limits
     // title-derived file moves to Reflect-managed notes.
-    trackRenames: !dailyNote && !template && !readOnlyLocal,
+    trackRenames: policy.trackRenames && !readOnlyLocal,
     readOnly: readOnlyLocal,
     // A missing ordinary note opens as a name-me template (old Reflect's
     // new-note flow): the seed — `id:` frontmatter plus an empty H1 the
@@ -251,29 +248,22 @@ export function NotePaneComponent({
     saveFile,
     resolveFileInfo,
     saveError,
-  } = useAssetPersistence(generation, path, openPdf)
+  } = useAssetPersistence(path, openPdf)
   const renderWikilinkHoverCard = useWikiLinkHoverPreview({
-    generation,
-    graphKey: graph?.root ?? null,
     dateFormat: settings.dateFormat,
   })
-  // Without a generation the navigation only resolves: a link from a
-  // local-only note must never create a note.
-  const followWikiLink = useWikiLinkNavigation(localOnly ? null : generation)
-  const onLinkClick = useMarkdownLinkClick(generation, path)
+  // Read-only navigation only resolves: a link from a local-only note must
+  // never create a note.
+  const followWikiLink = useWikiLinkNavigation({ readOnly: localOnly })
+  const onLinkClick = useMarkdownLinkClick(path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
   const linkPreviewSession = useMemo(
     () =>
-      generation === null || graphKey === null || localOnly
+      graphKey === null || localOnly
         ? null
-        : {
-            path,
-            generation,
-            graphKey,
-            sessionEpoch: document.sessionEpoch,
-          },
-    [path, generation, graphKey, localOnly, document.sessionEpoch],
+        : { path, graphKey, sessionEpoch: document.sessionEpoch },
+    [path, graphKey, localOnly, document.sessionEpoch],
   )
   const resolveLinkPreview = useLinkPreview(linkPreviewSession)
 
@@ -497,7 +487,7 @@ export function NotePaneComponent({
   const publishStatus = useNoteStatusPublisher(
     generation === null ? null : { generation, path },
     document.status === 'ready' ? document.initialContent : null,
-    deriveNoteState({
+    deriveNoteState(localOnlyFolders, {
       path,
       isPrivate: privateNote,
       readOnly: readOnlyLocal,
@@ -567,14 +557,13 @@ export function NotePaneComponent({
     // conflict notice — with its raw-text resolution actions — leads the
     // view, and the file renders with each block's sides color-coded instead
     // of the generic read-only dump (whose converter-gap alert would only
-    // double up on the conflict explanation). The notice resolves the text
-    // rendered here, so a version that lands unseen is refused, not resolved.
+    // double up on the conflict explanation).
     const conflicted = detectConflictMarkers(document.initialContent)
     return (
       <div className={cn(gutterClassName, className)}>
         <WikiBreadcrumb path={path} className="mb-1" />
         <KnowledgeLevelLabel path={path} className="mb-2 block" />
-        <SyncConflictNotice path={path} shownContent={document.initialContent} className="mb-4" />
+        <SyncConflictNotice path={path} className="mb-4" />
         {conflicted ? (
           <ConflictNoteView content={document.initialContent} />
         ) : (
@@ -661,7 +650,7 @@ export function NotePaneComponent({
         onWikiLinkClick={onWikiLinkClick}
         onLinkClick={onLinkClick}
         resolveLinkPreview={resolveLinkPreview}
-        {...(generation !== null && !isTouchEditorSurface() ? { renderWikilinkHoverCard } : {})}
+        {...(graph !== null && !platform.surface.touchEditor ? { renderWikilinkHoverCard } : {})}
         onTagClick={onTagClick}
         onWikilinkSearch={onWikilinkSearch}
         onTagSearch={onTagSearch}

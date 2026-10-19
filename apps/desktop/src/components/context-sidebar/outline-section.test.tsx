@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
 import { clearNoteOutline, publishNoteOutline } from '@/editor/outline/outline-store.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { OutlineSection } from './outline-section.tsx'
 
 const PATH = 'notes/plan.md'
@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe('OutlineSection', () => {
   it('renders nothing until the note publishes section headings', async () => {
-    const screen = await render(<OutlineSection path={PATH} />)
+    const screen = await renderInApp(<OutlineSection path={PATH} />, { servicesOnly: true })
     expect(screen.container.textContent).toBe('')
 
     publishNoteOutline(PATH, owner, { headings: [], activeIndex: null, reveal })
@@ -40,7 +40,7 @@ describe('OutlineSection', () => {
 
   it('marks the section being read and follows it', async () => {
     publish(0)
-    await render(<OutlineSection path={PATH} />)
+    await renderInApp(<OutlineSection path={PATH} />, { servicesOnly: true })
     await expect
       .element(page.getByRole('button', { name: 'Goals' }))
       .toHaveAttribute('aria-current', 'location')
@@ -56,7 +56,7 @@ describe('OutlineSection', () => {
 
   it('indents rows by level and jumps on click', async () => {
     publish(null)
-    await render(<OutlineSection path={PATH} />)
+    await renderInApp(<OutlineSection path={PATH} />, { servicesOnly: true })
     const metrics = page.getByRole('button', { name: 'Metrics' })
     await expect.element(metrics).toHaveClass('pl-6')
     await expect.element(page.getByRole('button', { name: 'Goals' })).toHaveClass('pl-3')

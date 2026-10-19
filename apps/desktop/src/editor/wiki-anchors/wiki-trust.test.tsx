@@ -1,11 +1,17 @@
-import { createRef } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createRef, type ReactNode } from 'react'
+import { QueryClient } from '@tanstack/react-query'
 import { MarkdownEditor, type EditorHandle } from '@meowdown/react'
-import { emitFileChanges, setBridge, wikiClaimTextSha256 } from '@reflect/core'
-import { cleanup, render } from 'vitest-browser-react'
+import { wikiClaimTextSha256, type Settings } from '@reflect/core'
+import {
+  createTestClockService,
+  createTestCoreServices,
+  type TestCoreServices,
+} from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
+import { todayIso } from '@/lib/dates.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
 import { savedFileRetryMs } from './use-wiki-trust-view.ts'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
@@ -14,19 +20,6 @@ import { wikiEditorRange } from './wiki-article-projection.ts'
 import { WikiTrustSummary } from './wiki-trust-summary.tsx'
 
 const resolveWikilink = createWikilinkResolver('mdy')
-
-const settingsState = vi.hoisted(() => ({
-  settings: {
-    wikiTrustDisplay: 'inline',
-    wikiTrustReportPath: '.harness/wiki-trust.json',
-    wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-  },
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({ useSettings: () => settingsState }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/graphs/Personal', name: 'Personal', generation: 1 } }),
-}))
-vi.mock('@/lib/open-url.ts', () => ({ openUrlSync: vi.fn() }))
 
 const PATH = 'wiki/Example.md'
 const SOLID = 'First claim [ref][one]'
@@ -86,7 +79,10 @@ async function reportText(weak = WEAK): Promise<string> {
   })
 }
 
+let app: TestCoreServices
 let queryClient: QueryClient
+/** The settings the next render starts from. */
+let settings: Pick<Settings, 'wikiTrustDisplay' | 'wikiLanguages'>
 /** The note as saved, which the view hashes. */
 let disk: string
 /** The report file as the harness last wrote it. */
@@ -99,53 +95,58 @@ let readFailures: number
 let reads: number
 
 beforeEach(async () => {
-  settingsState.settings.wikiTrustDisplay = 'inline'
-  settingsState.settings.wikiLanguages = [{ label: 'English', folder: 'wiki' }]
+  settings = {
+    wikiTrustDisplay: 'inline',
+    wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+  }
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   disk = SOURCE
   readGate = null
   readFailures = 0
   reads = 0
   report = { stamp: '1:1', contents: await reportText() }
-  setBridge({
-    invoke: async (command, args) =>
-      command === 'wiki_trust_report_read'
-        ? {
-            stamp: report.stamp,
-            // As Rust does: the caller's copy is current, so no contents.
-            contents:
-              (args as { knownStamp: string | null }).knownStamp === report.stamp
-                ? null
-                : report.contents,
-          }
-        : command === 'note_read_local'
-          ? await (readGate ?? Promise.resolve()).then(() => {
-              reads += 1
-              if (readFailures > 0) {
-                readFailures -= 1
-                throw new Error('read failed')
-              }
-              return {
-                kind: 'content',
-                content: disk,
-                localOnly: false,
-              }
-            })
-          : null,
-    listen: async () => () => {},
-  })
+  app = createApp()
 })
 
-afterEach(async () => {
-  await cleanup()
-  queryClient.clear()
-})
+/**
+ * Core services whose bridge answers the report read from `report` and whose
+ * note reads answer from `disk`, held by `readGate` and failed by
+ * `readFailures`.
+ */
+function createApp(): TestCoreServices {
+  // Today is the date a question records.
+  const services = createTestCoreServices({
+    clock: createTestClockService({ today: todayIso() }),
+  })
+  services.ipc.onCommand('wiki_trust_report_read', (args) => ({
+    stamp: report.stamp,
+    // As Rust does: the caller's copy is current, so no contents.
+    contents: args['knownStamp'] === report.stamp ? null : report.contents,
+  }))
+  vi.spyOn(services.noteFile, 'readLocal').mockImplementation(async () => {
+    await readGate
+    reads += 1
+    if (readFailures > 0) {
+      readFailures -= 1
+      throw new Error('read failed')
+    }
+    return { kind: 'content', content: disk, localOnly: false }
+  })
+  return services
+}
+
+/**
+ * Render `ui` in `app`, over `queryClient` and with `settings`.
+ */
+function render(ui: ReactNode) {
+  return renderInApp(ui, { app, queryClient, settings })
+}
 
 async function editorFixture(source = SOURCE, path = PATH) {
   disk = source
   const ref = createRef<EditorHandle>()
   const rendered = await render(
-    <QueryClientProvider client={queryClient}>
+    <>
       <MarkdownEditor
         initialMarkdown={source}
         mode="hide"
@@ -155,7 +156,7 @@ async function editorFixture(source = SOURCE, path = PATH) {
         <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
       </MarkdownEditor>
       <WikiTrustSummary path={path} />
-    </QueryClientProvider>,
+    </>,
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
   const editor = ref.current!.getEditor()!
@@ -199,13 +200,13 @@ describe('claim trust from the harness report', () => {
 
   it('leaves the line height of prose with a waiting mark unchanged', async () => {
     const heightOf = async (display: 'inline' | 'off'): Promise<number> => {
-      settingsState.settings.wikiTrustDisplay = display
-      const { container } = await render(
-        <QueryClientProvider client={queryClient}>
-          <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
-            <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-          </MarkdownEditor>
-        </QueryClientProvider>,
+      // A fresh app per render: settings are seeded before the first read.
+      app = createApp()
+      settings.wikiTrustDisplay = display
+      const { container, unmount } = await render(
+        <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+        </MarkdownEditor>,
       )
       await vi.waitFor(() =>
         expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull(),
@@ -218,7 +219,7 @@ describe('claim trust from the harness report', () => {
         .querySelector('[data-wiki-claim="c1"]')!
         .closest('p')!
         .getBoundingClientRect().height
-      await cleanup()
+      await unmount()
       return height
     }
     // Both claims Solid, so their marks wait collapsed: the line must not grow.
@@ -284,7 +285,7 @@ describe('claim trust from the harness report', () => {
   })
 
   it("keeps the open card's mark shown when the claim lens turns off", async () => {
-    settingsState.settings.wikiTrustDisplay = 'on-demand'
+    settings.wikiTrustDisplay = 'on-demand'
     const { container, editor } = await editorFixture()
     const lens = (): void => {
       editor.view.dispatch(editor.state.tr.setMeta(wikiArticleKey, 'toggle'))
@@ -341,7 +342,7 @@ describe('claim trust from the harness report', () => {
   it.each(['inline', 'margin'] as const)(
     'ends the claim with its %s mark when the closing marker sits on its own line',
     async (display) => {
-      settingsState.settings.wikiTrustDisplay = display
+      settings.wikiTrustDisplay = display
       const { container } = await editorFixture(
         SOURCE.replace('<!-- /claim:c2 -->.', '.\n\n<!-- /claim:c2 -->'),
       )
@@ -385,7 +386,7 @@ describe('claim trust from the harness report', () => {
   })
 
   it("shows a translation's edited claim as changed, not with its source's verdict", async () => {
-    settingsState.settings.wikiLanguages = [
+    settings.wikiLanguages = [
       { label: 'English', folder: 'wiki' },
       { label: '中文', folder: 'wiki-zh' },
     ]
@@ -406,7 +407,7 @@ describe('claim trust from the harness report', () => {
   })
 
   it('keeps an earlier unreviewed edit in a translation as changed', async () => {
-    settingsState.settings.wikiLanguages = [
+    settings.wikiLanguages = [
       { label: 'English', folder: 'wiki' },
       { label: '中文', folder: 'wiki-zh' },
     ]
@@ -488,16 +489,14 @@ describe('claim trust from the harness report', () => {
     })
     const ref = createRef<EditorHandle>()
     const { container } = await render(
-      <QueryClientProvider client={queryClient}>
-        <MarkdownEditor
-          initialMarkdown={SOURCE}
-          mode="hide"
-          handleRef={ref}
-          resolveWikilink={resolveWikilink}
-        >
-          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MarkdownEditor>
-      </QueryClientProvider>,
+      <MarkdownEditor
+        initialMarkdown={SOURCE}
+        mode="hide"
+        handleRef={ref}
+        resolveWikilink={resolveWikilink}
+      >
+        <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+      </MarkdownEditor>,
     )
     await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
     const editor = ref.current!.getEditor()!
@@ -533,16 +532,14 @@ describe('claim trust from the harness report', () => {
     disk = SOURCE.replace('## Evidence', '```anchors c2\n```\n\n## Evidence')
     const ref = createRef<EditorHandle>()
     await render(
-      <QueryClientProvider client={queryClient}>
-        <MarkdownEditor
-          initialMarkdown={disk}
-          mode="hide"
-          handleRef={ref}
-          resolveWikilink={resolveWikilink}
-        >
-          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MarkdownEditor>
-      </QueryClientProvider>,
+      <MarkdownEditor
+        initialMarkdown={disk}
+        mode="hide"
+        handleRef={ref}
+        resolveWikilink={resolveWikilink}
+      >
+        <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+      </MarkdownEditor>,
     )
     await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
     await page.getByRole('button', { name: 'Question this claim' }).click()
@@ -567,10 +564,13 @@ describe('claim trust from the harness report', () => {
     await editorFixture()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const settled = reads
-    emitFileChanges([{ path: 'wiki/Other.md', kind: 'upsert' }], 'own-write')
+    app.fileChanges.emit({
+      changes: [{ path: 'wiki/Other.md', kind: 'upsert' }],
+      source: 'own-write',
+    })
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(reads).toBe(settled)
-    emitFileChanges([{ path: PATH, kind: 'upsert' }], 'own-write')
+    app.fileChanges.emit({ changes: [{ path: PATH, kind: 'upsert' }], source: 'own-write' })
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
@@ -580,15 +580,13 @@ describe('claim trust from the harness report', () => {
       release = resolve
     })
     await render(
-      <QueryClientProvider client={queryClient}>
-        <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
-          <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
-        </MarkdownEditor>
-      </QueryClientProvider>,
+      <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
+        <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
+      </MarkdownEditor>,
     )
     await vi.waitFor(() => expect(reads).toBe(0))
     await new Promise((resolve) => setTimeout(resolve, 50))
-    emitFileChanges([{ path: PATH, kind: 'upsert' }], 'external')
+    app.fileChanges.emit({ changes: [{ path: PATH, kind: 'upsert' }], source: 'external' })
     release()
     await vi.waitFor(() => expect(reads).toBe(2))
   })
@@ -631,7 +629,7 @@ describe('claim trust from the harness report', () => {
   })
 
   it('holds marks back on demand until Option reveals them', async () => {
-    settingsState.settings.wikiTrustDisplay = 'on-demand'
+    settings.wikiTrustDisplay = 'on-demand'
     const { container } = await editorFixture()
     await vi.waitFor(() =>
       expect(container.querySelector('[data-wiki-trust-claim="c2"]')).not.toBeNull(),
@@ -673,12 +671,12 @@ describe('claim trust from the harness report', () => {
       contents: JSON.stringify({ ...JSON.parse(report.contents), notes: {} }),
     }
     const { container } = await render(
-      <QueryClientProvider client={queryClient}>
+      <>
         <MarkdownEditor initialMarkdown={SOURCE} mode="hide" resolveWikilink={resolveWikilink}>
           <WikiArticleBridge path={PATH} onWikiLinkClick={vi.fn()} />
         </MarkdownEditor>
         <WikiTrustSummary path={PATH} />
-      </QueryClientProvider>,
+      </>,
     )
     await vi.waitFor(() => expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull())
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
@@ -688,7 +686,7 @@ describe('claim trust from the harness report', () => {
   })
 
   it('draws marks in the margin instead when that style is chosen', async () => {
-    settingsState.settings.wikiTrustDisplay = 'margin'
+    settings.wikiTrustDisplay = 'margin'
     // Two claims to check, so the column stacks two marks (a Solid one stays silent).
     const supported = JSON.parse(report.contents) as {
       notes: Record<string, { claims: Record<string, { tier: string }> }>

@@ -1,8 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { errorMessage, icloudAdoptGraph, icloudPendingCount, icloudStatus } from '@reflect/core'
+import { isICloudRoot } from '@reflect/core'
 import { ConflictedNoteLinks } from '@/components/settings/conflicted-note-links.tsx'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { SettingsField } from '@/components/settings/field.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -15,15 +14,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog.tsx'
-import { isICloudRoot } from '@/lib/icloud-controller.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import {
   createConflictedNotesQueryOptions,
   createDuplicateNoteIdsQueryOptions,
 } from '@/lib/query-options.ts'
-import { isMacosDesktop } from '@/lib/platform.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSync } from '@/providers/sync-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 const PENDING_NOTES_REFETCH_MS = 5_000
 
@@ -72,20 +70,21 @@ function reviewLine(conflictCount: number, forkCount: number): string {
 export function IcloudSettingsField(): ReactElement | null {
   const { graph, openRecent } = useGraph()
   const { backup, disconnectGraph } = useSync()
+  const { icloudMigration: migration, icloudNative, indexQuery, platform } = useCoreServices()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const bridgeAvailable = useBridgeReady()
   const hosted = graph !== null && isICloudRoot(graph.root)
   const { data: status } = useQuery({
     queryKey: queryKeys.icloud.status,
-    queryFn: icloudStatus,
-    enabled: bridgeAvailable && isMacosDesktop,
+    queryFn: () => icloudNative.status(),
+    enabled: platform.isMacosDesktop,
   })
   const pendingNotes = useQuery({
     queryKey: queryKeys.icloud.pendingNotes(graph?.root),
-    queryFn: () => (graph === null ? Promise.resolve(0) : icloudPendingCount(graph.root, 'notes')),
-    enabled: bridgeAvailable && isMacosDesktop && hosted,
+    queryFn: () =>
+      graph === null ? Promise.resolve(0) : icloudNative.pendingCount(graph.root, 'notes'),
+    enabled: platform.isMacosDesktop && hosted,
     staleTime: PENDING_NOTES_REFETCH_MS,
     refetchInterval: (query) => {
       const count = query.state.data
@@ -93,17 +92,17 @@ export function IcloudSettingsField(): ReactElement | null {
     },
   })
   const conflicted = useQuery({
-    ...createConflictedNotesQueryOptions(graph?.root),
-    enabled: bridgeAvailable && hosted,
+    ...createConflictedNotesQueryOptions(indexQuery, graph?.root),
+    enabled: hosted,
   })
   const duplicateIds = useQuery({
-    ...createDuplicateNoteIdsQueryOptions(graph?.root),
-    enabled: bridgeAvailable && hosted,
+    ...createDuplicateNoteIdsQueryOptions(indexQuery, graph?.root),
+    enabled: hosted,
   })
 
   // The navigator hides the entry off macOS through the same gate — the two
   // must agree (see use-visible-settings-sections).
-  if (!isMacosDesktop || graph === null) {
+  if (!platform.isMacosDesktop || graph === null) {
     return null
   }
   const backupConnected = backup.phase === 'connected'
@@ -113,43 +112,18 @@ export function IcloudSettingsField(): ReactElement | null {
     conflictCount !== undefined && forkCount !== undefined && (conflictCount > 0 || forkCount > 0)
 
   async function moveToICloud(): Promise<void> {
-    if (graph === null) {
-      return
-    }
     setBusy(true)
     setError(null)
     try {
-      // Copy first: if it fails, nothing changed — the backup is still
-      // connected and the graph untouched.
-      const newRoot = await icloudAdoptGraph(graph.generation)
-      if (backupConnected) {
-        try {
-          await disconnectGraph()
-        } catch (caught) {
-          // The iCloud copy has no .git, so exclusivity holds for the new
-          // graph regardless; the original folder keeping its backup is the
-          // recovery copy working as intended. Tell the user, don't block.
-          setError(
-            `The graph moved to iCloud, but GitHub sync could not be disconnected from the original folder: ${errorMessage(caught)}`,
-          )
-        }
-      }
-      setConfirmOpen(false)
-      const opened = await openRecent(newRoot)
-      if (!opened) {
-        // Append rather than replace: a disconnect failure above must stay
-        // visible alongside this one — both tell the user something distinct.
-        setError((previous) =>
-          [
-            previous,
-            'The copy landed in iCloud but could not be opened — open it from Saved graphs.',
-          ]
-            .filter(Boolean)
-            .join(' '),
-        )
-      }
-    } catch (caught) {
-      setError(errorMessage(caught))
+      const failure = await migration.moveGraph({
+        disconnectBackup: backupConnected ? disconnectGraph : null,
+        openGraph: openRecent,
+        onCopied: (failureSoFar) => {
+          setError(failureSoFar)
+          setConfirmOpen(false)
+        },
+      })
+      setError(failure)
     } finally {
       setBusy(false)
     }

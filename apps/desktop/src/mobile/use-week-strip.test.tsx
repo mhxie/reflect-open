@@ -1,4 +1,4 @@
-import { act } from 'react'
+import { act } from '@/test-utils/act.ts'
 import { cleanup, renderHook } from 'vitest-browser-react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WeekStartDay } from '@reflect/core'

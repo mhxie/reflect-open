@@ -1,35 +1,40 @@
-import { createRef } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createRef, type ReactNode } from 'react'
 import { MarkdownEditor, type EditorHandle } from '@meowdown/react'
 import { createMarkdownSourceMap } from '@meowdown/core'
 import { AllSelection, TextSelection } from '@prosekit/pm/state'
 import { undo, redo } from '@prosekit/pm/history'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
+import { renderInApp, type RenderInAppOptions } from '@/test-utils/render-in-app.tsx'
 import { WikiAnchorsBridge } from './wiki-anchors-bridge.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import { noteArticleFor } from './wiki-article-store.ts'
 import { wikiEditorRange } from './wiki-article-projection.ts'
-import { RouterProvider } from '@/routing/router.tsx'
 
 const resolveWikilink = createWikilinkResolver('mdy')
 
-vi.mock('@/providers/graph-provider.tsx', () => ({ useGraph: () => ({ graph: null }) }))
-vi.mock('@/lib/open-url.ts', () => ({ openUrlSync: vi.fn() }))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      wikiTrustDisplay: 'inline',
-      wikiTrustReportPath: '.harness/wiki-trust.json',
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-    },
-  }),
-}))
+/**
+ * No graph is open, so no trust report is read; `wiki/` holds the English
+ * articles.
+ */
+const IN_APP: RenderInAppOptions = {
+  graph: null,
+  settings: {
+    wikiTrustDisplay: 'inline',
+    wikiLanguages: [{ label: 'English', folder: 'wiki' }],
+  },
+}
+
+/**
+ * Render `ui` in the app, with no graph open.
+ */
+function render(ui: ReactNode) {
+  return renderInApp(ui, IN_APP)
+}
 
 const SOURCE = [
   '# Example',
@@ -69,27 +74,20 @@ const SOURCE = [
   '',
 ].join('\n')
 
-afterEach(async () => {
-  await cleanup()
-})
-
 async function editorFixture(source = SOURCE, path = 'wiki/Example.md') {
   const ref = createRef<EditorHandle>()
   const onDocChange = vi.fn()
   const rendered = await render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MarkdownEditor
-        initialMarkdown={source}
-        mode="hide"
-        handleRef={ref}
-        onDocChange={onDocChange}
-        resolveWikilink={resolveWikilink}
-      >
-        <WikiAnchorsBridge onWikiLinkClick={vi.fn()} />
-        <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
-      </MarkdownEditor>
-    </QueryClientProvider>,
-    { wrapper: RouterProvider },
+    <MarkdownEditor
+      initialMarkdown={source}
+      mode="hide"
+      handleRef={ref}
+      onDocChange={onDocChange}
+      resolveWikilink={resolveWikilink}
+    >
+      <WikiAnchorsBridge onWikiLinkClick={vi.fn()} />
+      <WikiArticleBridge path={path} onWikiLinkClick={vi.fn()} />
+    </MarkdownEditor>,
   )
   await vi.waitFor(() => expect(ref.current?.getEditor()?.mounted).toBe(true))
   const editor = ref.current!.getEditor()!
@@ -108,7 +106,6 @@ describe('article source projection', () => {
           titleMetadata={{ displayTitle: title, lang: 'zh-CN' }}
         />
       </main>,
-      { wrapper: RouterProvider },
     )
     const main = view.container.querySelector('main')!
     expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth + 1)
@@ -132,9 +129,7 @@ describe('article source projection', () => {
         (node) => node.textContent,
       ),
     ).toEqual(['[1]', '[1]', '[2]'])
-    const preview = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />, {
-      wrapper: RouterProvider,
-    })
+    const preview = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />)
     expect(
       [...preview.container.querySelectorAll('.wiki-article-reference')].map(
         (node) => node.textContent,
@@ -165,18 +160,14 @@ describe('article source projection', () => {
     expect(ref.current!.getMarkdown()).toBe(before)
     expect(onDocChange).not.toHaveBeenCalled()
     expect(undo(editor.state)).toBe(false)
-    const preview = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />, {
-      wrapper: RouterProvider,
-    })
+    const preview = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />)
     expect(revealPreviewHeading(preview.container, SOURCE, '^c7')).toBe(true)
     expect(preview.container.querySelectorAll('[data-wiki-claim-target]')).toHaveLength(2)
     expect(revealPreviewHeading(preview.container, SOURCE, '^c9')).toBe(false)
   })
 
   it('retains each locator in ascending groups and returns keyboard focus on close', async () => {
-    const view = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />, {
-      wrapper: RouterProvider,
-    })
+    const view = await render(<MarkdownPreview sourcePath={null} content={SOURCE} />)
     const trigger = view.getByRole('button', { name: 'Reference 1: Study one, p. 7' })
     await trigger.click()
     await expect.element(page.getByText('Study one, p. 7', { exact: true }).last()).toBeVisible()
@@ -258,7 +249,6 @@ describe('article source projection', () => {
   it('keeps passive article previews free of controls and preserves a paragraph split inside its ID', async () => {
     const preview = await render(
       <MarkdownPreview sourcePath={null} content={SOURCE} interactive={false} />,
-      { wrapper: RouterProvider },
     )
     expect(preview.container.querySelector('a, button, summary, [tabindex]')).toBeNull()
     const { editor, ref } = await editorFixture()
@@ -281,7 +271,6 @@ describe('article source projection', () => {
         claimFragment="^c3"
         interactive={false}
       />,
-      { wrapper: RouterProvider },
     )
     expect(view.container.textContent).toContain('中文 😀 selected')
     expect(view.container.textContent).not.toContain('before')

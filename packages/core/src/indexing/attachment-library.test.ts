@@ -1,12 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { FileMeta } from '../graph/schemas.ts'
-import { setBridge } from '../ipc/bridge.ts'
-import {
-  buildAttachmentLibrary,
-  listAttachmentNoteTags,
-  listAttachmentReferences,
-  type AttachmentReferenceRow,
-} from './attachment-library.ts'
+import { buildAttachmentLibrary, type AttachmentReferenceRow } from './attachment-library.ts'
 
 function file(path: string, modifiedMs: number, extra: Partial<FileMeta> = {}): FileMeta {
   return { path, size: 100, modifiedMs, ...extra }
@@ -179,69 +173,5 @@ describe('buildAttachmentLibrary', () => {
         notes: [],
       },
     ])
-  })
-})
-
-describe('attachment reference queries', () => {
-  // A fake bridge resolves `db_query` so the test exercises the real compiled
-  // SQL — the same harness note-list.test uses.
-  const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
-
-  beforeEach(() => {
-    mockInvoke.mockReset()
-    setBridge({ invoke: mockInvoke, listen: async () => () => {} })
-  })
-
-  afterEach(() => {
-    setBridge(null)
-  })
-
-  it('reads the body tags of notes with media references, by subquery', async () => {
-    mockInvoke.mockResolvedValueOnce([{ note_path: 'notes/trip.md', tag: 'travel' }])
-
-    expect(await listAttachmentNoteTags()).toEqual([{ notePath: 'notes/trip.md', tag: 'travel' }])
-    const [, args] = mockInvoke.mock.calls[0]!
-    const sql = String(args['sql'])
-    expect(sql).toContain('from "tags" where "tags"."note_path" in (select "assets"."note_path"')
-    expect(sql).toContain('"assets"."asset_path" like ?')
-    expect(sql).toContain('order by "tags"."tag_key"')
-  })
-
-  it('reads media references from regular and daily notes with their titles', async () => {
-    mockInvoke.mockResolvedValueOnce([
-      {
-        asset_path: 'assets/photo.png',
-        note_path: 'notes/trip.md',
-        title: 'Trip',
-        mtime: 4,
-        is_private: 1,
-        has_conflict: 1,
-      },
-    ])
-
-    const rows = await listAttachmentReferences()
-
-    expect(rows).toEqual([
-      {
-        assetPath: 'assets/photo.png',
-        notePath: 'notes/trip.md',
-        title: 'Trip',
-        mtime: 4,
-        isPrivate: true,
-        hasConflict: true,
-      },
-    ])
-    const [command, args] = mockInvoke.mock.calls[0]!
-    expect(command).toBe('db_query')
-    const sql = String(args['sql'])
-    expect(sql).toContain('inner join "notes" on "notes"."path" = "assets"."note_path"')
-    expect(sql).toContain('"notes"."is_private"')
-    expect(sql).toContain('"notes"."has_conflict"')
-    expect(mockInvoke).toHaveBeenCalledTimes(1)
-    expect(sql).toContain('"notes"."kind" in (?, ?)')
-    expect(sql).toContain('"assets"."asset_path" like ?')
-    const parameters = args['params']
-    expect(parameters).toEqual(expect.arrayContaining(['note', 'daily', '%.png', '%.pdf']))
-    expect(parameters).not.toContain('%.zip')
   })
 })

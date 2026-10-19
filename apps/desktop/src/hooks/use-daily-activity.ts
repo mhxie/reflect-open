@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { listDailyActivity, type DailyActivity } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import type { DailyActivity } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * Every daily note with content and its size, kept fresh by index
@@ -10,11 +10,11 @@ import { useGraph } from '@/providers/graph-provider.tsx'
  */
 export function useDailyActivity(enabled: boolean): DailyActivity[] | undefined {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { dailyActivity } = useCoreServices()
   const { data } = useQuery({
     queryKey: queryKeys.index.dailyActivity(graph?.root),
-    queryFn: () => listDailyActivity(),
-    enabled: enabled && bridgeReady && graph !== null,
+    queryFn: () => dailyActivity.listDailyActivity(),
+    enabled: enabled && graph !== null,
   })
   return data
 }

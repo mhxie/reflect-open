@@ -1,11 +1,13 @@
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setBridge } from '@reflect/core'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestPlatformService,
+  seedNotes,
+} from '@reflect/core/testing'
 import { MobileNote } from '@/mobile/screens/note.tsx'
-import { RouterProvider } from '@/routing/router.tsx'
+import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 
 /**
  * Conflict containment on the mobile note screen (Plan 19, step 10): a note
@@ -34,82 +36,20 @@ const CONFLICTED = [
   '',
 ].join('\n')
 
-const NOTE_ROW = {
-  path: 'notes/standup.md',
-  title: 'Standup',
-  dailyDate: null,
-  isPrivate: false,
-  hasConflict: true,
-  gistUrl: null,
-  gistStale: false,
-}
-
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getNote: vi.fn(async () => NOTE_ROW),
-  getBacklinksWithContext: vi.fn(async () => ({
-    contexts: [],
-    nextCursor: null,
-    indexedLinkCount: 0,
-  })),
-}))
-
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      editorMarkdownSyntax: 'hide',
-      wikiLanguages: [{ label: 'English', folder: 'wiki' }],
-      editorDefaultBullet: false,
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
-
-setBridge({
-  invoke: async (command) => {
-    if (command === 'note_read') {
-      return CONFLICTED
-    }
-    if (command === 'db_query') {
-      return []
-    }
-    return null
-  },
-  listen: async () => () => {},
-})
-
-let queryClient: QueryClient
-
-beforeEach(() => {
-  setPlatformSurface({ mobileApp: true })
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-})
-
-afterEach(() => {
-  cleanup()
-  queryClient.clear()
-  setPlatformSurface({ mobileApp: false })
-  vi.clearAllMocks()
-})
-
 describe('MobileNote with a conflicted note', () => {
   it('opens protected with raw markers and conflict resolution actions', async () => {
-    await render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider initialRoute={{ kind: 'note', path: 'notes/standup.md' }}>
-          <MobileNote path="notes/standup.md" />
-        </RouterProvider>
-      </QueryClientProvider>,
-    )
+    // The file and its indexed row both carry the markers, as after a sync.
+    const app = createTestCoreServices({
+      platform: createTestPlatformService(MOBILE_PLATFORM),
+      noteFile: createTestNoteFileService({ files: { 'notes/standup.md': CONFLICTED } }),
+    })
+    seedNotes(app.database, [{ path: 'notes/standup.md', markdown: CONFLICTED }])
+    await renderInApp(<MobileNote path="notes/standup.md" />, {
+      app,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      route: { kind: 'note', path: 'notes/standup.md' },
+      settings: { editorMarkdownSyntax: 'hide', editorDefaultBullet: false },
+    })
 
     await expect.element(page.getByText(/choose what to keep/i)).toBeVisible()
     // Protected: raw file shown verbatim, no live editor mounted.

@@ -1,4 +1,4 @@
-import { act } from 'react'
+import { act } from '@/test-utils/act.ts'
 import { renderHook } from 'vitest-browser-react'
 import { describe, expect, it } from 'vitest'
 import { MOD_KEY } from '@/test-utils/mod-key.ts'

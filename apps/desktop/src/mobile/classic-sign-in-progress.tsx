@@ -1,13 +1,12 @@
 import type { ReactElement } from 'react'
 import type { DateFormat } from '@reflect/core'
-import { useQueryClient } from '@tanstack/react-query'
 import { Check, CircleAlert, Dot } from 'lucide-react'
 import appIcon from '@/assets/app-icon.png'
 import { Button } from '@/components/ui/button.tsx'
 import { Spinner } from '@/components/ui/spinner.tsx'
-import { queryKeys } from '@/lib/query-client.ts'
 import type { ClassicSignIn } from '@/mobile/use-classic-access.ts'
 import { formatFullDate } from '@/lib/dates.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { useDateFormat } from '@/hooks/use-date-format.ts'
 
 type StepState = 'done' | 'active' | 'pending' | 'failed'
@@ -94,13 +93,15 @@ function StepIcon({ state }: { state: StepState }): ReactElement {
  * while idle, while the sheet is open, or after a cancelled sheet.
  */
 export function ClassicSignInProgress({ signIn }: { signIn: ClassicSignIn }): ReactElement | null {
-  const queryClient = useQueryClient()
+  const { classicAccess: classic, logger } = useCoreServices()
   const screen = screenFor(signIn, useDateFormat())
   if (screen === null) return null
   const { mutation } = signIn
 
   const done = async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.classic.access })
+    await classic.read().catch((error: unknown) => {
+      logger.error('Reading the Reflect Classic access failed', error)
+    })
     mutation.reset()
   }
 

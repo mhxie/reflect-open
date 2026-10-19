@@ -13,7 +13,7 @@ import {
 import { Badge } from '@/components/ui/badge.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { onDeviceBadgeText } from '@/lib/on-device-settings.ts'
-import { startOperation } from '@/lib/operations.ts'
+import { useAppServices } from '@/services/services-provider.tsx'
 import { ModelCombobox } from './model-combobox.tsx'
 import { OpenAiCompatibleProviderOptions } from './openai-compatible-provider-options.tsx'
 
@@ -49,6 +49,7 @@ export function AiProviderRow({
   onSetCapabilities,
   onRemove,
 }: AiProviderRowProps): ReactElement {
+  const { operations } = useAppServices()
   const provider = aiProvider(config.provider)
   const providerLabel = provider.label
   const modelLabel = aiModelLabel(config.provider, config.model)
@@ -58,7 +59,7 @@ export function AiProviderRow({
 
   const remove = (): void => {
     onRemove(config.id).catch((error: unknown) => {
-      startOperation(`Removing ${name}`).fail(errorMessage(error))
+      operations.start(`Removing ${name}`).fail(errorMessage(error))
     })
   }
 

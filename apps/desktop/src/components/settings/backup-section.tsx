@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactElement } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
+import { suggestRepoName } from '@reflect/core'
 import { ConnectGithubDialog } from '@/components/settings/connect-github-dialog.tsx'
 import { ConflictedNoteLinks } from '@/components/settings/conflicted-note-links.tsx'
 import { SettingsField } from '@/components/settings/field.tsx'
@@ -9,15 +9,14 @@ import { GithubSignOutRow } from '@/components/settings/github-sign-out-row.tsx'
 import { SyncForkNotice } from '@/components/settings/sync-fork-notice.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { useAsyncAction } from '@/hooks/use-async-action.ts'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { useGithubConnected } from '@/hooks/use-github-connected.ts'
-import { suggestRepoName } from '@/lib/github-repos.ts'
 import {
   createConflictedNotesQueryOptions,
   createDuplicateNoteIdsQueryOptions,
 } from '@/lib/query-options.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSync, type BackupState } from '@/providers/sync-provider.tsx'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 /** A short, plain-language line for each backup state — never Git jargon. */
 function statusLine(backup: Extract<BackupState, { phase: 'connected' }>): string {
@@ -52,15 +51,16 @@ function githubRepoBrowserUrl(
 export function BackupSettingsField(): ReactElement {
   const { backup, disconnectGraph, signOut, backUpNow } = useSync()
   const { graph } = useGraph()
+  const { indexQuery } = useCoreServices()
+  const { opener } = useAppServices()
   const githubConnected = useGithubConnected()
   const [connectOpen, setConnectOpen] = useState(false)
   const openRepoAttempt = useRef(0)
   const action = useAsyncAction()
 
-  const bridgeReady = useBridgeReady()
   const conflicted = useQuery({
-    ...createConflictedNotesQueryOptions(graph?.root),
-    enabled: bridgeReady && graph !== null,
+    ...createConflictedNotesQueryOptions(indexQuery, graph?.root),
+    enabled: graph !== null,
   })
   const conflictedNotes = conflicted.data ?? []
   const conflictCount = conflictedNotes.length
@@ -69,8 +69,8 @@ export function BackupSettingsField(): ReactElement {
   // note retitled differently on two devices. Surfaced for review beside the
   // marker conflicts; repair is the user's call, never automatic.
   const duplicateIds = useQuery({
-    ...createDuplicateNoteIdsQueryOptions(graph?.root),
-    enabled: bridgeReady && graph !== null,
+    ...createDuplicateNoteIdsQueryOptions(indexQuery, graph?.root),
+    enabled: graph !== null,
   })
   const forkGroups = duplicateIds.data ?? []
 
@@ -91,7 +91,8 @@ export function BackupSettingsField(): ReactElement {
     const attempt = openRepoAttempt.current + 1
     openRepoAttempt.current = attempt
     action.setError(null)
-    void openUrl(url)
+    void opener
+      .openUrl(url)
       .then(() => {
         if (openRepoAttempt.current === attempt) {
           action.setError(null)

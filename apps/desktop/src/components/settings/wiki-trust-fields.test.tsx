@@ -1,62 +1,45 @@
-import { render } from 'vitest-browser-react'
+import { createTestCoreServices } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setBridge } from '@reflect/core'
+import { describe, expect, it, vi, type MockInstance } from 'vitest'
+import type { Settings } from '@reflect/core'
 import exampleReport from '../../../../../fixtures/wiki-trust-report.example.json'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiTrustDisplayField } from './wiki-trust-display-field.tsx'
 import { WikiTrustReportField } from './wiki-trust-report-field.tsx'
 
-const settingsState = vi.hoisted(() => ({
-  settings: {
-    wikiTrustDisplay: 'inline',
-    wikiTrustReportPath: '.harness/wiki-trust.json',
-    timeFormat: '24h',
-    dateFormat: 'iso',
-  },
-  updates: [] as Record<string, unknown>[],
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: settingsState.settings,
-    updateSettings: (patch: Record<string, unknown>) => {
-      settingsState.updates.push(patch)
-    },
-  }),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/graphs/Personal', name: 'Personal', generation: 3 } }),
-}))
+/** What `wiki_trust_report_read` answers, and the reads it saw. */
+let report: { stamp: string; contents: string } | null = null
+let reads: Record<string, unknown>[] = []
+let updates: MockInstance<(patch: Partial<Settings>) => void>
 
-let report: { stamp: string; contents: string } | null
-let reads: Record<string, unknown>[]
-let queryClient: QueryClient
-
-beforeEach(() => {
-  settingsState.updates = []
-  reads = []
-  report = null
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  setBridge({
-    invoke: async (command, args) => {
-      if (command !== 'wiki_trust_report_read') throw new Error(`unexpected command ${command}`)
-      reads.push(args ?? {})
-      return report
-    },
-    listen: async () => () => {},
-  })
-})
-
-afterEach(() => {
-  queryClient.clear()
-})
+/** The settings patches the fields wrote, in order. */
+function written(): Partial<Settings>[] {
+  return updates.mock.calls.map(([patch]) => patch)
+}
 
 async function renderFields(): Promise<void> {
-  await render(
-    <QueryClientProvider client={queryClient}>
+  reads = []
+  const app = createTestCoreServices()
+  app.ipc.onCommand('wiki_trust_report_read', (args) => {
+    reads.push(args)
+    return report
+  })
+  updates = vi.spyOn(app.settings, 'update')
+  await renderInApp(
+    <>
       <WikiTrustDisplayField />
       <WikiTrustReportField />
-    </QueryClientProvider>,
+    </>,
+    {
+      app,
+      graph: { root: '/graphs/Personal', name: 'Personal', generation: 3 },
+      settings: {
+        wikiTrustDisplay: 'inline',
+        wikiTrustReportPath: '.harness/wiki-trust.json',
+        timeFormat: '24h',
+        dateFormat: 'iso',
+      },
+    },
   )
 }
 
@@ -75,6 +58,7 @@ describe('Settings → Wiki trust', () => {
   })
 
   it('says when no report exists yet', async () => {
+    report = null
     await renderFields()
     await expect.element(page.getByText(/^No report yet\./)).toBeVisible()
   })
@@ -88,20 +72,22 @@ describe('Settings → Wiki trust', () => {
   })
 
   it('commits a valid path and refuses one Reflect may not read', async () => {
+    report = null
     await renderFields()
     const input = page.getByLabelText('Trust report path')
     await input.fill('.reflect/trust.json')
     await userEvent.keyboard('{Enter}')
     await expect.element(page.getByText(/outside \.reflect\/ and \.git\//)).toBeVisible()
-    expect(settingsState.updates).toEqual([])
+    expect(written()).toEqual([])
     await input.fill(' ./_meta/wiki-trust.json ')
     await userEvent.keyboard('{Enter}')
-    expect(settingsState.updates).toEqual([{ wikiTrustReportPath: '_meta/wiki-trust.json' }])
+    expect(written()).toEqual([{ wikiTrustReportPath: '_meta/wiki-trust.json' }])
   })
 
   it('switches the reading style', async () => {
+    report = null
     await renderFields()
     await page.getByText('Beside the paragraph').click()
-    expect(settingsState.updates).toEqual([{ wikiTrustDisplay: 'margin' }])
+    expect(written()).toEqual([{ wikiTrustDisplay: 'margin' }])
   })
 })

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetOperations, startOperation } from '@/lib/operations.ts'
+import { createTestOperationsService, type TestOperationsService } from '@reflect/app/testing'
+import { createTestLoggerService, type TestLoggerService } from '@reflect/core/testing'
 import type { MockToastAddOptions } from '@/test-utils/toast.ts'
 import { attachOperationToasts } from './operation-toasts.ts'
 
@@ -11,22 +12,24 @@ const toast = vi.hoisted(() => ({
 vi.mock('@/components/ui/toast.tsx', () => ({ toast }))
 
 let detach: () => void = () => {}
+let operations: TestOperationsService
+let logger: TestLoggerService
 
 beforeEach(() => {
-  resetOperations()
+  operations = createTestOperationsService()
+  logger = createTestLoggerService()
   toast.add.mockClear()
   toast.close.mockClear()
-  detach = attachOperationToasts()
+  detach = attachOperationToasts(operations, logger)
 })
 
 afterEach(() => {
   detach()
-  resetOperations()
 })
 
 describe('attachOperationToasts', () => {
   it('keeps running background work out of the toasts until it needs attention', () => {
-    const handle = startOperation('Describing assets', { background: true })
+    const handle = operations.start('Describing assets', { background: true })
     handle.progress(1, 4)
     expect(toast.add).not.toHaveBeenCalled()
 
@@ -41,7 +44,7 @@ describe('attachOperationToasts', () => {
   })
 
   it('creates and updates a toast with a stable operation id', () => {
-    const handle = startOperation('Rebuilding search index')
+    const handle = operations.start('Rebuilding search index')
 
     expect(toast.add).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: 'operation-1', title: 'Rebuilding search index' }),
@@ -54,27 +57,22 @@ describe('attachOperationToasts', () => {
     )
   })
 
-  it('surfaces failures and closes the toast when the operation clears', () => {
-    vi.useFakeTimers()
-    try {
-      const handle = startOperation('Saving settings')
-      handle.fail('disk full')
+  it('surfaces failures and closes the toast when the operation clears', async () => {
+    const handle = operations.start('Saving settings')
+    handle.fail('disk full')
 
-      expect(toast.add).toHaveBeenLastCalledWith(
-        expect.objectContaining({ id: 'operation-1', description: 'disk full', type: 'error' }),
-      )
+    expect(toast.add).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'operation-1', description: 'disk full', type: 'error' }),
+    )
 
-      vi.advanceTimersByTime(9_200)
-      expect(toast.close).toHaveBeenCalledWith('operation-1')
-    } finally {
-      vi.useRealTimers()
-    }
+    await operations.clock.advance(9_200)
+    expect(toast.close).toHaveBeenCalledWith('operation-1')
   })
 
   it('passes optional action metadata to the toast', () => {
     const run = vi.fn()
 
-    startOperation('Update available', { action: { label: 'Install', run }, persistent: true })
+    operations.start('Update available', { action: { label: 'Install', run }, persistent: true })
 
     expect(toast.add).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -91,7 +89,7 @@ describe('attachOperationToasts', () => {
   })
 
   it('does not remove the operation when a toast is dismissed', () => {
-    const handle = startOperation('Saving settings')
+    const handle = operations.start('Saving settings')
 
     expect(toast.add).toHaveBeenLastCalledWith(
       expect.not.objectContaining({ onClose: expect.any(Function) }),
@@ -109,16 +107,12 @@ describe('attachOperationToasts', () => {
     const run = vi.fn(async () => {
       throw error
     })
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    startOperation('Update available', { action: { label: 'Install', run } })
+    operations.start('Update available', { action: { label: 'Install', run } })
 
     const options = toast.add.mock.lastCall?.[0]
     options?.actionProps?.onClick()
     await vi.waitFor(() =>
-      expect(consoleError).toHaveBeenCalledWith('operation action failed:', error),
+      expect(logger.getErrors()).toEqual([{ message: 'operation action failed:', cause: error }]),
     )
-
-    consoleError.mockRestore()
   })
 })

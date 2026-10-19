@@ -3,7 +3,6 @@ import {
   DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
   LOCAL_TRANSCRIPTION_MODEL_IDS,
 } from '../ai/local-transcription-models.ts'
-import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../ai/openai-compatible.ts'
 import { DEFAULT_SEMANTIC_MODEL, SEMANTIC_MODEL_IDS } from '../embeddings/models.ts'
 import { NOTE_ATTACHMENT_TYPES } from '../graph/attachment-types.ts'
 import {
@@ -11,6 +10,7 @@ import {
   NOTE_LIST_SORT_KEYS,
   SORT_DIRECTIONS,
 } from '../indexing/note-list-sort.ts'
+import { isHttpBaseUrl, normalizeOpenAICompatibleBaseUrl } from '../lib/http-url.ts'
 import { normalizeWikiLanguages } from '../wiki/languages.ts'
 import {
   DEFAULT_WIKI_TRUST_REPORT_PATH,

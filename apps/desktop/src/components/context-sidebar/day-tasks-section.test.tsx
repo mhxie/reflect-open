@@ -1,40 +1,25 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { ReactNode } from 'react'
-import type { OpenTask } from '@reflect/core'
-import { makeOpenTask } from '@/lib/tasks/open-task-fixture.ts'
-import { resetRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import type { OpenTask, TaskService, TaskWriteResult } from '@reflect/core'
+import { createTestCoreServices, makeOpenTask, type TestCoreServices } from '@reflect/core/testing'
+import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { DayTasksSection } from './day-tasks-section.tsx'
 
 const TODAY = '2026-10-03'
 
-const getOpenTasks = vi.hoisted(() => vi.fn<() => Promise<OpenTask[]>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getOpenTasks,
-  // `secure` is an editable local-only folder, `archive` a read-only one.
-  isLocalOnlyPath: (path: string) => path.startsWith('secure/') || path.startsWith('archive/'),
-  isLocalOnlyReadOnlyPath: (path: string) => path.startsWith('archive/'),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/lib/use-today.ts', () => ({ useToday: () => TODAY }))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({ settings: { dateFormat: 'iso' } }),
-}))
-const writeTask = vi.hoisted(() => vi.fn())
-const insertTask = vi.hoisted(() => vi.fn())
-const continueTaskInContext = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/note-task.ts', () => ({ writeTask, insertTask, continueTaskInContext }))
+/**
+ * The result of a write that changed nothing the rows need to re-address.
+ */
+const WRITTEN: TaskWriteResult = { source: '', moved: [], inserted: [], tasks: [], updatedAt: 0 }
 
-/** The result of a write that changed nothing the cache needs to re-address. */
-const WRITTEN = { source: '', moved: [], inserted: [], tasks: [] }
+// The section runs on the real `TaskService` of the test app services; each
+// test steers its reads and writes through these spies.
+let app: TestCoreServices
+let getOpenTasks: MockInstance<TaskService['getOpenTasks']>
+let writeTask: MockInstance<TaskService['writeTask']>
 
 function dailyTask(date: string, markdown: string, astPath: number[] = [0]): OpenTask {
   return makeOpenTask({ notePath: `daily/${date}.md`, dailyDate: date, markdown, astPath })
@@ -45,27 +30,36 @@ function RouteProbe(): ReactNode {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
+/**
+ * The section for `date` in a graph where `secure` is an editable local-only
+ * folder and `archive` a read-only one.
+ */
 function renderSection(date: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider>
-        <DayTasksSection date={date} />
-        <RouteProbe />
-      </RouterProvider>
-    </QueryClientProvider>,
+  return renderInApp(
+    <>
+      <DayTasksSection date={date} />
+      <RouteProbe />
+    </>,
+    {
+      app,
+      graph: {
+        root: '/g',
+        name: 'g',
+        generation: 1,
+        localOnlyFolders: ['secure', 'archive'],
+        localOnlyEditableFolders: ['secure'],
+      },
+      settings: { dateFormat: 'iso' },
+    },
   )
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear()
-  getOpenTasks.mockReset().mockResolvedValue([])
-  writeTask.mockReset().mockResolvedValue(WRITTEN)
-  resetRecentlyCompleted()
-})
-
-afterEach(async () => {
-  await cleanup()
+  // A fresh app per test, so its task service's recently-completed set starts empty.
+  app = createTestCoreServices()
+  app.clock.setToday(TODAY)
+  getOpenTasks = vi.spyOn(app.tasks, 'getOpenTasks').mockResolvedValue([])
+  writeTask = vi.spyOn(app.tasks, 'writeTask').mockResolvedValue(WRITTEN)
 })
 
 describe('DayTasksSection', () => {
@@ -117,7 +111,6 @@ describe('DayTasksSection', () => {
     expect(writeTask).toHaveBeenCalledWith(
       expect.objectContaining({ markdown: 'write the review' }),
       [{ kind: 'toggle' }],
-      1,
     )
     await expect
       .element(page.getByRole('button', { name: 'Reopen: write the review' }))

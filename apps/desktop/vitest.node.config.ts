@@ -4,7 +4,9 @@ export default defineDesktopProject({
   test: {
     name: 'node',
     environment: 'node',
-    sequence: { groupOrder: 200 },
+    fsModuleCache: true,
+    isolate: false,
     include: ['src/**/*.test.ts'],
+    sequence: { groupOrder: 200 },
   },
 })

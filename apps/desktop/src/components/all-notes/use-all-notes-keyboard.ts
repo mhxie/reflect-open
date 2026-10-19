@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { isModEvent } from '@meowdown/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 
 export interface AllNotesKeyboardOptions {
   selection: ListSelection

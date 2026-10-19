@@ -1,64 +1,26 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import '@/styles/index.css'
-import { render } from 'vitest-browser-react'
 import { Suspense, type ReactElement } from 'react'
-import { normalizeWikiLanguages, setBridge, type Settings } from '@reflect/core'
+import {
+  buildIndexedNote,
+  normalizeWikiLanguages,
+  parseNote,
+  ReflectError,
+  type Settings,
+} from '@reflect/core'
 import { wikiRoute, type Route } from '@/routing/route.ts'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiScreen } from './wiki-screen.tsx'
 
 /**
- * The Wiki screen over the real query layer, a fake IPC bridge (index rows
- * from compiled SQL, entry files from memory), the real router, and a small
- * settings store so sorting, layout, and folding re-render like the app.
+ * The Wiki screen over the real query layer, a seeded test index (entry rows
+ * and the notes that cite them), entry files from memory, the real router,
+ * and the real settings, so sorting, layout, and folding re-render like the app.
  */
-
-const settingsStore = vi.hoisted(() => {
-  let patch: Record<string, unknown> = {}
-  const listeners = new Set<() => void>()
-  return {
-    get: (): Record<string, unknown> => patch,
-    set: (next: Record<string, unknown>): void => {
-      patch = { ...patch, ...next }
-      for (const listener of listeners) {
-        listener()
-      }
-    },
-    reset: (): void => {
-      patch = {}
-    },
-    subscribe: (listener: () => void): (() => void) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-  }
-})
-
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1 },
-    indexing: false,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', async () => {
-  const { useSyncExternalStore } = await import('react')
-  const { DEFAULT_SETTINGS: defaults } = await import('@reflect/core')
-  const read = (): Settings => ({ ...defaults, dateFormat: 'iso', ...settingsStore.get() })
-  return {
-    useSettings: () => {
-      useSyncExternalStore(settingsStore.subscribe, settingsStore.get)
-      return {
-        settings: read(),
-        updateSettings: (patch: Partial<Settings>) => settingsStore.set(patch),
-        updateSettingsWith: (updater: (current: Settings) => Partial<Settings>) =>
-          settingsStore.set(updater(read())),
-      }
-    },
-  }
-})
 
 const SPACING = [
   '# Spacing Effect',
@@ -180,13 +142,13 @@ const WIKI: Fixture = {
 
 let fixture: Fixture = WIKI
 let pendingNoteLoad: Promise<void> | undefined
-
-const mockInvoke = vi.fn<(command: string, args: Record<string, unknown>) => Promise<unknown>>()
-setBridge({ invoke: mockInvoke, listen: async () => () => {} })
+/** Settings the next render starts from, over ISO dates. */
+let initialSettings: Partial<Settings> = {}
+/** Why the next render's listing fails, if it does. */
+let listingFailure: Error | null = null
 
 /**
- * `fixture` with fresh hashes for `paths`: listing caches summaries by path
- * and hash across renders, the way the app keeps them across visits.
+ * `fixture` with fresh hashes for `paths`, the way a changed file reindexes.
  */
 function rehashed(paths: readonly string[], files: Record<string, string>): Fixture {
   return {
@@ -200,39 +162,18 @@ function rehashed(paths: readonly string[], files: Record<string, string>): Fixt
 /** Paths whose reads fail the way an unreadable file does. */
 let unreadable = new Set<string>()
 
+/** Notes outside the wiki that cite Spacing Effect. */
+const CITERS = ['notes/a.md', 'notes/b.md', 'notes/c.md']
+
 beforeEach(() => {
   fixture = WIKI
   pendingNoteLoad = undefined
+  initialSettings = {}
+  listingFailure = null
   unreadable = new Set()
-  settingsStore.reset()
-  mockInvoke.mockReset()
-  mockInvoke.mockImplementation(async (command, args) => {
-    if (command === 'note_read_local') {
-      if (unreadable.has(String(args['path']))) {
-        throw { kind: 'io', message: 'stream did not contain valid UTF-8' }
-      }
-      const content = fixture.files[String(args['path'])]
-      return content === undefined
-        ? { kind: 'evicted' }
-        : { kind: 'content', content, localOnly: false }
-    }
-    if (command !== 'db_query') {
-      return null
-    }
-    const query = String(args['sql'])
-    if (query.includes('count(distinct')) {
-      return [{ target_path: 'wiki/memory/Spacing Effect.md', cited_by: 3 }]
-    }
-    if (query.includes('from "tags"')) {
-      return []
-    }
-    if (query.includes('"file_hash"')) {
-      return fixture.notes.map((note) => ({ is_private: 0, has_conflict: 0, ...note }))
-    }
-    return []
-  })
 })
 
+/** The route on screen: a navigation whose destination suspends commits once it is ready. */
 function RouteProbe(): ReactElement {
   const { route } = useRouter()
   return <output data-testid="route">{JSON.stringify(route)}</output>
@@ -250,30 +191,62 @@ function RoutedScreen(): ReactElement {
   )
 }
 
-function renderScreen(language: string | null = null) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={wikiRoute({ language })}>
-        <Suspense fallback={null}>
-          <div style={{ height: '100vh' }}>
-            <RoutedScreen />
-          </div>
-          <RouteProbe />
-        </Suspense>
-      </RouterProvider>
-    </QueryClientProvider>,
+async function renderScreen(language: string | null = null) {
+  const citers = Object.fromEntries(
+    CITERS.map((path) => [path, 'See [[wiki/memory/Spacing Effect]].\n']),
+  )
+  const app = createTestCoreServices({
+    noteFile: createTestNoteFileService({ files: { ...fixture.files, ...citers }, generation: 1 }),
+  })
+  const index = (path: string, title: string | null, fileHash: string, mtime: number) => {
+    const source = fixture.files[path] ?? citers[path] ?? ''
+    const indexed = buildIndexedNote(parseNote({ path, source }), { fileHash, mtime, source })
+    app.database.applyProjection(title === null ? indexed : { ...indexed, title })
+  }
+  for (const note of fixture.notes) {
+    index(note.path, note.title, note.file_hash, note.mtime)
+  }
+  for (const path of CITERS) {
+    index(path, null, `hash-${path}`, 1)
+  }
+  const readLocal = app.noteFile.readLocal.bind(app.noteFile)
+  vi.spyOn(app.noteFile, 'readLocal').mockImplementation(async (path, generation) => {
+    if (unreadable.has(path)) {
+      throw new ReflectError('io', 'stream did not contain valid UTF-8')
+    }
+    if (fixture.files[path] === undefined && citers[path] === undefined) {
+      return { kind: 'evicted' }
+    }
+    return await readLocal(path, generation)
+  })
+  if (listingFailure !== null) {
+    vi.spyOn(app.wiki, 'listEntries').mockRejectedValue(listingFailure)
+  }
+  // Entries are summarized as of today: reviews and sources dated 2020 count.
+  app.clock.setNow(Date.now())
+  return await renderInApp(
+    <Suspense fallback={null}>
+      <div style={{ height: '100vh' }}>
+        <RoutedScreen />
+      </div>
+      <RouteProbe />
+    </Suspense>,
+    {
+      app,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      route: wikiRoute({ language }),
+      settings: { dateFormat: 'iso', ...initialSettings },
+    },
   )
 }
 
-function probedRoute(view: Awaited<ReturnType<typeof renderScreen>>): unknown {
+type ScreenView = Awaited<ReturnType<typeof renderScreen>>
+
+function probedRoute(view: ScreenView): unknown {
   return JSON.parse(view.getByTestId('route').element().textContent ?? 'null')
 }
 
-async function expectRoute(
-  view: Awaited<ReturnType<typeof renderScreen>>,
-  route: Route,
-): Promise<void> {
+async function expectRoute(view: ScreenView, route: Route): Promise<void> {
   await vi.waitFor(() => expect(probedRoute(view)).toEqual(route))
 }
 
@@ -281,7 +254,7 @@ async function expectRoute(
  * Entry subjects in render order (the gutter toggle is the row's pressed
  * button; an index tree row's expander is its expanded one).
  */
-function rowTitles(view: Awaited<ReturnType<typeof renderScreen>>): string[] {
+function rowTitles(view: ScreenView): string[] {
   return [...view.container.querySelectorAll('[data-row-index]')].map(
     (row) =>
       row.querySelector('button:not([aria-pressed]):not([aria-expanded])')?.textContent ?? '',
@@ -291,14 +264,14 @@ function rowTitles(view: Awaited<ReturnType<typeof renderScreen>>): string[] {
 describe('WikiScreen', () => {
   it('keeps filters reachable in a narrow window with several languages', async () => {
     const previousViewport = { width: window.innerWidth, height: window.innerHeight }
-    settingsStore.set({
+    initialSettings = {
       wikiLanguages: normalizeWikiLanguages([
         { label: 'English', folder: 'wiki' },
         { label: '简体中文', folder: 'wiki-cn' },
         { label: '日本語', folder: 'wiki-jp' },
         { label: 'Français', folder: 'wiki-fr' },
       ]),
-    })
+    }
     await page.viewport(760, 650)
     const view = await renderScreen()
     try {
@@ -591,12 +564,12 @@ describe('WikiScreen', () => {
       'Zeigarnik Effect',
       'Wiki Index',
     ])
-    expect(settingsStore.get()['wikiSort']).toEqual({ key: 'claims', direction: 'desc' })
+    expect(view.app.settings.get().wikiSort).toEqual({ key: 'claims', direction: 'desc' })
     await view.unmount()
   })
 
   it('groups entries by topic, sorted inside each topic', async () => {
-    settingsStore.set({ wikiSort: { key: 'sources', direction: 'desc' } })
+    initialSettings = { wikiSort: { key: 'sources', direction: 'desc' } }
     const view = await renderScreen()
     await expect.element(view.getByText('Spaced sessions beat cramming.')).toBeInTheDocument()
 
@@ -610,12 +583,12 @@ describe('WikiScreen', () => {
       'Retrieval Practice',
       'Zeigarnik Effect',
     ])
-    expect(settingsStore.get()['wikiGroupByTopic']).toBe(true)
+    expect(view.app.settings.get().wikiGroupByTopic).toBe(true)
     await view.unmount()
   })
 
   it('folds a topic, skips its rows from the keyboard, and ⌥-click folds every topic', async () => {
-    settingsStore.set({ wikiGroupByTopic: true })
+    initialSettings = { wikiGroupByTopic: true }
     const view = await renderScreen()
     await expect.element(view.getByText('Spaced sessions beat cramming.')).toBeInTheDocument()
 
@@ -625,7 +598,7 @@ describe('WikiScreen', () => {
       .element(view.getByRole('button', { name: /^memory/ }))
       .toHaveAttribute('aria-expanded', 'false')
     expect(rowTitles(view)).toEqual(['Wiki Index', 'Zeigarnik Effect'])
-    expect(settingsStore.get()['wikiFoldedTopics']).toEqual(['memory'])
+    expect(view.app.settings.get().wikiFoldedTopics).toEqual(['memory'])
 
     view.container.querySelector<HTMLElement>('[aria-label="Wiki"]')?.focus()
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}')
@@ -669,7 +642,7 @@ describe('WikiScreen', () => {
       expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect']),
     )
 
-    settingsStore.set({
+    view.app.settings.update({
       wikiLanguages: normalizeWikiLanguages([{ label: 'English', folder: 'wiki' }]),
     })
 
@@ -685,13 +658,13 @@ describe('WikiScreen', () => {
   })
 
   it('keeps missing-translation filters distinct for languages with the same label', async () => {
-    settingsStore.set({
+    initialSettings = {
       wikiLanguages: normalizeWikiLanguages([
         { label: 'English', folder: 'wiki' },
         { label: '中文', folder: 'wiki-cn' },
         { label: '中文', folder: 'wiki-tw' },
       ]),
-    })
+    }
     const view = await renderScreen()
     const header = view.getByRole('banner')
 
@@ -747,13 +720,7 @@ describe('WikiScreen', () => {
   })
 
   it('explains a listing that fails', async () => {
-    const serve = mockInvoke.getMockImplementation()
-    mockInvoke.mockImplementation(async (command, args) => {
-      if (command === 'db_query' && String(args['sql']).includes('"file_hash"')) {
-        throw { kind: 'io', message: 'database is locked' }
-      }
-      return await serve?.(command, args)
-    })
+    listingFailure = new ReflectError('io', 'database is locked')
     const view = await renderScreen()
 
     await expect

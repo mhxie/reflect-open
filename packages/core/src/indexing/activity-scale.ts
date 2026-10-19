@@ -1,6 +1,6 @@
 import { addDaysIso, weekdayIso } from '@reflect/utils'
 import { isNotNullish } from '@ocavue/utils'
-import type { DailyActivity } from './daily-activity.ts'
+import type { DailyActivity } from './daily-activity-service.ts'
 
 /** A heatmap cell's intensity: 0 for no entry, 1–4 by size. */
 export type ActivityLevel = 0 | 1 | 2 | 3 | 4

@@ -1,19 +1,11 @@
 /**
  * `@reflect/core` sync domain (Plan 12) — GitHub backup & sync over the Rust
- * git primitives: typed command bindings, the GitHub module (device flow,
- * token refresh, repo API), and the debounced sync engine.
+ * git primitives: the git schemas, the GitHub module (device flow, token
+ * refresh, repo API), and the debounced sync engine's types.
  */
 export {
-  gitStatus,
-  gitNoteVersion,
-  gitSetup,
-  gitDisconnect,
-  gitClone,
-  gitCommitAll,
-  gitFetch,
-  gitMergeRemote,
-  gitPush,
   gitStatusSchema,
+  gitNoteVersionSchema,
   commitOutcomeSchema,
   remoteDeltaSchema,
   mergeOutcomeSchema,
@@ -23,6 +15,7 @@ export {
   displacedFileSchema,
   type GitCredential,
   type GitStatus,
+  type GitNoteVersion,
   type CommitOutcome,
   type RemoteDelta,
   type MergeOutcome,
@@ -30,7 +23,7 @@ export {
   type SkippedFile,
   type ChangedFile,
   type DisplacedFile,
-} from './commands.ts'
+} from './git-repository-service.ts'
 export {
   GITHUB_APP_CLIENT_ID,
   GITHUB_APP_SLUG,
@@ -38,39 +31,26 @@ export {
   githubAppInstallUrl,
   isDeviceFlowConfigured,
   githubAuthSchema,
-  saveGithubAuth,
-  loadGithubAuth,
-  clearGithubAuth,
-  deviceFlowStart,
-  deviceFlowPoll,
-  runDeviceFlow,
-  refreshGithubAuth,
-  getGithubToken,
   githubCredential,
-  parseGithubRemote,
-  githubRemoteUrl,
-  newRepoUrl,
-  BACKUP_REPO_DESCRIPTION,
-  createGithubRepo,
-  getGithubRepo,
-  getAuthenticatedUser,
   type GithubAuth,
   type DeviceFlowStart,
   type DevicePollResult,
   type RunDeviceFlowOptions,
+  type GithubUser,
+} from './github-auth-service.ts'
+export {
+  parseGithubRemote,
+  remoteHost,
+  parseRepoInput,
+  suggestRepoName,
+  githubRemoteUrl,
+  newRepoUrl,
+  BACKUP_REPO_DESCRIPTION,
   type GithubRepoRef,
   type GithubRepo,
-  type GithubUser,
-} from './github.ts'
-export { createGist, updateGist, deleteGist, type PublishedGist, type GistFile } from './gists.ts'
+} from './github-repo-service.ts'
+export type { PublishedGist, GistFile } from './gist-service.ts'
 export {
-  clearHostCredential,
-  loadHostCredential,
-  remoteHost,
-  saveHostCredential,
-} from './host-credentials.ts'
-export {
-  createSyncEngine,
   isSyncError,
   type SyncEngine,
   type SyncEngineOptions,

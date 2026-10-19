@@ -1,8 +1,7 @@
 import type { ReactElement } from 'react'
 import { ExternalLink } from 'lucide-react'
-import { errorMessage, openAsset } from '@reflect/core'
-import { startOperation } from '@/lib/operations.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { PEEK_HEADER_BUTTON } from './peek-header-button.ts'
 import { PeekFrame } from './peek-frame.tsx'
 import { PdfPeekPages } from './pdf-peek-pages.tsx'
@@ -20,6 +19,7 @@ export interface PdfPeekProps {
  */
 export function PdfPeek({ path, onClose }: PdfPeekProps): ReactElement {
   const { graph } = useGraph()
+  const { attachments } = useCoreServices()
   const generation = graph?.generation ?? null
   return (
     <PeekFrame
@@ -32,11 +32,8 @@ export function PdfPeek({ path, onClose }: PdfPeekProps): ReactElement {
             type="button"
             aria-label="Open in default app"
             title="Open in default app"
-            onClick={() => {
-              openAsset(path, generation).catch((cause: unknown) => {
-                startOperation('Opening attachment').fail(errorMessage(cause))
-              })
-            }}
+            // A failure surfaces as an "Opening attachment" operation.
+            onClick={() => void attachments.openOrReveal(path)}
             className={PEEK_HEADER_BUTTON}
           >
             <ExternalLink aria-hidden className="size-4" strokeWidth={1.75} />

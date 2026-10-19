@@ -6,55 +6,93 @@ import {
   type ReactElement,
 } from 'react'
 import { Circle, CircleCheck } from 'lucide-react'
-import { isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
+import { getTaskKey, isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
 import { getIsComposing } from '@meowdown/core'
-import { getTaskKey } from '@/lib/tasks/task-identity.ts'
 import { cn } from '@/lib/utils.ts'
-import type { ModClickEvent } from '@/lib/windows/open-in-new-window.ts'
+import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { TaskEditor, type TaskNavigate } from './task-editor.tsx'
 import { TaskText } from './task-text.tsx'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { useNoteLabel } from '@/hooks/use-note-label.ts'
 
 interface TaskRowProps {
   task: OpenTask
-  /** Show the source-note date — date buckets aggregate tasks from many notes. */
+  /**
+   * Show the source-note date — date buckets aggregate tasks from many notes.
+   */
   showSource: boolean
-  /** Whether this row is part of the current multi-selection (Plan 18). */
+  /**
+   * Whether this row is part of the current multi-selection (Plan 18).
+   */
   selected: boolean
-  /** Whether this row is the sole selection — it shows the inline editor. */
+  /**
+   * Whether this row is the sole selection — it shows the inline editor.
+   */
   editing: boolean
-  /** Whether a Tasks-view write is already in flight. */
+  /**
+   * Whether a Tasks-view write is already in flight.
+   */
   taskActionPending: boolean
-  /** Whether this checkbox click should apply to the whole multi-selection. */
+  /**
+   * Whether this checkbox click should apply to the whole multi-selection.
+   */
   togglesSelection: boolean
-  /** Select the row, honoring ⌘/Ctrl (toggle) and Shift (range) modifiers. */
+  /**
+   * Select the row, honoring ⌘/Ctrl (toggle) and Shift (range) modifiers.
+   */
   onSelect: (event: Pick<MouseEvent, 'metaKey' | 'ctrlKey' | 'shiftKey'>) => void
-  /** Checkbox click on an unselected or solely selected row: toggle this task. */
+  /**
+   * Checkbox click on an unselected or solely selected row: toggle this task.
+   */
   onCheckboxToggle: () => void
-  /** Checkbox click while part of a multi-selection: apply this row's next state to it. */
+  /**
+   * Checkbox click while part of a multi-selection: apply this row's next state to it.
+   */
   onSelectionCheckboxToggle: () => void
-  /** Persist an inline edit (content after the marker) and exit edit mode. */
+  /**
+   * Persist an inline edit (content after the marker) and exit edit mode.
+   */
   onEditCommit: (content: string) => void
-  /** Enter in the editor: persist this row then add the next task (V1 continuous entry). */
+  /**
+   * Enter in the editor: persist this row then add the next task (V1 continuous entry).
+   */
   onEditContinue: (content: string | null) => void
-  /** Delete the task from the inline editor (emptied via ⌘↵ / ⌘⌫) and exit edit mode. */
+  /**
+   * Delete the task from the inline editor (emptied via ⌘↵ / ⌘⌫) and exit edit mode.
+   */
   onEditDelete: () => void
-  /** Backspace on an empty row in the editor: delete it and select the previous task. */
+  /**
+   * Backspace on an empty row in the editor: delete it and select the previous task.
+   */
   onEditDeleteEmpty: () => void
-  /** Exit edit mode without writing (Escape / unchanged). */
+  /**
+   * Exit edit mode without writing (Escape / unchanged).
+   */
   onEditCancel: () => void
-  /** ⌘↵ in the editor: complete the task, saving the edit first when `content` isn't null. */
+  /**
+   * ⌘↵ in the editor: complete the task, saving the edit first when `content` isn't null.
+   */
   onEditComplete: (content: string | null) => void
-  /** Checkbox click while editing: save any draft, then toggle checked state. */
+  /**
+   * Checkbox click while editing: save any draft, then toggle checked state.
+   */
   onEditCheckboxToggle: (content: string | null) => void
-  /** ⌘⇧K in the editor: convert the task to a bullet, saving the edit first when changed. */
+  /**
+   * ⌘⇧K in the editor: convert the task to a bullet, saving the edit first when changed.
+   */
   onEditConvertToBullet: (content: string | null) => void
-  /** Persist a changed edit when the row unmounts (selection moved), without exiting. */
+  /**
+   * Persist a changed edit when the row unmounts (selection moved), without exiting.
+   */
   onEditFlush: (content: string) => void
-  /** ↑/↓ in the editor: move the selection between rows (Shift extends). */
+  /**
+   * ↑/↓ in the editor: move the selection between rows (Shift extends).
+   */
   onEditNavigate: TaskNavigate
-  /** Holds the editing row's flush-then-convert trigger for the toolbar button. */
+  /**
+   * Holds the editing row's flush-then-convert trigger for the toolbar button.
+   */
   convertControllerRef: MutableRefObject<(() => void) | null>
   onOpen: (notePath: string, event?: ModClickEvent) => void
 }
@@ -100,7 +138,7 @@ export function TaskRow({
 }: TaskRowProps): ReactElement {
   const noteLabel = useNoteLabel()
   const checkboxToggleControllerRef = useRef<(() => void) | null>(null)
-  const readOnly = isLocalOnlyReadOnlyPath(task.notePath)
+  const readOnly = isLocalOnlyReadOnlyPath(useLocalOnlyFolders(), task.notePath)
   const editable = editing && !readOnly
   const done = task.checked
   const label = task.text || 'Empty task'

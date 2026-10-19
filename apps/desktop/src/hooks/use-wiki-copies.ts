@@ -1,15 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { isWikiPath, wikiCopies, type WikiLanguage } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import { isWikiPath, type WikiCopy } from '@reflect/core'
 import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
-
-/** One language's copy of a wiki entry, or `path: null` where it has none. */
-export interface WikiCopy {
-  readonly language: WikiLanguage
-  readonly path: string | null
-}
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * Every language's copy of the wiki entry at `path`, in settings order;
@@ -18,13 +12,13 @@ export interface WikiCopy {
  */
 export function useWikiCopies(path: string): readonly WikiCopy[] | undefined {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { wiki } = useCoreServices()
   const languages = useWikiLanguages()
   const inWiki = isWikiPath(path, languages)
   const { data } = useQuery({
     queryKey: queryKeys.index.wikiCopies(graph?.root, path, languages),
-    queryFn: () => wikiCopies(path, languages),
-    enabled: bridgeReady && graph !== null && inWiki,
+    queryFn: () => wiki.copies(path, languages),
+    enabled: graph !== null && inWiki,
   })
   return inWiki ? data : undefined
 }

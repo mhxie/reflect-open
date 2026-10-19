@@ -1,31 +1,17 @@
 import { createRef } from 'react'
-import { setBridge, type IpcBridge } from '@reflect/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
 import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
 import '@/test-utils/locator.ts'
-
-vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 
 const pmRoot = page.locate('.ProseMirror')
 
-afterEach(() => {
-  setBridge(null)
-})
-
 describe('NoteEditor smoke', () => {
   it('mounts the real editor and serializes typed text', async () => {
-    const bridge: IpcBridge = {
-      invoke: async () => null,
-      listen: async () => () => {},
-    }
-    setBridge(bridge)
-
     const handleRef = createRef<NoteEditorHandle>()
     const onChange = vi.fn()
-    await render(
+    await renderInApp(
       <NoteEditor
         privateNote={false}
         initialContent="Hello"
@@ -42,9 +28,5 @@ describe('NoteEditor smoke', () => {
       expect(onChange).toHaveBeenCalled()
     })
     expect(handleRef.current?.getMarkdown()).toBe('Hello world\n')
-  })
-
-  it('applies module mocks in browser mode', () => {
-    expect(vi.isMockFunction(openUrl)).toBe(true)
   })
 })

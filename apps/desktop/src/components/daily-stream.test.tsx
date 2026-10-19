@@ -1,15 +1,16 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from 'vitest-browser-react'
 import { page } from 'vitest/browser'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, useEffect, useState, type ReactElement, type ReactNode } from 'react'
-import { setBridge } from '@reflect/core'
+import { describe, expect, it, vi } from 'vitest'
+import { useEffect, type ReactElement, type ReactNode } from 'react'
+import { act, actAsync } from '@/test-utils/act.ts'
+import { createSystemClock, type ClockService } from '@reflect/core'
+import { createTestCoreServices, createTestClockService } from '@reflect/core/testing'
 import { FocusedDailyProvider, useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import { useRouter } from '@/routing/router.tsx'
 import { formatDayLabel, todayIso } from '@/lib/dates.ts'
 import { createDayWindow, dateAtIndex, indexOfDate } from '@/lib/day-window.ts'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { DailyStream, ESTIMATED_DAY_HEIGHT } from './daily-stream.tsx'
 
 /**
@@ -24,53 +25,35 @@ import { DailyStream, ESTIMATED_DAY_HEIGHT } from './daily-stream.tsx'
 vi.mock('@/editor/note-editor.tsx', () => ({
   NoteEditor: () => <div data-testid="fake-editor" />,
 }))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({
-    graph: { root: '/g', name: 'g', generation: 1 },
-    indexing: false,
-  }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      dateFormat: 'mdy',
-      editorMarkdownSyntax: 'hide',
-      editorSpellCheck: true,
-      aiProviders: [],
-      defaultAiProviderId: null,
-      chatSystemPrompt: '',
-      aiPrompts: [],
-    },
-    updateSettings: async () => {},
-    updateSettingsWith: () => {},
-  }),
-}))
-
-setBridge({
-  // Reads never resolve: every day stays a loading placeholder.
-  invoke: () => new Promise(() => {}),
-  listen: async () => () => {},
-})
-
-afterEach(async () => {
-  await cleanup()
-  vi.useRealTimers()
-})
-
-function StreamProviders({ children }: { children: ReactNode }): ReactElement {
-  const [client] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  )
-  return (
-    <QueryClientProvider client={client}>
-      <RouterProvider initialRoute={{ kind: 'today' }}>
-        <div style={{ height: 800 }}>{children}</div>
-      </RouterProvider>
-    </QueryClientProvider>
-  )
+/**
+ * A test clock at 23:59 on 2026-06-27, for the app of {@link renderStream}.
+ */
+function clockBeforeMidnight(): ReturnType<typeof createTestClockService> {
+  return createTestClockService({ now: new Date(2026, 5, 27, 23, 59, 0).getTime() })
 }
 
-/** Records `offset` on the current history entry, as a view's scroll would. */
+function Stream({ children }: { children: ReactNode }): ReactElement {
+  return <div style={{ height: 800 }}>{children}</div>
+}
+
+/**
+ * Render `children` in a stream-sized box; the app runs on `clock` (the system clock by default).
+ */
+async function renderStream(children: ReactNode, clock: ClockService = createSystemClock()) {
+  const app = createTestCoreServices({ clock })
+  // Reads never resolve: every day stays a loading placeholder.
+  vi.spyOn(app.noteFile, 'read').mockReturnValue(new Promise(() => {}))
+  return await renderInApp(<Stream>{children}</Stream>, {
+    app,
+    graph: { root: '/g', name: 'g', generation: 1 },
+    settings: { dateFormat: 'mdy', editorMarkdownSyntax: 'hide', editorSpellCheck: true },
+    route: { kind: 'today' },
+  })
+}
+
+/**
+ * Records `offset` on the current history entry, as a view's scroll would.
+ */
 function SaveScrollProbe({ offset }: { offset: number }): ReactElement | null {
   const { saveScrollState } = useRouter()
   useEffect(() => {
@@ -90,11 +73,7 @@ function NavigateTodayProbe({ onReady }: { onReady: (navigateToday: () => void) 
 describe('DailyStream', () => {
   it('anchors its first scroll to today, with no top-of-window flicker', async () => {
     const today = todayIso()
-    const view = await render(
-      <StreamProviders>
-        <DailyStream target={{ kind: 'today' }} />
-      </StreamProviders>,
-    )
+    const view = await renderStream(<DailyStream target={{ kind: 'today' }} />)
 
     const stream = page.getByTestId('daily-stream')
     await vi.waitFor(() => expect(stream.element().scrollTop).toBeGreaterThan(0))
@@ -103,27 +82,27 @@ describe('DailyStream', () => {
   })
 
   it('re-anchors a today arrival to the stream-local day after midnight', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date(2026, 5, 27, 23, 59, 0))
+    const clock = clockBeforeMidnight()
     let navigateToday: () => void = () => {
       throw new Error('navigate not ready')
     }
-    const view = await render(
-      <StreamProviders>
+    const view = await renderStream(
+      <>
         <DailyStream target={{ kind: 'today' }} />
         <NavigateTodayProbe
           onReady={(run) => {
             navigateToday = run
           }}
         />
-      </StreamProviders>,
+      </>,
+      clock,
     )
 
     const dayWindow = createDayWindow('2026-06-27')
-    await act(async () => {
-      vi.advanceTimersByTime(2 * 60 * 1000)
+    await actAsync(async () => {
+      await clock.advance(2 * 60 * 1000)
     })
-    await act(async () => {
+    await actAsync(async () => {
       navigateToday()
     })
 
@@ -138,31 +117,28 @@ describe('DailyStream', () => {
   })
 
   it('anchors a today arrival to the real day after a slept-through midnight', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date(2026, 5, 27, 23, 59, 0))
+    const clock = clockBeforeMidnight()
     let navigateToday: () => void = () => {
       throw new Error('navigate not ready')
     }
-    const view = await render(
-      <StreamProviders>
+    const view = await renderStream(
+      <>
         <DailyStream target={{ kind: 'today' }} />
         <NavigateTodayProbe
           onReady={(run) => {
             navigateToday = run
           }}
         />
-      </StreamProviders>,
+      </>,
+      clock,
     )
 
     // Simulated sleep: the wall clock jumps but no timer fires (DOM timers
-    // run on a monotonic clock that pauses while the machine sleeps). The
-    // midnight timeout is now hours away in timer time; the store's
-    // heartbeat is what notices the new date.
-    vi.setSystemTime(new Date(2026, 5, 28, 9, 0, 0))
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
+    // run on a monotonic clock that pauses while the machine sleeps).
+    await actAsync(async () => {
+      clock.setNow(new Date(2026, 5, 28, 9, 0, 0).getTime())
     })
-    await act(async () => {
+    await actAsync(async () => {
       navigateToday()
     })
 
@@ -178,16 +154,12 @@ describe('DailyStream', () => {
   })
 
   it('mounts straight at a restored entry’s saved offset, not the anchor', async () => {
-    const view = await render(
-      <StreamProviders>
-        <SaveScrollProbe offset={4321} />
-      </StreamProviders>,
-    )
+    const view = await renderStream(<SaveScrollProbe offset={4321} />)
     await view.rerender(
-      <StreamProviders>
+      <Stream>
         <SaveScrollProbe offset={4321} />
         <DailyStream target={{ kind: 'today' }} />
-      </StreamProviders>,
+      </Stream>,
     )
 
     await vi.waitFor(() =>
@@ -204,13 +176,13 @@ describe('DailyStream', () => {
       focused = useFocusedDailyDate()
       return null
     }
-    const view = await render(
-      <StreamProviders>
+    const view = await renderStream(
+      <>
         <FocusedDailyProvider>
           <DailyStream target={{ kind: 'date', date: today }} />
           <FocusProbe />
         </FocusedDailyProvider>
-      </StreamProviders>,
+      </>,
     )
 
     // Focus enters a stream row (the route is unchanged): the sidebar's day
@@ -230,11 +202,7 @@ describe('DailyStream', () => {
   })
 
   it('reserves the editor’s space on loading placeholders, with the hint delayed', async () => {
-    const view = await render(
-      <StreamProviders>
-        <DailyStream target={{ kind: 'today' }} />
-      </StreamProviders>,
-    )
+    const view = await renderStream(<DailyStream target={{ kind: 'today' }} />)
 
     await vi.waitFor(() =>
       expect(document.querySelectorAll('.reflect-note-loading').length).toBeGreaterThan(0),

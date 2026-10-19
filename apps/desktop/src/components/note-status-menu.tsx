@@ -19,7 +19,7 @@ import type {
   NoteDetailSections,
   VersionDetail,
 } from '@/lib/note-details.ts'
-import { startOperation } from '@/lib/operations.ts'
+import { useAppServices } from '@/services/services-provider.tsx'
 import {
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -77,21 +77,21 @@ function backupIcon(detail: BackupDetail): ReactElement {
   }
 }
 
-async function copyVersion(version: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(version)
-    toast.add({ title: 'Version copied' })
-  } catch (cause) {
-    startOperation('Copying version').fail(errorMessage(cause))
-  }
-}
-
 interface VersionRowProps {
   readonly detail: VersionDetail
 }
 
 /** The Version row: a committed hash copies on Enter; anything else is a fact. */
 function VersionRow({ detail }: VersionRowProps): ReactElement {
+  const { clipboard, operations } = useAppServices()
+  const copyVersion = async (version: string): Promise<void> => {
+    try {
+      await clipboard.writeText(version)
+      toast.add({ title: 'Version copied' })
+    } catch (cause) {
+      operations.start('Copying version').fail(errorMessage(cause))
+    }
+  }
   if (detail.status !== 'committed') {
     return (
       <NoteMenuInfoItem icon={<GitCommitHorizontal />} label={detail.value} hint={detail.hint} />

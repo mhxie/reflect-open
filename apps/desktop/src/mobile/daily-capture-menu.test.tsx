@@ -1,9 +1,8 @@
-import { render, type RenderResult } from 'vitest-browser-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TestCoreServices } from '@reflect/core/testing'
+import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
 import { DailyCaptureMenu } from './daily-capture-menu.tsx'
 
-const navigate = vi.hoisted(() => vi.fn())
-const hapticImpactLight = vi.hoisted(() => vi.fn())
 const memo = vi.hoisted(() => ({
   phase: 'idle' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
   elapsedMs: 0,
@@ -22,20 +21,12 @@ const memo = vi.hoisted(() => ({
   discard: vi.fn(),
 }))
 
-vi.mock('@/routing/router.tsx', () => ({
-  useRouter: () => ({ navigate }),
-}))
-
 vi.mock('@/mobile/audio-memo-provider.tsx', () => ({
   useMobileAudioMemo: () => ({ ...memo }),
 }))
 
-vi.mock('@/mobile/haptics.ts', () => ({
-  hapticImpactLight,
-}))
-
-function renderMenu(): Promise<RenderResult> {
-  return render(<DailyCaptureMenu />)
+function renderMenu(): Promise<InAppRenderResult<TestCoreServices>> {
+  return renderInApp(<DailyCaptureMenu />)
 }
 
 beforeEach(() => {
@@ -69,7 +60,7 @@ describe('DailyCaptureMenu', () => {
     const view = await renderMenu()
 
     await view.getByRole('button', { name: 'Show capture actions' }).click()
-    expect(hapticImpactLight).toHaveBeenCalledTimes(1)
+    expect(view.app.mobile.haptics.impacts()).toBe(1)
 
     await expect
       .element(view.getByRole('button', { name: 'Hide capture actions' }))
@@ -80,7 +71,7 @@ describe('DailyCaptureMenu', () => {
       .toBeInTheDocument()
 
     await view.getByRole('button', { name: 'Hide capture actions' }).click()
-    expect(hapticImpactLight).toHaveBeenCalledTimes(2)
+    expect(view.app.mobile.haptics.impacts()).toBe(2)
 
     await expect
       .element(view.getByRole('button', { name: 'Show capture actions' }))
@@ -105,9 +96,15 @@ describe('DailyCaptureMenu', () => {
 
     await view.getByRole('button', { name: 'New note' }).click()
 
-    expect(navigate).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'note', path: expect.stringMatching(/^notes\/.+\.md$/) }),
-    )
+    expect(view.appServices.navigation.navigations()).toEqual([
+      {
+        route: expect.objectContaining({
+          kind: 'note',
+          path: expect.stringMatching(/^notes\/.+\.md$/),
+        }),
+        options: undefined,
+      },
+    ])
     await expect
       .element(view.getByRole('button', { name: 'Show capture actions' }))
       .toHaveAttribute('aria-expanded', 'false')

@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import { resolveOnDeviceTarget, type AiProviderConfig, type AiProvidersState } from '@reflect/core'
+import { resolveOnDeviceTarget, type AiProviderConfig } from '@reflect/core'
 import {
   Select,
   SelectContent,
@@ -17,9 +17,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog.tsx'
 import { Switch } from '@/components/ui/switch.tsx'
-import { backfillAssetDescriptionsVisibly } from '@/lib/asset-backfill.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 
 /** The OCR model select's value for "use the default AI provider". */
@@ -59,6 +59,7 @@ function ocrModelOptions(
 export function DescribeAssetsField(): ReactElement {
   const { settings, updateSettings } = useSettings()
   const { graph } = useGraph()
+  const { assetDescription } = useCoreServices()
   const [confirming, setConfirming] = useState(false)
   const [running, setRunning] = useState(false)
 
@@ -70,24 +71,15 @@ export function DescribeAssetsField(): ReactElement {
       resolveOnDeviceTarget(config) !== null,
   )
   const options = ocrModelOptions(localModels, settings.localOcrProviderId ?? null)
-  const generation = graph?.generation ?? null
 
   const runBackfill = async (): Promise<void> => {
     setConfirming(false)
-    if (generation === null || running) {
+    if (running) {
       return
-    }
-    const providers: AiProvidersState = {
-      providers: settings.aiProviders,
-      defaultProviderId: settings.defaultAiProviderId,
     }
     setRunning(true)
     try {
-      await backfillAssetDescriptionsVisibly(
-        generation,
-        providers,
-        settings.localOcrProviderId ?? null,
-      )
+      await assetDescription.backfillVisibly()
     } finally {
       setRunning(false)
     }
@@ -135,7 +127,7 @@ export function DescribeAssetsField(): ReactElement {
           type="button"
           variant="outline"
           size="sm"
-          disabled={generation === null || !hasProvider || running}
+          disabled={graph === null || !hasProvider || running}
           onClick={() => setConfirming(true)}
           className="text-text-secondary"
         >

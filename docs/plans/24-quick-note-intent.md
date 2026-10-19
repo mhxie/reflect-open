@@ -146,7 +146,7 @@ decision) before any real Swift work is invested.
 
 ## Phase 1 — schema + drain coalescing (platform-neutral TS, CI-testable)
 
-1. **`packages/core/src/actions/capture-envelope.ts`** — add `'ios-intent'`
+1. **`packages/core/src/capture/capture-envelope.ts`** — add `'ios-intent'`
    to `textCaptureSourceSchema` (the doc comment on it already names this
    exact extension point). Provenance only; no shape change, no version bump.
    The parity corpus (`capture-envelope.fixtures.json`) covers the *wire

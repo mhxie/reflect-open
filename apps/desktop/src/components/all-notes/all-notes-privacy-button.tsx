@@ -1,9 +1,9 @@
 import { useState, type ReactElement } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { isLocalOnlyPath, type NoteListEntry } from '@reflect/core'
 import { Shield, ShieldOff } from 'lucide-react'
-import { setNotesPrivate } from '@/lib/note-private.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
+import { setNotesPrivate } from '@/lib/note-privacy-toast.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { Button } from '@/components/ui/button.tsx'
 
 interface AllNotesPrivacyButtonProps {
@@ -20,11 +20,11 @@ interface AllNotesPrivacyButtonProps {
  * follows once the index re-projects the changed files.
  */
 export function AllNotesPrivacyButton({ notes }: AllNotesPrivacyButtonProps): ReactElement | null {
-  const { graph } = useGraph()
-  const queryClient = useQueryClient()
+  const { noteActions } = useCoreServices()
+  const localOnly = useLocalOnlyFolders()
   const [busy, setBusy] = useState(false)
-  const targets = notes.filter((note) => !isLocalOnlyPath(note.path))
-  if (targets.length === 0 || graph === null) {
+  const targets = notes.filter((note) => !isLocalOnlyPath(localOnly, note.path))
+  if (targets.length === 0) {
     return null
   }
   const makePrivate = !targets.every((note) => note.isPrivate)
@@ -34,7 +34,7 @@ export function AllNotesPrivacyButton({ notes }: AllNotesPrivacyButtonProps): Re
     setBusy(true)
     try {
       await setNotesPrivate(
-        { queryClient, root: graph.root, generation: graph.generation },
+        noteActions,
         targets.map((note) => note.path),
         makePrivate,
       )

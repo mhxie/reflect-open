@@ -1,10 +1,11 @@
 # Git backup safety invariants
 
 The rules every change to the sync path must keep. "The sync path" is
-`apps/desktop/src-tauri/src/git/`, `packages/core/src/sync/`,
-`apps/desktop/src/lib/backup-controller.ts`, `backup-flush.ts`, and the
+`apps/desktop/src-tauri/src/git/`, `packages/core/src/sync/` (the sync
+engine and the backup service), the backup flusher of
+`packages/core/src/graph/persistence-flush-service.ts`, and the
 note session's external-change handling in
-`apps/desktop/src/editor/note-session-state.ts`.
+`packages/core/src/documents/note-session-service.ts`.
 
 Each rule names the test that enforces it. A rule whose test is still
 `#[ignore]` / `test.fails` is a known gap: the test is red on purpose and
@@ -45,7 +46,7 @@ serialized. The quit-time and background flush go through the sync engine's
 queue, never straight to `git_commit_all`.
 
 - Test: `git::tests::commit_during_fast_forward_never_reverts_pulled_notes`
-  (`#[ignore]`), `backup-controller.test.tsx` "quit flush waits for an
+  (`#[ignore]`), `backup-service.test.ts` "quit flush waits for an
   in-flight pull before committing", `engine.test.ts` "commitNow joins the
   single-flight queue and never touches the network".
 

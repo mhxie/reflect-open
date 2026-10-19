@@ -1,4 +1,4 @@
-import { act } from 'react'
+import { act } from '@/test-utils/act.ts'
 import { cleanup, renderHook } from 'vitest-browser-react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useDoubleTap } from './use-double-tap.ts'
@@ -11,7 +11,6 @@ async function mountTaps(activeKey: string | null = 'a') {
 
 afterEach(() => {
   cleanup()
-  vi.restoreAllMocks()
 })
 
 /** Pin Date.now so tap spacing is exact (the gesture-test convention). */

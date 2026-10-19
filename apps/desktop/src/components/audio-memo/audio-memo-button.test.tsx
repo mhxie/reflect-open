@@ -1,7 +1,7 @@
-import { render, type RenderResult } from 'vitest-browser-react'
+import type { RenderResult } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { TooltipProvider } from '@/components/ui/tooltip.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 
 const memo = vi.hoisted(() => ({
   phase: 'idle' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
@@ -25,11 +25,7 @@ vi.mock('@/providers/audio-memo-provider.tsx', () => ({
 const { AudioMemoButton } = await import('./audio-memo-button.tsx')
 
 function renderButton(): Promise<RenderResult> {
-  return render(
-    <TooltipProvider>
-      <AudioMemoButton />
-    </TooltipProvider>,
-  )
+  return renderInApp(<AudioMemoButton />)
 }
 
 beforeEach(() => {

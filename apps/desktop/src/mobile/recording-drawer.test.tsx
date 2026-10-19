@@ -1,8 +1,9 @@
-import { act, type ReactNode } from 'react'
-import { cleanup, render } from 'vitest-browser-react'
+import type { ReactNode } from 'react'
+import { act } from '@/test-utils/act.ts'
 import { userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@/test-utils/fire-event.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 
 const memo = vi.hoisted(() => ({
   phase: 'recording' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
@@ -34,12 +35,6 @@ vi.mock('@/mobile/audio-memo-provider.tsx', () => ({
   useMobileAudioMemo: () => ({ ...memo }),
 }))
 
-const navigate = vi.hoisted(() => vi.fn())
-
-vi.mock('@/routing/router.tsx', () => ({
-  useRouter: () => ({ navigate }),
-}))
-
 const { RecordingDrawer } = await import('./recording-drawer.tsx')
 
 beforeEach(() => {
@@ -52,21 +47,18 @@ beforeEach(() => {
   memo.drawerOpen = true
 })
 
-afterEach(async () => {
-  await cleanup()
-})
 afterEach(() => vi.useRealTimers())
 
 describe('RecordingDrawer', () => {
   it('counts past an hour: a session has no duration limit', async () => {
     memo.elapsedMs = 65 * 60_000 + 3000
-    const view = await render(<RecordingDrawer />)
+    const view = await renderInApp(<RecordingDrawer />)
 
     await expect.element(view.getByText('1:05:03')).toBeVisible()
   })
 
   it('requires a second tap before discarding a live recording', async () => {
-    const view = await render(<RecordingDrawer />)
+    const view = await renderInApp(<RecordingDrawer />)
 
     await userEvent.click(view.getByRole('button', { name: 'Discard recording' }))
 
@@ -82,7 +74,7 @@ describe('RecordingDrawer', () => {
 
   it('lets the discard confirmation lapse back to a single safe tap', async () => {
     vi.useFakeTimers()
-    const view = await render(<RecordingDrawer />)
+    const view = await renderInApp(<RecordingDrawer />)
 
     act(() => {
       fireEvent.click(view.getByRole('button', { name: 'Discard recording' }))
@@ -102,7 +94,7 @@ describe('RecordingDrawer', () => {
   })
 
   it('stops and saves from the primary control without confirmation', async () => {
-    const view = await render(<RecordingDrawer />)
+    const view = await renderInApp(<RecordingDrawer />)
 
     await userEvent.click(view.getByRole('button', { name: 'Stop recording' }))
 
@@ -111,7 +103,7 @@ describe('RecordingDrawer', () => {
 
   it('without a transcription model, guides key setup instead of recording', async () => {
     memo.hasTranscriptionConfig = false
-    const view = await render(<RecordingDrawer />)
+    const view = await renderInApp(<RecordingDrawer />)
 
     await expect
       .element(view.getByText(/send the recording to OpenAI or Google Gemini/))
@@ -119,7 +111,9 @@ describe('RecordingDrawer', () => {
     expect(view.getByRole('button', { name: 'Stop recording' }).query()).toBeNull()
 
     await userEvent.click(view.getByRole('button', { name: 'Open Settings' }))
-    expect(navigate).toHaveBeenCalledWith({ kind: 'settings' })
+    expect(view.appServices.navigation.navigations()).toEqual([
+      { route: { kind: 'settings' }, options: undefined },
+    ])
     expect(memo.onDrawerOpenChange).toHaveBeenCalledWith(false)
   })
 })

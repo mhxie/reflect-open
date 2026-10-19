@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { listNotes, type NoteListEntry } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
-import { queryKeys } from '@/lib/query-client.ts'
+import type { NoteListEntry } from '@reflect/core'
+import { createAllNotesQueryOptions } from '@/lib/query-options.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** A hovered day loads only after the pointer rests this long, so a sweep fetches nothing. */
 const DWELL_MS = 150
@@ -15,16 +15,15 @@ const DWELL_MS = 150
  */
 export function useNotesEditedOn(date: string | null): readonly NoteListEntry[] | undefined {
   const { graph } = useGraph()
-  const bridgeReady = useBridgeReady()
+  const { noteList } = useCoreServices()
   const [settled, setSettled] = useState<string | null>(null)
   useEffect(() => {
     const timer = setTimeout(() => setSettled(date), DWELL_MS)
     return () => clearTimeout(timer)
   }, [date])
   const { data } = useQuery({
-    queryKey: queryKeys.index.allNotesUpdatedOn(graph?.root, date ?? ''),
-    queryFn: () => listNotes({ updatedOn: date }),
-    enabled: date !== null && settled === date && bridgeReady && graph !== null,
+    ...createAllNotesQueryOptions(noteList, graph?.root, { kind: 'updated', date: date ?? '' }),
+    enabled: date !== null && settled === date && graph !== null,
     select: (notes) => notes.toSorted((left, right) => right.mtime - left.mtime),
   })
   return data

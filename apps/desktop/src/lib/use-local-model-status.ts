@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react'
-import {
-  localModelStatus,
-  subscribeLocalModelStatus,
-  type LocalModelStatus,
-  type LocalTranscriptionModelId,
-} from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import type { LocalModelStatus, LocalTranscriptionModelId } from '@reflect/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** Reported until the runtime answers for the current model. */
 const UNKNOWN: LocalModelStatus = { status: 'unsupported' }
@@ -18,51 +13,44 @@ interface ModelStatusEntry {
 /**
  * The on-device transcription model's live status: polled when the model
  * changes, then tracked through `local-transcription:status` events. Reads
- * `unsupported` while `enabled` is false, without a bridge, off macOS, and
- * until the runtime answers for a newly chosen model — never another
- * model's status.
+ * `unsupported` while `enabled` is false, when the runtime can't answer (off
+ * macOS, no native shell), and until the runtime answers for a newly chosen
+ * model — never another model's status.
  */
 export function useLocalModelStatus(
   model: LocalTranscriptionModelId,
   enabled: boolean,
 ): LocalModelStatus {
+  const { localTranscription } = useCoreServices()
   const [entry, setEntry] = useState<ModelStatusEntry | null>(null)
-  const bridgeReady = useBridgeReady()
-  const active = bridgeReady && enabled
 
   useEffect(() => {
-    if (!active) {
+    if (!enabled) {
       return
     }
     let live = true
-    let unlisten: (() => void) | null = null
-    void localModelStatus(model)
-      .then((status) => {
-        if (live) {
-          setEntry({ model, status })
-        }
-      })
-      .catch(() => {
-        if (live) {
-          setEntry({ model, status: UNKNOWN })
-        }
-      })
-    void subscribeLocalModelStatus((eventModel, status) => {
+    const unlisten = localTranscription.onStatus((eventModel, status) => {
       if (live && eventModel === model) {
         setEntry({ model, status })
       }
-    }).then((fn) => {
-      if (live) {
-        unlisten = fn
-      } else {
-        fn()
-      }
     })
+    void localTranscription.status(model).then(
+      (status) => {
+        if (live) {
+          setEntry({ model, status })
+        }
+      },
+      () => {
+        if (live) {
+          setEntry({ model, status: UNKNOWN })
+        }
+      },
+    )
     return () => {
       live = false
-      unlisten?.()
+      unlisten()
     }
-  }, [active, model])
+  }, [enabled, localTranscription, model])
 
-  return active && entry?.model === model ? entry.status : UNKNOWN
+  return enabled && entry?.model === model ? entry.status : UNKNOWN
 }

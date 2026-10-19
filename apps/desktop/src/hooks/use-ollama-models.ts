@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { listOllamaModels, type OllamaModels } from '@reflect/core'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import type { OllamaModels } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** What the summary model picker knows about the Ollama server on this Mac. */
 export interface OllamaModelsLookup {
@@ -19,11 +19,11 @@ export interface OllamaModelsLookup {
  * the picker offers to check again.
  */
 export function useOllamaModels(enabled: boolean): OllamaModelsLookup {
-  const bridgeReady = useBridgeReady()
+  const { onDeviceModels } = useCoreServices()
   const query = useQuery({
     queryKey: queryKeys.ollamaModels,
-    queryFn: ({ signal }) => listOllamaModels({ signal }),
-    enabled: enabled && bridgeReady,
+    queryFn: ({ signal }) => onDeviceModels.listOllamaModels({ signal }),
+    enabled,
     retry: false,
   })
   return {

@@ -4,7 +4,7 @@ import type { TranscriptionProvider } from './provider-config.ts'
 
 /**
  * The HTTP substrate under audio transcription: one guarded `send`, one
- * error ladder, one rejection type. Both provider legs (`ai/transcribe`)
+ * error ladder, one rejection type. Both provider legs (`ai/transcription-service`)
  * issue every request through {@link send}, which is where two cross-cutting
  * contracts live:
  *

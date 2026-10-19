@@ -1,9 +1,8 @@
 import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
-import { render } from 'vitest-browser-react'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
 import '@/test-utils/locator.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { useFormattingToolbar, type FormattingToolbar } from './formatting-toolbar-store.ts'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 
@@ -30,7 +29,6 @@ async function setupEditor(
   touchEditor = true,
   saveFile?: (file: File) => Promise<string | null>,
 ): Promise<Setup> {
-  setPlatformSurface({ touchEditor })
   const grabbed: { current: NoteEditorHandle | null } = { current: null }
   const editor = (
     <NoteEditor
@@ -43,11 +41,12 @@ async function setupEditor(
       }}
     />
   )
-  const screen = await render(
+  const screen = await renderInApp(
     <>
       {editor}
       <ToolbarProbe />
     </>,
+    { platform: { surface: { touchEditor } } },
   )
   await expect.element(pmRoot).toBeInTheDocument()
   return {
@@ -64,7 +63,6 @@ async function setupEditor(
 }
 
 afterEach(() => {
-  setPlatformSurface({ touchEditor: false })
   captured.toolbar = null
 })
 

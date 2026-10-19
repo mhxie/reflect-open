@@ -1,22 +1,15 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import { renderHook } from 'vitest-browser-react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { NoteRow } from '@reflect/core'
+import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { queryKeys } from '@/lib/query-client.ts'
+import { act } from '@/test-utils/act.ts'
+import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { usePrivateNoteState, type PrivateNoteOptions } from './use-private-note.ts'
 
-const getNote = vi.hoisted(() => vi.fn<(path: string) => Promise<NoteRow | undefined>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  getNote,
-  // The graph's local-only folders are `secure`.
-  isLocalOnlyPath: (path: string) => path.split('/').slice(0, -1).includes('secure'),
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
+/**
+ * The open graph: rooted at `/g`, its local-only folders are `secure`.
+ */
+const GRAPH = { root: '/g', localOnlyFolders: ['secure'] }
 
 function row(path: string, isPrivate: boolean): NoteRow {
   return {
@@ -32,14 +25,14 @@ function row(path: string, isPrivate: boolean): NoteRow {
 
 /** Rows by path; a missing entry is a note the index doesn't have. */
 let rows: Record<string, NoteRow>
-let client: QueryClient
-
-function wrapper({ children }: { children: ReactNode }): ReactNode {
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
-}
+let app: TestCoreServices
+let getNote: MockInstance<TestCoreServices['indexQuery']['getNote']>
 
 async function settledState(path: string, options: PrivateNoteOptions) {
-  const hook = await renderHook(() => usePrivateNoteState(path, options), { wrapper })
+  const hook = await renderHookInApp(() => usePrivateNoteState(path, options), {
+    app,
+    graph: GRAPH,
+  })
   await vi.waitFor(() => expect(getNote).toHaveBeenCalledWith(path))
   await vi.waitFor(() => expect(hook.result.current.pending).toBe(false))
   return hook
@@ -47,8 +40,9 @@ async function settledState(path: string, options: PrivateNoteOptions) {
 
 beforeEach(() => {
   rows = {}
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  getNote.mockReset().mockImplementation(async (path) => rows[path])
+  app = createTestCoreServices()
+  // Spied before the render: the hook reads the service when it mounts.
+  getNote = vi.spyOn(app.indexQuery, 'getNote').mockImplementation(async (path) => rows[path])
 })
 
 describe('usePrivateNoteState', () => {
@@ -83,9 +77,10 @@ describe('usePrivateNoteState', () => {
 
   it('fails closed while the row loads, and says it is pending', async () => {
     getNote.mockImplementation(() => new Promise(() => {}))
-    const { result } = await renderHook(() => usePrivateNoteState('notes/plan.md', noSession), {
-      wrapper,
-    })
+    const { result } = await renderHookInApp(
+      () => usePrivateNoteState('notes/plan.md', noSession),
+      { app, graph: GRAPH },
+    )
     await vi.waitFor(() => expect(getNote).toHaveBeenCalled())
     expect(result.current).toEqual({ privateNote: true, pending: true })
   })
@@ -97,13 +92,16 @@ describe('usePrivateNoteState', () => {
 
   it('follows an in-app Lock toggle through the row cache', async () => {
     rows['notes/plan.md'] = row('notes/plan.md', false)
-    const { result, act } = await settledState('notes/plan.md', noSession)
+    const { result, queryClient } = await settledState('notes/plan.md', noSession)
     expect(result.current.privateNote).toBe(false)
 
-    await act(() => {
-      client.setQueryData(queryKeys.index.note('/g', 'notes/plan.md'), row('notes/plan.md', true))
+    act(() => {
+      queryClient.setQueryData(
+        queryKeys.index.note('/g', 'notes/plan.md'),
+        row('notes/plan.md', true),
+      )
     })
-    expect(result.current.privateNote).toBe(true)
+    await vi.waitFor(() => expect(result.current.privateNote).toBe(true))
   })
 
   it("keeps a session's verdict through a rename until the new path's row lands", async () => {
@@ -119,9 +117,9 @@ describe('usePrivateNoteState', () => {
       return rows[path]
     })
     const session = { sessionEpoch: 3, privateHeader: false }
-    const hook = await renderHook(
+    const hook = await renderHookInApp(
       ({ path }: { path: string } = { path: 'notes/old.md' }) => usePrivateNoteState(path, session),
-      { wrapper, initialProps: { path: 'notes/old.md' } },
+      { app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
     )
     await vi.waitFor(() => expect(hook.result.current.privateNote).toBe(false))
 
@@ -137,10 +135,10 @@ describe('usePrivateNoteState', () => {
     getNote.mockImplementation(async (path) =>
       path === 'notes/other.md' ? await new Promise<never>(() => {}) : rows[path],
     )
-    const hook = await renderHook(
+    const hook = await renderHookInApp(
       ({ path }: { path: string } = { path: 'notes/old.md' }) =>
         usePrivateNoteState(path, noSession),
-      { wrapper, initialProps: { path: 'notes/old.md' } },
+      { app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
     )
     await vi.waitFor(() => expect(hook.result.current.privateNote).toBe(false))
 

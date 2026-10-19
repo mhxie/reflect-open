@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { sha256Hex } from '@reflect/utils'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isNotePath, mayContainNotes } from '../graph/paths.ts'
 import { foldKey, parseNote } from '../markdown/index.ts'
-import { hashContent } from './hash.ts'
 import { cjkColumnText } from './cjk.ts'
 import { buildIndexedNote } from './indexed-note.ts'
 import { buildFtsAnyMatch, buildFtsMatch, isSentenceLike } from './search-query.ts'
@@ -83,7 +83,7 @@ async function deriveExpectations(): Promise<ExpectedParity> {
   for (const relPath of walkCorpusNotes()) {
     const source = readFileSync(join(corpusDir, relPath), 'utf8').replaceAll(/\r\n?/g, '\n')
     const indexed = buildIndexedNote(parseNote({ path: relPath, source }), {
-      fileHash: await hashContent(source),
+      fileHash: await sha256Hex(source),
       mtime: 0,
       source,
     })

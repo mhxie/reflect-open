@@ -1,58 +1,41 @@
-import { render } from 'vitest-browser-react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createTestCoreServices } from '@reflect/core/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { RouterProvider, useRouter } from '@/routing/router.tsx'
+import type { WikiAncestor, WikiLanguage } from '@reflect/core'
+import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiBreadcrumb } from './wiki-breadcrumb.tsx'
 
-const wikiAncestors = vi.hoisted(() => vi.fn())
-const openRouteInNewWindow = vi.hoisted(() => vi.fn<() => Promise<boolean>>())
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  hasBridge: () => true,
-  wikiAncestors,
-}))
-vi.mock('@/lib/windows/open-in-new-window.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/windows/open-in-new-window.ts')>()),
-  openRouteInNewWindow,
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: { root: '/g', name: 'g', generation: 1 } }),
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({
-  useSettings: () => ({
-    settings: {
-      wikiLanguages: [
-        { label: 'English', folder: 'wiki' },
-        { label: '简体中文', folder: 'wiki-cn' },
-      ],
-    },
-    updateSettings: () => {},
-  }),
-}))
+const LANGUAGES: WikiLanguage[] = [
+  { label: 'English', folder: 'wiki' },
+  { label: '简体中文', folder: 'wiki-cn' },
+]
 
-function RouteProbe(): ReactNode {
-  const { route } = useRouter()
-  return <output data-testid="route">{JSON.stringify(route)}</output>
+const wikiAncestors =
+  vi.fn<(path: string, languages: readonly WikiLanguage[]) => Promise<WikiAncestor[]>>()
+
+async function renderBreadcrumb(path: string) {
+  const app = createTestCoreServices()
+  vi.spyOn(app.wiki, 'ancestors').mockImplementation(wikiAncestors)
+  return await renderInApp(
+    <div data-testid="host">
+      <WikiBreadcrumb path={path} />
+    </div>,
+    {
+      app,
+      graph: { root: '/g', name: 'g', generation: 1 },
+      settings: { wikiLanguages: LANGUAGES },
+    },
+  )
 }
 
-function renderBreadcrumb(path: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider>
-        <div data-testid="host">
-          <WikiBreadcrumb path={path} />
-        </div>
-        <RouteProbe />
-      </RouterProvider>
-    </QueryClientProvider>,
-  )
+type BreadcrumbView = Awaited<ReturnType<typeof renderBreadcrumb>>
+
+function probedRoute(view: BreadcrumbView): unknown {
+  return view.appServices.navigation.getState().route
 }
 
 beforeEach(() => {
   window.sessionStorage.clear()
-  openRouteInNewWindow.mockReset().mockResolvedValue(true)
   wikiAncestors.mockReset().mockResolvedValue([
     { path: 'wiki-cn/index.md', title: 'Wiki 索引', displayTitle: null, lang: 'zh-CN' },
     { path: 'wiki-cn/memory/index.md', title: '记忆', displayTitle: null, lang: 'zh-CN' },
@@ -68,17 +51,11 @@ describe('WikiBreadcrumb', () => {
     const crumbs = [...trail.element().querySelectorAll('button')]
     expect(crumbs.map((crumb) => crumb.textContent)).toEqual(['Wiki 索引中文', '记忆中文'])
     expect(new Set(crumbs.map((crumb) => crumb.getBoundingClientRect().top)).size).toBe(1)
-    expect(wikiAncestors).toHaveBeenCalledWith('wiki-cn/memory/Spacing Effect.md', [
-      { label: 'English', folder: 'wiki' },
-      { label: '简体中文', folder: 'wiki-cn' },
-    ])
+    expect(wikiAncestors).toHaveBeenCalledWith('wiki-cn/memory/Spacing Effect.md', LANGUAGES)
 
     await trail.getByRole('button', { name: '记忆，中文' }).click()
 
-    expect(JSON.parse(view.getByTestId('route').element().textContent ?? 'null')).toEqual({
-      kind: 'note',
-      path: 'wiki-cn/memory/index.md',
-    })
+    expect(probedRoute(view)).toEqual({ kind: 'note', path: 'wiki-cn/memory/index.md' })
   })
 
   it('opens an index in a new window on a modifier click', async () => {
@@ -89,7 +66,9 @@ describe('WikiBreadcrumb', () => {
       .click({ modifiers: ['ControlOrMeta'] })
 
     await vi.waitFor(() =>
-      expect(openRouteInNewWindow).toHaveBeenCalledWith({ kind: 'note', path: 'wiki-cn/index.md' }),
+      expect(view.appServices.window.openedNoteWindows()).toContain(
+        deepLinkForRoute({ kind: 'note', path: 'wiki-cn/index.md' }),
+      ),
     )
   })
 

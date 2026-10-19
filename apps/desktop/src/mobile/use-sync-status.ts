@@ -1,17 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
+import { mobileSyncStatus, type MobileSyncStatus } from '@reflect/app'
 import { createConflictedNotesQueryOptions } from '@/lib/query-options.ts'
-import { mobileSyncStatus, type MobileSyncStatus } from '@/mobile/sync-status.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSyncContext } from '@/providers/sync-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
  * The mobile sync status, ready to display — engine state joined with the
  * graph's conflicted-note count (which outlives any one cycle). `null` when
  * there is nothing truthful to say: no backup configured, no sync lifecycle
- * mounted (dev harness, tests), or the conflict count still loading — a
- * status shown before the count is known could claim `Backed up` over
- * conflict markers already on disk, then flip.
+ * mounted (dev harness, tests), or the conflict count still loading. The
+ * derivation lives in app's `mobileSyncStatus`.
  *
  * One hook for both surfaces (settings sheet, status pill) so they share a
  * query cache entry and can never disagree.
@@ -19,22 +18,18 @@ import { useSyncContext } from '@/providers/sync-provider.tsx'
 export function useMobileSyncStatus(): MobileSyncStatus | null {
   const { graph } = useGraph()
   const sync = useSyncContext()
+  const { indexQuery } = useCoreServices()
   const backup = sync?.backup ?? null
   const connected = backup !== null && backup.phase === 'connected'
 
-  const bridgeReady = useBridgeReady()
   const { data: conflicted, isError: countUnavailable } = useQuery({
-    ...createConflictedNotesQueryOptions(graph?.root),
-    enabled: bridgeReady && graph !== null && connected,
+    ...createConflictedNotesQueryOptions(indexQuery, graph?.root),
+    enabled: graph !== null && connected,
   })
 
-  // Loading hides the status (no flip); a *failed* count must not — the
-  // engine-driven states (Syncing, Offline, Needs attention) don't depend on
-  // it, and blanking them over an unreadable index would hide real signal.
-  // The degradation is losing the Needs-review headline until the index
-  // recovers.
-  if (backup === null || (connected && conflicted === undefined && !countUnavailable)) {
-    return null
-  }
-  return mobileSyncStatus(backup, conflicted?.length ?? 0)
+  return mobileSyncStatus({
+    backup,
+    conflictCount: conflicted?.length,
+    conflictCountUnavailable: countUnavailable,
+  })
 }

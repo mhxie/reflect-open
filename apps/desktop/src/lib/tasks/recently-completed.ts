@@ -1,165 +1,12 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
-import type { OpenTask } from '@reflect/core'
-import { withChecked, withRelocatedTasks, type TaskMoves } from '@/lib/tasks/task-cache.ts'
-import { getTaskKey } from '@/lib/tasks/task-identity.ts'
+import { withoutReopenedTasks, type OpenTask } from '@reflect/core'
+import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
- * The "recently completed" set (Plan 18) — V1's middle state where a checked task
- * keeps showing (struck) in the list until you archive it. It's deliberately a
- * **view-only, ephemeral** set, not durable state: a checked task is already
- * `[x]` on disk, and "archived" only means "stop showing it in the active list",
- * which the markdown can't (and shouldn't) encode. So it resets on app restart;
- * it survives navigating away from Tasks and back (a module singleton, above any
- * one screen mount).
- *
- * Tracking the session's completions — rather than every `[x]` task — is what
- * keeps a fresh launch clean: only what you checked *this run* lingers struck;
- * the whole historical pile stays behind the "show archived" filter.
- *
- * The set yields to the index when it disagrees: a task reopened at its source
- * note (the checkbox flipped back to `[ ]` in the editor) comes back through the
- * open-tasks read, and {@link reconcileRecentlyCompleted} drops the struck copy
- * so the live row shows instead of a stale `[x]` shadow.
- *
- * Scoped to a graph root: switching graphs (whose task paths differ) yields an
- * empty set rather than the previous graph's rows.
+ * The React view of `TaskService`'s "recently completed" set (Plan 18) — V1's
+ * middle state where a checked task keeps showing (struck) in the list until
+ * you archive it. The set itself lives on the service.
  */
-
-const EMPTY: readonly OpenTask[] = []
-let graphRoot: string | null = null
-let tasks: readonly OpenTask[] = EMPTY
-const listeners = new Set<() => void>()
-
-function emit(): void {
-  for (const listener of listeners) {
-    listener()
-  }
-}
-
-/** Switch the active graph, discarding any other graph's set. */
-function adopt(root: string | null): void {
-  if (root !== graphRoot) {
-    graphRoot = root
-    tasks = EMPTY
-  }
-}
-
-/**
- * Keep `completed` showing struck (checked) in the active list until archived.
- * Stored as a fresh checked copy, deduped by {@link getTaskKey}. `checked` is
- * set to match disk: these rows outlive the reindex, and the write-back guards
- * on it, so a stale `false` would later fail a reopen/edit/delete.
- */
-export function markRecentlyCompleted(root: string | null, completed: readonly OpenTask[]): void {
-  if (completed.length === 0) {
-    return
-  }
-  adopt(root)
-  const byKey = new Map(tasks.map((task) => [getTaskKey(task), task]))
-  for (const task of completed) {
-    byKey.set(getTaskKey(task), withChecked(task, true))
-  }
-  tasks = [...byKey.values()]
-  emit()
-}
-
-/** Drop these keys — a completion rolled back, or the task was deleted. */
-export function forgetRecentlyCompleted(root: string | null, keys: readonly string[]): void {
-  if (root !== graphRoot || keys.length === 0) {
-    return
-  }
-  const drop = new Set(keys)
-  const next = tasks.filter((task) => !drop.has(getTaskKey(task)))
-  if (next.length !== tasks.length) {
-    tasks = next
-    emit()
-  }
-}
-
-/** Whether a task is currently being kept visible by the session's struck set. */
-export function hasRecentlyCompleted(root: string | null, key: string): boolean {
-  return root === graphRoot && tasks.some((task) => getTaskKey(task) === key)
-}
-
-/**
- * Apply a note write's task moves to the session's struck rows. Unlike the
- * query caches, this singleton is not rebuilt by an open-task refetch, so moved
- * completed rows must be re-keyed explicitly.
- */
-export function relocateRecentlyCompleted(
-  root: string | null,
-  notePath: string,
-  moved: TaskMoves,
-): void {
-  if (root !== graphRoot || moved.length === 0) {
-    return
-  }
-  const next = withRelocatedTasks(tasks, notePath, moved)
-  if (next !== tasks) {
-    tasks = next
-    emit()
-  }
-}
-
-/**
- * The struck rows not superseded by a live open row — the pure core of the
- * reconciliation, shared by the store prune ({@link reconcileRecentlyCompleted})
- * and the render-time view in {@link useRecentlyCompleted}. A struck task the
- * index reports open again with a **newer** `updatedAt` was reopened at the
- * source note — its file was rewritten and reindexed since we completed it — so
- * the struck copy is dropped and the live open row shows instead of a stale
- * `[x]` shadow (whose reopen write-back would fail: the `[x]` line is no longer
- * in the note). An open row with an *unchanged* `updatedAt` is the
- * pre-completion index state — a refetch racing the completion's reindex — and
- * keeps its shadow, so a just-checked row can't flicker back to open. Returns
- * the input array itself when nothing is dropped, so callers can compare by
- * reference.
- */
-function withoutReopened(
-  struck: readonly OpenTask[],
-  open: readonly OpenTask[],
-): readonly OpenTask[] {
-  if (struck.length === 0 || open.length === 0) {
-    return struck
-  }
-  const liveByKey = new Map(open.map((row) => [getTaskKey(row), row]))
-  const next = struck.filter((task) => {
-    const live = liveByKey.get(getTaskKey(task))
-    return live === undefined || live.updatedAt <= task.updatedAt
-  })
-  return next.length === struck.length ? struck : next
-}
-
-/**
- * Reconcile the struck set against a fresh open-tasks read, dropping every
- * struck copy whose task was reopened at its source note ({@link
- * withoutReopened}) — so `hasRecentlyCompleted` and the Archive count agree
- * with what the surfaces render.
- */
-export function reconcileRecentlyCompleted(root: string | null, open: readonly OpenTask[]): void {
-  if (root !== graphRoot) {
-    return
-  }
-  const next = withoutReopened(tasks, open)
-  if (next !== tasks) {
-    tasks = next
-    emit()
-  }
-}
-
-/** Archive: stop showing the session's completed tasks (they stay `[x]` on disk). */
-export function archiveRecentlyCompleted(root: string | null): void {
-  adopt(root)
-  if (tasks.length > 0) {
-    tasks = EMPTY
-    emit()
-  }
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
 
 /**
  * The session's recently-completed tasks for `root` (empty for any other graph),
@@ -170,29 +17,23 @@ function subscribe(listener: () => void): () => void {
  * The returned view filters superseded rows **during render** — the very first
  * render with the fresh open data already shows the live row, leaving no frame
  * where the stale `[x]` shadow could still offer a doomed Reopen. The store
- * itself is pruned in an effect ({@link reconcileRecentlyCompleted}) so
+ * itself is pruned in an effect (`TaskService.reconcileRecentlyCompleted`) so
  * `hasRecentlyCompleted` and the Archive count catch up right after.
  */
 export function useRecentlyCompleted(
   root: string | null,
   open: readonly OpenTask[] | undefined,
 ): readonly OpenTask[] {
+  const { tasks } = useCoreServices()
   useEffect(() => {
     if (open !== undefined) {
-      reconcileRecentlyCompleted(root, open)
+      tasks.reconcileRecentlyCompleted(root, open)
     }
-  }, [root, open])
-  const getSnapshot = useCallback(() => (root === graphRoot ? tasks : EMPTY), [root])
-  const struck = useSyncExternalStore(subscribe, getSnapshot)
+  }, [tasks, root, open])
+  const getSnapshot = useCallback(() => tasks.getRecentlyCompleted(root), [tasks, root])
+  const struck = useSyncExternalStore(tasks.subscribeRecentlyCompleted, getSnapshot)
   return useMemo(
-    () => (open === undefined ? struck : withoutReopened(struck, open)),
+    () => (open === undefined ? struck : withoutReopenedTasks(struck, open)),
     [struck, open],
   )
-}
-
-/** Test-only: clear the singleton between cases. */
-export function resetRecentlyCompleted(): void {
-  graphRoot = null
-  tasks = EMPTY
-  emit()
 }

@@ -208,7 +208,7 @@ ends without touching the network.)
 Editing makes suspension a data-loss class: saves debounce (800ms default) and
 iOS both suspends the process soon after backgrounding and may kill the
 WebContent process outright. Contract, extending the quit-flush trio
-(`lib/quit-flush.ts`) with a mobile leg:
+(today `QuitPolicyService.installDesktopQuitPolicy`) with a mobile leg:
 
 - **On background** (visibility/pause): flush open documents + settings, then
   a local commit (never a push — same as desktop quit; the next resume cycle
@@ -351,7 +351,7 @@ Steps 1 and 2 are the existential gates; nothing else starts until both pass.
    >
    > **Also landed 2026-06-12: step 5 and the decision-8 keyboard plugin.**
    > The write-event seam ships as `setLocalWriteEcho`/`echoLocalWrite` in
-   > core — `writeNote`/`writeAsset`/`deleteNote` emit their change batch
+   > core (now `FileChangeService.reportOwnWrite`) — `writeNote`/`writeAsset`/`deleteNote` emit their change batch
    > in-process after the write lands, enabled by the mobile root chunk at
    > load, unit-tested (including no-emit-on-failed-write).
    > `plugins/tauri-plugin-keyboard` (workspace member, mobile-only dep)

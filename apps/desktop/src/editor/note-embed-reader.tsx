@@ -8,6 +8,7 @@ import {
   useState,
   type ReactElement,
 } from 'react'
+import type { WikiEmbedResolver } from '@meowdown/core'
 import type { NoteEmbedPayload, NoteEmbedRenderer } from '@meowdown/react'
 import { ArrowUpRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { splitFrontmatter, splitWikiLinkTarget } from '@reflect/core'
@@ -17,9 +18,9 @@ import { NoteEmbedBody } from '@/editor/note-embed-body.tsx'
 import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import { useNoteEmbedNavigation } from '@/editor/use-note-embed-navigation.ts'
 import { useNoteEmbedSource, type NoteEmbedSourceOptions } from '@/editor/use-note-embed-source.ts'
-import { createNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { usePreviewOverflow } from '@/hooks/use-preview-overflow.ts'
 import { cn } from '@/lib/utils.ts'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import {
   embeddedHeadingElement,
   notifyOutlineEmbed,
@@ -158,9 +159,12 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
     () => noteEmbedExcerpt(body, splitWikiLinkTarget(target).fragment),
     [body, target],
   )
-  const previewAttachments = useMemo(
-    () => createNoteAttachments(generation, path),
-    [generation, path],
+  const { attachments } = useCoreServices()
+  // Classifying an embed reads no catalog, so the passive preview resolves no
+  // note's attachments before the reader opens.
+  const resolvePreviewEmbed = useCallback<WikiEmbedResolver>(
+    ({ target: embedTarget }) => attachments.resolveWikiEmbed(embedTarget),
+    [attachments],
   )
   return (
     <div
@@ -201,7 +205,7 @@ export function NoteEmbedReader(props: NoteEmbedReaderProps): ReactElement {
               // Passive: no link resolves, so no attachment resolver is built.
               sourcePath={null}
               headingOffset={ancestors.length}
-              resolveWikiEmbed={previewAttachments.resolveWikiEmbed}
+              resolveWikiEmbed={resolvePreviewEmbed}
               interactive={false}
               remoteEmbeds={false}
               className="reflect-note-surface"

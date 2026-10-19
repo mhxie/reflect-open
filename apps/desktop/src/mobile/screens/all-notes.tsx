@@ -1,17 +1,14 @@
 import { useDeferredValue, useMemo, useRef, type ReactElement } from 'react'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ChevronLeft, FileText, SearchX } from 'lucide-react'
 import {
   foldTag,
-  listNoteTags,
   parseHighlights,
-  searchWithFilters,
   type DateFormat,
   type FilteredSearchHit,
   type NoteTagFacet,
 } from '@reflect/core'
 import { Spinner } from '@/components/ui/spinner.tsx'
-import { useBridgeReady } from '@/hooks/use-bridge-ready.ts'
 import { formatDayLabel } from '@/lib/dates.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { FilterBar } from '@/mobile/search-filters/filter-bar.tsx'
@@ -32,7 +29,9 @@ import {
 } from '@/mobile/top-bar.tsx'
 import { useArrivalFocus } from '@/mobile/use-arrival-focus.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { useDateFormat } from '@/hooks/use-date-format.ts'
+import { useNoteRows } from '@/hooks/note-row-overlay.ts'
 import { allNotesRoute, routeForPath } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
 
@@ -99,10 +98,9 @@ export function MobileAllNotes({
   onFiltersChange,
 }: MobileAllNotesProps): ReactElement {
   const { graph } = useGraph()
+  const { noteList, search } = useCoreServices()
   const { navigate, back, arrivalSeq, arrivalFocusEditor } = useRouter()
-  const queryClient = useQueryClient()
-  const bridgeReady = useBridgeReady()
-  const enabled = bridgeReady && graph !== null
+  const enabled = graph !== null
 
   // The All-tab double-tap (`focusEditor` arrivals) lands in the search bar,
   // the tab's capture surface — the daily double-tap's All-flavored twin.
@@ -122,34 +120,25 @@ export function MobileAllNotes({
 
   const { data: facets } = useQuery({
     queryKey: queryKeys.index.allNotesTags(graph?.root),
-    queryFn: () => listNoteTags(),
+    queryFn: () => noteList.listNoteTags(),
     enabled,
   })
-  const { data: hits } = useQuery({
+  const { data: indexedHits, isPlaceholderData } = useQuery({
     queryKey: queryKeys.index.mobileAllNotesWithSearch(graph?.root, parsed),
-    queryFn: () => searchWithFilters(parsed, searchPlanFor(parsed)),
+    queryFn: () => search.searchWithFilters(parsed, searchPlanFor(parsed)),
     enabled,
     // Typing re-keys the query as the deferred value settles; holding the
     // previous rows avoids a blank flash between keystrokes.
     placeholderData: keepPreviousData,
   })
 
+  const pristine = parsed.text === '' && !parsed.filtered
+  // The pristine feed lists every note; a held previous result may not.
+  const hits = useNoteRows(indexedHits, { complete: pristine && !isPlaceholderData })
   const rows = useMemo(
     () => (hits ?? []).map((hit) => rowForHit(hit, dateFormat)),
     [hits, dateFormat],
   )
-  const pristine = parsed.text === '' && !parsed.filtered
-
-  const removeDeletedRow = (path: string): void => {
-    queryClient.setQueriesData<FilteredSearchHit[]>(
-      { queryKey: queryKeys.index.mobileAllNotes(graph?.root) },
-      (cachedHits) => cachedHits?.filter((hit) => hit.path !== path),
-    )
-    // Do not invalidate yet: the index can still contain the deleted row and
-    // would briefly resurrect it. `deleteNote`'s local-write echo reindexes,
-    // then invalidates the full index scope (including tag facets) once the
-    // projection has caught up.
-  }
 
   const addPendingTag = (facet: NoteTagFacet): void => {
     const key = foldTag(facet.tag)
@@ -209,11 +198,7 @@ export function MobileAllNotes({
           <Empty icon={<SearchX className="size-6" />} message="No matches" />
         )
       ) : (
-        <NoteRowList
-          rows={rows}
-          onOpen={(path) => navigate(routeForPath(path))}
-          onDeleted={removeDeletedRow}
-        />
+        <NoteRowList rows={rows} onOpen={(path) => navigate(routeForPath(path))} />
       )}
     </div>
   )

@@ -18,14 +18,13 @@ import {
 import { ATTACHMENT_FILTER_NOUNS } from '@/components/all-notes/attachment-filter-labels.ts'
 import { usePeek } from '@/components/peek/peek-provider.tsx'
 import { MediaLightbox } from '@/editor/media-lightbox.tsx'
-import { attachmentUrl } from '@/editor/use-note-attachments.ts'
 import { useElementWidth } from '@/hooks/use-element-width.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { openAttachment } from '@/lib/open-attachment.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
 import { AttachmentFlow } from './attachment-flow.tsx'
 import {
   attachmentFilename,
@@ -75,6 +74,7 @@ interface LightboxFile {
 export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactElement {
   const { graph } = useGraph()
   const generation = graph?.generation ?? null
+  const { attachments } = useCoreServices()
   const { navigate } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
   const openPeek = usePeek()?.openPeek
@@ -132,7 +132,7 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
         openLightbox(
           {
             type: 'image',
-            src: `${attachmentUrl(generation, entry.path)}?${attachmentVersionParam(entry)}`,
+            src: `${attachments.assetUrl(entry.path, generation)}?${attachmentVersionParam(entry)}`,
             alt: attachmentFilename(entry.path),
           },
           element,
@@ -140,10 +140,10 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
       } else if (action === 'peek' && openPeek !== undefined) {
         openPeek({ kind: 'pdf', path: entry.path })
       } else {
-        void openAttachment(entry.path, generation)
+        void attachments.openOrReveal(entry.path)
       }
     },
-    [generation, openLightbox, openPeek],
+    [attachments, generation, openLightbox, openPeek],
   )
   const handleRootKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const modified = event.metaKey || event.ctrlKey || event.altKey
@@ -212,9 +212,9 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
       <MediaLightbox
         lightbox={lightbox}
         onOpenImage={
-          lightboxFile === null
+          lightboxFile === null || lightboxFile.generation !== generation
             ? null
-            : () => void openAttachment(lightboxFile.path, lightboxFile.generation)
+            : () => void attachments.openOrReveal(lightboxFile.path)
         }
       />
     </div>

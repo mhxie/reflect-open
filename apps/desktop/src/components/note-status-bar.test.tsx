@@ -1,69 +1,37 @@
-import { act, type ReactElement } from 'react'
-import { cleanup, render } from 'vitest-browser-react'
+import type { ReactElement, ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { NoteState, NoteStateKind } from '@reflect/core'
+import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import type {
+  AttachmentService,
+  BackupState,
+  NoteActionsService,
+  NoteState,
+  NoteStateKind,
+} from '@reflect/core'
+import {
+  createTestBackupService,
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestPlatformService,
+  type TestBackupService,
+  type TestCoreServices,
+} from '@reflect/core/testing'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
-import { setPlatformSurface } from '@/lib/platform-surface.ts'
 import {
   clearNoteStatus,
   publishNoteStatus,
   type NoteStatus,
   type NoteStatusScope,
 } from '@/editor/status/note-status-store.ts'
-import type { useNoteGitVersion } from '@/hooks/use-note-git-version.ts'
-import type { BackupState } from '@/providers/sync-provider.tsx'
 import type { Route } from '@/routing/route.ts'
-import { RouterProvider } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { toast } from '@/components/ui/toast.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
+import { actAsync } from '@/test-utils/act.ts'
+import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteStatusBar } from './note-status-bar.tsx'
-
-const revealAsset = vi.hoisted(() => vi.fn(async (_path: string, _generation: number) => {}))
-vi.mock('@reflect/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@reflect/core')>()),
-  revealAsset,
-}))
-
-vi.mock('@/lib/use-today.ts', () => ({ useToday: () => '2026-10-03' }))
-const settings = vi.hoisted(() => ({
-  statusBarEnabled: true,
-  timeFormat: '12h',
-  dateFormat: 'mdy',
-}))
-vi.mock('@/providers/settings-provider.tsx', () => ({ useSettings: () => ({ settings }) }))
-const mtime = vi.hoisted(() => ({ value: null as number | null }))
-vi.mock('@/hooks/use-note-mtime.ts', () => ({ useNoteMtime: () => mtime.value }))
-const graph = vi.hoisted(() => ({
-  value: { root: '/g', name: 'g', generation: 7 },
-}))
-vi.mock('@/providers/graph-provider.tsx', () => ({
-  useGraph: () => ({ graph: graph.value, indexGeneration: 99 }),
-}))
-const sync = vi.hoisted((): { backup: BackupState } => ({
-  backup: { phase: 'disconnected' },
-}))
-vi.mock('@/providers/sync-provider.tsx', () => ({ useSyncContext: () => sync }))
-const gitVersion = vi.hoisted(() => {
-  const current: { value: ReturnType<typeof useNoteGitVersion> } = {
-    value: { version: 'abc123def4', pending: false, unavailable: false },
-  }
-  return { current, use: vi.fn<typeof useNoteGitVersion>(() => current.value) }
-})
-vi.mock('@/hooks/use-note-git-version.ts', () => ({ useNoteGitVersion: gitVersion.use }))
-const toggleNotePrivate = vi.hoisted(() => vi.fn(async () => {}))
-vi.mock('@/lib/note-private.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/note-private.ts')>()),
-  toggleNotePrivate,
-}))
-const unreadable = vi.hoisted(() => ({ value: false }))
-vi.mock('@/hooks/use-unreadable-frontmatter.ts', () => ({
-  useUnreadableFrontmatter: () => unreadable.value,
-}))
 
 const EDITABLE: NoteState = {
   kind: 'editable',
@@ -98,6 +66,13 @@ const states: Record<NoteStateKind, NoteState> = {
 const owner = Symbol('test')
 const publishedScopes: NoteStatusScope[] = []
 
+const CONNECTED: BackupState = {
+  phase: 'connected',
+  remoteUrl: 'https://github.com/test/notes',
+  repo: null,
+  status: { state: 'idle' },
+}
+
 function publishStatus(
   path: string,
   status: Omit<NoteStatus, 'state' | 'protection'> & {
@@ -129,18 +104,76 @@ function PeekOpener(): ReactElement {
   )
 }
 
-function renderBar(
-  initialRoute: Route,
-  placement: 'overlay' | 'inline' = 'overlay',
-  path?: string,
-) {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <RouterProvider initialRoute={initialRoute}>
-        <NoteStatusBar placement={placement} {...(path === undefined ? {} : { path })} />
-      </RouterProvider>
-    </QueryClientProvider>,
+interface BarOptions {
+  readonly placement?: 'overlay' | 'inline'
+  /** A retained mobile screen's note, as `NoteStatusBar`'s `path` prop. */
+  readonly path?: string
+  readonly generation?: number
+  readonly root?: string
+  /** The open graph's backup state; disconnected by default. */
+  readonly backup?: BackupState
+  readonly statusBarEnabled?: boolean
+  readonly mobile?: boolean
+  /** The indexed mtime of every note (epoch ms). */
+  readonly mtime?: number | null
+  readonly files?: Readonly<Record<string, string>>
+  /** Wraps the bar, e.g. in a Peek provider. */
+  readonly around?: (bar: ReactNode) => ReactNode
+  readonly writeText?: (text: string) => Promise<void>
+}
+
+// The services of the rendered bar; set by `renderBar`.
+let app: TestCoreServices
+let backup: TestBackupService
+let reveal: MockInstance<AttachmentService['reveal']>
+let togglePrivate: MockInstance<NoteActionsService['togglePrivate']>
+
+async function renderBar(initialRoute: Route, options: BarOptions = {}) {
+  backup = createTestBackupService({ state: options.backup ?? { phase: 'disconnected' } })
+  app = createTestCoreServices({
+    backup,
+    noteFile: createTestNoteFileService({ files: { ...options.files } }),
+    ...(options.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),
+  })
+  app.clock.setToday('2026-10-03')
+  app.gitRepository.onNoteVersion(() => 'abc123def4')
+  const mtime = options.mtime ?? null
+  vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(async () => mtime ?? undefined)
+  reveal = vi.spyOn(app.attachments, 'reveal').mockResolvedValue()
+  togglePrivate = vi
+    .spyOn(app.noteActions, 'togglePrivate')
+    .mockResolvedValue({ status: 'done', isPrivate: true, changed: true })
+  const bar = (
+    <NoteStatusBar
+      placement={options.placement ?? 'overlay'}
+      {...(options.path === undefined ? {} : { path: options.path })}
+    />
   )
+  return await renderInApp(options.around === undefined ? bar : options.around(bar), {
+    app,
+    graph: {
+      root: options.root ?? '/g',
+      name: 'g',
+      generation: options.generation ?? 7,
+    },
+    settings: {
+      statusBarEnabled: options.statusBarEnabled ?? true,
+      timeFormat: '12h',
+      dateFormat: 'mdy',
+    },
+    route: initialRoute,
+    ...(options.writeText === undefined
+      ? {}
+      : { appServices: { clipboard: { writeText: options.writeText } } }),
+  })
+}
+
+/** The paths and generations the bar asked Git for a note version. */
+function noteVersionCalls(): unknown[][] {
+  return app.gitRepository
+    .calls()
+    .filter((call) => call.method === 'noteVersion')
+    .map((call) => [...call.args])
 }
 
 /** Each menu row's label, without the explanatory hints. */
@@ -159,21 +192,10 @@ async function openRecovery(states: string): Promise<void> {
   await expect.element(page.getByRole('dialog', { name: 'Resolve note' })).toBeVisible()
 }
 
-afterEach(async () => {
-  await cleanup()
+afterEach(() => {
   for (const scope of publishedScopes.splice(0)) {
     clearNoteStatus(scope, owner)
   }
-  settings.statusBarEnabled = true
-  mtime.value = null
-  graph.value = { root: '/g', name: 'g', generation: 7 }
-  sync.backup = { phase: 'disconnected' }
-  gitVersion.current.value = { version: 'abc123def4', pending: false, unavailable: false }
-  gitVersion.use.mockClear()
-  revealAsset.mockReset()
-  toggleNotePrivate.mockClear()
-  unreadable.value = false
-  setPlatformSurface({ mobileApp: false })
 })
 
 describe('NoteStatusBar', () => {
@@ -191,12 +213,11 @@ describe('NoteStatusBar', () => {
     await expect.element(page.getByText('The editor cannot save', { exact: false })).toBeVisible()
     await page.getByRole('button', { name: 'Show file', exact: true }).click()
 
-    expect(revealAsset).toHaveBeenCalledWith('notes/source.md', 7)
+    expect(reveal).toHaveBeenCalledWith('notes/source.md', 7)
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
   })
 
   it('keeps protection and reports a failed file reveal', async () => {
-    revealAsset.mockRejectedValueOnce(new Error('File is unavailable'))
     publishStatus('notes/source.md', {
       characters: 42,
       selectedCharacters: 0,
@@ -205,6 +226,7 @@ describe('NoteStatusBar', () => {
       protection: { kind: 'unsupported-markdown' },
     })
     await renderBar({ kind: 'note', path: 'notes/source.md' })
+    reveal.mockRejectedValueOnce(new Error('File is unavailable'))
     await openRecovery('Protected')
     await page.getByRole('button', { name: 'Show file', exact: true }).click()
 
@@ -228,7 +250,7 @@ describe('NoteStatusBar', () => {
     await page.getByRole('button', { name: 'Try again', exact: true }).click()
 
     expect(retrySave).toHaveBeenCalledOnce()
-    expect(revealAsset).not.toHaveBeenCalled()
+    expect(reveal).not.toHaveBeenCalled()
   })
 
   it('offers both conflict choices when an external change blocks save recovery', async () => {
@@ -274,7 +296,7 @@ describe('NoteStatusBar', () => {
     await expect.element(page.getByRole('button', { name: 'Show file' })).toBeVisible()
 
     const retrySave = vi.fn()
-    await act(async () => {
+    await actAsync(() => {
       publishStatus('notes/recovery.md', {
         ...initial,
         protection: { kind: 'save-blocked', message: 'Permission denied', retrySave },
@@ -289,7 +311,6 @@ describe('NoteStatusBar', () => {
   })
 
   it('explains unsupported Markdown on mobile without offering desktop file reveal', async () => {
-    setPlatformSurface({ mobileApp: true })
     publishStatus('notes/source.md', {
       characters: 42,
       selectedCharacters: 0,
@@ -297,12 +318,15 @@ describe('NoteStatusBar', () => {
       state: states.protected,
       protection: { kind: 'unsupported-markdown' },
     })
-    await renderBar({ kind: 'note', path: 'notes/source.md' }, 'inline')
+    await renderBar(
+      { kind: 'note', path: 'notes/source.md' },
+      { placement: 'inline', mobile: true },
+    )
     await openRecovery('Protected')
 
     await expect.element(page.getByText('The editor cannot save', { exact: false })).toBeVisible()
     expect(page.getByRole('button', { name: 'Show file' }).query()).toBeNull()
-    expect(revealAsset).not.toHaveBeenCalled()
+    expect(reveal).not.toHaveBeenCalled()
   })
 
   it('shows the routed note’s live character count', async () => {
@@ -327,22 +351,20 @@ describe('NoteStatusBar', () => {
   })
 
   it('stays hidden when turned off in settings', async () => {
-    settings.statusBarEnabled = false
     publishStatus('notes/a.md', { characters: 1234, selectedCharacters: 0, editedAt: null })
-    const view = await renderBar({ kind: 'note', path: 'notes/a.md' })
+    const view = await renderBar({ kind: 'note', path: 'notes/a.md' }, { statusBarEnabled: false })
 
     expect(view.container.querySelector('[role="status"]')).toBeNull()
-    expect(gitVersion.use).toHaveBeenLastCalledWith(expect.objectContaining({ open: false }))
+    expect(noteVersionCalls()).toEqual([])
   })
 
   it('shows when the note was last edited, preferring a newer in-pane edit', async () => {
-    mtime.value = Date.now() - 5 * 60_000
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar({ kind: 'note', path: 'notes/a.md' }, { mtime: Date.now() - 5 * 60_000 })
     const status = page.getByRole('status', { name: 'Note status' })
     await expect.element(status.getByText('Edited 5 min ago')).toBeVisible()
 
-    await act(async () => {
+    await actAsync(() => {
       publishStatus('notes/a.md', {
         characters: 11,
         selectedCharacters: 0,
@@ -381,13 +403,16 @@ describe('NoteStatusBar', () => {
   it('follows a peeked note, above the Peek backdrop', async () => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
     publishStatus('notes/peeked.md', { characters: 77, selectedCharacters: 0, editedAt: null })
-    const view = await render(
-      <RouterProvider initialRoute={{ kind: 'note', path: 'notes/a.md' }}>
-        <PeekProvider>
-          <PeekOpener />
-          <NoteStatusBar />
-        </PeekProvider>
-      </RouterProvider>,
+    const view = await renderBar(
+      { kind: 'note', path: 'notes/a.md' },
+      {
+        around: (bar) => (
+          <PeekProvider>
+            <PeekOpener />
+            {bar}
+          </PeekProvider>
+        ),
+      },
     )
     const bar = page.getByRole('status', { name: 'Note status' })
     await expect.element(bar.getByText('10 chars')).toBeVisible()
@@ -431,14 +456,9 @@ describe('NoteStatusBar', () => {
       editedAt: null,
       state: states['read-only'],
     })
-    await render(
-      <TooltipProvider delay={0}>
-        <QueryClientProvider client={new QueryClient()}>
-          <RouterProvider initialRoute={{ kind: 'note', path: 'notes/a.md' }}>
-            <NoteStatusBar />
-          </RouterProvider>
-        </QueryClientProvider>
-      </TooltipProvider>,
+    await renderBar(
+      { kind: 'note', path: 'notes/a.md' },
+      { around: (bar) => <TooltipProvider delay={0}>{bar}</TooltipProvider> },
     )
     await userEvent.hover(page.getByRole('button', { name: 'Note state: Read-only, Local-only' }))
 
@@ -446,37 +466,30 @@ describe('NoteStatusBar', () => {
   })
 
   it('opens full dimensions with the keyboard and restores focus after Escape', async () => {
-    sync.backup = {
-      phase: 'connected',
-      remoteUrl: 'https://github.com/test/notes',
-      repo: null,
-      status: { state: 'idle' },
-    }
     publishStatus('notes/a.md', {
       characters: 10,
       selectedCharacters: 0,
       editedAt: null,
       state: states.private,
     })
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar({ kind: 'note', path: 'notes/a.md' }, { backup: CONNECTED })
     const button = page.getByRole('button', { name: 'Note state: Private' })
-    expect(gitVersion.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({ generation: 7, path: 'notes/a.md', open: false }),
-    )
+    // The version is looked up only while the details are open.
+    expect(noteVersionCalls()).toEqual([])
     await userEvent.tab()
     await expect.element(button).toHaveFocus()
     await userEvent.keyboard('{Enter}')
 
     const dialog = page.getByRole('menu')
     await expect.element(dialog).toBeVisible()
-    expect(await detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4'])
+    await vi.waitFor(async () =>
+      expect(await detailValues()).toEqual(['Private', 'Editable', 'Backed up', 'abc123def4']),
+    )
     await expect.element(dialog.getByText('Never sent to AI or other services.')).toBeVisible()
     await expect
       .element(dialog.getByRole('menuitemcheckbox', { name: 'Private' }))
       .toHaveAttribute('aria-checked', 'true')
-    expect(gitVersion.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md', open: true }),
-    )
+    expect(noteVersionCalls()).toContainEqual(['notes/a.md', 7])
 
     await userEvent.keyboard('{Escape}')
     await expect.element(dialog).not.toBeInTheDocument()
@@ -484,23 +497,12 @@ describe('NoteStatusBar', () => {
   })
 
   it('updates protection and live graph sync without changing privacy policy', async () => {
-    sync.backup = {
-      phase: 'connected',
-      remoteUrl: 'https://github.com/test/notes',
-      repo: null,
-      status: { state: 'idle' },
-    }
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar({ kind: 'note', path: 'notes/a.md' }, { backup: CONNECTED })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    await act(async () => {
-      sync.backup = {
-        phase: 'connected',
-        remoteUrl: 'https://github.com/test/notes',
-        repo: null,
-        status: { state: 'offline', message: 'offline' },
-      }
+    await actAsync(() => {
+      backup.setState({ ...CONNECTED, status: { state: 'offline', message: 'offline' } })
       publishStatus('notes/a.md', {
         characters: 10,
         selectedCharacters: 0,
@@ -510,13 +512,17 @@ describe('NoteStatusBar', () => {
     })
 
     await expect.element(page.getByRole('button', { name: 'Note state: Protected' })).toBeVisible()
-    expect(await detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4'])
+    await vi.waitFor(async () =>
+      expect(await detailValues()).toEqual(['Standard', 'Paused', 'Offline', 'abc123def4']),
+    )
   })
 
   it('keeps one horizontal row and hides the time before a narrow footer wraps', async () => {
-    mtime.value = Date.now() - 60_000
     publishStatus('notes/a.md', { characters: 1234, selectedCharacters: 0, editedAt: null })
-    const view = await renderBar({ kind: 'note', path: 'notes/a.md' })
+    const view = await renderBar(
+      { kind: 'note', path: 'notes/a.md' },
+      { mtime: Date.now() - 60_000 },
+    )
     view.container.style.position = 'relative'
     view.container.style.width = '520px'
     view.container.style.height = '60px'
@@ -549,38 +555,36 @@ describe('NoteStatusBar', () => {
     })
     const view = await renderBar(
       { kind: 'note', path: 'notes/a.md' },
-      'inline',
-      'daily/2026-10-02.md',
+      { placement: 'inline', path: 'daily/2026-10-02.md' },
     )
 
     await expect.element(page.getByText('77 chars')).toBeVisible()
     const bar = view.container.querySelector<HTMLElement>('[role="status"]')!
     expect(getComputedStyle(bar).position).toBe('static')
     await page.getByRole('button', { name: 'Note state: Local-only' }).click()
-    expect(gitVersion.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({ path: 'daily/2026-10-02.md', isLocalOnly: true }),
-    )
     expect(await detailValues()).toEqual(['Local-only', 'Editable', 'Never backed up'])
     expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
+    // A local-only note stays out of Git, its version included.
+    expect(noteVersionCalls()).toEqual([])
   })
 
   it('reads the same path only from its graph file generation', async () => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
     publishStatus('notes/a.md', { characters: 77, selectedCharacters: 0, editedAt: null }, 8)
-    graph.value = { root: '/second', name: 'second', generation: 8 }
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar({ kind: 'note', path: 'notes/a.md' }, { root: '/second', generation: 8 })
 
     await expect.element(page.getByText('77 chars')).toBeVisible()
     await expect.element(page.getByText('10 chars')).not.toBeInTheDocument()
   })
 
   it('keeps secondary-window backup initialization unknown until its state is known', async () => {
-    sync.backup = { phase: 'loading' }
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar({ kind: 'note', path: 'notes/a.md' }, { backup: { phase: 'loading' } })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    expect(await detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4'])
+    await vi.waitFor(async () =>
+      expect(await detailValues()).toEqual(['Private', 'Editable', 'Checking', 'abc123def4']),
+    )
   })
 
   it('toggles privacy from the details through the shared note action', async () => {
@@ -592,10 +596,8 @@ describe('NoteStatusBar', () => {
     await expect.element(privacy).toHaveAttribute('aria-checked', 'false')
     await privacy.click()
 
-    expect(toggleNotePrivate).toHaveBeenCalledWith(
-      expect.objectContaining({ root: '/g', generation: 7, path: 'notes/a.md' }),
-    )
-    await act(async () => {
+    await vi.waitFor(() => expect(togglePrivate).toHaveBeenCalledWith('notes/a.md'))
+    await actAsync(() => {
       publishStatus('notes/a.md', {
         characters: 10,
         selectedCharacters: 0,
@@ -608,14 +610,17 @@ describe('NoteStatusBar', () => {
   })
 
   it('keeps a locked note with unreadable frontmatter locked', async () => {
-    unreadable.value = true
     publishStatus('notes/a.md', {
       characters: 10,
       selectedCharacters: 0,
       editedAt: null,
       state: states.private,
     })
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar(
+      { kind: 'note', path: 'notes/a.md' },
+      // An unrecognized `private:` value locks the note but can't be toggled.
+      { files: { 'notes/a.md': '---\nprivate: maybe\n---\n# A\n' } },
+    )
     await page.getByRole('button', { name: 'Note state: Private' }).click()
 
     await expect
@@ -639,26 +644,29 @@ describe('NoteStatusBar', () => {
 
     await expect.element(page.getByRole('menuitem', { name: /Resolve…/ })).toBeVisible()
     expect(page.getByRole('menuitemcheckbox', { name: 'Private' }).query()).toBeNull()
-    expect(await detailValues()).toEqual([
-      'Unsupported Markdown',
-      'Standard',
-      'Paused',
-      'Backup off',
-      'abc123def4',
-    ])
+    await vi.waitFor(async () =>
+      expect(await detailValues()).toEqual([
+        'Unsupported Markdown',
+        'Standard',
+        'Paused',
+        'Backup off',
+        'abc123def4',
+      ]),
+    )
   })
 
   it('moves between actionable items with the arrow keys and copies the version', async () => {
-    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const writeText = vi.fn(async (_text: string) => {})
     const add = vi.spyOn(toast, 'add')
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
-    await renderBar({ kind: 'note', path: 'notes/a.md' })
+    await renderBar({ kind: 'note', path: 'notes/a.md' }, { writeText })
     page.getByRole('button', { name: 'Note state: Editable' }).element().focus()
     await userEvent.keyboard('{Enter}')
 
     const privacy = page.getByRole('menuitemcheckbox', { name: 'Private' })
     const version = page.getByRole('menuitem', { name: 'Copy version abc123def4' })
     await expect.element(privacy).toHaveFocus()
+    await expect.element(version).toBeInTheDocument()
     // Facts are disabled items a screen reader still reaches.
     await userEvent.keyboard('{ArrowDown}')
     await expect.element(page.getByRole('menuitem', { name: 'Editable' })).toHaveFocus()
@@ -676,20 +684,19 @@ describe('NoteStatusBar', () => {
       expect(add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Version copied' })),
     )
     await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
-    writeText.mockRestore()
     add.mockRestore()
   })
 
   it('opens on a request for its note and never replays one made for another', async () => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
-    await act(async () => {
+    await actAsync(() => {
       requestNoteMenu('notes/b.md')
     })
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await expect.element(page.getByTestId('note-statistics')).toHaveTextContent('10 chars')
     expect(page.getByRole('menu').query()).toBeNull()
 
-    await act(async () => {
+    await actAsync(() => {
       requestNoteMenu('notes/a.md')
     })
     await expect.element(page.getByRole('menu')).toBeVisible()
