@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it } from 'vitest'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
@@ -9,7 +10,7 @@ describe('useSessionFlag', () => {
     const first = await renderHookInApp(() => useSessionFlag('reflect.test-flag', true), { app })
     expect(first.result.current[0]).toBe(true)
 
-    await first.act(() => first.result.current[1](false))
+    await act(() => first.result.current[1](false))
     expect(first.result.current[0]).toBe(false)
     await first.unmount()
 
@@ -25,7 +26,7 @@ describe('useSessionFlag', () => {
       unrelated: useSessionFlag('reflect.other-flag', true),
     }))
 
-    await view.act(() => view.result.current.one[1](false))
+    await act(() => view.result.current.one[1](false))
     expect(view.result.current.one[0]).toBe(false)
     expect(view.result.current.other[0]).toBe(false)
     expect(view.result.current.unrelated[0]).toBe(true)

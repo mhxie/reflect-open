@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { createLocalOnlyFolders, ReflectError, type NoteRecovery } from '@reflect/core'
+import { AppError, createLocalOnlyFolders, type NoteRecovery } from '@reflect/core'
 import {
   createTestCoreServices,
   createTestNoteFileService,
@@ -14,6 +14,7 @@ const NOTE = 'secure/note.md'
  * A note in the editable local-only folder `secure`, whose writes fail while
  * `blocked()` (the folder is unmounted) and whose kept unsaved text lives one
  * copy per owner, the newest offered first, the way the Rust store keeps it.
+ * `bases` holds the revision each landed write named.
  */
 function recoveryStore(blocked: () => boolean) {
   const inner = createTestNoteFileService({
@@ -22,39 +23,49 @@ function recoveryStore(blocked: () => boolean) {
   })
   const copies = new Map<string, NoteRecovery>()
   const cleared: string[] = []
+  const bases: (string | null | undefined)[] = []
   let version = 0
   const noteFile = overrideNoteFileService(inner, {
     async write(path, contents, generation, expectedContents) {
       if (blocked()) {
-        throw new ReflectError('traversal', 'local-only folder is unmounted')
+        throw new AppError('traversal', 'local-only folder is unmounted')
       }
-      return await inner.write(path, contents, generation, expectedContents)
+      const result = await inner.write(path, contents, generation, expectedContents)
+      bases.push(expectedContents)
+      return result
     },
-    async writeRecovery(path, contents, ownerId, sourceRevision, generation) {
-      expect({ path, generation }).toEqual({ path: NOTE, generation: 1 })
-      expect(ownerId).toMatch(/^[a-f0-9]{32}$/)
-      version += 1
-      const copy: NoteRecovery = {
-        ownerId,
-        contents,
-        sourceRevision,
-        token: version.toString(16).padStart(32, '0'),
-        savedAtMs: 5,
-      }
-      copies.delete(ownerId)
-      copies.set(ownerId, copy)
-      return copy
-    },
-    async readRecovery() {
-      return [...copies.values()].at(-1) ?? null
-    },
-    async clearRecovery(path, ownerId, token) {
-      expect(path).toBe(NOTE)
-      cleared.push(token)
-      if (copies.get(ownerId)?.token === token) copies.delete(ownerId)
-    },
+    writeRecovery: (path, contents, ownerId, sourceRevision, generation) =>
+      Promise.try(() => {
+        expect({ path, generation }).toEqual({ path: NOTE, generation: 1 })
+        expect(ownerId).toMatch(/^[a-f0-9]{32}$/)
+        version += 1
+        const copy: NoteRecovery = {
+          ownerId,
+          contents,
+          sourceRevision,
+          token: version.toString(16).padStart(32, '0'),
+          savedAtMs: 5,
+        }
+        copies.delete(ownerId)
+        copies.set(ownerId, copy)
+        return copy
+      }),
+    readRecovery: () => Promise.resolve([...copies.values()].at(-1) ?? null),
+    clearRecovery: (path, ownerId, token) =>
+      Promise.try(() => {
+        expect(path).toBe(NOTE)
+        cleared.push(token)
+        if (copies.get(ownerId)?.token === token) copies.delete(ownerId)
+      }),
   })
-  return { noteFile, copies, cleared, disk: () => inner.files().get(NOTE) }
+  return {
+    noteFile,
+    copies,
+    cleared,
+    bases,
+    disk: () => inner.files().get(NOTE),
+    mergeNextWrite: (content: string) => inner.mergeNextWrite(NOTE, content),
+  }
 }
 
 it('pins recovery ownership to the hook session and offers each closed window’s draft', async () => {
@@ -87,17 +98,17 @@ it('pins recovery ownership to the hook session and offers each closed window’
   reopened.result.current.restoreRecovery()
   await app.openDocuments.flushAll()
   await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(first))
-  // A was kept against the note B has since replaced, so restoring it parks
-  // B as the conflict instead of silently overwriting it.
+  expect(store.disk()).toBe('# B\n')
+  // A was kept against the note B has since replaced, so restoring it names
+  // that older revision as the write's base: the file merges A into B
+  // instead of silently overwriting it.
+  store.mergeNextWrite('# A\n\n# B\n')
   reopened.result.current.restoreRecovery()
   await app.openDocuments.flushAll()
-  await vi.waitFor(() => expect(reopened.result.current.conflict).toBe('# B\n'))
-  expect(store.disk()).toBe('# B\n')
-  reopened.result.current.keepMine()
-  await app.openDocuments.flushAll()
-  await vi.waitFor(() => expect(store.disk()).toBe('# A\n'))
+  await vi.waitFor(() => expect(store.disk()).toBe('# A\n\n# B\n'))
+  expect(store.bases.at(-1)).toBe('# Hello\n')
   await vi.waitFor(() => expect(store.copies.size).toBe(0))
-  expect(reopened.result.current.recovery).toBeNull()
+  await vi.waitFor(() => expect(reopened.result.current.recovery).toBeNull())
   expect(store.cleared[0]).toBe(second?.token)
   expect(store.cleared.at(-1)).toBe(first?.token)
 })

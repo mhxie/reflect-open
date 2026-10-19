@@ -52,7 +52,6 @@ interface WikiAddressWinner {
   dailyDate: string | null
   claimCount: number
   isPrivate: boolean
-  hasConflict: boolean
 }
 
 function winnerAddressesPath(path: string, winner: WikiAddressWinner | undefined): boolean {
@@ -173,14 +172,7 @@ export async function verifyWikiSuggestionAddresses(
       .selectFrom('noteKeys')
       .innerJoin('notes', 'notes.path', 'noteKeys.notePath')
       .where('key', 'in', chunk)
-      .select([
-        'key',
-        'notePath',
-        'notes.dailyDate',
-        'notes.isPrivate',
-        'notes.hasConflict',
-        'noteKeys.claimCount',
-      ])
+      .select(['key', 'notePath', 'notes.dailyDate', 'notes.isPrivate', 'noteKeys.claimCount'])
       .execute()
     for (const row of rows) {
       if (row.key !== null && row.notePath !== null) {
@@ -189,7 +181,6 @@ export async function verifyWikiSuggestionAddresses(
           dailyDate: row.dailyDate,
           claimCount: Number(row.claimCount),
           isPrivate: row.isPrivate !== 0,
-          hasConflict: row.hasConflict !== 0,
         })
       }
     }
@@ -229,7 +220,6 @@ export async function verifyWikiSuggestionAddresses(
             ...candidate,
             path: canonicalWinner.path,
             isPrivate: canonicalWinner.isPrivate,
-            hasConflict: canonicalWinner.hasConflict,
             insertText,
           })
         }

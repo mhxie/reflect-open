@@ -1,6 +1,6 @@
 import type { UserContent } from '@reflect/modules/ai'
 import { z } from 'zod'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import type { LanguageModelService } from './language-model-service.ts'
@@ -109,25 +109,31 @@ export function isDescriptionRejected(value: unknown): value is DescriptionRejec
 
 function classify(
   cause: unknown,
-  sdk: Pick<typeof import('@reflect/modules/ai'), 'APICallError' | 'NoObjectGeneratedError'>,
+  sdk: Pick<
+    typeof import('@reflect/modules/ai'),
+    'APICallError' | 'NoObjectGeneratedError' | 'NoOutputGeneratedError'
+  >,
 ): Error {
   if (sdk.APICallError.isInstance(cause)) {
     const status = cause.statusCode ?? 0
     if (status === 401 || status === 403) {
-      return new ReflectError('auth', `the provider rejected the API key (${status})`)
+      return new AppError('auth', `the provider rejected the API key (${status})`)
     }
     if (status === 429 || status >= 500) {
-      return new ReflectError('network', `the provider is unavailable (${status})`)
+      return new AppError('network', `the provider is unavailable (${status})`)
     }
     if (status >= 400) {
       return new DescriptionRejectedError(cause.message)
     }
   }
-  if (sdk.NoObjectGeneratedError.isInstance(cause)) {
+  if (
+    sdk.NoObjectGeneratedError.isInstance(cause) ||
+    sdk.NoOutputGeneratedError.isInstance(cause)
+  ) {
     return new DescriptionRejectedError(cause.message)
   }
   if (cause instanceof DOMException && cause.name === 'TimeoutError') {
-    return new ReflectError('network', 'the description request timed out')
+    return new AppError('network', 'the description request timed out')
   }
   return cause instanceof Error ? cause : new Error(String(cause))
 }
@@ -180,7 +186,7 @@ export interface PageDescriberServiceDeps {
  */
 export interface PageDescriberService {
   /**
-   * Generate the title and description. Throws {@link ReflectError} (`auth`,
+   * Generate the title and description. Throws {@link AppError} (`auth`,
    * `network`) for transient/credential failures the caller should retry later,
    * and {@link DescriptionRejectedError} when the provider refuses this capture
    * itself.
@@ -206,9 +212,9 @@ class PageDescriberServiceImpl implements PageDescriberService {
       })
     }
     try {
-      const result = await sdk.generateObject({
+      const result = await sdk.generateText({
         model: await this.#deps.languageModel.create(request.config, request.apiKey),
-        schema: pageDescriptionSchema,
+        output: sdk.Output.object({ schema: pageDescriptionSchema }),
         messages: [{ role: 'user', content }],
         abortSignal: AbortSignal.timeout(DESCRIBE_TIMEOUT_MS),
         // The enrichment pass is the retry layer (next trigger re-runs pending
@@ -216,8 +222,8 @@ class PageDescriberServiceImpl implements PageDescriberService {
         maxRetries: 0,
       })
       return {
-        title: result.object.title === null ? null : normalizedPageTitle(result.object.title),
-        description: result.object.description.trim(),
+        title: result.output.title === null ? null : normalizedPageTitle(result.output.title),
+        description: result.output.description.trim(),
       }
     } catch (cause) {
       throw classify(cause, sdk)

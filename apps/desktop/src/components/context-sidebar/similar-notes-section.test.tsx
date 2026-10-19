@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { createTestWindowService } from '@reflect/app/testing'
 import { userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,13 +9,13 @@ import {
   createTestRetrievalService,
 } from '@reflect/core/testing'
 import type { ReactNode } from 'react'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SimilarNotesSection } from './similar-notes-section.tsx'
 
 const relatedNotes = vi.fn<RetrievalService['relatedNotes']>()
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 let semanticSearchEnabled: boolean
 
 function RouteProbe(): ReactNode {
@@ -59,7 +60,6 @@ describe('SimilarNotesSection', () => {
         snippet: '',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     const view = await renderSimilar('notes/source.md')
@@ -87,7 +87,6 @@ describe('SimilarNotesSection', () => {
         snippet: 'borrow checker notes',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     const view = await renderSimilar('notes/languages.md', false)
@@ -106,7 +105,6 @@ describe('SimilarNotesSection', () => {
         snippet: 'borrow checker notes',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
       {
         path: 'notes/zig.md',
@@ -115,7 +113,6 @@ describe('SimilarNotesSection', () => {
         snippet: 'comptime experiments',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     const view = await renderSimilar('notes/languages.md')
@@ -139,7 +136,6 @@ describe('SimilarNotesSection', () => {
         snippet: `snippet ${index + 1}`,
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       })),
     )
     const view = await renderSimilar('notes/languages.md', false)
@@ -157,7 +153,6 @@ describe('SimilarNotesSection', () => {
         snippet: 'tomato beds',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     const view = await renderSimilar('daily/2026-06-09.md')
@@ -175,7 +170,6 @@ describe('SimilarNotesSection', () => {
         snippet: 'tomato beds',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     const view = await renderSimilar('daily/2026-06-09.md')

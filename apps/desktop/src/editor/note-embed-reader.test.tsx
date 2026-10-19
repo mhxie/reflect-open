@@ -75,21 +75,21 @@ beforeEach(async () => {
     ],
     ['notes/Child.md', '# Child\n\nChild paragraph'],
   ])
-  resolveWiki = vi
-    .spyOn(app.noteLinkResolver, 'resolveWikiTarget')
-    .mockImplementation(async (target) => ({
+  resolveWiki = vi.spyOn(app.noteLinkResolver, 'resolveWikiTarget').mockImplementation((target) =>
+    Promise.resolve({
       kind: 'resolved',
       path:
         target.replace(/^\//, '').split('#')[0] === 'Child'
           ? 'notes/Child.md'
           : 'notes/Original.md',
-    }))
+    }),
+  )
   resolveMarkdown = vi
     .spyOn(app.noteLinkResolver, 'resolveMarkdownHref')
     .mockResolvedValue({ kind: 'resolved', path: 'notes/Sibling.md' })
   read = vi
     .spyOn(app.noteDocuments, 'readExisting')
-    .mockImplementation(async (path) => sources.get(path) ?? '')
+    .mockImplementation((path) => Promise.resolve(sources.get(path) ?? ''))
   create = vi.spyOn(app.noteCreation, 'resolveOrCreateNoteWithTitle')
   getNote = vi.spyOn(app.indexQuery, 'getNote')
   resolveImageUrl = vi.spyOn(app.attachments, 'resolveImageUrl').mockReturnValue(IMAGE)
@@ -113,6 +113,14 @@ function reader(options: Partial<NoteEmbedReaderOptions> = {}, target = 'Origina
  */
 async function emptyCatalog() {
   return await createTestAttachmentService().loadCatalog()
+}
+
+/**
+ * The text of the element that has focus.
+ */
+function focusedText(): string | null | undefined {
+  const focused = document.activeElement
+  return focused?.textContent
 }
 
 /**
@@ -411,7 +419,7 @@ describe('NoteEmbedReader', () => {
     await userEvent.keyboard('{Enter}')
     await expect.element(view.getByTestId('note-embed-full')).toBeVisible()
     await expect.element(view.getByText('End of full note', { exact: true })).toBeVisible()
-    expect(document.activeElement?.textContent).toBe('Original')
+    expect(focusedText()).toBe('Original')
   })
 
   it('opens the resolved source path and keeps the requested heading', async () => {
@@ -419,7 +427,7 @@ describe('NoteEmbedReader', () => {
     await view.getByRole('button', { name: 'Read original', exact: true }).click()
     await expect.element(view.getByTestId('note-embed-full')).toBeVisible()
     await expect.element(view.getByText('Original paragraph')).toBeVisible()
-    expect(document.activeElement?.textContent).toBe('Details')
+    expect(focusedText()).toBe('Details')
     await view.getByRole('button', { name: 'Open Read original', exact: true }).click()
     await vi.waitFor(() =>
       expect(resolveWiki).toHaveBeenLastCalledWith(
@@ -504,9 +512,9 @@ describe('NoteEmbedReader', () => {
     await expect.element(view.getByText('Child paragraph')).toBeVisible()
     await expect.element(view.getByRole('heading', { name: 'Child', level: 3 })).toBeVisible()
     await view.getByText('Jump B', { exact: true }).click()
-    expect(document.activeElement?.textContent).toBe('B')
+    expect(focusedText()).toBe('B')
     await view.getByRole('link', { name: /Markdown jump$/ }).click()
-    expect(document.activeElement?.textContent).toBe('A')
+    expect(focusedText()).toBe('A')
     await view.getByRole('button', { name: 'Original', exact: true }).click()
     await expect
       .element(view.getByText('This note is already embedded above. Open it to continue reading.'))
@@ -691,7 +699,7 @@ describe('NoteEmbedReader', () => {
       await view.getByText('Other', { exact: true }).click()
       if (kind === 'wiki') await view.getByText('Jump details', { exact: true }).click()
       else await view.getByRole('link', { name: /Markdown details$/ }).click()
-      expect(document.activeElement?.textContent).toBe('Details')
+      expect(focusedText()).toBe('Details')
       pending.resolve({ kind: 'resolved', path: 'notes/Retired.md' })
       await pending.promise
       expect(navigate).not.toHaveBeenCalled()

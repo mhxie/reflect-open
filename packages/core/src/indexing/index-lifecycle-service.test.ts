@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import { createGraphSession, type GraphRole, type GraphSession } from '../graph/graph-session.ts'
 import type { AppPlatform } from '../ports/platform-facts.ts'
 import { createTestXArchiveService } from '../testing/capture.ts'
@@ -69,7 +70,7 @@ function setup(options?: {
   files?: Readonly<Record<string, string>>
   indexed?: readonly TestNote[]
   store?: TestIndexStoreServiceOptions
-  failStore?: (call: IndexStoreCall) => unknown
+  failStore?: (call: IndexStoreCall) => Error | undefined
   onScan?: () => Promise<void>
   onClear?: () => Promise<void>
   onSubscribe?: () => void
@@ -840,7 +841,7 @@ describe('rebuildVisibly', () => {
       files: { 'notes/bad.md': '# bad' },
       failStore: (call) =>
         call.method === 'applyBatch'
-          ? { kind: 'parse', message: 'unexpected end of hex escape' }
+          ? new AppError('parse', 'unexpected end of hex escape')
           : undefined,
     })
 

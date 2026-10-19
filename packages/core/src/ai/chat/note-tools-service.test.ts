@@ -1,7 +1,7 @@
 import { createTestGraphSessionService } from '../../testing/graph-session.ts'
 import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it, vi } from 'vitest'
-import { ReflectError } from '../../errors.ts'
+import { AppError } from '../../errors.ts'
 import type { ToolExecutionOptions } from '@reflect/modules/ai'
 import type { RetrievalHit, RetrieveOptions } from '../../embeddings/retrieve.ts'
 import type { DailyNoteRow, DailyNotesRange } from '../../daily/daily-note-service.ts'
@@ -118,7 +118,7 @@ function buildNoteTools(effects: ToolEffects = {}): NoteTools {
   const localOnly = createLocalOnlyFolders(localOnlyFolders)
   const readSource = async (path: string): Promise<string> => {
     if (effects.readNoteFn === undefined) {
-      throw new ReflectError('notFound', `${path} not found`)
+      throw new AppError('notFound', `${path} not found`)
     }
     return await effects.readNoteFn(path)
   }
@@ -137,18 +137,20 @@ function buildNoteTools(effects: ToolEffects = {}): NoteTools {
         localOnly: isLocalOnlyPath(localOnly, path),
       })),
   )
-  vi.spyOn(noteFile, 'listAttachments').mockImplementation(async () =>
-    (effects.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 })),
+  vi.spyOn(noteFile, 'listAttachments').mockImplementation(() =>
+    Promise.resolve((effects.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 }))),
   )
   const retrieval = createTestRetrievalService()
-  vi.spyOn(retrieval, 'retrieve').mockImplementation(effects.retrieveFn ?? (async () => []))
+  vi.spyOn(retrieval, 'retrieve').mockImplementation(
+    effects.retrieveFn ?? (() => Promise.resolve([])),
+  )
   const database = createTestDatabaseService()
   const noteList = createNoteListService({ database })
   vi.spyOn(noteList, 'listRecentNotes').mockImplementation(
-    effects.listRecentNotesFn ?? (async () => []),
+    effects.listRecentNotesFn ?? (() => Promise.resolve([])),
   )
   const assetReferences = {
-    notePaths: effects.assetReferencingNotePathsFn ?? (async () => []),
+    notePaths: effects.assetReferencingNotePathsFn ?? (() => Promise.resolve([])),
   }
   const xArchive = createTestXArchiveService(
     effects.xArchiveOwners === undefined ? {} : { owners: effects.xArchiveOwners },
@@ -180,7 +182,7 @@ function buildNoteTools(effects: ToolEffects = {}): NoteTools {
     noteFile,
     assetStore,
     noteList,
-    dailyNotes: { listDailyNotes: effects.listDailyNotesFn ?? (async () => []) },
+    dailyNotes: { listDailyNotes: effects.listDailyNotesFn ?? (() => []) },
     assetReferences,
     assetPrivacy,
     xArchive,
@@ -227,7 +229,6 @@ function hit(overrides: Partial<RetrievalHit>): RetrievalHit {
     heading: null,
     isPrivate: false,
     assetTextHash: NO_ASSET_TEXT_HASH,
-    hasConflict: false,
     ...overrides,
   }
 }
@@ -257,37 +258,17 @@ function dailyRow(date: string, overrides: Partial<DailyNoteRow> = {}): DailyNot
   }
 }
 
-function isAsyncIterable(value: object): value is AsyncIterable<unknown> {
-  return Symbol.asyncIterator in value
-}
-
-/** Execute `search_notes` directly, asserting a non-streaming output. */
+/** Execute `search_notes` directly. */
 async function runSearch(
   tools: NoteTools,
   input: { query: string; limit?: number },
 ): Promise<SearchNotesOutput> {
-  const execute = tools.search_notes.execute
-  if (!execute) {
-    throw new Error('search_notes has no execute')
-  }
-  const output = await execute(input, CALL)
-  if (isAsyncIterable(output)) {
-    throw new Error('unexpected streaming tool output')
-  }
-  return output
+  return await tools.search_notes.execute(input, CALL)
 }
 
-/** Execute `read_notes` directly, asserting a non-streaming output. */
+/** Execute `read_notes` directly. */
 async function runReadNotes(tools: NoteTools, paths: string[]): Promise<ReadNotesOutput> {
-  const execute = tools.read_notes.execute
-  if (!execute) {
-    throw new Error('read_notes has no execute')
-  }
-  const output = await execute({ paths }, CALL)
-  if (isAsyncIterable(output)) {
-    throw new Error('unexpected streaming tool output')
-  }
-  return output
+  return await tools.read_notes.execute({ paths }, CALL)
 }
 
 /** Read a single path via `read_notes`, returning its lone result. */
@@ -299,17 +280,9 @@ async function runRead(tools: NoteTools, path: string): Promise<ReadNoteResult> 
   return note
 }
 
-/** Execute `read_assets` directly, asserting a non-streaming output. */
+/** Execute `read_assets` directly. */
 async function runReadAssets(tools: NoteTools, paths: string[]): Promise<ReadAssetsOutput> {
-  const execute = tools.read_assets.execute
-  if (!execute) {
-    throw new Error('read_assets has no execute')
-  }
-  const output = await execute({ paths }, CALL)
-  if (isAsyncIterable(output)) {
-    throw new Error('unexpected streaming tool output')
-  }
-  return output
+  return await tools.read_assets.execute({ paths }, CALL)
 }
 
 /** Read a single asset via `read_assets`, returning its lone result. */
@@ -321,45 +294,29 @@ async function runReadAsset(tools: NoteTools, path: string): Promise<ReadAssetRe
   return asset
 }
 
-/** Execute `list_recent_notes` directly, asserting a non-streaming output. */
+/** Execute `list_recent_notes` directly. */
 async function runRecents(
   tools: NoteTools,
   input: { limit?: number; tag?: string | null },
 ): Promise<ListRecentNotesOutput> {
-  const execute = tools.list_recent_notes.execute
-  if (!execute) {
-    throw new Error('list_recent_notes has no execute')
-  }
-  const output = await execute(input, CALL)
-  if (isAsyncIterable(output)) {
-    throw new Error('unexpected streaming tool output')
-  }
-  return output
+  return await tools.list_recent_notes.execute(input, CALL)
 }
 
-/** Execute `list_daily_notes` directly, asserting a non-streaming output. */
+/** Execute `list_daily_notes` directly. */
 async function runDailies(
   tools: NoteTools,
   input: { start: string; end: string },
 ): Promise<ListDailyNotesOutput> {
-  const execute = tools.list_daily_notes.execute
-  if (!execute) {
-    throw new Error('list_daily_notes has no execute')
-  }
-  const output = await execute(input, CALL)
-  if (isAsyncIterable(output)) {
-    throw new Error('unexpected streaming tool output')
-  }
-  return output
+  return await tools.list_daily_notes.execute(input, CALL)
 }
 
 describe('search_notes', () => {
   it('always retrieves with excludePrivateContent', async () => {
     const seen: Array<RetrieveOptions | undefined> = []
     const tools = buildNoteTools({
-      retrieveFn: async (_query, options) => {
+      retrieveFn: (_query, options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     await runSearch(tools, { query: 'atlas' })
@@ -370,9 +327,9 @@ describe('search_notes', () => {
     const seen: Array<RetrieveOptions | undefined> = []
     const tools = buildNoteTools({
       semanticSearchEnabled: false,
-      retrieveFn: async (_query, options) => {
+      retrieveFn: (_query, options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     await runSearch(tools, { query: 'atlas' })
@@ -381,11 +338,12 @@ describe('search_notes', () => {
 
   it('drops private hits entirely — not even the title goes out', async () => {
     const tools = buildNoteTools({
-      retrieveFn: async () => [
-        hit({}),
-        hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE, snippet: '', isPrivate: true }),
-      ],
-      readNoteFn: async () => 'a public body\n',
+      retrieveFn: () =>
+        Promise.resolve([
+          hit({}),
+          hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE, snippet: '', isPrivate: true }),
+        ]),
+      readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runSearch(tools, { query: 'diary' })
     const payload = JSON.stringify(output)
@@ -405,9 +363,9 @@ describe('search_notes', () => {
   it('drops a hit whose live frontmatter turned private before reindex (TOCTOU)', async () => {
     const tools = buildNoteTools({
       // The stale index still says public…
-      retrieveFn: async () => [hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE })],
+      retrieveFn: () => Promise.resolve([hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE })]),
       // …but the note on disk was just marked private.
-      readNoteFn: async () => '---\nprivate: true\n---\n# Diary\n',
+      readNoteFn: () => Promise.resolve('---\nprivate: true\n---\n# Diary\n'),
     })
     const output = await runSearch(tools, { query: 'diary' })
     expect(output.hits).toEqual([])
@@ -416,10 +374,8 @@ describe('search_notes', () => {
 
   it('fails closed: an unreadable hit is dropped, not sent', async () => {
     const tools = buildNoteTools({
-      retrieveFn: async () => [hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE })],
-      readNoteFn: async () => {
-        throw { kind: 'io', message: 'disk error' }
-      },
+      retrieveFn: () => Promise.resolve([hit({ path: PRIVATE_PATH, title: PRIVATE_TITLE })]),
+      readNoteFn: () => Promise.reject(new AppError('io', 'disk error')),
     })
     const output = await runSearch(tools, { query: 'diary' })
     expect(output.hits).toEqual([])
@@ -429,11 +385,11 @@ describe('search_notes', () => {
     const assetTextHash = 'a'.repeat(64)
     const checked: Array<[path: string, hash: string | undefined]> = []
     const tools = buildNoteTools({
-      retrieveFn: async () => [hit({}), hit({ path: 'notes/trip.md', assetTextHash })],
-      readNoteFn: async () => '# Trip\n\n![[scan.png]]\n',
-      hasRestrictedSearchSourcesFn: async (path, _source, options) => {
+      retrieveFn: () => Promise.resolve([hit({}), hit({ path: 'notes/trip.md', assetTextHash })]),
+      readNoteFn: () => Promise.resolve('# Trip\n\n![[scan.png]]\n'),
+      hasRestrictedSearchSourcesFn: (path, _source, options) => {
         checked.push([path, options.expectedAssetTextHash])
-        return true
+        return Promise.resolve(true)
       },
     })
     const output = await runSearch(tools, { query: 'trip' })
@@ -444,9 +400,9 @@ describe('search_notes', () => {
   it('passes the requested limit through', async () => {
     const seen: Array<RetrieveOptions | undefined> = []
     const tools = buildNoteTools({
-      retrieveFn: async (_query, options) => {
+      retrieveFn: (_query, options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     await runSearch(tools, { query: 'atlas', limit: 3 })
@@ -461,12 +417,12 @@ describe('read_notes', () => {
       'notes/b.md': '# B\n\nBeta.\n',
     }
     const tools = buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         const body = bodies[path]
         if (body === undefined) {
-          throw { kind: 'notFound', message: 'no such note' }
+          return Promise.reject(new AppError('notFound', 'no such note'))
         }
-        return body
+        return Promise.resolve(body)
       },
     })
     const output = await runReadNotes(tools, ['notes/a.md', 'notes/gone.md', 'notes/b.md'])
@@ -478,7 +434,8 @@ describe('read_notes', () => {
 
   it('returns the body without frontmatter, titled from the note', async () => {
     const tools = buildNoteTools({
-      readNoteFn: async () => '---\npinned: true\n---\n# Project Atlas\n\nLaunch plan.\n',
+      readNoteFn: () =>
+        Promise.resolve('---\npinned: true\n---\n# Project Atlas\n\nLaunch plan.\n'),
     })
     const output = await runRead(tools, 'notes/atlas.md')
     if (!output.ok) {
@@ -491,7 +448,7 @@ describe('read_notes', () => {
 
   it('refuses a private note from its live frontmatter', async () => {
     const tools = buildNoteTools({
-      readNoteFn: async () => `---\nprivate: true\n---\n# Diary\n\n${PRIVATE_BODY}\n`,
+      readNoteFn: () => Promise.resolve(`---\nprivate: true\n---\n# Diary\n\n${PRIVATE_BODY}\n`),
     })
     const output = await runRead(tools, PRIVATE_PATH)
     if (output.ok) {
@@ -504,9 +461,9 @@ describe('read_notes', () => {
   it('refuses a path that is not a note without reading it', async () => {
     const reads: string[] = []
     const tools = buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         reads.push(path)
-        return `# Leak\n\n${PRIVATE_BODY}\n`
+        return Promise.resolve(`# Leak\n\n${PRIVATE_BODY}\n`)
       },
     })
     const paths = ['.git/config', '.reflect/settings.json', 'assets/a.png.reflect.md']
@@ -521,9 +478,9 @@ describe('read_notes', () => {
     const reads: string[] = []
     const tools = buildNoteTools({
       localOnlyFolders: ['secure'],
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         reads.push(path)
-        return `# Bank\n\n${PRIVATE_BODY}\n`
+        return Promise.resolve(`# Bank\n\n${PRIVATE_BODY}\n`)
       },
     })
     const output = await runRead(tools, 'finance/Secure/bank.md')
@@ -540,11 +497,13 @@ describe('read_notes', () => {
     const requested: string[] = []
     const tools = buildNoteTools({
       localOnlyFolders: ['secure'],
-      readShareableFn: async (path) => {
+      readShareableFn: (path) => {
         requested.push(path)
-        return path === folded
-          ? { kind: 'localOnly' }
-          : { kind: 'content', content: '# Plan\n\nPublic.\n' }
+        return Promise.resolve(
+          path === folded
+            ? { kind: 'localOnly' }
+            : { kind: 'content', content: '# Plan\n\nPublic.\n' },
+        )
       },
     })
     const output = await runReadNotes(tools, [folded, 'people/plan.md'])
@@ -556,9 +515,7 @@ describe('read_notes', () => {
 
   it('treats a PrivateNoteError from the read as a private note', async () => {
     const tools = buildNoteTools({
-      readShareableFn: async (path) => {
-        throw new PrivateNoteError(path)
-      },
+      readShareableFn: (path) => Promise.reject(new PrivateNoteError(path)),
     })
     const output = await runRead(tools, 'notes/plan.md')
     expect(output).toEqual({ ok: false, path: 'notes/plan.md', error: PRIVATE_NOTE_REFUSAL })
@@ -566,9 +523,7 @@ describe('read_notes', () => {
 
   it('reports a missing note instead of throwing', async () => {
     const tools = buildNoteTools({
-      readNoteFn: async () => {
-        throw { kind: 'notFound', message: 'no such note' }
-      },
+      readNoteFn: () => Promise.reject(new AppError('notFound', 'no such note')),
     })
     const output = await runRead(tools, 'notes/gone.md')
     if (output.ok) {
@@ -579,7 +534,7 @@ describe('read_notes', () => {
 
   it('caps oversized notes and flags the cut', async () => {
     const body = 'x'.repeat(MAX_NOTE_CONTENT_CHARS + 10)
-    const tools = buildNoteTools({ readNoteFn: async () => body })
+    const tools = buildNoteTools({ readNoteFn: () => Promise.resolve(body) })
     const output = await runRead(tools, 'notes/big.md')
     if (!output.ok) {
       expect.unreachable('expected a successful read')
@@ -604,14 +559,14 @@ describe('read_assets', () => {
     effects: ToolEffects = {},
   ): NoteTools {
     return buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         const source = files[path]
         if (source === undefined) {
-          throw { kind: 'notFound', message: 'no such file' }
+          return Promise.reject(new AppError('notFound', 'no such file'))
         }
-        return source
+        return Promise.resolve(source)
       },
-      assetReferencingNotePathsFn: async () => refs,
+      assetReferencingNotePathsFn: () => Promise.resolve(refs),
       ...effects,
     })
   }
@@ -669,15 +624,15 @@ describe('read_assets', () => {
       'notes/deck.md': PUBLIC_REF,
     }
     const tools = buildNoteTools({
-      readShareableFn: async (path) => {
+      readShareableFn: (path) => {
         requested.push(path)
         const content = files[path]
         if (content === undefined) {
-          throw new ReflectError('notFound', `${path} not found`)
+          return Promise.reject(new AppError('notFound', `${path} not found`))
         }
-        return { kind: 'content', content }
+        return Promise.resolve({ kind: 'content', content })
       },
-      assetReferencingNotePathsFn: async () => ['notes/deck.md'],
+      assetReferencingNotePathsFn: () => Promise.resolve(['notes/deck.md']),
     })
     const output = await runReadAsset(tools, ASSET)
     expect(requested).toEqual([SIDECAR, 'notes/deck.md'])
@@ -686,9 +641,11 @@ describe('read_assets', () => {
 
   it('refuses an asset whose sidecar Rust keeps local-only', async () => {
     const tools = buildNoteTools({
-      readShareableFn: async (path) =>
-        path === SIDECAR ? { kind: 'localOnly' } : { kind: 'content', content: PUBLIC_REF },
-      assetReferencingNotePathsFn: async () => ['notes/deck.md'],
+      readShareableFn: (path) =>
+        Promise.resolve(
+          path === SIDECAR ? { kind: 'localOnly' } : { kind: 'content', content: PUBLIC_REF },
+        ),
+      assetReferencingNotePathsFn: () => Promise.resolve(['notes/deck.md']),
     })
     const output = await runReadAsset(tools, ASSET)
     expect(output).toEqual({ ok: false, path: ASSET, error: ASSET_UNAVAILABLE_ERROR })
@@ -703,16 +660,16 @@ describe('read_assets', () => {
       'notes/post.md': `# Post\n\n![post](${archive})\n`,
     }
     const tools = buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         const source = files[path]
         if (source === undefined) {
-          throw { kind: 'notFound', message: 'no such file' }
+          return Promise.reject(new AppError('notFound', 'no such file'))
         }
-        return source
+        return Promise.resolve(source)
       },
-      assetReferencingNotePathsFn: async (_assetPath, owners) => {
+      assetReferencingNotePathsFn: (_assetPath, owners) => {
         seenOwners.push(owners)
-        return ['notes/post.md']
+        return Promise.resolve(['notes/post.md'])
       },
       xArchiveOwners: { [media]: [archive] },
     })
@@ -797,13 +754,13 @@ describe('read_assets', () => {
 
   it('fails closed when a referencing note cannot be read', async () => {
     const tools = buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         if (path === SIDECAR) {
-          return `---\nreflectAsset: true\n---\n${DESCRIPTION_BODY}\n`
+          return Promise.resolve(`---\nreflectAsset: true\n---\n${DESCRIPTION_BODY}\n`)
         }
-        throw { kind: 'io', message: 'disk error' }
+        return Promise.reject(new AppError('io', 'disk error'))
       },
-      assetReferencingNotePathsFn: async () => ['notes/deck.md'],
+      assetReferencingNotePathsFn: () => Promise.resolve(['notes/deck.md']),
     })
     const output = await runReadAsset(tools, ASSET)
     if (output.ok) {
@@ -815,11 +772,11 @@ describe('read_assets', () => {
   it('rejects a non-asset path without touching the filesystem', async () => {
     const reads: string[] = []
     const tools = buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         reads.push(path)
-        throw { kind: 'notFound', message: 'no such file' }
+        return Promise.reject(new AppError('notFound', 'no such file'))
       },
-      assetReferencingNotePathsFn: async () => [],
+      assetReferencingNotePathsFn: () => Promise.resolve([]),
     })
     for (const path of ['notes/secret.md', 'assets/chart.png.reflect.md']) {
       const output = await runReadAsset(tools, path)
@@ -874,11 +831,13 @@ describe('read_assets', () => {
   it('refuses an attachment holding device-only OCR text without reading its sidecar', async () => {
     const reads: string[] = []
     const tools = buildNoteTools({
-      readNoteFn: async (path) => {
+      readNoteFn: (path) => {
         reads.push(path)
-        return path === SIDECAR ? `---\nreflectAsset: true\n---\n${DESCRIPTION_BODY}\n` : PUBLIC_REF
+        return Promise.resolve(
+          path === SIDECAR ? `---\nreflectAsset: true\n---\n${DESCRIPTION_BODY}\n` : PUBLIC_REF,
+        )
       },
-      assetReferencingNotePathsFn: async () => ['notes/deck.md'],
+      assetReferencingNotePathsFn: () => Promise.resolve(['notes/deck.md']),
       ocrCache: await ocrCacheOf(ASSET, { status: 'complete', body: OCR_BODY }),
     })
     const output = await runReadAsset(tools, ASSET)
@@ -939,11 +898,13 @@ describe('read_assets', () => {
     it('marks a description whose sidecar Rust reports local-only', async () => {
       const tools = buildNoteTools({
         target: await onDeviceTarget(),
-        readDeviceNoteFn: async (path) =>
-          path.endsWith('.reflect.md')
-            ? { content: 'Private caption', localOnly: true }
-            : { content: '![photo](assets/photo.png)', localOnly: false },
-        assetReferencingNotePathsFn: async () => ['notes/public.md'],
+        readDeviceNoteFn: (path) =>
+          Promise.resolve(
+            path.endsWith('.reflect.md')
+              ? { content: 'Private caption', localOnly: true }
+              : { content: '![photo](assets/photo.png)', localOnly: false },
+          ),
+        assetReferencingNotePathsFn: () => Promise.resolve(['notes/public.md']),
       })
       const output = await runReadAsset(tools, 'assets/photo.png')
       expect(output).toMatchObject({
@@ -1000,9 +961,9 @@ describe('list_recent_notes', () => {
   it('queries with the default limit and no tag', async () => {
     const seen: RecentNotesOptions[] = []
     const tools = buildNoteTools({
-      listRecentNotesFn: async (options) => {
+      listRecentNotesFn: (options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     await runRecents(tools, {})
@@ -1012,9 +973,9 @@ describe('list_recent_notes', () => {
   it('passes an explicit limit and tag through', async () => {
     const seen: RecentNotesOptions[] = []
     const tools = buildNoteTools({
-      listRecentNotesFn: async (options) => {
+      listRecentNotesFn: (options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     await runRecents(tools, { limit: 3, tag: 'book' })
@@ -1024,9 +985,9 @@ describe('list_recent_notes', () => {
   it('treats an explicit null tag as no filter', async () => {
     const seen: RecentNotesOptions[] = []
     const tools = buildNoteTools({
-      listRecentNotesFn: async (options) => {
+      listRecentNotesFn: (options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     await runRecents(tools, { tag: null })
@@ -1036,9 +997,9 @@ describe('list_recent_notes', () => {
   it('refuses a non-tag filter without querying, pointing at the no-tag call', async () => {
     const seen: RecentNotesOptions[] = []
     const tools = buildNoteTools({
-      listRecentNotesFn: async (options) => {
+      listRecentNotesFn: (options) => {
         seen.push(options)
-        return []
+        return Promise.resolve([])
       },
     })
     for (const tag of ['*', ' ', '#book', ']INVALIDNOFILTER[']) {
@@ -1055,8 +1016,8 @@ describe('list_recent_notes', () => {
   it('maps rows onto listings: preview as snippet, ISO modifiedAt, no daily date', async () => {
     const mtime = 1_750_000_000_000
     const tools = buildNoteTools({
-      listRecentNotesFn: async () => [recentRow({ mtime })],
-      readNoteFn: async () => 'a public body\n',
+      listRecentNotesFn: () => Promise.resolve([recentRow({ mtime })]),
+      readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runRecents(tools, {})
     if (!output.ok) {
@@ -1075,11 +1036,12 @@ describe('list_recent_notes', () => {
 
   it('drops an indexed-private row entirely — not even the title goes out', async () => {
     const tools = buildNoteTools({
-      listRecentNotesFn: async () => [
-        recentRow({}),
-        recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE, isPrivate: true }),
-      ],
-      readNoteFn: async () => 'a public body\n',
+      listRecentNotesFn: () =>
+        Promise.resolve([
+          recentRow({}),
+          recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE, isPrivate: true }),
+        ]),
+      readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runRecents(tools, {})
     const payload = JSON.stringify(output)
@@ -1093,8 +1055,9 @@ describe('list_recent_notes', () => {
 
   it('drops a row whose live frontmatter turned private before reindex (TOCTOU)', async () => {
     const tools = buildNoteTools({
-      listRecentNotesFn: async () => [recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE })],
-      readNoteFn: async () => '---\nprivate: true\n---\n# Diary\n',
+      listRecentNotesFn: () =>
+        Promise.resolve([recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE })]),
+      readNoteFn: () => Promise.resolve('---\nprivate: true\n---\n# Diary\n'),
     })
     const output = await runRecents(tools, {})
     if (!output.ok) {
@@ -1109,11 +1072,11 @@ describe('list_recent_notes', () => {
     for (const target of [CLOUD, await onDeviceTarget()]) {
       const tools = buildNoteTools({
         target,
-        listRecentNotesFn: async () => [recentRow({})],
-        readNoteFn: async () => '# Trip\n![[scan.png]]\n',
-        hasRestrictedSearchSourcesFn: async (path) => {
+        listRecentNotesFn: () => Promise.resolve([recentRow({})]),
+        readNoteFn: () => Promise.resolve('# Trip\n![[scan.png]]\n'),
+        hasRestrictedSearchSourcesFn: (path) => {
           checked.push(path)
-          return true
+          return Promise.resolve(true)
         },
       })
       const output = await runRecents(tools, {})
@@ -1127,10 +1090,8 @@ describe('list_recent_notes', () => {
 
   it('fails closed: an unreadable row is dropped, not sent', async () => {
     const tools = buildNoteTools({
-      listRecentNotesFn: async () => [recentRow({})],
-      readNoteFn: async () => {
-        throw { kind: 'io', message: 'disk error' }
-      },
+      listRecentNotesFn: () => Promise.resolve([recentRow({})]),
+      readNoteFn: () => Promise.reject(new AppError('io', 'disk error')),
     })
     const output = await runRecents(tools, {})
     if (!output.ok) {
@@ -1144,9 +1105,9 @@ describe('list_daily_notes', () => {
   it('queries the inclusive range with one row past the day cap', async () => {
     const seen: DailyNotesRange[] = []
     const tools = buildNoteTools({
-      listDailyNotesFn: async (range) => {
+      listDailyNotesFn: (range) => {
         seen.push(range)
-        return []
+        return Promise.resolve([])
       },
     })
     await runDailies(tools, { start: '2026-06-01', end: '2026-06-30' })
@@ -1157,8 +1118,8 @@ describe('list_daily_notes', () => {
 
   it('maps days with their dates and stays untruncated within the cap', async () => {
     const tools = buildNoteTools({
-      listDailyNotesFn: async () => [dailyRow('2026-06-10'), dailyRow('2026-06-09')],
-      readNoteFn: async () => 'a public body\n',
+      listDailyNotesFn: () => Promise.resolve([dailyRow('2026-06-10'), dailyRow('2026-06-09')]),
+      readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runDailies(tools, { start: '2026-06-01', end: '2026-06-30' })
     expect(output.truncated).toBe(false)
@@ -1171,8 +1132,8 @@ describe('list_daily_notes', () => {
       dailyRow(`2026-05-${String(index + 1).padStart(2, '0')}`),
     )
     const tools = buildNoteTools({
-      listDailyNotesFn: async () => days,
-      readNoteFn: async () => 'a public body\n',
+      listDailyNotesFn: () => Promise.resolve(days),
+      readNoteFn: () => Promise.resolve('a public body\n'),
     })
     const output = await runDailies(tools, { start: '2026-05-01', end: '2026-06-30' })
     expect(output.truncated).toBe(true)
@@ -1181,10 +1142,9 @@ describe('list_daily_notes', () => {
 
   it('drops a daily whose live frontmatter turned private before reindex (TOCTOU)', async () => {
     const tools = buildNoteTools({
-      listDailyNotesFn: async () => [
-        dailyRow('2026-06-10', { path: PRIVATE_PATH, title: PRIVATE_TITLE }),
-      ],
-      readNoteFn: async () => '---\nprivate: true\n---\n# Diary\n',
+      listDailyNotesFn: () =>
+        Promise.resolve([dailyRow('2026-06-10', { path: PRIVATE_PATH, title: PRIVATE_TITLE })]),
+      readNoteFn: () => Promise.resolve('---\nprivate: true\n---\n# Diary\n'),
     })
     const output = await runDailies(tools, { start: '2026-06-01', end: '2026-06-30' })
     expect(output.days).toEqual([])
@@ -1197,11 +1157,11 @@ describe('bound to a verified on-device model', () => {
     const seen: Array<RetrieveOptions | undefined> = []
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
-      retrieveFn: async (_query, options) => {
+      retrieveFn: (_query, options) => {
         seen.push(options)
-        return [hit({ isPrivate: true, snippet: PRIVATE_BODY })]
+        return Promise.resolve([hit({ isPrivate: true, snippet: PRIVATE_BODY })])
       },
-      readNoteFn: async () => `---\nprivate: true\n---\n${PRIVATE_BODY}`,
+      readNoteFn: () => Promise.resolve(`---\nprivate: true\n---\n${PRIVATE_BODY}`),
     })
     const output = await runSearch(tools, { query: 'private' })
     expect(seen).toEqual([{ limit: 8, mode: 'hybrid', excludePrivateContent: false }])
@@ -1220,11 +1180,13 @@ describe('bound to a verified on-device model', () => {
   it('marks a stale public search snapshot whose sidecar Rust reports local-only', async () => {
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
-      retrieveFn: async () => [hit({ snippet: PRIVATE_BODY, assetTextHash: 'a'.repeat(64) })],
-      readDeviceNoteFn: async (path) => ({
-        content: path.endsWith('.reflect.md') ? PRIVATE_BODY : '# Public',
-        localOnly: path.endsWith('.reflect.md'),
-      }),
+      retrieveFn: () =>
+        Promise.resolve([hit({ snippet: PRIVATE_BODY, assetTextHash: 'a'.repeat(64) })]),
+      readDeviceNoteFn: (path) =>
+        Promise.resolve({
+          content: path.endsWith('.reflect.md') ? PRIVATE_BODY : '# Public',
+          localOnly: path.endsWith('.reflect.md'),
+        }),
       // The attachment check reads the sidecar through the tools' own reader.
       hasRestrictedSearchSourcesFn: async (_path, _source, { readNote }) => {
         await readNote(`people/${FOLDED_SECURE}/scan.png.reflect.md`)
@@ -1244,7 +1206,7 @@ describe('bound to a verified on-device model', () => {
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
       localOnlyFolders: ['secure'],
-      readNoteFn: async (path) => bodies[path] ?? '',
+      readNoteFn: (path) => Promise.resolve(bodies[path] ?? ''),
     })
     const output = await runReadNotes(tools, ['secure/bank.md', PRIVATE_PATH, 'notes/plan.md'])
     expect(output.notes).toEqual([
@@ -1285,7 +1247,8 @@ describe('bound to a verified on-device model', () => {
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
       localOnlyFolders: ['secure'],
-      readDeviceNoteFn: async (path) => ({ content: '# Visa\n', localOnly: path === folded }),
+      readDeviceNoteFn: (path) =>
+        Promise.resolve({ content: '# Visa\n', localOnly: path === folded }),
     })
     expect(await runRead(tools, folded)).toMatchObject({
       ok: true,
@@ -1296,7 +1259,7 @@ describe('bound to a verified on-device model', () => {
   it('still refuses a path that is not a note', async () => {
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
-      readNoteFn: async () => `# Leak\n\n${PRIVATE_BODY}\n`,
+      readNoteFn: () => Promise.resolve(`# Leak\n\n${PRIVATE_BODY}\n`),
     })
     expect(await runRead(tools, '.git/config')).toEqual({
       ok: false,
@@ -1310,19 +1273,21 @@ describe('bound to a verified on-device model', () => {
     const dailies: DailyNotesRange[] = []
     const tools = buildNoteTools({
       target: await onDeviceTarget(),
-      listRecentNotesFn: async (options) => {
+      listRecentNotesFn: (options) => {
         recents.push(options)
-        return [
+        return Promise.resolve([
           recentRow({}),
           recentRow({ path: PRIVATE_PATH, title: PRIVATE_TITLE, isPrivate: true }),
-        ]
+        ])
       },
-      listDailyNotesFn: async (range) => {
+      listDailyNotesFn: (range) => {
         dailies.push(range)
-        return [dailyRow('2026-06-10')]
+        return Promise.resolve([dailyRow('2026-06-10')])
       },
-      readNoteFn: async (path) =>
-        path === 'daily/2026-06-10.md' ? '---\nprivate: true\n---\n# Today\n' : 'a public body\n',
+      readNoteFn: (path) =>
+        Promise.resolve(
+          path === 'daily/2026-06-10.md' ? '---\nprivate: true\n---\n# Today\n' : 'a public body\n',
+        ),
     })
     const recent = await runRecents(tools, {})
     if (!recent.ok) {

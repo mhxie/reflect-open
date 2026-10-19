@@ -31,8 +31,6 @@ import { NotePrivacyAction } from './note-privacy-action.tsx'
 import { NOTE_MENU_ITEM, NoteMenuInfoItem, NoteMenuItemContent } from './note-menu-row.tsx'
 
 const PROTECTION_TITLES: Record<NoteProtection['kind'], string> = {
-  'sync-conflict': 'Sync conflict',
-  'external-change': 'Changed on disk',
   'save-blocked': 'Saving blocked',
   'unsupported-markdown': 'Unsupported Markdown',
 }

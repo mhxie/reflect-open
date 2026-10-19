@@ -93,7 +93,7 @@ describe('LocalTranscriptionService models', () => {
     ])
   })
 
-  it('delivers status events to every subscriber until it unsubscribes', async () => {
+  it('delivers status events to every subscriber until it unsubscribes', () => {
     const { ipc, logger, service } = setup()
     const first: string[] = []
     const second: string[] = []

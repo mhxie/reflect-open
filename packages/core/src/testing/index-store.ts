@@ -1,4 +1,4 @@
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { noteBasenameKey } from '../graph/note-reference.ts'
 import { dateFromDailyPath, foldGraphPath, isCalendarDate } from '../graph/paths.ts'
 import { CLAIM_TIER, type IndexedNote } from '../indexing/indexed-note.ts'
@@ -82,9 +82,9 @@ export interface TestIndexStoreServiceOptions {
   meta?: Readonly<Record<string, string>>
   /**
    * Called after a call is recorded and before it takes effect. A returned
-   * value other than `undefined` rejects the call with that value.
+   * `Error` rejects the call with it.
    */
-  fail?: (call: IndexStoreCall) => unknown
+  fail?: (call: IndexStoreCall) => Error | undefined
 }
 
 export interface TestIndexStoreService extends IndexStoreService {
@@ -112,7 +112,7 @@ class TestIndexStoreServiceImpl implements TestIndexStoreService {
   readonly #database: TestDatabaseService | undefined
   readonly #generation: number
   readonly #scan: ReconcileScan
-  readonly #fail: ((call: IndexStoreCall) => unknown) | undefined
+  readonly #fail: ((call: IndexStoreCall) => Error | undefined) | undefined
   readonly #meta: Map<string, string>
   readonly #log: IndexStoreCall[] = []
   readonly #appliedNotes: IndexedNote[] = []
@@ -129,9 +129,11 @@ class TestIndexStoreServiceImpl implements TestIndexStoreService {
     this.#metaSeeded = this.#database === undefined
   }
 
-  async open(): Promise<number> {
-    this.#record({ method: 'open' })
-    return this.#generation
+  open(): Promise<number> {
+    return Promise.try(() => {
+      this.#record({ method: 'open' })
+      return this.#generation
+    })
   }
 
   async apply(note: IndexedNote, writeGeneration: number): Promise<void> {
@@ -162,13 +164,17 @@ class TestIndexStoreServiceImpl implements TestIndexStoreService {
     this.#moves.push({ from, to })
   }
 
-  async reconcileScan(scanGeneration: number): Promise<ReconcileScan> {
-    this.#record({ method: 'reconcileScan', generation: scanGeneration })
-    return this.#scan
+  reconcileScan(scanGeneration: number): Promise<ReconcileScan> {
+    return Promise.try(() => {
+      this.#record({ method: 'reconcileScan', generation: scanGeneration })
+      return this.#scan
+    })
   }
 
-  async touch(entries: readonly IndexedNoteTouch[], writeGeneration: number): Promise<void> {
-    this.#record({ method: 'touch', entries: [...entries], generation: writeGeneration })
+  touch(entries: readonly IndexedNoteTouch[], writeGeneration: number): Promise<void> {
+    return Promise.try(() => {
+      this.#record({ method: 'touch', entries: [...entries], generation: writeGeneration })
+    })
   }
 
   async clear(
@@ -183,9 +189,9 @@ class TestIndexStoreServiceImpl implements TestIndexStoreService {
     await this.#database?.runQuery('DELETE FROM notes', [])
   }
 
-  async pruneEmbeddings(writeGeneration: number, keep: readonly string[]): Promise<number> {
+  pruneEmbeddings(writeGeneration: number, keep: readonly string[]): Promise<number> {
     this.#record({ method: 'pruneEmbeddings', generation: writeGeneration, keep: [...keep] })
-    return 0
+    return Promise.resolve(0)
   }
 
   async getMeta(key: string): Promise<string | null> {
@@ -294,7 +300,7 @@ class TestIndexStoreServiceImpl implements TestIndexStoreService {
     const run = database.runQuery
     const occupied = await run('SELECT 1 FROM notes WHERE path = ?', [to])
     if (Array.isArray(occupied) && occupied.length > 0) {
-      throw new ReflectError('io', `cannot move note: ${to} is already indexed`)
+      throw new AppError('io', `cannot move note: ${to} is already indexed`)
     }
     const date = dateFromDailyPath(to)
     const dailyDate = date !== null && isCalendarDate(date) ? date : null

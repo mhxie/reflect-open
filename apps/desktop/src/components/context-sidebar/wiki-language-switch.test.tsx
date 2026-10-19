@@ -1,9 +1,10 @@
+import { deepLinkForRoute } from '@reflect/app'
 import { createTestWindowService } from '@reflect/app/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { WikiService } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import type { MaybePromise } from '@reflect/utils'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiLanguageSwitch } from './wiki-language-switch.tsx'
@@ -13,7 +14,7 @@ const CHINESE = { label: '简体中文', folder: 'wiki-cn' }
 const JAPANESE = { label: '日本語', folder: 'wiki-ja' }
 
 const wikiCopies = vi.fn<WikiService['copies']>()
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()

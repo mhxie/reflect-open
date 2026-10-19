@@ -16,7 +16,7 @@ use saphyr_parser::{Event, Parser, ScalarStyle, Tag};
 
 use crate::classify::UnreadableReason;
 use crate::scalar::{
-    classify_untagged, key_identity, resolve_null, Scalar, ValueClass, CORE_TAG_PREFIX,
+    CORE_TAG_PREFIX, Scalar, ValueClass, classify_untagged, key_identity, resolve_null,
 };
 
 /// Blocks larger than this are never parsed (256 KiB).

@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it } from 'vitest'
 import { StrictMode, type ReactNode } from 'react'
 import { createTestCoreServices, createTestSettingsService } from '@reflect/core/testing'
@@ -8,7 +9,7 @@ describe('useSettings', () => {
   it('renders the settings of the app services and forwards updates', async () => {
     const settings = createTestSettingsService({ editorMarkdownSyntax: 'show' })
     const app = createTestCoreServices({ settings })
-    const { result, act } = await renderHookInApp(() => useSettings(), { app })
+    const { result } = await renderHookInApp(() => useSettings(), { app })
 
     await act(async () => {
       await expect(result.current.whenSettingsLoaded()).resolves.toBe('loaded')
@@ -34,7 +35,7 @@ describe('useSettings', () => {
   it('loads once in StrictMode', async () => {
     const settings = createTestSettingsService()
     const app = createTestCoreServices({ settings })
-    const { result, act } = await renderHookInApp(() => useSettings(), {
+    const { result } = await renderHookInApp(() => useSettings(), {
       app,
       wrapper: (children: ReactNode) => <StrictMode>{children}</StrictMode>,
     })

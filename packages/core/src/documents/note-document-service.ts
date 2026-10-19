@@ -1,5 +1,5 @@
 import { requireGraphSession, type GraphSessionSource } from '../graph/graph-session.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { isLocalOnlyReadOnlyPath } from '../graph/local-only.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { patchNote, readNoteOrNull } from '../graph/patch-note.ts'
@@ -18,11 +18,10 @@ import type { OpenDocumentsService } from './open-documents-service.ts'
  *   isn't the truth yet), so we fall back to disk rather than act on a
  *   placeholder — the trap behind empty publishes and mis-read toggle states.
  * - **Writes** go through the session when it can take the patch (so our own
- *   write never parks a conflict under a dirty buffer), else a checked
- *   read-patch-write on disk (`patchNote`) that a loading/clean session
- *   reconciles like any external edit. Both encode the flag through
- *   {@link frontmatterPatchToYaml}, so a value lands identically whichever
- *   channel wins.
+ *   write never races a dirty buffer), else a checked read-patch-write on
+ *   disk (`patchNote`) that a loading/clean session reconciles like any
+ *   external edit. Both encode the flag through {@link frontmatterPatchToYaml},
+ *   so a value lands identically whichever channel wins.
  */
 export interface NoteDocumentService {
   /**
@@ -62,8 +61,8 @@ export interface NoteDocumentService {
    * in-memory buffer synchronously, so unsaved edits survive and there's no
    * read-then-write gap for a concurrent keystroke. The session declines (and
    * we refuse rather than clobber via disk) only when it can't persist now
-   * (failed to load, protected/read-only, or a parked conflict); a session
-   * still loading waits for its load instead. A decline is surfaced as
+   * (failed to load, protected/read-only, or disposed); a session still
+   * loading waits for its load instead. A decline is surfaced as
    * {@link NoteBusyError}. When the note is **not** open, disk is the source of
    * truth: the transform applies to the bytes on disk and the result is written
    * back checked against them, re-applied to a concurrent change rather than
@@ -97,13 +96,13 @@ export interface CommitSourceEditOptions {
   /**
    * Treat a missing note as empty: the edit creates it (today's daily).
    */
-  readonly createIfMissing?: boolean
+  readonly createIfMissing?: boolean | undefined
 }
 
 /**
  * A note couldn't be written because it is open with unsaved edits that
- * the session can't persist right now — it's read-only/protected, or a sync
- * conflict is parked. Distinct from `TaskStaleError` (a stale index): the
+ * the session can't persist right now: it's read-only/protected or disposed.
+ * Distinct from `TaskStaleError` (a stale index): the
  * recovery is "save or resolve the note", not "reindex". We refuse rather than
  * write to disk, which would clobber the live buffer.
  */
@@ -193,7 +192,7 @@ class NoteDocumentServiceImpl implements NoteDocumentService {
         const missingFromStart = firstRead
         firstRead = false
         if (source === null && !missingFromStart) {
-          throw new ReflectError('notFound', `${path} was deleted`)
+          throw new AppError('notFound', `${path} was deleted`)
         }
         const onDisk = source ?? ''
         const patched = upsertFrontmatter(onDisk, yaml)
@@ -217,7 +216,7 @@ class NoteDocumentServiceImpl implements NoteDocumentService {
     const graph = graphSession.getState().session
     if (graph !== null && isLocalOnlyReadOnlyPath(graph.localOnly, path)) {
       return Promise.reject(
-        new ReflectError(
+        new AppError(
           'unsupported',
           'This note is in a read-only local-only folder and can’t be edited.',
         ),
@@ -239,7 +238,7 @@ class NoteDocumentServiceImpl implements NoteDocumentService {
         path,
         (source) => {
           if (source === null && options.createIfMissing !== true) {
-            throw new ReflectError('notFound', `${path} does not exist`)
+            throw new AppError('notFound', `${path} does not exist`)
           }
           return transform(source ?? '')
         },

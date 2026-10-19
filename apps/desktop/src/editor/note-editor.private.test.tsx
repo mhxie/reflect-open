@@ -28,7 +28,7 @@ const YOUTUBE_URL = 'https://youtu.be/aqz-KE-bpKQ'
 const hostResolver = vi.fn((src: string) =>
   /^https?:/i.test(src) ? src : `reflect-asset://g/${src}`,
 )
-const resolveLinkPreview: LinkPreviewResolver = vi.fn(async () => undefined)
+const resolveLinkPreview: LinkPreviewResolver = vi.fn(() => Promise.resolve(undefined))
 
 let app: TestCoreServices
 /**

@@ -29,15 +29,21 @@ jobs:
         include:
           - name: macos
             os: macos-26
-            target: x86_64-apple-darwin
             command: pnpm release:macos --target=universal-apple-darwin --no-sign
           - name: ios
             os: macos-26
-            target: aarch64-apple-ios
             command: pnpm release:ios --build-number=1 --no-sign
           - name: windows
-            os: windows-latest
+            os: windows-2025
             command: pnpm release:windows
+          # The oldest Ubuntu that can link the prebuilt ONNX Runtime, which
+          # needs glibc 2.38 and the libstdc++ of GCC 14.
+          - name: linux-x64
+            os: ubuntu-24.04
+            command: pnpm release:linux
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            command: pnpm release:linux
 
     name: build-${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -52,8 +58,12 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
-          targets: ${{ matrix.target }}
           cache-key: build-${{ matrix.name }}
+
+      # The universal build also compiles the x86_64 slice on this arm64 runner.
+      - name: Add the x86_64 macOS target
+        if: matrix.name == 'macos'
+        run: rustup target add x86_64-apple-darwin
 
       - name: Build
         shell: bash

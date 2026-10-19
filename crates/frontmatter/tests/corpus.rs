@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use reflect_frontmatter::{backup_privacy, BackupPrivacy};
+use reflect_frontmatter::{BackupPrivacy, backup_privacy};
 use serde_json::Value;
 
 fn fixtures() -> PathBuf {
@@ -93,9 +93,11 @@ fn the_parity_corpus_agrees_with_the_ts_index_bit() {
     let parity = fixtures().join("parity");
     let expected = load(parity.join("expected.json"));
     let notes = expected["notes"].as_object().unwrap();
-    assert!(notes
-        .values()
-        .any(|note| note["private"].as_bool() == Some(true)));
+    assert!(
+        notes
+            .values()
+            .any(|note| note["private"].as_bool() == Some(true))
+    );
     for (rel_path, want) in notes {
         let bytes = fs::read(parity.join(rel_path)).unwrap();
         assert_eq!(

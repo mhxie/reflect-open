@@ -197,18 +197,22 @@ export function OutlineBridge({ path }: OutlineBridgeProps): null {
       }
 
       docChangedRef.current = refreshHeadings
-      container?.addEventListener('scroll', scheduleActiveRefresh, { passive: true })
-      view.dom.addEventListener(OUTLINE_EMBED_CHANGE, refreshHeadings)
-      window.addEventListener('resize', scheduleActiveRefresh)
+      const listeners = new AbortController()
+      container?.addEventListener('scroll', scheduleActiveRefresh, {
+        passive: true,
+        signal: listeners.signal,
+      })
+      view.dom.addEventListener(OUTLINE_EMBED_CHANGE, refreshHeadings, {
+        signal: listeners.signal,
+      })
+      window.addEventListener('resize', scheduleActiveRefresh, { signal: listeners.signal })
       refreshHeadings()
       publish()
 
       teardown = () => {
         mounted = false
         docChangedRef.current = null
-        container?.removeEventListener('scroll', scheduleActiveRefresh)
-        view.dom.removeEventListener(OUTLINE_EMBED_CHANGE, refreshHeadings)
-        window.removeEventListener('resize', scheduleActiveRefresh)
+        listeners.abort()
         if (spyFrame !== null) {
           cancelAnimationFrame(spyFrame)
         }

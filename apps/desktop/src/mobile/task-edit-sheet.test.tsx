@@ -25,7 +25,6 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
     title: 'Plan',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -37,8 +36,8 @@ const actions: TaskActions = {
   remove: () => {},
   edit: () => {},
   checkboxToggle: () => {},
-  insert: async () => null,
-  insertAfter: async () => null,
+  insert: () => Promise.resolve(null),
+  insertAfter: () => Promise.resolve(null),
   editAndToggle: () => {},
   schedule: () => {},
   convertToBullet: () => {},
@@ -51,7 +50,7 @@ async function renderSheet(task: OpenTask) {
   const app = createTestCoreServices()
   const getNote = vi
     .spyOn(app.indexQuery, 'getNote')
-    .mockImplementation(async (path) => noteRow(path, path === 'notes/locked.md'))
+    .mockImplementation((path) => Promise.resolve(noteRow(path, path === 'notes/locked.md')))
   const view = await renderInApp(
     <MobileTaskEditSheet
       task={task}

@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { createTestWindowService } from '@reflect/app/testing'
 import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,14 +16,14 @@ import { useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { BacklinksPanel } from './backlinks-panel.tsx'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 
 // What the app's fakes answer; each test sets them before `renderPanel`.
 const getBacklinksWithContext = vi.fn()
 const resolveOrCreateNoteWithTitle = vi.fn<NoteCreationService['resolveOrCreateNoteWithTitle']>()
 const resolveMarkdownHref = vi.fn<NoteLinkResolverService['resolveMarkdownHref']>()
 const resolveWikiTarget = vi.fn<WikiResolverService['resolveWikiTarget']>()
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 const getBacklinksPage: BacklinkService['getBacklinksWithContext'] = async (path, options) => {
   const result: unknown = await getBacklinksWithContext(path, options)
@@ -153,10 +154,12 @@ describe('BacklinksPanel', () => {
         tasks: [],
       },
     ])
-    resolveWikiTarget.mockImplementation(async (raw: string) =>
-      raw === 'Roadmap'
-        ? { kind: 'resolved', ref: 'notes/roadmap.md' }
-        : { kind: 'unresolved', text: raw },
+    resolveWikiTarget.mockImplementation((raw: string) =>
+      Promise.resolve(
+        raw === 'Roadmap'
+          ? { kind: 'resolved', ref: 'notes/roadmap.md' }
+          : { kind: 'unresolved', text: raw },
+      ),
     )
     const view = await renderPanel('notes/source.md')
     const chips = view.getByTestId('wikilink')

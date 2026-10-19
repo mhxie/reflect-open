@@ -31,23 +31,26 @@ class TestMobileStorageServiceImpl implements TestMobileStorageService {
     }
   }
 
-  async resolve(): Promise<MobileStorageInfo> {
-    return { ...this.#storage, icloudGraphRoots: [...this.#storage.icloudGraphRoots] }
+  resolve(): Promise<MobileStorageInfo> {
+    return Promise.resolve({
+      ...this.#storage,
+      icloudGraphRoots: [...this.#storage.icloudGraphRoots],
+    })
   }
 
-  async resolveLocal(): Promise<string> {
-    return this.#storage.localRoot
+  resolveLocal(): Promise<string> {
+    return Promise.resolve(this.#storage.localRoot)
   }
 
-  async createGraph(path: string): Promise<GraphInfo> {
+  createGraph(path: string): Promise<GraphInfo> {
     this.#created.push(path)
-    return {
+    return Promise.resolve({
       root: path,
       name: baseName(path),
       generation: 1,
       localOnlyFolders: [],
       localOnlyEditableFolders: [],
-    }
+    })
   }
 
   createdGraphs(): readonly string[] {

@@ -37,9 +37,9 @@ export function useNoteEmbedNavigation({
   const { noteLinkResolver } = useCoreServices()
   const { linkNavigation, operations } = useAppServices()
   const scope = JSON.stringify([graphKey, generation, sourcePath])
-  const currentScope = useRef(scope)
+  const scopeRef = useRef(scope)
   useLayoutEffect(() => {
-    currentScope.current = scope
+    scopeRef.current = scope
   }, [scope])
   const openNote = useNoteLinkNavigation(scope)
   const beginLinkIntent = useLinkIntentGuard()
@@ -56,7 +56,7 @@ export function useNoteEmbedNavigation({
             kind === 'wiki'
               ? await noteLinkResolver.resolveWikiTarget(target, generation, sourcePath)
               : await noteLinkResolver.resolveMarkdownHref(sourcePath, target, generation)
-          if (isStale() || currentScope.current !== scope) return
+          if (isStale() || scopeRef.current !== scope) return
           if (result.kind === 'resolved') {
             const fragment =
               kind === 'wiki'
@@ -75,7 +75,7 @@ export function useNoteEmbedNavigation({
             operations.fail('Opening link', 'This note is not available on this device.')
           }
         } catch (cause) {
-          if (!isStale() && currentScope.current === scope) {
+          if (!isStale() && scopeRef.current === scope) {
             operations.fail('Opening link', errorMessage(cause))
           }
         }

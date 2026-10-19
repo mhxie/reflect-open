@@ -1,6 +1,6 @@
 import { sha256Hex } from '@reflect/utils'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import {
   createLocalOnlyFolders,
   NO_LOCAL_ONLY_FOLDERS,
@@ -151,7 +151,7 @@ describe('AssetDescriptionText.gatherText', () => {
   it('skips an asset whose description path resolves outside the graph', async () => {
     noteFile.set('assets/b.pdf.reflect.md', '---\nreflectAsset: true\n---\n\nStill indexed.\n')
     readNoteMock.mockRejectedValueOnce(
-      new ReflectError('traversal', 'path resolves outside the graph: "raw/a.png.reflect.md"'),
+      new AppError('traversal', 'path resolves outside the graph: "raw/a.png.reflect.md"'),
     )
     expect(await assetText.gatherText(['raw/a.png', 'assets/b.pdf'], AT_ROOT)).toBe(
       'Still indexed.',
@@ -159,7 +159,7 @@ describe('AssetDescriptionText.gatherText', () => {
   })
 
   it('propagates a non-notFound read error', async () => {
-    readNoteMock.mockRejectedValueOnce({ kind: 'io', message: 'disk error' })
+    readNoteMock.mockRejectedValueOnce(new AppError('io', 'disk error'))
     await expect(assetText.gatherText(['assets/a.png'], AT_ROOT)).rejects.toMatchObject({
       kind: 'io',
     })

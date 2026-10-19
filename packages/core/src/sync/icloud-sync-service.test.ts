@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOpenDocumentsService } from '../documents/open-documents-service.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { IcloudScanOptions, IcloudSweepOutcome } from '../ipc/icloud-native-service.ts'
 import { createTestClockService, type TestClockService } from '../testing/clock.ts'
 import { createTestFileChangeService, type TestFileChangeService } from '../testing/file-change.ts'
 import { createTestIndexLifecycleService } from '../testing/index-lifecycle.ts'
+import { createTestProgressPort, type TestProgressPort } from '../testing/ports.ts'
 import { createTestLoggerService, type TestLoggerService } from '../testing/logger.ts'
 import { createTestActivityPort, type TestActivityPort } from '../testing/shell.ts'
 import { createTestICloudNativeService, type TestICloudNativeService } from '../testing/sync.ts'
@@ -29,14 +30,14 @@ const INDEX_GENERATION = 3
 
 const EMPTY_OUTCOME: IcloudSweepOutcome = {
   changed: [],
-  needsReview: [],
-  deferred: [],
+  copies: [],
   autoResolved: 0,
 }
 
 let clock: TestClockService
 let activity: TestActivityPort
 let logger: TestLoggerService
+let progress: TestProgressPort
 let fileChanges: TestFileChangeService
 let icloud: TestICloudNativeService
 /**
@@ -52,6 +53,7 @@ beforeEach(() => {
   clock = createTestClockService({ now: Date.UTC(2026, 6, 4) })
   activity = createTestActivityPort()
   logger = createTestLoggerService()
+  progress = createTestProgressPort()
   fileChanges = createTestFileChangeService()
   icloud = createTestICloudNativeService()
   scanResults = []
@@ -87,14 +89,15 @@ afterEach(() => {
 function service(overrides: { watch?: boolean } = {}) {
   const indexLifecycle = createTestIndexLifecycleService()
   vi.spyOn(indexLifecycle, 'applyChanges').mockImplementation(
-    async (changes, generation, _fileGeneration, canApply) => {
-      indexApplies.push({
-        paths: changes.map((change) => change.path),
-        generation,
-        canApply: canApply?.() ?? true,
-      })
-      return changes.length
-    },
+    (changes, generation, _fileGeneration, canApply) =>
+      Promise.try(() => {
+        indexApplies.push({
+          paths: changes.map((change) => change.path),
+          generation,
+          canApply: canApply?.() ?? true,
+        })
+        return changes.length
+      }),
   )
   const openDocuments = createOpenDocumentsService({ fileChanges: createTestFileChangeService() })
   vi.spyOn(openDocuments, 'dirtyPaths').mockImplementation(() => dirtyPaths)
@@ -107,6 +110,7 @@ function service(overrides: { watch?: boolean } = {}) {
       activity,
       clock,
       logger,
+      progress,
     },
     {
       root: ROOT,
@@ -195,16 +199,15 @@ describe('createICloudSyncService', () => {
     expect(scanCalls()).toHaveLength(2) // baseline + resume: the sweeps still run
   })
 
-  it('external upserts become base ingests; this device’s own writes never do', async () => {
+  it('an external batch is ingested', async () => {
     const sync = service()
     await sync.start()
     await settleScan() // baseline out of the way
 
-    fileChanges.reportOwnWrite([{ path: 'notes/own.md', kind: 'upsert' }])
     emitExternal(
-      { path: 'notes/own.md' },
       { path: 'notes/external.md' },
       { path: 'notes/gone.md', kind: 'remove' },
+      { path: 'assets/picture.png' },
     )
     await settleScan(INGEST_SETTLE_MS) // arrival-driven: debounce + minimum spacing
 
@@ -213,17 +216,43 @@ describe('createICloudSyncService', () => {
     expect(scanCalls()[1]?.recordBaseline).toBe(false)
   })
 
-  it('an own write counts as external again once its echo window has passed', async () => {
+  it('own-write and pull batches are not ingested', async () => {
     const sync = service()
     await sync.start()
-    await settleScan() // baseline out of the way
+    await settleScan()
 
-    fileChanges.reportOwnWrite([{ path: 'notes/own.md', kind: 'upsert' }])
-    await clock.advance(5_001)
-    emitExternal({ path: 'notes/own.md' })
+    fileChanges.emit({
+      changes: [{ path: 'notes/own.md', kind: 'upsert', modifiedMs: 1 }],
+      source: 'own-write',
+    })
+    fileChanges.emit({
+      changes: [{ path: 'notes/pulled.md', kind: 'upsert', modifiedMs: 1 }],
+      source: 'pull',
+    })
     await settleScan(INGEST_SETTLE_MS)
 
-    expect(scanCalls()[1]?.ingestedPaths).toEqual(['notes/own.md'])
+    expect(scanCalls()).toHaveLength(1)
+  })
+
+  it('a sweep that wrote conflict copies lists every copy once through progress', async () => {
+    scanResults.push({
+      ...EMPTY_OUTCOME,
+      copies: [
+        'assets/data (conflict 2026-10-16 08-05-31 a1b2c3d4).json',
+        'media/talk (conflict 2026-10-16 08-05-32 b2c3d4e5).mp3',
+      ],
+    })
+    const sync = service()
+    await sync.start()
+    await settleScan()
+
+    expect(progress.snapshot()).toMatchObject([
+      {
+        label: 'Syncing',
+        message:
+          'Kept 2 conflict copies: assets/data (conflict 2026-10-16 08-05-31 a1b2c3d4).json, media/talk (conflict 2026-10-16 08-05-32 b2c3d4e5).mp3',
+      },
+    ])
   })
 
   it('sweep rewrites fan out to subscribers and reindex, without re-ingesting', async () => {
@@ -232,8 +261,7 @@ describe('createICloudSyncService', () => {
         { path: 'notes/merged.md', kind: 'upsert', modifiedMs: 5 },
         { path: 'assets/picture.png', kind: 'upsert', modifiedMs: 5 },
       ],
-      needsReview: ['notes/merged.md'],
-      deferred: [],
+      copies: [],
       autoResolved: 0,
     })
     const sync = service()
@@ -254,12 +282,9 @@ describe('createICloudSyncService', () => {
     expect(indexApplies).toEqual([
       { paths: ['notes/merged.md'], generation: INDEX_GENERATION, canApply: true },
     ])
-    // Neither the service's own synchronous fan-out nor the file watcher's
-    // later echo of the sweep's write may come back as an ingest — only the
-    // genuinely external change does.
-    emitExternal({ path: 'notes/merged.md' }, { path: 'notes/other.md' })
-    await settleScan(INGEST_SETTLE_MS) // arrival-driven: debounce + minimum spacing
-    expect(scanCalls()[1]?.ingestedPaths).toEqual(['notes/other.md'])
+    // The sweep batch itself is never an ingest.
+    await settleScan(INGEST_SETTLE_MS)
+    expect(scanCalls()).toHaveLength(1)
   })
 
   it('gates the direct reindex on visibility for mobile only', async () => {
@@ -332,7 +357,7 @@ describe('createICloudSyncService', () => {
   })
 
   it('a watch that fails to start is logged and the baseline sweep still runs', async () => {
-    vi.spyOn(icloud, 'watchStart').mockRejectedValue(new ReflectError('io', 'no container'))
+    vi.spyOn(icloud, 'watchStart').mockRejectedValue(new AppError('io', 'no container'))
     const sync = service({ watch: true })
     await sync.start()
     await settleScan()
@@ -345,7 +370,7 @@ describe('createICloudSyncService', () => {
 
   it('a failed change subscription is logged and the baseline sweep still runs', async () => {
     vi.spyOn(fileChanges, 'subscribe').mockImplementation(() => {
-      throw new ReflectError('io', 'watcher unavailable')
+      throw new AppError('io', 'watcher unavailable')
     })
     const sync = service()
     await sync.start()

@@ -20,8 +20,8 @@ use ignore::{Match, WalkBuilder};
 
 use crate::local_only::{LocalOnlyFolders, LocalOnlyLink};
 use crate::{
-    classify, evicted_logical_path, icloud_placeholder_target, is_dataless, wire_path,
-    GraphPathKind,
+    GraphPathKind, classify, evicted_logical_path, icloud_placeholder_target, is_dataless,
+    wire_path,
 };
 
 /// Per-directory ignore file for user-configured exclusions, same syntax and
@@ -244,14 +244,12 @@ impl TreeWalk {
                     return false;
                 }
             }
-            if is_dir {
-                if let Some(discovery) = &discovery {
-                    discovery
-                        .visited
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(entry.path().to_path_buf());
-                }
+            if is_dir && let Some(discovery) = &discovery {
+                discovery
+                    .visited
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(entry.path().to_path_buf());
             }
             true
         });
@@ -529,10 +527,12 @@ mod tests {
             attachments,
             vec!["Media/clip.MP4", "assets/photo.png", "notes/keep.txt"]
         );
-        assert!(catalog
-            .notes
-            .iter()
-            .all(|f| !f.placeholder && f.modified_ms > 0));
+        assert!(
+            catalog
+                .notes
+                .iter()
+                .all(|f| !f.placeholder && f.modified_ms > 0)
+        );
     }
 
     #[cfg(unix)]

@@ -1,4 +1,5 @@
-import { ReflectError } from '../errors.ts'
+import type { MaybePromise } from '@reflect/utils'
+import { AppError } from '../errors.ts'
 import type { NoteCreationService } from '../graph/note-creation-service.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
@@ -23,7 +24,7 @@ export interface BacklinkTargetService {
    * link-safe current title so renames keep one section; an unsafe title falls
    * back to the requested spelling that just resolved as its alias.
    */
-  ensure(title: string, generation: number): Promise<string>
+  ensure(title: string, generation: number): MaybePromise<string>
 }
 
 class BacklinkTargetServiceImpl implements BacklinkTargetService {
@@ -41,7 +42,7 @@ class BacklinkTargetServiceImpl implements BacklinkTargetService {
     }
     const path = outcome.kind === 'ambiguous' ? [...outcome.paths].sort().at(0) : outcome.path
     if (path === undefined) {
-      throw new ReflectError('unknown', `The [[${title}]] backlink target could not be resolved.`)
+      throw new AppError('unknown', `The [[${title}]] backlink target could not be resolved.`)
     }
     const source = await noteFile.read(path, generation)
     const currentTitle = parseNote({ path, source }).title

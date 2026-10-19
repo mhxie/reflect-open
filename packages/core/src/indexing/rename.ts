@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import {
   isLocalOnlyPath,
   isLocalOnlyReadOnlyPath,
@@ -24,17 +25,17 @@ import { isWikiLinkSafeText, serializeWikiSuggestionAddress } from './suggest.ts
 
 export interface RenameIo {
   /** Distinct source paths of links whose folded target key matches. */
-  sources: (targetKey: string) => Promise<string[]>
+  sources: (targetKey: string) => MaybePromise<string[]>
   /** Links that currently resolve to the renamed note's subject path. */
-  backlinks: (path: string) => Promise<RenameBacklink[]>
-  read: (path: string) => Promise<string>
+  backlinks: (path: string) => MaybePromise<RenameBacklink[]>
+  read: (path: string) => MaybePromise<string>
   /**
-   * A checked write with the graph generation pre-bound (stale → loud
-   * rejection): it lands only while the file still holds `expectedContents`,
-   * the source the rewrite was computed from.
+   * A checked write with the graph generation pre-bound: `expectedContents`
+   * names the source the rewrite was computed from, so a concurrent change is
+   * merged or refused, never overwritten.
    */
-  write: (path: string, content: string, expectedContents: string | null) => Promise<void>
-  resolve: (target: string) => Promise<Resolution>
+  write: (path: string, content: string, expectedContents: string | null) => MaybePromise<void>
+  resolve: (target: string) => MaybePromise<Resolution>
 }
 
 /** Indexed fields needed to find title-mirroring displays for one subject. */
@@ -92,9 +93,9 @@ export interface TitleRenameRewriteResult {
  * note's old title, and update pipe displays that still mirror the old title
  * on any link resolving to the same subject. Serialized (ordering stays
  * deterministic and progress means something); a failing source is skipped,
- * not fatal. The old-title alias keeps its links resolving. Each write is
- * checked against the text it rewrote: a source edited meanwhile is re-read
- * and rewritten again (`patchNoteWith`), never overwritten.
+ * not fatal. The old-title alias keeps its links resolving. Each write names
+ * the text it rewrote (`patchNoteWith`): a source edited meanwhile is merged
+ * or rewritten again, never overwritten.
  *
  * Local-only notes bound the rewrite both ways. A source in a read-only
  * local-only folder is never written. When the renamed note itself is
@@ -273,10 +274,10 @@ function aliasFamily(title: string): string[] {
 /** Data access for {@link rewritePathLinksForMove}, injected like {@link RenameIo}. */
 export interface PathLinkRewriteIo {
   /** Distinct source paths of links whose folded target path key matches. */
-  pathLinkSources: (targetPathKey: string) => Promise<string[]>
-  read: (path: string) => Promise<string>
+  pathLinkSources: (targetPathKey: string) => MaybePromise<string[]>
+  read: (path: string) => MaybePromise<string>
   /** A checked write, as {@link RenameIo.write}. */
-  write: (path: string, content: string, expectedContents: string | null) => Promise<void>
+  write: (path: string, content: string, expectedContents: string | null) => MaybePromise<void>
 }
 
 /** What {@link rewritePathLinksForMove} touched, mirroring the title result. */

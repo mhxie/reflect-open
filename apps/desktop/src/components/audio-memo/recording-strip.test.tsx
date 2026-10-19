@@ -3,19 +3,27 @@ import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import type { AudioMemoContextValue } from '@/providers/audio-memo-provider.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import type { Mutable } from '@reflect/utils'
 
-const memo = vi.hoisted(() => ({
-  phase: 'idle' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
+const memo = vi.hoisted((): Mutable<AudioMemoContextValue> => ({
+  phase: 'idle',
   elapsedMs: 0,
   stream: null,
+  nativeRecorder: false,
   subscribeLevel: null,
-  error: null as string | null,
+  available: true,
+  unavailableReason: null,
+  error: null,
   canRetry: false,
+  toggle: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
   discard: vi.fn(),
+  pendingCount: 0,
+  recorderState: 'idle',
 }))
 const recorder = vi.hoisted(() => ({
   lastTranscript: null as string | null,
@@ -37,15 +45,16 @@ function PeekProbe(): ReactElement {
 
 async function renderStrip() {
   const app = createTestCoreServices()
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(async (path) => ({
-    path,
-    title: 'Call with Sarah Chen',
-    dailyDate: null,
-    isPrivate: false,
-    hasConflict: false,
-    gistUrl: null,
-    gistStale: false,
-  }))
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation((path) =>
+    Promise.resolve({
+      path,
+      title: 'Call with Sarah Chen',
+      dailyDate: null,
+      isPrivate: false,
+      gistUrl: null,
+      gistStale: false,
+    }),
+  )
   return await renderInApp(
     <PeekProvider>
       <RecordingStrip />

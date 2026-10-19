@@ -59,12 +59,14 @@ async function setup(options?: SetupOptions) {
   )
   const created: { title: string; generation: number }[] = []
   const noteCreation = {
-    resolveOrCreateNoteWithTitle: async (
+    resolveOrCreateNoteWithTitle: (
       title: string,
       generation: number,
     ): Promise<ResolveOrCreateNoteResult> => {
       created.push({ title, generation })
-      return options?.createOutcome ?? { kind: 'created', path: 'notes/created.md' }
+      return Promise.resolve(
+        options?.createOutcome ?? { kind: 'created', path: 'notes/created.md' },
+      )
     },
   }
   const contacts = createTestContactsService({
@@ -74,7 +76,7 @@ async function setup(options?: SetupOptions) {
   const base = createTestCoreServices()
   const personNotes: typeof base.personNotes = {
     ...base.personNotes,
-    resolvePersonContact: async (contact) => ({
+    resolvePersonContact: (contact) => ({
       kind: 'new',
       contact,
       insertText: contact.fullName,
@@ -87,9 +89,9 @@ async function setup(options?: SetupOptions) {
     graphSession,
     suggestions: {
       ...base.suggestions,
-      suggestWikiLinkTargets: async () =>
+      suggestWikiLinkTargets: () =>
         options?.wikiLinks ?? { suggestions: [], claimedTargetKeys: [], queryReadsAsDate: false },
-      suggestTags: async () => [
+      suggestTags: () => [
         { tag: 'work', count: 2 },
         { tag: 'home', count: 1 },
       ],

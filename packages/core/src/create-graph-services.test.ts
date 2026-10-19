@@ -73,9 +73,11 @@ function sessionDeps(app: TestCoreServices) {
       indexLifecycle,
       noteDisplacement: app.noteDisplacement,
       progress: app.progress,
+      clock,
       activity,
       platform: app.platform,
       persistenceFlush: app.persistenceFlush,
+      icloudNative,
       logger,
     },
     icloudSync: {
@@ -86,6 +88,7 @@ function sessionDeps(app: TestCoreServices) {
       activity,
       clock,
       logger,
+      progress: app.progress,
     },
     icloudDownload: { icloudNative, activity, clock, logger },
   }
@@ -194,7 +197,7 @@ describe('createGraphServices', () => {
 
     expect(context.graph.backup).toBe(context.backup)
     expect(context.backups).toEqual([
-      { generation: 3, indexGeneration: 5, localOnly: context.session.localOnly },
+      { root: '/g', generation: 3, indexGeneration: 5, localOnly: context.session.localOnly },
     ])
     expect(context.backup.calls()).toEqual([{ method: 'start' }])
     expect(context.chats).toEqual([{ attached: 1, detached: 0 }])
@@ -227,7 +230,12 @@ describe('createGraphServices', () => {
     })
 
     expect(context.backups).toEqual([
-      { generation: 3, indexGeneration: null, localOnly: context.session.localOnly },
+      {
+        root: '/Users/me/Library/Mobile Documents/iCloud~reflect/Documents/notes',
+        generation: 3,
+        indexGeneration: null,
+        localOnly: context.session.localOnly,
+      },
     ])
     expect(context.icloudSyncs.map((sync) => sync.options.indexGeneration)).toEqual([null])
     expect(context.app.capture.sessions()).toHaveLength(1)

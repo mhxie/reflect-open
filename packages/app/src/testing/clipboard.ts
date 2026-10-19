@@ -3,7 +3,7 @@ import type { ClipboardService } from '../app/clipboard-service.ts'
 export interface TestClipboardService extends ClipboardService {
   writes(): readonly string[]
   /**
-   * Make later writes reject with `error`; `null` makes them succeed again.
+   * Make later writes throw `error`; `null` makes them succeed again.
    */
   failWith(error: unknown): void
 }
@@ -12,7 +12,7 @@ class TestClipboardServiceImpl implements TestClipboardService {
   readonly #written: string[] = []
   #failure: { error: unknown } | null = null
 
-  async writeText(text: string): Promise<void> {
+  writeText(text: string): void {
     if (this.#failure !== null) {
       throw this.#failure.error
     }

@@ -51,7 +51,6 @@ export function rowForHit(hit: FilteredSearchHit, dateFormat: DateFormat): NoteR
     mtime: hit.mtime,
     isPinned: hit.isPinned,
     isPrivate: hit.isPrivate,
-    hasConflict: hit.hasConflict,
     canDelete: hit.dailyDate === null,
     snippet:
       hit.snippet !== null

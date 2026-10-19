@@ -73,13 +73,14 @@ function sqliteParameter(value: unknown): SQLInputValue {
  */
 function openGraphDatabase(path: string): DatabaseService {
   const database = new DatabaseSync(path, { readOnly: true })
-  const runQuery = async (sql: string, params: readonly unknown[]): Promise<unknown> => {
-    try {
-      return database.prepare(sql).all(...params.map(sqliteParameter))
-    } catch (error) {
-      throw toAppError(error)
-    }
-  }
+  const runQuery = (sql: string, params: readonly unknown[]): Promise<unknown> =>
+    Promise.try(() => {
+      try {
+        return database.prepare(sql).all(...params.map(sqliteParameter))
+      } catch (error) {
+        throw toAppError(error)
+      }
+    })
   return { db: createDb(runQuery), runQuery }
 }
 

@@ -101,10 +101,10 @@ function insertProjection(database: DatabaseSync, indexed: IndexedNote): void {
     .prepare(
       `INSERT INTO notes(
         path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned,
-        pinned_order, has_conflict, gist_url, gist_stale, file_hash, mtime, updated_at,
-        preview, has_content, body_chars, has_device_only_content, asset_text_hash,
-        summary_fresh, display_title, lang, summary
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pinned_order, gist_url, gist_stale, file_hash, mtime, updated_at, preview,
+        has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh,
+        display_title, lang, summary
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       indexed.path,
@@ -117,7 +117,6 @@ function insertProjection(database: DatabaseSync, indexed: IndexedNote): void {
       Number(indexed.isPrivate),
       Number(indexed.isPinned),
       indexed.pinnedOrder,
-      Number(indexed.hasConflict),
       indexed.gistUrl,
       Number(indexed.gistStale),
       indexed.fileHash,
@@ -312,16 +311,17 @@ class NodeTestDatabaseServiceImpl implements TestDatabaseService {
     this.db = createDb(this.runQuery)
   }
 
-  readonly runQuery = async (sql: string, params: readonly unknown[]): Promise<unknown> => {
-    this.#queries.push({ sql, params: [...params] })
-    try {
-      return this.#open()
-        .prepare(sql)
-        .all(...params.map(sqliteParameter))
-    } catch (error) {
-      throw toAppError(error)
-    }
-  }
+  readonly runQuery = (sql: string, params: readonly unknown[]): Promise<unknown> =>
+    Promise.try(() => {
+      this.#queries.push({ sql, params: [...params] })
+      try {
+        return this.#open()
+          .prepare(sql)
+          .all(...params.map(sqliteParameter))
+      } catch (error) {
+        throw toAppError(error)
+      }
+    })
 
   applyProjection(note: IndexedNote): void {
     insertProjection(this.#open(), note)

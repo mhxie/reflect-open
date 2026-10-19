@@ -8,6 +8,7 @@ import {
   isLocalOnlyPath,
   localIsoDate,
   type ClockService,
+  type ContactMatch,
   type ContactsService,
   type GraphSessionService,
   type LoggerService,
@@ -106,16 +107,7 @@ class AutocompleteSuggestionServiceImpl implements AutocompleteSuggestionService
   }
 
   async suggestLinks(query: string, options?: SuggestLinksOptions): Promise<WikiLinkMenuItem[]> {
-    const {
-      suggestions,
-      contacts,
-      personNotes,
-      settings,
-      clock,
-      operations,
-      logger,
-      graphSession,
-    } = this.#deps
+    const { suggestions, contacts, settings, clock, operations, logger, graphSession } = this.#deps
     const session = graphSession.getState().session
     if (session === null) {
       return []
@@ -135,18 +127,8 @@ class AutocompleteSuggestionServiceImpl implements AutocompleteSuggestionService
     }
     const [wikiLinks, contactResolutions] = await Promise.all([
       suggestions.suggestWikiLinkTargets(query, 8, dateContext),
-      // A contacts hiccup (permission revoked mid-session, store error)
-      // must cost only its own rows, never the note suggestions.
       contactsInMenu
-        ? contacts
-            .lookupPeople(query)
-            .then((matches) =>
-              Promise.all(matches.map((contact) => personNotes.resolvePersonContact(contact))),
-            )
-            .catch((error: unknown): PersonContactResolution[] => {
-              logger.error('contact link suggestions failed:', error)
-              return []
-            })
+        ? this.#suggestContacts(query)
         : Promise.resolve<PersonContactResolution[]>([]),
     ])
     const contactCandidates = contactResolutions
@@ -207,26 +189,7 @@ class AutocompleteSuggestionServiceImpl implements AutocompleteSuggestionService
         }
         return {
           ...row,
-          onSelect: () => {
-            void personNotes
-              .ensurePersonNote({
-                title: contact.fullName,
-                emails: contact.emails,
-                body: contactDetailsMarkdown(contact),
-                generation,
-              })
-              .then((outcome) => {
-                if (outcome.kind === 'ambiguous') {
-                  this.#reportAmbiguousNoteTitle(contact.fullName)
-                } else if (outcome.kind === 'unavailable') {
-                  this.#reportUnavailableNoteTitle(contact.fullName)
-                }
-              })
-              .catch((error: unknown) => {
-                logger.error('create-person-note failed:', error)
-                operations.fail('Creating note', errorMessage(error))
-              })
-          },
+          onSelect: () => void this.#createPersonNote(contact, generation),
         }
       }
       const { title, date, path, generated, insertText: target } = entry.suggestion
@@ -260,6 +223,45 @@ class AutocompleteSuggestionServiceImpl implements AutocompleteSuggestionService
   async suggestTags(query: string): Promise<TagMenuItem[]> {
     const tags = await this.#deps.suggestions.suggestTags(query)
     return tags.map((tag) => ({ tag: tag.tag }))
+  }
+
+  /**
+   * The contact rows of the `[[` menu, each resolved against its person note.
+   * A contacts hiccup (permission revoked mid-session, store error) costs
+   * only these rows, never the note suggestions, so a failure is logged and
+   * answers no contacts.
+   */
+  async #suggestContacts(query: string): Promise<PersonContactResolution[]> {
+    const { contacts, personNotes, logger } = this.#deps
+    try {
+      const matches = await contacts.lookupPeople(query)
+      return await Promise.all(
+        matches.map(async (contact) => await personNotes.resolvePersonContact(contact)),
+      )
+    } catch (error: unknown) {
+      logger.error('contact link suggestions failed:', error)
+      return []
+    }
+  }
+
+  async #createPersonNote(contact: ContactMatch, generation: number): Promise<void> {
+    const { personNotes, logger, operations } = this.#deps
+    try {
+      const outcome = await personNotes.ensurePersonNote({
+        title: contact.fullName,
+        emails: contact.emails,
+        body: contactDetailsMarkdown(contact),
+        generation,
+      })
+      if (outcome.kind === 'ambiguous') {
+        this.#reportAmbiguousNoteTitle(contact.fullName)
+      } else if (outcome.kind === 'unavailable') {
+        this.#reportUnavailableNoteTitle(contact.fullName)
+      }
+    } catch (error: unknown) {
+      logger.error('create-person-note failed:', error)
+      operations.fail('Creating note', errorMessage(error))
+    }
   }
 
   /**

@@ -1,5 +1,6 @@
 import { page } from 'vitest/browser'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { createRef, useLayoutEffect, type RefObject } from 'react'
 import type { IndexQueryService, NoteRow } from '@reflect/core'
 import type { ResolvedArchivedPost } from '@reflect/core/x-archive'
 import {
@@ -12,8 +13,7 @@ import { PaletteProvider } from '@/components/command-palette/palette-provider.t
 import { useNoteMenuRequest } from '@/editor/status/note-menu-request.ts'
 import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { queryClient } from '@/lib/query-client.ts'
-import type { Route } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouter, type RouterNavigate } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { RouteContent } from './route-content.tsx'
@@ -51,7 +51,7 @@ const REMOTE_COMMANDS = [
 // The app of the rendered pane; set by `renderNote`.
 let app: TestCoreServices
 let noteFile: TestNoteFileService
-let navigate: ((route: Route) => void) | null = null
+const navigateRef: RefObject<RouterNavigate | null> = createRef()
 const getNote = vi.fn<IndexQueryService['getNote']>()
 const resolveArchive = vi.fn<(postId: string) => Promise<ResolvedArchive>>()
 
@@ -61,7 +61,6 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
     title: '',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -84,16 +83,24 @@ function archivedPost(id: string, text: string): NonNullable<ResolvedArchive> {
 }
 
 beforeEach(() => {
-  navigate = null
-  getNote.mockReset().mockImplementation(async (path) => noteRow(path, false))
+  navigateRef.current = null
+  getNote.mockReset().mockImplementation((path) => Promise.resolve(noteRow(path, false)))
   resolveArchive
     .mockReset()
-    .mockImplementation(async (postId) => archivedPost(postId, 'Archived post'))
+    .mockImplementation((postId) => Promise.resolve(archivedPost(postId, 'Archived post')))
 })
 
 /** Exposes the router's navigate, so a test can move one pane between notes. */
 function Navigator(): null {
-  navigate = useRouter().navigate
+  const { navigate } = useRouter()
+
+  useLayoutEffect(() => {
+    navigateRef.current = navigate
+    return () => {
+      navigateRef.current = null
+    }
+  }, [navigate])
+
   return null
 }
 
@@ -145,10 +152,10 @@ function remoteCalls(since = 0): string[] {
 }
 
 function openNote(path: string): void {
-  if (navigate === null) {
+  if (navigateRef.current === null) {
     throw new Error('the router has not rendered')
   }
-  navigate({ kind: 'note', path })
+  navigateRef.current({ kind: 'note', path })
 }
 
 /**
@@ -207,7 +214,7 @@ function remoteElements(): Element | null {
 }
 
 it('opens a locked note in the editor with nothing remote', async () => {
-  getNote.mockImplementation(async (path) => noteRow(path, true))
+  getNote.mockImplementation((path) => Promise.resolve(noteRow(path, true)))
   await renderNote('notes/locked.md', {
     'notes/locked.md': `---\nprivate: true\n---\n# Locked\n\n${REMOTE_BODY}`,
   })
@@ -225,7 +232,7 @@ it('opens a locked note in the editor with nothing remote', async () => {
 })
 
 it('marks a private note above its title and opens its status menu from there', async () => {
-  getNote.mockImplementation(async (path) => noteRow(path, true))
+  getNote.mockImplementation((path) => Promise.resolve(noteRow(path, true)))
   await renderNote('notes/locked.md', { 'notes/locked.md': `---\nprivate: true\n---\n# Locked\n` })
 
   const notice = page.getByRole('button', { name: 'Private note: show note details' })
@@ -286,7 +293,7 @@ const SECRET = 'secret words'
  * pane leaves the local-only note.
  */
 async function visitLocalOnlyNote(remote: string): Promise<{ calls: number; lookups: number }> {
-  getNote.mockImplementation(async (path) => noteRow(path, path.startsWith('secure/')))
+  getNote.mockImplementation((path) => Promise.resolve(noteRow(path, path.startsWith('secure/'))))
   await renderNote('notes/public.md', {
     'notes/public.md': '# Public\n\nhello public\n',
     'secure/a.md': `# Secret\n\n${SECRET}\n\n${remote}\n`,

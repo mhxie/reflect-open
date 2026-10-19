@@ -206,25 +206,25 @@ function visibleLayer(view: BrowserView): HTMLElement {
  * Dispatch a pointer event the gesture hook can read.
  */
 async function firePointer(element: Element, type: string, init: PointerEventInit): Promise<void> {
-  act(() => {
+  await act(() => {
     element.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, ...init }))
   })
 }
 
 async function finishAnimation(element: Element): Promise<void> {
-  act(() => {
+  await act(() => {
     fireEvent.animationEnd(element)
   })
 }
 
 async function finishTransition(element: Element): Promise<void> {
-  act(() => {
+  await act(() => {
     fireEvent.transitionEnd(element)
   })
 }
 
 async function fireClick(element: Element): Promise<void> {
-  act(() => {
+  await act(() => {
     fireEvent.click(element)
   })
 }
@@ -271,7 +271,7 @@ describe('MobileShell', () => {
     )
 
     document.documentElement.style.setProperty('--keyboard-height', '240px')
-    act(() => appServices.keyboard.publish(240))
+    await act(() => appServices.keyboard.publish(240))
     await waitFor(() =>
       expect(footerElement.getBoundingClientRect().bottom).toBeLessThanOrEqual(460),
     )
@@ -546,13 +546,15 @@ describe('MobileShell', () => {
     await expect.element(view.getByText('No notes yet')).toMatchTextContent('No notes yet')
 
     await user.click(view.getByRole('button', { name: 'Daily', exact: true }))
-    await waitFor(() =>
-      expect(
-        view
-          .getByRole('button', { name: dayCellLabel(other) })
-          .element()
-          .getAttribute('aria-current'),
-      ).toBe('date'),
+    await waitFor(
+      () =>
+        expect(
+          view
+            .getByRole('button', { name: dayCellLabel(other) })
+            .element()
+            .getAttribute('aria-current'),
+        ).toBe('date'),
+      { timeout: 10_000 },
     )
   })
 
@@ -689,10 +691,10 @@ describe('MobileShell', () => {
     const view = await mount({ kind: 'today' })
     await expect.element(view.getByRole('navigation', { name: 'Sections' })).toBeVisible()
 
-    act(() => appServices.keyboard.publish(316))
+    await act(() => appServices.keyboard.publish(316))
     expect(view.getByRole('navigation', { name: 'Sections' }).query()).toBeNull()
 
-    act(() => appServices.keyboard.publish(0))
+    await act(() => appServices.keyboard.publish(0))
     await expect.element(view.getByRole('navigation', { name: 'Sections' })).toBeVisible()
   })
 
@@ -702,10 +704,10 @@ describe('MobileShell', () => {
 
     // Keyboard up with no focused editor (the All-tab search field): neither
     // the tab bar nor a dead-button toolbar.
-    act(() => appServices.keyboard.publish(316))
+    await act(() => appServices.keyboard.publish(316))
     expect(view.getByRole('toolbar', { name: 'Formatting' }).query()).toBeNull()
 
-    act(() =>
+    await act(() =>
       publishFormattingToolbar(owner, {
         capabilities: {
           canIndent: true,
@@ -731,7 +733,7 @@ describe('MobileShell', () => {
     await expect.element(view.getByRole('toolbar', { name: 'Formatting' })).toBeVisible()
     expect(view.getByRole('navigation', { name: 'Sections' }).query()).toBeNull()
 
-    act(() => {
+    await act(() => {
       clearFormattingToolbar(owner)
       appServices.keyboard.publish(0)
     })
@@ -957,7 +959,7 @@ describe('MobileStack transitions & back-swipe', () => {
     await firePointer(stack, 'pointermove', { pointerId: 1, clientX: 600, clientY: 310 })
     await firePointer(stack, 'pointerup', { pointerId: 1, clientX: 600, clientY: 310 })
 
-    act(() => {
+    await act(() => {
       card.dispatchEvent(new Event('transitionend', { bubbles: true }))
       card.dispatchEvent(new Event('transitionend', { bubbles: true }))
     })

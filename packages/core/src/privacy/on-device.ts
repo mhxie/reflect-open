@@ -12,7 +12,7 @@ import type {
   OnDeviceServerKind,
   OpenAiCompatibleProviderConfig,
 } from '../settings/schema.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { isLoopbackHttpUrl } from './loopback.ts'
 import type { OnDeviceTarget } from './on-device-target.ts'
 import type { OnDeviceServerVerdict } from './on-device-verification.ts'
@@ -62,7 +62,7 @@ export type VerifiedModelTarget = CloudTarget | VerifiedOnDeviceTarget
  * Verify a turn's destination before any private content is read: a cloud
  * target passes as it is, an on-device target only once `verifyServer`
  * (`OnDeviceModelService.verifyServer`) accepts its server. A refusal throws
- * `ReflectError('auth', reason)`; it never falls back to cloud.
+ * `AppError('auth', reason)`; it never falls back to cloud.
  */
 export async function verifyModelTarget(
   target: ModelTarget,
@@ -73,7 +73,7 @@ export async function verifyModelTarget(
   }
   const verdict = await verifyServer(target)
   if (verdict !== 'ok') {
-    throw new ReflectError('auth', verdict.reason)
+    throw new AppError('auth', verdict.reason)
   }
   // The brand has no runtime representation, so this assertion is the whole
   // verification mint; the guarantee is the accepted verdict above.

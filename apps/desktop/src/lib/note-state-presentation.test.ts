@@ -50,7 +50,7 @@ describe('activeNoteStateKinds', () => {
       { path: 'notes/a.md', isPrivate: false },
       { path: 'notes/a.md', isPrivate: true },
       { path: 'notes/a.md', isPrivate: true, readOnly: true },
-      { path: 'notes/a.md', isPrivate: false, hasConflict: true },
+      { path: 'notes/a.md', isPrivate: false, protected: true },
     ]) {
       const state = deriveNoteState(NO_LOCAL_ONLY_FOLDERS, input)
       expect(activeNoteStateKinds(state)[0]).toBe(state.kind)

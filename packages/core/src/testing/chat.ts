@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type {
   ChatEngineService,
   ChatStreamEvent,
@@ -58,39 +59,45 @@ class TestChatHistoryServiceImpl implements TestChatHistoryService {
     }
   }
 
-  async saveTurn(input: SaveChatTurnInput): Promise<void> {
-    this.#saves.push(structuredClone(input))
-    let entry = this.#stored.get(input.conversation.id)
-    if (entry === undefined) {
-      entry = { conversation: { ...input.conversation }, turns: [] }
-      this.#stored.set(input.conversation.id, entry)
-    } else {
-      entry.conversation = { ...entry.conversation, updatedMs: input.conversation.updatedMs }
-    }
-    const turn = structuredClone(input.turn)
-    const index = entry.turns.findIndex((existing) => existing.id === turn.id)
-    if (index === -1) {
-      entry.turns.push(turn)
-    } else {
-      entry.turns[index] = turn
-    }
+  saveTurn(input: SaveChatTurnInput): Promise<void> {
+    return Promise.try(() => {
+      this.#saves.push(structuredClone(input))
+      let entry = this.#stored.get(input.conversation.id)
+      if (entry === undefined) {
+        entry = { conversation: { ...input.conversation }, turns: [] }
+        this.#stored.set(input.conversation.id, entry)
+      } else {
+        entry.conversation = { ...entry.conversation, updatedMs: input.conversation.updatedMs }
+      }
+      const turn = structuredClone(input.turn)
+      const index = entry.turns.findIndex((existing) => existing.id === turn.id)
+      if (index === -1) {
+        entry.turns.push(turn)
+      } else {
+        entry.turns[index] = turn
+      }
+    })
   }
 
-  async deleteConversation(id: string): Promise<void> {
+  deleteConversation(id: string): void {
     this.#deletes.push(id)
     this.#stored.delete(id)
   }
 
-  async listRecent(limit = 50): Promise<ChatConversation[]> {
-    return [...this.#stored.values()]
-      .map((entry) => ({ ...entry.conversation }))
-      .sort((a, b) => b.updatedMs - a.updatedMs)
-      .slice(0, limit)
+  listRecent(limit = 50): Promise<ChatConversation[]> {
+    return Promise.resolve(
+      [...this.#stored.values()]
+        .map((entry) => ({ ...entry.conversation }))
+        .sort((a, b) => b.updatedMs - a.updatedMs)
+        .slice(0, limit),
+    )
   }
 
-  async loadConversation(conversationId: string): Promise<ChatTurn[]> {
-    const entry = this.#stored.get(conversationId)
-    return (entry?.turns ?? []).map((turn) => ({ ...structuredClone(turn), status: 'done' }))
+  loadConversation(conversationId: string): Promise<ChatTurn[]> {
+    return Promise.try(() => {
+      const entry = this.#stored.get(conversationId)
+      return (entry?.turns ?? []).map((turn) => ({ ...structuredClone(turn), status: 'done' }))
+    })
   }
 
   getSaves(): readonly SaveChatTurnInput[] {
@@ -170,7 +177,7 @@ export function createTestChatEngineService(
  */
 export type TestChatGraphContextSource =
   | CloudGraphContext
-  | ((graphName: string) => CloudGraphContext | Promise<CloudGraphContext>)
+  | ((graphName: string) => MaybePromise<CloudGraphContext>)
 
 export interface TestChatGraphContextService extends ChatGraphContextService {
   /**

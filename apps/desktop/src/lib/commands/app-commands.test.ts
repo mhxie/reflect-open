@@ -13,7 +13,7 @@ import {
   type TestEmbeddingIndexService,
   type TestEmbeddingRuntimeService,
 } from '@reflect/core/testing'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 import { notePathForRoute, type Route } from '@/routing/route.ts'
 import type { NavigateOptions } from '@/routing/router.tsx'
 import { APP_COMMANDS, keybindingFor } from './app-commands.ts'
@@ -26,7 +26,7 @@ function createApp() {
     status: { status: 'uninitialized' },
   })
   const embeddingIndex: TestEmbeddingIndexService = createTestEmbeddingIndexService({
-    backfill: async () => 'completed',
+    backfill: () => Promise.resolve('completed'),
   })
   return createTestCoreServices({ embeddingRuntime, embeddingIndex })
 }
@@ -70,8 +70,8 @@ function fakeContext(overrides?: Partial<CommandContext>) {
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
-    togglePin: vi.fn(async () => {}),
-    togglePrivate: vi.fn(async () => {}),
+    togglePin: vi.fn(() => {}),
+    togglePrivate: vi.fn(() => {}),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -569,7 +569,9 @@ describe('wiki.switchLanguage', () => {
   const japanese = { label: '日本語', folder: 'wiki-ja' }
 
   function copies(answer: (path: string) => readonly WikiCopy[]) {
-    return vi.spyOn(app.wiki, 'copies').mockImplementation(async (path) => [...answer(path)])
+    return vi
+      .spyOn(app.wiki, 'copies')
+      .mockImplementation((path) => Promise.resolve([...answer(path)]))
   }
 
   it('opens the next language with a copy, wrapping past the last one', async () => {
@@ -632,10 +634,12 @@ describe('wiki.switchLanguage', () => {
     await command('wiki.switchLanguage').run(outside.context)
     expect(outside.navigated).toEqual([])
 
-    lookups.mockImplementation(async () => [
-      { language: english, path: 'wiki/memory/A.md' },
-      { language: chinese, path: null },
-    ])
+    lookups.mockImplementation(() =>
+      Promise.resolve([
+        { language: english, path: 'wiki/memory/A.md' },
+        { language: chinese, path: null },
+      ]),
+    )
     const alone = fakeContext({ route: () => ({ kind: 'note', path: 'wiki/memory/A.md' }) })
     await command('wiki.switchLanguage').run(alone.context)
     expect(alone.navigated).toEqual([])

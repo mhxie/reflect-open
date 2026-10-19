@@ -33,8 +33,6 @@ export interface NoteSessionSnapshot {
    * note exists only as this buffer until the first save lands.
    */
   missing: boolean
-  /** External content waiting on the user's choice (set only when dirty). */
-  conflict: string | null
   error: string | null
   /**
    * True when the live frontmatter, the header the next save writes, keeps
@@ -67,7 +65,6 @@ export const INITIAL_NOTE_SNAPSHOT: NoteSessionSnapshot = {
   protected: false,
   dirty: false,
   missing: false,
-  conflict: null,
   error: null,
   privateHeader: true,
   recovery: null,
@@ -89,7 +86,7 @@ export interface NoteSessionOptions {
    * writable note in an editable local-only folder also keeps its unsaved
    * text when a save can't land ({@link NoteSessionSnapshot.recovery}).
    */
-  readOnly?: boolean
+  readOnly?: boolean | undefined
   /**
    * Round-trip fidelity check gating editability (meowdown's `checkRoundTrip`).
    */
@@ -99,12 +96,13 @@ export interface NoteSessionOptions {
   /**
    * Receives the full document (frontmatter + body) whenever it transitions
    * to a known-on-disk state: the initial load, an adopted external change
-   * (including "load theirs"), or a landed save. `saved` is the only
-   * user-driven origin — the title-rename tracker (Plan 07b) keys off it.
+   * (including a save that merged with a newer disk text), or a landed save.
+   * `saved` is the only user-driven origin: the title-rename tracker
+   * (Plan 07b) keys off it.
    */
   onContent?: ((content: string, origin: NoteContentOrigin) => void) | undefined
   /**
-   * Push content into the live editor (external reload / "load theirs"). The
+   * Push content into the live editor (external reload or merged save). The
    * editor's change handler may fire synchronously during this call; the
    * session recognizes the re-entry and won't treat it as a user edit.
    */
@@ -134,7 +132,7 @@ export interface NoteSessionOptions {
    * authored title stays a birth, not a rename.
    */
   missingSeed?: string | undefined
-  saveDebounceMs?: number
+  saveDebounceMs?: number | undefined
 }
 /**
  * One open note's document lifecycle. Create via {@link NoteSessionService.create}.
@@ -144,7 +142,7 @@ export interface NoteSession {
   readonly path: string
   /**
    * Rebind the session to a renamed path (Plan 17). The *file* moved; the
-   * document didn't — buffer, header, dirtiness, and conflict state are all
+   * document didn't: buffer, header, and dirtiness are all
    * untouched, and every subsequent read/write uses `to`. Call after flushing,
    * right before the file move lands, so a racing save can never resurrect
    * the old path.
@@ -162,15 +160,16 @@ export interface NoteSession {
    * and wrote the other device's note at the session's path, whose bytes
    * were `incomingAtFrom` (`null` when they couldn't be read). The document
    * follows its bytes to `to` when the moved note was kept out (`keptOut`),
-   * the buffer is dirty, a conflict is parked, or the live header reads as
-   * private: otherwise its next save would put this device's text back over
-   * the other device's note. Following first drops a parked conflict equal
-   * to `incomingAtFrom` (that note keeps the old path), or any parked
-   * conflict when `incomingAtFrom` is unknown, then reconciles against
-   * `to` — equal bytes change nothing, a dirty buffer parks them, a clean
-   * one adopts them. A clean, public note stays and adopts the
-   * incoming note instead. Returns whether the session moved; the caller
-   * re-keys the open-documents registry and announces the move.
+   * the buffer is dirty, or the live header reads as private: otherwise its
+   * next save would merge this device's text into the other device's note.
+   * Following reconciles against `to` like any external change: equal bytes
+   * change nothing, a dirty buffer saves there checked against the base it
+   * was typed on, a clean one adopts them. A clean, public note stays and
+   * adopts the incoming note instead, and so does a document that already
+   * holds `incomingAtFrom` (a reload or a merged save reached it before this
+   * event: its bytes are the ones at the old path now). Returns whether the
+   * session moved; the caller re-keys the open-documents registry and
+   * announces the move.
    */
   followDisplacement(to: string, incomingAtFrom: string | null, keptOut: boolean): boolean
   /** Read the note and emit `ready` (or `error`). Call once after creation. */
@@ -182,23 +181,18 @@ export interface NoteSession {
   /**
    * Persist pending edits now (e.g. on window blur). Resolves once the
    * flushed write has settled — quit-time teardown awaits this so the webview
-   * can't die before the bytes land. When the write can't land (a parked
-   * conflict, a failed save), it resolves once the unsaved text is kept
+   * can't die before the bytes land. When the write can't land (a failed
+   * save), it resolves once the unsaved text is kept
    * ({@link NoteSessionSnapshot.recovery}) for a note that keeps it.
    */
   flush(): Promise<void>
-  /** Resolve a conflict by keeping the buffer (rewrites the file). */
-  keepMine(): void
-  /** Resolve a conflict by loading the external content (discards the buffer). */
-  loadTheirs(): void
   /**
    * Put the offered {@link NoteSessionSnapshot.recovery} into the buffer as an
-   * edit and save it now, checked against what disk holds like any save —
-   * when disk still holds the revision the copy was kept against (or the
-   * note is gone). When the note changed since, nothing is written: the
-   * current file is parked as the conflict, so Keep mine / Load theirs
-   * decides. A no-op without an offer, before the note has loaded, while
-   * protected, or while a conflict is parked (resolve that first).
+   * edit and save it now, checked against the revision the copy was kept
+   * against: when the note changed since, the write merges the restored text
+   * with the newer disk text instead of replacing it, and the session adopts
+   * the merged result; a note that is gone is created again. A no-op without
+   * an offer, before the note has loaded, or while protected.
    */
   restoreRecovery(): void
   /**
@@ -254,14 +248,7 @@ export interface NoteSession {
   updateFrontmatter(patch: FrontmatterPatch): boolean
   /**
    * {@link NoteSession.updateFrontmatter}, but the patch **lands on disk now**
-   * regardless of session state. Normally that's a flush; under a parked
-   * conflict — where saves are paused and a flush is a deliberate no-op — the
-   * contested content is patched and written through too, checked against
-   * the parked text so a newer version is refused, so the index sees the
-   * change immediately and *both* resolutions keep it ("keep mine" writes
-   * the patched header, "load theirs" adopts the patched park). Same gating
-   * and false-return as `updateFrontmatter`. For patches that should ride the
-   * resolution instead (the rename alias), use `updateFrontmatter`.
+   * through a flush. Same gating and false-return as `updateFrontmatter`.
    */
   commitFrontmatter(patch: FrontmatterPatch): Promise<boolean>
   /**
@@ -280,10 +267,10 @@ export interface NoteSession {
    * synchronously, so there is no read/write race with the editor. A session
    * still loading waits for the load, then applies the edit to the loaded
    * buffer. Returns false when the session can't take it (failed to load,
-   * protected, disposed, or a parked conflict) so the caller refuses rather
-   * than clobber the buffer; an
-   * error thrown by `transform` (a stale task locator) propagates untouched,
-   * and a failed flush reverts the in-memory edit before rethrowing.
+   * protected, or disposed) so the caller refuses rather than clobber the
+   * buffer; an error thrown by `transform` (a stale task locator) propagates
+   * untouched, and a failed flush reverts the in-memory edit before
+   * rethrowing.
    */
   commitSourceEdit(transform: (source: string) => string): Promise<boolean>
   /** Flush pending edits and detach: no further snapshots are emitted. */

@@ -16,7 +16,6 @@ const DAILY = 'daily/2026-06-09.md'
 
 function hit(path: string): RetrievalHit {
   return {
-    hasConflict: false,
     path,
     title: path,
     score: 0.9,

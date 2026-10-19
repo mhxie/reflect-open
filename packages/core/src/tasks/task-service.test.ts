@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createOpenDocumentsService,
@@ -5,6 +6,7 @@ import {
 } from '../documents/open-documents-service.ts'
 import { createGraphSession, type GraphSession } from '../graph/graph-session.ts'
 import { createLocalOnlyFolders } from '../graph/local-only.ts'
+import type { NoteWriteResult } from '../graph/note-file-service.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createNoteDocumentService, NoteBusyError } from '../documents/note-document-service.ts'
 import {
@@ -89,7 +91,7 @@ let clock: TestClockService
 let logger: TestLoggerService
 let tasks: TaskService
 let appliedListeners: Set<(event: IndexAppliedEvent) => void>
-let reconciledListeners: Set<(event: IndexReconciledEvent) => void | Promise<void>>
+let reconciledListeners: Set<(event: IndexReconciledEvent) => MaybePromise<void>>
 
 const openGraph = createGraphSession({ root: '/g', name: 'g', generation: 7, indexGeneration: 1 })
 
@@ -179,11 +181,11 @@ const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 describe('write serialization', () => {
   it('serializes concurrent writes to the same note — no read/write interleave', async () => {
     noteFile.set('notes/a.md', '+ [ ] do it\n')
-    const pendingFirstWrite = Promise.withResolvers<number>()
+    const pendingFirstWrite = Promise.withResolvers<NoteWriteResult>()
     let writes = 0
     const writeNote = vi.spyOn(noteFile, 'write').mockImplementation(() => {
       writes += 1
-      return writes === 1 ? pendingFirstWrite.promise : Promise.resolve(0)
+      return writes === 1 ? pendingFirstWrite.promise : Promise.resolve({ merged: null })
     })
 
     const first = tasks.writeTask(task, [{ kind: 'toggle' }])
@@ -194,7 +196,7 @@ describe('write serialization', () => {
     expect(noteFile.getReads()).toHaveLength(1)
     expect(writeNote).toHaveBeenCalledTimes(1)
 
-    pendingFirstWrite.resolve(0)
+    pendingFirstWrite.resolve({ merged: null })
     await Promise.all([first, second])
     // The second only read after the first's write settled.
     expect(noteFile.getReads()).toHaveLength(2)
@@ -314,7 +316,6 @@ describe('insertTask', () => {
         breadcrumbs: ['Tasks'],
         checked: false,
         isPrivate: false,
-        hasConflict: false,
       },
       moved: [],
       updatedAt: 1000,
@@ -381,7 +382,6 @@ describe('continueTaskInContext', () => {
       breadcrumbs: ['StartupToolbox', 'Reflections'],
       checked: false,
       isPrivate: false,
-      hasConflict: false,
     })
     expect(projectTasks(written)[1]?.breadcrumbs).toEqual(['StartupToolbox', 'Reflections'])
     expect(movedFrom(result, [0, 1, 1])).toMatchObject({
@@ -405,7 +405,6 @@ describe('continueTaskInContext', () => {
       breadcrumbs: ['Group'],
       checked: false,
       isPrivate: false,
-      hasConflict: false,
     })
     expect(movedFrom(result, [0, 1])).toBeNull()
     expect(movedFrom(result, [0, 2])).toMatchObject({ astPath: [0, 1], markdown: 'peer' })
@@ -448,7 +447,7 @@ describe('getOpenTasks', () => {
       {
         path: 'notes/project.md',
         markdown:
-          '---\npinned: 2\nprivate: true\n---\n# Project\n\n- StartupToolbox\n  - *Reflections*\n    + [ ] ship [[it]] **now**\n    + [x] shipped\n\n<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n',
+          '---\npinned: 2\nprivate: true\n---\n# Project\n\n- StartupToolbox\n  - *Reflections*\n    + [ ] ship [[it]] **now**\n    + [x] shipped\n',
         mtime: 123,
       },
     ])
@@ -464,7 +463,6 @@ describe('getOpenTasks', () => {
         dailyDate: null,
         isPinned: true,
         isPrivate: true,
-        hasConflict: true,
         pinnedOrder: 2,
         updatedAt: 123,
       }),
@@ -877,7 +875,6 @@ describe('task list state', () => {
         breadcrumbs: [],
         checked: false,
         isPrivate: false,
-        hasConflict: false,
       },
       moved: [{ from, to: { ...from, astPath: [1] } }],
       updatedAt: 5,
@@ -1055,7 +1052,7 @@ describe('local-only notes', () => {
     noteFile.set('finance/secure/ledger.md', '# Ledger\n')
 
     await expect(localTasks().insertTask('finance/secure/ledger.md')).resolves.toMatchObject({
-      created: { isPrivate: true, hasConflict: false },
+      created: { isPrivate: true },
     })
     expect(noteFile.getReads()).toHaveLength(1)
   })
@@ -1121,7 +1118,7 @@ describe('checked disk writes', () => {
     const write = vi.spyOn(noteFile, 'write')
 
     await expect(tasks.insertTask('daily/2026-06-14.md')).resolves.toMatchObject({
-      created: { isPrivate: false, hasConflict: false },
+      created: { isPrivate: false },
     })
     // The write names no prior contents: it is refused once a file appears.
     expect(write).toHaveBeenCalledWith('daily/2026-06-14.md', '## Tasks\n\n+ [ ] \n', 7, null)
@@ -1217,7 +1214,6 @@ describe('inserted task flags', () => {
       expect(row).toMatchObject({
         notePath: 'daily/2026-06-14.md',
         isPrivate: true,
-        hasConflict: false,
       })
       expect(noteFile.getReads()).toHaveLength(owner === 'disk' ? 1 : 0)
     },
@@ -1234,7 +1230,7 @@ describe('inserted task flags', () => {
 
     const inserted = await tasks.insertTask('daily/2026-06-14.md')
 
-    expect(inserted.created).toMatchObject({ isPrivate: true, hasConflict: false })
+    expect(inserted.created).toMatchObject({ isPrivate: true })
     expect(read).toHaveBeenCalledTimes(2)
     expect(write).toHaveBeenCalledTimes(2)
   })

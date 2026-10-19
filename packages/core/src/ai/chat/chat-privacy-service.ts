@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { readAssetOcrState } from '../../assets/asset-ocr-cache.ts'
 import type { AssetPrivacyService } from '../../assets/asset-privacy-service.ts'
 import { isXArchiveAssetPath } from '../../embeds/x-archive-service.ts'
-import { isAppError, ReflectError } from '../../errors.ts'
+import { AppError, isAppError } from '../../errors.ts'
 import type { AssetStoreService } from '../../graph/asset-store-service.ts'
 import {
   createAttachmentCatalog,
@@ -112,7 +112,7 @@ export interface ChatPrivacyService {
    * would resend (`buildHistory` plus the new user message, which is always
    * the last segment and always sent). A verified on-device target receives
    * all of it; a cloud target gets the public prefix of the history, or a
-   * refusal (`ReflectError('auth')`) when marked private local context, or a
+   * refusal (`AppError('auth')`) when marked private local context, or a
    * search snippet whose attachment text can no longer be cleared, occurs in
    * what it would be sent.
    */
@@ -334,7 +334,7 @@ class ChatPrivacyServiceImpl implements ChatPrivacyService {
           expectedAssetTextHash: snapshot.assetTextHash,
         }))
       ) {
-        throw new ReflectError(
+        throw new AppError(
           'auth',
           'This conversation contains attachment search text whose original source cannot be cleared for cloud use. Continue with a verified on-device model or start a new cloud conversation.',
         )
@@ -449,7 +449,7 @@ class ChatPrivacyServiceImpl implements ChatPrivacyService {
       if (read === undefined) {
         read = noteFile.readShareable(path, generation).then((result) => {
           if (result.kind === 'localOnly') {
-            throw new ReflectError('auth', 'History source is local-only.')
+            throw new AppError('auth', 'History source is local-only.')
           }
           return result.content
         })
@@ -513,7 +513,7 @@ export function createChatPrivacyService(deps: ChatPrivacyServiceDeps): ChatPriv
  */
 function refuseCloudPrivateContext(messages: readonly ModelMessage[]): void {
   if (containsPrivateContext(messages)) {
-    throw new ReflectError(
+    throw new AppError(
       'auth',
       'This conversation contains private local context. Continue with a verified on-device model or start a new conversation for a cloud model.',
     )

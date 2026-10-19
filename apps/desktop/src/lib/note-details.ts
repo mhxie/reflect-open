@@ -81,7 +81,10 @@ function backupDetail(state: NoteState, backup: BackupState | undefined): Backup
   }
   const { status } = backup
   switch (status.state) {
+    // The quiet window before the next backup reads as backed up, as upstream's
+    // mobile status does: the edits it holds back go out when it closes.
     case 'idle':
+    case 'waiting':
       return { name: 'Backup', status: 'backed-up', value: 'Backed up', hint: null }
     case 'syncing':
       return { name: 'Backup', status: 'syncing', value: 'Syncing', hint: null }

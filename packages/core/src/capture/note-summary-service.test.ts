@@ -5,7 +5,7 @@ import { aiKeySecretName, createAiCredentialService } from '../ai/ai-credential-
 import { createAiProviderConfigService } from '../ai/ai-provider-config-service.ts'
 import type { AiProvidersState } from '../ai/provider-config.ts'
 import { createOpenDocumentsService } from '../documents/open-documents-service.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { GraphRole } from '../graph/graph-session.ts'
 import { project } from '../indexing/flow-test-harness.ts'
 import type { IndexedNote } from '../indexing/indexed-note.ts'
@@ -111,16 +111,16 @@ async function setup(options: SetupOptions = {}) {
   const languageModel = createTestLanguageModelService(
     (config) =>
       new MockLanguageModelV4({
-        doGenerate: async (callOptions) => {
+        doGenerate: (callOptions) => {
           calls.push(callOptions)
           const engine =
             'onDevice' in config && config.onDevice !== undefined ? 'on-device' : 'cloud'
-          return {
+          return Promise.resolve({
             content: [{ type: 'text', text: `Summary from ${engine}.` }],
             finishReason: { unified: 'stop' as const, raw: undefined },
             usage: USAGE,
             warnings: [],
-          }
+          })
         },
       }),
   )
@@ -534,7 +534,7 @@ describe('NoteSummaryService.reconcile', () => {
 
   it('reports a failed write as stopped, never throwing', async () => {
     const { service, writeKeepingModified } = await setup()
-    writeKeepingModified.mockRejectedValue(new ReflectError('unsupported', 'refused'))
+    writeKeepingModified.mockRejectedValue(new AppError('unsupported', 'refused'))
 
     const result = await service.reconcile(input())
 

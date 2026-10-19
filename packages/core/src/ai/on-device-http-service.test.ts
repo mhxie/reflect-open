@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import { createTestOnDeviceHttpService } from '../testing/ai.ts'
 import { createTestIdService } from '../testing/id.ts'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
@@ -147,7 +148,7 @@ describe('OnDeviceHttpService', () => {
           return await waitingRead.promise
         case 'on_device_http_cancel':
           // The Rust side fails the read that was waiting.
-          waitingRead?.reject({ kind: 'io', message: 'the on-device request was cancelled' })
+          waitingRead?.reject(new AppError('io', 'the on-device request was cancelled'))
           return null
         default:
           throw new Error(command)
@@ -219,7 +220,7 @@ describe('OnDeviceHttpService', () => {
 
   it('reports transport failures the way fetch does', async () => {
     const refused = scripted(() => {
-      throw { kind: 'network', message: 'error sending request: Connection refused (os error 61)' }
+      throw new AppError('network', 'error sending request: Connection refused (os error 61)')
     }).http
     const failure = await refused.fetch(URL_ON_THIS_MAC).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(TypeError)
@@ -229,7 +230,7 @@ describe('OnDeviceHttpService', () => {
     })
 
     const browser = scripted(() => {
-      throw { kind: 'unsupported', message: 'Reaching a model on this Mac needs the desktop app.' }
+      throw new AppError('unsupported', 'Reaching a model on this Mac needs the desktop app.')
     }).http
     await expect(browser.fetch(URL_ON_THIS_MAC)).rejects.toMatchObject({
       name: 'TypeError',

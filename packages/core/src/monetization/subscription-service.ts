@@ -5,6 +5,7 @@ import type { PlatformFacts } from '../ports/platform-facts.ts'
 import { getJson, setJson, type StorageService } from '../ports/storage-service.ts'
 import { IAP_PRODUCT_IDS, type IapService } from '../ipc/iap-service.ts'
 import type { Unlisten } from '../unlisten.ts'
+import { toAppError } from '../errors.ts'
 
 const activeSubscriptionSchema = z.enum(['yearly', 'monthly']).nullable()
 
@@ -71,45 +72,36 @@ export interface SubscriptionService {
 
 const IDLE_STATE: SubscriptionState = { value: null, isLoading: false, isError: false }
 
+/** A lookup that found no plan rejects with this, so `Promise.any` skips it. */
+class NoPlanError extends Error {}
+
 /**
  * Resolves the first plan that a lookup confirms, else `null` once every
- * lookup settles, else the first error.
+ * lookup settles, else an `AggregateError` of every lookup failure.
  */
-function resolveActiveSubscription(
+async function resolveActiveSubscription(
   lookups: readonly Promise<SubscriptionPlan | null>[],
 ): Promise<ActiveSubscription> {
-  return new Promise((resolve, reject) => {
-    let pending = lookups.length
-    const errors: unknown[] = []
-
-    function settleEmptyLookup(): void {
-      pending -= 1
-      if (pending !== 0) {
-        return
-      }
-      if (errors.length > 0) {
-        reject(errors[0])
-      } else {
-        resolve(null)
-      }
+  try {
+    return await Promise.any(
+      lookups.map(async (lookup) => {
+        const plan = await lookup
+        if (plan === null) {
+          throw new NoPlanError()
+        }
+        return plan
+      }),
+    )
+  } catch (error) {
+    if (!(error instanceof AggregateError)) {
+      throw error
     }
-
-    for (const lookup of lookups) {
-      void lookup.then(
-        (plan) => {
-          if (plan !== null) {
-            resolve(plan)
-            return
-          }
-          settleEmptyLookup()
-        },
-        (error: unknown) => {
-          errors.push(error)
-          settleEmptyLookup()
-        },
-      )
+    const failures = error.errors.filter((reason) => !(reason instanceof NoPlanError))
+    if (failures.length === 0) {
+      return null
     }
-  })
+    throw new AggregateError(failures, 'every App Store subscription lookup failed')
+  }
 }
 
 export interface SubscriptionServiceDeps {
@@ -230,7 +222,7 @@ class SubscriptionServiceImpl implements SubscriptionService {
         },
         (error: unknown) => {
           clock.clearTimeout(timeout)
-          reject(error)
+          reject(toAppError(error))
         },
       )
     })

@@ -711,7 +711,7 @@ describe('claim trust from the harness report', () => {
     }
     document.documentElement.style.fontSize = ''
     // A right gutter, as the app has, keeps the column in the viewport.
-    ;(container as HTMLElement).style.cssText = 'width: 560px; padding-right: 64px'
+    container.style.cssText = 'width: 560px; padding-right: 64px'
     const [upper, lower] = [
       ...container.querySelectorAll<HTMLElement>('.wiki-trust-margin .wiki-trust-mark'),
     ]

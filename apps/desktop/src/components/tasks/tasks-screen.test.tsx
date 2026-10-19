@@ -15,7 +15,7 @@ import { MOD_KEY } from '@/test-utils/mod-key.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { TasksScreen } from './tasks-screen.tsx'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 
 vi.mock('@/editor/markdown-preview.tsx', () => ({
   MarkdownPreview: ({ content, className }: { content: string; className?: string }) => {
@@ -267,7 +267,6 @@ beforeEach(() => {
       breadcrumbs: [],
       checked: false,
       isPrivate: false,
-      hasConflict: false,
     },
     moved: [],
     updatedAt: 0,
@@ -279,7 +278,6 @@ beforeEach(() => {
       breadcrumbs: [],
       checked: false,
       isPrivate: false,
-      hasConflict: false,
     },
     moved: [],
     updatedAt: 0,
@@ -844,14 +842,14 @@ describe('TasksScreen', () => {
     await userEvent.click(await view.findByRole('button', { name: 'first' }))
     // ⌘-click adds the row without clearing the rest (modifier set explicitly —
     // userEvent's held modifiers don't reach its synthetic click).
-    act(() => {
+    await act(() => {
       fireEvent.click(view.getByRole('button', { name: 'third' }), MOD_KEY)
     })
     expect([pressed('first'), pressed('second'), pressed('third')]).toEqual([true, false, true])
     expect(noteWindows.openedNoteWindows()).toEqual([])
 
     // Shift-click from the anchor (third) back to first selects the whole range.
-    act(() => {
+    await act(() => {
       fireEvent.click(view.getByRole('button', { name: 'first' }), { shiftKey: true })
     })
     expect([pressed('first'), pressed('second'), pressed('third')]).toEqual([true, true, true])
@@ -942,7 +940,6 @@ describe('TasksScreen', () => {
     insertTask.mockResolvedValue({
       created: {
         isPrivate: false,
-        hasConflict: false,
         astPath: [0],
         markdown: '',
         breadcrumbs: [],
@@ -986,7 +983,6 @@ describe('TasksScreen', () => {
         breadcrumbs: [],
         checked: false,
         isPrivate: false,
-        hasConflict: false,
       },
       moved: [
         {
@@ -1069,7 +1065,6 @@ describe('TasksScreen', () => {
         breadcrumbs: [],
         checked: false,
         isPrivate: true,
-        hasConflict: false,
       },
       moved: [],
       updatedAt: 0,
@@ -1161,7 +1156,7 @@ describe('TasksScreen', () => {
 
     await view.findByText('keep')
     await userEvent.keyboard('{ControlOrMeta>}a{/ControlOrMeta}') // select both
-    act(() => {
+    await act(() => {
       fireEvent.keyDown(view.getByLabelText('Tasks', { exact: true }), { key: 'Backspace' })
     })
     // V1 refuses a multi-row ⌫ (which row would survive is unclear).
@@ -1173,7 +1168,6 @@ describe('TasksScreen', () => {
     continueTaskInContext.mockResolvedValue({
       created: {
         isPrivate: false,
-        hasConflict: false,
         astPath: [3],
         markdown: '',
         breadcrumbs: [],
@@ -1212,7 +1206,6 @@ describe('TasksScreen', () => {
     continueTaskInContext.mockResolvedValue({
       created: {
         isPrivate: false,
-        hasConflict: false,
         astPath: [40],
         markdown: '',
         breadcrumbs: ['StartupToolbox', 'Reflections'],

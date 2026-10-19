@@ -64,10 +64,6 @@ export interface NoteListEntry {
    * The indexed privacy flag (locked, unreadable frontmatter, or local-only).
    */
   isPrivate: boolean
-  /**
-   * The indexed sync conflict flag.
-   */
-  hasConflict: boolean
 }
 
 export interface NoteListOptions {
@@ -175,7 +171,6 @@ const NOTE_LIST_COLUMNS = [
   'notes.isPinned',
   'notes.pinnedOrder',
   'notes.isPrivate',
-  'notes.hasConflict',
 ] as const
 
 /**
@@ -434,7 +429,6 @@ class NoteListServiceImpl implements NoteListService {
       isPinned: row.isPinned !== 0,
       pinnedOrder: row.pinnedOrder,
       isPrivate: row.isPrivate !== 0,
-      hasConflict: row.hasConflict !== 0,
     }))
   }
 
@@ -530,13 +524,11 @@ class NoteListServiceImpl implements NoteListService {
         'notes.title',
         'notes.mtime',
         'notes.isPrivate',
-        'notes.hasConflict',
       ])
       .execute()
     return rows.map((row) => ({
       ...row,
       isPrivate: row.isPrivate !== 0,
-      hasConflict: row.hasConflict !== 0,
     }))
   }
 

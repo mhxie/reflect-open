@@ -1,14 +1,15 @@
 import type { ShareService } from '@reflect/app'
 import {
+  frontmatterPatchToYaml,
   isOstensiblyEmptyNoteSource,
   upsertFrontmatter,
   type IndexQueryService,
   type NoteActionsService,
   type NoteDocumentService,
   type NoteRow,
+  AppError,
 } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
-import { frontmatterPatchToYaml } from '@/editor/note-session.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import type { ReactElement, ReactNode } from 'react'
 import { act } from '@/test-utils/act.ts'
@@ -107,7 +108,6 @@ function noteRow(path: string, isPrivate: boolean, title = 'Meeting'): NoteRow {
     title,
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -122,10 +122,12 @@ beforeEach(() => {
       currentNoteRowSettled ? Promise.resolve(currentNoteRow ?? undefined) : new Promise(() => {}),
     )
   noteSource.value = '# A\n'
-  readNoteSource.mockReset().mockImplementation(async () => noteSource.value)
-  commitNoteFrontmatter.mockReset().mockImplementation(async (_path, patch) => {
-    noteSource.value = upsertFrontmatter(noteSource.value, frontmatterPatchToYaml(patch))
-  })
+  readNoteSource.mockReset().mockImplementation(() => Promise.resolve(noteSource.value))
+  commitNoteFrontmatter.mockReset().mockImplementation((_path, patch) =>
+    Promise.try(() => {
+      noteSource.value = upsertFrontmatter(noteSource.value, frontmatterPatchToYaml(patch))
+    }),
+  )
   shareMock.mockReset().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'share', { configurable: true, value: shareMock })
 })
@@ -262,7 +264,7 @@ describe('NoteActionsMenu', () => {
   })
 
   it('rolls back stale optimistic privacy state and surfaces failures for retry', async () => {
-    commitNoteFrontmatter.mockRejectedValueOnce({ kind: 'io', message: 'disk on fire' })
+    commitNoteFrontmatter.mockRejectedValueOnce(new AppError('io', 'disk on fire'))
     const { view } = await mount()
 
     await openActions()
@@ -369,7 +371,7 @@ describe('NoteActionsMenu', () => {
     const dialog = page.getByRole('dialog')
     // The real trash reports the missing graph.
     trash.mockRestore()
-    act(() => app.graphSession.setGraph(null))
+    await act(() => app.graphSession.setGraph(null))
     await dialog.getByRole('button', { name: 'Delete' }).click()
 
     await expect.element(dialog.getByText('No graph is open.')).toBeInTheDocument()

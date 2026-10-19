@@ -21,7 +21,7 @@ const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
  * Render `ui` in the graph `/g` with reduced motion, so a swipe settles at once.
  */
 function mount(ui: ReactNode): Promise<InAppRenderResult<CoreServices>> {
-  const readSource = async (): Promise<string> => '# A\n'
+  const readSource = (): Promise<string> => Promise.resolve('# A\n')
   const app = createTestCoreServices({
     platform: createTestPlatformService({ reducedMotion: true }),
     noteDocuments: {
@@ -50,7 +50,6 @@ function row(overrides: Partial<NoteRowModel> = {}): NoteRowModel {
     mtime: new Date(2020, 0, 1).getTime(),
     isPinned: false,
     isPrivate: false,
-    hasConflict: false,
     canDelete: true,
     snippet: [{ text: 'First line', highlighted: false }],
     ...overrides,
@@ -80,15 +79,13 @@ const mobileKey = queryKeys.index.mobileAllNotesWithSearch('/g', { text: '' })
 function CachedNoteList(): ReactElement {
   const { data } = useQuery<FilteredSearchHit[]>({
     queryKey: mobileKey,
-    queryFn: async () => [],
+    queryFn: () => [],
     enabled: false,
   })
   const hits = useNoteRows(data) ?? []
   return (
     <NoteRowList
-      rows={hits.map((hit) =>
-        row({ isPinned: hit.isPinned, isPrivate: hit.isPrivate, hasConflict: hit.hasConflict }),
-      )}
+      rows={hits.map((hit) => row({ isPinned: hit.isPinned, isPrivate: hit.isPrivate }))}
       onOpen={onOpen}
     />
   )
@@ -108,16 +105,16 @@ describe('NoteRowList', () => {
     expect(view.container.querySelector('[role="img"]')).toBeNull()
   })
 
-  it.each([
-    { label: 'Private', overrides: { isPrivate: true } },
-    { label: 'Protected', overrides: { hasConflict: true } },
-  ])('shows $label in a note row without adding another button', async ({ label, overrides }) => {
-    const view = await mount(<SwipeHarness note={row(overrides)} />)
-    await expect.element(view.getByRole('img', { name: label, exact: true })).toBeVisible()
-    expect(view.getByRole('button').elements()).toHaveLength(1)
-    await view.getByRole('button').click()
-    expect(onOpen).toHaveBeenCalledOnce()
-  })
+  it.each([{ label: 'Private', overrides: { isPrivate: true } }])(
+    'shows $label in a note row without adding another button',
+    async ({ label, overrides }) => {
+      const view = await mount(<SwipeHarness note={row(overrides)} />)
+      await expect.element(view.getByRole('img', { name: label, exact: true })).toBeVisible()
+      expect(view.getByRole('button').elements()).toHaveLength(1)
+      await view.getByRole('button').click()
+      expect(onOpen).toHaveBeenCalledOnce()
+    },
+  )
 
   it('a swipe pin updates the row marker through the overlay while persistence is pending', async () => {
     const write = Promise.withResolvers<void>()
@@ -139,7 +136,6 @@ describe('NoteRowList', () => {
         mtime: 0,
         isPinned: false,
         isPrivate: false,
-        hasConflict: false,
         hasDeviceOnlyContent: false,
         summary: '',
       },
@@ -149,7 +145,7 @@ describe('NoteRowList', () => {
       .toBeInTheDocument()
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
-    swipe(
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 32 },
       { x: rect.right - 120, y: rect.top + 32 },
@@ -174,7 +170,6 @@ describe('NoteRowList', () => {
       mtime: new Date(2020, 0, 1).getTime(),
       isPinned: false,
       isPrivate: false,
-      hasConflict: false,
       canDelete: true,
       snippet: [],
     }
@@ -193,7 +188,7 @@ describe('NoteRowList', () => {
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 
-    swipe(
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 32 },
       { x: rect.right - 120, y: rect.top + 32 },
@@ -210,7 +205,7 @@ describe('NoteRowList', () => {
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 
-    swipe(
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 12 },
       { x: rect.right - 22, y: rect.top + 52 },
@@ -225,7 +220,7 @@ describe('NoteRowList', () => {
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
 
-    swipe(
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 32 },
       { x: rect.right - 120, y: rect.top + 32 },
@@ -242,7 +237,7 @@ describe('NoteRowList', () => {
     const view = await mount(<SwipeHarness />)
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
-    swipe(
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 32 },
       { x: rect.right - 120, y: rect.top + 32 },
@@ -260,7 +255,7 @@ describe('NoteRowList', () => {
     )
     const surface = view.getByRole('button', { name: /Alpha.*First line/ }).element()
     const rect = surface.getBoundingClientRect()
-    swipe(
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 32 },
       { x: rect.right - 90, y: rect.top + 32 },
@@ -276,8 +271,8 @@ describe('NoteRowList', () => {
     const rect = surface.getBoundingClientRect()
 
     // No move/up reaches the row for this first armed touch.
-    pointer(surface, 'pointerdown', rect.right - 20, rect.top + 32)
-    swipe(
+    await pointer(surface, 'pointerdown', rect.right - 20, rect.top + 32)
+    await swipe(
       surface,
       { x: rect.right - 20, y: rect.top + 32 },
       { x: rect.right - 120, y: rect.top + 32 },

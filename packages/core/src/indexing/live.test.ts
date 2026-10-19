@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import {
   createLocalOnlyFolders,
   NO_LOCAL_ONLY_FOLDERS,
@@ -137,10 +138,11 @@ describe('LiveIndex.apply', () => {
   it('reports a failing change and continues with the rest of the batch', async () => {
     const { liveIndex, writes } = setup({
       files: { 'notes/bad.md': '# bad', 'notes/good.md': '# ok' },
-      read: async (path) => {
+      read: (path) => {
         if (path === 'notes/bad.md') {
-          throw { kind: 'io', message: 'unreadable' }
+          return Promise.reject(new AppError('io', 'unreadable'))
         }
+        return Promise.resolve()
       },
     })
 

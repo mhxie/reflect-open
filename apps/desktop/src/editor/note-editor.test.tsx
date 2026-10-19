@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { createRef, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
@@ -71,7 +72,8 @@ const MOBILE_APP: TestPlatformOptions = { surface: { mobileApp: true } }
  * a preparing transition.
  */
 async function settleViewTransition(): Promise<void> {
-  await document.activeViewTransition?.finished
+  const transition = document.activeViewTransition
+  await transition?.finished
 }
 
 const pmRoot = page.locate('.ProseMirror')
@@ -98,7 +100,7 @@ const YOUTUBE_NOTE = `![](https://www.youtube.com/watch?v=aqz-KE-bpKQ)<!-- ${JSO
 const IMAGE_NOTE = 'A photo\n\n![Cat](assets/cat.png)'
 
 function renderEditor(
-  openAsset: (path: string) => Promise<void> | void = vi.fn(async () => {}),
+  openAsset: (path: string) => MaybePromise<void> = vi.fn(async () => {}),
   platform?: TestPlatformOptions,
 ): ReturnType<typeof render> {
   return render(
@@ -183,10 +185,12 @@ describe('NoteEditor wiki-link chips', () => {
 
 describe('NoteEditor link preview', () => {
   it('forwards host-resolved metadata to the link popup', async () => {
-    const resolveLinkPreview = vi.fn(async () => ({
-      title: 'Example Domain',
-      description: 'An example description.',
-    }))
+    const resolveLinkPreview = vi.fn(() =>
+      Promise.resolve({
+        title: 'Example Domain',
+        description: 'An example description.',
+      }),
+    )
     // Park the mouse first, for the same reason as the wiki-link hover card.
     await unhover()
     await render(
@@ -629,7 +633,7 @@ describe('NoteEditor file pills', () => {
 describe('NoteEditor file paste', () => {
   it('persists a pasted file through saveFile and inserts its destination', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    const saveFile = vi.fn(async () => 'assets/q3.zip')
+    const saveFile = vi.fn(() => Promise.resolve('assets/q3.zip'))
     await render(
       <NoteEditor
         privateNote={false}
@@ -651,7 +655,7 @@ describe('NoteEditor file paste', () => {
 
   it('embeds a pasted PDF as an inline preview', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    const saveFile = vi.fn(async () => 'assets/q3.pdf')
+    const saveFile = vi.fn(() => Promise.resolve('assets/q3.pdf'))
     await render(
       <NoteEditor
         privateNote={false}
@@ -673,7 +677,7 @@ describe('NoteEditor file paste', () => {
 
   it('titles a blank note from a pasted PDF and puts the PDF below the title', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    const saveFile = vi.fn(async () => 'assets/socc20-serverless.pdf')
+    const saveFile = vi.fn(() => Promise.resolve('assets/socc20-serverless.pdf'))
     await render(
       <NoteEditor
         privateNote={false}
@@ -697,7 +701,7 @@ describe('NoteEditor file paste', () => {
 
   it('leaves a blank note untitled for a pasted image', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    const saveFile = vi.fn(async () => 'assets/pasted-1.png')
+    const saveFile = vi.fn(() => Promise.resolve('assets/pasted-1.png'))
     await render(
       <NoteEditor
         privateNote={false}
@@ -720,7 +724,7 @@ describe('NoteEditor file paste', () => {
 
   it('declines the paste when saveFile returns null', async () => {
     const handleRef = createRef<NoteEditorHandle>()
-    const saveFile = vi.fn(async () => null)
+    const saveFile = vi.fn(() => Promise.resolve(null))
     await render(
       <NoteEditor
         privateNote={false}
@@ -742,7 +746,7 @@ describe('NoteEditor file paste', () => {
 
 describe('NoteEditor PDF embeds', () => {
   function renderPdfNote(
-    openAsset: (path: string) => Promise<void> | void,
+    openAsset: (path: string) => MaybePromise<void>,
   ): ReturnType<typeof render> {
     return render(
       <NoteEditor

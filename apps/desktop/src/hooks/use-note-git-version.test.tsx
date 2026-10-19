@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
-import { actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useNoteGitVersion } from './use-note-git-version.ts'
 
@@ -70,7 +70,7 @@ describe('useNoteGitVersion', () => {
     expect(versionCalls(app)).toHaveLength(1)
 
     app.gitRepository.onNoteVersion(() => 'def456abc9')
-    await actAsync(async () => {
+    await act(async () => {
       await vi.advanceTimersByTimeAsync(45_000)
     })
     expect(versionCalls(app)).toHaveLength(1)
@@ -109,7 +109,7 @@ describe('useNoteGitVersion', () => {
     root = '/second'
     await hook.rerender()
     await vi.waitFor(() => expect(hook.result.current.version).toBe('newgraph123'))
-    await actAsync(async () => {
+    await act(async () => {
       first.resolve('oldgraph456')
       await first.promise
     })

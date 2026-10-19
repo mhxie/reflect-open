@@ -10,7 +10,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 interface NoteStateIndicatorProps {
   readonly path: string
   readonly isPrivate: boolean
-  readonly hasConflict?: boolean
   readonly className?: string
 }
 
@@ -23,13 +22,12 @@ interface NoteStateIndicatorProps {
 export function NoteStateIndicator({
   path,
   isPrivate,
-  hasConflict = false,
   className,
 }: NoteStateIndicatorProps): ReactElement | null {
   const graph = useMaybeGraph()?.graph
   const localOnly = useLocalOnlyFolders()
   const live = useNoteStatus(graph ? { generation: graph.generation, path } : null)
-  const state = live?.state ?? deriveNoteState(localOnly, { path, isPrivate, hasConflict })
+  const state = live?.state ?? deriveNoteState(localOnly, { path, isPrivate })
   if (state.kind === 'editable') {
     return null
   }

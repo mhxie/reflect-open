@@ -5,7 +5,7 @@ import {
   type TestCoreServiceOverrides,
 } from '@reflect/core/testing'
 import { MobileRoot } from '@/mobile/mobile-root.tsx'
-import { actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteDisplacements } from './note-displacements.tsx'
 
@@ -90,9 +90,7 @@ describe('NoteDisplacements', () => {
     const oldGuard = follow.mock.calls[0]?.[4]
     follow.mockClear()
 
-    await actAsync(() =>
-      app.graphSession.setGraph({ ...GRAPH, generation: 8, indexGeneration: 80 }),
-    )
+    await act(() => app.graphSession.setGraph({ ...GRAPH, generation: 8, indexGeneration: 80 }))
     await vi.waitFor(() => expect(subscriptions()).toBe(2))
     deliver(0, 7)
     deliver(1, 7)

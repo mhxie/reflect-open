@@ -22,7 +22,7 @@ mod scalar;
 mod scan;
 mod split;
 
-pub use classify::{backup_privacy, BackupPrivacy, UnreadableReason};
-pub use fields::{frontmatter_id, parse_frontmatter, Frontmatter};
+pub use classify::{BackupPrivacy, UnreadableReason, backup_privacy};
+pub use fields::{Frontmatter, frontmatter_id, parse_frontmatter};
 pub use line_endings::normalize_line_endings_keeping_privacy;
-pub use split::{split_frontmatter, FrontmatterSplit};
+pub use split::{FrontmatterSplit, split_frontmatter};

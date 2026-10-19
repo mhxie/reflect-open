@@ -238,15 +238,10 @@ async function untilAborted<T>(
       reject(abortError())
     }
     signal.addEventListener('abort', abort, { once: true })
-    promise.then(
-      (value) => {
+    promise
+      .finally(() => {
         signal.removeEventListener('abort', abort)
-        resolve(value)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', abort)
-        reject(error)
-      },
-    )
+      })
+      .then(resolve, reject)
   })
 }

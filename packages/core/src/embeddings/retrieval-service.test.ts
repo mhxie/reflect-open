@@ -242,21 +242,15 @@ describe('retrieve', () => {
     expect(ranAnyTerm(database)).toBe(false)
   })
 
-  it('preserves Private and conflict metadata from both lexical legs', async () => {
+  it('preserves Private metadata from both lexical legs', async () => {
     const { retrieval, database } = await setup({ embedded: false, notes: WOMBAT_NOTES })
     await database.runQuery('UPDATE notes SET is_private = 1 WHERE path = ?', ['notes/exact.md'])
-    await database.runQuery('UPDATE notes SET has_conflict = 1 WHERE path IN (?, ?)', [
-      'notes/exact.md',
-      'notes/related.md',
-    ])
 
     const hits = await retrieval.retrieve(SENTENCE, { mode: 'lexical', limit: 3 })
 
-    expect(
-      hits.map(({ path, isPrivate, hasConflict }) => ({ path, isPrivate, hasConflict })),
-    ).toEqual([
-      { path: 'notes/exact.md', isPrivate: true, hasConflict: true },
-      { path: 'notes/related.md', isPrivate: true, hasConflict: true },
+    expect(hits.map(({ path, isPrivate }) => ({ path, isPrivate }))).toEqual([
+      { path: 'notes/exact.md', isPrivate: true },
+      { path: 'notes/related.md', isPrivate: true },
     ])
   })
 

@@ -537,7 +537,6 @@ describe('similarNotes', () => {
       snippet: '',
       heading: null,
       isPrivate: false,
-      hasConflict: false,
     }
     const { semanticSearch, retrieval } = await setup({ relatedNotes: () => [hit] })
 
@@ -574,9 +573,9 @@ describe('after an index rebuild', () => {
     const localOnly: LocalOnlyFolders[] = []
     const { indexLifecycle } = await setup({
       localOnlyFolders: ['secure'],
-      backfill: async (backfillOptions) => {
+      backfill: (backfillOptions) => {
         localOnly.push(backfillOptions.localOnly)
-        return 'completed'
+        return Promise.resolve('completed')
       },
     })
 

@@ -1,4 +1,6 @@
+import type { MaybePromise } from '@reflect/utils'
 import { describe, expect, it } from 'vitest'
+import { AppError } from '../errors.ts'
 import { createLocalOnlyFolders, NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import { resolved, unresolved } from '../markdown/index.ts'
 import {
@@ -20,27 +22,31 @@ function fakeIo(
 ) {
   const writes: Record<string, string> = {}
   const io = {
-    sources: async () => options?.sources ?? Object.keys(files).sort(),
-    backlinks: async () => options?.backlinks ?? [],
-    read: async (path) => {
+    sources: () => options?.sources ?? Object.keys(files).sort(),
+    backlinks: () => options?.backlinks ?? [],
+    read: (path) => {
       const content = files[path]
       if (content === undefined) {
-        throw new Error(`unreadable: ${path}`)
+        return Promise.reject(new Error(`unreadable: ${path}`))
       }
-      return content
+      return Promise.resolve(content)
     },
-    write: async (path, content, _expectedContents) => {
+    write: (path, content, _expectedContents) => {
       writes[path] = content
     },
-    resolve: async (target) => {
+    resolve: (target) => {
       const mapped = options?.resolveByTarget?.[target]
       if (mapped !== undefined) {
-        return resolved(mapped)
+        return Promise.resolve(resolved(mapped))
       }
-      return options?.resolveTo !== undefined ? resolved(options.resolveTo) : unresolved('x')
+      return Promise.resolve(
+        options?.resolveTo !== undefined ? resolved(options.resolveTo) : unresolved('x'),
+      )
     },
   } satisfies RenameIo & {
-    backlinks: () => Promise<Array<{ sourcePath: string; targetRaw: string; alias: string | null }>>
+    backlinks: () => MaybePromise<
+      Array<{ sourcePath: string; targetRaw: string; alias: string | null }>
+    >
   }
   return { io, writes }
 }
@@ -213,7 +219,7 @@ describe('rewriteLinksForTitleChange', () => {
     const files: Record<string, string> = { 'notes/ok.md': '[[Old]] here\n' }
     const { io, writes } = fakeIo(files)
     const sources = ['notes/gone.md', 'notes/ok.md'] // gone.md read throws
-    io.sources = async () => sources
+    io.sources = () => sources
     const progress: Array<[number, number]> = []
     const result = await rewriteLinksForTitleChange({
       localOnly: NO_LOCAL_ONLY_FOLDERS,
@@ -364,9 +370,9 @@ describe('rewriteLinksForTitleChange stable-target displays', () => {
     )
     const write = io.write
     let writeCount = 0
-    io.write = async (path, content, expected) => {
+    io.write = (path, content, expected) => {
       writeCount += 1
-      await write(path, content, expected)
+      return write(path, content, expected)
     }
 
     await rewriteLinksForTitleChange({
@@ -597,11 +603,11 @@ describe('rewriteLinksForTitleChange write failures', () => {
       'notes/ok.md': '[[Old]]\n',
     })
     const write = io.write
-    io.write = async (path, content, expected) => {
+    io.write = (path, content, expected) => {
       if (path === 'notes/fail.md') {
-        throw new Error('write failed')
+        return Promise.reject(new Error('write failed'))
       }
-      await write(path, content, expected)
+      return write(path, content, expected)
     }
     const result = await rewriteLinksForTitleChange({
       localOnly: NO_LOCAL_ONLY_FOLDERS,
@@ -618,7 +624,7 @@ describe('rewriteLinksForTitleChange write failures', () => {
 })
 
 describe('checked rewrites', () => {
-  const CHANGED_ON_DISK = { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+  const CHANGED_ON_DISK = new AppError('io', 'Note changed on disk; reload before retrying')
 
   /** A fake IO whose writes keep Rust's rule: they land only over `expected`. */
   function checkedIo(
@@ -627,7 +633,7 @@ describe('checked rewrites', () => {
   ) {
     const { io } = fakeIo(files)
     const calls: Array<[string, string, string | null]> = []
-    io.write = async (path, content, expected) => {
+    io.write = (path, content, expected) => {
       calls.push([path, content, expected])
       beforeWrite(path)
       if ((files[path] ?? null) !== expected) {
@@ -702,9 +708,9 @@ describe('checked rewrites', () => {
       'notes/plan-2.md',
       'notes/roadmap.md',
       {
-        pathLinkSources: async () => ['Journal.md'],
-        read: async (path) => files[path] ?? '',
-        write: async (path, content, expected) => {
+        pathLinkSources: () => ['Journal.md'],
+        read: (path) => files[path] ?? '',
+        write: (path, content, expected) => {
           calls.push([path, content, expected])
           files[path] = content
         },
@@ -956,15 +962,15 @@ describe('rewritePathLinksForMove', () => {
     return {
       writes,
       io: {
-        pathLinkSources: async () => sources,
-        read: async (path: string) => {
+        pathLinkSources: () => sources,
+        read: (path: string) => {
           const content = files[path]
           if (content === undefined) {
-            throw new Error(`unreadable: ${path}`)
+            return Promise.reject(new Error(`unreadable: ${path}`))
           }
-          return content
+          return Promise.resolve(content)
         },
-        write: async (path: string, content: string) => {
+        write: (path: string, content: string) => {
           writes[path] = content
         },
       },

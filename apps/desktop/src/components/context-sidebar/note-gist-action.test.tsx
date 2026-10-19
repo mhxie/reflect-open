@@ -24,7 +24,6 @@ function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
     title: 'A',
     dailyDate: null,
     isPrivate: false,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
     ...overrides,
@@ -55,7 +54,7 @@ beforeEach(() => {
   connected = true
   row = null
   app = createTestCoreServices()
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(async () => row ?? undefined)
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(() => Promise.resolve(row ?? undefined))
   publish = vi.spyOn(app.gistPublish, 'publish').mockResolvedValue({ url: GIST_URL, stale: false })
   unpublish = vi.spyOn(app.gistPublish, 'unpublish').mockResolvedValue({ url: null, stale: false })
 })

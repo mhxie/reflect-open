@@ -44,10 +44,6 @@ export interface BacklinkContext {
    */
   sourcePrivate: boolean
   /**
-   * Whether the indexed source contains sync conflict markers.
-   */
-  sourceHasConflict: boolean
-  /**
    * The Markdown block context around the link (old Reflect's rules — see
    * {@link blockContextAt}): the whole paragraph, the containing list item with
    * its children, or the heading's section. Empty when the file is unreadable.
@@ -198,7 +194,6 @@ class BacklinkServiceImpl implements BacklinkService {
         'notes.displayTitle as sourceDisplayTitle',
         'notes.lang as sourceLang',
         'notes.isPrivate as sourceIsPrivate',
-        'notes.hasConflict as sourceHasConflict',
         sourceRecency.as('recencyMs'),
       ])
       .$narrowType<{ sourcePath: string }>()
@@ -330,7 +325,6 @@ class BacklinkServiceImpl implements BacklinkService {
           sourceDisplayTitle: pageSource.sourceDisplayTitle,
           sourceLang: pageSource.sourceLang,
           sourcePrivate,
-          sourceHasConflict: pageSource.sourceHasConflict !== 0,
           snippet,
           posFrom,
           tasks: extractSnippetTasks(

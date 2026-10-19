@@ -16,11 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use hf_hub::api::sync::ApiBuilder;
 use hf_hub::api::Progress;
+use hf_hub::api::sync::ApiBuilder;
 use hf_hub::{Cache, Repo, RepoType};
 use qwen3_asr::{AsrInference, TranscribeOptions};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// One Qwen3-ASR checkpoint at a pinned revision.
 pub struct QwenModel {
@@ -449,11 +449,11 @@ impl QwenEngine {
     fn inference(&self, dir: &Path) -> Result<Arc<AsrInference>, String> {
         {
             let mut slot = self.lock()?;
-            if let Some(loaded) = slot.loaded.as_mut() {
-                if loaded.dir == dir {
-                    loaded.last_used = Instant::now();
-                    return Ok(Arc::clone(&loaded.inference));
-                }
+            if let Some(loaded) = slot.loaded.as_mut()
+                && loaded.dir == dir
+            {
+                loaded.last_used = Instant::now();
+                return Ok(Arc::clone(&loaded.inference));
             }
         }
         // Loading takes seconds; the slot stays unlocked meanwhile so a
@@ -481,28 +481,30 @@ impl QwenEngine {
     }
 
     fn touch(&self) {
-        if let Ok(mut slot) = self.0.lock() {
-            if let Some(loaded) = slot.loaded.as_mut() {
-                loaded.last_used = Instant::now();
-            }
+        if let Ok(mut slot) = self.0.lock()
+            && let Some(loaded) = slot.loaded.as_mut()
+        {
+            loaded.last_used = Instant::now();
         }
     }
 
     fn watch_idle(&self, epoch: u64) {
         let slot = Arc::clone(&self.0);
-        std::thread::spawn(move || loop {
-            std::thread::sleep(IDLE_POLL);
-            let Ok(mut slot) = slot.lock() else {
-                return;
-            };
-            match slot.loaded.as_ref() {
-                Some(loaded) if loaded.epoch == epoch => {
-                    if loaded.last_used.elapsed() >= IDLE_RELEASE {
-                        slot.loaded = None;
-                        return;
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(IDLE_POLL);
+                let Ok(mut slot) = slot.lock() else {
+                    return;
+                };
+                match slot.loaded.as_ref() {
+                    Some(loaded) if loaded.epoch == epoch => {
+                        if loaded.last_used.elapsed() >= IDLE_RELEASE {
+                            slot.loaded = None;
+                            return;
+                        }
                     }
+                    _ => return,
                 }
-                _ => return,
             }
         });
     }

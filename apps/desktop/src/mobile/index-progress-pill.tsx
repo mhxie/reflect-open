@@ -1,6 +1,5 @@
 import { useSyncExternalStore, type ReactElement } from 'react'
 import { isIndexProgressWorthShowing } from '@reflect/core'
-import { useKeyboardVisible } from '@/mobile/use-keyboard.ts'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -16,9 +15,8 @@ export function IndexProgressPill(): ReactElement | null {
     indexLifecycle.subscribeFileProgress,
     indexLifecycle.fileProgress,
   )
-  const keyboardVisible = useKeyboardVisible()
 
-  if (progress === null || !isIndexProgressWorthShowing(progress) || keyboardVisible) {
+  if (progress === null || !isIndexProgressWorthShowing(progress)) {
     return null
   }
 

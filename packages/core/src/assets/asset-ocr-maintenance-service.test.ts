@@ -1,6 +1,6 @@
 import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it, vi } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { FileChange } from '../indexing/file-change-service.ts'
 import { hashBytes } from '../indexing/hash.ts'
 import type { IndexAppliedEvent } from '../indexing/index-lifecycle-service.ts'
@@ -76,8 +76,9 @@ async function setup(options: { entry?: string; modifiedMs?: number; listed?: bo
       appliedListeners.delete(listener)
     }
   })
-  vi.spyOn(indexLifecycle, 'reindexNotesReferencing').mockImplementation(async (assetPaths) => {
+  vi.spyOn(indexLifecycle, 'reindexNotesReferencing').mockImplementation((assetPaths) => {
     reindexed.push(assetPaths)
+    return Promise.resolve()
   })
   const activity = createTestActivityPort()
   const clock = createTestClockService({ now: NOW })
@@ -133,7 +134,7 @@ describe('AssetOcrMaintenanceService.reconcile', () => {
   it('recovers deleted sources from cache inventory and preserves their privacy marker', async () => {
     const { service, assetStore, cacheEntry } = await setup({ listed: false })
     vi.spyOn(assetStore, 'readBytesForDevice').mockRejectedValue(
-      new ReflectError('notFound', 'deleted'),
+      new AppError('notFound', 'deleted'),
     )
     const write = vi.spyOn(assetStore, 'writeOcrCache')
 
@@ -213,12 +214,14 @@ describe('AssetOcrMaintenanceService.reconcile', () => {
     const other = 'secure/other.png'
     const { service, assetStore } = await setup()
     await assetStore.writeOcrCache(await sha256Hex(other), await completeEntry(other), GENERATION)
-    vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation(async (path) => {
-      if (path === PATH) {
-        throw new ReflectError('io', 'the file is not available offline')
-      }
-      return new Uint8Array([3, 4])
-    })
+    vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) =>
+      Promise.try(() => {
+        if (path === PATH) {
+          throw new AppError('io', 'the file is not available offline')
+        }
+        return new Uint8Array([3, 4])
+      }),
+    )
 
     expect(await service.reconcile(GENERATION, undefined, { reindexCached: false })).toEqual([
       other,

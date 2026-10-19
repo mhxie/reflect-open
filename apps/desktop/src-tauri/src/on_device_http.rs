@@ -34,10 +34,10 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONNECTION};
-use reqwest::{redirect, Client, Method, Response, Url};
+use reqwest::header::{CONNECTION, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, Method, Response, Url, redirect};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{watch, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, watch};
 use url::Host;
 
 use crate::error::{AppError, AppResult};

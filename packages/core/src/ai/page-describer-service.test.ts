@@ -36,14 +36,14 @@ function modelAnswering(text: string): LanguageModelV3CallOptions[] {
   const calls: LanguageModelV3CallOptions[] = []
   languageModelService.setModel(
     new MockLanguageModelV3({
-      doGenerate: async (options) => {
+      doGenerate: (options) => {
         calls.push(options)
-        return {
+        return Promise.resolve({
           content: [{ type: 'text', text }],
           finishReason: { unified: 'stop' as const, raw: undefined },
           usage: USAGE,
           warnings: [],
-        }
+        })
       },
     }),
   )
@@ -58,9 +58,10 @@ function modelAnsweringObject(title: string, description: string): LanguageModel
 function modelThrowing(error: unknown): void {
   languageModelService.setModel(
     new MockLanguageModelV3({
-      doGenerate: async () => {
-        throw error
-      },
+      doGenerate: () =>
+        Promise.try(() => {
+          throw error
+        }),
     }),
   )
 }
@@ -206,6 +207,22 @@ describe('PageDescriberService', () => {
 
   it('an unparseable answer becomes DescriptionRejectedError, never a crash', async () => {
     modelAnswering('not an object at all')
+    const failure = await request().catch((cause: unknown) => cause)
+    expect(isDescriptionRejected(failure)).toBe(true)
+  })
+
+  it('a filtered answer with no text becomes DescriptionRejectedError', async () => {
+    languageModelService.setModel(
+      new MockLanguageModelV3({
+        doGenerate: () =>
+          Promise.resolve({
+            content: [],
+            finishReason: { unified: 'content-filter' as const, raw: undefined },
+            usage: USAGE,
+            warnings: [],
+          }),
+      }),
+    )
     const failure = await request().catch((cause: unknown) => cause)
     expect(isDescriptionRejected(failure)).toBe(true)
   })

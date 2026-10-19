@@ -1,13 +1,16 @@
-import { isAppError, ReflectError } from '../errors.ts'
+import type { MaybePromise } from '@reflect/utils'
+import { AppError, isAppError } from '../errors.ts'
 import type { NoteFileService } from './note-file-service.ts'
 
 /**
  * Read-modify-write for a note on disk. Every note write is checked (see
- * `NoteFileService.write`): it names the source it replaces and Rust refuses it when the
- * file changed in between. A patch therefore never clobbers a concurrent
- * change — a sync pull, another device, an editor save. It re-reads the note
- * and re-applies itself to the new bytes, a bounded number of times, and then
- * surfaces the conflict. There is never an unconditional fallback.
+ * `NoteFileService.write`): it names the source it replaces. When the file
+ * changed in between, Rust merges the patched text with the new bytes, and
+ * when the file appeared or went missing it refuses the write. A patch
+ * therefore never clobbers a concurrent change — a sync pull, another device,
+ * an editor save. After a refusal it re-reads the note and re-applies itself
+ * to the new bytes, a bounded number of times, and then surfaces the
+ * conflict. There is never an unconditional fallback.
  */
 
 /** How many writes {@link patchNote} attempts before a conflict surfaces. */
@@ -21,17 +24,18 @@ export const PATCH_NOTE_ATTEMPTS = 3
  * with nothing written. For a missing note, return `null` rather than `''`
  * when there is nothing to add, or an empty file is created.
  */
-export type NotePatch = (source: string | null) => string | null | Promise<string | null>
+export type NotePatch = (source: string | null) => MaybePromise<string | null>
 
 /** The file access a patch needs; {@link patchNote} binds a {@link NoteFileService}. */
 export interface NotePatchIo {
   /** The note's current source, or `null` when no file exists. */
-  read: (path: string) => Promise<string | null>
+  read: (path: string) => MaybePromise<string | null>
   /**
-   * A checked write: refuses unless the file still holds `expectedContents`
-   * (`null`: the file must not exist).
+   * A checked write against `expectedContents` (`null`: the file must not
+   * exist). Rust merges it into a file that has moved past that revision and
+   * refuses it when the file appeared or went missing.
    */
-  write: (path: string, contents: string, expectedContents: string | null) => Promise<void>
+  write: (path: string, contents: string, expectedContents: string | null) => MaybePromise<void>
 }
 
 export interface PatchNoteOptions {
@@ -45,8 +49,9 @@ export interface PatchNoteResult {
   /** What the final patch returned: the note's next source, or `null` if it declined. */
   readonly patched: string | null
   /**
-   * Whether the note now holds `patched` — false when the patch declined or
-   * changed nothing. A write that reported failure after landing counts.
+   * Whether the note now holds `patched`, or Rust's merge of it with a
+   * concurrent change — false when the patch declined or changed nothing. A
+   * write that reported failure after landing counts.
    */
   readonly written: boolean
 }
@@ -57,7 +62,7 @@ export interface PatchNoteResult {
  * wraps (`cause`); a background pass that should skip the note rather than
  * stop can tell it apart from a real IO failure.
  */
-export class NoteChangedError extends ReflectError {
+export class NoteChangedError extends AppError {
   readonly path: string
 
   constructor(path: string, options?: ErrorOptions) {

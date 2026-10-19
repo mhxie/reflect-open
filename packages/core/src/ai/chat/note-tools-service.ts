@@ -1,4 +1,10 @@
-import type { Tool, TypedToolCall, TypedToolResult } from '@reflect/modules/ai'
+import type { MaybePromise } from '@reflect/utils'
+import type {
+  Tool,
+  ToolExecutionOptions,
+  TypedToolCall,
+  TypedToolResult,
+} from '@reflect/modules/ai'
 import { z } from 'zod'
 import { readAssetOcrState } from '../../assets/asset-ocr-cache.ts'
 import type { AssetPrivacyService } from '../../assets/asset-privacy-service.ts'
@@ -6,7 +12,7 @@ import type { DailyNoteRow, DailyNotesRange } from '../../daily/daily-note-servi
 import type { XArchiveService } from '../../embeds/x-archive-service.ts'
 import type { RetrievalHit } from '../../embeddings/retrieval-hit.ts'
 import type { RetrievalService, RetrieveOptions } from '../../embeddings/retrieval-service.ts'
-import { ReflectError } from '../../errors.ts'
+import { AppError } from '../../errors.ts'
 import type { AssetStoreService } from '../../graph/asset-store-service.ts'
 import { isLocalOnlyPath, type LocalOnlyFolders } from '../../graph/local-only.ts'
 import type { NoteFileService } from '../../graph/note-file-service.ts'
@@ -184,7 +190,7 @@ export interface NoteToolsService {
  * The daily-note range query of `DailyNoteService`.
  */
 export interface DailyNoteQueries {
-  listDailyNotes(range: DailyNotesRange): Promise<DailyNoteRow[]>
+  listDailyNotes(range: DailyNotesRange): MaybePromise<DailyNoteRow[]>
 }
 
 export interface NoteToolsServiceDeps {
@@ -232,7 +238,7 @@ class NoteToolsServiceImpl implements NoteToolsService {
         ? async (path: string): Promise<string> => {
             const read = await readDeviceNote(path)
             if (read.localOnly) {
-              throw new ReflectError('auth', 'Search source is local-only.')
+              throw new AppError('auth', 'Search source is local-only.')
             }
             return read.content
           }
@@ -444,16 +450,24 @@ function searchNotesDescription(
 }
 
 /**
+ * A {@link Tool} whose `execute` always returns a promise, never a stream.
+ * The narrow signature comes first, so a call resolves to it.
+ */
+type PromiseTool<I, O> = {
+  execute: (input: I, options: ToolExecutionOptions<unknown>) => Promise<O>
+} & Tool<I, O>
+
+/**
  * The tool set type, for typed stream parts in the chat engine. Written out
  * (rather than inferred from {@link NoteToolsService.build}) so the declaration the
  * composite build emits only names types this package can import.
  */
 export type NoteTools = {
-  search_notes: Tool<z.infer<typeof searchNotesInput>, SearchNotesOutput>
-  list_recent_notes: Tool<z.infer<typeof listRecentNotesInput>, ListRecentNotesOutput>
-  list_daily_notes: Tool<z.infer<typeof listDailyNotesInput>, ListDailyNotesOutput>
-  read_notes: Tool<z.infer<typeof readNotesInput>, ReadNotesOutput>
-  read_assets: Tool<z.infer<typeof readAssetsInput>, ReadAssetsOutput>
+  search_notes: PromiseTool<z.infer<typeof searchNotesInput>, SearchNotesOutput>
+  list_recent_notes: PromiseTool<z.infer<typeof listRecentNotesInput>, ListRecentNotesOutput>
+  list_daily_notes: PromiseTool<z.infer<typeof listDailyNotesInput>, ListDailyNotesOutput>
+  read_notes: PromiseTool<z.infer<typeof readNotesInput>, ReadNotesOutput>
+  read_assets: PromiseTool<z.infer<typeof readAssetsInput>, ReadAssetsOutput>
 }
 
 /**

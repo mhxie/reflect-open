@@ -40,20 +40,17 @@ describe('suggestWikiTargets', () => {
       { path: 'notes/other.md', markdown: '---\nprivate: true\naliases: [Unique]\n---\n# Other\n' },
     ],
   ] as const)(
-    'carries Private and conflict metadata from %s candidates without more queries',
+    'carries Private metadata from %s candidates without more queries',
     async (_source, note) => {
-      const database = seeded([
-        { ...note, markdown: `${note.markdown}<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n` },
-      ])
+      const database = seeded([note])
 
       const result = await createSuggestionService({ database }).suggestWikiTargets('unique')
 
-      expect(result[0]).toMatchObject({ path: note.path, isPrivate: true, hasConflict: true })
+      expect(result[0]).toMatchObject({ path: note.path, isPrivate: true })
       const queries = database.getQueries()
       expect(queries).toHaveLength(2)
       for (const query of queries) {
         expect(query.sql).toContain('"is_private"')
-        expect(query.sql).toContain('"has_conflict"')
       }
     },
   )
@@ -92,7 +89,7 @@ describe('suggestWikiTargets', () => {
     const database = seeded([
       {
         path: 'notes/today.md',
-        markdown: '---\nprivate: true\n---\n# Today\n<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n',
+        markdown: '---\nprivate: true\n---\n# Today\n',
       },
     ])
 
@@ -100,10 +97,9 @@ describe('suggestWikiTargets', () => {
 
     expect(result.map((row) => row.target)).toEqual(['Today', '2020-01-01'])
     expect(result[0]!.path).toBe('notes/today.md')
-    expect(result[0]).toMatchObject({ isPrivate: true, hasConflict: true })
+    expect(result[0]).toMatchObject({ isPrivate: true })
     // A generated date has no indexed file, so no note flags.
     expect(result[1]).not.toHaveProperty('isPrivate')
-    expect(result[1]).not.toHaveProperty('hasConflict')
     expect(result[1]).toMatchObject({
       date: '2020-01-01',
       generated: { phrase: 'Today' },

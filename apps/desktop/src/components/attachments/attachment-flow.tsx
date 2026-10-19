@@ -89,9 +89,9 @@ export function AttachmentFlow({
   )
   // Read by the navigation callback, so it stays stable across relayouts and
   // the memoized cards skip re-rendering when only other cards moved.
-  const latest = useRef({ layout, entries })
+  const latestRef = useRef({ layout, entries })
   useLayoutEffect(() => {
-    latest.current = { layout, entries }
+    latestRef.current = { layout, entries }
   }, [layout, entries])
 
   const mounted = useMemo(() => {
@@ -115,12 +115,14 @@ export function AttachmentFlow({
 
   const handleNavigate = useCallback(
     (index: number, direction: MasonryDirection) => {
-      const next = masonryNeighbor(latest.current.layout.positions, index, direction)
-      const target = next === null ? undefined : latest.current.entries[next]
+      const next = masonryNeighbor(latestRef.current.layout.positions, index, direction)
+      const target = next === null ? undefined : latestRef.current.entries[next]
       if (next === null || target === undefined) {
         return
       }
-      // Mount the target synchronously (it may sit past the overscan), then focus it.
+      // The target may sit past the overscan, so it must mount before the
+      // focus call, or `focusAttachmentCard` finds no card to focus.
+      // eslint-disable-next-line @eslint-react/dom-no-flush-sync
       flushSync(() => setFocusedPath(target.path))
       focusAttachmentCard(listElement, next)
     },

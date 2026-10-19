@@ -19,7 +19,6 @@ export interface NoteRowModel {
   mtime: number
   isPinned: boolean
   isPrivate: boolean
-  hasConflict: boolean
   /** Daily notes are part of the chronological spine and cannot be deleted. */
   canDelete: boolean
   /** First content line; search hits carry highlighted match segments. */
@@ -127,12 +126,7 @@ export function SwipeableNoteRow({
         style={{ height: NOTE_ROW_HEIGHT }}
       >
         <span className="flex w-full items-baseline gap-2">
-          <NoteStateIndicator
-            path={row.path}
-            isPrivate={row.isPrivate}
-            hasConflict={row.hasConflict}
-            className="self-center"
-          />
+          <NoteStateIndicator path={row.path} isPrivate={row.isPrivate} className="self-center" />
           {row.isPinned ? (
             <>
               <Pin aria-hidden className="size-3 shrink-0 self-center text-text-muted" />

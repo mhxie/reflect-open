@@ -100,10 +100,10 @@ describe('placeOldTitleAlias', () => {
   it('recomputes the aliases over a concurrent change instead of clobbering it', async () => {
     const gained = '---\naliases:\n  - Gained Elsewhere\n---\n# Old Title\n\nbody\n'
     const { deps, noteFile } = setup()
-    vi.spyOn(noteFile, 'read').mockImplementationOnce(async () => {
+    vi.spyOn(noteFile, 'read').mockImplementationOnce(() => {
       // Another writer lands between this read and the write it feeds.
       noteFile.set(PATH, gained)
-      return '# Old Title\n\nbody\n'
+      return Promise.resolve('# Old Title\n\nbody\n')
     })
     const writes = vi.spyOn(noteFile, 'write')
 
@@ -122,7 +122,9 @@ describe('placeOldTitleAlias', () => {
     const { deps, noteFile } = setup()
     let version = 0
     // Every read sees a newer version than the file the write is checked against.
-    vi.spyOn(noteFile, 'read').mockImplementation(async () => `# Old Title\n\nv${version++}\n`)
+    vi.spyOn(noteFile, 'read').mockImplementation(() =>
+      Promise.resolve(`# Old Title\n\nv${version++}\n`),
+    )
     const writes = vi.spyOn(noteFile, 'write')
 
     await expect(placeOldTitleAlias(deps, PATH, RENAME, GENERATION)).rejects.toMatchObject(

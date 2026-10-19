@@ -2,6 +2,7 @@ import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { MIN_VISIBLE_MS } from '@reflect/app'
 import {
+  frontmatterPatchToYaml,
   isOstensiblyEmptyNoteSource,
   KEPT_IN_GRAPH_TRASH,
   UNREADABLE_FRONTMATTER_LABEL,
@@ -10,10 +11,10 @@ import {
   type NoteActionsService,
   type NoteDocumentService,
   type NoteRow,
+  AppError,
 } from '@reflect/core'
 import { createTestCoreServices, createTestPlatformService } from '@reflect/core/testing'
 import { createTestOperationsService, type TestOperationsService } from '@reflect/app/testing'
-import { frontmatterPatchToYaml } from '@/editor/note-session.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteActionsSection } from './note-actions-section.tsx'
@@ -99,10 +100,12 @@ beforeEach(() => {
   getPinnedNotes.mockReset().mockResolvedValue([])
   getNote.mockReset().mockResolvedValue(noteRow('notes/a.md', false))
   noteSource = '# A\n'
-  readNoteSource.mockReset().mockImplementation(async () => noteSource)
-  commitNoteFrontmatter.mockReset().mockImplementation(async (_path, patch) => {
-    noteSource = upsertFrontmatter(noteSource, frontmatterPatchToYaml(patch))
-  })
+  readNoteSource.mockReset().mockImplementation(() => Promise.resolve(noteSource))
+  commitNoteFrontmatter.mockReset().mockImplementation((_path, patch) =>
+    Promise.try(() => {
+      noteSource = upsertFrontmatter(noteSource, frontmatterPatchToYaml(patch))
+    }),
+  )
 })
 
 function noteRow(path: string, isPrivate: boolean, title = 'A'): NoteRow {
@@ -111,7 +114,6 @@ function noteRow(path: string, isPrivate: boolean, title = 'A'): NoteRow {
     title,
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -328,7 +330,7 @@ describe('NoteActionsSection private toggle', () => {
   })
 
   it('restores the private label when a write fails', async () => {
-    commitNoteFrontmatter.mockRejectedValueOnce({ kind: 'io', message: 'disk on fire' })
+    commitNoteFrontmatter.mockRejectedValueOnce(new AppError('io', 'disk on fire'))
     const view = await renderSection('notes/a.md')
     await userEvent.click(view.getByRole('button', { name: /Make this note private/ }))
     await expect

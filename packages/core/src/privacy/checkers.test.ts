@@ -151,7 +151,6 @@ describe('cloudSafeSearchHits', () => {
     heading: null,
     isPrivate: false,
     assetTextHash: 'a'.repeat(64),
-    hasConflict: false,
   }
   const PRIVATE: RetrievalHit = {
     path: PRIVATE_PATH,
@@ -161,7 +160,6 @@ describe('cloudSafeSearchHits', () => {
     heading: null,
     isPrivate: true,
     assetTextHash: 'a'.repeat(64),
-    hasConflict: false,
   }
 
   it('drops private hits entirely: not even the title survives', async () => {
@@ -236,19 +234,21 @@ describe('cloudSafeSearchHits', () => {
     const other: RetrievalHit = { ...PUBLIC, path: 'notes/b.md', title: 'Other' }
     const checked: Array<{ path: string; source: string }> = []
 
-    const safe = await privacy.cloudSafeSearchHits([PUBLIC, other], async (hit, source) => {
+    const safe = await privacy.cloudSafeSearchHits([PUBLIC, other], (hit, source) => {
       checked.push({ path: hit.path, source })
       if (hit.path === 'notes/b.md') {
-        throw new Error('unreadable attachment')
+        return Promise.reject(new Error('unreadable attachment'))
       }
-      return false
+      return Promise.resolve(false)
     })
     expect(safe.map((hit) => hit.path)).toEqual(['notes/a.md'])
     expect(checked).toEqual([
       { path: 'notes/a.md', source: '# Public\n' },
       { path: 'notes/b.md', source: '# Other\n' },
     ])
-    await expect(privacy.cloudSafeSearchHits([PUBLIC], async () => true)).resolves.toEqual([])
+    await expect(
+      privacy.cloudSafeSearchHits([PUBLIC], () => Promise.resolve(true)),
+    ).resolves.toEqual([])
   })
 })
 
@@ -420,7 +420,6 @@ describe('local-only folders', () => {
         heading: null,
         isPrivate: false,
         assetTextHash: 'a'.repeat(64),
-        hasConflict: false,
       },
       {
         path: LOCAL_PATH,
@@ -430,7 +429,6 @@ describe('local-only folders', () => {
         heading: null,
         isPrivate: false,
         assetTextHash: 'a'.repeat(64),
-        hasConflict: false,
       },
     ]
 
@@ -468,7 +466,7 @@ describe('local-only folders', () => {
     const noteFile = createTestNoteFileService({ files: { 'notes/alias.md': '# Public\n' } })
     const privacy = createPrivacyService({
       noteFile: overrideNoteFileService(noteFile, {
-        readShareable: async () => ({ kind: 'localOnly' }),
+        readShareable: () => Promise.resolve({ kind: 'localOnly' }),
       }),
       graphSession: createTestGraphSessionService({ graph: { generation: 1 } }),
     })

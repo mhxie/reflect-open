@@ -11,7 +11,6 @@ export type NoteStateKind = 'editable' | 'private' | 'local-only' | 'read-only' 
 export interface NoteStateInput {
   readonly path: string
   readonly isPrivate: boolean
-  readonly hasConflict?: boolean
   readonly readOnly?: boolean
   readonly protected?: boolean
 }
@@ -34,7 +33,7 @@ export interface NoteState {
  */
 export function deriveNoteState(localOnly: LocalOnlyFolders, input: NoteStateInput): NoteState {
   const isLocalOnly = isLocalOnlyPath(localOnly, input.path)
-  const isProtected = input.protected === true || input.hasConflict === true
+  const isProtected = input.protected === true
   const isReadOnly =
     isProtected || input.readOnly === true || isLocalOnlyReadOnlyPath(localOnly, input.path)
   const isPrivate = input.isPrivate || isLocalOnly

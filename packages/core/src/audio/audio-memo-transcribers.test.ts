@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { TRANSCRIPTION_MAX_SEGMENT_BYTES } from '../ai/provider-config.ts'
 import { isTranscriptionRejected } from '../ai/transcribe-http.ts'
-import { errorMessage, ReflectError } from '../errors.ts'
+import { AppError, errorMessage } from '../errors.ts'
 import {
   createTestAssetStoreService,
   createTestLocalTranscriptionService,
@@ -111,7 +111,7 @@ describe('localSegmentTranscriber', () => {
   })
 
   it('leaves any other failure retryable', async () => {
-    const failure = new ReflectError('io', 'the recording couldn’t be read')
+    const failure = new AppError('io', 'the recording couldn’t be read')
     const localTranscription = createTestLocalTranscriptionService()
     vi.spyOn(localTranscription, 'transcribe').mockRejectedValue(failure)
     const transcriber = localSegmentTranscriber(localTranscription, {

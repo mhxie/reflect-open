@@ -38,7 +38,6 @@ export {
   type GitRepositoryService,
 } from './sync/git-repository-service.ts'
 export { isICloudRoot } from './sync/icloud-sync-service.ts'
-export { type ConflictResolutionService } from './sync/conflict-resolution-service.ts'
 export { type GistPublishService } from './sync/gist-publish-service.ts'
 export { isMobilePlatform, type AppPlatform } from './ports/platform-facts.ts'
 export { createSystemClock, type ClockService, type TimerHandle } from './ports/clock-service.ts'
@@ -233,7 +232,7 @@ export {
   type SemanticIndexProgress,
   type SemanticSearchService,
 } from './embeddings/semantic-search-service.ts'
-export { errorMessage, toAppError, ReflectError, type AppError } from './errors.ts'
+export { errorMessage, isAppError, toAppError, AppError, type AppErrorKind } from './errors.ts'
 export {
   dailyPath,
   notePath,
@@ -470,12 +469,7 @@ export {
 } from './link-preview/link-preview-service.ts'
 export { parseLinkPreviewMeta } from './link-preview/metadata.ts'
 export { cloudSafeLinkHref, notePrivate } from './privacy/checkers.ts'
-export {
-  isDeviceFlowConfigured,
-  suggestRepoName,
-  type GithubAuth,
-  type GithubUser,
-} from './sync/index.ts'
+export { suggestRepoName, type GithubAuth, type GithubUser } from './sync/index.ts'
 export {
   isPinned,
   pinnedOrder,
@@ -488,23 +482,16 @@ export {
   unresolved,
   splitFrontmatter,
   upsertFrontmatter,
-  detectConflictMarkers,
-  parseConflictMarkers,
-  resolveConflictMarkers,
-  type ConflictSide,
   displayNoteTitle,
   foldKey,
   foldTag,
   foldFallbackTitleKey,
   isTagName,
-  // Fork: character counts, conflict labels, and title presentation.
+  // Fork: character counts and title presentation.
   countDisplayChars,
-  conflictMarkerBlockCount,
-  conflictMarkerLabels,
   noteTitlePresentation,
   parseFrontmatter,
   type NoteTitleMetadata,
-  type ConflictResolution,
   type Frontmatter,
   type Span,
   type Heading,
@@ -526,7 +513,6 @@ export {
   type BacklinkContextPage,
   type BacklinkSourceCursor,
   type SnippetTask,
-  type ConflictedNote,
   type DuplicateIdGroup,
   type NoteRow,
   type NoteListEntry,

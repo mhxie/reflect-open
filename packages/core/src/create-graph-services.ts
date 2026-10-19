@@ -189,7 +189,12 @@ export function createGraphServices(
     disposers.push(attachments.watchCatalog(generation))
 
     if (lifecycles.backup) {
-      const sessionBackup = create.backup(deps.backup, { generation, indexGeneration, localOnly })
+      const sessionBackup = create.backup(deps.backup, {
+        root,
+        generation,
+        indexGeneration,
+        localOnly,
+      })
       backup = sessionBackup
       void sessionBackup.start()
       disposers.push(() => {

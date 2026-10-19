@@ -20,7 +20,7 @@ const EMPTY_ASSET_TEXT_HASH = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca
 
 function startOfLocalDay(date: string): number {
   const [year, month, day] = date.split('-').map(Number)
-  return new Date(year!, month! - 1, day!).getTime()
+  return new Date(year!, month! - 1, day).getTime()
 }
 
 function setup(notes: readonly TestNote[]): {
@@ -63,7 +63,6 @@ describe('searchWithFilters', () => {
         summary: '',
         mtime: 2000,
         isPinned: false,
-        hasConflict: false,
         isPrivate: false,
         hasDeviceOnlyContent: false,
         assetTextHash: EMPTY_ASSET_TEXT_HASH,
@@ -125,7 +124,6 @@ describe('searchWithFilters', () => {
         summary: '',
         mtime: startOfLocalDay('2026-01-02'),
         isPinned: true,
-        hasConflict: false,
         isPrivate: false,
         hasDeviceOnlyContent: false,
         assetTextHash: EMPTY_ASSET_TEXT_HASH,
@@ -433,13 +431,12 @@ describe('searchWithFilters', () => {
   })
 
   it.each(['#Work', '', 'work'])(
-    'preserves Private and conflict metadata for %j using one bulk query',
+    'preserves Private metadata for %j using one bulk query',
     async (query) => {
       const { database, search } = setup([
         {
           path: 'notes/work.md',
-          markdown:
-            '---\nprivate: true\n---\n# Work\nWeekly agenda. #work\n<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n',
+          markdown: '---\nprivate: true\n---\n# Work\nWeekly agenda. #work\n',
           mtime: 2000,
         },
       ])
@@ -447,11 +444,10 @@ describe('searchWithFilters', () => {
       const hits = await search.searchWithFilters(parseSearchQuery(query))
 
       expect(hits).toHaveLength(1)
-      expect(hits[0]).toMatchObject({ path: 'notes/work.md', isPrivate: true, hasConflict: true })
+      expect(hits[0]).toMatchObject({ path: 'notes/work.md', isPrivate: true })
       const queries = database.getQueries()
       expect(queries).toHaveLength(1)
       expect(queries[0]?.sql).toContain('"notes"."is_private"')
-      expect(queries[0]?.sql).toContain('"notes"."has_conflict"')
     },
   )
 })

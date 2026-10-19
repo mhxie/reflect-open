@@ -264,12 +264,14 @@ mod tests {
         };
         assert_eq!(watchdog.tick(changed), vec![Action::Rebuild]);
         watchdog.tick(speaking(48_000));
-        assert!(watchdog
-            .tick(Observation {
-                devices_changed: true,
-                ..speaking(96_000)
-            })
-            .is_empty());
+        assert!(
+            watchdog
+                .tick(Observation {
+                    devices_changed: true,
+                    ..speaking(96_000)
+                })
+                .is_empty()
+        );
         for _ in 0..3 {
             watchdog.tick(speaking(96_000));
         }

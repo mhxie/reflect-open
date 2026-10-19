@@ -1,6 +1,6 @@
 import type { HostEmbed } from '@meowdown/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ReflectError, type PdfPageSize } from '@reflect/core'
+import { AppError, type PdfPageSize } from '@reflect/core'
 import {
   createTestAttachmentService,
   createTestGraphSessionService,
@@ -95,7 +95,7 @@ describe('createPdfEmbedResolver', () => {
 
   it('shows a card with nothing to open for a missing file', async () => {
     const attachments = attachmentsOver([])
-    vi.spyOn(attachments, 'pdfInfo').mockRejectedValue(new ReflectError('notFound', 'not found'))
+    vi.spyOn(attachments, 'pdfInfo').mockRejectedValue(new AppError('notFound', 'not found'))
     const embed = await resolve(attachments, 'assets/gone.pdf')
 
     expect(embed?.element.dataset['testid']).toBe('pdf-embed-error')
@@ -106,7 +106,7 @@ describe('createPdfEmbedResolver', () => {
   it('offers to open a locked PDF in the default app', async () => {
     const attachments = attachmentsOver(['assets/secret.pdf'])
     vi.spyOn(attachments, 'pdfInfo').mockRejectedValue(
-      new ReflectError('locked', 'the PDF is password-protected'),
+      new AppError('locked', 'the PDF is password-protected'),
     )
     const openAsset = vi.fn()
     const embed = await resolve(attachments, 'assets/secret.pdf', { openAsset })
@@ -119,7 +119,7 @@ describe('createPdfEmbedResolver', () => {
   it('shows a card with no open action on iOS, where previews are unsupported', async () => {
     const attachments = attachmentsOver(['assets/paper.pdf'])
     vi.spyOn(attachments, 'pdfInfo').mockRejectedValue(
-      new ReflectError('unsupported', 'PDF previews are only available on macOS'),
+      new AppError('unsupported', 'PDF previews are only available on macOS'),
     )
     const embed = await resolve(attachments, 'assets/paper.pdf', { mobileApp: true })
 
@@ -130,7 +130,7 @@ describe('createPdfEmbedResolver', () => {
   it('explains a PDF past the size limit on the Mac and still offers to open it', async () => {
     const attachments = attachmentsOver(['assets/scan.pdf'])
     vi.spyOn(attachments, 'pdfInfo').mockRejectedValue(
-      new ReflectError('unsupported', 'PDF previews are limited to 200 MB; this file is 312 MB'),
+      new AppError('unsupported', 'PDF previews are limited to 200 MB; this file is 312 MB'),
     )
     const openAsset = vi.fn()
     const embed = await resolve(attachments, 'assets/scan.pdf', { openAsset })

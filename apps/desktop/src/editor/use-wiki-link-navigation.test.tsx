@@ -1,3 +1,6 @@
+import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
+import { useRouter, type RouterNavigate } from '@/routing/router.tsx'
+import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import {
   createTestAppServices,
   createTestOperationsService,
@@ -10,28 +13,39 @@ import {
   createTestLoggerService,
   type TestOpenGraph,
 } from '@reflect/core/testing'
+import type { MaybePromise } from '@reflect/utils'
+import { createRef, useLayoutEffect, type ReactNode, type RefObject } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
-import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { useWikiLinkNavigation } from './use-wiki-link-navigation.ts'
+import { useWikiLinkNavigation, type WikiLinkNavigation } from './use-wiki-link-navigation.ts'
 
 const resolveWikiTarget = vi.fn()
 const resolveExistingWikiTarget = vi.fn()
 const resolveOrCreateNoteWithTitle = vi.fn()
 // Receives the `reflect://` link of every note window a test opens.
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 const logger = createTestLoggerService()
 
-let lastHandler:
-  | ((options: { target: string; openInNewWindow: boolean; peek?: boolean }) => void)
-  | null = null
-let navigate: ReturnType<typeof useRouter>['navigate'] | null = null
+const lastHandlerRef: RefObject<WikiLinkNavigation | null> = createRef()
+const navigateRef: RefObject<RouterNavigate | null> = createRef()
 
 function Host({ readOnly = false }: { readOnly?: boolean }): ReactNode {
-  lastHandler = useWikiLinkNavigation({ readOnly })
-  navigate = useRouter().navigate
+  const lastHandler = useWikiLinkNavigation({ readOnly })
+  const navigate = useRouter().navigate
+
+  useLayoutEffect(() => {
+    lastHandlerRef.current = lastHandler
+    return () => {
+      lastHandlerRef.current = null
+    }
+  }, [lastHandler])
+
+  useLayoutEffect(() => {
+    navigateRef.current = navigate
+    return () => {
+      navigateRef.current = null
+    }
+  }, [navigate])
+
   return null
 }
 
@@ -77,7 +91,7 @@ function renderWithLinkNavigation(ui: ReactNode, graph?: TestOpenGraph | null) {
   return renderInApp(ui, {
     app,
     appServices: { linkNavigation },
-    ...(graph === undefined ? {} : { graph }),
+    graph,
   })
 }
 
@@ -103,8 +117,8 @@ beforeEach(() => {
   resolveWikiTarget.mockReset()
   resolveExistingWikiTarget.mockReset()
   resolveOrCreateNoteWithTitle.mockReset()
-  lastHandler = null
-  navigate = null
+  lastHandlerRef.current = null
+  navigateRef.current = null
 })
 
 describe('useWikiLinkNavigation', () => {
@@ -118,7 +132,7 @@ describe('useWikiLinkNavigation', () => {
       </PeekProvider>,
     )
 
-    lastHandler?.({ target: 'Target', openInNewWindow: false, peek: true })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: false, peek: true })
 
     await vi.waitFor(() =>
       expect(view.getByTestId('peek').element().textContent).toContain('notes/target.md'),
@@ -130,7 +144,7 @@ describe('useWikiLinkNavigation', () => {
     resolveOrCreateNoteWithTitle.mockResolvedValue({ kind: 'resolved', path: 'wiki/Anchoring.md' })
     const view = await renderHost()
 
-    lastHandler?.({ target: 'Anchoring#^c3', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Anchoring#^c3', openInNewWindow: false })
 
     await vi.waitFor(() => expect(currentRoute(view)).toContain('wiki/Anchoring.md'))
     expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Anchoring', 1)
@@ -147,11 +161,11 @@ describe('useWikiLinkNavigation', () => {
     )
     const peeked = (): string => view.getByTestId('peek').element().textContent ?? ''
 
-    lastHandler?.({ target: 'Anchoring#^c3', openInNewWindow: false, peek: true })
+    lastHandlerRef.current?.({ target: 'Anchoring#^c3', openInNewWindow: false, peek: true })
     await vi.waitFor(() => expect(peeked()).toContain('"fragment":"^c3"'))
     expect(peeked()).toContain('"path":"wiki/Anchoring.md"')
 
-    lastHandler?.({ target: 'Anchoring#^c5', openInNewWindow: false, peek: true })
+    lastHandlerRef.current?.({ target: 'Anchoring#^c5', openInNewWindow: false, peek: true })
     await vi.waitFor(() => expect(peeked()).toContain('"fragment":"^c5"'))
   })
 
@@ -161,7 +175,7 @@ describe('useWikiLinkNavigation', () => {
       path: 'notes/target.md',
     })
     const view = await renderHost()
-    lastHandler?.({ target: 'Target', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: false })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('notes/target.md'))
     expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Target', 1)
     expect(resolveWikiTarget).not.toHaveBeenCalled()
@@ -173,7 +187,7 @@ describe('useWikiLinkNavigation', () => {
       path: 'notes/target.md',
     })
     const view = await renderHost()
-    lastHandler?.({ target: 'Target', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: false })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('notes/target.md'))
     expect(view.getByTestId('route').element().getAttribute('data-focus')).toBe('false')
   })
@@ -181,7 +195,7 @@ describe('useWikiLinkNavigation', () => {
   it('treats an unresolved ISO date as a daily target, without a focus intent', async () => {
     resolveExistingWikiTarget.mockResolvedValue({ kind: 'missing' })
     const view = await renderHost()
-    lastHandler?.({ target: '2026-06-09', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: '2026-06-09', openInNewWindow: false })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('"daily"'))
     expect(currentRoute(view)).toContain('2026-06-09')
     expect(view.getByTestId('route').element().getAttribute('data-focus')).toBe('false')
@@ -197,7 +211,7 @@ describe('useWikiLinkNavigation', () => {
     })
     const view = await renderHost()
 
-    lastHandler?.({ target: '2026-06-09', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: '2026-06-09', openInNewWindow: false })
 
     await vi.waitFor(() => expect(currentRoute(view)).toContain('"note"'))
     expect(currentRoute(view)).toContain('notes/2026-06-09.md')
@@ -207,7 +221,7 @@ describe('useWikiLinkNavigation', () => {
     resolveWikiTarget.mockResolvedValue({ kind: 'resolved', ref: 'notes/2026-06-09.md' })
     const view = await renderHost({ readOnly: true })
 
-    lastHandler?.({ target: '2026-06-09', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: '2026-06-09', openInNewWindow: false })
 
     await vi.waitFor(() => expect(currentRoute(view)).toContain('notes/2026-06-09.md'))
     expect(resolveWikiTarget).toHaveBeenCalledWith('2026-06-09')
@@ -221,7 +235,7 @@ describe('useWikiLinkNavigation', () => {
     })
     const view = await renderHost()
 
-    lastHandler?.({ target: '2026-06-09', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: '2026-06-09', openInNewWindow: false })
 
     await vi.waitFor(() =>
       expect(operations.snapshot()).toContainEqual(expect.objectContaining({ status: 'failed' })),
@@ -237,7 +251,7 @@ describe('useWikiLinkNavigation', () => {
     })
     const view = await renderHost()
 
-    lastHandler?.({ target: '2026-06-09', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: '2026-06-09', openInNewWindow: false })
 
     await vi.waitFor(() =>
       expect(operations.snapshot()).toContainEqual(
@@ -257,7 +271,7 @@ describe('useWikiLinkNavigation', () => {
     })
     const view = await renderHost()
 
-    lastHandler?.({ target: 'Project log', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Project log', openInNewWindow: false })
 
     await vi.waitFor(() => expect(currentRoute(view)).toContain('"daily"'))
     expect(currentRoute(view)).toContain('2026-06-09')
@@ -269,7 +283,7 @@ describe('useWikiLinkNavigation', () => {
       path: 'notes/created.md',
     })
     const view = await renderHost({ graph: { generation: 7 } })
-    lastHandler?.({ target: 'Brand New', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Brand New', openInNewWindow: false })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('notes/created.md'))
     expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Brand New', 7)
     expect(view.getByTestId('route').element().getAttribute('data-focus')).toBe('false')
@@ -278,7 +292,7 @@ describe('useWikiLinkNavigation', () => {
   it('does not create when read-only', async () => {
     resolveWikiTarget.mockResolvedValue({ kind: 'unresolved', text: 'Brand New' })
     const view = await renderHost({ readOnly: true })
-    lastHandler?.({ target: 'Brand New', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Brand New', openInNewWindow: false })
     await vi.waitFor(() => expect(resolveWikiTarget).toHaveBeenCalled())
     expect(resolveOrCreateNoteWithTitle).not.toHaveBeenCalled()
     expect(currentRoute(view)).toContain('"today"')
@@ -287,7 +301,7 @@ describe('useWikiLinkNavigation', () => {
   it('does not create with no graph open', async () => {
     resolveWikiTarget.mockResolvedValue({ kind: 'unresolved', text: 'Brand New' })
     const view = await renderHost({ graph: null })
-    lastHandler?.({ target: 'Brand New', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Brand New', openInNewWindow: false })
     await vi.waitFor(() => expect(resolveWikiTarget).toHaveBeenCalled())
     expect(resolveOrCreateNoteWithTitle).not.toHaveBeenCalled()
     expect(currentRoute(view)).toContain('"today"')
@@ -295,7 +309,7 @@ describe('useWikiLinkNavigation', () => {
 
   it('ignores an unresolved empty target', async () => {
     const view = await renderHost()
-    lastHandler?.({ target: '   ', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: '   ', openInNewWindow: false })
     await new Promise((tick) => setTimeout(tick, 0))
     expect(resolveWikiTarget).not.toHaveBeenCalled()
     expect(resolveOrCreateNoteWithTitle).not.toHaveBeenCalled()
@@ -308,7 +322,7 @@ describe('useWikiLinkNavigation', () => {
       path: 'notes/target.md',
     })
     const view = await renderHost()
-    lastHandler?.({ target: 'Target', openInNewWindow: true })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: true })
     await vi.waitFor(() =>
       expect(openNoteWindow).toHaveBeenCalledWith('reflect://note/notes%2Ftarget.md'),
     )
@@ -321,7 +335,7 @@ describe('useWikiLinkNavigation', () => {
       path: 'notes/created.md',
     })
     const view = await renderHost({ graph: { generation: 7 } })
-    lastHandler?.({ target: 'Brand New', openInNewWindow: true })
+    lastHandlerRef.current?.({ target: 'Brand New', openInNewWindow: true })
     await vi.waitFor(() =>
       expect(openNoteWindow).toHaveBeenCalledWith('reflect://note/notes%2Fcreated.md'),
     )
@@ -335,7 +349,7 @@ describe('useWikiLinkNavigation', () => {
       paths: ['notes/business-ideas.md', 'notes/business-ideas-2.md'],
     })
     const view = await renderHost({ graph: { generation: 7 } })
-    lastHandler?.({ target: 'Business ideas', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Business ideas', openInNewWindow: false })
     await vi.waitFor(() => expect(resolveOrCreateNoteWithTitle).toHaveBeenCalled())
     expect(currentRoute(view)).toContain('"today"')
     expect(resolveWikiTarget).not.toHaveBeenCalled()
@@ -353,7 +367,7 @@ describe('useWikiLinkNavigation', () => {
     })
     const view = await renderHost({ graph: { generation: 7 } })
 
-    lastHandler?.({ target: 'Business ideas', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Business ideas', openInNewWindow: false })
 
     await vi.waitFor(() =>
       expect(operations.snapshot()).toContainEqual(
@@ -372,7 +386,7 @@ describe('useWikiLinkNavigation', () => {
     resolveOrCreateNoteWithTitle.mockRejectedValue(failure)
     const view = await renderHost()
 
-    lastHandler?.({ target: 'Business ideas', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Business ideas', openInNewWindow: false })
 
     await vi.waitFor(() =>
       expect(operations.findByLabel('Opening link')).toMatchObject({
@@ -394,7 +408,7 @@ describe('useWikiLinkNavigation', () => {
     })
     openNoteWindow.mockResolvedValue(false)
     const view = await renderHost()
-    lastHandler?.({ target: 'Target', openInNewWindow: true })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: true })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('notes/target.md'))
   })
 
@@ -407,7 +421,7 @@ describe('useWikiLinkNavigation', () => {
         <RouteProbe key="probe" />
       </>,
     )
-    lastHandler?.({ target: 'Target', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: false })
     await vi.waitFor(() => expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Target', 1))
     // Unmount only the host; the router (and probe) live on, so a navigate
     // slipping through the guard would be visible as a route change.
@@ -431,9 +445,9 @@ describe('useWikiLinkNavigation', () => {
     })
     const view = await renderHost()
 
-    lastHandler?.({ target: 'Older', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Older', openInNewWindow: false })
     await vi.waitFor(() => expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Older', 1))
-    lastHandler?.({ target: 'Newer', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Newer', openInNewWindow: false })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('notes/newer.md'))
     pendingOlder.resolve({ kind: 'resolved', path: 'notes/older.md' })
     await new Promise((tick) => setTimeout(tick, 0))
@@ -447,9 +461,9 @@ describe('useWikiLinkNavigation', () => {
     resolveOrCreateNoteWithTitle.mockReturnValue(pendingResolution.promise)
     const view = await renderHost()
 
-    lastHandler?.({ target: 'Target', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Target', openInNewWindow: false })
     await vi.waitFor(() => expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Target', 1))
-    navigate?.({ kind: 'settings' })
+    navigateRef.current?.({ kind: 'settings' })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('"settings"'))
 
     pendingResolution.resolve({ kind: 'resolved', path: 'notes/target.md' })
@@ -464,11 +478,11 @@ describe('useWikiLinkNavigation', () => {
     resolveOrCreateNoteWithTitle.mockReturnValue(pendingCreation.promise)
     const view = await renderHost({ graph: { generation: 7 } })
 
-    lastHandler?.({ target: 'Brand New', openInNewWindow: false })
+    lastHandlerRef.current?.({ target: 'Brand New', openInNewWindow: false })
     await vi.waitFor(() =>
       expect(resolveOrCreateNoteWithTitle).toHaveBeenCalledWith('Brand New', 7),
     )
-    navigate?.({ kind: 'settings' })
+    navigateRef.current?.({ kind: 'settings' })
     await vi.waitFor(() => expect(currentRoute(view)).toContain('"settings"'))
 
     pendingCreation.resolve({ kind: 'created', path: 'notes/created.md' })

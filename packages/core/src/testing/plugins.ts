@@ -1,4 +1,4 @@
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type { AppStoreService } from '../ipc/app-store-service.ts'
 import type { IapProduct, IapService } from '../ipc/iap-service.ts'
@@ -24,7 +24,7 @@ class TestHapticsServiceImpl implements TestHapticsService {
   impactLight(): Promise<void> {
     this.#count += 1
     if (this.#fail) {
-      return Promise.reject(new ReflectError('io', 'test haptics: no haptic engine'))
+      return Promise.reject(new AppError('io', 'test haptics: no haptic engine'))
     }
     return Promise.resolve()
   }
@@ -68,10 +68,12 @@ class TestIapServiceImpl implements TestIapService {
     this.#owned = new Set(options?.owned ?? [])
   }
 
-  async getProducts(productIds: string[]): Promise<IapProduct[]> {
-    return this.#products
-      .filter((product) => productIds.includes(product.productId))
-      .map((product) => ({ ...product }))
+  getProducts(productIds: string[]): Promise<IapProduct[]> {
+    return Promise.resolve(
+      this.#products
+        .filter((product) => productIds.includes(product.productId))
+        .map((product) => ({ ...product })),
+    )
   }
 
   purchase(productId: string): Promise<void> {
@@ -80,8 +82,8 @@ class TestIapServiceImpl implements TestIapService {
     return Promise.resolve()
   }
 
-  async isOwned(productId: string): Promise<boolean> {
-    return this.#owned.has(productId)
+  isOwned(productId: string): Promise<boolean> {
+    return Promise.resolve(this.#owned.has(productId))
   }
 
   subscribePurchaseUpdated(listener: () => void): Unlisten {
@@ -133,19 +135,19 @@ class TestAppStoreServiceImpl implements TestAppStoreService {
     this.#environment = options?.environment ?? 'Production'
   }
 
-  environment(): Promise<string> {
+  environment(): string {
     this.#log.push('environment')
-    return Promise.resolve(this.#environment)
+    return this.#environment
   }
 
-  sync(): Promise<void> {
+  sync(): void {
     this.#log.push('sync')
-    return Promise.resolve()
+    return
   }
 
-  presentOfferCodeRedeemSheet(): Promise<void> {
+  presentOfferCodeRedeemSheet(): void {
     this.#log.push('presentOfferCodeRedeemSheet')
-    return Promise.resolve()
+    return
   }
 
   calls(): readonly AppStoreCall[] {

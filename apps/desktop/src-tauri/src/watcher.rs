@@ -37,28 +37,20 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
-use file_id::{get_file_id, FileId};
+use file_id::{FileId, get_file_id};
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, FileIdCache};
+use notify_debouncer_full::{DebounceEventResult, Debouncer, FileIdCache, new_debouncer_opt};
 use reflect_graph_paths::{
-    classify, evicted_logical_path, eviction_placeholder, has_pruned_component, is_pruned_dir_name,
-    to_slash_lossy, wire_path, GraphPathKind, LocalOnlyFolders, LocalOnlyLink,
+    GraphPathKind, LocalOnlyFolders, LocalOnlyLink, classify, evicted_logical_path,
+    eviction_placeholder, has_pruned_component, is_pruned_dir_name, to_slash_lossy, wire_path,
 };
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
 use crate::fs::GraphState;
-
-/// The Tauri event name carrying batched {@link FileChange}s to the frontend.
-const CHANGE_EVENT: &str = "index:changed";
-
-/// The coarse dirty signal: a visible directory was created, renamed, or
-/// removed (or the platform demanded a rescan), and its descendants were
-/// never enumerated per file. Carries no payload — the frontend answers with
-/// one full reconcile pass.
-pub(crate) const RECONCILE_EVENT: &str = "index:reconcile";
+use reflect_types::events::{INDEX_CHANGED, INDEX_RECONCILE};
+use reflect_types::{ChangeKind, FileChange};
 
 /// Holds the active watch; dropping it stops the background watch thread.
 #[derive(Default)]
@@ -246,22 +238,6 @@ impl FileIdCache for PrunedFileIdMap {
     }
 }
 
-/// A debounced change to a tracked file, sent to the frontend.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileChange {
-    /// Graph-relative path, forward-slashed.
-    pub path: String,
-    /// `"upsert"` (created/modified) or `"remove"` (deleted).
-    pub kind: String,
-    /// Last-modified time in epoch milliseconds, set for upserts. The frontend
-    /// stamps `notes.mtime` from this — without it, watcher-indexed rows would
-    /// carry no real timestamp (and reconcile would never repair them, since it
-    /// is content-hash gated).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modified_ms: Option<u64>,
-}
-
 /// What one debounced batch amounts to: precise per-file changes, and/or the
 /// coarse signal that a full reconcile is needed.
 #[derive(Debug, Default, PartialEq)]
@@ -328,7 +304,7 @@ fn collect_changes(paths: &[PathBuf], root: &Path) -> BatchEffects {
                 // one must leave the index rather than be read through.
                 Ok(meta) if meta.file_type().is_symlink() => FileChange {
                     path: rel.clone(),
-                    kind: "remove".to_string(),
+                    kind: ChangeKind::Remove,
                     modified_ms: None,
                 },
                 // A directory took a tracked file's name: membership changed
@@ -345,7 +321,7 @@ fn collect_changes(paths: &[PathBuf], root: &Path) -> BatchEffects {
                 Ok(meta) if crate::fs::is_dataless(&meta) => continue,
                 Ok(meta) => FileChange {
                     path: rel.clone(),
-                    kind: "upsert".to_string(),
+                    kind: ChangeKind::Upsert,
                     modified_ms: crate::fs::modified_ms(&meta),
                 },
                 Err(_) => {
@@ -360,7 +336,7 @@ fn collect_changes(paths: &[PathBuf], root: &Path) -> BatchEffects {
                     }
                     FileChange {
                         path: rel.clone(),
-                        kind: "remove".to_string(),
+                        kind: ChangeKind::Remove,
                         modified_ms: None,
                     }
                 }
@@ -452,16 +428,18 @@ fn run_coalesced(gate: Arc<RefreshGate>, work: impl Fn() + Send + 'static) {
     if gate.running.swap(true, Ordering::SeqCst) {
         return; // the running thread sees the request and goes again
     }
-    std::thread::spawn(move || loop {
-        while gate.requested.swap(false, Ordering::SeqCst) {
-            work();
-        }
-        gate.running.store(false, Ordering::SeqCst);
-        // A request landing between the last check and the store above saw
-        // the gate still running: take the gate back for it, unless another
-        // thread already has.
-        if !gate.requested.load(Ordering::SeqCst) || gate.running.swap(true, Ordering::SeqCst) {
-            break;
+    std::thread::spawn(move || {
+        loop {
+            while gate.requested.swap(false, Ordering::SeqCst) {
+                work();
+            }
+            gate.running.store(false, Ordering::SeqCst);
+            // A request landing between the last check and the store above saw
+            // the gate still running: take the gate back for it, unless another
+            // thread already has.
+            if !gate.requested.load(Ordering::SeqCst) || gate.running.swap(true, Ordering::SeqCst) {
+                break;
+            }
         }
     });
 }
@@ -584,10 +562,10 @@ pub fn watch_start(
                 );
             }
             if !effects.changes.is_empty() {
-                let _ = handler_app.emit(CHANGE_EVENT, &effects.changes);
+                let _ = handler_app.emit(INDEX_CHANGED, &effects.changes);
             }
             if effects.reconcile {
-                let _ = handler_app.emit(RECONCILE_EVENT, ());
+                let _ = handler_app.emit(INDEX_RECONCILE, ());
             }
             if needs_link_refresh(&routed, effects.reconcile, follows_links) {
                 request_link_refresh(handler_app.clone(), session, Arc::clone(&handler_refresh));
@@ -760,7 +738,7 @@ mod tests {
             effects.changes,
             vec![FileChange {
                 path: "notes/a.md".to_string(),
-                kind: "remove".to_string(),
+                kind: ChangeKind::Remove,
                 modified_ms: None,
             }]
         );
@@ -778,7 +756,7 @@ mod tests {
         let effects = collect_changes(&[note], root);
         assert_eq!(effects.changes.len(), 1);
         assert_eq!(effects.changes[0].path, "notes/a.md");
-        assert_eq!(effects.changes[0].kind, "upsert");
+        assert_eq!(effects.changes[0].kind, ChangeKind::Upsert);
         // A real timestamp, not epoch zero — All Notes sorts and labels by it.
         assert!(effects.changes[0].modified_ms.is_some_and(|ms| ms > 0));
         assert!(!effects.reconcile);
@@ -858,7 +836,7 @@ mod tests {
 
         let effects = collect_changes(&[root.join("notes/a.md")], root);
         assert_eq!(effects.changes.len(), 1);
-        assert_eq!(effects.changes[0].kind, "remove");
+        assert_eq!(effects.changes[0].kind, ChangeKind::Remove);
     }
 
     #[test]
@@ -914,7 +892,7 @@ mod tests {
 
         let effects = collect_changes(&[root.join("notes/a.md")], root);
         assert_eq!(effects.changes.len(), 1);
-        assert_eq!(effects.changes[0].kind, "remove");
+        assert_eq!(effects.changes[0].kind, ChangeKind::Remove);
     }
 
     #[test]
@@ -930,7 +908,7 @@ mod tests {
         let effects = collect_changes(&[root.join("notes/.a.md.icloud")], root);
         assert_eq!(effects.changes.len(), 1);
         assert_eq!(effects.changes[0].path, "notes/a.md");
-        assert_eq!(effects.changes[0].kind, "upsert");
+        assert_eq!(effects.changes[0].kind, ChangeKind::Upsert);
     }
 
     #[test]
@@ -1044,7 +1022,7 @@ mod tests {
         let effects = collect_changes(&routed.paths[..1], &root);
         assert_eq!(effects.changes.len(), 1);
         assert_eq!(effects.changes[0].path, "finance/secure/bank.md");
-        assert_eq!(effects.changes[0].kind, "upsert");
+        assert_eq!(effects.changes[0].kind, ChangeKind::Upsert);
         assert!(effects.changes[0].modified_ms.is_some_and(|ms| ms > 0));
     }
 
@@ -1267,10 +1245,12 @@ mod tests {
         let mut cache = PrunedFileIdMap::with_extra_roots(root, extra);
         cache.add_path(&target, RecursiveMode::Recursive);
         assert!(cache.paths.contains_key(&target.join("bank.md")));
-        assert!(!cache
-            .paths
-            .keys()
-            .any(|path| path.starts_with(target.join(".cache"))));
+        assert!(
+            !cache
+                .paths
+                .keys()
+                .any(|path| path.starts_with(target.join(".cache")))
+        );
     }
 
     #[test]

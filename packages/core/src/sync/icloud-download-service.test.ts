@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { createTestClockService, type TestClockService } from '../testing/clock.ts'
 import { createTestLoggerService, type TestLoggerService } from '../testing/logger.ts'
 import { createTestActivityPort, type TestActivityPort } from '../testing/shell.ts'
@@ -214,9 +214,9 @@ describe('createICloudDownloadService', () => {
   it('a failed nudge never starts the bulk download', async () => {
     // `pending` defaulting to 0 on error must not read as "notes are in".
     const requested: string[] = []
-    vi.spyOn(icloud, 'downloadPending').mockImplementation(async (_root, scope) => {
+    vi.spyOn(icloud, 'downloadPending').mockImplementation((_root, scope) => {
       requested.push(scope)
-      throw new ReflectError('io', 'container hiccup')
+      return Promise.reject(new AppError('io', 'container hiccup'))
     })
     start()
     await flush()
@@ -229,7 +229,7 @@ describe('createICloudDownloadService', () => {
 
   it('a failed poll is logged and reconciles what landed', async () => {
     icloud.setPendingCount(3)
-    vi.spyOn(icloud, 'pendingCount').mockRejectedValue(new ReflectError('io', 'container hiccup'))
+    vi.spyOn(icloud, 'pendingCount').mockRejectedValue(new AppError('io', 'container hiccup'))
     start()
     await flush()
     await clock.advance(1000)

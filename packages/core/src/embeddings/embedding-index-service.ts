@@ -319,7 +319,7 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
       }
       return false
     })
-    const toEmbed = passages.filter((_, i) => !skip[i])
+    const toEmbed = passages.filter((_, i) => skip[i] !== true)
     const vectors: number[][] = []
     // One call per few chunks: the model serves one call at a time, so a search
     // typed during a long note's re-embed waits for a batch, not the whole note.
@@ -355,7 +355,7 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
       isPrivate,
       // A non-skipped chunk always has a freshly-embedded vector: `vectors` is
       // exactly as long as the non-skipped chunks, consumed in order here.
-      vector: skip[i] ? null : vectors[vectorAt++]!,
+      vector: skip[i] === true ? null : vectors[vectorAt++]!,
     }))
     await this.#applyChunks(path, payload, generation)
     return toEmbed.length

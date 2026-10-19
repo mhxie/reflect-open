@@ -29,7 +29,7 @@ import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { toast } from '@/components/ui/toast.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
-import { actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteStatusBar } from './note-status-bar.tsx'
 
@@ -138,7 +138,9 @@ async function renderBar(initialRoute: Route, options: BarOptions = {}) {
   app.clock.setToday('2026-10-03')
   app.gitRepository.onNoteVersion(() => 'abc123def4')
   const mtime = options.mtime ?? null
-  vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(async () => mtime ?? undefined)
+  vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(() =>
+    Promise.resolve(mtime ?? undefined),
+  )
   reveal = vi.spyOn(app.attachments, 'reveal').mockResolvedValue()
   togglePrivate = vi
     .spyOn(app.noteActions, 'togglePrivate')
@@ -253,33 +255,6 @@ describe('NoteStatusBar', () => {
     expect(reveal).not.toHaveBeenCalled()
   })
 
-  it('offers both conflict choices when an external change blocks save recovery', async () => {
-    const keepMine = vi.fn()
-    const loadTheirs = vi.fn()
-    publishStatus('notes/local.md', {
-      characters: 42,
-      selectedCharacters: 0,
-      editedAt: null,
-      state: { ...states.protected, isPrivate: true, isLocalOnly: true },
-      protection: {
-        kind: 'external-change',
-        message: 'Folder is unavailable',
-        keepMine,
-        loadTheirs,
-      },
-    })
-    await renderBar({ kind: 'note', path: 'notes/local.md' })
-    await openRecovery('Protected, Local-only')
-
-    await expect.element(page.getByText('External change', { exact: true })).toBeVisible()
-    expect(page.getByRole('button', { name: 'Try again', exact: true }).query()).toBeNull()
-    await page.getByRole('button', { name: 'Keep mine', exact: true }).click()
-    await page.getByRole('button', { name: 'Load theirs', exact: true }).click()
-
-    expect(keepMine).toHaveBeenCalledOnce()
-    expect(loadTheirs).toHaveBeenCalledOnce()
-  })
-
   it('updates recovery when the reason changes while Protected stays open', async () => {
     const initial = {
       characters: 42,
@@ -296,7 +271,7 @@ describe('NoteStatusBar', () => {
     await expect.element(page.getByRole('button', { name: 'Show file' })).toBeVisible()
 
     const retrySave = vi.fn()
-    await actAsync(() => {
+    await act(() => {
       publishStatus('notes/recovery.md', {
         ...initial,
         protection: { kind: 'save-blocked', message: 'Permission denied', retrySave },
@@ -364,7 +339,7 @@ describe('NoteStatusBar', () => {
     const status = page.getByRole('status', { name: 'Note status' })
     await expect.element(status.getByText('Edited 5 min ago')).toBeVisible()
 
-    await actAsync(() => {
+    await act(() => {
       publishStatus('notes/a.md', {
         characters: 11,
         selectedCharacters: 0,
@@ -501,7 +476,7 @@ describe('NoteStatusBar', () => {
     await renderBar({ kind: 'note', path: 'notes/a.md' }, { backup: CONNECTED })
     await page.getByRole('button', { name: 'Note state: Editable' }).click()
 
-    await actAsync(() => {
+    await act(() => {
       backup.setState({ ...CONNECTED, status: { state: 'offline', message: 'offline' } })
       publishStatus('notes/a.md', {
         characters: 10,
@@ -597,7 +572,7 @@ describe('NoteStatusBar', () => {
     await privacy.click()
 
     await vi.waitFor(() => expect(togglePrivate).toHaveBeenCalledWith('notes/a.md'))
-    await actAsync(() => {
+    await act(() => {
       publishStatus('notes/a.md', {
         characters: 10,
         selectedCharacters: 0,
@@ -689,14 +664,14 @@ describe('NoteStatusBar', () => {
 
   it('opens on a request for its note and never replays one made for another', async () => {
     publishStatus('notes/a.md', { characters: 10, selectedCharacters: 0, editedAt: null })
-    await actAsync(() => {
+    await act(() => {
       requestNoteMenu('notes/b.md')
     })
     await renderBar({ kind: 'note', path: 'notes/a.md' })
     await expect.element(page.getByTestId('note-statistics')).toHaveTextContent('10 chars')
     expect(page.getByRole('menu').query()).toBeNull()
 
-    await actAsync(() => {
+    await act(() => {
       requestNoteMenu('notes/a.md')
     })
     await expect.element(page.getByRole('menu')).toBeVisible()

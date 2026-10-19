@@ -1,4 +1,4 @@
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { NO_LOCAL_ONLY_FOLDERS, type LocalOnlyFolders } from './local-only.ts'
 
 /**
@@ -76,7 +76,7 @@ export interface GraphSessionSource {
 export function requireGraphSession(graphSession: GraphSessionSource): GraphSession {
   const { session } = graphSession.getState()
   if (session === null) {
-    throw new ReflectError('noGraph', 'No graph is open.')
+    throw new AppError('noGraph', 'No graph is open.')
   }
   return session
 }

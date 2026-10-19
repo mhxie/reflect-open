@@ -1,6 +1,6 @@
 import type { RoundTripFidelity } from '@meowdown/markdown'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { NoteRecovery } from '../graph/schemas.ts'
 import { applyTaskEdits, projectTasks, TaskStaleError } from '../markdown/task-ast.ts'
 import type { TaskLocator } from '../markdown/task-model.ts'
@@ -17,6 +17,7 @@ import {
   type NoteSession,
   type NoteSessionSnapshot,
 } from './note-session-service.ts'
+import { createTitleRenameTracker, type TitleRename } from './title-rename-tracker.ts'
 
 /** The first task's locator as the index records it. */
 function firstTask(source: string): TaskLocator {
@@ -118,24 +119,22 @@ function recoveryFake(slot: NoteRecovery | null = null, gate?: () => Promise<voi
       calls.push(`preserve ${contents}`)
       return keep(ownerId, contents, sourceRevision)
     },
-    readRecovery: async () => {
+    readRecovery: () => {
       calls.push('read')
-      return newest()
+      return Promise.resolve(newest())
     },
-    clearRecovery: async (_path, ownerId, token) => {
+    clearRecovery: (_path, ownerId, token) => {
       calls.push('clear')
       if (copies.get(ownerId)?.token === token) {
         copies.delete(ownerId)
       }
+      return Promise.resolve()
     },
   }
 }
 
 /** The edit resolver's refusal when the local-only folder is gone: retrying alone won't help. */
-const FOLDER_GONE = new ReflectError(
-  'traversal',
-  'the local-only folder finance/secure does not exist',
-)
+const FOLDER_GONE = new AppError('traversal', 'the local-only folder finance/secure does not exist')
 
 interface Harness {
   snapshots: NoteSessionSnapshot[]
@@ -151,6 +150,14 @@ interface Harness {
   failWrites: (message: string | null) => void
   /** While set, writes reject with exactly this error (an app error, say). */
   failWritesWith: (cause: Error | null) => void
+  /**
+   * The next write merges with the disk and returns `content` as merged (the merge-on-write seam).
+   */
+  mergeNextWrite: (content: string) => void
+  /**
+   * The note's bytes on disk, `undefined` when missing.
+   */
+  disk: () => string | undefined
   session: NoteSession
   /**
    * The graph open when the session was created.
@@ -220,10 +227,10 @@ function harness(options?: {
       if (writeFailureCause !== null) {
         throw writeFailureCause
       }
-      const modifiedMs = await files.write(home, contents, generation, expected)
+      const result = await files.write(home, contents, generation, expected)
       writes.push({ path, contents })
       await options?.afterWrite?.()
-      return modifiedMs
+      return result
     },
     // Called through the fake at call time, so a test's spy on it takes effect.
     ...(recovery === undefined
@@ -292,6 +299,10 @@ function harness(options?: {
     failWritesWith: (cause) => {
       writeFailureCause = cause
     },
+    mergeNextWrite: (content) => {
+      files.mergeNextWrite(home, content)
+    },
+    disk: () => files.files().get(home),
     session,
     graph,
     generations: () => files.writes().map((write) => write.generation),
@@ -309,7 +320,7 @@ describe('createNoteSession', () => {
     await settled()
 
     session.editorChanged('# Edited\n')
-    session.flush()
+    await session.flush()
     await settled()
 
     expect(writes).toEqual([])
@@ -392,26 +403,18 @@ describe('createNoteSession', () => {
     expect(snapshots.length).toBe(afterLoad + 1) // one dirty transition, not two
   })
 
-  it('keepMine rewrites the file even when the conflict content equals the buffer', async () => {
+  it('an external change equal to the buffer saves cleanly', async () => {
     const { session, writes, snapshots, setDisk } = harness()
     session.load()
     await settled()
 
-    // The user types X while the same X lands on disk externally (e.g. another
-    // device synced the identical edit). The external content parks as a
-    // conflict; "keep mine" must still persist deterministically.
     session.editorChanged('# Same on both\n')
     setDisk('# Same on both\n')
     session.externalChanged()
     await settled()
-    expect(snapshots.at(-1)?.conflict).toBe('# Same on both\n')
-    expect(writes).toEqual([]) // parked conflict paused the debounced save
-
-    session.keepMine()
-    await settled()
     expect(writes).toEqual([{ path: 'notes/a.md', contents: '# Same on both\n' }])
-    expect(snapshots.at(-1)?.conflict).toBeNull()
     expect(snapshots.at(-1)?.dirty).toBe(false)
+    expect(snapshots.at(-1)?.error).toBeNull()
   })
 
   it('re-gates protection when external content stops being representable', async () => {
@@ -430,9 +433,32 @@ describe('createNoteSession', () => {
   })
 })
 
-describe('external changes and saves', () => {
-  const MARKERS = '# Shared\n\n<<<<<<< this device\na\n=======\nb\n>>>>>>> other device\n'
+/**
+ * Feed a session's content reports to a title-rename tracker and return its renames.
+ */
+function replayRenames(
+  contents: ReadonlyArray<{ content: string; origin: string }>,
+): TitleRename[] {
+  const renames: TitleRename[] = []
+  const tracker = createTitleRenameTracker({
+    path: PATH,
+    clock,
+    onRename: (rename) => {
+      renames.push(rename)
+    },
+  })
+  for (const { content, origin } of contents) {
+    if (origin === 'saved') {
+      tracker.saved(content)
+    } else {
+      tracker.baseline(content)
+    }
+  }
+  tracker.settle()
+  return renames
+}
 
+describe('external changes and saves', () => {
   it('ignores an external event whose content matches the disk state (the echo of its own save)', async () => {
     const h = harness()
     h.session.load()
@@ -442,48 +468,204 @@ describe('external changes and saves', () => {
     await settled()
 
     expect(h.applied).toEqual([])
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.writes).toEqual([])
   })
 
-  it('parks an external change as a conflict when dirty, never touching the editor until loadTheirs', async () => {
+  it('a dirty buffer saves at once when an external change arrives', async () => {
     const h = harness()
     h.session.load()
     await settled()
 
-    h.session.editorChanged('# My unsaved edit\n')
-    h.setDisk('# Theirs\n')
+    h.session.editorChanged('# Hello\n\nmine\n')
+    h.setDisk('# Hello\n\ntheirs\n')
+    h.mergeNextWrite('# Hello\n\nmine\n\ntheirs\n')
+    h.session.externalChanged()
+    await clock.advance(0) // well inside the save debounce
+
+    expect(h.writes).toEqual([{ path: 'notes/a.md', contents: '# Hello\n\nmine\n' }])
+    expect(h.expectedContents).toEqual(['# Hello\n'])
+  })
+
+  it('an exact merge adopts the merged text and the session is clean', async () => {
+    const h = harness()
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# Hello\n\nmine\n')
+    h.setDisk('# Hello\n\ntheirs\n')
+    h.mergeNextWrite('# Hello\n\nmine\n\ntheirs\n')
     h.session.externalChanged()
     await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Theirs\n')
-    expect(h.applied).toEqual([])
 
-    h.session.loadTheirs()
-    expect(h.applied).toEqual(['# Theirs\n'])
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.disk()).toBe('# Hello\n\nmine\n\ntheirs\n')
+    expect(h.applied).toEqual(['# Hello\n\nmine\n\ntheirs\n'])
+    expect(h.session.content()).toBe('# Hello\n\nmine\n\ntheirs\n')
+    expect(h.snapshots.at(-1)).toMatchObject({ dirty: false, protected: false, error: null })
+
+    h.session.editorChanged('# Hello\n\nmine\n\ntheirs\n\nmore\n')
+    await settled()
+    expect(h.expectedContents.at(-1)).toBe('# Hello\n\nmine\n\ntheirs\n')
+    expect(h.disk()).toBe('# Hello\n\nmine\n\ntheirs\n\nmore\n')
+  })
+
+  it('a lossy merged result opens protected', async () => {
+    const lossyWhenTasks = (markdown: string): RoundTripFidelity =>
+      markdown.includes('+ [ ]') ? 'lossy' : 'exact'
+    const h = harness({ classify: lossyWhenTasks })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# Hello\n\nmine\n')
+    h.setDisk('# Hello\n\n+ [ ] theirs\n')
+    h.mergeNextWrite('# Hello\n\nmine\n\n+ [ ] theirs\n')
+    h.session.externalChanged()
+    await settled()
+
+    expect(h.applied).toEqual([])
+    expect(h.snapshots.at(-1)).toMatchObject({
+      dirty: false,
+      protected: true,
+      initialContent: '# Hello\n\nmine\n\n+ [ ] theirs\n',
+    })
+    h.session.editorChanged('# Hello\n\nmine\n')
+    await settled()
+    expect(h.disk()).toBe('# Hello\n\nmine\n\n+ [ ] theirs\n')
+  })
+
+  it('a merged title change is reported as external before saved', async () => {
+    const h = harness({ disk: '# Old title\n\nbody\n' })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# Old title\n\nbody mine\n')
+    h.setDisk('# Their title\n\nbody\n')
+    h.mergeNextWrite('# Their title\n\nbody mine\n')
+    h.session.externalChanged()
+    await settled()
+    h.session.editorChanged('# Their title\n\nbody mine more\n')
+    await settled()
+
+    expect(h.contents).toEqual([
+      { content: '# Old title\n\nbody\n', origin: 'load' },
+      { content: '# Their title\n\nbody mine\n', origin: 'external' },
+      { content: '# Their title\n\nbody mine more\n', origin: 'saved' },
+    ])
+  })
+
+  it('a title typed by the user survives a merged write and renames the file', async () => {
+    const h = harness({ disk: '# Old title\n\nbody\n' })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# New title\n\nbody\n')
+    h.setDisk('# Old title\n\nbody theirs\n')
+    h.mergeNextWrite('# New title\n\nbody theirs\n')
+    h.session.externalChanged()
+    await settled()
+
+    expect(h.contents.at(-1)).toEqual({ content: '# New title\n\nbody theirs\n', origin: 'saved' })
+    expect(replayRenames(h.contents)).toEqual([
+      { from: 'Old title', to: 'New title', previousAutoAlias: null },
+    ])
+  })
+
+  it('a body-only merge after a pending rename is reported as saved and keeps the rename', async () => {
+    const h = harness({ disk: '# Old title\n\nbody\n' })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# New title\n\nbody\n')
+    await settled()
+    h.session.editorChanged('# New title\n\nbody mine\n')
+    h.setDisk('# New title\n\nbody theirs\n')
+    h.mergeNextWrite('# New title\n\nbody mine theirs\n')
+    h.session.externalChanged()
+    await settled()
+
+    expect(h.contents.map((c) => c.origin)).toEqual(['load', 'saved', 'saved'])
+    expect(replayRenames(h.contents)).toEqual([
+      { from: 'Old title', to: 'New title', previousAutoAlias: null },
+    ])
+  })
+
+  it('a merge that changes the title after a local rename is reported as external', async () => {
+    const h = harness({ disk: '# Old title\n\nbody\n' })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# New title\n\nbody\n')
+    await settled()
+    h.session.editorChanged('# New title\n\nbody mine\n')
+    h.setDisk('# Their title\n\nbody\n')
+    h.mergeNextWrite('# Their title\n\nbody mine\n')
+    h.session.externalChanged()
+    await settled()
+
+    expect(h.contents.map((c) => c.origin)).toEqual(['load', 'saved', 'external'])
+  })
+
+  it('keystrokes during a merging write stay dirty and merge on the next write', async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const h = harness({
+      beforeWrite: () => {
+        started.resolve()
+        return release.promise
+      },
+    })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# Hello\n\nmine\n')
+    h.setDisk('# Hello\n\ntheirs\n')
+    h.mergeNextWrite('# Hello\n\nmine\n\ntheirs\n')
+    h.session.externalChanged()
+    await started.promise
+    h.session.editorChanged('# Hello\n\nmine typed on\n')
+    release.resolve()
+    await clock.advance(0)
+
+    expect(h.applied).toEqual([]) // the newer keystrokes are not replaced
+    expect(h.session.content()).toBe('# Hello\n\nmine typed on\n')
+    expect(h.snapshots.at(-1)?.dirty).toBe(true)
+
+    h.mergeNextWrite('# Hello\n\nmine typed on\n\ntheirs\n')
+    await h.session.flush()
+    // The second write names the text the keystrokes were typed on, which the
+    // first write already merged into the file.
+    expect(h.expectedContents).toEqual(['# Hello\n', '# Hello\n\nmine\n'])
+    expect(h.session.content()).toBe('# Hello\n\nmine typed on\n\ntheirs\n')
     expect(h.snapshots.at(-1)?.dirty).toBe(false)
   })
 
-  it('pauses saves while a conflict is parked, then keepMine writes the latest buffer', async () => {
-    const h = harness()
+  it('dispose after flush still completes a merging write', async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const h = harness({
+      beforeWrite: () => {
+        started.resolve()
+        return release.promise
+      },
+    })
     h.session.load()
     await settled()
 
-    h.session.editorChanged('# Mine\n')
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Theirs\n')
+    h.session.editorChanged('# Hello\n\nmine\n')
+    h.setDisk('# Hello\n\ntheirs\n')
+    h.mergeNextWrite('# Hello\n\nmine\n\ntheirs\n')
+    const flushed = h.session.flush()
+    h.session.dispose()
+    await started.promise
+    const emitted = h.snapshots.length
+    release.resolve()
+    await flushed
 
-    h.session.editorChanged('# Mine v2\n')
-    await clock.advance(5000)
-    expect(h.writes).toEqual([])
-
-    h.session.keepMine()
-    await settled()
-    expect(h.writes).toEqual([{ path: 'notes/a.md', contents: '# Mine v2\n' }])
+    expect(h.disk()).toBe('# Hello\n\nmine\n\ntheirs\n')
+    expect(h.applied).toEqual([]) // no editor is mounted after dispose
+    expect(h.snapshots).toHaveLength(emitted)
   })
 
-  it('treats an external event for an in-flight save as an echo, not a conflict', async () => {
+  it('treats an external event for an in-flight save as an echo', async () => {
     const hold = Promise.withResolvers<void>()
     const h = harness({ afterWrite: () => hold.promise })
     h.session.load()
@@ -496,11 +678,15 @@ describe('external changes and saves', () => {
     h.session.editorChanged('# Saved and more\n')
     h.session.externalChanged()
     await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.writes).toEqual([{ path: 'notes/a.md', contents: '# Saved\n' }])
 
     hold.resolve()
     await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.writes).toEqual([
+      { path: 'notes/a.md', contents: '# Saved\n' },
+      { path: 'notes/a.md', contents: '# Saved and more\n' },
+    ])
+    expect(h.snapshots.at(-1)?.error).toBeNull()
   })
 
   it('a queued save re-checks the buffer at write time (revert during a slow write)', async () => {
@@ -553,34 +739,6 @@ describe('external changes and saves', () => {
     await clock.advance(5000)
     await h.session.flush()
     expect(h.writes).toEqual([])
-  })
-
-  it('an external change that introduces conflict markers flips the note protected', async () => {
-    const h = harness()
-    h.session.load()
-    await settled()
-    expect(h.snapshots.at(-1)?.protected).toBe(false)
-
-    h.setDisk(MARKERS)
-    h.session.externalChanged()
-    await settled()
-
-    expect(h.snapshots.at(-1)?.protected).toBe(true)
-    expect(h.snapshots.at(-1)?.initialContent).toBe(MARKERS)
-    expect(h.applied).toEqual([]) // the conflicted bytes never enter a live editor
-  })
-
-  it('a note that documents a conflict inside a fence stays editable and saves', async () => {
-    const disk =
-      '# How to resolve\n\n```\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n```\n'
-    const h = harness({ disk })
-    h.session.load()
-    await settled()
-    expect(h.snapshots.at(-1)?.protected).toBe(false)
-
-    h.session.editorChanged(`${disk}\nmore\n`)
-    await settled()
-    expect(h.writes).toEqual([{ path: 'notes/a.md', contents: `${disk}\nmore\n` }])
   })
 
   it('a missing note without createIfMissing is an error', async () => {
@@ -714,63 +872,18 @@ describe('frontmatter ownership (Plan 07b)', () => {
     expect(h.applied).toEqual([]) // the editor was never reloaded
   })
 
-  it('an external frontmatter-only change adopts cleanly without a conflict', async () => {
+  it('an external frontmatter-only change adopts cleanly', async () => {
     const h = harness({ disk: `${FM}# Hello\n` })
     h.session.load()
     await settled()
     h.setDisk(`---\naliases:\n  - Newer\n---\n# Hello\n`)
     h.session.externalChanged()
     await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
+    expect(h.snapshots.at(-1)?.dirty).toBe(false)
     // Next save preserves the adopted header.
     h.session.editorChanged('# Hello!\n')
     await settled()
     expect(h.writes.at(-1)?.contents).toBe('---\naliases:\n  - Newer\n---\n\n# Hello!\n')
-  })
-
-  it('a frontmatter patch under a parked conflict lands with "keep mine"', async () => {
-    // The rename coordinator's alias can arrive while a conflict is parked:
-    // it rides the in-memory header (saves are paused, not dropped) and
-    // persists when the user keeps their version. "Load theirs" discarding
-    // it is the user explicitly choosing external content over the rename's
-    // consequences — a disk write here would clobber the protected "theirs".
-    const h = harness()
-    h.session.load()
-    await settled()
-    h.session.editorChanged('# Mine\n') // dirty
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Theirs\n')
-
-    expect(h.session.updateFrontmatter({ aliases: ['Old Title'] })).toBe(true)
-    await settled()
-    expect(h.writes).toEqual([]) // paused, not written under the conflict
-
-    h.session.keepMine()
-    await settled()
-    const written = h.writes.at(-1)?.contents ?? ''
-    expect(written).toContain('Old Title') // the alias survived the conflict
-    expect(written).toContain('# Mine')
-  })
-
-  it('a later external change refreshes a parked conflict snapshot', async () => {
-    const h = harness()
-    h.session.load()
-    await settled()
-    h.session.editorChanged('# Mine\n')
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Theirs\n')
-
-    h.setDisk('---\npinned: true\n---\n# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('---\npinned: true\n---\n# Theirs\n')
-
-    h.session.loadTheirs()
-    expect(h.session.content()).toBe('---\npinned: true\n---\n\n# Theirs\n')
   })
 
   it('commitFrontmatter lands the patch immediately on a clean session', async () => {
@@ -830,23 +943,6 @@ describe('frontmatter ownership (Plan 07b)', () => {
     }
   })
 
-  it('a failed conflict patch restores the header and leaves the conflict intact', async () => {
-    const h = harness()
-    h.session.load()
-    await settled()
-    h.session.editorChanged('# Mine\n')
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-    h.failWrites('disk full')
-
-    await expect(h.session.commitFrontmatter({ pinned: true })).rejects.toThrow('disk full')
-    expect(h.session.content()).toBe('# Mine\n')
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Theirs\n')
-    expect(h.snapshots.at(-1)?.dirty).toBe(true)
-    h.session.discard()
-  })
-
   it('commitFrontmatter declines when the session has no write channel', async () => {
     // No graph generation → no `io.write`. The patch can't land, so report
     // false rather than the in-memory success that would let publish/pin/private
@@ -859,59 +955,30 @@ describe('frontmatter ownership (Plan 07b)', () => {
     expect(h.writes).toEqual([])
   })
 
-  it('commitFrontmatter under a parked conflict writes through and refreshes the park', async () => {
+  it('commitFrontmatter reports a patch that landed through an exact merge', async () => {
     const h = harness()
     h.session.load()
     await settled()
-    h.session.editorChanged('# Mine\n')
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Theirs\n')
+    h.setDisk('# Hello\n\ntheirs\n')
+    h.mergeNextWrite('---\npinned: true\n---\n\n# Hello\n\ntheirs\n')
 
     await expect(h.session.commitFrontmatter({ pinned: true })).resolves.toBe(true)
-    // The contested content was patched and written — the index sees it now…
-    expect(h.writes.at(-1)?.contents).toBe('---\npinned: true\n---\n\n# Theirs\n')
-    // …the park holds the patched bytes, so "load theirs" adopts the pin…
-    expect(h.snapshots.at(-1)?.conflict).toBe('---\npinned: true\n---\n\n# Theirs\n')
-    h.session.loadTheirs()
-    expect(h.session.content()).toBe('---\npinned: true\n---\n\n# Theirs\n')
+    expect(h.session.content()).toBe('---\npinned: true\n---\n\n# Hello\n\ntheirs\n')
   })
 
-  it('commitFrontmatter under a parked conflict writes only over the parked disk text', async () => {
+  it('commitFrontmatter names the text it patched, so a newer disk text is never overwritten', async () => {
     const h = harness()
     h.session.load()
     await settled()
-    h.session.editorChanged('# Mine\n')
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-
-    await h.session.commitFrontmatter({ pinned: true })
-    expect(h.expectedContents.at(-1)).toBe('# Theirs\n')
-
-    // A newer version that landed before its watcher event is refused, not
-    // overwritten with the patched park.
+    // A newer version landed before its watcher event, and this write can't merge with it.
     h.setDisk('# Newer\n')
-    await expect(h.session.commitFrontmatter({ private: true })).rejects.toMatchObject({
-      kind: 'io',
-    })
-    expect(h.writes.at(-1)?.contents).toBe('---\npinned: true\n---\n\n# Theirs\n')
-  })
 
-  it('commitFrontmatter under a conflict keeps the patch through "keep mine" too', async () => {
-    const h = harness()
-    h.session.load()
-    await settled()
-    h.session.editorChanged('# Mine\n')
-    h.setDisk('# Theirs\n')
-    h.session.externalChanged()
-    await settled()
-
-    await h.session.commitFrontmatter({ pinned: true })
-    h.session.keepMine()
-    await settled()
-    expect(h.writes.at(-1)?.contents).toBe('---\npinned: true\n---\n\n# Mine\n')
+    await expect(h.session.commitFrontmatter({ private: true })).rejects.toThrow(
+      'Note changed on disk',
+    )
+    expect(h.expectedContents.at(-1)).toBe('# Hello\n')
+    expect(h.disk()).toBe('# Newer\n')
+    expect(h.session.content()).toBe('# Hello\n')
   })
 
   it('onContent reports full joined content with the right origins', async () => {
@@ -1038,8 +1105,6 @@ describe('missing-note seed (new ordinary notes)', () => {
   })
 
   it('an external write while the seed is showing adopts cleanly and clears missing', async () => {
-    // Another device/process creates the file while the seeded buffer is open
-    // and untouched: not a conflict — the buffer was never dirty.
     const h = harness({ disk: null, createIfMissing: true, missingSeed: SEED })
     h.session.load()
     await settled()
@@ -1049,10 +1114,26 @@ describe('missing-note seed (new ordinary notes)', () => {
     await settled()
 
     const ready = h.snapshots.at(-1)
-    expect(ready?.conflict).toBeNull()
+    expect(ready?.dirty).toBe(false)
     expect(ready?.missing).toBe(false)
     expect(h.applied).toEqual(['# Created elsewhere\n'])
     expect(h.writes).toEqual([])
+  })
+
+  it('a file created elsewhere under unsaved seed edits merges against the seed', async () => {
+    const h = harness({ disk: null, createIfMissing: true, missingSeed: SEED })
+    h.session.load()
+    await settled()
+
+    h.session.editorChanged('# Mine\n')
+    h.setDisk('# Created elsewhere\n')
+    h.mergeNextWrite('# Mine\n\nCreated elsewhere\n')
+    h.session.externalChanged()
+    await settled()
+
+    expect(h.expectedContents).toEqual([SEED])
+    expect(h.session.content()).toBe('# Mine\n\nCreated elsewhere\n')
+    expect(h.snapshots.at(-1)).toMatchObject({ dirty: false, missing: false })
   })
 
   it('an external write matching the seed verbatim still clears missing', async () => {
@@ -1069,7 +1150,6 @@ describe('missing-note seed (new ordinary notes)', () => {
 
     const ready = h.snapshots.at(-1)
     expect(ready?.missing).toBe(false)
-    expect(ready?.conflict).toBeNull()
     expect(h.applied).toEqual([]) // content unchanged: no editor reload
     expect(h.writes).toEqual([])
   })
@@ -1096,18 +1176,18 @@ describe('missing-note seed (new ordinary notes)', () => {
     expect(h.writes).toEqual([{ path: 'notes/a.md', contents: '# Hello again\n' }])
   })
 
-  it('a delete racing unsaved edits neither conflicts nor drops them', async () => {
+  it('a delete racing unsaved edits keeps them', async () => {
     const h = harness({ disk: '# Hello\n' })
     h.session.load()
     await settled()
 
     h.session.editorChanged('# Unsaved\n')
     h.setDisk(null)
-    h.session.externalChanged() // read fails: nothing to park a conflict against
+    h.session.externalChanged() // read fails: nothing to merge against
     await settled()
 
     const after = h.snapshots.at(-1)
-    expect(after?.conflict).toBeNull()
+    expect(after?.error).toBeNull()
     expect(after?.dirty).toBe(false) // the debounced save already landed…
     expect(h.writes.at(-1)).toEqual({ path: 'notes/a.md', contents: '# Unsaved\n' }) // …recreating the file
   })
@@ -1137,6 +1217,28 @@ describe('missing-note seed (new ordinary notes)', () => {
     expect(recovered?.error).toBeNull()
     expect(recovered?.dirty).toBe(false)
     expect(h.writes).toEqual([{ path: 'notes/a.md', contents: '# Edited more\n' }])
+  })
+
+  it('flush also waits for the retry of a failed save', async () => {
+    let attempts = 0
+    const h: Harness = harness({
+      beforeWrite: () => {
+        attempts += 1
+        if (attempts === 1) {
+          h.setDisk('# Other\n') // the checked write lost a race with another writer
+          return Promise.reject(new Error('Note changed on disk; reload before retrying'))
+        }
+        return Promise.resolve()
+      },
+    })
+    h.session.load()
+    await settled()
+
+    h.mergeNextWrite('# Other\n\nEdited\n')
+    h.session.editorChanged('# Edited\n')
+    await h.session.flush()
+    expect(h.writes).toEqual([{ path: 'notes/a.md', contents: '# Edited\n' }])
+    expect(h.disk()).toBe('# Other\n\nEdited\n')
   })
 
   it('flush after a failed save retries the same buffer', async () => {
@@ -1357,20 +1459,6 @@ describe('commitSourceEdit', () => {
     expect(h.writes).toEqual([])
   })
 
-  it('refuses (returns false) while a conflict is parked', async () => {
-    const source = '+ [ ] x\n'
-    const h = harness({ disk: source })
-    h.session.load()
-    await settled()
-
-    h.session.editorChanged('+ [ ] x edited\n') // dirty
-    h.setDisk('+ [ ] x external\n')
-    h.session.externalChanged() // parks a conflict (dirty + divergent disk)
-    await settled()
-
-    expect(await h.session.commitSourceEdit(toggleTransform(firstTask(source)))).toBe(false)
-  })
-
   it('reverts the edit and surfaces the error when the write fails', async () => {
     const source = '+ [ ] x\n'
     const h = harness({ disk: source })
@@ -1433,28 +1521,6 @@ it.each([null, '# Hello\n'])(
     h.session.discard()
   },
 )
-
-it('parks an external revision when a checked autosave fails', async () => {
-  const h = harness()
-  try {
-    h.session.load()
-    await settled()
-    h.session.editorChanged('# My unsaved text\n')
-    h.setDisk('# Capture wrote here\n')
-    await h.session.flush()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Capture wrote here\n')
-    expect(h.session.content()).toBe('# My unsaved text\n')
-    expect(h.writes).toEqual([])
-    await h.session.flush()
-    expect(h.expectedContents).toHaveLength(1)
-    h.session.keepMine()
-    await h.session.flush()
-    expect(h.expectedContents.at(-1)).toBe('# Capture wrote here\n')
-    expect(h.writes.at(-1)?.contents).toBe('# My unsaved text\n')
-  } finally {
-    h.session.discard()
-  }
-})
 
 it('a rejected source edit preserves typing made while its write was pending', async () => {
   const started = Promise.withResolvers<void>()
@@ -1545,9 +1611,9 @@ describe('followDisplacement', () => {
     const applied: string[] = []
     const noteFile = overrideNoteFileService(files, {
       write: async (path, contents, generation, expected) => {
-        const modifiedMs = await files.write(path, contents, generation, expected)
+        const result = await files.write(path, contents, generation, expected)
         writes.push({ path, contents, expected })
-        return modifiedMs
+        return result
       },
     })
     const session = createNoteSessionService({
@@ -1575,67 +1641,83 @@ describe('followDisplacement', () => {
     return { files, writes, snapshots, applied, session, pull }
   }
 
-  it('follows a dirty session with a parked conflict; keep mine writes only the copy', async () => {
+  it('follows a dirty session after a merged save; it saves only the copy', async () => {
     const h = displacementHarness('# Today\n')
     h.session.load()
     await settled()
     h.session.editorChanged('# Today\n\nmine\n')
     h.files.set(FROM, '# Today\n\nfrom another editor\n')
+    h.files.mergeNextWrite(FROM, '# Today\n\nmine\n\nfrom another editor\n')
     h.session.externalChanged()
     await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Today\n\nfrom another editor\n')
+    expect(h.session.content()).toBe('# Today\n\nmine\n\nfrom another editor\n')
 
+    h.session.editorChanged('# Today\n\nmine\n\nfrom another editor\n\nmore\n')
     h.pull()
     expect(h.session.followDisplacement(TO, INCOMING, false)).toBe(true)
     await settled()
-    expect(h.session.path).toBe(TO)
-    expect(h.snapshots.at(-1)?.conflict).toBe('# Today\n\nfrom another editor\n')
 
-    h.session.keepMine()
-    await settled()
-    expect(h.writes).toEqual([
-      { path: TO, contents: '# Today\n\nmine\n', expected: '# Today\n\nfrom another editor\n' },
-    ])
+    expect(h.session.path).toBe(TO)
+    expect(h.writes.at(-1)).toEqual({
+      path: TO,
+      contents: '# Today\n\nmine\n\nfrom another editor\n\nmore\n',
+      expected: '# Today\n\nmine\n\nfrom another editor\n',
+    })
     expect(h.files.files().get(FROM)).toBe(INCOMING)
   })
 
-  it('drops a parked conflict that is the incoming note, then saves to the copy', async () => {
+  it('a save the incoming note refused follows the move and lands on the copy', async () => {
     const h = displacementHarness('# Today\n')
     h.session.load()
     await settled()
     h.session.editorChanged('# Today\n\nmine\n')
     h.pull()
-    // The pull's file event reached the editor first: it parked the phone's note.
+    // The pull's file event reached the editor first: its save can't land on the phone's note.
     h.session.externalChanged()
     await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe(INCOMING)
+    expect(h.writes).toEqual([])
 
     expect(h.session.followDisplacement(TO, INCOMING, false)).toBe(true)
     await settled()
 
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
     expect(h.writes).toEqual([{ path: TO, contents: '# Today\n\nmine\n', expected: '# Today\n' }])
     expect(h.files.files().get(FROM)).toBe(INCOMING)
+    expect(h.snapshots.at(-1)).toMatchObject({ dirty: false, error: null })
   })
 
-  it('re-derives a parked conflict from the copy when the old path could not be read', async () => {
+  it('follows a dirty session when the old path could not be read', async () => {
     const h = displacementHarness('# Today\n')
     h.session.load()
     await settled()
     h.session.editorChanged('# Today\n\nmine\n')
     h.pull()
-    h.session.externalChanged()
-    await settled()
-    expect(h.snapshots.at(-1)?.conflict).toBe(INCOMING)
 
-    // The follow-up read of FROM failed: whether the parked note is the
-    // incoming one is unknown, so the copy's bytes decide.
+    // The follow-up read of FROM failed: the document follows its own bytes.
     expect(h.session.followDisplacement(TO, null, false)).toBe(true)
     await settled()
 
-    expect(h.snapshots.at(-1)?.conflict).toBeNull()
     expect(h.writes).toEqual([{ path: TO, contents: '# Today\n\nmine\n', expected: '# Today\n' }])
     expect(h.files.files().get(FROM)).toBe(INCOMING)
+  })
+
+  it('stays when a merged save already took the incoming note in', async () => {
+    const h = displacementHarness('# Today\n')
+    h.session.load()
+    await settled()
+    h.session.editorChanged('# Today\n\nmine\n')
+    h.pull()
+    h.files.mergeNextWrite(FROM, '# From the phone\n\nmine\n')
+    h.session.externalChanged()
+    await settled()
+
+    // The move's read of FROM finds what the merged save left there.
+    expect(h.session.followDisplacement(TO, '# From the phone\n\nmine\n', false)).toBe(false)
+    await settled()
+
+    expect(h.session.path).toBe(FROM)
+    expect(h.session.content()).toBe('# From the phone\n\nmine\n')
+    expect(h.files.files().get(TO)).toBe('# Today\n')
+    expect(h.writes).toEqual([{ path: FROM, contents: '# Today\n\nmine\n', expected: '# Today\n' }])
   })
 
   it('follows a clean session when the moved note was kept out', async () => {
@@ -1911,23 +1993,27 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     expect(snapshots.at(-1)).toMatchObject({ saveBlocked: false, error: null, dirty: false })
   })
 
-  it('a changed-on-disk refusal parks the conflict and keeps the text, without blocking', async () => {
+  it('a changed-on-disk refusal keeps the text, without blocking', async () => {
     const recovery = recoveryFake()
     const { session, snapshots, setDisk } = harness({ localOnly: 'editable', recovery })
     session.load()
     await settled()
 
     session.editorChanged('# Mine\n')
-    setDisk('# Theirs\n') // lands before the save, which the check refuses
+    setDisk('# Theirs\n') // lands before the save, which can't merge with it
     await settled()
 
-    expect(snapshots.at(-1)).toMatchObject({ conflict: '# Theirs\n', saveBlocked: false })
+    expect(snapshots.at(-1)).toMatchObject({
+      dirty: true,
+      saveBlocked: false,
+      error: 'Note changed on disk; reload before retrying',
+    })
     expect(recovery.slot()?.contents).toBe('# Mine\n')
   })
 
-  it('loading theirs over a blocked save takes input again', async () => {
+  it('a merged save over a blocked save takes input again', async () => {
     const recovery = recoveryFake()
-    const { session, snapshots, setDisk, failWritesWith } = harness({
+    const { session, snapshots, setDisk, failWritesWith, mergeNextWrite } = harness({
       localOnly: 'editable',
       recovery,
     })
@@ -1935,16 +2021,25 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     await settled()
     failWritesWith(FOLDER_GONE)
     session.editorChanged('# Mine\n')
-    setDisk('# Theirs\n')
     await settled()
-    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: true, conflict: '# Theirs\n' })
+    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: true, dirty: true })
 
-    session.loadTheirs()
+    failWritesWith(null)
+    setDisk('# Theirs\n')
+    mergeNextWrite('# Mine\n\n# Theirs\n')
+    await session.flush()
 
-    expect(snapshots.at(-1)).toMatchObject({ saveBlocked: false, dirty: false, conflict: null })
+    expect(session.content()).toBe('# Mine\n\n# Theirs\n')
+    expect(recovery.slot()).toBeNull()
+    expect(snapshots.at(-1)).toMatchObject({
+      saveBlocked: false,
+      dirty: false,
+      error: null,
+      recovery: null,
+    })
   })
 
-  it('a teardown over a parked conflict keeps the latest text, and its flush waits for it', async () => {
+  it('a teardown over a refused save keeps the latest text, and its flush waits for it', async () => {
     let releaseKeep: () => void = () => {}
     const recovery = recoveryFake(
       null,
@@ -1960,7 +2055,7 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     setDisk('# Theirs\n')
     session.externalChanged()
     await clock.advance(0)
-    releaseKeep() // the keep at park time
+    releaseKeep() // the keep when the save was refused
 
     session.editorChanged('# Mine, edited further\n')
     let flushed = false
@@ -1974,7 +2069,7 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     releaseKeep()
     await clock.advance(0)
     expect(flushed).toBe(true)
-    expect(writes).toEqual([]) // the parked conflict paused every save
+    expect(writes).toEqual([]) // every save was refused
     expect(recovery.slot()?.contents).toBe('# Mine, edited further\n')
   })
 
@@ -2054,22 +2149,21 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     await reopened.session.flush()
     expect(reopened.snapshots.at(-1)?.recovery?.contents).toBe('# A\n')
     // A was kept against the note B has since replaced: restoring it must
-    // not silently drop B, so the choice goes to the conflict prompt.
+    // not silently drop B, so its write names A's revision and merges.
+    reopened.mergeNextWrite('# B\n\n# A\n')
     reopened.session.restoreRecovery()
     await reopened.session.flush()
-    expect(reopened.writes.map((write) => write.contents)).toEqual(['# B\n'])
-    expect(reopened.snapshots.at(-1)).toMatchObject({ conflict: '# B\n', dirty: true })
-    reopened.session.keepMine()
-    await reopened.session.flush()
     expect(reopened.writes.map((write) => write.contents)).toEqual(['# B\n', '# A\n'])
+    expect(reopened.expectedContents).toEqual(['# Hello\n', '# Hello\n'])
+    expect(reopened.disk()).toBe('# B\n\n# A\n')
     expect(recovery.copies.size).toBe(0)
-    expect(reopened.snapshots.at(-1)).toMatchObject({ recovery: null, conflict: null })
+    expect(reopened.snapshots.at(-1)).toMatchObject({ recovery: null, dirty: false })
   })
 
-  it('restoring a copy kept against an older revision parks the newer note as a conflict', async () => {
+  it('restoring a copy kept against an older revision merges it with the newer note', async () => {
     const kept = recoveryCopy('# Hello\n\nkept\n')
     const recovery = recoveryFake(kept)
-    const { session, snapshots, applied, writes } = harness({
+    const { session, snapshots, applied, expectedContents, mergeNextWrite } = harness({
       localOnly: 'editable',
       recovery,
       disk: '# Hello\n\nchanged since\n',
@@ -2078,29 +2172,24 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     await settled()
     expect(snapshots.at(-1)?.recovery).toEqual(kept)
 
+    mergeNextWrite('# Hello\n\nkept\n\nchanged since\n')
     session.restoreRecovery()
-    await settled()
+    await session.flush()
 
-    expect(writes).toEqual([])
-    expect(applied).toEqual(['# Hello\n\nkept\n'])
-    expect(snapshots.at(-1)).toMatchObject({
-      conflict: '# Hello\n\nchanged since\n',
-      dirty: true,
-      recovery: null,
-    })
-
-    session.loadTheirs()
-    await settled()
-    expect(writes).toEqual([])
-    expect(applied.at(-1)).toBe('# Hello\n\nchanged since\n')
-    // Choosing theirs resolves the restored copy too.
+    // The write names the revision the copy was kept against, never the newer note.
+    expect(expectedContents).toEqual(['# Hello\n'])
+    expect(applied).toEqual(['# Hello\n\nkept\n', '# Hello\n\nkept\n\nchanged since\n'])
+    // The merged save resolves the restored copy too.
     expect(recovery.copies.size).toBe(0)
-    expect(snapshots.at(-1)).toMatchObject({ conflict: null, dirty: false, recovery: null })
+    expect(snapshots.at(-1)).toMatchObject({ dirty: false, recovery: null })
   })
 
-  it('loading theirs drops the copy kept for the discarded text', async () => {
+  it('a merged save drops the copy kept for its text', async () => {
     const recovery = recoveryFake()
-    const { session, snapshots, setDisk } = harness({ localOnly: 'editable', recovery })
+    const { session, snapshots, setDisk, mergeNextWrite } = harness({
+      localOnly: 'editable',
+      recovery,
+    })
     session.load()
     await settled()
     session.editorChanged('# Mine\n')
@@ -2108,11 +2197,11 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
     await settled()
     expect(recovery.slot()?.contents).toBe('# Mine\n')
 
-    session.loadTheirs()
+    mergeNextWrite('# Mine\n\n# Theirs\n')
     await session.flush()
 
     expect(recovery.slot()).toBeNull()
-    expect(snapshots.at(-1)).toMatchObject({ conflict: null, dirty: false, recovery: null })
+    expect(snapshots.at(-1)).toMatchObject({ dirty: false, recovery: null })
   })
 
   it('a successful save clears only its own draft and offers another window’s copy', async () => {
@@ -2160,7 +2249,7 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
   it('opens the note when the kept copy can’t be read', async () => {
     const recovery = recoveryFake()
     vi.spyOn(recovery, 'readRecovery').mockRejectedValue(
-      new ReflectError('traversal', 'symlink in .reflect/recovery'),
+      new AppError('traversal', 'symlink in .reflect/recovery'),
     )
     const { session, snapshots } = harness({ localOnly: 'editable', recovery })
     session.load()

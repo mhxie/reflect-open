@@ -1,5 +1,5 @@
 import type { ReactElement, ReactNode } from 'react'
-import { actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppServices } from '@reflect/app'
 import { createTestDialogService } from '@reflect/app/testing'
@@ -104,7 +104,7 @@ describe('GraphProvider', () => {
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
     expect(result.current.graph?.root).toBe('/known')
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.chooseGraph()
     })
 
@@ -120,7 +120,7 @@ describe('GraphProvider', () => {
     appServices.dialog.setFolder('/fresh')
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.pickAndOpen()
     })
 
@@ -135,7 +135,7 @@ describe('GraphProvider', () => {
     const { app, result } = await renderGraph(createTestCoreServices())
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.openRecent('/a')
     })
 
@@ -198,13 +198,13 @@ describe('GraphProvider', () => {
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
 
     // Control: a clean configuration shows nothing.
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.openRecent('/clean')
     })
     expect(result.current.status).toBe('ready')
     expect(localOnlyOperations()).toEqual([])
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.openRecent('/notes')
     })
     await vi.waitFor(() => expect(localOnlyOperations()).toHaveLength(1))
@@ -226,13 +226,13 @@ describe('GraphProvider', () => {
       appServices.operations.getAll().filter((operation) => operation.label === 'Backup settings')
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.openRecent('/clean')
     })
     expect(result.current.status).toBe('ready')
     expect(backupOperations()).toEqual([])
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.openRecent('/notes')
     })
     await vi.waitFor(() => expect(backupOperations()).toHaveLength(1))
@@ -277,7 +277,7 @@ describe('GraphProvider mobile onboarding (Plans 19/21)', () => {
     await vi.waitFor(() => expect(result.current.needsOnboarding).toBe(true))
     await vi.waitFor(() => expect(result.current.mobileStorageResolving).toBe(false))
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.completeOnboarding('local')
     })
 

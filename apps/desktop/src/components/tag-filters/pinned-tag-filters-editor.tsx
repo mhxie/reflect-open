@@ -29,9 +29,9 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
   const [query, setQuery] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const controls = useRef(new Map<string, HTMLButtonElement>())
-  const pendingFocus = useRef<TagFocusTarget | 'input' | null>(null)
-  const finalFocusTarget = useRef<TagFocusTarget | 'input' | null>(null)
+  const controlsRef = useRef(new Map<string, HTMLButtonElement>())
+  const pendingFocusRef = useRef<TagFocusTarget | 'input' | null>(null)
+  const finalFocusTargetRef = useRef<TagFocusTarget | 'input' | null>(null)
   const typed = normalizePinnedTag(query)
   const alreadyPinned = typed !== null && tags.includes(typed)
   const invalid = query.trim() !== '' && typed === null
@@ -45,25 +45,25 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
     (target: TagFocusTarget | 'input' | null): HTMLElement | null =>
       target === null || target === 'input'
         ? inputRef.current
-        : (controls.current.get(`${target.control}:${target.tag}`) ?? inputRef.current),
+        : (controlsRef.current.get(`${target.control}:${target.tag}`) ?? inputRef.current),
     [],
   )
   const registerControl = useCallback(
     (tag: string, control: PinnedTagControl, element: HTMLButtonElement | null): void => {
       const key = `${control}:${tag}`
       if (element === null) {
-        controls.current.delete(key)
+        controlsRef.current.delete(key)
       } else {
-        controls.current.set(key, element)
+        controlsRef.current.set(key, element)
       }
     },
     [],
   )
 
   useLayoutEffect(() => {
-    if (pendingFocus.current !== null) {
-      findFocusTarget(pendingFocus.current)?.focus({ preventScroll: true })
-      pendingFocus.current = null
+    if (pendingFocusRef.current !== null) {
+      findFocusTarget(pendingFocusRef.current)?.focus({ preventScroll: true })
+      pendingFocusRef.current = null
     }
   }, [tags, findFocusTarget])
 
@@ -71,10 +71,10 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
   // yet (queued before settings load, or already applied elsewhere) renders
   // no new list, so its request is dropped instead of firing on a later one.
   const editWithFocus = (target: TagFocusTarget | 'input', edit: () => boolean): void => {
-    pendingFocus.current = target
-    finalFocusTarget.current = target
-    if (!edit() && pendingFocus.current === target) {
-      pendingFocus.current = null
+    pendingFocusRef.current = target
+    finalFocusTargetRef.current = target
+    if (!edit() && pendingFocusRef.current === target) {
+      pendingFocusRef.current = null
     }
   }
 
@@ -123,7 +123,7 @@ export function PinnedTagFiltersEditor({ facets }: PinnedTagFiltersEditorProps):
           onUnpin={unpin}
           registerControl={registerControl}
           menuFinalFocus={(tag) =>
-            controls.current.get(`menu:${tag}`) ?? findFocusTarget(finalFocusTarget.current)
+            controlsRef.current.get(`menu:${tag}`) ?? findFocusTarget(finalFocusTargetRef.current)
           }
         />
       )}

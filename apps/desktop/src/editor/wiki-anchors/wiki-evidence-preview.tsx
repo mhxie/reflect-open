@@ -14,12 +14,12 @@ export function WikiEvidencePreview({
   raw,
   options,
 }: WikiEvidencePreviewProps): ReactElement {
-  const root = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    const container = root.current
+    const container = rootRef.current
     if (container === null) return
     container.replaceChildren(createWikiEvidence(block, raw, options))
     return () => container.replaceChildren()
   }, [block, raw, options])
-  return <div ref={root} />
+  return <div ref={rootRef} />
 }

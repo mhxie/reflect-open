@@ -6,7 +6,6 @@ import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { BacklinkSourceGroup } from './backlink-source-group.tsx'
 
 const SOURCE: BacklinkSource = {
-  hasConflict: false,
   path: 'notes/source.md',
   title: 'Source Note',
   isPrivate: false,
@@ -28,14 +27,11 @@ function mount(onOpen: OnOpen, source: BacklinkSource = SOURCE) {
 }
 
 describe('BacklinkSourceGroup', () => {
-  it.each([
-    { isPrivate: true, hasConflict: false, label: 'Private' },
-    { isPrivate: false, hasConflict: true, label: 'Protected' },
-  ])(
+  it.each([{ isPrivate: true, label: 'Private' }])(
     'shows $label source metadata and keeps Enter navigation on the parent button',
-    async ({ isPrivate, hasConflict, label }) => {
+    async ({ isPrivate, label }) => {
       const onOpen = vi.fn<OnOpen>()
-      await mount(onOpen, { ...SOURCE, isPrivate, hasConflict })
+      await mount(onOpen, { ...SOURCE, isPrivate })
       const button = page.getByRole('button', { name: `${label} Source Note`, exact: true })
       await expect.element(button.getByRole('img', { name: label, exact: true })).toBeVisible()
       expect(button.element().querySelector('button')).toBeNull()

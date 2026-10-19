@@ -1,5 +1,6 @@
+import type { MaybePromise } from '@reflect/utils'
 import { describe, expect, it, vi } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { AssetStoreService } from '../graph/asset-store-service.ts'
 import { createLocalOnlyFolders } from '../graph/local-only.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
@@ -28,7 +29,7 @@ interface Listing {
  * A note file service listing `listing()` once `gate` settles, counting calls.
  */
 function listingNoteFile(
-  listing: () => readonly Listing[] | Promise<readonly Listing[]>,
+  listing: () => MaybePromise<readonly Listing[]>,
 ): NoteFileService & { listings: () => number } {
   let calls = 0
   return Object.assign(createTestNoteFileService(), {
@@ -108,16 +109,14 @@ function assetUrl(generation: number, path: string): string {
 }
 
 function failing(message: string): () => Promise<never> {
-  return async () => {
-    throw new ReflectError('io', message)
-  }
+  return () => Promise.reject(new AppError('io', message))
 }
 
 describe('listFiles and pdfInfo', () => {
   it('lists the attachment files of the given session, with their sizes and times', async () => {
-    const listAttachments = vi.fn(async (): Promise<FileMeta[]> => [
-      { path: 'assets/a.png', size: 12, modifiedMs: 5 },
-    ])
+    const listAttachments = vi.fn((): Promise<FileMeta[]> =>
+      Promise.resolve([{ path: 'assets/a.png', size: 12, modifiedMs: 5 }]),
+    )
     const noteFile = Object.assign(createTestNoteFileService(), { listAttachments })
     const { attachments } = setup({ noteFile })
 
@@ -267,7 +266,7 @@ describe('createSaveScope', () => {
     vi.spyOn(assetStore, 'uploadBlob').mockImplementation(
       async (name, contents, notePath, generation) => {
         if (failure !== null) {
-          throw new ReflectError('io', failure)
+          throw new AppError('io', failure)
         }
         return await uploadBlob(name, contents, notePath, generation)
       },
@@ -303,7 +302,7 @@ describe('createSaveScope', () => {
 
     const saving = scope.saveFile(fileOf('slow.pdf', 'application/pdf'), NOTE)
     scope.reset()
-    upload.reject(new ReflectError('io', 'late failure'))
+    upload.reject(new AppError('io', 'late failure'))
 
     await expect(saving).resolves.toBeNull()
     expect(scope.error()).toBeNull()

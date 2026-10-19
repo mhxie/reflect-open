@@ -1,4 +1,4 @@
-import { IAP_PRODUCT_IDS, indexedNoteSchema, ReflectError, type IpcBridge } from '@reflect/core'
+import { IAP_PRODUCT_IDS, indexedNoteSchema, AppError, type IpcBridge } from '@reflect/core'
 import { z } from 'zod'
 import type { DevFileStore } from '@/dev/dev-file-store.ts'
 import type { DevIndexDb } from '@/dev/dev-index-db.ts'
@@ -18,8 +18,9 @@ export interface DevBridgeBackend {
 
 const dbQueryArgsSchema = z.object({ sql: z.string(), params: z.array(z.unknown()) })
 const pathArgsSchema = z.object({ path: z.string() })
-const writeArgsSchema = z.object({ path: z.string(), contents: z.string() })
-const checkedWriteArgsSchema = writeArgsSchema.extend({
+const writeArgsSchema = z.object({
+  path: z.string(),
+  contents: z.string(),
   checkContents: z.boolean().optional(),
   expectedContents: z.string().nullable().optional(),
 })
@@ -89,7 +90,14 @@ class DevBridgeImpl implements IpcBridge {
     this.#deps = deps
   }
 
-  async invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
+  invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
+    // The executor turns a synchronous throw into a rejection.
+    return new Promise((resolve) => {
+      resolve(this.#runCommand(command, args))
+    })
+  }
+
+  #runCommand(command: string, args: Record<string, unknown>): unknown {
     const { files, index } = this.#deps
     switch (command) {
       case 'app_version':
@@ -121,7 +129,7 @@ class DevBridgeImpl implements IpcBridge {
       case 'plugin:iap|purchase': {
         const { payload } = iapProductArgsSchema.parse(args)
         if (!iapProducts.some((product) => product.productId === payload.productId)) {
-          throw new ReflectError('notFound', `unknown preview product: ${payload.productId}`)
+          throw new AppError('notFound', `unknown preview product: ${payload.productId}`)
         }
         this.#ownedProductId = payload.productId
         return null
@@ -175,7 +183,7 @@ class DevBridgeImpl implements IpcBridge {
         const { path } = pathArgsSchema.parse(args)
         const contents = files.read(path)
         if (contents === null) {
-          throw new ReflectError('notFound', `no such note: ${path}`)
+          throw new AppError('notFound', `no such note: ${path}`)
         }
         return contents
       }
@@ -184,7 +192,7 @@ class DevBridgeImpl implements IpcBridge {
         const { path } = pathArgsSchema.parse(args)
         const contents = files.read(path)
         if (contents === null) {
-          throw new ReflectError('notFound', `no such note: ${path}`)
+          throw new AppError('notFound', `no such note: ${path}`)
         }
         return { kind: 'content', content: contents, localOnly: false }
       }
@@ -193,29 +201,34 @@ class DevBridgeImpl implements IpcBridge {
         const { path } = pathArgsSchema.parse(args)
         const contents = files.read(path)
         if (contents === null) {
-          throw new ReflectError('notFound', `no such note: ${path}`)
+          throw new AppError('notFound', `no such note: ${path}`)
         }
         return { kind: 'content', content: contents }
       }
       case 'note_write': {
         // Rust's contract: every write names the contents it replaces.
-        const { path, contents, checkContents, expectedContents } =
-          checkedWriteArgsSchema.parse(args)
+        const { path, contents, checkContents, expectedContents } = writeArgsSchema.parse(args)
         if (checkContents !== true) {
-          throw new ReflectError('parse', 'a note write must name the contents it replaces')
+          throw new AppError('parse', 'a note write must name the contents it replaces')
         }
-        if (files.read(path) !== (expectedContents ?? null)) {
-          throw new ReflectError('io', 'Note changed on disk; reload before retrying')
+        const current = files.read(path)
+        const expected = expectedContents ?? null
+        // A file that appeared under a "must not exist" write, or went missing
+        // under a named revision, is refused as in Rust. Rust merges a stale
+        // revision into the file; this in-memory backend refuses it instead.
+        const refused =
+          expected === null
+            ? current !== null
+            : current === null || (current !== expected && current !== contents)
+        if (refused) {
+          throw new AppError('io', 'Note changed on disk; reload before retrying')
         }
-        return files.write(path, contents)
+        return { modifiedMs: files.write(path, contents), merged: null }
       }
       case 'note_create': {
         const { path, contents, generation } = createArgsSchema.parse(args)
         if (generation !== this.#graphInfo.generation) {
-          throw new ReflectError(
-            'io',
-            'the graph changed since this command was issued; dropping it',
-          )
+          throw new AppError('io', 'the graph changed since this command was issued; dropping it')
         }
         return files.create(path, contents)
       }
@@ -235,10 +248,10 @@ class DevBridgeImpl implements IpcBridge {
           request: { from, to },
         } = moveRequestArgsSchema.parse(args)
         if (!files.exists(from)) {
-          throw new ReflectError('notFound', `cannot move note: ${from} does not exist`)
+          throw new AppError('notFound', `cannot move note: ${from} does not exist`)
         }
         if (files.exists(to)) {
-          throw new ReflectError('io', `cannot move note: ${to} already exists`)
+          throw new AppError('io', `cannot move note: ${to} already exists`)
         }
         // Index first: it can refuse (occupied path), and a refused move must
         // leave the file untouched — the in-memory stand-in for Rust's
@@ -259,7 +272,7 @@ class DevBridgeImpl implements IpcBridge {
         const { path } = pathArgsSchema.parse(args)
         const contents = this.#assets.get(path)
         if (contents === undefined) {
-          throw new ReflectError('notFound', `asset not found: ${path}`)
+          throw new AppError('notFound', `asset not found: ${path}`)
         }
         return contents
       }
@@ -273,7 +286,7 @@ class DevBridgeImpl implements IpcBridge {
       // Pages are rasterized natively on macOS; the browser preview shows the
       // "can't preview" card.
       case 'pdf_info':
-        throw new ReflectError('unsupported', 'PDF previews need the macOS app')
+        throw new AppError('unsupported', 'PDF previews need the macOS app')
 
       case 'db_query': {
         const { sql, params } = dbQueryArgsSchema.parse(args)
@@ -347,7 +360,6 @@ class DevBridgeImpl implements IpcBridge {
           remoteUrl: null,
           ahead: 0,
           behind: 0,
-          inProgress: false,
         }
 
       case 'git_note_version':
@@ -377,14 +389,14 @@ class DevBridgeImpl implements IpcBridge {
       case 'on_device_http_send':
       case 'on_device_http_read':
       case 'on_device_http_cancel':
-        throw new ReflectError(
+        throw new AppError(
           'unsupported',
           'Reaching a model on this Mac needs the desktop app; the browser preview cannot.',
         )
 
       default:
         console.error(`[dev-bridge] unimplemented command "${command}"`, args)
-        throw new ReflectError('unknown', `dev bridge: unimplemented command "${command}"`)
+        throw new AppError('unknown', `dev bridge: unimplemented command "${command}"`)
     }
   }
 
@@ -393,8 +405,8 @@ class DevBridgeImpl implements IpcBridge {
   // refresh the UI through core's in-process local-write echo. Plugin event
   // registrations get the same treatment, so the keyboard and recorder
   // hooks mount cleanly in the harness.
-  async listen(): Promise<() => void> {
-    return () => {}
+  listen(): Promise<() => void> {
+    return Promise.resolve(() => {})
   }
 
   async listenPlugin(): Promise<void> {}

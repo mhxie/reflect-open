@@ -20,7 +20,6 @@ export const gitStatusSchema = z.object({
   remoteUrl: z.string().nullable(),
   ahead: z.number(),
   behind: z.number(),
-  inProgress: z.boolean(),
 })
 export type GitStatus = z.infer<typeof gitStatusSchema>
 
@@ -41,6 +40,17 @@ export const skippedFileSchema = z.object({
   size: z.number(),
 })
 export type SkippedFile = z.infer<typeof skippedFileSchema>
+
+/**
+ * A file a merge rewrote on disk, same shape as the watcher's FileChange.
+ */
+export const changedFileSchema = z.object({
+  path: z.string(),
+  kind: z.enum(['upsert', 'remove']),
+  /** Last-modified time in epoch ms; `null` for a removed file. */
+  modifiedMs: z.number().nullable(),
+})
+export type ChangedFile = z.infer<typeof changedFileSchema>
 
 export const commitOutcomeSchema = z.object({
   /**
@@ -71,17 +81,14 @@ export const remoteDeltaSchema = z.object({
 export type RemoteDelta = z.infer<typeof remoteDeltaSchema>
 
 /**
- * A file a merge rewrote on disk — same shape as the watcher's FileChange.
+ * Where `origin` says the current branch is (`remoteOid`, `null` when the
+ * remote has no such branch) next to the last-fetched tracking ref.
  */
-export const changedFileSchema = z.object({
-  path: z.string(),
-  kind: z.enum(['upsert', 'remove']),
-  /**
-   * Last-modified time (epoch ms; upserts only) — real mtime for the reindex.
-   */
-  modifiedMs: z.number().optional(),
+export const remoteTipSchema = z.object({
+  remoteOid: z.string().nullable(),
+  trackingOid: z.string().nullable(),
 })
-export type ChangedFile = z.infer<typeof changedFileSchema>
+export type RemoteTip = z.infer<typeof remoteTipSchema>
 
 /**
  * One of this device's entries a pull moved out of a path it wrote, so the
@@ -111,18 +118,20 @@ export const displacedFileSchema = z.object({
 })
 export type DisplacedFile = z.infer<typeof displacedFileSchema>
 
-export const mergeOutcomeSchema = z.object({
+export const pullOutcomeSchema = z.object({
+  /** True when the pull committed local changes before it merged. */
+  committed: z.boolean(),
+  /** Unpushed local commits after the merge. */
+  ahead: z.number(),
+  skippedLargeFiles: z.array(skippedFileSchema),
   /**
-   * `deferred`: a save raced the cycle's commit, so the pull wrote nothing;
-   * the engine commits and pulls again.
+   * `deferred`: a file changed from outside the app after the pull's commit,
+   * so the pull wrote nothing; the engine pulls again.
    */
-  kind: z.enum(['upToDate', 'fastForward', 'merged', 'mergedWithConflicts', 'deferred']),
-  conflictedPaths: z.array(z.string()),
-  /**
-   * Every file the merge changed. The caller reindexes these directly —
-   * pulls must not depend on the file watcher being up (on launch it may
-   * not be yet) to keep the index in step with the notes.
-   */
+  kind: z.enum(['upToDate', 'fastForward', 'merged', 'deferred']),
+  /** Graph-relative paths of the conflict copies the merge wrote. */
+  reviewPaths: z.array(z.string()),
+  /** Every file the merge changed on disk. */
   changedFiles: z.array(changedFileSchema),
   /**
    * Another device's changes inside this graph's local-only folders: kept in
@@ -135,7 +144,7 @@ export const mergeOutcomeSchema = z.object({
    */
   displaced: z.array(displacedFileSchema).default([]),
 })
-export type MergeOutcome = z.infer<typeof mergeOutcomeSchema>
+export type PullOutcome = z.infer<typeof pullOutcomeSchema>
 
 export const pushOutcomeSchema = z.object({
   pushed: z.boolean(),
@@ -184,19 +193,23 @@ export interface GitRepositoryService {
    */
   fetch(credential: GitCredential | null, generation: number): Promise<RemoteDelta>
   /**
+   * Ask `origin` for the current branch tip without fetching.
+   */
+  remoteHead(credential: GitCredential | null, generation: number): Promise<RemoteTip>
+  /**
    * Push to `origin`; rejections come back as data, not thrown errors.
    */
   push(credential: GitCredential | null, generation: number): Promise<PushOutcome>
   /**
-   * Merge the fetched remote branch. Conflicts are committed into the notes as
-   * labeled markers: the repo is never left mid-merge, and the indexer turns
-   * the markers into `Needs review` flags. Uncommitted bytes in the pull's way
-   * move aside (`displaced`, each also broadcast on `note:displaced`), another
-   * device's changes inside a local-only folder stay out of the tree
-   * (`frozenPaths`), and a save that raced the cycle's commit comes back
-   * `deferred` with nothing written.
+   * Commit local changes, then merge the fetched remote branch, under one
+   * graph lock. Text conflicts are committed as merged text and other
+   * conflicts keep a copy: the repo is never left mid-merge. Uncommitted
+   * bytes in the pull's way move aside (`displaced`, each also broadcast on
+   * `note:displaced`), another device's changes inside a local-only folder
+   * stay out of the tree (`frozenPaths`), and a write from outside the app
+   * that raced the commit comes back `deferred` with nothing written.
    */
-  mergeRemote(generation: number): Promise<MergeOutcome>
+  pull(fallbackMessage: string, generation: number): Promise<PullOutcome>
 }
 
 export interface GitRepositoryServiceDeps {
@@ -238,12 +251,20 @@ class GitRepositoryServiceImpl implements GitRepositoryService {
     return this.#deps.ipc.call('git_fetch', { credential, generation }, remoteDeltaSchema)
   }
 
+  remoteHead(credential: GitCredential | null, generation: number): Promise<RemoteTip> {
+    return this.#deps.ipc.call('git_remote_head', { credential, generation }, remoteTipSchema)
+  }
+
   push(credential: GitCredential | null, generation: number): Promise<PushOutcome> {
     return this.#deps.ipc.call('git_push', { credential, generation }, pushOutcomeSchema)
   }
 
-  mergeRemote(generation: number): Promise<MergeOutcome> {
-    return this.#deps.ipc.call('git_merge_remote', { generation }, mergeOutcomeSchema)
+  pull(fallbackMessage: string, generation: number): Promise<PullOutcome> {
+    return this.#deps.ipc.call(
+      'git_pull',
+      { message: fallbackMessage, generation },
+      pullOutcomeSchema,
+    )
   }
 }
 

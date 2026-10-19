@@ -41,12 +41,12 @@ export function HeadingPicker({ context }: HeadingPickerProps): ReactElement {
   const { open, closeHeadingPicker } = useHeadingPicker()
   // The note the command targeted, read while the picker is open.
   const outline = useNoteOutline(open ? context.notePath() : null)
-  const jumped = useRef(false)
+  const jumpedRef = useRef(false)
   const headings = outline?.headings ?? []
   const depths = outlineDepths(headings)
 
   const jump = (index: number): void => {
-    jumped.current = true
+    jumpedRef.current = true
     closeHeadingPicker()
     outline?.reveal(index)
   }
@@ -62,8 +62,8 @@ export function HeadingPicker({ context }: HeadingPickerProps): ReactElement {
       finalFocus={() => {
         // A jump already focused the editor at the heading; the default return
         // to the previously focused element would take focus back off it.
-        if (jumped.current) {
-          jumped.current = false
+        if (jumpedRef.current) {
+          jumpedRef.current = false
           return false
         }
         // Dismissed: back to the note's editor, caret where it was. The picker

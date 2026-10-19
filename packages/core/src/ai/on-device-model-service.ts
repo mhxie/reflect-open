@@ -27,7 +27,7 @@ export interface OnDeviceModelService {
    * Verify a turn's or an action's destination before any private content is
    * read: a cloud target passes as it is, an on-device target only once
    * {@link OnDeviceModelService.verifyServer} accepts its server. A refusal
-   * rejects with `ReflectError('auth', reason)`; it never falls back to cloud.
+   * rejects with `AppError('auth', reason)`; it never falls back to cloud.
    */
   verify(target: ModelTarget, apiKey: string, signal?: AbortSignal): Promise<VerifiedModelTarget>
   /**

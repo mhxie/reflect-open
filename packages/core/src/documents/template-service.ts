@@ -1,6 +1,6 @@
 import { requireGraphSession, type GraphSessionSource } from '../graph/graph-session.ts'
 import type { ProgressPort } from '../ports/progress-port.ts'
-import { errorMessage, ReflectError } from '../errors.ts'
+import { AppError, errorMessage } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { patchNote } from '../graph/patch-note.ts'
 import type { IndexQueryService } from '../indexing/index-query-service.ts'
@@ -204,7 +204,7 @@ class TemplateServiceImpl implements TemplateService {
       path,
       (source) => {
         if (source === null) {
-          throw new ReflectError('notFound', `${path} does not exist`)
+          throw new AppError('notFound', `${path} does not exist`)
         }
         return retitledSource(path, source, title)
       },

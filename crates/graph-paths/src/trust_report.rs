@@ -37,8 +37,8 @@ pub fn normalize_wiki_trust_report_path(input: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_wiki_trust_report_path, normalize_wiki_trust_report_path,
-        DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY,
+        DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY, is_wiki_trust_report_path,
+        normalize_wiki_trust_report_path,
     };
     use serde::Deserialize;
 

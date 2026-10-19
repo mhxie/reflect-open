@@ -175,9 +175,11 @@ mod tests {
         ]);
         let found = find_cached(cache.path(), "ggml-large-v3-turbo.bin").unwrap();
         assert_eq!(found.etag, "aaa");
-        assert!(found
-            .path
-            .ends_with("snapshots/old/ggml-large-v3-turbo.bin"));
+        assert!(
+            found
+                .path
+                .ends_with("snapshots/old/ggml-large-v3-turbo.bin")
+        );
         assert!(find_cached(cache.path(), "ggml-large-v3-turbo-q8_0.bin").is_none());
     }
 

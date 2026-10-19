@@ -2,7 +2,7 @@ import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it, vi } from 'vitest'
 import { AssetDescriptionRejectedError } from '../ai/asset-describer-service.ts'
 import { createBackgroundReconcilerFactory } from '../reconcile/background-reconciler.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { descriptionPathFor } from '../graph/paths.ts'
 import type { FileChange } from '../indexing/file-change-service.ts'
 import type { IndexAppliedEvent } from '../indexing/index-lifecycle-service.ts'
@@ -106,10 +106,12 @@ async function settle(): Promise<void> {
 }
 
 /**
- * A spy on the checked note writes; creating a missing description is not one.
+ * A spy on the writes that replace a managed description; creating a missing
+ * description is not one. They keep the file's modification time, so a file
+ * that changed meanwhile is refused, never merged.
  */
 function writeSpy(files: ReturnType<typeof createTestNoteFileService>) {
-  return vi.spyOn(files, 'write')
+  return vi.spyOn(files, 'writeKeepingModified')
 }
 
 /**
@@ -179,7 +181,7 @@ function setup(options?: {
     /**
      * When set, the next re-index rejects with it.
      */
-    reindexError: null as unknown,
+    reindexError: null as Error | null,
     listenerCount: () => appliedListeners.size,
     emit(changes: FileChange[], generation: number = INDEX_GENERATION): void {
       for (const listener of appliedListeners) {
@@ -218,13 +220,14 @@ function setup(options?: {
     }
   })
   vi.spyOn(indexLifecycle, 'reindexNotesReferencing').mockImplementation(
-    async (assetPaths, generations) => {
+    (assetPaths, generations) => {
       reindexed.push([assetPaths, generations])
       if (index.reindexError !== null) {
         const error = index.reindexError
         index.reindexError = null
-        throw error
+        return Promise.reject(error)
       }
+      return Promise.resolve()
     },
   )
   const service = createAssetDescriptionService({
@@ -304,7 +307,7 @@ describe('pure helpers', () => {
     expect(descriptionPathFor('assets/a.png')).toBe('assets/a.png.reflect.md')
   })
 
-  it('readManagedDescription recognizes managed files and rejects user-authored ones', async () => {
+  it('readManagedDescription recognizes managed files and rejects user-authored ones', () => {
     const built = buildDescriptionSource(
       {
         source: 'assets/a.png',
@@ -504,7 +507,7 @@ describe('AssetDescriptionService.reconcile', () => {
     files.set('notes/pub.md', publicNote('assets/a.png'))
     refs.set('assets/a.png', ['notes/pub.md'])
     files.set('assets/a.png.reflect.md', managedDescription('oldhash'))
-    writeSpy(files).mockRejectedValueOnce(new ReflectError('io', 'disk full'))
+    writeSpy(files).mockRejectedValueOnce(new AppError('io', 'disk full'))
 
     const outcome = await reconcile()
 
@@ -598,7 +601,7 @@ describe('AssetDescriptionService.reconcile', () => {
     files.set('notes/pub.md', publicNote('assets/a.png'))
     refs.set('assets/a.png', ['notes/pub.md'])
     describer.setResult(() => {
-      throw new ReflectError('network', 'offline')
+      throw new AppError('network', 'offline')
     })
 
     const outcome = await reconcile()
@@ -725,7 +728,7 @@ describe('AssetDescriptionService.openSession', () => {
 
   it('still reports the descriptions as indexed when the re-index fails, and logs it', async () => {
     const { session, index, logger, indexedEvents } = await describable()
-    const failure = new ReflectError('io', 'index closed')
+    const failure = new AppError('io', 'index closed')
     index.reindexError = failure
     session.start()
     index.emit([upsert('assets/a.png')])
@@ -794,7 +797,7 @@ describe('AssetDescriptionService.openSession', () => {
   it('keeps an asset dirty after a transient stop and retries it on wake', async () => {
     const { session, index, describer, activity, logger, files } = await describable()
     describer.setResult(() => {
-      throw new ReflectError('network', 'offline')
+      throw new AppError('network', 'offline')
     })
     session.start()
 
@@ -815,7 +818,7 @@ describe('AssetDescriptionService.openSession', () => {
   it('logs an unexpected stop once, not on every retry', async () => {
     const { session, index, describer, activity, logger } = await describable()
     describer.setResult(() => {
-      throw new ReflectError('io', 'index not ready')
+      throw new AppError('io', 'index not ready')
     })
     session.start()
 
@@ -907,7 +910,7 @@ describe('AssetDescriptionService.openSession', () => {
 
   it('re-indexes again on the next pass after a failed re-index', async () => {
     const { session, index, reindexed } = await describable()
-    index.reindexError = new ReflectError('io', 'index closed')
+    index.reindexError = new AppError('io', 'index closed')
     session.start()
     index.emit([upsert('assets/a.png')])
     await vi.waitFor(() => expect(reindexed).toHaveLength(1))
@@ -1071,7 +1074,7 @@ describe('AssetDescriptionService.backfillVisibly', () => {
     refs.set('assets/a.png', ['notes/pub.md'])
 
     describer.setResult(() => {
-      throw new ReflectError('network', 'offline')
+      throw new AppError('network', 'offline')
     })
     await service.backfillVisibly()
     expect(operations.findByLabel('Describing assets')).toMatchObject({
@@ -1080,7 +1083,7 @@ describe('AssetDescriptionService.backfillVisibly', () => {
     })
 
     describer.setResult(() => {
-      throw new ReflectError('io', 'disk error')
+      throw new AppError('io', 'disk error')
     })
     await service.backfillVisibly()
     expect(operations.findByLabel('Describing assets')).toMatchObject({

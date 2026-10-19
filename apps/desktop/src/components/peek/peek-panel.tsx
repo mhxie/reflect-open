@@ -14,14 +14,14 @@ export function PeekPanel(): ReactElement | null {
   const peek = usePeek()
   const { route } = useRouter()
   const closePeek = peek?.closePeek
-  const firstRoute = useRef(route)
+  const firstRouteRef = useRef(route)
 
   // A navigation (including the panel's own "Open") retires the peek.
   useEffect(() => {
-    if (firstRoute.current !== route) {
+    if (firstRouteRef.current !== route) {
       closePeek?.()
     }
-    firstRoute.current = route
+    firstRouteRef.current = route
   }, [route, closePeek])
 
   if (peek?.target == null) {

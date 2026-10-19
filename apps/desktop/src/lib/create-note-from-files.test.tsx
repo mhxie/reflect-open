@@ -100,9 +100,9 @@ describe('createNoteFromFiles', () => {
 
   it('leaves the user where they went while the files copied', async () => {
     let route: Route = TODAY
-    vi.spyOn(app.attachments, 'saveFile').mockImplementation(async () => {
+    vi.spyOn(app.attachments, 'saveFile').mockImplementation(() => {
       route = { kind: 'tasks' }
-      return { ok: true, path: 'assets/a.pdf', destination: 'assets/a.pdf' }
+      return Promise.resolve({ ok: true, path: 'assets/a.pdf', destination: 'assets/a.pdf' })
     })
     const navigate = vi.fn()
 
@@ -117,9 +117,9 @@ describe('createNoteFromFiles', () => {
   })
 
   it('stops copying once another graph opens', async () => {
-    const save = vi.spyOn(app.attachments, 'saveFile').mockImplementation(async () => {
+    const save = vi.spyOn(app.attachments, 'saveFile').mockImplementation(() => {
       app.graphSession.setGraph({ generation: 5 })
-      return { ok: true, path: 'assets/a.pdf', destination: 'assets/a.pdf' }
+      return Promise.resolve({ ok: true, path: 'assets/a.pdf', destination: 'assets/a.pdf' })
     })
     const navigate = vi.fn(() => registerNoteEditorHandle('notes/new.md', handle, 4))
 

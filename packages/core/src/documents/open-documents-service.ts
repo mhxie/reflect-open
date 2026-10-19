@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { FileChange, FileChangeService } from '../indexing/file-change-service.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type { NoteSession } from './note-session-types.ts'
@@ -7,11 +8,11 @@ export interface OpenDocument {
   /**
    * Fire pending settle-time work (title renames) now.
    */
-  settle?: () => void
+  settle?: (() => void) | undefined
   /**
    * Resolves once fired settle-time work has landed.
    */
-  settled?: () => Promise<void>
+  settled?: (() => MaybePromise<void>) | undefined
 }
 
 /**
@@ -54,15 +55,15 @@ export interface OpenDocumentsService {
   sessionFor(path: string, generation?: number): NoteSession | null
   /**
    * Paths of open documents holding unsaved edits right now. The iCloud
-   * conflict sweep (Plan 21) defers these — the session's own conflict parking
-   * protects the buffer regardless, but skipping avoids churning a note the
-   * user is mid-thought in.
+   * conflict sweep (Plan 21) defers these, to avoid churning a note the user
+   * is editing.
    */
   dirtyPaths(): string[]
   /**
    * Ask every open document to reconcile against disk, exactly as if a watcher
    * upsert had arrived for its path: an unchanged file is a no-op, a clean
-   * buffer adopts silently, a dirty buffer parks the conflict banner. The index
+   * buffer adopts silently, a dirty buffer saves at once and merges with the
+   * disk text. The index
    * lifecycle calls this after each completed reconcile pass, because the pass
    * reads changed files into the index without emitting per-file events. On iOS
    * there is no file watcher, so a resume reconcile is the only signal a remote

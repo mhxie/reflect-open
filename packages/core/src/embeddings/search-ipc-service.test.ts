@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { GraphRole } from '../graph/graph-session.ts'
 import {
   createTestEmbeddingRuntimeService,
@@ -25,7 +25,6 @@ function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
     snippet: `about ${path}`,
     heading: null,
     isPrivate: false,
-    hasConflict: false,
     ...overrides,
   }
 }
@@ -151,7 +150,7 @@ describe('answer', () => {
 
   it('reports a failure as an error answer instead of throwing', async () => {
     const { searchIpc } = await setup({
-      results: () => Promise.reject(new ReflectError('io', 'the index is closed')),
+      results: () => Promise.reject(new AppError('io', 'the index is closed')),
     })
 
     await expect(searchIpc.answer({ ...REQUEST, mode: 'lexical' })).resolves.toEqual({
@@ -254,7 +253,7 @@ describe('start', () => {
   it('logs, and keeps search in-app, when the socket cannot be served', async () => {
     const { searchIpc, ipc, logger } = await setup()
     ipc.onCommand('search_ipc_start', () => {
-      throw new ReflectError('io', 'path too long for a socket')
+      throw new AppError('io', 'path too long for a socket')
     })
 
     const stop = searchIpc.start()

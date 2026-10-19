@@ -11,12 +11,22 @@ import { RouteContent } from './route-content.tsx'
 /**
  * The note route for `path` holding `content`, in a graph whose read-only
  * local-only folder is `secure`; the wiki index `wiki/index.md` sits above
- * every wiki note. `conflicted` is what the index says of the note's markers.
+ * every wiki note.
  */
-async function renderNote(path: string, content: string, conflicted = false) {
+async function renderNote(path: string, content: string) {
   const app = createTestCoreServices({
     noteFile: createTestNoteFileService({ files: { [path]: content } }),
   })
+  // The editor round-trips nearly all Markdown, so one body stands in for a
+  // converter gap and opens the note protected.
+  const createSession = app.noteSessions.create.bind(app.noteSessions)
+  vi.spyOn(app.noteSessions, 'create').mockImplementation((options) =>
+    createSession({
+      ...options,
+      classify: (markdown) =>
+        markdown.includes('Unsupported body.') ? 'lossy' : options.classify(markdown),
+    }),
+  )
   vi.spyOn(app.wiki, 'ancestors').mockResolvedValue([
     { path: 'wiki/index.md', title: 'Wiki Index', displayTitle: null, lang: null },
   ])
@@ -25,7 +35,6 @@ async function renderNote(path: string, content: string, conflicted = false) {
     title: '',
     dailyDate: null,
     isPrivate: false,
-    hasConflict: conflicted,
     gistUrl: null,
     gistStale: false,
   })
@@ -58,14 +67,11 @@ it('leads the editor with the trail', async () => {
   expect(document.querySelector('[contenteditable="true"]')).not.toBeNull()
 })
 
-it('leads a protected, sync-conflicted note with the trail', async () => {
-  await renderNote(
-    'wiki/topic/Clash.md',
-    '<<<<<<< this device\nmine\n=======\ntheirs\n>>>>>>> other device\n',
-    true,
-  )
+it('leads a protected note with the trail', async () => {
+  await renderNote('wiki/topic/Unsupported.md', '# Unsupported\n\nUnsupported body.\n')
 
-  await expect.element(page.getByText(/edited on two devices/i)).toBeVisible()
+  await expect.element(page.getByText(/reproduce faithfully/i)).toBeVisible()
+  expect(document.querySelector('[contenteditable="true"]')).toBeNull()
   await expectTrail()
 })
 

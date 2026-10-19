@@ -134,9 +134,9 @@ describe('verifyModelTarget', () => {
     const checked: OnDeviceTarget[] = []
     const cloud = modelTarget(HOSTED)
     await expect(
-      verifyModelTarget(cloud, async (target) => {
+      verifyModelTarget(cloud, (target) => {
         checked.push(target)
-        return 'ok'
+        return Promise.resolve('ok')
       }),
     ).resolves.toBe(cloud)
     expect(checked).toEqual([])
@@ -144,17 +144,16 @@ describe('verifyModelTarget', () => {
 
   it('verifies an on-device target only once its server accepts it', async () => {
     const onDevice = modelTarget(attested())
-    const verified = await verifyModelTarget(onDevice, async () => 'ok')
+    const verified = await verifyModelTarget(onDevice, () => Promise.resolve('ok'))
     expect(verified).toBe(onDevice)
     expect(verified.kind).toBe('on-device')
   })
 
   it('refuses with the reason when the server is refused, never falling back to cloud', async () => {
     await expect(
-      verifyModelTarget(modelTarget(attested()), async () => ({
-        kind: 'refused',
-        reason: 'Choose a model running on this Mac.',
-      })),
+      verifyModelTarget(modelTarget(attested()), () =>
+        Promise.resolve({ kind: 'refused', reason: 'Choose a model running on this Mac.' }),
+      ),
     ).rejects.toMatchObject({ kind: 'auth', message: 'Choose a model running on this Mac.' })
   })
 })

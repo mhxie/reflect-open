@@ -42,9 +42,9 @@ export function NoteEmbedBody({
   const noteAttachments = useNoteAttachments(sourcePath)
   const beginLinkIntent = useLinkIntentGuard()
   const scope = JSON.stringify([generation, sourcePath])
-  const currentScope = useRef(scope)
+  const scopeRef = useRef(scope)
   useLayoutEffect(() => {
-    currentScope.current = scope
+    scopeRef.current = scope
   }, [scope])
   const openFile = useCallback(
     (href: string) => {
@@ -55,7 +55,7 @@ export function NoteEmbedBody({
           // A bare filename can resolve differently once the source folder's
           // catalog is available. Never open a guessed vault-root fallback.
           await attachments.loadCatalog()
-          if (isStale() || currentScope.current !== scope) return
+          if (isStale() || scopeRef.current !== scope) return
           const path = noteAttachments.resolveAttachmentPath(href)
           if (path === null) {
             operations.fail('Opening attachment', 'Attachment not found.')
@@ -63,7 +63,7 @@ export function NoteEmbedBody({
           }
           await attachments.openOrReveal(path)
         } catch (cause) {
-          if (!isStale() && currentScope.current === scope) {
+          if (!isStale() && scopeRef.current === scope) {
             operations.fail('Opening attachment', errorMessage(cause))
           }
         }

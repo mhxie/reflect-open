@@ -112,9 +112,9 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   // Read when a report arrives, not when its read began: backup may start
   // while a read is still in flight.
   const syncContext = useSyncContext()
-  const sync = useRef(syncContext)
+  const syncRef = useRef(syncContext)
   useEffect(() => {
-    sync.current = syncContext
+    syncRef.current = syncContext
   })
   const path = settings.wikiTrustReportPath
   const enabled = graph !== null && (always || settings.wikiTrustDisplay !== 'off')
@@ -138,7 +138,7 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
     // and a display-off editor share the key.
     queryFn: () =>
       open
-        ? loadReport(wiki, client, key, path, () => sync.current?.fileChanged())
+        ? loadReport(wiki, client, key, path, () => syncRef.current?.fileChanged())
         : Promise.reject(new Error('No graph is open.')),
     enabled,
     refetchInterval: (query) =>

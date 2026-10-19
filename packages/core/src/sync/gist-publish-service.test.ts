@@ -89,9 +89,9 @@ function setup(options?: SetupOptions) {
   const noteRows = createNoteRowService({ graphSession: graph })
   const progress = createTestProgressPort()
   const githubAuth = createTestGithubAuthService()
-  vi.spyOn(githubAuth, 'getToken').mockImplementation(async () => {
+  vi.spyOn(githubAuth, 'getToken').mockImplementation(() => {
     tokenReads.count += 1
-    return token
+    return Promise.resolve(token)
   })
   const service = createGistPublishService({
     gists: createGistService({ http }),
@@ -256,9 +256,9 @@ describe('GistPublishService.publish', () => {
     const path = 'people/\u{17F}ecure/visa.md'
     const shareableReads: [string, number][] = []
     const { service, http, progress, tokenReads } = setup({
-      readShareable: async (readPath, generation) => {
+      readShareable: (readPath, generation) => {
         shareableReads.push([readPath, generation])
-        return { kind: 'localOnly' }
+        return Promise.resolve({ kind: 'localOnly' })
       },
     })
 

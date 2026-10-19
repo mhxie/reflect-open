@@ -1,5 +1,6 @@
+import { act } from '@/test-utils/act.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ReflectError, type GithubAuth, type GithubAuthService } from '@reflect/core'
+import { AppError, type GithubAuth, type GithubAuthService } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useDeviceFlowAuth } from './use-device-flow-auth.ts'
@@ -24,11 +25,16 @@ describe('useDeviceFlowAuth', () => {
   it('surfaces the user code and resolves true on success', async () => {
     // No browser side effects here: the surface opens GitHub only after the
     // user has the code (copy first, then hand off).
-    mockFlow.mockImplementation(async (options) => {
-      options.onCode({ userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device' })
-      return AUTH
-    })
-    const { result, act } = await mount()
+    mockFlow.mockImplementation((options) =>
+      Promise.try(() => {
+        options.onCode({
+          userCode: 'ABCD-1234',
+          verificationUri: 'https://github.com/login/device',
+        })
+        return AUTH
+      }),
+    )
+    const { result } = await mount()
 
     let authed = false
     await act(async () => {
@@ -46,11 +52,16 @@ describe('useDeviceFlowAuth', () => {
   })
 
   it('returns to the idle view with a message when the flow fails', async () => {
-    mockFlow.mockImplementation(async (options) => {
-      options.onCode({ userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device' })
-      throw new ReflectError('auth', 'GitHub sign-in was denied.')
-    })
-    const { result, act } = await mount()
+    mockFlow.mockImplementation((options) =>
+      Promise.try(() => {
+        options.onCode({
+          userCode: 'ABCD-1234',
+          verificationUri: 'https://github.com/login/device',
+        })
+        throw new AppError('auth', 'GitHub sign-in was denied.')
+      }),
+    )
+    const { result } = await mount()
 
     let authed = true
     await act(async () => {
@@ -64,7 +75,7 @@ describe('useDeviceFlowAuth', () => {
 
   it('resolves false without an error when the flow is aborted (dialog closed)', async () => {
     mockFlow.mockResolvedValue(null)
-    const { result, act } = await mount()
+    const { result } = await mount()
 
     let authed = true
     await act(async () => {
@@ -77,11 +88,11 @@ describe('useDeviceFlowAuth', () => {
 
   it('aborts the polling when the owning component unmounts', async () => {
     let signal: AbortSignal | undefined
-    mockFlow.mockImplementation(async (options) => {
+    mockFlow.mockImplementation((options) => {
       signal = options.signal
-      return null
+      return Promise.resolve(null)
     })
-    const { result, act, unmount } = await mount()
+    const { result, unmount } = await mount()
 
     await act(async () => {
       await result.current.signIn()

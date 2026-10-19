@@ -68,7 +68,6 @@ describe('NoteContextSidebar', () => {
         snippet: 'comptime experiments',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     const view = await renderSidebar('notes/rust.md')

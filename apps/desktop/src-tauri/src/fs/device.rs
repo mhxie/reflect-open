@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::io::Read;
 use tauri::State;
 
-use super::{ensure_shareable_note_path, graph_for, io, resolve_read, GraphState};
+use super::{GraphState, ensure_shareable_note_path, graph_for, io, resolve_read};
 use crate::error::{AppError, AppResult};
 
 #[cfg(unix)]
@@ -14,7 +14,7 @@ pub(super) fn read_bounded_source(
     rest: &std::path::Path,
     max_bytes: u64,
 ) -> AppResult<Vec<u8>> {
-    use super::beneath::{open_dir_beneath, read_bounded_beneath, BeneathError};
+    use super::beneath::{BeneathError, open_dir_beneath, read_bounded_beneath};
     let parent = rest
         .parent()
         .ok_or_else(|| AppError::traversal("missing source directory"))?;
@@ -32,7 +32,7 @@ pub(super) fn read_bounded_source(
 }
 
 /// Read a bounded model-facing source without following links after resolution.
-pub(super) fn read_source_for_device(target: &super::resolve::ReadTarget) -> AppResult<Vec<u8>> {
+pub(super) fn read_source_for_device(target: &super::ReadTarget) -> AppResult<Vec<u8>> {
     #[cfg(unix)]
     {
         read_bounded_source(&target.base, &target.rest, 20 * 1024 * 1024)
@@ -143,12 +143,12 @@ pub async fn asset_ocr_cache_keys(
 
 #[cfg(unix)]
 fn cache_keys(root: &std::path::Path) -> AppResult<Vec<String>> {
-    use super::beneath::{names_beneath, open_dir_beneath, BeneathError};
+    use super::beneath::{BeneathError, names_beneath, open_dir_beneath};
     let directory = match open_dir_beneath(root, std::path::Path::new(".reflect/asset-ocr"), false)
     {
         Ok(directory) => directory,
         Err(BeneathError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
         Err(error) => return Err(error.into()),
     };
@@ -214,7 +214,7 @@ pub async fn asset_ocr_cache_write(
 
 #[cfg(unix)]
 fn write_cache(root: &std::path::Path, relative: &str, contents: &str) -> AppResult<()> {
-    use super::beneath::{open_dir_beneath, write_current_beneath, Persisted};
+    use super::beneath::{Persisted, open_dir_beneath, write_current_beneath};
     let root_dir = open_dir_beneath(root, std::path::Path::new(""), false)?;
     let cache_dir = open_dir_beneath(root, std::path::Path::new(".reflect/asset-ocr"), true)?;
     let name = std::path::Path::new(relative)
@@ -277,24 +277,28 @@ mod tests {
         .unwrap();
         assert!(read.content.contains("Secret"));
         assert!(!read.local_only);
-        assert!(tauri::async_runtime::block_on(note_read_for_device(
-            "notes/private.md".into(),
-            Some(6),
-            app.state(),
-        ))
-        .is_err());
+        assert!(
+            tauri::async_runtime::block_on(note_read_for_device(
+                "notes/private.md".into(),
+                Some(6),
+                app.state(),
+            ))
+            .is_err()
+        );
         for path in [
             ".git/config.md",
             ".reflect/hidden.md",
             "notes/private.txt",
             "../escape.md",
         ] {
-            assert!(tauri::async_runtime::block_on(note_read_for_device(
-                path.into(),
-                Some(7),
-                app.state(),
-            ))
-            .is_err());
+            assert!(
+                tauri::async_runtime::block_on(note_read_for_device(
+                    path.into(),
+                    Some(7),
+                    app.state(),
+                ))
+                .is_err()
+            );
         }
     }
 
@@ -314,7 +318,7 @@ mod tests {
         )
         .unwrap();
         let state: State<GraphState> = app.state();
-        state.0.lock().unwrap().local_only = Some(std::sync::Arc::new(
+        state.0.lock().unwrap().set_local_only(Some(
             reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw_root)).unwrap(),
         ));
         let read = tauri::async_runtime::block_on(note_read_for_device(
@@ -325,12 +329,14 @@ mod tests {
         .unwrap();
         assert!(read.local_only);
         assert_eq!(read.content, "Local secret");
-        assert!(tauri::async_runtime::block_on(note_read_for_device(
-            "notes/link.md".into(),
-            Some(7),
-            app.state(),
-        ))
-        .is_err());
+        assert!(
+            tauri::async_runtime::block_on(note_read_for_device(
+                "notes/link.md".into(),
+                Some(7),
+                app.state(),
+            ))
+            .is_err()
+        );
     }
 
     #[test]
@@ -358,26 +364,32 @@ mod tests {
             tauri::async_runtime::block_on(asset_ocr_cache_keys(7, app.state())).unwrap(),
             vec![key.clone()]
         );
-        assert!(directory
-            .path()
-            .join(format!(".reflect/asset-ocr/{key}.json"))
-            .is_file());
+        assert!(
+            directory
+                .path()
+                .join(format!(".reflect/asset-ocr/{key}.json"))
+                .is_file()
+        );
         for (bad_key, generation) in [("../notes/private.md".to_string(), 7), (key.clone(), 6)] {
-            assert!(tauri::async_runtime::block_on(asset_ocr_cache_write(
-                bad_key,
-                "bad".into(),
-                generation,
+            assert!(
+                tauri::async_runtime::block_on(asset_ocr_cache_write(
+                    bad_key,
+                    "bad".into(),
+                    generation,
+                    app.state(),
+                ))
+                .is_err()
+            );
+        }
+        assert!(
+            tauri::async_runtime::block_on(asset_ocr_cache_write(
+                key,
+                "x".repeat(1024 * 1024 + 1),
+                7,
                 app.state(),
             ))
-            .is_err());
-        }
-        assert!(tauri::async_runtime::block_on(asset_ocr_cache_write(
-            key,
-            "x".repeat(1024 * 1024 + 1),
-            7,
-            app.state(),
-        ))
-        .is_err());
+            .is_err()
+        );
         assert!(
             fs::read_to_string(directory.path().join("notes/private.md"))
                 .unwrap()
@@ -396,13 +408,15 @@ mod tests {
             directory.path().join(".reflect/asset-ocr"),
         )
         .unwrap();
-        assert!(tauri::async_runtime::block_on(asset_ocr_cache_write(
-            "a".repeat(64),
-            "secret".into(),
-            7,
-            app.state(),
-        ))
-        .is_err());
+        assert!(
+            tauri::async_runtime::block_on(asset_ocr_cache_write(
+                "a".repeat(64),
+                "secret".into(),
+                7,
+                app.state(),
+            ))
+            .is_err()
+        );
         assert!(fs::read_dir(elsewhere.path()).unwrap().next().is_none());
     }
 
@@ -413,17 +427,21 @@ mod tests {
         let (app, directory) = open_graph();
         fs::create_dir_all(directory.path().join("assets")).unwrap();
         symlink("../assets", directory.path().join(".reflect/asset-ocr")).unwrap();
-        assert!(tauri::async_runtime::block_on(asset_ocr_cache_write(
-            "a".repeat(64),
-            "Private OCR".into(),
-            7,
-            app.state(),
-        ))
-        .is_err());
-        assert!(fs::read_dir(directory.path().join("assets"))
-            .unwrap()
-            .next()
-            .is_none());
+        assert!(
+            tauri::async_runtime::block_on(asset_ocr_cache_write(
+                "a".repeat(64),
+                "Private OCR".into(),
+                7,
+                app.state(),
+            ))
+            .is_err()
+        );
+        assert!(
+            fs::read_dir(directory.path().join("assets"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
         assert!(tauri::async_runtime::block_on(asset_ocr_cache_keys(7, app.state())).is_err());
     }
 
@@ -486,13 +504,15 @@ mod tests {
                 .unwrap()
                 .cache
         );
-        assert!(tauri::async_runtime::block_on(asset_ocr_cache_write(
-            "a".repeat(64),
-            "Private OCR".into(),
-            7,
-            app.state(),
-        ))
-        .is_err());
+        assert!(
+            tauri::async_runtime::block_on(asset_ocr_cache_write(
+                "a".repeat(64),
+                "Private OCR".into(),
+                7,
+                app.state(),
+            ))
+            .is_err()
+        );
         assert!(!directory.path().join(".reflect/asset-ocr").exists());
         assert!(matches!(
             tauri::async_runtime::block_on(note_read_for_device(

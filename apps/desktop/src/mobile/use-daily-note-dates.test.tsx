@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
@@ -31,7 +32,7 @@ describe('useDailyNoteDates', () => {
     await vi.waitFor(() => expect(dailyDatesInRange).toHaveBeenCalledTimes(2))
     expect(hook.result.current.has('2026-07-14')).toBe(true)
 
-    await hook.act(() => pendingNextRange.resolve(['2027-01-05']))
+    await act(() => pendingNextRange.resolve(['2027-01-05']))
     await vi.waitFor(() => expect(hook.result.current.has('2027-01-05')).toBe(true))
     expect(hook.result.current.has('2026-07-14')).toBe(false)
   })

@@ -1,2519 +1,83 @@
-//! Cross-module index tests: most exercise the write path and the query bridge
-//! together against a migrated in-memory database, the same shape the commands
-//! compose at runtime.
-
-use reflect_index_schema::LATEST_SCHEMA_VERSION;
-use rusqlite::Connection;
-use serde_json::Value;
-use sha2::Digest;
-
-use super::chat_write::{delete_conversation, save_message, ChatConversation, ChatMessageRow};
-use super::embed_write::{apply_chunks, prepare_vectors, remove_chunks, EmbeddedChunk};
-use super::migrations::{migrate, migrate_to, open_in_memory, open_index_at, validate_migrations};
-use super::query::run_query;
-use super::scan::scan_reconcile;
-use super::write::{
-    apply_note, claim_tier, clear_index, move_note, prune_orphan_embeddings, touch_note,
-    IndexedAlias, IndexedClaim, IndexedEmail, IndexedLink, IndexedNote, IndexedTag, IndexedTask,
-    MovedNoteAddress,
-};
-
-fn migrated() -> Connection {
-    // Registers sqlite-vec before migrating — the 0002 migration creates a
-    // vec0 table, so a raw rusqlite open would fail with "no such module".
-    let mut conn = open_in_memory().expect("open");
-    conn.execute_batch("PRAGMA foreign_keys=ON;").expect("fk");
-    migrate(&mut conn).expect("migrate");
-    conn
-}
-
-/// The filename-stem key the TS projection derives (`noteBasenameKey`).
-fn stem_key(path: &str) -> String {
-    let filename = path.rsplit('/').next().unwrap_or(path);
-    filename.trim_end_matches(".md").to_lowercase()
-}
-
-/// Mirrors `projectNoteClaims`'s seen-set: first claim of a key wins.
-fn push_claim(claims: &mut Vec<IndexedClaim>, key: &str, tier: i64) {
-    if !key.is_empty() && !claims.iter().any(|claim| claim.key == key) {
-        claims.push(IndexedClaim {
-            key: key.to_string(),
-            tier,
-        });
-    }
-}
-
-fn note(path: &str, title: &str, links: Vec<IndexedLink>) -> IndexedNote {
-    let mut claims = Vec::new();
-    push_claim(&mut claims, &title.to_lowercase(), claim_tier::TITLE);
-    push_claim(&mut claims, &stem_key(path), claim_tier::BASENAME);
-    IndexedNote {
-        path: path.to_string(),
-        id: None,
-        title: title.to_string(),
-        display_title: None,
-        lang: None,
-        title_key: title.to_lowercase(),
-        path_key: path.to_lowercase(),
-        kind: "note".to_string(),
-        daily_date: None,
-        is_private: false,
-        is_pinned: false,
-        pinned_order: None,
-        has_conflict: false,
-        has_content: true,
-        body_chars: 0,
-        has_device_only_content: false,
-        gist_url: None,
-        gist_stale: false,
-        summary_fresh: false,
-        file_hash: "h".to_string(),
-        mtime: 0,
-        text: format!("{title} body"),
-        asset_text: String::new(),
-        preview: "body".to_string(),
-        summary: String::new(),
-        links,
-        tags: vec![],
-        aliases: vec![],
-        claims,
-        emails: vec![],
-        assets: vec![],
-        tasks: vec![],
-    }
-}
-
-fn wiki(target: &str) -> IndexedLink {
-    IndexedLink {
-        kind: "wiki".to_string(),
-        target_raw: target.to_string(),
-        target_key: target.to_lowercase(),
-        target_path_key: None,
-        alias: None,
-        pos_from: 0,
-        pos_to: 0,
-    }
-}
-
-/// A link that names an exact file (`[[Projects/Plan]]` or `[x](./plan.md)`).
-fn path_link(kind: &str, target_raw: &str, target_path_key: &str) -> IndexedLink {
-    IndexedLink {
-        kind: kind.to_string(),
-        target_raw: target_raw.to_string(),
-        target_key: target_raw.to_lowercase(),
-        target_path_key: Some(target_path_key.to_string()),
-        alias: None,
-        pos_from: 0,
-        pos_to: 0,
-    }
-}
-
-fn aliased_note(path: &str, title: &str, alias: &str) -> IndexedNote {
-    let mut indexed = note(path, title, vec![]);
-    indexed.aliases = vec![IndexedAlias {
-        alias: alias.to_string(),
-        alias_key: alias.to_lowercase(),
-    }];
-    let mut claims = Vec::new();
-    push_claim(&mut claims, &title.to_lowercase(), 2);
-    push_claim(&mut claims, &alias.to_lowercase(), claim_tier::ALIAS);
-    push_claim(&mut claims, &stem_key(path), 4);
-    indexed.claims = claims;
-    indexed
-}
-
-fn daily_note(path: &str, date: &str) -> IndexedNote {
-    let mut indexed = note(path, date, vec![]);
-    indexed.kind = "daily".to_string();
-    indexed.daily_date = Some(date.to_string());
-    let mut claims = Vec::new();
-    push_claim(&mut claims, date, claim_tier::DAILY_DATE);
-    push_claim(&mut claims, &date.to_lowercase(), claim_tier::TITLE);
-    push_claim(&mut claims, &stem_key(path), claim_tier::BASENAME);
-    indexed.claims = claims;
-    indexed
-}
-
-/// What the TS `movedNoteAddress` computes for a test path (never a daily).
-fn moved_address(to: &str) -> MovedNoteAddress {
-    MovedNoteAddress {
-        path_key: to.to_lowercase(),
-        basename_key: stem_key(to),
-        daily_date: None,
-    }
-}
-
-fn task(index: i64, markdown: &str, checked: bool) -> IndexedTask {
-    IndexedTask {
-        ast_path: format!("[{index}]"),
-        markdown: markdown.to_string(),
-        breadcrumbs: vec![],
-        checked,
-        due_date: None,
-    }
-}
-
-#[test]
-fn migrations_are_valid_and_idempotent() {
-    // Guards every migration's SQL (rusqlite_migration validates the set).
-    validate_migrations().expect("migration set is valid");
-    let mut conn = migrated();
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, LATEST_SCHEMA_VERSION as i64);
-    migrate(&mut conn).expect("re-running to_latest is a no-op");
-}
-
-#[test]
-fn tag_search_indexes_are_created() {
-    let conn = migrated();
-    let has_tags_index: bool = conn
-        .prepare("SELECT 1 FROM pragma_index_list('tags') WHERE name = ?1")
-        .unwrap()
-        .exists(["tags_tag_key_note_path"])
-        .unwrap();
-    assert!(has_tags_index);
-
-    let has_notes_index: bool = conn
-        .prepare("SELECT 1 FROM pragma_index_list('notes') WHERE name = ?1")
-        .unwrap()
-        .exists(["notes_daily_date_mtime_path"])
-        .unwrap();
-    assert!(has_notes_index);
-
-    let tag_columns: Vec<(String, i64)> = conn
-        .prepare(
-            "SELECT name, seqno FROM pragma_index_xinfo('tags_tag_key_note_path')
-             WHERE key = 1 ORDER BY seqno",
-        )
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(
-        tag_columns,
-        vec![("tag_key".to_string(), 0), ("note_path".to_string(), 1)]
-    );
-
-    let notes_columns: Vec<(String, i64, i64)> = conn
-        .prepare(
-            "SELECT name, seqno, \"desc\" FROM pragma_index_xinfo('notes_daily_date_mtime_path')
-             WHERE key = 1 ORDER BY seqno",
-        )
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(
-        notes_columns,
-        vec![
-            ("daily_date".to_string(), 0, 0),
-            ("mtime".to_string(), 1, 1),
-            ("path".to_string(), 2, 0),
-        ]
-    );
-}
-
-#[test]
-fn preview_and_tag_keys_round_trip() {
-    let conn = migrated();
-    let mut tagged = note("notes/a.md", "A", vec![]);
-    tagged.preview = "first body line".to_string();
-    tagged.summary = "One sentence about the note.".to_string();
-    tagged.tags = vec![IndexedTag {
-        tag: "Café".to_string(),
-        tag_key: "café".to_string(),
-    }];
-    apply_note(&conn, &tagged).unwrap();
-
-    let notes = run_query(&conn, "SELECT preview, summary FROM notes", &[]).unwrap();
-    assert_eq!(notes[0]["preview"], Value::from("first body line"));
-    assert_eq!(
-        notes[0]["summary"],
-        Value::from("One sentence about the note.")
-    );
-
-    // Display casing and the TS-folded key are stored side by side — matching
-    // happens on tag_key (SQLite's lower() couldn't fold the É).
-    let tags = run_query(&conn, "SELECT tag, tag_key FROM tags", &[]).unwrap();
-    assert_eq!(tags[0]["tag"], Value::from("Café"));
-    assert_eq!(tags[0]["tag_key"], Value::from("café"));
-}
-
-#[test]
-fn note_emails_apply_move_and_cascade() {
-    let conn = migrated();
-    let mut person = note("notes/jane-doe.md", "Jane Doe", vec![]);
-    person.emails = vec![IndexedEmail {
-        email: "Jane@Corp.com".to_string(),
-        email_key: "jane@corp.com".to_string(),
-    }];
-    apply_note(&conn, &person).unwrap();
-
-    // Display casing and the folded match key are stored side by side, like tags.
-    let rows = run_query(
-        &conn,
-        "SELECT note_path, email, email_key FROM note_emails",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["email"], Value::from("Jane@Corp.com"));
-    assert_eq!(rows[0]["email_key"], Value::from("jane@corp.com"));
-
-    // A rename carries the rows to the new path (inside the same deferred-FK
-    // transaction the command layer would open).
-    conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
-        .unwrap();
-    move_note(
-        &conn,
-        "notes/jane-doe.md",
-        "notes/jane.md",
-        &moved_address("notes/jane.md"),
-    )
-    .unwrap();
-    conn.execute_batch("COMMIT;").unwrap();
-    let moved = run_query(&conn, "SELECT note_path FROM note_emails", &[]).unwrap();
-    assert_eq!(moved[0]["note_path"], Value::from("notes/jane.md"));
-
-    // Re-applying with no emails replaces the rows rather than accreting.
-    let mut renamed = note("notes/jane.md", "Jane Doe", vec![]);
-    renamed.emails = vec![];
-    apply_note(&conn, &renamed).unwrap();
-    let cleared = run_query(&conn, "SELECT note_path FROM note_emails", &[]).unwrap();
-    assert!(cleared.is_empty());
-}
-
-#[test]
-fn backlinks_resolve_by_title_at_query_time() {
-    let conn = migrated();
-    // Source links to "Target" before the target note even exists.
-    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("Target")])).unwrap();
-    let none = run_query(
-        &conn,
-        "SELECT source_path FROM backlinks WHERE target_path = ?1",
-        &[Value::from("notes/target.md")],
-    )
-    .unwrap();
-    assert!(none.is_empty());
-
-    // Creating the target immediately resolves the inbound link (join, no reindex).
-    apply_note(&conn, &note("notes/target.md", "Target", vec![])).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT source_path FROM backlinks WHERE target_path = ?1",
-        &[Value::from("notes/target.md")],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["source_path"], Value::from("notes/a.md"));
-}
-
-#[test]
-fn backlinks_resolve_by_alias_when_the_key_has_no_stronger_claimant() {
-    let conn = migrated();
-    apply_note(
-        &conn,
-        &aliased_note("notes/tim-maccaw-dad.md", "Tim MacCaw // Dad", "Dad"),
-    )
-    .unwrap();
-    apply_note(&conn, &note("notes/source.md", "Source", vec![wiki("Dad")])).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'notes/source.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0]["target_path"],
-        Value::from("notes/tim-maccaw-dad.md")
-    );
-}
-
-#[test]
-fn backlink_resolution_uses_daily_then_title_then_alias_precedence() {
-    let conn = migrated();
-    apply_note(
-        &conn,
-        &aliased_note("notes/aliased-date.md", "Release Day", "2026-07-10"),
-    )
-    .unwrap();
-    apply_note(&conn, &note("notes/titled-date.md", "2026-07-10", vec![])).unwrap();
-    apply_note(&conn, &daily_note("daily/2026-07-10.md", "2026-07-10")).unwrap();
-    apply_note(
-        &conn,
-        &note(
-            "notes/date-source.md",
-            "Date Source",
-            vec![wiki("2026-07-10")],
-        ),
-    )
-    .unwrap();
-
-    apply_note(
-        &conn,
-        &aliased_note("notes/tim-maccaw-dad.md", "Tim MacCaw // Dad", "Dad"),
-    )
-    .unwrap();
-    apply_note(&conn, &note("notes/dad.md", "Dad", vec![])).unwrap();
-    apply_note(
-        &conn,
-        &note("notes/dad-source.md", "Dad Source", vec![wiki("Dad")]),
-    )
-    .unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT source_path, target_path FROM backlinks ORDER BY source_path",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["source_path"], Value::from("notes/dad-source.md"));
-    assert_eq!(rows[0]["target_path"], Value::from("notes/dad.md"));
-    assert_eq!(rows[1]["source_path"], Value::from("notes/date-source.md"));
-    assert_eq!(rows[1]["target_path"], Value::from("daily/2026-07-10.md"));
-}
-
-#[test]
-fn note_addressing_migrations_preserve_rows_and_reproject_resolution() {
-    let mut conn = open_in_memory().expect("open");
-    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    migrate_to(&mut conn, 17).expect("stage v17");
-
-    // Rows as a v17 writer shaped them: no `path_key`, no `note_claims`.
-    for (path, title) in [("notes/dad.md", "Dad"), ("notes/source.md", "Source")] {
-        conn.execute(
-            "INSERT INTO notes(path, title, title_key, kind, file_hash, mtime, updated_at)
-             VALUES(?1, ?2, ?3, 'note', 'h', 0, 0)",
-            rusqlite::params![path, title, title.to_lowercase()],
-        )
-        .unwrap();
-    }
-    conn.execute(
-        "INSERT INTO links(source_path, kind, target_raw, target_key, pos_from, pos_to)
-         VALUES('notes/source.md', 'wiki', 'Dad', 'dad', 0, 0)",
-        [],
-    )
-    .unwrap();
-
-    let counts_before: Vec<i64> = ["notes", "links"]
-        .iter()
-        .map(|table| {
-            conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap()
-        })
-        .collect();
-
-    migrate(&mut conn).expect("migrate to latest");
-
-    // Neither 0018 nor 0019 wipes projection rows...
-    let counts_after: Vec<i64> = ["notes", "links"]
-        .iter()
-        .map(|table| {
-            conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap()
-        })
-        .collect();
-    assert_eq!(counts_after, counts_before);
-
-    // ...but name resolution now reads `note_claims`, which pre-0019 rows do
-    // not have: links stay unresolved until the projection-version bump
-    // rebuilds them on the next open.
-    let stale = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'notes/source.md'",
-        &[],
-    )
-    .unwrap();
-    assert!(stale.is_empty());
-
-    // The reprojection restores resolution through the claims table.
-    apply_note(&conn, &note("notes/dad.md", "Dad", vec![])).unwrap();
-    apply_note(&conn, &note("notes/source.md", "Source", vec![wiki("Dad")])).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'notes/source.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["target_path"], Value::from("notes/dad.md"));
-}
-
-#[test]
-fn alias_collisions_choose_the_first_path_for_backlinks() {
-    let conn = migrated();
-    apply_note(&conn, &aliased_note("notes/zeta.md", "Zeta", "Shared Name")).unwrap();
-    apply_note(
-        &conn,
-        &aliased_note("notes/alpha.md", "Alpha", "Shared Name"),
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO aliases(note_path, alias, alias_key) VALUES (?1, ?2, ?3)",
-        ["notes/alpha.md", "SHARED NAME", "shared name"],
-    )
-    .unwrap();
-    apply_note(
-        &conn,
-        &note("notes/source.md", "Source", vec![wiki("Shared Name")]),
-    )
-    .unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'notes/source.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["target_path"], Value::from("notes/alpha.md"));
-
-    let keys = run_query(
-        &conn,
-        "SELECT note_path, claim_count FROM note_keys WHERE key = 'shared name'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(keys.len(), 1);
-    assert_eq!(keys[0]["note_path"], Value::from("notes/alpha.md"));
-    assert_eq!(keys[0]["claim_count"], Value::from(2));
-
-    conn.execute("DELETE FROM notes WHERE path = ?1", ["notes/alpha.md"])
-        .unwrap();
-    let fallback = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'notes/source.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(fallback.len(), 1);
-    assert_eq!(fallback[0]["target_path"], Value::from("notes/zeta.md"));
-    let fallback_key = run_query(
-        &conn,
-        "SELECT note_path, claim_count FROM note_keys WHERE key = 'shared name'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(fallback_key[0]["note_path"], Value::from("notes/zeta.md"));
-    assert_eq!(fallback_key[0]["claim_count"], Value::from(1));
-}
-
-#[test]
-fn templates_are_invisible_to_backlink_resolution() {
-    let conn = migrated();
-    let mut template = note("templates/journal.md", "Journal", vec![wiki("Target")]);
-    template.kind = "template".to_string();
-    template.claims = vec![];
-    apply_note(&conn, &template).unwrap();
-    apply_note(&conn, &note("notes/target.md", "Target", vec![])).unwrap();
-    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("Journal")])).unwrap();
-
-    // A note linking [[Journal]] must not resolve to the template's title…
-    let to_template = run_query(
-        &conn,
-        "SELECT source_path FROM backlinks WHERE target_path = ?1",
-        &[Value::from("templates/journal.md")],
-    )
-    .unwrap();
-    assert!(to_template.is_empty());
-
-    // …and the template's boilerplate [[Target]] link is not a graph edge.
-    let from_template = run_query(
-        &conn,
-        "SELECT source_path FROM backlinks WHERE target_path = ?1",
-        &[Value::from("notes/target.md")],
-    )
-    .unwrap();
-    assert!(from_template.is_empty());
-}
-
-#[test]
-fn asset_description_text_is_searchable_but_stays_out_of_the_preview() {
-    let conn = migrated();
-    // The note body says nothing about a waterfall; only the asset description
-    // (folded into the FTS body, Plan 20) does.
-    let mut sample = note("notes/a.md", "Trip", vec![]);
-    sample.text = "Trip planning".to_string();
-    sample.preview = "Trip planning".to_string();
-    sample.asset_text = "A photo of a waterfall in a green canyon.".to_string();
-    apply_note(&conn, &sample).unwrap();
-
-    // A query that appears only in the asset description surfaces the note.
-    let hits = run_query(
-        &conn,
-        "SELECT path FROM search_fts WHERE search_fts MATCH ?1",
-        &[Value::from("waterfall")],
-    )
-    .unwrap();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0]["path"], Value::from("notes/a.md"));
-
-    // The note body is still searchable alongside it.
-    let body_hits = run_query(
-        &conn,
-        "SELECT path FROM search_fts WHERE search_fts MATCH ?1",
-        &[Value::from("planning")],
-    )
-    .unwrap();
-    assert_eq!(body_hits.len(), 1);
-
-    // The asset text never leaks into the preview.
-    let preview: String = conn
-        .query_row(
-            "SELECT preview FROM notes WHERE path = 'notes/a.md'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(
-        !preview.contains("waterfall"),
-        "preview must not carry asset text"
-    );
-}
-
-#[test]
-fn pinned_migration_drops_stale_note_rows_for_reindex() {
-    // Rows indexed before 0003 would keep is_pinned=0 even where the file
-    // already says `pinned: true` (the open-time reconcile hash-skips
-    // unchanged files) — the migration wipes the projection so the next open
-    // re-indexes everything with the new column populated.
-    let mut conn = open_in_memory().expect("open");
-    migrate_to(&mut conn, 2).expect("migrate to v2");
-    conn.execute_batch(
-        "INSERT INTO notes(path, title, title_key, file_hash) VALUES('notes/a.md', 'A', 'a', 'h');
-         INSERT INTO tags(note_path, tag) VALUES('notes/a.md', 'x');
-         INSERT INTO search_fts(path, title, body) VALUES('notes/a.md', 'A', 'A body');
-         INSERT INTO index_meta(key, value) VALUES('k', 'v');",
-    )
-    .expect("stage v2 rows");
-
-    migrate(&mut conn).expect("migrate to latest");
-    for table in ["notes", "tags", "search_fts"] {
-        let count: i64 = conn
-            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0, "{table} should be wiped for the re-index");
-    }
-    // Bookkeeping outlives the wipe (same contract as index_clear).
-    let meta: i64 = conn
-        .query_row("SELECT count(*) FROM index_meta", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(meta, 1);
-}
-
-#[test]
-fn pinned_flag_and_order_round_trip_into_the_notes_row() {
-    let conn = migrated();
-    let mut pinned = note("notes/p.md", "P", vec![]);
-    pinned.is_pinned = true;
-    pinned.pinned_order = Some(1.5);
-    apply_note(&conn, &pinned).unwrap();
-    apply_note(&conn, &note("notes/q.md", "Q", vec![])).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT path, pinned_order FROM notes WHERE is_pinned = 1",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["path"], Value::from("notes/p.md"));
-    assert_eq!(rows[0]["pinned_order"], Value::from(1.5));
-}
-
-#[test]
-fn conflict_flag_round_trips_into_the_notes_row() {
-    let conn = migrated();
-    let mut conflicted = note("notes/c.md", "C", vec![]);
-    conflicted.has_conflict = true;
-    apply_note(&conn, &conflicted).unwrap();
-    apply_note(&conn, &note("notes/clean.md", "Clean", vec![])).unwrap();
-    let rows = run_query(&conn, "SELECT path FROM notes WHERE has_conflict = 1", &[]).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["path"], Value::from("notes/c.md"));
-
-    // Re-indexing without markers clears the flag (resolution detection).
-    apply_note(&conn, &note("notes/c.md", "C", vec![])).unwrap();
-    let rows = run_query(&conn, "SELECT path FROM notes WHERE has_conflict = 1", &[]).unwrap();
-    assert!(rows.is_empty());
-}
-
-#[test]
-fn gist_columns_round_trip_into_the_notes_row() {
-    let conn = migrated();
-    let mut published = note("notes/g.md", "G", vec![]);
-    published.gist_url = Some("https://gist.github.com/alex/abc123".to_string());
-    published.gist_stale = true;
-    apply_note(&conn, &published).unwrap();
-    apply_note(&conn, &note("notes/plain.md", "Plain", vec![])).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT path, gist_url FROM notes WHERE gist_stale = 1",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["path"], Value::from("notes/g.md"));
-    assert_eq!(
-        rows[0]["gist_url"],
-        Value::from("https://gist.github.com/alex/abc123")
-    );
-
-    // Re-indexing after a republish (matching hash again) clears the flag.
-    published.gist_stale = false;
-    apply_note(&conn, &published).unwrap();
-    let rows = run_query(&conn, "SELECT path FROM notes WHERE gist_stale = 1", &[]).unwrap();
-    assert!(rows.is_empty());
-}
-
-#[test]
-fn reapplying_a_note_replaces_its_rows() {
-    let conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("X"), wiki("Y")])).unwrap();
-    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("Z")])).unwrap();
-    let rows = run_query(&conn, "SELECT target_key FROM links", &[]).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["target_key"], Value::from("z"));
-}
-
-#[test]
-fn has_content_lands_on_the_notes_row_and_is_queryable() {
-    let conn = migrated();
-    let mut blank = note("daily/2026-06-02.md", "2026-06-02", vec![]);
-    blank.kind = "daily".to_string();
-    blank.daily_date = Some("2026-06-02".to_string());
-    blank.has_content = false;
-    apply_note(&conn, &blank).unwrap();
-    let mut written = note("daily/2026-06-01.md", "2026-06-01", vec![]);
-    written.kind = "daily".to_string();
-    written.daily_date = Some("2026-06-01".to_string());
-    apply_note(&conn, &written).unwrap();
-
-    let dotted = run_query(
-        &conn,
-        "SELECT daily_date FROM notes WHERE daily_date IS NOT NULL AND has_content = 1
-         ORDER BY daily_date",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(dotted.len(), 1);
-    assert_eq!(dotted[0]["daily_date"], Value::from("2026-06-01"));
-}
-
-#[test]
-fn reconcile_scan_classifies_candidates_orphans_and_skips() {
-    let conn = migrated();
-    let now: u64 = 100_000;
-    let indexed = |path: &str, mtime: i64, hash: &str| {
-        let mut row = note(path, "T", vec![]);
-        row.mtime = mtime;
-        row.file_hash = hash.to_string();
-        apply_note(&conn, &row).unwrap();
-    };
-    indexed("notes/settled.md", 1_000, "settled-hash");
-    indexed("notes/moved.md", 1_000, "moved-hash");
-    indexed("notes/fresh.md", (now - 1_000) as i64, "fresh-hash");
-    indexed("notes/evicted.md", 1_000, "evicted-hash");
-    indexed("notes/evicted-current.md", 9_000, "current-hash");
-    indexed("notes/gone.md", 1_000, "gone-hash");
-
-    let meta = |path: &str, modified_ms: u64, placeholder: bool| crate::fs::FileMeta {
-        path: path.to_string(),
-        size: 1,
-        modified_ms,
-        placeholder,
-    };
-    let files = [
-        meta("notes/settled.md", 1_000, false), // row matches, settled → skipped
-        meta("notes/moved.md", 2_000, false),   // mtime moved → candidate with facts
-        meta("notes/fresh.md", now - 1_000, false), // matches but too fresh to trust → candidate
-        meta("notes/new.md", 3_000, false),     // no row → arrival candidate
-        meta("notes/evicted.md", 9_000, true),  // placeholder, stale row → download request
-        meta("notes/evicted-current.md", 9_000, true), // placeholder, row current → left evicted
-        meta("notes/evicted-new.md", 4_000, true), // placeholder, no row → download request
-    ];
-
-    let scan = scan_reconcile(&conn, &files, now, |_| false).unwrap();
-
-    assert_eq!(scan.total, 7);
-    let paths: Vec<&str> = scan
-        .candidates
-        .iter()
-        .map(|candidate| candidate.path.as_str())
-        .collect();
-    assert_eq!(paths, ["notes/moved.md", "notes/fresh.md", "notes/new.md"]);
-    let moved = &scan.candidates[0];
-    assert_eq!(moved.modified_ms, 2_000);
-    assert_eq!(moved.stored_mtime, Some(1_000));
-    assert_eq!(moved.stored_hash.as_deref(), Some("moved-hash"));
-    let arrival = &scan.candidates[2];
-    assert_eq!(arrival.stored_mtime, None);
-    assert_eq!(arrival.stored_hash, None);
-
-    // Only the vanished row is an orphan — eviction must not read as deletion.
-    let orphan_paths: Vec<&str> = scan
-        .orphans
-        .iter()
-        .map(|orphan| orphan.path.as_str())
-        .collect();
-    assert_eq!(orphan_paths, ["notes/gone.md"]);
-    assert_eq!(scan.orphans[0].stored_hash, "gone-hash");
-    assert_eq!(scan.orphans[0].stored_mtime, 1_000);
-
-    // Placeholders whose content the index lacks (stale or missing rows) are
-    // reported for a targeted download; a current row stays evicted in peace.
-    assert_eq!(
-        scan.stale_placeholders,
-        ["notes/evicted.md", "notes/evicted-new.md"]
-    );
-}
-
-/// An unmounted raw store hides its notes from the walk without deleting
-/// them: their rows stay. A real local-only folder's vanished note, and one
-/// behind a link the walk did follow, are ordinary orphans.
-#[cfg(unix)]
-#[test]
-fn reconcile_scan_keeps_rows_behind_an_unfollowed_local_only_link() {
-    use super::scan::behind_unfollowed_link;
-    let dir = tempfile::tempdir().unwrap();
-    let base = dir.path().canonicalize().unwrap();
-    let (root, raw) = (base.join("graph"), base.join("raw"));
-    std::fs::create_dir_all(root.join("finance")).unwrap();
-    std::fs::create_dir_all(root.join("people/secure")).unwrap();
-    std::fs::create_dir_all(raw.join("finance/secure")).unwrap();
-    std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
-    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap();
-    let conn = migrated();
-    for path in [
-        "finance/secure/bank.md",
-        "people/secure/visa.md",
-        "notes/gone.md",
-    ] {
-        apply_note(&conn, &note(path, "T", vec![])).unwrap();
-    }
-    let orphans = |conn: &Connection| -> Vec<String> {
-        scan_reconcile(conn, &[], 100_000, behind_unfollowed_link(&root, &folders))
-            .unwrap()
-            .orphans
-            .into_iter()
-            .map(|orphan| orphan.path)
-            .collect()
-    };
-
-    // Mounted: the walk follows the link, so a note missing there is gone.
-    assert_eq!(
-        orphans(&conn),
-        [
-            "finance/secure/bank.md",
-            "notes/gone.md",
-            "people/secure/visa.md"
-        ]
-    );
-
-    // Unmounted: the link dangles, and its row is kept.
-    std::fs::remove_dir_all(&raw).unwrap();
-    assert_eq!(orphans(&conn), ["notes/gone.md", "people/secure/visa.md"]);
-}
-
-#[test]
-fn touch_note_restamps_mtime_and_updated_at_without_creating_rows() {
-    let conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-
-    touch_note(&conn, "notes/a.md", 4_200).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT mtime, updated_at FROM notes WHERE path = ?1",
-        &[Value::from("notes/a.md")],
-    )
-    .unwrap();
-    assert_eq!(rows[0]["mtime"], Value::from(4_200));
-    assert_eq!(rows[0]["updated_at"], Value::from(4_200));
-
-    // A path with no row updates nothing — a touch must never resurrect a
-    // removed note.
-    touch_note(&conn, "notes/gone.md", 4_200).unwrap();
-    let count = run_query(&conn, "SELECT COUNT(*) AS n FROM notes", &[]).unwrap();
-    assert_eq!(count[0]["n"], Value::from(1));
-}
-
-#[test]
-fn fts_matches_indexed_body() {
-    let conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "Quick", vec![])).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT path FROM search_fts WHERE search_fts MATCH ?1",
-        &[Value::from("quick")],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-}
-
-#[test]
-fn db_query_rejects_mutating_statements() {
-    let conn = migrated();
-    assert!(run_query(&conn, "DELETE FROM notes", &[]).is_err());
-    assert!(run_query(&conn, "SELECT count(*) FROM notes", &[]).is_ok());
-}
-
-#[test]
-fn read_bridge_refuses_attach_and_pragma() {
-    // `Statement::readonly()` alone treats ATTACH/DETACH and connection-state
-    // PRAGMAs as "read only", but neither reads *our* projection: an ATTACH
-    // would let a caller open and SELECT from an arbitrary SQLite file on disk
-    // (exfiltration), and `PRAGMA foreign_keys = OFF` would disable the cascades
-    // the write path depends on. The read bridge's authorizer denies both at
-    // prepare time (see `query::read_only_authorization`).
-    let conn = migrated();
-    let secret = tempfile::tempdir().expect("tempdir");
-    let secret_db = secret.path().join("secret.sqlite");
-    {
-        let other = Connection::open(&secret_db).expect("open secret db");
-        other
-            .execute_batch("CREATE TABLE secret(x); INSERT INTO secret(x) VALUES ('exfiltrated');")
-            .expect("seed secret");
-    }
-    let attach = format!("ATTACH DATABASE '{}' AS evil", secret_db.display());
-    assert!(
-        run_query(&conn, &attach, &[]).is_err(),
-        "read bridge must refuse ATTACH"
-    );
-    assert!(
-        run_query(&conn, "PRAGMA foreign_keys = OFF", &[]).is_err(),
-        "read bridge must refuse PRAGMA"
-    );
-
-    // The guard is scoped per call and never blocks a legitimate read: indexing
-    // a note and reading it back (incl. an FTS MATCH) still works afterwards.
-    apply_note(&conn, &note("notes/a.md", "Quick", vec![])).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT path FROM search_fts WHERE search_fts MATCH ?1",
-        &[Value::from("quick")],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-}
-
-#[test]
-fn clear_cascades_to_child_tables() {
-    let conn = migrated();
-    let mut seeded = note("notes/a.md", "A", vec![wiki("X")]);
-    seeded.tasks = vec![task(0, "buy milk", false)];
-    apply_note(&conn, &seeded).unwrap();
-    clear_index(&conn, false).unwrap();
-    // Deleting notes cascades to children; search_fts is cleared explicitly.
-    for table in [
-        "notes",
-        "links",
-        "tags",
-        "aliases",
-        "assets",
-        "tasks",
-        "search_fts",
-    ] {
-        let rows = run_query(&conn, &format!("SELECT count(*) AS n FROM {table}"), &[]).unwrap();
-        assert_eq!(rows[0]["n"], Value::from(0), "{table} should be empty");
-    }
-}
-
-#[test]
-fn reapplying_a_note_cascades_away_stale_children() {
-    let conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("X"), wiki("Y")])).unwrap();
-    // Re-applying clears the note (cascade) before reinserting, so the old
-    // tags/links don't linger even though apply_note lists no explicit deletes.
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-    let rows = run_query(&conn, "SELECT count(*) AS n FROM links", &[]).unwrap();
-    assert_eq!(rows[0]["n"], Value::from(0));
-}
-
-#[test]
-fn apply_note_inserts_tasks_and_replace_clears_them() {
-    let conn = migrated();
-    let mut seeded = note("notes/a.md", "A", vec![]);
-    let mut due = task(4, "buy milk", false);
-    due.due_date = Some("2026-07-01".to_string());
-    seeded.tasks = vec![due, task(20, "call mum", true)];
-    apply_note(&conn, &seeded).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT ast_path, markdown, breadcrumbs, checked, due_date FROM tasks WHERE note_path = 'notes/a.md' ORDER BY rowid",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["ast_path"], Value::from("[4]"));
-    assert_eq!(rows[0]["markdown"], Value::from("buy milk"));
-    assert_eq!(rows[0]["breadcrumbs"], Value::from("[]"));
-    assert_eq!(rows[0]["checked"], Value::from(0));
-    assert_eq!(rows[0]["due_date"], Value::from("2026-07-01"));
-    assert_eq!(rows[1]["checked"], Value::from(1));
-    assert_eq!(rows[1]["due_date"], Value::Null);
-
-    // Re-applying with no tasks cascades the old rows away (no explicit delete).
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-    let after = run_query(&conn, "SELECT count(*) AS n FROM tasks", &[]).unwrap();
-    assert_eq!(after[0]["n"], Value::from(0));
-}
-
-#[test]
-fn apply_note_serializes_task_breadcrumbs() {
-    let conn = migrated();
-    let mut seeded = note("notes/a.md", "A", vec![]);
-    let mut with_context = task(4, "ship it", false);
-    with_context.breadcrumbs = vec!["Project".to_string(), "Phase one".to_string()];
-    seeded.tasks = vec![with_context];
-    apply_note(&conn, &seeded).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT breadcrumbs FROM tasks WHERE note_path = 'notes/a.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(
-        rows[0]["breadcrumbs"],
-        Value::from("[\"Project\",\"Phase one\"]")
-    );
-}
-
-#[test]
-fn open_tasks_read_includes_private_notes_and_excludes_completed() {
-    // The semantics `getOpenTasks` (queries.ts) relies on: open checkboxes joined
-    // to note context, completed tasks excluded, and `private: true` notes' tasks
-    // INCLUDED (the Tasks view is a local-only surface, like local search).
-    let conn = migrated();
-    let mut public = note("daily/2026-06-10.md", "A", vec![]);
-    public.kind = "daily".to_string();
-    public.daily_date = Some("2026-06-10".to_string());
-    public.tasks = vec![task(2, "open a", false)];
-    apply_note(&conn, &public).unwrap();
-
-    let mut private = note("notes/b.md", "B", vec![]);
-    private.is_private = true;
-    private.tasks = vec![task(2, "open b", false), task(20, "done b", true)];
-    apply_note(&conn, &private).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT tasks.note_path, tasks.markdown AS text, notes.title AS note_title, notes.daily_date \
-         FROM tasks INNER JOIN notes ON notes.path = tasks.note_path \
-         WHERE tasks.checked = 0 ORDER BY tasks.note_path, tasks.rowid",
-        &[],
-    )
-    .unwrap();
-
-    assert_eq!(rows.len(), 2); // both open tasks; the completed one is gone
-    assert_eq!(rows[0]["note_path"], Value::from("daily/2026-06-10.md"));
-    assert_eq!(rows[0]["text"], Value::from("open a"));
-    assert_eq!(rows[0]["note_title"], Value::from("A"));
-    assert_eq!(rows[0]["daily_date"], Value::from("2026-06-10"));
-    // The private note's open task is present (local-only surface).
-    assert_eq!(rows[1]["note_path"], Value::from("notes/b.md"));
-    assert_eq!(rows[1]["text"], Value::from("open b"));
-}
-
-#[test]
-fn link_kind_check_rejects_unknown_kinds() {
-    let conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-    let bogus = conn.execute(
-        "INSERT INTO links(source_path, kind, target_raw, target_key, pos_from, pos_to)
-         VALUES('notes/a.md', 'bogus', 'X', 'x', 0, 0)",
-        [],
-    );
-    assert!(
-        bogus.is_err(),
-        "CHECK should reject kinds other than wiki/md"
-    );
-}
-
-#[test]
-fn note_kind_daily_date_invariant_is_enforced() {
-    // `kind` and `daily_date` both derive from the path in `buildIndexedNote`,
-    // so they agree by construction — the 0015 CHECK makes SQLite reject any
-    // writer that drifts: kind = 'daily' iff daily_date is set.
-    let conn = migrated();
-
-    let note_with_date = conn.execute(
-        "INSERT INTO notes(path, title, title_key, kind, daily_date, file_hash)
-         VALUES('notes/a.md', 'A', 'a', 'note', '2026-07-01', 'h')",
-        [],
-    );
-    assert!(
-        note_with_date.is_err(),
-        "CHECK should reject kind='note' with a daily_date"
-    );
-
-    let daily_without_date = conn.execute(
-        "INSERT INTO notes(path, title, title_key, kind, daily_date, file_hash)
-         VALUES('daily/2026-07-01.md', 'July 1st, 2026', 'july 1st, 2026', 'daily', NULL, 'h')",
-        [],
-    );
-    assert!(
-        daily_without_date.is_err(),
-        "CHECK should reject kind='daily' without a daily_date"
-    );
-
-    let template_with_date = conn.execute(
-        "INSERT INTO notes(path, title, title_key, kind, daily_date, file_hash)
-         VALUES('templates/j.md', 'J', 'j', 'template', '2026-07-01', 'h')",
-        [],
-    );
-    assert!(
-        template_with_date.is_err(),
-        "CHECK should reject kind='template' with a daily_date"
-    );
-
-    // The three shapes buildIndexedNote actually emits all pass.
-    conn.execute_batch(
-        "INSERT INTO notes(path, title, title_key, kind, daily_date, file_hash) VALUES
-           ('daily/2026-07-01.md', 'July 1st, 2026', 'july 1st, 2026', 'daily', '2026-07-01', 'h'),
-           ('notes/a.md', 'A', 'a', 'note', NULL, 'h'),
-           ('templates/j.md', 'J', 'j', 'template', NULL, 'h');",
-    )
-    .expect("consistent rows insert");
-}
-
-#[test]
-fn kind_invariant_migration_wipes_the_projection_for_reindex() {
-    // 0015 drops and recreates `notes` (a table-level CHECK cannot be ADDed)
-    // while six child tables reference it ON DELETE CASCADE. The projection
-    // is wiped children-first (so the DROP's implicit DELETE cascades over
-    // empty tables even with enforcement on) and the next open re-indexes.
-    let mut conn = open_in_memory().expect("open");
-    conn.execute_batch("PRAGMA foreign_keys=ON;").expect("fk");
-    migrate_to(&mut conn, 14).expect("migrate to v14");
-    conn.execute_batch(
-        "INSERT INTO notes(path, title, title_key, kind, daily_date, file_hash) VALUES
-           ('daily/2026-07-01.md', 'July 1st, 2026', 'july 1st, 2026', 'daily', '2026-07-01', 'h1'),
-           ('notes/a.md', 'A', 'a', 'note', NULL, 'h2');
-         INSERT INTO note_text(note_path, text) VALUES('notes/a.md', 'A body');
-         INSERT INTO links(source_path, kind, target_raw, target_key, pos_from, pos_to)
-           VALUES('notes/a.md', 'wiki', 'July 1st, 2026', 'july 1st, 2026', 0, 0);
-         INSERT INTO tags(note_path, tag, tag_key) VALUES('notes/a.md', 'X', 'x');
-         INSERT INTO tasks(note_path, marker_offset, text, raw, checked)
-           VALUES('notes/a.md', 0, 'buy milk', '[ ] buy milk', 0);
-         INSERT INTO search_fts(path, title, body) VALUES('notes/a.md', 'A', 'A body');
-         INSERT INTO index_meta(key, value) VALUES('k', 'v');",
-    )
-    .expect("stage v14 rows");
-
-    migrate(&mut conn).expect("migrate to latest");
-
-    for table in ["notes", "links", "tags", "tasks", "search_fts"] {
-        let count: i64 = conn
-            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 0, "{table} should be wiped for the re-index");
-    }
-    // Bookkeeping outlives the wipe (same contract as index_clear).
-    let meta: i64 = conn
-        .query_row("SELECT count(*) FROM index_meta", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(meta, 1);
-
-    // Every notes index came back with the recreated table.
-    for index in [
-        "notes_title_key",
-        "notes_daily_date",
-        "notes_id",
-        "notes_daily_date_mtime_path",
-        "notes_non_daily_mtime",
-        "notes_pinned",
-        "notes_has_conflict",
-    ] {
-        let exists: bool = conn
-            .prepare("SELECT 1 FROM pragma_index_list('notes') WHERE name = ?1")
-            .unwrap()
-            .exists([index])
-            .unwrap();
-        assert!(exists, "index {index} must be recreated with the table");
-    }
-
-    // The write path, the views, and the child cascades all bind to `notes`
-    // by name — prove they resolve against the recreated table.
-    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("Target")])).unwrap();
-    apply_note(&conn, &note("notes/target.md", "Target", vec![])).unwrap();
-    let backlink_sources: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM backlinks WHERE target_path = 'notes/target.md'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(backlink_sources, 1);
-    conn.execute("DELETE FROM notes WHERE path = 'notes/a.md'", [])
-        .unwrap();
-    let orphans: i64 = conn
-        .query_row("SELECT count(*) FROM links", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(
-        orphans, 0,
-        "ON DELETE CASCADE must target the recreated table"
-    );
-}
-
-#[test]
-fn open_index_at_creates_migrates_and_reopens() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let root = dir.path();
-
-    let conn = open_index_at(root).expect("first open");
-    assert!(root.join(".reflect/index.sqlite").exists());
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, LATEST_SCHEMA_VERSION as i64);
-    let journal: String = conn
-        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(journal, "wal");
-    drop(conn);
-
-    // Reopening an existing index is a no-op migration and preserves data.
-    let conn = open_index_at(root).expect("first open");
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-    drop(conn);
-    let conn = open_index_at(root).expect("reopen");
-    let rows = run_query(&conn, "SELECT count(*) AS n FROM notes", &[]).unwrap();
-    assert_eq!(rows[0]["n"], Value::from(1));
-}
-
-/// The note-window adoption contract (`windows::window_bootstrap`): reading
-/// the open sessions must never bump either generation — a bump here would
-/// strand every command the main window has pinned to the current ones.
-#[test]
-fn session_adoption_reads_never_bump_generations() {
-    use tauri::Manager;
-    let app = tauri::test::mock_builder()
-        .build(tauri::test::mock_context(tauri::test::noop_assets()))
-        .expect("mock app");
-    app.manage(crate::fs::GraphState::default());
-    app.manage(super::IndexState::default());
-    app.manage(crate::background_task::BackgroundTaskState::default());
-
-    let graph_dir = tempfile::tempdir().expect("tempdir");
-    {
-        let state: tauri::State<crate::fs::GraphState> = app.state();
-        let mut inner = state.0.lock().unwrap();
-        inner.generation = 3;
-        inner.root = Some(graph_dir.path().to_path_buf());
-    }
-
-    // Before any index opens, adoption reports that honestly (None), rather
-    // than opening one itself.
-    assert_eq!(super::current_generation(&app.state()).unwrap(), None);
-
-    let opened = super::index_open(app.state(), app.state(), app.state()).expect("open");
-    for _ in 0..2 {
-        let info = crate::fs::current_graph_info(&app.state()).expect("graph info");
-        assert_eq!(info.generation, 3);
-        assert_eq!(
-            super::current_generation(&app.state()).unwrap(),
-            Some(opened)
-        );
-    }
-
-    // Both counters sit exactly where the main window left them.
-    let graph: tauri::State<crate::fs::GraphState> = app.state();
-    assert_eq!(graph.0.lock().unwrap().generation, 3);
-}
-
-/// Command-level integration: the generation gate that every TS write relies on.
-/// A write carrying a stale generation (issued before the index was reopened)
-/// must silently no-op rather than mutate the newly-opened index.
-#[test]
-fn stale_generation_writes_are_dropped_end_to_end() {
-    use tauri::Manager;
-    let app = tauri::test::mock_builder()
-        .build(tauri::test::mock_context(tauri::test::noop_assets()))
-        .expect("mock app");
-    app.manage(crate::fs::GraphState::default());
-    app.manage(super::IndexState::default());
-    app.manage(crate::background_task::BackgroundTaskState::default());
-
-    let graph_dir = tempfile::tempdir().expect("tempdir");
-    {
-        let state: tauri::State<crate::fs::GraphState> = app.state();
-        let mut inner = state.0.lock().unwrap();
-        inner.generation = 1;
-        inner.root = Some(graph_dir.path().to_path_buf());
-    }
-
-    let count = |label: &str| -> Value {
-        let rows = tauri::async_runtime::block_on(super::db_query(
-            "SELECT count(*) AS n FROM notes".to_string(),
-            vec![],
-            app.handle().clone(),
-        ))
-        .unwrap_or_else(|err| panic!("{label}: {err:?}"));
-        rows[0]["n"].clone()
-    };
-
-    let stale = super::index_open(app.state(), app.state(), app.state()).expect("first open");
-    super::index_apply(
-        note("notes/a.md", "A", vec![]),
-        stale,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-    )
-    .expect("apply");
-    assert_eq!(count("after first apply"), Value::from(1));
-
-    // Reopening (graph switch / reload) bumps the generation; the old one is stale.
-    let fresh = super::index_open(app.state(), app.state(), app.state()).expect("reopen");
-    assert_ne!(stale, fresh);
-
-    super::index_apply(
-        note("notes/b.md", "B", vec![]),
-        stale,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-    )
-    .expect("stale apply returns Ok");
-    assert_eq!(count("after stale apply"), Value::from(1)); // dropped, not applied
-
-    super::index_remove(
-        "notes/a.md".to_string(),
-        stale,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-    )
-    .expect("stale remove returns Ok");
-    assert_eq!(count("after stale remove"), Value::from(1)); // also dropped
-
-    super::index_apply(
-        note("notes/b.md", "B", vec![]),
-        fresh,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-    )
-    .expect("fresh apply");
-    assert_eq!(count("after fresh apply"), Value::from(2));
-
-    // index_meta_set rides the same gate: stale stamps vanish, fresh ones land
-    // (and upsert — the projection-version stamp is written after every rebuild).
-    let meta = |label: &str| -> Vec<serde_json::Map<String, Value>> {
-        tauri::async_runtime::block_on(super::db_query(
-            "SELECT value FROM index_meta WHERE key = 'k'".to_string(),
-            vec![],
-            app.handle().clone(),
-        ))
-        .unwrap_or_else(|err| panic!("{label}: {err:?}"))
-    };
-    super::index_meta_set(
-        "k".to_string(),
-        "stale".to_string(),
-        stale,
-        app.state(),
-        app.state(),
-    )
-    .expect("stale meta set returns Ok");
-    assert!(meta("after stale meta set").is_empty());
-    super::index_meta_set(
-        "k".to_string(),
-        "v1".to_string(),
-        fresh,
-        app.state(),
-        app.state(),
-    )
-    .expect("fresh meta set");
-    super::index_meta_set(
-        "k".to_string(),
-        "v2".to_string(),
-        fresh,
-        app.state(),
-        app.state(),
-    )
-    .expect("meta upsert");
-    assert_eq!(meta("after meta upsert")[0]["value"], Value::from("v2"));
-}
-
-#[test]
-fn fts5_is_compiled_in() {
-    let conn = Connection::open_in_memory().expect("open");
-    conn.execute_batch(
-        "CREATE VIRTUAL TABLE fts USING fts5(body);
-         INSERT INTO fts(body) VALUES ('the quick brown fox');",
-    )
-    .expect("fts5 create/insert");
-    let hits: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM fts WHERE fts MATCH 'quick'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("fts5 match");
-    assert_eq!(hits, 1);
-}
-
-#[test]
-fn sqlite_vec_loads_and_runs_knn() {
-    let conn = open_in_memory().expect("open with vec");
-    let version: String = conn
-        .query_row("SELECT vec_version()", [], |row| row.get(0))
-        .expect("vec_version");
-    assert!(!version.is_empty());
-
-    conn.execute_batch(
-        "CREATE VIRTUAL TABLE vec_items USING vec0(embedding float[4]);
-         INSERT INTO vec_items(rowid, embedding) VALUES
-           (1, '[1, 2, 3, 4]'),
-           (2, '[9, 9, 9, 9]');",
-    )
-    .expect("vec0 create/insert");
-
-    let nearest: i64 = conn
-        .query_row(
-            "SELECT rowid FROM vec_items \
-             WHERE embedding MATCH '[1, 2, 3, 4]' ORDER BY distance LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .expect("vec0 knn");
-    assert_eq!(nearest, 1);
-}
-
-// ---- embeddings (Plan 09) ---------------------------------------------------
-
-fn chunk(hash: &str, vector: Option<Vec<f32>>) -> EmbeddedChunk {
-    EmbeddedChunk {
-        heading: None,
-        pos_from: 0,
-        pos_to: 10,
-        text: format!("text {hash}"),
-        content_hash: hash.to_string(),
-        model_id: "all-MiniLM-L6-v2".to_string(),
-        vector,
-        is_private: false,
-        source_hash: "h".to_string(),
-        asset_text_hash: sha2::Sha256::digest(b"")
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-    }
-}
-
-fn vec384(fill: f32) -> Vec<f32> {
-    vec![fill; 384]
-}
-
-/// Chunks only exist for indexed notes (apply_chunks guards on the row).
-fn index_note(conn: &Connection, path: &str) {
-    apply_note(conn, &note(path, "T", vec![])).unwrap();
-}
-
-fn chunk_rows(conn: &Connection) -> Vec<(String, String)> {
-    conn.prepare("SELECT note_path, content_hash FROM embedding_chunks ORDER BY id")
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap()
-}
-
-fn vector_count(conn: &Connection) -> i64 {
-    conn.query_row("SELECT count(*) FROM embedding_vectors", [], |row| {
-        row.get(0)
-    })
+//! Command tier: the index commands take the open graph's local-only folders
+//! from `GraphState`, and a graph open loads and checks the configuration
+//! the index records. The session's own rules are tested in `reflect-index`.
+
+use std::path::{Path, PathBuf};
+
+use reflect_graph_paths::LocalOnlyFolders;
+use reflect_index::{FileIndexConnections, LocalOnlyRecord, LocalOnlyScope};
+use serde_json::{Value, json};
+use tauri::Manager;
+
+use super::{IndexState, IndexedNote, MovedNoteAddress, NoteMoveRequest};
+
+type App = tauri::App<tauri::test::MockRuntime>;
+
+/// A note's projection as the TypeScript extractor sends it.
+fn note(path: &str, title: &str) -> IndexedNote {
+    serde_json::from_value(json!({
+        "path": path,
+        "title": title,
+        "titleKey": title.to_lowercase(),
+        "pathKey": path.to_lowercase(),
+        "kind": "note",
+        "isPrivate": false,
+        "isPinned": false,
+        "hasContent": true,
+        "bodyChars": 0,
+        "gistStale": false,
+        "summaryFresh": false,
+        "fileHash": "h",
+        "mtime": 0,
+        "text": format!("{title} body"),
+        "preview": "body",
+        "links": [],
+        "tags": [],
+        "aliases": [],
+        "claims": [],
+        "emails": [],
+        "assets": [],
+        "tasks": [],
+    }))
     .unwrap()
 }
 
-#[test]
-fn apply_chunks_inserts_new_and_drops_stale_with_their_vectors() {
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    apply_chunks(
-        &conn,
-        "notes/a.md",
-        &[
-            chunk("h1", Some(vec384(0.1))),
-            chunk("h2", Some(vec384(0.2))),
-        ],
-    )
-    .unwrap();
-    assert_eq!(vector_count(&conn), 2);
-
-    // h2 survives unembedded (hash-skip); h3 is new; h1 is gone.
-    apply_chunks(
-        &conn,
-        "notes/a.md",
-        &[chunk("h2", None), chunk("h3", Some(vec384(0.3)))],
-    )
-    .unwrap();
-    assert_eq!(
-        chunk_rows(&conn),
-        vec![
-            ("notes/a.md".to_string(), "h2".to_string()),
-            ("notes/a.md".to_string(), "h3".to_string()),
-        ]
-    );
-    assert_eq!(vector_count(&conn), 2);
+/// The folded address a move's destination (or source) answers to.
+fn moved_address(path: &str) -> MovedNoteAddress {
+    let stem = Path::new(path).file_stem().unwrap().to_string_lossy();
+    serde_json::from_value(json!({
+        "pathKey": path.to_lowercase(),
+        "basenameKey": stem.to_lowercase(),
+    }))
+    .unwrap()
 }
 
-#[test]
-fn unchanged_chunks_keep_vectors_but_refresh_positions() {
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    apply_chunks(&conn, "notes/a.md", &[chunk("h1", Some(vec384(0.5)))]).unwrap();
-    let mut moved = chunk("h1", None);
-    moved.pos_from = 100;
-    moved.pos_to = 140;
-    apply_chunks(&conn, "notes/a.md", &[moved]).unwrap();
-    let (from, to): (i64, i64) = conn
-        .query_row(
-            "SELECT pos_from, pos_to FROM embedding_chunks WHERE content_hash = 'h1'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+fn move_request(from: &str, to: &str) -> NoteMoveRequest {
+    NoteMoveRequest {
+        from: from.into(),
+        to: to.into(),
+        to_address: moved_address(to),
+        from_address: moved_address(from),
+    }
+}
+
+/// Store `notes` in the index at `root` from a session that knows of no
+/// local-only folder (rows written before a folder was configured).
+fn store_unconfigured(root: &Path, notes: &[IndexedNote]) {
+    let session = IndexState::default();
+    let generation = session
+        .open(root, LocalOnlyScope::default(), &FileIndexConnections)
         .unwrap();
-    assert_eq!((from, to), (100, 140));
-    assert_eq!(vector_count(&conn), 1);
-}
-
-#[test]
-fn an_unchanged_chunk_without_a_stored_row_is_a_loud_error() {
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    let result = apply_chunks(&conn, "notes/a.md", &[chunk("missing", None)]);
-    assert!(result.is_err());
-}
-
-#[test]
-fn remove_chunks_drops_rows_and_vectors_for_one_note_only() {
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    index_note(&conn, "notes/b.md");
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
-    apply_chunks(&conn, "notes/b.md", &[chunk("b1", Some(vec384(0.2)))]).unwrap();
-    remove_chunks(&conn, "notes/a.md").unwrap();
-    assert_eq!(
-        chunk_rows(&conn),
-        vec![("notes/b.md".to_string(), "b1".to_string())]
-    );
-    assert_eq!(vector_count(&conn), 1);
-}
-
-#[test]
-fn clear_index_wipes_embeddings_too() {
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
-    clear_index(&conn, false).unwrap();
-    assert_eq!(chunk_rows(&conn), vec![]);
-    assert_eq!(vector_count(&conn), 0);
-}
-
-#[test]
-fn retained_rebuild_drops_restricted_chunks_before_the_note_flags_disappear() {
-    let conn = migrated();
-    let mut private = note("notes/private.md", "Private", vec![]);
-    private.has_device_only_content = true;
-    apply_note(&conn, &private).unwrap();
-    index_note(&conn, "notes/public.md");
-    apply_chunks(
-        &conn,
-        "notes/private.md",
-        &[chunk("secret", Some(vec384(0.1)))],
-    )
-    .unwrap();
-    apply_chunks(
-        &conn,
-        "notes/public.md",
-        &[chunk("public", Some(vec384(0.2)))],
-    )
-    .unwrap();
-    clear_index(&conn, true).unwrap();
-    assert_eq!(
-        chunk_rows(&conn),
-        vec![("notes/public.md".to_string(), "public".to_string())]
-    );
-    assert_eq!(vector_count(&conn), 1);
-}
-
-#[test]
-fn late_private_embedding_retains_its_source_privacy_after_a_public_projection() {
-    let conn = migrated();
-    let mut old = chunk("private-snapshot", Some(vec384(0.1)));
-    old.is_private = true;
-    index_note(&conn, "notes/a.md");
-    apply_chunks(&conn, "notes/a.md", &[old]).unwrap();
-    let restricted: bool = conn.query_row("SELECT notes.is_private OR embedding_chunks.is_private FROM notes JOIN embedding_chunks ON notes.path = embedding_chunks.note_path", [], |row| row.get(0)).unwrap();
-    assert!(restricted);
-}
-
-#[test]
-fn late_embeddings_do_not_replace_the_current_note_snapshot() {
-    let conn = migrated();
-    let old = chunk("old", Some(vec384(0.1)));
-    let mut current = note("notes/a.md", "Public", vec![]);
-    current.file_hash = "new-source".to_string();
-    apply_note(&conn, &current).unwrap();
-    apply_chunks(&conn, "notes/a.md", &[old]).unwrap();
-    assert!(chunk_rows(&conn).is_empty());
-    assert_eq!(vector_count(&conn), 0);
-}
-
-#[test]
-fn a_rebuild_keeps_embeddings_and_prunes_only_departed_notes() {
-    let conn = migrated();
-    index_note(&conn, "notes/kept.md");
-    index_note(&conn, "notes/gone.md");
-    apply_chunks(&conn, "notes/kept.md", &[chunk("k1", Some(vec384(0.1)))]).unwrap();
-    apply_chunks(&conn, "notes/gone.md", &[chunk("g1", Some(vec384(0.2)))]).unwrap();
-
-    index_note(&conn, "notes/evicted.md");
-    apply_chunks(&conn, "notes/evicted.md", &[chunk("e1", Some(vec384(0.3)))]).unwrap();
-
-    clear_index(&conn, true).unwrap();
-    assert_eq!(vector_count(&conn), 3);
-    // The rebuild re-applies only the note still on disk; the evicted one it
-    // couldn't read keeps its vectors.
-    index_note(&conn, "notes/kept.md");
-    let keep = ["notes/evicted.md".to_string()];
-    assert_eq!(prune_orphan_embeddings(&conn, &keep).unwrap(), 1);
-
-    let paths: Vec<String> = chunk_rows(&conn)
-        .into_iter()
-        .map(|(path, _)| path)
-        .collect();
-    assert_eq!(paths, ["notes/kept.md", "notes/evicted.md"]);
-    assert_eq!(vector_count(&conn), 2);
-}
-
-#[test]
-fn a_cjk_word_inside_a_clause_matches_through_its_character_pairs() {
-    let conn = migrated();
-    let mut trip = note("notes/trip.md", "旅行计划", vec![]);
-    trip.text = "我们下周去東京旅行，然后去大阪。".to_string();
-    apply_note(&conn, &trip).unwrap();
-    index_note(&conn, "notes/plain.md");
-
-    let matches = |expression: &str| -> Vec<String> {
-        conn.prepare("SELECT path FROM search_fts WHERE search_fts MATCH ?1")
-            .unwrap()
-            .query_map([expression], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap()
-    };
-    // `unicode61` alone can't see a word inside the clause token.
-    assert!(matches(r#"body : "東京"*"#).is_empty());
-    assert_eq!(matches(r#"cjk : "東京""#), ["notes/trip.md"]);
-    assert_eq!(matches(r#"cjk : "東京 京旅 旅行""#), ["notes/trip.md"]);
-    assert_eq!(matches(r#"cjk : "计划""#), ["notes/trip.md"]);
-    // Pairs that straddle a clause break never form.
-    assert!(matches(r#"cjk : "行然""#).is_empty());
-}
-
-#[test]
-fn knn_query_returns_nearest_chunk_first() {
-    let conn = migrated();
-    index_note(&conn, "notes/near.md");
-    index_note(&conn, "notes/far.md");
-    let mut near = vec384(0.0);
-    near[0] = 1.0;
-    let mut far = vec384(0.0);
-    far[1] = 1.0;
-    apply_chunks(&conn, "notes/near.md", &[chunk("n", Some(near))]).unwrap();
-    apply_chunks(&conn, "notes/far.md", &[chunk("f", Some(far))]).unwrap();
-
-    let mut probe = vec![0.0f32; 384];
-    probe[0] = 0.9;
-    let probe_json = format!(
-        "[{}]",
-        probe
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-    // The same shape the frontend uses through read-only db_query.
-    let rows = run_query(
-        &conn,
-        "SELECT c.note_path FROM embedding_vectors v
-         JOIN embedding_chunks c ON c.id = v.rowid
-         WHERE v.embedding MATCH ?1 AND k = 2
-         ORDER BY v.distance",
-        &[Value::String(probe_json)],
-    )
-    .unwrap();
-    let first = rows[0].get("note_path").unwrap().as_str().unwrap();
-    assert_eq!(first, "notes/near.md");
-}
-
-#[test]
-fn reindexing_a_note_keeps_its_chunks_but_true_deletion_drops_them() {
-    let mut conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "Alpha", vec![])).unwrap();
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
-
-    // Upsert path: apply_note re-creates the note row — chunks must survive
-    // (the hash-skip depends on it).
-    apply_note(&conn, &note("notes/a.md", "Alpha edited", vec![])).unwrap();
-    assert_eq!(chunk_rows(&conn).len(), 1);
-    assert_eq!(vector_count(&conn), 1);
-
-    // Genuine deletion (the index_remove command shape): everything goes.
-    let tx = conn.transaction().unwrap();
-    super::write::remove_note(&tx, "notes/a.md").unwrap();
-    super::embed_write::remove_chunks(&tx, "notes/a.md").unwrap();
-    tx.commit().unwrap();
-    assert_eq!(chunk_rows(&conn), vec![]);
-    assert_eq!(vector_count(&conn), 0);
-}
-
-#[test]
-fn embedding_vectors_use_cosine_distance() {
-    // A probe pointing the same direction as a stored vector but at half its
-    // magnitude: cosine distance 0, L2 distance 0.5 — this test discriminates
-    // the metric (retrieve.ts thresholds raw distances as cosine).
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    let mut stored = vec384(0.0);
-    stored[0] = 1.0;
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(stored))]).unwrap();
-
-    let mut probe = vec![0.0f32; 384];
-    probe[0] = 0.5;
-    let probe_json = format!(
-        "[{}]",
-        probe
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-    let rows = run_query(
-        &conn,
-        "SELECT v.distance FROM embedding_vectors v
-         WHERE v.embedding MATCH ?1 AND k = 1 ORDER BY v.distance",
-        &[Value::String(probe_json)],
-    )
-    .unwrap();
-    let distance = rows[0].get("distance").unwrap().as_f64().unwrap();
-    assert!(
-        distance.abs() < 1e-6,
-        "expected cosine distance 0, got {distance}"
-    );
-}
-
-#[test]
-fn cosine_migration_preserves_stored_vectors() {
-    // Stage a vector on the pre-cosine schema (0002), then run 0003: the
-    // vector must survive the table rebuild byte-for-byte (no re-embedding),
-    // matching itself at cosine distance 0.
-    let mut conn = open_in_memory().expect("open");
-    migrate_to(&mut conn, 2).expect("migrate to 0002");
-    // Stage a note with raw SQL — apply_note writes is_pinned/pinned_order
-    // which don't exist until 0004, so we insert the v2-era columns directly.
-    conn.execute_batch(
-        "INSERT INTO notes(path, title, title_key, file_hash, mtime, updated_at) \
-         VALUES('notes/a.md', 'A', 'a', 'h', 0, 0);",
-    )
-    .expect("stage v2 note");
-    conn.execute_batch(
-        "INSERT INTO embedding_chunks(note_path, heading, pos_from, pos_to, text, content_hash, model_id) \
-         VALUES('notes/a.md', NULL, 0, 5, 'hello', 'a1', 'all-MiniLM-L6-v2');",
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO embedding_vectors(rowid, embedding) VALUES(1, ?1)",
-        rusqlite::params![serde_json::to_string(&vec384(0.25)).unwrap()],
-    )
-    .unwrap();
-    assert_eq!(vector_count(&conn), 1);
-
-    migrate(&mut conn).expect("migrate to latest");
-    assert_eq!(vector_count(&conn), 1);
-
-    let vec_json = run_query(
-        &conn,
-        "SELECT vec_to_json(v.embedding) AS vec FROM embedding_vectors v",
-        &[],
-    )
-    .unwrap()[0]
-        .get("vec")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
-    let rows = run_query(
-        &conn,
-        "SELECT c.note_path, v.distance FROM embedding_vectors v
-         JOIN embedding_chunks c ON c.id = v.rowid
-         WHERE v.embedding MATCH ?1 AND k = 1 ORDER BY v.distance",
-        &[Value::String(vec_json)],
-    )
-    .unwrap();
-    assert_eq!(
-        rows[0].get("note_path").unwrap().as_str().unwrap(),
-        "notes/a.md"
-    );
-    let distance = rows[0].get("distance").unwrap().as_f64().unwrap();
-    assert!(
-        distance.abs() < 1e-6,
-        "expected cosine distance 0, got {distance}"
-    );
-}
-
-#[test]
-fn stored_vectors_round_trip_through_vec_to_json() {
-    // relatedNotes (TS) seeds KNN with `vec_to_json(embedding)` via db_query;
-    // pin the function name + shape against the real extension.
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.25)))]).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT vec_to_json(v.embedding) AS vec
-         FROM embedding_chunks c JOIN embedding_vectors v ON v.rowid = c.id
-         WHERE c.note_path = ?1 ORDER BY c.pos_from LIMIT 1",
-        &[Value::String("notes/a.md".to_string())],
-    )
-    .unwrap();
-    let vec = rows[0].get("vec").unwrap().as_str().unwrap();
-    assert!(vec.starts_with('['));
-    // And the JSON form is MATCH-able right back (the second relatedNotes query).
-    let knn = run_query(
-        &conn,
-        "SELECT c.note_path FROM embedding_vectors v
-         JOIN embedding_chunks c ON c.id = v.rowid
-         WHERE v.embedding MATCH ?1 AND k = 1 ORDER BY v.distance",
-        &[Value::String(vec.to_string())],
-    )
-    .unwrap();
-    assert_eq!(
-        knn[0].get("note_path").unwrap().as_str().unwrap(),
-        "notes/a.md"
-    );
-}
-
-#[test]
-fn apply_chunks_for_an_unindexed_path_is_a_cleaning_no_op() {
-    // The embed pipeline can race index_remove: a late embed_apply for a
-    // deleted note must not reinsert vectors for a dead path.
-    let conn = migrated();
-    let result = apply_chunks(&conn, "notes/gone.md", &[chunk("g1", Some(vec384(0.1)))]);
-    assert!(result.is_ok());
-    assert_eq!(chunk_rows(&conn), vec![]);
-    assert_eq!(vector_count(&conn), 0);
-}
-
-// ---- note_move (Plan 17) ----------------------------------------------------
-
-fn move_in_txn(conn: &mut Connection, from: &str, to: &str) -> crate::error::AppResult<()> {
-    let tx = conn.transaction()?;
-    tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
-    move_note(&tx, from, to, &moved_address(to))?;
-    tx.commit()?;
-    Ok(())
-}
-
-#[test]
-fn move_note_migrates_every_row_and_preserves_derived_state() {
-    let mut conn = migrated();
-    let mut moved = note("notes/old.md", "Kept Title", vec![wiki("Elsewhere")]);
-    moved.is_pinned = true;
-    moved.pinned_order = Some(2.5);
-    moved.has_conflict = true;
-    moved.tasks = vec![task(0, "do thing", false)];
-    apply_note(&conn, &moved).unwrap();
-    apply_note(
-        &conn,
-        &note("notes/src.md", "Src", vec![wiki("Kept Title")]),
-    )
-    .unwrap();
-    apply_chunks(&conn, "notes/old.md", &[chunk("m1", Some(vec384(0.5)))]).unwrap();
-    let vectors_before = vector_count(&conn);
-
-    move_in_txn(&mut conn, "notes/old.md", "notes/kept-title.md").unwrap();
-
-    // The notes row moved — same derived state, nothing re-created.
-    let row = run_query(
-        &conn,
-        "SELECT path, is_pinned, pinned_order, has_conflict FROM notes WHERE path = ?1",
-        &[Value::String("notes/kept-title.md".to_string())],
-    )
-    .unwrap();
-    assert_eq!(row.len(), 1);
-    assert_eq!(row[0].get("is_pinned").unwrap().as_i64().unwrap(), 1);
-    assert_eq!(row[0].get("has_conflict").unwrap().as_i64().unwrap(), 1);
-    let gone = run_query(
-        &conn,
-        "SELECT path FROM notes WHERE path = ?1",
-        &[Value::String("notes/old.md".to_string())],
-    )
-    .unwrap();
-    assert!(gone.is_empty());
-
-    // Children followed: outgoing links, FTS, embedding chunks (vectors kept).
-    for (sql, expected) in [
-        (
-            "SELECT count(*) AS n FROM links WHERE source_path = 'notes/kept-title.md'",
-            1,
-        ),
-        (
-            "SELECT count(*) AS n FROM search_fts WHERE path = 'notes/kept-title.md'",
-            1,
-        ),
-        (
-            "SELECT count(*) AS n FROM embedding_chunks WHERE note_path = 'notes/kept-title.md'",
-            1,
-        ),
-        (
-            "SELECT count(*) AS n FROM embedding_chunks WHERE note_path = 'notes/old.md'",
-            0,
-        ),
-        (
-            "SELECT count(*) AS n FROM tasks WHERE note_path = 'notes/kept-title.md'",
-            1,
-        ),
-        (
-            "SELECT count(*) AS n FROM tasks WHERE note_path = 'notes/old.md'",
-            0,
-        ),
-    ] {
-        let rows = run_query(&conn, sql, &[]).unwrap();
-        assert_eq!(
-            rows[0].get("n").unwrap().as_i64().unwrap(),
-            expected,
-            "{sql}"
-        );
-    }
-    assert_eq!(vector_count(&conn), vectors_before);
-
-    // Inbound links resolve by title key, so the backlink follows the move.
-    let backlinks = run_query(
-        &conn,
-        "SELECT source_path FROM backlinks WHERE target_path = 'notes/kept-title.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(
-        backlinks[0].get("source_path").unwrap().as_str().unwrap(),
-        "notes/src.md"
-    );
-}
-
-#[test]
-fn move_note_refuses_an_occupied_destination() {
-    let mut conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-    apply_note(&conn, &note("notes/b.md", "B", vec![])).unwrap();
-
-    let result = move_in_txn(&mut conn, "notes/a.md", "notes/b.md");
-    assert!(result.is_err());
-
-    // Nothing changed: both rows intact (the transaction rolled back).
-    for path in ["notes/a.md", "notes/b.md"] {
-        let rows = run_query(
-            &conn,
-            "SELECT title FROM notes WHERE path = ?1",
-            &[Value::String(path.to_string())],
-        )
-        .unwrap();
-        assert_eq!(rows.len(), 1, "{path}");
-    }
-}
-
-#[test]
-fn move_note_without_a_source_row_is_a_no_op_success() {
-    // An unindexed file can still be renamed; the watcher indexes it at `to`.
-    let mut conn = migrated();
-    move_in_txn(&mut conn, "notes/ghost.md", "notes/ghost-2.md").unwrap();
-    let rows = run_query(&conn, "SELECT count(*) AS n FROM notes", &[]).unwrap();
-    assert_eq!(rows[0].get("n").unwrap().as_i64().unwrap(), 0);
-}
-
-#[test]
-fn watcher_echo_after_a_move_is_benign_and_vectors_survive() {
-    // The fs rename echoes back as remove(old) + upsert(new). Because the DB
-    // moved first, the remove finds no rows and the upsert re-applies an
-    // identical projection — and embedding chunks (which live outside
-    // apply_note) keep their vectors. A rename must never trigger a re-embed.
-    let mut conn = migrated();
-    let mut moved = note("notes/old.md", "Kept Title", vec![]);
-    moved.is_pinned = true;
-    apply_note(&conn, &moved).unwrap();
-    apply_chunks(&conn, "notes/old.md", &[chunk("e1", Some(vec384(0.25)))]).unwrap();
-    move_in_txn(&mut conn, "notes/old.md", "notes/kept-title.md").unwrap();
-
-    // Echo: remove(old) — no rows — then upsert(new) — identical projection.
-    use super::write::remove_note;
-    remove_note(&conn, "notes/old.md").unwrap();
-    let mut echoed = note("notes/kept-title.md", "Kept Title", vec![]);
-    echoed.is_pinned = true;
-    apply_note(&conn, &echoed).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT is_pinned FROM notes WHERE path = 'notes/kept-title.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows[0].get("is_pinned").unwrap().as_i64().unwrap(), 1);
-    assert_eq!(
-        chunk_rows(&conn),
-        vec![("notes/kept-title.md".to_string(), "e1".to_string())]
-    );
-    assert_eq!(vector_count(&conn), 1);
-}
-
-// ---- chat history (0008) ----------------------------------------------------
-
-fn conversation(id: &str) -> ChatConversation {
-    ChatConversation {
-        id: id.to_string(),
-        title: "What did I write about Rust?".to_string(),
-        created_ms: 1_000,
-        updated_ms: 1_000,
-    }
-}
-
-fn chat_message(id: &str, conversation_id: &str) -> ChatMessageRow {
-    ChatMessageRow {
-        id: id.to_string(),
-        conversation_id: conversation_id.to_string(),
-        user_text: "What did I write about Rust?".to_string(),
-        attachments: "[]".to_string(),
-        parts: "[]".to_string(),
-        response_messages: "[]".to_string(),
-        created_ms: 1_000,
-    }
-}
-
-#[test]
-fn chat_message_save_round_trips_and_upserts_the_conversation() {
-    let conn = migrated();
-    save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT title, created_ms, updated_ms FROM chat_conversations WHERE id = 'c1'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0]["title"],
-        Value::from("What did I write about Rust?")
-    );
-
-    // A later save bumps updated_ms but never rewrites title/created_ms —
-    // the title is the conversation's identity, set once at creation.
-    let mut later = conversation("c1");
-    later.title = "ignored".to_string();
-    later.created_ms = 9_000;
-    later.updated_ms = 9_000;
-    save_message(&conn, &later, &chat_message("m2", "c1")).unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT title, created_ms, updated_ms FROM chat_conversations WHERE id = 'c1'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(
-        rows[0]["title"],
-        Value::from("What did I write about Rust?")
-    );
-    assert_eq!(rows[0]["created_ms"], Value::from(1_000));
-    assert_eq!(rows[0]["updated_ms"], Value::from(9_000));
-}
-
-#[test]
-fn chat_message_resave_updates_by_id() {
-    // The settle-time save re-sends the same row id with the streamed result.
-    let conn = migrated();
-    save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
-    let mut settled = chat_message("m1", "c1");
-    settled.parts = r#"[{"kind":"text","text":"You wrote three notes."}]"#.to_string();
-    settled.response_messages =
-        r#"[{"role":"assistant","content":"You wrote three notes."}]"#.to_string();
-    save_message(&conn, &conversation("c1"), &settled).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT parts FROM chat_messages WHERE id = 'm1'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0]["parts"],
-        Value::from(r#"[{"kind":"text","text":"You wrote three notes."}]"#)
-    );
-}
-
-#[test]
-fn chat_message_seq_is_assigned_per_conversation() {
-    // seq is computed inside the insert (MAX + 1 per conversation), never by
-    // the caller — the frontend's view can undercount the table (the read
-    // path drops rows it cannot parse), so a TS-derived counter could collide
-    // with a row it never saw. Counters are independent per conversation, a
-    // re-save keeps its slot, and the unique index stays on as a backstop.
-    let conn = migrated();
-    save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
-    save_message(&conn, &conversation("c1"), &chat_message("m2", "c1")).unwrap();
-    save_message(&conn, &conversation("c2"), &chat_message("m3", "c2")).unwrap();
-    save_message(&conn, &conversation("c1"), &chat_message("m2", "c1")).unwrap();
-
-    let rows = run_query(
-        &conn,
-        "SELECT id, seq FROM chat_messages ORDER BY conversation_id, seq",
-        &[],
-    )
-    .unwrap();
-    let slots: Vec<(String, i64)> = rows
-        .iter()
-        .map(|row| {
-            (
-                row["id"].as_str().unwrap().to_string(),
-                row["seq"].as_i64().unwrap(),
-            )
-        })
-        .collect();
-    assert_eq!(
-        slots,
-        vec![
-            ("m1".to_string(), 0),
-            ("m2".to_string(), 1),
-            ("m3".to_string(), 0),
-        ]
-    );
-}
-
-#[test]
-fn chat_conversation_delete_cascades_to_messages() {
-    let conn = migrated();
-    save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
-    save_message(&conn, &conversation("c2"), &chat_message("m2", "c2")).unwrap();
-    delete_conversation(&conn, "c1").unwrap();
-
-    let conversations = run_query(&conn, "SELECT id FROM chat_conversations", &[]).unwrap();
-    assert_eq!(conversations.len(), 1);
-    assert_eq!(conversations[0]["id"], Value::from("c2"));
-    let messages = run_query(&conn, "SELECT id FROM chat_messages", &[]).unwrap();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["id"], Value::from("m2"));
-}
-
-#[test]
-fn clear_index_preserves_chat_history() {
-    // Chat rows are durable, not a rebuildable projection — the full-rebuild
-    // wipe must leave them alone.
-    let conn = migrated();
-    apply_note(&conn, &note("notes/a.md", "A", vec![])).unwrap();
-    save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
-    clear_index(&conn, false).unwrap();
-
-    let notes = run_query(&conn, "SELECT count(*) AS n FROM notes", &[]).unwrap();
-    assert_eq!(notes[0]["n"], Value::from(0));
-    let messages = run_query(&conn, "SELECT count(*) AS n FROM chat_messages", &[]).unwrap();
-    assert_eq!(messages[0]["n"], Value::from(1));
-}
-
-// ---- note_claims addressing (0019) ------------------------------------------
-
-#[test]
-fn a_filename_stem_resolves_a_note_whose_authored_title_differs() {
-    let conn = migrated();
-    apply_note(&conn, &note("Projects/Plan.md", "Weekly Planning", vec![])).unwrap();
-    let keys = run_query(
-        &conn,
-        "SELECT note_path FROM note_keys WHERE key = 'plan'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(keys.len(), 1);
-    assert_eq!(keys[0]["note_path"], Value::from("Projects/Plan.md"));
-}
-
-#[test]
-fn a_title_outranks_a_filename_stem_claiming_the_same_key() {
-    let conn = migrated();
-    apply_note(&conn, &note("Archive/old.md", "Plan", vec![])).unwrap();
-    apply_note(&conn, &note("Projects/Plan.md", "Weekly", vec![])).unwrap();
-    let keys = run_query(
-        &conn,
-        "SELECT note_path, claim_count FROM note_keys WHERE key = 'plan'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(keys.len(), 1);
-    assert_eq!(keys[0]["note_path"], Value::from("Archive/old.md"));
-    // The weaker claimant does not inflate the winning tier's count.
-    assert_eq!(keys[0]["claim_count"], Value::from(1));
-}
-
-#[test]
-fn an_alias_outranks_a_filename_stem_but_loses_to_a_title() {
-    let conn = migrated();
-    apply_note(&conn, &aliased_note("notes/a.md", "Alpha", "Plan")).unwrap();
-    apply_note(&conn, &note("archive/Plan.md", "Beta", vec![])).unwrap();
-    let via_alias = run_query(
-        &conn,
-        "SELECT note_path FROM note_keys WHERE key = 'plan'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(via_alias[0]["note_path"], Value::from("notes/a.md"));
-
-    apply_note(&conn, &note("notes/c.md", "Plan", vec![])).unwrap();
-    let via_title = run_query(
-        &conn,
-        "SELECT note_path FROM note_keys WHERE key = 'plan'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(via_title[0]["note_path"], Value::from("notes/c.md"));
-}
-
-#[test]
-fn two_files_with_one_stem_report_the_ambiguity_without_fanning_out() {
-    let conn = migrated();
-    apply_note(&conn, &note("b/Plan.md", "One Thing", vec![])).unwrap();
-    apply_note(&conn, &note("a/Plan.md", "Another Thing", vec![])).unwrap();
-    apply_note(&conn, &note("notes/src.md", "Src", vec![wiki("Plan")])).unwrap();
-    let keys = run_query(
-        &conn,
-        "SELECT note_path, claim_count FROM note_keys WHERE key = 'plan'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(keys.len(), 1);
-    assert_eq!(keys[0]["note_path"], Value::from("a/Plan.md"));
-    assert_eq!(keys[0]["claim_count"], Value::from(2));
-    // Exactly one backlink row: the deterministic winner, never both.
-    let backlinks = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'notes/src.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(backlinks.len(), 1);
-    assert_eq!(backlinks[0]["target_path"], Value::from("a/Plan.md"));
-}
-
-#[test]
-fn a_path_link_backlinks_to_exactly_that_file() {
-    let conn = migrated();
-    apply_note(&conn, &note("Projects/Plan.md", "Weekly", vec![])).unwrap();
-    apply_note(&conn, &note("notes/Plan.md", "Other", vec![])).unwrap();
-    apply_note(
-        &conn,
-        &note(
-            "Journal.md",
-            "Journal",
-            vec![path_link("wiki", "Projects/Plan", "projects/plan.md")],
-        ),
-    )
-    .unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'Journal.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["target_path"], Value::from("Projects/Plan.md"));
-}
-
-#[test]
-fn a_markdown_link_backlinks_through_its_path_key() {
-    let conn = migrated();
-    apply_note(&conn, &note("Projects/Plan.md", "Weekly", vec![])).unwrap();
-    apply_note(
-        &conn,
-        &note(
-            "Projects/Journal.md",
-            "Journal",
-            vec![path_link("md", "./Plan.md", "projects/plan.md")],
-        ),
-    )
-    .unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT target_path, kind FROM backlinks WHERE source_path = 'Projects/Journal.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["target_path"], Value::from("Projects/Plan.md"));
-    assert_eq!(rows[0]["kind"], Value::from("md"));
-}
-
-#[test]
-fn a_path_link_to_a_missing_file_produces_no_backlink() {
-    let conn = migrated();
-    apply_note(
-        &conn,
-        &note(
-            "Journal.md",
-            "Journal",
-            vec![path_link("wiki", "Gone/Plan", "gone/plan.md")],
-        ),
-    )
-    .unwrap();
-    let rows = run_query(
-        &conn,
-        "SELECT target_path FROM backlinks WHERE source_path = 'Journal.md'",
-        &[],
-    )
-    .unwrap();
-    assert!(rows.is_empty());
-}
-
-#[test]
-fn a_move_restates_the_path_derived_claims() {
-    let mut conn = migrated();
-    apply_note(&conn, &note("notes/old-name.md", "Kept Title", vec![])).unwrap();
-    move_in_txn(&mut conn, "notes/old-name.md", "notes/new-name.md").unwrap();
-
-    let claims = run_query(
-        &conn,
-        "SELECT key, tier FROM note_claims WHERE note_path = 'notes/new-name.md' ORDER BY tier",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(claims.len(), 2);
-    assert_eq!(claims[0]["key"], Value::from("kept title"));
-    assert_eq!(claims[0]["tier"], Value::from(claim_tier::TITLE));
-    assert_eq!(claims[1]["key"], Value::from("new-name"));
-    assert_eq!(claims[1]["tier"], Value::from(claim_tier::BASENAME));
-
-    let path_key = run_query(
-        &conn,
-        "SELECT path_key FROM notes WHERE path = 'notes/new-name.md'",
-        &[],
-    )
-    .unwrap();
-    assert_eq!(path_key[0]["path_key"], Value::from("notes/new-name.md"));
-}
-
-/// The reconcile scan must list the root its index generation was opened
-/// for. Async commands have no main-thread ordering against `graph_open`,
-/// so a scan queued across a graph switch could otherwise walk the freshly
-/// swapped root and diff another graph's files against this index — in the
-/// window before the switch's `index_open` bumps the generation, that delta
-/// would pass the staleness gate.
-#[test]
-fn reconcile_scan_walks_the_index_sessions_root_not_the_current_graph() {
-    use tauri::Manager;
-    let app = tauri::test::mock_builder()
-        .build(tauri::test::mock_context(tauri::test::noop_assets()))
-        .expect("mock app");
-    app.manage(crate::fs::GraphState::default());
-    app.manage(super::IndexState::default());
-    app.manage(crate::background_task::BackgroundTaskState::default());
-
-    let graph_a = tempfile::tempdir().expect("tempdir");
-    let graph_b = tempfile::tempdir().expect("tempdir");
-    std::fs::write(graph_a.path().join("one.md"), "# one\n").unwrap();
-    std::fs::write(graph_b.path().join("two.md"), "# two\n").unwrap();
-    std::fs::write(graph_b.path().join("three.md"), "# three\n").unwrap();
-
-    {
-        let state: tauri::State<crate::fs::GraphState> = app.state();
-        let mut inner = state.0.lock().unwrap();
-        inner.generation = 1;
-        inner.root = Some(graph_a.path().to_path_buf());
-    }
-    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
-
-    // The switch's first half: `graph_open` swapped the root, `index_open`
-    // hasn't run yet — the exact window a queued scan can land in.
-    {
-        let state: tauri::State<crate::fs::GraphState> = app.state();
-        let mut inner = state.0.lock().unwrap();
-        inner.generation = 2;
-        inner.root = Some(graph_b.path().to_path_buf());
-    }
-
-    let scan = tauri::async_runtime::block_on(super::index_reconcile_scan(
-        generation,
-        app.handle().clone(),
-    ))
-    .expect("scan");
-    assert_eq!(scan.total, 1, "must list graph A, the index session's root");
-}
-
-fn is_private_row(conn: &Connection, path: &str) -> bool {
-    conn.query_row(
-        "SELECT is_private FROM notes WHERE path = ?1",
-        [path],
-        |row| row.get::<_, i64>(0),
-    )
-    .expect("row")
-        == 1
-}
-
-fn secure_folders() -> reflect_graph_paths::LocalOnlyFolders {
-    reflect_graph_paths::LocalOnlyFolders::new(["secure"], None).expect("folders")
-}
-
-#[test]
-fn local_only_rows_are_private_whatever_the_projection_says() {
-    use super::write::enforce_local_only;
-    let conn = migrated();
-    let folders = secure_folders();
-    for path in ["finance/secure/bank.md", "notes/public.md"] {
-        let mut projected = note(path, "Note", vec![]);
-        enforce_local_only(&mut projected, Some(&folders));
-        apply_note(&conn, &projected).unwrap();
-    }
-    assert!(is_private_row(&conn, "finance/secure/bank.md"));
-    assert!(!is_private_row(&conn, "notes/public.md"));
-
-    // Without a configuration the projection is taken as is.
-    let mut projected = note("people/secure/x.md", "X", vec![]);
-    enforce_local_only(&mut projected, None);
-    apply_note(&conn, &projected).unwrap();
-    assert!(!is_private_row(&conn, "people/secure/x.md"));
-}
-
-#[test]
-fn the_open_sweep_marks_rows_written_before_the_configuration() {
-    use super::write::mark_local_only_private;
-    let conn = migrated();
-    apply_note(&conn, &note("personal/secure/visa.md", "Visa", vec![])).unwrap();
-    apply_note(&conn, &note("personal/plan.md", "Plan", vec![])).unwrap();
-    assert_eq!(
-        mark_local_only_private(&conn, &secure_folders()).unwrap(),
-        1
-    );
-    assert!(is_private_row(&conn, "personal/secure/visa.md"));
-    assert!(!is_private_row(&conn, "personal/plan.md"));
-    assert_eq!(
-        mark_local_only_private(&conn, &secure_folders()).unwrap(),
-        0
-    );
-}
-
-#[test]
-fn a_row_moved_into_a_local_only_folder_turns_private() {
-    let mut conn = migrated();
-    apply_note(&conn, &note("notes/bank.md", "Bank", vec![])).unwrap();
-    let folders = secure_folders();
-    super::move_rows(
-        &mut conn,
-        "notes/bank.md",
-        "finance/secure/bank.md",
-        &moved_address("finance/secure/bank.md"),
-        Some(&folders),
-    )
-    .unwrap();
-    assert!(is_private_row(&conn, "finance/secure/bank.md"));
-}
-
-#[test]
-fn local_only_folder_names_are_recorded_for_the_cli() {
-    use super::write::record_local_only_folders;
-    use reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
-    let conn = migrated();
-    let stored = |conn: &Connection| -> Option<String> {
-        conn.query_row(
-            "SELECT value FROM index_meta WHERE key = ?1",
-            [LOCAL_ONLY_FOLDERS_KEY],
-            |row| row.get(0),
-        )
-        .ok()
-    };
-    record_local_only_folders(&conn, Some(&secure_folders()), true).unwrap();
-    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure"]"#));
-    // Paused: the record only grows, keeping what it had.
-    let kids = reflect_graph_paths::LocalOnlyFolders::new(["kids", "SECURE"], None).unwrap();
-    record_local_only_folders(&conn, Some(&kids), false).unwrap();
-    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure","kids"]"#));
-    record_local_only_folders(&conn, None, false).unwrap();
-    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure","kids"]"#));
-    // A record that cannot be read is left as it is while paused.
-    conn.execute(
-        "UPDATE index_meta SET value = 'not json' WHERE key = ?1",
-        [LOCAL_ONLY_FOLDERS_KEY],
-    )
-    .unwrap();
-    record_local_only_folders(&conn, Some(&kids), false).unwrap();
-    assert_eq!(stored(&conn).as_deref(), Some("not json"));
-    // Control: a known configuration replaces the record, and none clears it.
-    record_local_only_folders(&conn, Some(&secure_folders()), true).unwrap();
-    assert_eq!(stored(&conn).as_deref(), Some(r#"["secure"]"#));
-    record_local_only_folders(&conn, None, true).unwrap();
-    assert_eq!(stored(&conn), None);
-}
-
-/// Adding or releasing a folder clears the projection stamp, so the open's
-/// sync rebuilds every row (a released note's privacy, a public note's folded
-/// attachment text); an unchanged configuration keeps it.
-#[test]
-fn a_changed_local_only_record_requests_a_rebuild() {
-    use reflect_index_schema::PROJECTION_VERSION_KEY;
-    let mut conn = migrated();
-    let stamp = |conn: &Connection| -> Option<String> {
-        conn.query_row(
-            "SELECT value FROM index_meta WHERE key = ?1",
-            [PROJECTION_VERSION_KEY],
-            |row| row.get(0),
-        )
-        .ok()
-    };
-    let set_stamp = |conn: &Connection| {
-        conn.execute(
-            "INSERT OR REPLACE INTO index_meta(key, value) VALUES(?1, '7')",
-            [PROJECTION_VERSION_KEY],
-        )
-        .unwrap();
-    };
-
-    set_stamp(&conn);
-    super::sync_local_only(&mut conn, Some(&secure_folders()), true).unwrap();
-    assert_eq!(stamp(&conn), None, "a folder added");
-
-    set_stamp(&conn);
-    super::sync_local_only(&mut conn, Some(&secure_folders()), true).unwrap();
-    assert_eq!(stamp(&conn).as_deref(), Some("7"), "unchanged");
-
-    super::sync_local_only(&mut conn, None, true).unwrap();
-    assert_eq!(stamp(&conn), None, "a folder released");
-
-    set_stamp(&conn);
-    super::sync_local_only(&mut conn, None, true).unwrap();
-    assert_eq!(stamp(&conn).as_deref(), Some("7"), "still none");
+    session.apply(generation, notes).unwrap();
 }
 
 /// A mock app with one graph open at `root`, carrying `folders`.
-fn local_only_app(
-    root: &std::path::Path,
-    folders: Option<reflect_graph_paths::LocalOnlyFolders>,
-) -> tauri::App<tauri::test::MockRuntime> {
-    use tauri::Manager;
+fn local_only_app(root: &Path, folders: Option<LocalOnlyFolders>) -> App {
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
     app.manage(crate::fs::GraphState::default());
-    app.manage(super::IndexState::default());
+    app.manage(IndexState::default());
     app.manage(crate::background_task::BackgroundTaskState::default());
     app.manage(crate::fs::assets::AssetUploads::default());
     {
@@ -2526,11 +90,45 @@ fn local_only_app(
     app
 }
 
-fn row_private_flag(app: &tauri::App<tauri::test::MockRuntime>, path: &str) -> Option<bool> {
-    use tauri::Manager;
-    let index: tauri::State<super::IndexState> = app.state();
-    let state = super::lock_state(&index).unwrap();
-    super::write::row_private(state.conn.as_ref().unwrap(), path).unwrap()
+fn index_open(app: &App) -> u64 {
+    super::index_open(app.state(), app.state(), app.state()).expect("open")
+}
+
+fn apply(app: &App, generation: u64, note: IndexedNote) {
+    super::index_apply(
+        note,
+        generation,
+        app.handle().clone(),
+        app.state(),
+        app.state(),
+    )
+    .unwrap();
+}
+
+fn move_note(app: &App, from: &str, to: &str) -> crate::error::AppResult<()> {
+    super::note_move_indexed(
+        move_request(from, to),
+        1,
+        app.handle().clone(),
+        app.state(),
+        app.state(),
+        app.state(),
+    )
+}
+
+/// The stored privacy flag of the row at `path`, or `None` with no row.
+fn row_private_flag(app: &App, path: &str) -> Option<bool> {
+    let index = app.state::<IndexState>();
+    let generation = index.read_generation().unwrap();
+    let rows = index
+        .query(
+            generation,
+            "SELECT is_private AS private FROM notes WHERE path = ?1",
+            &[Value::from(path)],
+        )
+        .unwrap();
+    rows.first()
+        .map(|row| row["private"].as_i64().expect("an integer flag") != 0)
 }
 
 /// Command tier: `index_open` takes the graph's folders from `GraphState`,
@@ -2540,7 +138,6 @@ fn row_private_flag(app: &tauri::App<tauri::test::MockRuntime>, path: &str) -> O
 #[cfg(unix)]
 #[test]
 fn the_index_commands_take_local_only_folders_from_the_open_graph() {
-    use tauri::Manager;
     for configured in [true, false] {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().canonicalize().unwrap();
@@ -2552,28 +149,17 @@ fn the_index_commands_take_local_only_folders_from_the_open_graph() {
         std::fs::write(raw.join("finance/secure/bank.md"), "# Bank\n").unwrap();
         std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure"))
             .unwrap();
-        // A row stored before the folder was configured.
-        {
-            let conn = open_index_at(&root).unwrap();
-            apply_note(&conn, &note("people/secure/visa.md", "Visa", vec![])).unwrap();
-        }
-        let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw));
+        store_unconfigured(&root, &[note("people/secure/visa.md", "Visa")]);
+        let folders = LocalOnlyFolders::new(["secure"], Some(&raw));
         let app = local_only_app(&root, if configured { folders } else { None });
 
-        let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+        let generation = index_open(&app);
         assert_eq!(
             row_private_flag(&app, "people/secure/visa.md"),
             Some(configured)
         );
 
-        super::index_apply(
-            note("finance/secure/bank.md", "Bank", vec![]),
-            generation,
-            app.handle().clone(),
-            app.state(),
-            app.state(),
-        )
-        .unwrap();
+        apply(&app, generation, note("finance/secure/bank.md", "Bank"));
         assert_eq!(
             row_private_flag(&app, "finance/secure/bank.md"),
             Some(configured)
@@ -2589,69 +175,23 @@ fn the_index_commands_take_local_only_folders_from_the_open_graph() {
     }
 }
 
-/// A move into a local-only folder is refused before any row moves, and a
-/// compensated move restores the source row's privacy flag.
+/// A move into a local-only folder is refused before any row moves.
 #[cfg(unix)]
 #[test]
 fn a_refused_move_into_a_local_only_folder_leaves_the_row_as_it_was() {
-    use tauri::Manager;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     std::fs::create_dir_all(root.join("notes")).unwrap();
     std::fs::create_dir_all(root.join("people/secure")).unwrap();
     std::fs::write(root.join("notes/plan.md"), "# Plan\n").unwrap();
-    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
-    let app = local_only_app(&root, folders.clone());
-    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
-    super::index_apply(
-        note("notes/plan.md", "Plan", vec![]),
-        generation,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-    )
-    .unwrap();
+    let app = local_only_app(&root, LocalOnlyFolders::new(["secure"], None));
+    let generation = index_open(&app);
+    apply(&app, generation, note("notes/plan.md", "Plan"));
 
-    let request = super::NoteMoveRequest {
-        from: "notes/plan.md".into(),
-        to: "people/secure/plan.md".into(),
-        to_address: moved_address("people/secure/plan.md"),
-        from_address: moved_address("notes/plan.md"),
-    };
-    let moved =
-        tauri::async_runtime::block_on(super::note_move_indexed(request, 1, app.handle().clone()));
-    assert!(moved.is_err());
+    assert!(move_note(&app, "notes/plan.md", "people/secure/plan.md").is_err());
     assert_eq!(row_private_flag(&app, "notes/plan.md"), Some(false));
     assert_eq!(row_private_flag(&app, "people/secure/plan.md"), None);
     assert!(root.join("notes/plan.md").exists());
-
-    // The compensation itself restores the flag a forward move set.
-    let index: tauri::State<super::IndexState> = app.state();
-    let mut state = super::lock_state(&index).unwrap();
-    let conn = state.conn.as_mut().unwrap();
-    let request = super::NoteMoveRequest {
-        from: "notes/plan.md".into(),
-        to: "people/secure/plan.md".into(),
-        to_address: moved_address("people/secure/plan.md"),
-        from_address: moved_address("notes/plan.md"),
-    };
-    super::move_rows(
-        conn,
-        &request.from,
-        &request.to,
-        &request.to_address,
-        folders.as_ref(),
-    )
-    .unwrap();
-    assert_eq!(
-        super::write::row_private(conn, "people/secure/plan.md").unwrap(),
-        Some(true)
-    );
-    super::compensate_move(conn, &request, Some(false), folders.as_ref()).unwrap();
-    assert_eq!(
-        super::write::row_private(conn, "notes/plan.md").unwrap(),
-        Some(false)
-    );
 }
 
 /// A graph whose `finance/secure` links into a raw store with `secure`
@@ -2659,9 +199,9 @@ fn a_refused_move_into_a_local_only_folder_leaves_the_row_as_it_was() {
 #[cfg(unix)]
 struct EditableGraph {
     _dir: tempfile::TempDir,
-    root: std::path::PathBuf,
-    raw: std::path::PathBuf,
-    app: tauri::App<tauri::test::MockRuntime>,
+    root: PathBuf,
+    raw: PathBuf,
+    app: App,
 }
 
 #[cfg(unix)]
@@ -2676,7 +216,7 @@ fn editable_graph() -> EditableGraph {
     std::fs::write(root.join("notes/plan.md"), "# Plan\n").unwrap();
     std::fs::write(raw.join("finance/secure/bank.md"), "# Bank\n").unwrap();
     std::os::unix::fs::symlink(raw.join("finance/secure"), root.join("finance/secure")).unwrap();
-    let (folders, _) = reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw))
+    let (folders, _) = LocalOnlyFolders::new(["secure"], Some(&raw))
         .unwrap()
         .with_editable(["secure"]);
     let app = local_only_app(&root, Some(folders));
@@ -2688,51 +228,26 @@ fn editable_graph() -> EditableGraph {
     }
 }
 
-#[cfg(unix)]
-fn move_request(from: &str, to: &str) -> super::NoteMoveRequest {
-    super::NoteMoveRequest {
-        from: from.into(),
-        to: to.into(),
-        to_address: moved_address(to),
-        from_address: moved_address(from),
-    }
-}
-
 /// A move into or out of an editable local-only folder is refused before
 /// any row moves; a move within it carries the rows, which stay private.
 #[cfg(unix)]
 #[test]
 fn a_move_across_an_editable_folder_boundary_is_refused_before_any_row_moves() {
-    use tauri::Manager;
     let graph = editable_graph();
     let app = &graph.app;
-    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    let generation = index_open(app);
     for (path, title) in [
         ("notes/plan.md", "Plan"),
         ("finance/secure/bank.md", "Bank"),
     ] {
-        super::index_apply(
-            note(path, title, vec![]),
-            generation,
-            app.handle().clone(),
-            app.state(),
-            app.state(),
-        )
-        .unwrap();
+        apply(app, generation, note(path, title));
     }
-    let move_note = |from: &str, to: &str| {
-        tauri::async_runtime::block_on(super::note_move_indexed(
-            move_request(from, to),
-            1,
-            app.handle().clone(),
-        ))
-    };
 
     for (from, to) in [
         ("notes/plan.md", "finance/secure/plan.md"),
         ("finance/secure/bank.md", "notes/bank.md"),
     ] {
-        let message = format!("{:?}", move_note(from, to).unwrap_err());
+        let message = format!("{:?}", move_note(app, from, to).unwrap_err());
         assert!(
             message.contains("crosses a local-only boundary"),
             "{message}"
@@ -2747,7 +262,7 @@ fn a_move_across_an_editable_folder_boundary_is_refused_before_any_row_moves() {
     assert!(!graph.root.join("notes/bank.md").exists());
 
     // Control: within the folder, rows and file move together.
-    move_note("finance/secure/bank.md", "finance/secure/2026/bank.md").unwrap();
+    move_note(app, "finance/secure/bank.md", "finance/secure/2026/bank.md").unwrap();
     assert_eq!(row_private_flag(app, "finance/secure/bank.md"), None);
     assert_eq!(
         row_private_flag(app, "finance/secure/2026/bank.md"),
@@ -2762,7 +277,7 @@ fn a_move_across_an_editable_folder_boundary_is_refused_before_any_row_moves() {
 /// Every file below `dir`, with its bytes, skipping `skip` directory names
 /// (a link is recorded by its target and never followed).
 #[cfg(all(unix, desktop))]
-fn tree(dir: &std::path::Path, skip: &[&str]) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+fn tree(dir: &Path, skip: &[&str]) -> Vec<(PathBuf, Vec<u8>)> {
     let mut found = Vec::new();
     let entries = walkdir::WalkDir::new(dir)
         .sort_by_file_name()
@@ -2800,25 +315,24 @@ fn tree(dir: &std::path::Path, skip: &[&str]) -> Vec<(std::path::PathBuf, Vec<u8
 #[cfg(all(unix, desktop))]
 #[test]
 fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
-    use tauri::Manager;
     let graph = editable_graph();
     let (root, raw, app) = (&graph.root, &graph.raw, &graph.app);
     git2::Repository::init(root).unwrap();
     let _trash = crate::fs::os_trash_seam::install(|path| Ok(std::fs::remove_file(path)?));
-    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    let generation = index_open(app);
     let tracked = || tree(root, &[".git", ".reflect"]);
     let tracked_before = tracked();
     let secret = "account 4421-7731";
     let (path, moved) = ("finance/secure/bank.md", "finance/secure/2026/bank.md");
     let write = |path: &str, contents: &str, check: Option<bool>, expected: Option<&str>| {
-        tauri::async_runtime::block_on(crate::fs::note_write(
+        crate::fs::note_write(
             path.into(),
             contents.into(),
             1,
             check,
             expected.map(str::to_string),
             app.state(),
-        ))
+        )
     };
 
     let body = format!("# Bank\n\n{secret}\n");
@@ -2827,21 +341,9 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
     write(path, &body, Some(true), Some("# Bank\n")).unwrap();
     let aliased = format!("---\naliases:\n  - Old Bank\n---\n{body}");
     write(path, &aliased, Some(true), Some(&body)).unwrap();
-    super::index_apply(
-        note(path, "Bank", vec![]),
-        generation,
-        app.handle().clone(),
-        app.state(),
-        app.state(),
-    )
-    .unwrap();
+    apply(app, generation, note(path, "Bank"));
 
-    tauri::async_runtime::block_on(super::note_move_indexed(
-        move_request(path, moved),
-        1,
-        app.handle().clone(),
-    ))
-    .unwrap();
+    move_note(app, path, moved).unwrap();
     assert_eq!(row_private_flag(app, path), None);
     assert_eq!(row_private_flag(app, moved), Some(true));
 
@@ -2852,14 +354,14 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
         secret.as_bytes(),
     )
     .unwrap();
-    let asset = tauri::async_runtime::block_on(crate::fs::assets::asset_upload_commit(
+    let asset = crate::fs::assets::asset_upload_commit(
         upload,
         "statement.png".into(),
         moved.into(),
         1,
         app.state(),
         app.state(),
-    ))
+    )
     .unwrap();
     assert_eq!(asset, "finance/secure/assets/statement.png");
 
@@ -2913,9 +415,7 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
         .collect();
     assert!(leaked.is_empty(), "{leaked:?}");
 
-    let deleted =
-        tauri::async_runtime::block_on(crate::fs::note_delete(moved.into(), 1, app.state()))
-            .unwrap();
+    let deleted = crate::fs::note_delete(moved.into(), 1, app.state()).unwrap();
     assert_eq!(deleted.trashed, crate::fs::Trashed::System);
     assert!(!raw.join("finance/secure/2026/bank.md").exists());
 
@@ -2955,12 +455,18 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
 }
 
 /// The names an index recorded (empty for no index or no record).
-fn recorded_names(root: &std::path::Path) -> Vec<String> {
-    match super::recorded_local_only_folders(root) {
-        crate::fs::Recorded::Names(names) => names,
-        crate::fs::Recorded::Nothing => Vec::new(),
+fn recorded_names(root: &Path) -> Vec<String> {
+    match reflect_index::recorded_local_only_folders(root) {
+        LocalOnlyRecord::Names(names) => names,
+        LocalOnlyRecord::Nothing => Vec::new(),
         unreadable => panic!("{unreadable:?}"),
     }
+}
+
+/// Open (creating if needed) and migrate the index file under `root`, for
+/// staging raw rows.
+fn open_index_at(root: &Path) -> rusqlite::Connection {
+    reflect_index_schema::open_index_at(root).unwrap()
 }
 
 /// An index that cannot be read reports its record unreadable (the open
@@ -2968,16 +474,18 @@ fn recorded_names(root: &std::path::Path) -> Vec<String> {
 /// and an index without a record, have nothing to compare.
 #[test]
 fn an_index_that_cannot_be_read_reports_the_record_unreadable() {
-    use crate::fs::Recorded;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
-    let recorded = || super::recorded_local_only_folders(&root);
-    assert!(matches!(recorded(), Recorded::Nothing));
-    drop(open_index_at(&root).unwrap());
-    assert!(matches!(recorded(), Recorded::Nothing));
+    let recorded = || reflect_index::recorded_local_only_folders(&root);
+    assert!(matches!(recorded(), LocalOnlyRecord::Nothing));
+    drop(open_index_at(&root));
+    assert!(matches!(recorded(), LocalOnlyRecord::Nothing));
     std::fs::write(root.join(".reflect/index.sqlite"), b"not a database").unwrap();
     assert!(
-        matches!(recorded(), Recorded::Unreadable { corrupt: false, .. }),
+        matches!(
+            recorded(),
+            LocalOnlyRecord::Unreadable { corrupt: false, .. }
+        ),
         "{:?}",
         recorded()
     );
@@ -2988,15 +496,13 @@ fn an_index_that_cannot_be_read_reports_the_record_unreadable() {
 /// record alone (so the CLI keeps refusing); a known open replaces it.
 #[test]
 fn an_unknown_open_keeps_the_recorded_local_only_folders() {
-    use tauri::Manager;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     std::fs::create_dir_all(root.join("people/secure")).unwrap();
     assert!(recorded_names(&root).is_empty(), "no index yet");
 
-    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
-    let app = local_only_app(&root, folders);
-    super::index_open(app.state(), app.state(), app.state()).expect("open");
+    let app = local_only_app(&root, LocalOnlyFolders::new(["secure"], None));
+    index_open(&app);
     assert_eq!(recorded_names(&root), ["secure"]);
 
     // Unknown, even with no folders in hand: the record stays.
@@ -3005,12 +511,12 @@ fn an_unknown_open_keeps_the_recorded_local_only_folders() {
         let state: tauri::State<crate::fs::GraphState> = app.state();
         state.0.lock().unwrap().set_local_only_unknown();
     }
-    super::index_open(app.state(), app.state(), app.state()).expect("open");
+    index_open(&app);
     assert_eq!(recorded_names(&root), ["secure"]);
 
     // Control: a known configuration without the folder replaces it.
     let app = local_only_app(&root, None);
-    super::index_open(app.state(), app.state(), app.state()).expect("open");
+    index_open(&app);
     assert!(recorded_names(&root).is_empty());
 }
 
@@ -3019,12 +525,10 @@ fn an_unknown_open_keeps_the_recorded_local_only_folders() {
 /// still lands.
 #[test]
 fn the_frontend_cannot_overwrite_the_local_only_record() {
-    use tauri::Manager;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
-    let folders = reflect_graph_paths::LocalOnlyFolders::new(["secure"], None);
-    let app = local_only_app(&root, folders);
-    let generation = super::index_open(app.state(), app.state(), app.state()).expect("open");
+    let app = local_only_app(&root, LocalOnlyFolders::new(["secure"], None));
+    let generation = index_open(&app);
     let set = |key: &str| {
         super::index_meta_set(
             key.to_string(),
@@ -3038,7 +542,6 @@ fn the_frontend_cannot_overwrite_the_local_only_record() {
     assert_eq!(recorded_names(&root), ["secure"]);
     set("projection_version").expect("an ordinary key");
     let stored: String = open_index_at(&root)
-        .unwrap()
         .query_row(
             "SELECT value FROM index_meta WHERE key = 'projection_version'",
             [],
@@ -3052,14 +555,13 @@ fn the_frontend_cannot_overwrite_the_local_only_record() {
 /// managing the graph, index, and background-task state, and a graph folder.
 struct OpenFixture {
     _dir: tempfile::TempDir,
-    root: std::path::PathBuf,
-    settings: std::path::PathBuf,
-    app: tauri::App<tauri::test::MockRuntime>,
+    root: PathBuf,
+    settings: PathBuf,
+    app: App,
 }
 
 impl OpenFixture {
     fn new() -> Self {
-        use tauri::Manager;
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().canonicalize().unwrap();
         let root = base.join("graph");
@@ -3073,7 +575,7 @@ impl OpenFixture {
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
         app.manage(crate::fs::GraphState::default());
-        app.manage(super::IndexState::default());
+        app.manage(IndexState::default());
         app.manage(crate::background_task::BackgroundTaskState::default());
         Self {
             _dir: dir,
@@ -3089,32 +591,29 @@ impl OpenFixture {
         if let Some(entry) = entry {
             entries.insert(self.root.to_string_lossy().into_owned(), entry);
         }
-        let doc = serde_json::json!({ "localOnlyFolders": entries });
+        let doc = json!({ "localOnlyFolders": entries });
         std::fs::write(&self.settings, doc.to_string()).unwrap();
     }
 
     fn open(&self) -> crate::fs::GraphInfo {
-        use tauri::Manager;
         crate::fs::graph_open(self.root.to_string_lossy().into_owned(), self.app.state())
             .expect("graph_open")
     }
 
     fn index_open(&self) {
-        use tauri::Manager;
-        super::index_open(self.app.state(), self.app.state(), self.app.state())
-            .expect("index_open");
+        index_open(&self.app);
     }
 
     fn sync_refusal(&self, generation: u64) -> Option<String> {
-        use tauri::Manager;
         crate::fs::graph_for_sync(&self.app.state(), generation)
             .err()
             .map(|err| format!("{err:?}"))
     }
 
-    fn chat_rows(&self) -> Value {
-        let conn = open_index_at(&self.root).unwrap();
-        run_query(&conn, "SELECT count(*) AS n FROM chat_messages", &[]).unwrap()[0]["n"].clone()
+    fn chat_rows(&self) -> i64 {
+        open_index_at(&self.root)
+            .query_row("SELECT count(*) FROM chat_messages", [], |row| row.get(0))
+            .unwrap()
     }
 }
 
@@ -3130,12 +629,11 @@ impl Drop for OpenFixture {
 /// backup warning instead.
 #[test]
 fn a_graph_open_loads_its_accepted_history_roots_and_reports_a_malformed_one() {
-    use tauri::Manager;
     let fixture = OpenFixture::new();
     let key = crate::git::ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY;
     let graph = fixture.root.to_string_lossy().into_owned();
     let accepted = "d39c5fa0d39c5fa0d39c5fa0d39c5fa0d39c5fa0";
-    let doc = serde_json::json!({ key: { graph: [accepted, "d39c5fa"] } });
+    let doc = json!({ key: { graph: [accepted, "d39c5fa"] } });
     std::fs::write(&fixture.settings, doc.to_string()).unwrap();
 
     let info = fixture.open();
@@ -3156,15 +654,26 @@ fn a_graph_open_loads_its_accepted_history_roots_and_reports_a_malformed_one() {
 /// chat history survives every step.
 #[test]
 fn a_disappearing_entry_pauses_and_a_release_resumes_without_touching_chat() {
-    use tauri::Manager;
     let fixture = OpenFixture::new();
-    fixture.settings(Some(serde_json::json!({ "folders": ["secure"] })));
+    fixture.settings(Some(json!({ "folders": ["secure"] })));
     assert_eq!(fixture.open().local_only_folders, ["secure"]);
     fixture.index_open();
     assert_eq!(recorded_names(&fixture.root), ["secure"]);
     {
-        let conn = open_index_at(&fixture.root).unwrap();
-        save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
+        let index = fixture.app.state::<IndexState>();
+        let generation = index.current_generation().unwrap().unwrap();
+        let conversation = serde_json::from_value(json!({
+            "id": "c1", "title": "Chat", "createdMs": 1, "updatedMs": 1,
+        }))
+        .unwrap();
+        let message = serde_json::from_value(json!({
+            "id": "m1", "conversationId": "c1", "userText": "hi", "attachments": "[]",
+            "parts": "[]", "responseMessages": "[]", "createdMs": 1,
+        }))
+        .unwrap();
+        index
+            .save_chat_message(generation, &conversation, &message)
+            .unwrap();
     }
 
     // The entry disappears.
@@ -3192,27 +701,28 @@ fn a_disappearing_entry_pauses_and_a_release_resumes_without_touching_chat() {
     );
 
     // A release in the graph's own entry resumes it.
-    fixture.settings(Some(
-        serde_json::json!({ "folders": [], "released": ["secure"] }),
-    ));
+    fixture.settings(Some(json!({ "folders": [], "released": ["secure"] })));
     let info = fixture.open();
     assert!(info.local_only_folders.is_empty());
-    assert!(info
-        .local_only_warnings
-        .iter()
-        .any(|warning| warning.contains("no longer local-only")));
+    assert!(
+        info.local_only_warnings
+            .iter()
+            .any(|warning| warning.contains("no longer local-only"))
+    );
     assert_eq!(fixture.sync_refusal(info.generation), None);
     fixture.index_open();
     assert!(recorded_names(&fixture.root).is_empty());
 
     // The leftover release is silent, and nothing was rebuilt.
     let info = fixture.open();
-    assert!(!info
-        .local_only_warnings
-        .iter()
-        .any(|warning| warning.contains("no longer local-only")));
+    assert!(
+        !info
+            .local_only_warnings
+            .iter()
+            .any(|warning| warning.contains("no longer local-only"))
+    );
     assert_eq!(fixture.sync_refusal(info.generation), None);
-    assert_eq!(fixture.chat_rows(), Value::from(1));
+    assert_eq!(fixture.chat_rows(), 1);
 }
 
 /// A record that does not parse fails closed: with no entry for the graph
@@ -3221,14 +731,12 @@ fn a_disappearing_entry_pauses_and_a_release_resumes_without_touching_chat() {
 #[test]
 fn a_corrupt_record_pauses_until_an_entry_replaces_it() {
     let fixture = OpenFixture::new();
-    {
-        let conn = open_index_at(&fixture.root).unwrap();
-        conn.execute(
+    open_index_at(&fixture.root)
+        .execute(
             "INSERT INTO index_meta(key, value) VALUES(?1, 'not json')",
             [reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY],
         )
         .unwrap();
-    }
     fixture.settings(None);
     let info = fixture.open();
     assert!(
@@ -3238,16 +746,18 @@ fn a_corrupt_record_pauses_until_an_entry_replaces_it() {
         "{:?}",
         info.local_only_warnings
     );
-    assert!(fixture
-        .sync_refusal(info.generation)
-        .is_some_and(|reason| reason.contains("Sync is paused")));
+    assert!(
+        fixture
+            .sync_refusal(info.generation)
+            .is_some_and(|reason| reason.contains("Sync is paused"))
+    );
     fixture.index_open();
     assert!(matches!(
-        super::recorded_local_only_folders(&fixture.root),
-        crate::fs::Recorded::Unreadable { corrupt: true, .. }
+        reflect_index::recorded_local_only_folders(&fixture.root),
+        LocalOnlyRecord::Unreadable { corrupt: true, .. }
     ));
 
-    fixture.settings(Some(serde_json::json!({ "folders": ["secure"] })));
+    fixture.settings(Some(json!({ "folders": ["secure"] })));
     let info = fixture.open();
     assert!(
         fixture.sync_refusal(info.generation).is_some(),
@@ -3290,18 +800,18 @@ fn warns(info: &crate::fs::GraphInfo, text: &str) -> bool {
 #[test]
 fn a_folder_listed_during_a_pause_is_remembered() {
     let fixture = OpenFixture::new();
-    session(&fixture, serde_json::json!({ "folders": ["secure"] }));
-    let (_, paused) = session(&fixture, serde_json::json!({ "folders": ["kids"] }));
+    session(&fixture, json!({ "folders": ["secure"] }));
+    let (_, paused) = session(&fixture, json!({ "folders": ["kids"] }));
     assert!(paused, "secure went missing");
     assert_eq!(recorded_names(&fixture.root), ["secure", "kids"]);
 
-    let (info, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    let (info, paused) = session(&fixture, json!({ "folders": ["secure"] }));
     assert!(paused && warns(&info, "no longer lists \"kids\""));
     assert_eq!(info.local_only_folders, ["secure", "kids"]);
 
     let (_, paused) = session(
         &fixture,
-        serde_json::json!({ "folders": ["secure"], "released": ["kids"] }),
+        json!({ "folders": ["secure"], "released": ["kids"] }),
     );
     assert!(!paused);
     assert_eq!(recorded_names(&fixture.root), ["secure"]);
@@ -3315,12 +825,9 @@ fn a_folder_listed_during_a_pause_is_remembered() {
 #[test]
 fn a_name_in_both_lists_pauses_until_one_list_drops_it() {
     let fixture = OpenFixture::new();
-    let both = || serde_json::json!({ "folders": ["secure"], "released": ["secure"] });
-    session(&fixture, serde_json::json!({ "folders": ["secure"] }));
-    session(
-        &fixture,
-        serde_json::json!({ "folders": [], "released": ["secure"] }),
-    );
+    let both = || json!({ "folders": ["secure"], "released": ["secure"] });
+    session(&fixture, json!({ "folders": ["secure"] }));
+    session(&fixture, json!({ "folders": [], "released": ["secure"] }));
     assert!(recorded_names(&fixture.root).is_empty());
 
     let (info, paused) = session(&fixture, both());
@@ -3331,17 +838,11 @@ fn a_name_in_both_lists_pauses_until_one_list_drops_it() {
         ["secure"],
         "recorded while paused"
     );
-    let (info, paused) = session(
-        &fixture,
-        serde_json::json!({ "folders": ["secure"], "released": [] }),
-    );
+    let (info, paused) = session(&fixture, json!({ "folders": ["secure"], "released": [] }));
     assert!(!paused && info.local_only_folders == ["secure"]);
 
     session(&fixture, both());
-    let (info, paused) = session(
-        &fixture,
-        serde_json::json!({ "folders": [], "released": ["secure"] }),
-    );
+    let (info, paused) = session(&fixture, json!({ "folders": [], "released": ["secure"] }));
     assert!(!paused && info.local_only_folders.is_empty());
     assert!(warns(&info, "no longer local-only"));
 }
@@ -3359,7 +860,7 @@ fn a_graph_open_grants_editable_folders_only_while_editing_is_safe() {
     std::fs::create_dir_all(&raw).unwrap();
     let (info, paused) = session(
         &fixture,
-        serde_json::json!({ "folders": ["secure"], "editable": ["secure"], "rawRoot": raw }),
+        json!({ "folders": ["secure"], "editable": ["secure"], "rawRoot": raw }),
     );
     assert!(!paused);
     assert_eq!(info.local_only_editable_folders, ["secure"]);
@@ -3371,7 +872,7 @@ fn a_graph_open_grants_editable_folders_only_while_editing_is_safe() {
 
     let (info, paused) = session(
         &fixture,
-        serde_json::json!({
+        json!({
             "folders": ["secure", "kids"],
             "released": ["kids"],
             "editable": ["secure"],
@@ -3390,7 +891,7 @@ fn a_graph_open_grants_editable_folders_only_while_editing_is_safe() {
     if let Some(home) = dirs::home_dir() {
         let (info, paused) = session(
             &fixture,
-            serde_json::json!({
+            json!({
                 "folders": ["secure"],
                 "released": ["kids"],
                 "editable": ["secure"],
@@ -3412,17 +913,16 @@ fn a_graph_open_grants_editable_folders_only_while_editing_is_safe() {
 fn a_record_that_is_not_text_counts_as_damaged() {
     let fixture = OpenFixture::new();
     open_index_at(&fixture.root)
-        .unwrap()
         .execute(
             "INSERT INTO index_meta(key, value) VALUES(?1, X'00ff')",
             [reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY],
         )
         .unwrap();
     assert!(matches!(
-        super::recorded_local_only_folders(&fixture.root),
-        crate::fs::Recorded::Unreadable { corrupt: true, .. }
+        reflect_index::recorded_local_only_folders(&fixture.root),
+        LocalOnlyRecord::Unreadable { corrupt: true, .. }
     ));
-    let (info, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    let (info, paused) = session(&fixture, json!({ "folders": ["secure"] }));
     assert!(paused && warns(&info, "records \"secure\" from this graph's entry"));
     assert_eq!(recorded_names(&fixture.root), ["secure"]);
 }
@@ -3436,7 +936,6 @@ fn a_paused_open_leaves_a_record_it_cannot_read_unchanged() {
     let fixture = OpenFixture::new();
     let key = reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
     open_index_at(&fixture.root)
-        .unwrap()
         .execute(
             "INSERT INTO index_meta(key, value) VALUES(?1, X'00ff')",
             [key],
@@ -3444,7 +943,6 @@ fn a_paused_open_leaves_a_record_it_cannot_read_unchanged() {
         .unwrap();
     let stored = || -> String {
         open_index_at(&fixture.root)
-            .unwrap()
             .query_row(
                 "SELECT typeof(value) || ':' || hex(value) FROM index_meta WHERE key = ?1",
                 [key],
@@ -3459,31 +957,7 @@ fn a_paused_open_leaves_a_record_it_cannot_read_unchanged() {
         fixture.index_open();
         assert_eq!(stored(), "blob:00FF");
     }
-    let (_, paused) = session(&fixture, serde_json::json!({ "folders": ["secure"] }));
+    let (_, paused) = session(&fixture, json!({ "folders": ["secure"] }));
     assert!(paused);
     assert_eq!(recorded_names(&fixture.root), ["secure"]);
-}
-
-#[test]
-fn switching_embedding_models_refits_the_vector_table() {
-    let conn = migrated();
-    index_note(&conn, "notes/a.md");
-    apply_chunks(&conn, "notes/a.md", &[chunk("a1", Some(vec384(0.1)))]).unwrap();
-
-    // An index from before the marker holds the original model's vectors.
-    assert!(!prepare_vectors(&conn, "all-MiniLM-L6-v2", 384).unwrap());
-    assert_eq!(chunk_rows(&conn).len(), 1);
-
-    assert!(prepare_vectors(&conn, "embeddinggemma-300m", 768).unwrap());
-    assert_eq!(chunk_rows(&conn), vec![]);
-    assert_eq!(vector_count(&conn), 0);
-    // The recreated table takes the new width and refuses the old one.
-    let mut wide = chunk("a2", Some(vec![0.1; 768]));
-    wide.model_id = "embeddinggemma-300m".to_string();
-    apply_chunks(&conn, "notes/a.md", &[wide]).unwrap();
-    assert_eq!(vector_count(&conn), 1);
-    assert!(apply_chunks(&conn, "notes/a.md", &[chunk("a3", Some(vec384(0.1)))]).is_err());
-
-    assert!(!prepare_vectors(&conn, "embeddinggemma-300m", 768).unwrap());
-    assert_eq!(vector_count(&conn), 1);
 }

@@ -31,7 +31,6 @@ function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
     title: 'A',
     dailyDate: null,
     isPrivate: false,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
     ...overrides,
@@ -41,7 +40,7 @@ function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
 async function renderSection(path = 'notes/a.md') {
   operations = createTestOperationsService()
   const app = createTestCoreServices({ progress: operations })
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(async () => row ?? undefined)
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(() => Promise.resolve(row ?? undefined))
   publish = vi
     .spyOn(app.gistPublish, 'publish')
     .mockResolvedValue({ url: 'https://gist.github.com/alex/g1', stale: false })

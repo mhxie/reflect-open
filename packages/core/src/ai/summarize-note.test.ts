@@ -68,23 +68,24 @@ function note(content: string): ReturnType<typeof cloudSafeNoteContent> {
 
 function answering(text: string, calls: LanguageModelV4CallOptions[] = []): MockLanguageModelV4 {
   return new MockLanguageModelV4({
-    doGenerate: async (options) => {
+    doGenerate: (options) => {
       calls.push(options)
-      return {
+      return Promise.resolve({
         content: [{ type: 'text', text }],
         finishReason: { unified: 'stop' as const, raw: undefined },
         usage: USAGE,
         warnings: [],
-      }
+      })
     },
   })
 }
 
 function throwing(error: unknown): MockLanguageModelV4 {
   return new MockLanguageModelV4({
-    doGenerate: async () => {
-      throw error
-    },
+    doGenerate: () =>
+      Promise.try(() => {
+        throw error
+      }),
   })
 }
 

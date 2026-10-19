@@ -49,7 +49,7 @@ export interface RenderInAppOptions {
    * the graph `test` at `/graphs/test` is open with both generations 1. `null`
    * is the graph chooser: no graph, and no graph services.
    */
-  graph?: TestOpenGraph | null
+  graph?: TestOpenGraph | null | undefined
   /**
    * Reported over the graph state, e.g. `{ indexing: true }`, `{ error }`, `{ recents }`.
    */
@@ -144,7 +144,7 @@ async function prepare(options: AnyOptions | undefined): Promise<
       : { platform: createTestPlatformService(options.platform) }),
     ...(backup === null ? {} : { backup }),
   }
-  const app: CoreServices = options?.app ?? (createTestCoreServices(overrides) as CoreServices)
+  const app: CoreServices = options?.app ?? createTestCoreServices(overrides)
   const servicesOnly = options?.servicesOnly ?? false
   if (
     servicesOnly &&
@@ -209,9 +209,7 @@ async function prepare(options: AnyOptions | undefined): Promise<
                 {route === null ? (
                   wrapped
                 ) : (
-                  <RouterProvider {...(route === undefined ? {} : { initialRoute: route })}>
-                    {wrapped}
-                  </RouterProvider>
+                  <RouterProvider initialRoute={route}>{wrapped}</RouterProvider>
                 )}
               </TooltipProvider>
             </GraphProvider>

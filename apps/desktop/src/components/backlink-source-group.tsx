@@ -70,12 +70,7 @@ export function BacklinkSourceGroup({
           onClick={(event) => onOpen(source.path, event)}
           className="min-w-0 cursor-pointer truncate text-left text-xs text-accent"
         >
-          <NoteStateIndicator
-            path={source.path}
-            isPrivate={source.isPrivate}
-            hasConflict={source.hasConflict}
-            className="mr-1"
-          />
+          <NoteStateIndicator path={source.path} isPrivate={source.isPrivate} className="mr-1" />
           <NoteTitle title={label} displayTitle={source.displayTitle} lang={source.lang} />
         </button>
 

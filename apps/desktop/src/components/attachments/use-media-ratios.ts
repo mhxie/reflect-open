@@ -40,11 +40,11 @@ export function useMediaRatios(graphRoot: string | null): MediaRatios {
     setReader({ cache, ratioOf: readerFor(cache) })
   }
 
-  const frame = useRef<number | null>(null)
+  const frameRef = useRef<number | null>(null)
   useEffect(
     () => () => {
-      if (frame.current !== null) {
-        cancelAnimationFrame(frame.current)
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current)
       }
     },
     [],
@@ -57,9 +57,9 @@ export function useMediaRatios(graphRoot: string | null): MediaRatios {
       if (graphRoot !== null) {
         schedulePersistRatios(graphRoot)
       }
-      if (frame.current === null) {
-        frame.current = requestAnimationFrame(() => {
-          frame.current = null
+      if (frameRef.current === null) {
+        frameRef.current = requestAnimationFrame(() => {
+          frameRef.current = null
           setReader({ cache, ratioOf: readerFor(cache) })
         })
       }

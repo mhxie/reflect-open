@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { AppError } from '../errors.ts'
 import {
   createTestHttpService,
   createTestIdService,
@@ -30,12 +31,10 @@ async function validateApiKey(
 }
 
 function fetchReturning(status: number): typeof fetch {
-  return async () => new Response(null, { status })
+  return () => Promise.resolve(new Response(null, { status }))
 }
 
-const fetchThrowing: typeof fetch = async () => {
-  throw new TypeError('network down')
-}
+const fetchThrowing: typeof fetch = () => Promise.reject(new TypeError('network down'))
 
 describe('AiKeyValidationService', () => {
   it('sends the provider-specific auth headers to the model-listing endpoint', async () => {
@@ -154,7 +153,7 @@ describe('AiKeyValidationService', () => {
 
   it('reads a failed on-device probe as unreachable', async () => {
     const refused = () => {
-      throw { kind: 'network', message: 'error sending request: Connection refused (os error 61)' }
+      throw new AppError('network', 'error sending request: Connection refused (os error 61)')
     }
     const onDevice = createOnDeviceHttpService({
       ipc: createTestIpcBridgeService({

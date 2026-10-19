@@ -71,7 +71,7 @@ describe('deriveNoteState', () => {
     expect(state.isPrivate).toBe(false)
   })
 
-  it.each([{ protected: true }, { hasConflict: true }])(
+  it.each([{ protected: true }])(
     'keeps protection independent of the privacy flag: %j',
     (flags) => {
       const state = deriveNoteState(NO_LOCAL_ONLY_FOLDERS, {
@@ -85,7 +85,7 @@ describe('deriveNoteState', () => {
     },
   )
 
-  it.each([{ protected: true }, { hasConflict: true }])(
+  it.each([{ protected: true }])(
     'gives protection priority while preserving the other dimensions: %j',
     (flags) => {
       const localOnly = createLocalOnlyFolders(['secure'], ['secure'])

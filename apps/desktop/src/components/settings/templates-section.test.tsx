@@ -1,15 +1,16 @@
+import type { MaybePromise } from '@reflect/utils'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import { createTestWindowService } from '@reflect/app/testing'
 import { createTestCoreServices } from '@reflect/core/testing'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { TemplatesSection } from './templates-section.tsx'
 
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactElement {
   const { route } = useRouter()

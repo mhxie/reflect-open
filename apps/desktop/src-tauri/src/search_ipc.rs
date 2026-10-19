@@ -15,14 +15,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use reflect_index_schema::{search_socket_path, MAX_SEARCH_RESULTS};
+use reflect_index_schema::{MAX_SEARCH_RESULTS, search_socket_path};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::{AppHandle, State};
 use tokio::sync::oneshot;
 
 use crate::error::{AppError, AppResult};
-use crate::fs::{current_root, GraphState};
+use crate::fs::{GraphState, current_root};
 
 /// The event the main window's responder answers with `search_ipc_respond`.
 const REQUEST_EVENT: &str = "search-ipc:request";
@@ -218,7 +218,7 @@ mod platform {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::{UnixListener, UnixStream};
 
-    use super::{answer, parse_request, Pending, MAX_REQUEST_BYTES, READ_TIMEOUT};
+    use super::{MAX_REQUEST_BYTES, Pending, READ_TIMEOUT, answer, parse_request};
     use crate::error::{AppError, AppResult};
 
     /// Bind `path`, replacing a socket file a crashed app left behind but
@@ -316,7 +316,7 @@ mod platform {
 mod tests {
     use serde_json::json;
 
-    use super::{parse_request, Pending, Request};
+    use super::{Pending, Request, parse_request};
 
     #[test]
     fn a_well_formed_request_parses() {

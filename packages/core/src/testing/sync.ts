@@ -1,4 +1,5 @@
-import { ReflectError } from '../errors.ts'
+import type { MaybePromise } from '@reflect/utils'
+import { AppError } from '../errors.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type {
   ICloudNativeService,
@@ -18,9 +19,10 @@ import type {
   GitNoteVersion,
   GitRepositoryService,
   GitStatus,
-  MergeOutcome,
+  PullOutcome,
   PushOutcome,
   RemoteDelta,
+  RemoteTip,
 } from '../sync/git-repository-service.ts'
 import {
   createGithubAuthService,
@@ -62,15 +64,16 @@ export interface TestGitRepositoryService extends GitRepositoryService {
   onDisconnect(handler: GitRepositoryHandler<'disconnect'>): void
   onCommitAll(handler: GitRepositoryHandler<'commitAll'>): void
   onFetch(handler: GitRepositoryHandler<'fetch'>): void
+  onRemoteHead(handler: GitRepositoryHandler<'remoteHead'>): void
   onPush(handler: GitRepositoryHandler<'push'>): void
-  onMergeRemote(handler: GitRepositoryHandler<'mergeRemote'>): void
+  onPull(handler: GitRepositoryHandler<'pull'>): void
 }
 
 /**
  * An in-memory {@link GitRepositoryService} that records every call. By
  * default `noteVersion` finds no commit, `setup` and `disconnect` update the
  * status, `commitAll` finds a clean tree, `fetch` reports no delta, `push`
- * succeeds and `mergeRemote` is up to date; the `onXxx` setters replace one
+ * succeeds and `pull` is up to date; the `onXxx` setters replace one
  * method's answer.
  */
 class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
@@ -99,10 +102,14 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
       skippedLargeFiles: [],
     }),
     fetch: (): RemoteDelta => ({ ahead: 0, behind: 0 }),
+    remoteHead: (): RemoteTip => ({ remoteOid: null, trackingOid: null }),
     push: (): PushOutcome => ({ pushed: true, nonFastForward: false, rejectionMessage: null }),
-    mergeRemote: (): MergeOutcome => ({
+    pull: (): PullOutcome => ({
+      committed: false,
+      ahead: 0,
+      skippedLargeFiles: [],
       kind: 'upToDate',
-      conflictedPaths: [],
+      reviewPaths: [],
       changedFiles: [],
       frozenPaths: [],
       displaced: [],
@@ -116,7 +123,6 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
       remoteUrl: null,
       ahead: 0,
       behind: 0,
-      inProgress: false,
       ...initialStatus,
     }
   }
@@ -155,14 +161,19 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
     return await this.#handlers.fetch(credential, generation)
   }
 
+  async remoteHead(credential: GitCredential | null, generation: number): Promise<RemoteTip> {
+    this.#log.push({ method: 'remoteHead', args: [credential, generation] })
+    return await this.#handlers.remoteHead(credential, generation)
+  }
+
   async push(credential: GitCredential | null, generation: number): Promise<PushOutcome> {
     this.#log.push({ method: 'push', args: [credential, generation] })
     return await this.#handlers.push(credential, generation)
   }
 
-  async mergeRemote(generation: number): Promise<MergeOutcome> {
-    this.#log.push({ method: 'mergeRemote', args: [generation] })
-    return await this.#handlers.mergeRemote(generation)
+  async pull(fallbackMessage: string, generation: number): Promise<PullOutcome> {
+    this.#log.push({ method: 'pull', args: [fallbackMessage, generation] })
+    return await this.#handlers.pull(fallbackMessage, generation)
   }
 
   calls(): readonly GitRepositoryCall[] {
@@ -193,12 +204,16 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
     this.#handlers.fetch = handler
   }
 
+  onRemoteHead(handler: GitRepositoryHandler<'remoteHead'>): void {
+    this.#handlers.remoteHead = handler
+  }
+
   onPush(handler: GitRepositoryHandler<'push'>): void {
     this.#handlers.push = handler
   }
 
-  onMergeRemote(handler: GitRepositoryHandler<'mergeRemote'>): void {
-    this.#handlers.mergeRemote = handler
+  onPull(handler: GitRepositoryHandler<'pull'>): void {
+    this.#handlers.pull = handler
   }
 }
 
@@ -227,9 +242,7 @@ export interface TestICloudNativeService extends ICloudNativeService {
    * What `downloadPending` and `pendingCount` report from now on.
    */
   setPendingCount(count: number): void
-  onConflictsScan(
-    handler: (options: IcloudScanOptions) => IcloudSweepOutcome | Promise<IcloudSweepOutcome>,
-  ): void
+  onConflictsScan(handler: (options: IcloudScanOptions) => MaybePromise<IcloudSweepOutcome>): void
   emitConflicts(paths: string[]): void
   emitWatchFailed(): void
 }
@@ -242,13 +255,11 @@ export interface TestICloudNativeService extends ICloudNativeService {
 class TestICloudNativeServiceImpl implements TestICloudNativeService {
   #status: IcloudStatus
   #pending: number
-  #scan: (scanOptions: IcloudScanOptions) => IcloudSweepOutcome | Promise<IcloudSweepOutcome> =
-    () => ({
-      changed: [],
-      needsReview: [],
-      deferred: [],
-      autoResolved: 0,
-    })
+  #scan: (scanOptions: IcloudScanOptions) => MaybePromise<IcloudSweepOutcome> = () => ({
+    changed: [],
+    copies: [],
+    autoResolved: 0,
+  })
   readonly #log: ICloudNativeCall[] = []
   readonly #conflictListeners = new Set<(paths: string[]) => void>()
   readonly #watchFailedListeners = new Set<() => void>()
@@ -263,17 +274,17 @@ class TestICloudNativeServiceImpl implements TestICloudNativeService {
     this.#pending = options?.pendingCount ?? 0
   }
 
-  async status(): Promise<IcloudStatus> {
+  status(): IcloudStatus {
     this.#log.push({ method: 'status', args: [] })
     return { ...this.#status, existingGraphRoots: [...this.#status.existingGraphRoots] }
   }
 
-  async adoptGraph(generation: number): Promise<string> {
+  adoptGraph(generation: number): Promise<string> {
     this.#log.push({ method: 'adoptGraph', args: [generation] })
     if (!this.#status.available || this.#status.documentsRoot === null) {
-      throw new ReflectError('io', 'test iCloud: the container is unavailable')
+      return Promise.reject(new AppError('io', 'test iCloud: the container is unavailable'))
     }
-    return `${this.#status.documentsRoot}/Notes`
+    return Promise.resolve(`${this.#status.documentsRoot}/Notes`)
   }
 
   async conflictsScan(scanOptions: IcloudScanOptions): Promise<IcloudSweepOutcome> {
@@ -281,25 +292,25 @@ class TestICloudNativeServiceImpl implements TestICloudNativeService {
     return await this.#scan(scanOptions)
   }
 
-  async watchStart(root: string): Promise<void> {
+  watchStart(root: string): void {
     this.#log.push({ method: 'watchStart', args: [root] })
   }
 
-  async watchStop(): Promise<void> {
+  watchStop(): void {
     this.#log.push({ method: 'watchStop', args: [] })
   }
 
-  async downloadPending(root: string, scope: IcloudDownloadScope): Promise<number> {
+  downloadPending(root: string, scope: IcloudDownloadScope): number {
     this.#log.push({ method: 'downloadPending', args: [root, scope] })
     return this.#pending
   }
 
-  async pendingCount(root: string, scope: IcloudDownloadScope): Promise<number> {
+  pendingCount(root: string, scope: IcloudDownloadScope): number {
     this.#log.push({ method: 'pendingCount', args: [root, scope] })
     return this.#pending
   }
 
-  async requestDownloads(paths: string[]): Promise<number> {
+  requestDownloads(paths: string[]): number {
     this.#log.push({ method: 'requestDownloads', args: [paths] })
     return paths.length
   }
@@ -337,9 +348,7 @@ class TestICloudNativeServiceImpl implements TestICloudNativeService {
     this.#pending = count
   }
 
-  onConflictsScan(
-    handler: (options: IcloudScanOptions) => IcloudSweepOutcome | Promise<IcloudSweepOutcome>,
-  ): void {
+  onConflictsScan(handler: (options: IcloudScanOptions) => MaybePromise<IcloudSweepOutcome>): void {
     this.#scan = handler
   }
 
@@ -509,15 +518,15 @@ class TestBackupServiceImpl implements TestBackupService {
   #state: BackupState
   readonly #listeners = new Set<() => void>()
   readonly #log: BackupCall[] = []
-  #connectNew: BackupService['connectNewRepo'] = async () => 'connected'
-  #connectExisting: BackupService['connectExistingRepo'] =
-    async (): Promise<ConnectExistingResult> => 'connected'
+  #connectNew: BackupService['connectNewRepo'] = () => Promise.resolve('connected')
+  #connectExisting: BackupService['connectExistingRepo'] = (): Promise<ConnectExistingResult> =>
+    Promise.resolve('connected')
 
   constructor(options?: { state?: BackupState }) {
     this.#state = options?.state ?? { phase: 'loading' }
   }
 
-  async start(): Promise<void> {
+  start(): void {
     this.#log.push({ method: 'start' })
   }
 
@@ -551,15 +560,15 @@ class TestBackupServiceImpl implements TestBackupService {
     return await this.#connectExisting(ref, connectOptions)
   }
 
-  async disconnectGraph(): Promise<void> {
+  disconnectGraph(): void {
     this.#log.push({ method: 'disconnectGraph' })
   }
 
-  async signOut(): Promise<void> {
+  signOut(): void {
     this.#log.push({ method: 'signOut' })
   }
 
-  async backUpNow(): Promise<void> {
+  backUpNow(): void {
     this.#log.push({ method: 'backUpNow' })
   }
 
@@ -608,7 +617,7 @@ export interface TestICloudSyncService extends ICloudSyncService {
 class TestICloudSyncServiceImpl implements TestICloudSyncService {
   readonly #log: ('start' | 'dispose')[] = []
 
-  async start(): Promise<void> {
+  start(): void {
     this.#log.push('start')
   }
 

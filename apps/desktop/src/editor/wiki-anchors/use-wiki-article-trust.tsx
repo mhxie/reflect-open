@@ -150,7 +150,8 @@ export function useWikiArticleTrust(
         event.preventDefault()
         setCardFor((current) => (current === id ? null : id))
       }
-      dom.addEventListener('click', click)
+      const listeners = new AbortController()
+      dom.addEventListener('click', click, { signal: listeners.signal })
       // Holding Option reveals every claim's tier and mark, and lasts through
       // Option+Tab so the keyboard can reach a mark.
       const reveal = (on: boolean): void => {
@@ -163,14 +164,11 @@ export function useWikiArticleTrust(
         if (event.key === 'Alt') reveal(false)
       }
       const blur = (): void => reveal(false)
-      window.addEventListener('keydown', keydown)
-      window.addEventListener('keyup', keyup)
-      window.addEventListener('blur', blur)
+      window.addEventListener('keydown', keydown, { signal: listeners.signal })
+      window.addEventListener('keyup', keyup, { signal: listeners.signal })
+      window.addEventListener('blur', blur, { signal: listeners.signal })
       detach = () => {
-        dom.removeEventListener('click', click)
-        window.removeEventListener('keydown', keydown)
-        window.removeEventListener('keyup', keyup)
-        window.removeEventListener('blur', blur)
+        listeners.abort()
         reveal(false)
       }
     })

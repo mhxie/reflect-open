@@ -21,7 +21,6 @@ import { hasSearchableChar } from '../lib/searchable-char.ts'
 import {
   canonicalEmail,
   countDisplayChars,
-  detectConflictMarkers,
   encodeTaskPath,
   extractEmailFields,
   foldKey,
@@ -62,7 +61,7 @@ import { serializeWikiSuggestionAddress } from './suggest.ts'
  * first stamped version; v2 rows also carry the 0004 pinned columns) ·
  * 3 — repairs `notes.mtime` 0 rows written by the watcher path before it
  * carried `modifiedMs` (hash-reconcile can never refresh them) ·
- * 4 — `notes.has_conflict` (sync conflict markers, Plan 12) ·
+ * 4 — retained `notes.has_conflict` column, no longer written or read ·
  * 5 — `notes.gist_url` + `notes.gist_stale` (gist publishing) ·
  * 6 — rendered Markdown escapes in titles, wiki-link targets, and previews ·
  * 7 — `tasks` projection (GFM checkboxes, Plan 18): existing notes carry no task
@@ -256,8 +255,6 @@ export const indexedNoteSchema = z.object({
   isPinned: z.boolean(),
   /** Explicit pin order (`pinned: <n>`); null for bare `pinned: true`. */
   pinnedOrder: z.number().nullable(),
-  /** The file carries Git conflict markers from a sync merge (Plan 12). */
-  hasConflict: z.boolean(),
   /** The note is not blank: it has display text, or a body the FTS can match. */
   hasContent: z.boolean(),
   /** Characters of display text (code points, like SQLite `length`). */
@@ -399,11 +396,10 @@ export function projectNoteClaims(
 
 /**
  * Flatten a parsed note into the index payload. `meta.source` is the raw
- * markdown the note was parsed from — conflict markers are detected on it
- * (not on the extracted plain text, which may reshape marker lines).
- * `meta.localOnly` is the graph's local-only folders: a note inside one is
- * private whatever its frontmatter says. The indexer always passes its
- * session's folders; the default (none) is for callers outside a graph.
+ * markdown the note was parsed from. `meta.localOnly` is the graph's
+ * local-only folders: a note inside one is private whatever its frontmatter
+ * says. The indexer always passes its session's folders; the default (none)
+ * is for callers outside a graph.
  */
 export function buildIndexedNote(
   parsed: ParsedNote,
@@ -475,7 +471,6 @@ export function buildIndexedNote(
       isLocalOnlyPath(meta.localOnly ?? NO_LOCAL_ONLY_FOLDERS, parsed.path),
     isPinned: isPinned(parsed.frontmatter),
     pinnedOrder: pinnedOrder(parsed.frontmatter),
-    hasConflict: detectConflictMarkers(meta.source),
     gistUrl: parsed.frontmatter.gist?.url ?? null,
     // Staleness is a body-hash comparison (frontmatter excluded): publishing
     // writes the `gist` block itself, and a pin/private toggle is not an edit

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sha256Hex } from '@reflect/utils'
+import { AppError } from '../errors.ts'
 import {
   createLocalOnlyFolders,
   NO_LOCAL_ONLY_FOLDERS,
@@ -246,7 +247,7 @@ describe('reindexNotesReferencing', () => {
       ],
       read: (path) => {
         if (path === 'notes/b.md') {
-          throw { kind: 'io', message: 'disk error' }
+          throw new AppError('io', 'disk error')
         }
       },
     })
@@ -357,7 +358,7 @@ describe('rebuild', () => {
       store: {
         fail: (call) =>
           call.method === 'applyBatch'
-            ? { kind: 'parse', message: 'unexpected end of hex escape' }
+            ? new AppError('parse', 'unexpected end of hex escape')
             : undefined,
       },
     })

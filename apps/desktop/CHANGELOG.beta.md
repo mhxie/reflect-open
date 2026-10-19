@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.16.0-beta.8](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.7...v0.16.0-beta.8) (2026-10-18)
+
+
+### Features
+
+* **desktop:** add Liquid Glass app icons for iOS and macOS ([#1647](https://github.com/team-reflect/reflect-open/issues/1647)) ([2e14657](https://github.com/team-reflect/reflect-open/commit/2e14657ac3fd9bce3bf987ebd4d91f9128331a07))
+
+
+### Bug Fixes
+
+* **desktop:** drop the global reduced-motion override ([#1644](https://github.com/team-reflect/reflect-open/issues/1644)) ([f0d1216](https://github.com/team-reflect/reflect-open/commit/f0d121644af9b2a4affc6157f24910856a2aca94))
+
+## [0.16.0-beta.7](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.6...v0.16.0-beta.7) (2026-10-18)
+
+
+### Features
+
+* show open source licenses in settings ([#1637](https://github.com/team-reflect/reflect-open/issues/1637)) ([7978f99](https://github.com/team-reflect/reflect-open/commit/7978f9945332d81fc44bd5c2897ab5a348ca3cae))
+
+
+### Bug Fixes
+
+* **core:** harden email field regexes ([#1617](https://github.com/team-reflect/reflect-open/issues/1617)) ([509b418](https://github.com/team-reflect/reflect-open/commit/509b418ac5e1541443e00699864f4cf31cf09c1e))
+* index headings with long runs of spaces without stalling ([#1580](https://github.com/team-reflect/reflect-open/issues/1580)) ([d6b39a1](https://github.com/team-reflect/reflect-open/commit/d6b39a12a0ed21f339e4ad1dbaecf299b92fa543))
+* show keyboard shortcut labels correctly when a key name matches a built-in object property ([#1573](https://github.com/team-reflect/reflect-open/issues/1573)) ([2412fd9](https://github.com/team-reflect/reflect-open/commit/2412fd9bda8576036164a241757765f1b1365bcc))
+
+## [0.16.0-beta.6](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.5...v0.16.0-beta.6) (2026-10-17)
+
+
+### Bug Fixes
+
+* update meowdown ([#1564](https://github.com/team-reflect/reflect-open/issues/1564)) ([58e2854](https://github.com/team-reflect/reflect-open/commit/58e2854118686c1d1d8588b37bbfcc1a35f225e4))
+
+## [0.16.0-beta.5](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.4...v0.16.0-beta.5) (2026-10-16)
+
+
+### Features
+
+* add experimental Linux support ([#1559](https://github.com/team-reflect/reflect-open/issues/1559)) ([ad827f7](https://github.com/team-reflect/reflect-open/commit/ad827f7f91e941f96602d95b6202f5528e3bb607))
+
+## [0.16.0-beta.4](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.3...v0.16.0-beta.4) (2026-10-16)
+
+
+### Features
+
+* add automatic conflict resolution ([#1552](https://github.com/team-reflect/reflect-open/issues/1552)) ([16b0e06](https://github.com/team-reflect/reflect-open/commit/16b0e06e1b50f55cf95ab49302dd7223ef524c2c))
+* write logs to a file ([#1555](https://github.com/team-reflect/reflect-open/issues/1555)) ([cfa07c1](https://github.com/team-reflect/reflect-open/commit/cfa07c1b1dd6d64300e1073d5a8d68641426c244))
+
+
+### Bug Fixes
+
+* **capture:** repair placeholder capture link text in daily notes ([#1551](https://github.com/team-reflect/reflect-open/issues/1551)) ([e256c7b](https://github.com/team-reflect/reflect-open/commit/e256c7ba7eeba188c1a6b325dcac9f3c46e1516a))
+
 ## [0.16.0-beta.3](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.2...v0.16.0-beta.3) (2026-10-16)
 
 

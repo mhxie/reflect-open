@@ -10,19 +10,19 @@ use std::path::Path;
 use std::ptr::NonNull;
 
 use objc2_audio_toolbox::{
-    kExtAudioFileProperty_ClientDataFormat, kExtAudioFileProperty_FileDataFormat,
     ExtAudioFileDispose, ExtAudioFileGetProperty, ExtAudioFileOpenURL, ExtAudioFileRead,
-    ExtAudioFileRef, ExtAudioFileSetProperty,
+    ExtAudioFileRef, ExtAudioFileSetProperty, kExtAudioFileProperty_ClientDataFormat,
+    kExtAudioFileProperty_FileDataFormat,
 };
 use objc2_core_audio_types::{
-    kAudioFormatFlagIsFloat, kAudioFormatFlagIsPacked, kAudioFormatLinearPCM, AudioBuffer,
-    AudioBufferList, AudioStreamBasicDescription,
+    AudioBuffer, AudioBufferList, AudioStreamBasicDescription, kAudioFormatFlagIsFloat,
+    kAudioFormatFlagIsPacked, kAudioFormatLinearPCM,
 };
 use objc2_core_foundation::CFURL;
-use symphonia::core::codecs::audio::well_known::CODEC_ID_OPUS;
-use symphonia::core::codecs::audio::AudioDecoderOptions;
-use symphonia::core::codecs::registry::CodecRegistry;
 use symphonia::core::codecs::CodecParameters;
+use symphonia::core::codecs::audio::AudioDecoderOptions;
+use symphonia::core::codecs::audio::well_known::CODEC_ID_OPUS;
+use symphonia::core::codecs::registry::CodecRegistry;
 use symphonia::core::errors::Error as StreamError;
 use symphonia::core::formats::probe::{Hint, Probe};
 use symphonia::core::formats::{FormatOptions, Track, TrackType};
@@ -88,7 +88,7 @@ fn decode_webm(file: File) -> Result<Vec<Vec<f32>>, DecodeError> {
         _ => {
             return Err(DecodeError::Undecodable(
                 "it has no Opus audio track".to_string(),
-            ))
+            ));
         }
     };
     // libopus decodes at any of its native rates, so asking for 16 kHz here

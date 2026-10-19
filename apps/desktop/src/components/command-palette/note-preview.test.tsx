@@ -22,7 +22,6 @@ async function renderedFor(path: string): Promise<{ remoteEmbeds?: boolean }> {
     <NotePreview
       entry={{
         isPrivate: false,
-        hasConflict: false,
         path,
         title: 'T',
         date: null,

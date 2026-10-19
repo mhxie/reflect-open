@@ -19,7 +19,6 @@ export interface WikiEntryCopy {
   /** File modification time (epoch ms). */
   readonly mtime: number
   readonly isPrivate: boolean
-  readonly hasConflict: boolean
   readonly state: WikiCopyState
   /** The copy's opening paragraph (see {@link WikiEntrySummary.preview}); null unless read. */
   readonly preview: string | null

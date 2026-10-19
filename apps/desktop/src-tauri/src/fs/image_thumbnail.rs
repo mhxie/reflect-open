@@ -35,7 +35,7 @@ use tauri::http::StatusCode;
 use tokio::sync::Semaphore;
 
 use super::preview_cache;
-use super::resolve::{resolve_write, ReadTarget};
+use super::{ReadTarget, resolve_write};
 
 /// The query parameter that routes a `reflect-asset://` request here.
 const THUMB_QUERY: &str = "reflect-preview=thumb";
@@ -324,11 +324,11 @@ pub(crate) fn lookup_thumbnail(
     let cached = cache
         .as_ref()
         .and_then(|entry| preview_cache::read_cached(&entry.path, is_thumbnail));
-    if let Some(bytes) = cached {
-        if let Some(mime) = thumbnail_mime(&bytes) {
-            tracing::debug!(path = rel, bucket = request.bucket, "thumbnail cache hit");
-            return Ok(ThumbnailLookup::Cached(Thumbnail { bytes, mime }));
-        }
+    if let Some(bytes) = cached
+        && let Some(mime) = thumbnail_mime(&bytes)
+    {
+        tracing::debug!(path = rel, bucket = request.bucket, "thumbnail cache hit");
+        return Ok(ThumbnailLookup::Cached(Thumbnail { bytes, mime }));
     }
     tracing::debug!(path = rel, bucket = request.bucket, "thumbnail cache miss");
     Ok(ThumbnailLookup::Render(ThumbnailRender {
@@ -357,12 +357,11 @@ impl ThumbnailRender {
         let started = Instant::now();
         // A request for the same thumbnail that waited ahead of this one (a
         // card scrolled away and back) may have cached it meanwhile.
-        if let Some(entry) = &self.cache {
-            if let Some(bytes) = preview_cache::read_cached(&entry.path, is_thumbnail) {
-                if let Some(mime) = thumbnail_mime(&bytes) {
-                    return Ok(Thumbnail { bytes, mime });
-                }
-            }
+        if let Some(entry) = &self.cache
+            && let Some(bytes) = preview_cache::read_cached(&entry.path, is_thumbnail)
+            && let Some(mime) = thumbnail_mime(&bytes)
+        {
+            return Ok(Thumbnail { bytes, mime });
         }
         let (file, metadata) = open_image(&self.target)?;
         // A file rewritten while the render waited is rendered as it is now,
@@ -379,12 +378,11 @@ impl ThumbnailRender {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "rendered a thumbnail"
         );
-        if let Some(entry) = cache {
-            if let Err(err) =
+        if let Some(entry) = cache
+            && let Err(err) =
                 super::io::atomic_write_bytes(&entry.root, &entry.path, &thumbnail.bytes)
-            {
-                tracing::warn!(?err, path = %entry.path.display(), "failed to cache a thumbnail");
-            }
+        {
+            tracing::warn!(?err, path = %entry.path.display(), "failed to cache a thumbnail");
         }
         Ok(thumbnail)
     }
@@ -518,7 +516,7 @@ mod tests {
 
     use image::{Rgb, RgbImage, Rgba, RgbaImage};
 
-    use super::super::resolve::resolve_read;
+    use super::super::resolve_read;
     use super::*;
 
     fn png(image: &DynamicImage) -> Vec<u8> {

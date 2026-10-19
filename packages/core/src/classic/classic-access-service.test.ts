@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { verifyChallenge } from 'pkce-challenge'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSystemIdService, type IdService } from '../ports/id-service.ts'
@@ -37,7 +38,7 @@ function invoice(overrides: Partial<ClassicInvoice> = {}): ClassicInvoice {
   }
 }
 
-type Route = (request: Request) => Response | Promise<Response>
+type Route = (request: Request) => MaybePromise<Response>
 
 function tokenRoute(): Route {
   return () => Response.json({ access_token: 'the-token', access_token_id: 'id' })
@@ -607,7 +608,7 @@ describe('start', () => {
     )
   })
 
-  it('does nothing off iOS', async () => {
+  it('does nothing off iOS', () => {
     withStored(storedAccess())
     const reads = vi.spyOn(secrets, 'get')
     const classic = service({ appPlatform: 'desktop' })

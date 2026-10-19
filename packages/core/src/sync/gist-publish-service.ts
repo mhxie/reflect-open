@@ -3,7 +3,7 @@ import type { NoteFileService, ShareableNoteRead } from '../graph/note-file-serv
 import type { ProgressPort } from '../ports/progress-port.ts'
 import type { NoteDocumentService } from '../documents/note-document-service.ts'
 import type { NoteRowService } from '../documents/note-row-service.ts'
-import { errorMessage, isAppError, ReflectError } from '../errors.ts'
+import { AppError, errorMessage, isAppError } from '../errors.ts'
 import { noteBodyHash } from '../markdown/body-hash.ts'
 import { parseNote } from '../markdown/extract.ts'
 import { splitFrontmatter } from '../markdown/frontmatter.ts'
@@ -168,17 +168,17 @@ class GistPublishServiceImpl implements GistPublishService {
     // one — and `upsertFrontmatter` rightly refuses to rewrite a header it
     // can't parse. That refusal must come *before* the gist exists, not after.
     if (parsed.frontmatterWarning !== undefined) {
-      throw new ReflectError('parse', 'The note has invalid frontmatter — fix it before publishing')
+      throw new AppError('parse', 'The note has invalid frontmatter — fix it before publishing')
     }
 
     const body = splitFrontmatter(source).body
     if (body.trim() === '') {
-      throw new ReflectError('io', 'The note is empty — nothing to publish')
+      throw new AppError('io', 'The note is empty — nothing to publish')
     }
 
     const token = await githubAuth.getToken()
     if (token === null) {
-      throw new ReflectError('auth', 'Connect GitHub in Settings to publish gists')
+      throw new AppError('auth', 'Connect GitHub in Settings to publish gists')
     }
 
     const filename = gistFilename(parsed.title)
@@ -246,10 +246,7 @@ class GistPublishServiceImpl implements GistPublishService {
     const source = await noteDocuments.readSource(path)
     const parsed = parseNote({ path, source })
     if (parsed.frontmatterWarning !== undefined) {
-      throw new ReflectError(
-        'parse',
-        'The note has invalid frontmatter — fix it before unpublishing',
-      )
+      throw new AppError('parse', 'The note has invalid frontmatter — fix it before unpublishing')
     }
 
     const previous = parsed.frontmatter.gist
@@ -259,7 +256,7 @@ class GistPublishServiceImpl implements GistPublishService {
 
     const token = await githubAuth.getToken()
     if (token === null) {
-      throw new ReflectError('auth', 'Connect GitHub in Settings to unpublish gists')
+      throw new AppError('auth', 'Connect GitHub in Settings to unpublish gists')
     }
 
     await noteDocuments.commitFrontmatter(path, { gist: false }, generation)

@@ -25,7 +25,6 @@ export interface AttachmentNoteRef {
   /** The note's body tags (first-seen casing), ordered on the folded key. */
   readonly tags: readonly string[]
   readonly isPrivate: boolean
-  readonly hasConflict: boolean
 }
 
 /** One media file in the Attachments library. */
@@ -51,7 +50,6 @@ export interface AttachmentReferenceRow {
   readonly title: string
   readonly mtime: number
   readonly isPrivate: boolean
-  readonly hasConflict: boolean
 }
 
 /** One body tag of a note that links to a media attachment. */
@@ -140,7 +138,6 @@ export function buildAttachmentLibrary(
         mtime: reference.mtime,
         tags: tagsByNote.get(reference.notePath) ?? [],
         isPrivate: reference.isPrivate,
-        hasConflict: reference.hasConflict,
       })
     }
     entries.push({

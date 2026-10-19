@@ -12,7 +12,6 @@ import {
   type NoteFileService,
   type Settings,
 } from '@reflect/core'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
 import { useRouter } from '@/routing/router.tsx'
@@ -21,6 +20,7 @@ import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { hover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { AllNotesScreen } from './all-notes-screen.tsx'
+import { deepLinkForRoute } from '@reflect/app'
 
 /**
  * The All Notes screen over the real query layer and a seeded test index:
@@ -34,9 +34,8 @@ interface SeedNote {
   mtime: number
   preview: string
   tags?: readonly string[]
-  /** The indexed flags, which the seeded markdown does not carry. */
+  /** The indexed flag, which the seeded markdown does not carry. */
   isPrivate?: boolean
-  hasConflict?: boolean
   /** A numbered pin's shelf position; unpinned when absent. */
   pinnedOrder?: number
   /** The attachments the note references. */
@@ -178,7 +177,6 @@ async function renderScreen(options: RenderScreenOptions = {}) {
       }),
       preview: note.preview,
       isPrivate: note.isPrivate ?? false,
-      hasConflict: note.hasConflict ?? false,
       isPinned: note.pinnedOrder !== undefined,
       pinnedOrder: note.pinnedOrder ?? null,
       assets: [...(note.assets ?? [])],
@@ -265,21 +263,14 @@ async function movePinnedTagUpWithKeyboard(view: ScreenView, tag: string): Promi
 }
 
 describe('AllNotesScreen', () => {
-  it('shows indexed Private and conflict flags and keeps keyboard subject navigation', async () => {
+  it('shows the indexed Private flag and keeps keyboard subject navigation', async () => {
     const view = await renderScreen({
-      notes: [
-        { ...healthRow, isPrivate: true },
-        { ...tokyoRow, hasConflict: true },
-      ],
+      notes: [{ ...healthRow, isPrivate: true }, tokyoRow],
     })
     const privateNote = view.getByRole('button', { name: 'Health Stacked Private', exact: true })
     await expect.element(view.getByText('Wiki', { exact: true })).toBeVisible()
-    const protectedNote = view.getByRole('button', { name: 'Tokyo Gâteau Protected', exact: true })
     await expect
       .element(privateNote.getByRole('img', { name: 'Private', exact: true }))
-      .toBeVisible()
-    await expect
-      .element(protectedNote.getByRole('img', { name: 'Protected', exact: true }))
       .toBeVisible()
     expect(privateNote.element().querySelector('button')).toBeNull()
     privateNote.element().focus()
@@ -587,7 +578,7 @@ describe('AllNotesScreen', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     })
-    const listed = { isPinned: false, pinnedOrder: null, isPrivate: false, hasConflict: false }
+    const listed = { isPinned: false, pinnedOrder: null, isPrivate: false }
     client.setQueryData(queryKeys.index.allNotesWithTag('/g', null), [
       {
         ...listed,
@@ -1023,7 +1014,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     const view = await renderScreen()
     await openPinnedFilters(view)
     await movePinnedTagUpWithKeyboard(view, 'person')
-    act(() => {
+    await act(() => {
       updateSettingsElsewhere({ allNotesFilterTags: ['book', 'person', 'external'] })
     })
     await expect
@@ -1370,11 +1361,11 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     // health trashes; tokyo fails. The index still lists health until the
     // watcher reindexes, so a refetch here would wrongly bring it back.
     const view = await renderScreen()
-    deleteNote.mockImplementation(async (path) => {
+    deleteNote.mockImplementation((path) => {
       if (path === 'notes/tokyo.md') {
-        throw new Error('locked')
+        return Promise.reject(new Error('locked'))
       }
-      return { trashed: 'system' }
+      return Promise.resolve({ trashed: 'system' })
     })
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 

@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { LanguageModel } from '@reflect/modules/ai'
 import { MockLanguageModelV3 } from '@reflect/modules/ai/test'
 import type {
@@ -35,6 +36,7 @@ import type {
 } from '../privacy/on-device-verification.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import { z } from 'zod'
+import { AppError } from '../errors.ts'
 import type {
   LocalModelStatus,
   LocalModelUpdateReport,
@@ -57,7 +59,7 @@ import { createTestLoggerService } from './logger.ts'
  */
 export type TestLanguageModelSource =
   | LanguageModel
-  | ((config: AiProviderConfig, apiKey: string) => LanguageModel | Promise<LanguageModel>)
+  | ((config: AiProviderConfig, apiKey: string) => MaybePromise<LanguageModel>)
 
 /**
  * A `create` call the fake received.
@@ -140,7 +142,7 @@ class TestAiKeyValidationServiceImpl implements TestAiKeyValidationService {
     this.#current = result
   }
 
-  async validate(input: ApiKeyValidationInput): Promise<ApiKeyValidation> {
+  validate(input: ApiKeyValidationInput): ApiKeyValidation {
     this.#log.push(input)
     return this.#current
   }
@@ -168,7 +170,7 @@ export function createTestAiKeyValidationService(
  */
 export type TestPageDescriberSource =
   | PageEnrichment
-  | ((request: DescribePageRequest) => PageEnrichment | Promise<PageEnrichment>)
+  | ((request: DescribePageRequest) => MaybePromise<PageEnrichment>)
 
 export interface TestPageDescriberService extends PageDescriberService {
   /**
@@ -219,7 +221,7 @@ export function createTestPageDescriberService(
  */
 export type TestAssetDescriberSource =
   | string
-  | ((request: DescribeAssetRequest) => string | Promise<string>)
+  | ((request: DescribeAssetRequest) => MaybePromise<string>)
 
 export interface TestAssetDescriberService extends AssetDescriberService {
   /**
@@ -270,7 +272,7 @@ export function createTestAssetDescriberService(
  */
 export type TestTranscriptionSource =
   | string
-  | ((request: TranscriptionRequest) => string | Promise<string>)
+  | ((request: TranscriptionRequest) => MaybePromise<string>)
 
 export interface TestTranscriptionService extends TranscriptionService {
   /**
@@ -403,7 +405,7 @@ class TestOnDeviceHttpServiceImpl implements TestOnDeviceHttpService {
           const { requestId } = onDeviceRequestIdSchema.parse(args)
           const chunks = this.#bodies.get(requestId)
           if (chunks === undefined) {
-            throw { kind: 'notFound', message: 'no such on-device request' }
+            throw new AppError('notFound', 'no such on-device request')
           }
           const chunk = chunks.shift()
           if (chunk === undefined) {
@@ -506,17 +508,22 @@ class TestOnDeviceModelServiceImpl implements TestOnDeviceModelService {
     )
   }
 
-  async verifyServer(
+  verifyServer(
     _target: OnDeviceTarget,
     options?: OnDeviceVerificationOptions,
   ): Promise<OnDeviceServerVerdict> {
-    options?.signal?.throwIfAborted()
-    return this.#verdict
+    // The executor turns an abort into a rejection.
+    return new Promise((resolve) => {
+      options?.signal?.throwIfAborted()
+      resolve(this.#verdict)
+    })
   }
 
-  async listOllamaModels(options?: ListOllamaModelsOptions): Promise<OllamaModels> {
-    options?.signal?.throwIfAborted()
-    return this.#ollama
+  listOllamaModels(options?: ListOllamaModelsOptions): Promise<OllamaModels> {
+    return new Promise((resolve) => {
+      options?.signal?.throwIfAborted()
+      resolve(this.#ollama)
+    })
   }
 
   verifyCalls(): readonly TestOnDeviceVerifyCall[] {
@@ -536,7 +543,7 @@ class TestOnDeviceModelServiceImpl implements TestOnDeviceModelService {
  * A scripted {@link OnDeviceModelService}: every server check concludes
  * `options.verdict` (`'ok'` by default) without a request, so an attested
  * target verifies; `verify` mints through the real rule, so a refusal still
- * rejects with `ReflectError('auth', reason)`.
+ * rejects with `AppError('auth', reason)`.
  */
 export function createTestOnDeviceModelService(
   options?: TestOnDeviceModelServiceOptions,
@@ -609,9 +616,11 @@ class TestLocalTranscriptionServiceImpl implements TestLocalTranscriptionService
     return this.#inner.delete(model)
   }
 
-  async transcribe(input: TranscribeLocallyInput): Promise<LocalTranscript> {
+  transcribe(input: TranscribeLocallyInput): Promise<LocalTranscript> {
     this.#transcribeLog.push(input)
-    return this.#transcripts[input.path] ?? { outcome: 'transcribed', text: '', segments: [] }
+    return Promise.resolve(
+      this.#transcripts[input.path] ?? { outcome: 'transcribed', text: '', segments: [] },
+    )
   }
 
   checkUpdates(model: LocalTranscriptionModelId, force: boolean): Promise<LocalModelUpdateReport> {

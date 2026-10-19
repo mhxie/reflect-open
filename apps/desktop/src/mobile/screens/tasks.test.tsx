@@ -224,7 +224,7 @@ async function revealSwipeActions(
   const body = await view.findByRole('button', { name: `Edit: ${label}` })
   const surface = body.parentElement!
   const rect = surface.getBoundingClientRect()
-  swipe(
+  await swipe(
     surface,
     { x: rect.right - 20, y: rect.top + 16 },
     { x: rect.right - 160, y: rect.top + 16 },
@@ -250,7 +250,6 @@ beforeEach(async () => {
   insertTask = vi.spyOn(tasks, 'insertTask').mockResolvedValue({
     created: {
       isPrivate: false,
-      hasConflict: false,
       astPath: [0],
       markdown: '',
       breadcrumbs: [],

@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { isCaptureSpoolPath } from '../capture/capture-identity.ts'
 import type { ActivityPort } from '../ports/activity-port.ts'
 import type { ProgressPort } from '../ports/progress-port.ts'
@@ -5,16 +6,25 @@ import type { LoggerService } from '../ports/logger-service.ts'
 import type { PersistenceFlushService } from '../graph/persistence-flush-service.ts'
 import type { PlatformFacts } from '../ports/platform-facts.ts'
 import { isMobilePlatform } from '../ports/platform-facts.ts'
-import { errorMessage, ReflectError } from '../errors.ts'
+import { AppError, errorMessage, isAppError } from '../errors.ts'
 import { isEditableLocalOnlyPath, type LocalOnlyFolders } from '../graph/local-only.ts'
 import { isNotePath } from '../graph/paths.ts'
 import type { FileChangeService } from '../indexing/file-change-service.ts'
 import type { IndexLifecycleService } from '../indexing/index-lifecycle-service.ts'
 import type { NoteDisplacementService } from '../indexing/note-displacement-service.ts'
 import type { Unlisten } from '../unlisten.ts'
+import type { ICloudNativeService } from '../ipc/icloud-native-service.ts'
+import type { ClockService, TimerHandle } from '../ports/clock-service.ts'
 import { displacedNotesMessage } from './displaced-notes.ts'
+import { isICloudRoot } from './icloud-sync-service.ts'
 import { isSyncError, type SyncEngine, type SyncEngineFactory, type SyncStatus } from './engine.ts'
-import type { ChangedFile, DisplacedFile, GitRepositoryService } from './git-repository-service.ts'
+import { describeConflictCopies } from './conflict-copies.ts'
+import type {
+  ChangedFile,
+  DisplacedFile,
+  GitCredential,
+  GitRepositoryService,
+} from './git-repository-service.ts'
 import { githubCredential, type GithubAuthService } from './github-auth-service.ts'
 import {
   githubRemoteUrl,
@@ -56,9 +66,25 @@ export type ConnectExistingResult = 'connected' | 'needsPublicConfirm' | 'notFou
 const MOBILE_IDLE_MS = 10_000
 
 /**
+ * Quiet period before the network pass on an iCloud-hosted graph with a
+ * remote. iCloud and Git then both move the same files, so Git waits until
+ * iCloud and the user have both stopped.
+ */
+const COEXIST_QUIET_MS = 5 * 60_000
+
+/**
+ * How often a visible desktop window asks the remote for its branch tip.
+ */
+const REMOTE_PROBE_MS = 90_000
+
+/**
  * The (graph, index session) pair one {@link BackupService} backs up.
  */
 export interface BackupServiceOptions {
+  /**
+   * The open graph's root folder.
+   */
+  readonly root: string
   /**
    * The open graph's generation — every git command is pinned to it.
    */
@@ -93,10 +119,15 @@ export interface BackupServiceDeps {
    */
   readonly noteDisplacement: NoteDisplacementService
   readonly progress: ProgressPort
+  readonly clock: ClockService
   readonly activity: ActivityPort
   readonly platform: PlatformFacts
   readonly persistenceFlush: PersistenceFlushService
   readonly logger: LoggerService
+  /**
+   * Reports the iCloud downloads still pending for an iCloud-hosted graph.
+   */
+  readonly icloudNative: ICloudNativeService
 }
 
 /**
@@ -117,7 +148,7 @@ export interface BackupService {
   /**
    * Probe the graph and start the engine if fully connected. Idempotent.
    */
-  start(): Promise<void>
+  start(): MaybePromise<void>
   getState: () => BackupState
   /**
    * Subscribe to state changes; returns the unsubscribe.
@@ -137,21 +168,22 @@ export interface BackupService {
    */
   connectExistingRepo(
     ref: GithubRepoRef,
-    options?: { allowPublic?: boolean },
+    options?: { allowPublic?: boolean | undefined },
   ): Promise<ConnectExistingResult>
   /**
    * Stop backing **this graph** up (drops its remote; history and the
    * machine-level GitHub credential stay — other graphs keep syncing).
    */
-  disconnectGraph(): Promise<void>
+  disconnectGraph(): MaybePromise<void>
   /**
    * Sign this machine out of GitHub — every connected graph stops syncing.
    */
-  signOut(): Promise<void>
+  signOut(): MaybePromise<void>
   /**
-   * Full cycle now: commit, pull/merge, push.
+   * Full cycle now: fetch, pull, push. On an iCloud-hosted graph with a remote
+   * it commits, and opens a quiet window only when none is open.
    */
-  backUpNow(): Promise<void>
+  backUpNow(): MaybePromise<void>
   /**
    * A graph file the watcher does not report changed (one under a hidden
    * folder, such as an agent harness's trust report); schedules a backup the
@@ -167,6 +199,7 @@ export interface BackupService {
 class BackupServiceImpl implements BackupService {
   readonly #deps: BackupServiceDeps
   readonly #generation: number
+  readonly #root: string
   readonly #indexGeneration: number | null
   readonly #localOnly: LocalOnlyFolders
   readonly #mobile: boolean
@@ -177,6 +210,7 @@ class BackupServiceImpl implements BackupService {
   #engine: SyncEngine | null = null
   #unlisten: Unlisten | null = null
   #unregisterBackupFlusher: (() => void) | null = null
+  #probeTimer: TimerHandle | null = null
   /**
    * Serializes direct index writes without delaying synchronous file-change fanout.
    */
@@ -189,13 +223,15 @@ class BackupServiceImpl implements BackupService {
   constructor(deps: BackupServiceDeps, options: BackupServiceOptions) {
     this.#deps = deps
     this.#generation = options.generation
+    this.#root = options.root
     this.#indexGeneration = options.indexGeneration
     this.#localOnly = options.localOnly
     this.#mobile = isMobilePlatform(deps.platform.appPlatform) || deps.platform.surface.mobileApp
   }
 
   async start(): Promise<void> {
-    const { git, syncEngines, githubAuth, progress, activity, logger } = this.#deps
+    const { git, syncEngines, githubAuth, progress, activity, logger, icloudNative, platform } =
+      this.#deps
     this.#teardown()
     if (this.#disposed) {
       return
@@ -252,24 +288,30 @@ class BackupServiceImpl implements BackupService {
         await this.#startLocalHistory(status.initialized)
         return
       }
+      // The managed sign-in is for github.com only; SSH and path remotes get
+      // none and Rust resolves them locally.
+      const getCredential =
+        repo !== null
+          ? async () => {
+              const token = await githubAuth.getToken()
+              return token === null ? null : githubCredential(token)
+            }
+          : () => null
+      const coexisting = isICloudRoot(this.#root)
       const next = syncEngines.create({
         generation: this.#generation,
-        ...(this.#mobile ? { idleMs: MOBILE_IDLE_MS } : {}),
+        idleMs: this.#mobile ? MOBILE_IDLE_MS : undefined,
+        quietMs: coexisting ? COEXIST_QUIET_MS : undefined,
+        networkReady: coexisting
+          ? async () => (await icloudNative.pendingCount(this.#root, 'notes')) === 0
+          : undefined,
         // iOS can suspend us at any await. Do not begin a launch, online, or
         // debounced Git cycle after the document is hidden; the existing
         // visible/focus trigger below replays a full cycle on foreground.
         // The background flusher's protected local commit bypasses this
         // engine deliberately.
         canStartCycle: () => !this.#mobile || !activity.isHidden(),
-        // The managed sign-in is for github.com only; SSH and path remotes
-        // get none and Rust resolves them locally.
-        getCredential:
-          repo !== null
-            ? async () => {
-                const token = await githubAuth.getToken()
-                return token === null ? null : githubCredential(token)
-              }
-            : async () => null,
+        getCredential,
         onStatus: (engineStatus) => {
           this.#setState({ phase: 'connected', remoteUrl, repo, status: engineStatus })
           if (repo !== null && isForbidden(engineStatus)) {
@@ -288,11 +330,15 @@ class BackupServiceImpl implements BackupService {
           this.#onDisplaced(displaced)
         },
         onRemoteChanges: (changes) => this.#onRemoteChanges(changes),
+        onReview: (paths) => progress.fail('Syncing', describeConflictCopies(paths)),
       })
       this.#setState({ phase: 'connected', remoteUrl, repo, status: { state: 'idle' } })
       this.#adoptEngine(next)
 
       this.#resumeDisposers.push(activity.subscribeResume(() => void next.syncNow()))
+      if (!coexisting && !this.#mobile && platform.isNativeShell) {
+        this.#armProbe(next, getCredential)
+      }
 
       void next.syncNow() // launch pull: pick up other devices' changes
     } catch (error) {
@@ -324,7 +370,7 @@ class BackupServiceImpl implements BackupService {
     }
     const [owner, repoName, ...rest] = repo.fullName.split('/')
     if (owner === undefined || repoName === undefined || rest.length > 0) {
-      throw new ReflectError('parse', `unexpected repository name from GitHub: ${repo.fullName}`)
+      throw new AppError('parse', `unexpected repository name from GitHub: ${repo.fullName}`)
     }
     // Align with the account's default branch for new repos so the first
     // push creates the branch GitHub already considers the default.
@@ -376,7 +422,7 @@ class BackupServiceImpl implements BackupService {
   }
 
   #setState(next: BackupState): void {
-    if (this.#disposed) {
+    if (this.#disposed || sameState(this.#state, next)) {
       return
     }
     this.#state = next
@@ -390,6 +436,7 @@ class BackupServiceImpl implements BackupService {
    */
   #teardown(): void {
     this.#remoteIndexEpoch += 1
+    this.#clearProbe()
     this.#engine?.stop()
     this.#engine = null
     this.#unlisten?.()
@@ -399,6 +446,52 @@ class BackupServiceImpl implements BackupService {
     }
     this.#unregisterBackupFlusher?.()
     this.#unregisterBackupFlusher = null
+  }
+
+  #clearProbe(): void {
+    if (this.#probeTimer !== null) {
+      this.#deps.clock.clearTimeout(this.#probeTimer)
+      this.#probeTimer = null
+    }
+  }
+
+  #armProbe(engine: SyncEngine, getCredential: () => MaybePromise<GitCredential | null>): void {
+    this.#probeTimer = this.#deps.clock.setTimeout(() => {
+      this.#probeTimer = null
+      void this.#probe(engine, getCredential)
+    }, REMOTE_PROBE_MS)
+  }
+
+  /**
+   * One probe tick: ask the remote for its branch tip and pull when it moved.
+   * A failed probe is logged and the next one runs on schedule.
+   */
+  async #probe(
+    engine: SyncEngine,
+    getCredential: () => MaybePromise<GitCredential | null>,
+  ): Promise<void> {
+    const { git, activity, logger } = this.#deps
+    const failed = this.#state.phase === 'connected' && this.#state.status.state === 'error'
+    if (!activity.isHidden() && !failed) {
+      try {
+        const credential = await getCredential()
+        const tip = await git.remoteHead(credential, this.#generation)
+        if (this.#engine !== engine) {
+          return
+        }
+        if (tip.remoteOid !== null && tip.remoteOid !== tip.trackingOid) {
+          void engine.syncNow()
+        }
+      } catch (error) {
+        if (this.#engine !== engine) {
+          return
+        }
+        logger.info('remote probe failed:', errorMessage(error))
+      }
+    }
+    if (this.#engine === engine) {
+      this.#armProbe(engine, getCredential)
+    }
   }
 
   /**
@@ -437,7 +530,7 @@ class BackupServiceImpl implements BackupService {
     }
   }
 
-  #onRemoteChanges(changes: ChangedFile[]): void | Promise<void> {
+  #onRemoteChanges(changes: ChangedFile[]): MaybePromise<void> {
     const { fileChanges, indexLifecycle, activity, logger } = this.#deps
     if (changes.length === 0) {
       return
@@ -452,8 +545,11 @@ class BackupServiceImpl implements BackupService {
     // the index and embeddings take markdown notes, the audio-memo
     // reconciler takes recordings) — and the index additionally gets a
     // direct apply (idempotent if a live watcher subscription double-applies).
-    fileChanges.emit({ changes, source: 'pull' })
-    const indexable = changes.filter((change) => isNotePath(change.path))
+    const fileChangeBatch = changes.map(({ path, kind, modifiedMs }) =>
+      modifiedMs === null || modifiedMs === undefined ? { path, kind } : { path, kind, modifiedMs },
+    )
+    fileChanges.emit({ changes: fileChangeBatch, source: 'pull' })
+    const indexable = fileChangeBatch.filter((change) => isNotePath(change.path))
     const indexGeneration = this.#indexGeneration
     if (indexGeneration !== null && indexable.length > 0) {
       const task = this.#remoteIndexTail.then(async () => {
@@ -490,7 +586,10 @@ class BackupServiceImpl implements BackupService {
     // Spooled capture envelopes (`.reflect/inbox/`) are git-ignored and
     // drained within seconds — they must not tick the commit debounce. The
     // drain's own note writes arrive as ordinary changes right after.
-    this.#unlisten = fileChanges.subscribe(({ changes }) => {
+    this.#unlisten = fileChanges.subscribe(({ changes, source }) => {
+      if (source === 'pull') {
+        return
+      }
       if (changes.some((change) => !isCaptureSpoolPath(change.path))) {
         next.noteChanged()
       }
@@ -541,7 +640,7 @@ class BackupServiceImpl implements BackupService {
       const next = syncEngines.create({
         generation: this.#generation,
         localOnly: true,
-        getCredential: async () => null,
+        getCredential: () => null,
         onStatus: (engineStatus) => {
           // No UI surfaces local history, so a failing commit loop (disk full,
           // corrupted repo) must at least leave a trace for diagnosis.
@@ -591,7 +690,7 @@ class BackupServiceImpl implements BackupService {
       // else (GitHub throttling, a fetch that never reached it, an unparsable
       // reply) says nothing about the credential, so it must not keep asking
       // for a reconnect either.
-      if (cause instanceof ReflectError && cause.kind === 'auth') {
+      if (isAppError(cause) && cause.kind === 'auth') {
         return
       }
       next = {
@@ -609,7 +708,7 @@ class BackupServiceImpl implements BackupService {
     const { githubAuth } = this.#deps
     const token = await githubAuth.getToken()
     if (token === null) {
-      throw new ReflectError('auth', 'Connect GitHub first (no credential stored)')
+      throw new AppError('auth', 'Connect GitHub first (no credential stored)')
     }
     return token
   }
@@ -633,4 +732,18 @@ export function createBackupService(
  */
 function isForbidden(status: SyncStatus): boolean {
   return isSyncError(status) && status.errorKind === 'auth' && status.message.includes('403')
+}
+
+function sameState(a: BackupState, b: BackupState): boolean {
+  if (a.phase !== 'connected' || b.phase !== 'connected') {
+    return a.phase === b.phase
+  }
+  return a.remoteUrl === b.remoteUrl && a.repo === b.repo && sameStatus(a.status, b.status)
+}
+
+function sameStatus(a: SyncStatus, b: SyncStatus): boolean {
+  const left: Record<string, unknown> = a
+  const right: Record<string, unknown> = b
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key])
 }

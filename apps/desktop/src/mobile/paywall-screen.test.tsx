@@ -64,7 +64,7 @@ function refetches(): number {
 }
 
 beforeEach(() => {
-  getProducts = async () => PRODUCTS
+  getProducts = () => Promise.resolve(PRODUCTS)
   purchase = async () => {}
   sync = async () => {}
   redeem = async () => {}
@@ -113,7 +113,7 @@ beforeEach(() => {
 
 describe('PaywallScreen products', () => {
   it('shows the existing failure UI when a required product is missing', async () => {
-    getProducts = async () => [YEARLY_PRODUCT]
+    getProducts = () => Promise.resolve([YEARLY_PRODUCT])
     const view = await mount()
 
     await expect.element(view.getByText(/Could not load subscription options/)).toBeVisible()
@@ -144,7 +144,7 @@ describe('PaywallScreen purchase mutation', () => {
       .element(view.getByRole('button', { name: /Already a Reflect member/ }))
       .toBeDisabled()
     await expect.element(view.getByRole('button', { name: 'Restore Purchases' })).toBeDisabled()
-    expect(view.container.querySelector('button svg.animate-spin')).not.toBeNull()
+    await expect.element(trial.getByTestId('spinner')).toBeInTheDocument()
     expect(purchases).toEqual([IAP_PRODUCT_IDS.yearly])
     const activePurchase = queryClient
       .getMutationCache()
@@ -299,7 +299,9 @@ describe('PaywallScreen restore mutation', () => {
     await expect
       .element(view.getByRole('button', { name: 'Start 7-day free trial' }))
       .toBeDisabled()
-    expect(view.container.querySelector('button svg.animate-spin')).toBeNull()
+    await expect
+      .element(view.getByRole('button', { name: 'Start 7-day free trial' }).getByTestId('spinner'))
+      .not.toBeInTheDocument()
     const activeRestore = queryClient
       .getMutationCache()
       .find({ exact: true, mutationKey: mutationKeys.iap.restore })
@@ -397,7 +399,7 @@ describe('PaywallScreen Reflect Classic verification', () => {
 
   it('offers a different account in a private session when not eligible', async () => {
     classicAccess.setSignIn(
-      afterSheet(async () => ({ kind: 'not-eligible', email: 'a@example.com' })),
+      afterSheet(() => Promise.resolve({ kind: 'not-eligible', email: 'a@example.com' })),
     )
     const view = await openSignIn()
 

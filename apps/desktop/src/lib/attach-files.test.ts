@@ -31,8 +31,8 @@ function contextFor(notePath: string | null): CommandContext {
     notePath: () => notePath,
     back: vi.fn(),
     forward: vi.fn(),
-    togglePin: vi.fn(async () => {}),
-    togglePrivate: vi.fn(async () => {}),
+    togglePin: vi.fn(() => {}),
+    togglePrivate: vi.fn(() => {}),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -114,7 +114,7 @@ describe('attachFilesToNote', () => {
     const path = 'finance/secure/bank.md'
     const handle = editorHandle()
     registerNoteEditorHandle(path, handle, 4)
-    vi.spyOn(appLayer.dialog, 'pickFiles').mockImplementation(async () => {
+    vi.spyOn(appLayer.dialog, 'pickFiles').mockImplementation(() => {
       registerNoteEditorHandle(path, handle, 5)
       return ['/tmp/private.pdf']
     })

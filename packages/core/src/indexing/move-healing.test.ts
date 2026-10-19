@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { createTestClockService } from '../testing/clock.ts'
 import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
@@ -107,7 +108,7 @@ describe('MoveHealing.detectExternalMoves', () => {
   it('skips an unreadable arrival: no pair, no content, no throw', async () => {
     const { healing } = setup({
       read: () => {
-        throw { kind: 'io', message: 'locked' }
+        throw new AppError('io', 'locked')
       },
     })
 
@@ -146,7 +147,7 @@ describe('MoveHealing.detectExternalMoves', () => {
 
   it('treats a failed existence probe as present: no guess, plain delete+create', async () => {
     const { healing } = setup({
-      exists: () => Promise.reject({ kind: 'io', message: 'probe failed' }),
+      exists: () => Promise.reject(new AppError('io', 'probe failed')),
     })
 
     expect((await healing.detectExternalMoves([ORPHAN], [ARRIVAL], 1)).moves).toEqual([])

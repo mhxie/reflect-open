@@ -2,7 +2,7 @@
 //! from the local date and the `daily/YYYY-MM-DD.md` convention, no index —
 //! so no local-only folders either (`daily/` sits at the graph root).
 
-use crate::commands::output::{print_content, print_json, NoteJson, PathJson};
+use crate::commands::output::{NoteJson, PathJson, print_content, print_json};
 use crate::error::CliError;
 use crate::graph::Graph;
 use crate::note_file::{ensure_not_private, read_note};

@@ -83,6 +83,11 @@ function caretHeading(): Element | null {
   return element?.closest('h1, h2, h3, h4, h5, h6') ?? null
 }
 
+/** The element holding focus, if any. */
+function focusedElement(): Element | null {
+  return document.activeElement
+}
+
 it('puts the caret in the claim a ^cN link names', async () => {
   await renderFollowing('^c2')
 
@@ -152,11 +157,9 @@ it('reveals a claim in a local-only read-only preview', async () => {
   await renderFollowing('^c2', { localOnly: 'read-only' })
 
   await expect.element(page.getByText('The wheel-of-fortune study.')).toBeInTheDocument()
-  await vi.waitFor(() =>
-    expect(document.activeElement?.textContent).toContain('[C2] The canonical'),
-  )
+  await vi.waitFor(() => expect(focusedElement()?.textContent).toContain('[C2] The canonical'))
   expect(document.querySelector('[contenteditable="true"]')).toBeNull()
-  expect(document.activeElement?.getBoundingClientRect().top).toBeLessThan(window.innerHeight)
+  expect(focusedElement()?.getBoundingClientRect().top).toBeLessThan(window.innerHeight)
 })
 
 it('reveals a repeated heading by its numbered slug in a read-only preview', async () => {
@@ -180,5 +183,5 @@ it('follows a same-note heading link in a read-only preview', async () => {
 
   await page.getByTestId('wikilink').first().click()
 
-  await vi.waitFor(() => expect(document.activeElement?.textContent).toBe('Evidence'))
+  await vi.waitFor(() => expect(focusedElement()?.textContent).toBe('Evidence'))
 })

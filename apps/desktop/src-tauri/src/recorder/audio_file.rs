@@ -13,20 +13,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use objc2_audio_toolbox::{
-    kAudioFileM4AType, kAudioFileWAVEType, kExtAudioFileProperty_ClientDataFormat, AudioFileFlags,
-    ExtAudioFileCreateWithURL, ExtAudioFileDispose, ExtAudioFileRef, ExtAudioFileSetProperty,
-    ExtAudioFileWrite,
+    AudioFileFlags, ExtAudioFileCreateWithURL, ExtAudioFileDispose, ExtAudioFileRef,
+    ExtAudioFileSetProperty, ExtAudioFileWrite, kAudioFileM4AType, kAudioFileWAVEType,
+    kExtAudioFileProperty_ClientDataFormat,
 };
 use objc2_core_audio_types::{
-    kAudioFormatFlagIsFloat, kAudioFormatFlagIsPacked, kAudioFormatFlagIsSignedInteger,
-    kAudioFormatLinearPCM, kAudioFormatMPEG4AAC, AudioBuffer, AudioBufferList,
-    AudioStreamBasicDescription,
+    AudioBuffer, AudioBufferList, AudioStreamBasicDescription, kAudioFormatFlagIsFloat,
+    kAudioFormatFlagIsPacked, kAudioFormatFlagIsSignedInteger, kAudioFormatLinearPCM,
+    kAudioFormatMPEG4AAC,
 };
 use objc2_core_foundation::CFURL;
 use rtrb::{Consumer, Producer, RingBuffer};

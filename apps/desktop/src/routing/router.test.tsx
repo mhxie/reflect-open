@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
@@ -31,7 +32,7 @@ describe('router', () => {
   })
 
   it('renders the navigation service through navigate, back, and forward', async () => {
-    const { result, act, appServices } = await routerHook()
+    const { result, appServices } = await routerHook()
     await act(() => result.current.navigate({ kind: 'daily', date: '2026-06-08' }))
     await act(() =>
       result.current.navigate({ kind: 'note', path: 'notes/a.md' }, { focusEditor: true }),
@@ -52,7 +53,7 @@ describe('router', () => {
   })
 
   it('follows navigation made on the service itself', async () => {
-    const { result, act, appServices } = await routerHook()
+    const { result, appServices } = await routerHook()
     await act(() => appServices.navigation.navigate({ kind: 'tasks' }))
     expect(result.current.route).toEqual({ kind: 'tasks' })
   })
@@ -71,8 +72,8 @@ describe('router', () => {
 
   it('a new mount starts a fresh history', async () => {
     const first = await routerHook()
-    await first.act(() => first.result.current.navigate({ kind: 'tasks' }))
-    await first.act(() => first.result.current.saveScrollState(40))
+    await act(() => first.result.current.navigate({ kind: 'tasks' }))
+    await act(() => first.result.current.saveScrollState(40))
     await first.unmount()
 
     const { result } = await routerHook(undefined, first.app)
@@ -83,7 +84,7 @@ describe('router', () => {
   })
 
   it('restores a saved scroll offset on back/forward, per entry', async () => {
-    const { result, act } = await routerHook()
+    const { result } = await routerHook()
     await act(() => result.current.saveScrollState(120)) // scrolling on today
     await act(() => result.current.navigate({ kind: 'note', path: 'notes/a.md' }))
     expect(result.current.savedScroll()).toBeNull() // fresh entry: no offset yet
@@ -97,7 +98,7 @@ describe('router', () => {
   })
 
   it('can clear the active entry scroll offset without changing routes', async () => {
-    const { result, act } = await routerHook()
+    const { result } = await routerHook()
     const entryId = result.current.entryId
     const arrivals = result.current.arrivalSeq
     await act(() => result.current.saveScrollState(120))
@@ -148,7 +149,7 @@ describe('router', () => {
 
   describe('note moves (Plan 17)', () => {
     it('rewrites the current route when a note moves', async () => {
-      const { result, act, app } = await routerHook()
+      const { result, app } = await routerHook()
       await act(() => result.current.navigate({ kind: 'note', path: 'notes/01abc.md' }))
       const arrivalsBefore = result.current.arrivalSeq
       const entryBefore = result.current.entryId
@@ -161,9 +162,9 @@ describe('router', () => {
     })
 
     it('a move settling after the workspace unmounts is harmless', async () => {
-      const { result, act, unmount, app } = await routerHook()
+      const { result, unmount, app } = await routerHook()
       await act(() => result.current.navigate({ kind: 'note', path: 'notes/01abc.md' }))
-      unmount()
+      await unmount()
 
       app.noteMove.followHealedMove('notes/01abc.md', 'notes/meeting-notes.md')
     })

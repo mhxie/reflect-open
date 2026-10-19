@@ -2,7 +2,7 @@ import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it, vi } from 'vitest'
 import { createAiCredentialService } from '../ai/ai-credential-service.ts'
 import { createAiProviderConfigService } from '../ai/ai-provider-config-service.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { LocalOcrSupport } from '../graph/asset-store-service.ts'
 import type { OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
 import {
@@ -78,13 +78,15 @@ async function setup(
   const noteFile = createTestNoteFileService()
   // Rust serves any visible Markdown file to the device reads, a description
   // sidecar under `assets/` included; the double serves notes only.
-  vi.spyOn(noteFile, 'readForDevice').mockImplementation(async (path) => {
-    const content = noteFile.files().get(path)
-    if (content === undefined) {
-      throw new ReflectError('notFound', `${path} does not exist`)
-    }
-    return { content, localOnly: false }
-  })
+  vi.spyOn(noteFile, 'readForDevice').mockImplementation((path) =>
+    Promise.try(() => {
+      const content = noteFile.files().get(path)
+      if (content === undefined) {
+        throw new AppError('notFound', `${path} does not exist`)
+      }
+      return { content, localOnly: false }
+    }),
+  )
   const provider = options.provider ?? CONFIG
   const settings = createTestSettingsService({
     aiProviders: [provider],
@@ -238,12 +240,14 @@ describe('local OCR', () => {
   describe('a failure confined to one attachment', () => {
     it('skips an oversize source and still recognizes the next attachment', async () => {
       const { run, assetStore } = await setup({ photo: true })
-      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation(async (path) => {
-        if (path === 'assets/scan.pdf') {
-          throw new ReflectError('unsupported', 'source exceeds 20971520 bytes')
-        }
-        return new Uint8Array([9])
-      })
+      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) =>
+        Promise.try(() => {
+          if (path === 'assets/scan.pdf') {
+            throw new AppError('unsupported', 'source exceeds 20971520 bytes')
+          }
+          return new Uint8Array([9])
+        }),
+      )
       const outcome = await run()
       expect(outcome.stopped).toBeNull()
       expect(outcome.skippedOversize).toBe(1)
@@ -252,12 +256,14 @@ describe('local OCR', () => {
 
     it('skips an offline source and a blank page instead of stopping the pass', async () => {
       const { run, assetStore, describer } = await setup({ photo: true })
-      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation(async (path) => {
-        if (path === 'assets/photo.png') {
-          throw new ReflectError('io', 'the file is not available offline')
-        }
-        return new Uint8Array([1])
-      })
+      vi.spyOn(assetStore, 'readBytesForDevice').mockImplementation((path) =>
+        Promise.try(() => {
+          if (path === 'assets/photo.png') {
+            throw new AppError('io', 'the file is not available offline')
+          }
+          return new Uint8Array([1])
+        }),
+      )
       describer.setResult('   ')
       const outcome = await run()
       expect(outcome.stopped).toBeNull()
@@ -294,7 +300,7 @@ describe('local OCR', () => {
     it('still stops the whole pass when the local server is unavailable', async () => {
       const { run, describer } = await setup({ photo: true })
       describer.setResult(() => {
-        throw new ReflectError('network', 'Server down')
+        throw new AppError('network', 'Server down')
       })
       const outcome = await run()
       expect(outcome.stopped).toMatchObject({ reason: 'network', message: 'Server down' })

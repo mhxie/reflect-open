@@ -164,6 +164,15 @@ reflect-open/
 └── turbo.json, pnpm-workspace.yaml
 ```
 
+### Sync
+
+Safety rules for the sync path: [docs/git-backup-safety.md](docs/git-backup-safety.md) (S1 to S9). Read them before you change `git/`, `conflict/`, `icloud/`, `fs/` or `packages/core/src/sync/`.
+
+- **TS owns policy.** Cadence, single-flight queueing and status live in `packages/core/src/sync/*-service.ts` (`engine.ts`, `backup-service.ts`, `icloud-sync-service.ts`). Rust owns the capabilities: `git/` (libgit2 commit, fetch, merge, push) and `icloud/` (sweep, versions, watch).
+- **Conflicts.** `.md` notes go through `conflict/ladder.rs` (also used by `note_write`). Other files get a conflict copy from `conflict/copy.rs`. See S7.
+- **One lock per graph.** `fs/graph_lock.rs` serializes git commands, note writes and sweep writes. Take it before you touch notes in Rust. `git_fetch` and `git_remote_head` run outside it.
+- **Own writes.** `fs/own_writes.rs` records the note bytes this process wrote, so a later read can tell its own content from a change that arrived from elsewhere.
+
 ### Related repos
 
 - **Meowdown:** the local checkout lives at `~/repos/meowdown`. Meowdown is the

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { AppError } from '../errors.ts'
 import { audioMemoIdentity, audioMemoPartPath } from './audio-memo.ts'
 import { APP_REVIEW_STUB_KEY } from '../ai/app-review-demo.ts'
 import { TranscriptionRejectedError } from '../ai/transcribe-http.ts'
-import { ReflectError } from '../errors.ts'
 import type { TestNoteFileService } from '../testing/index.ts'
 import {
   ANTHROPIC_CONFIG,
@@ -35,14 +35,14 @@ afterEach(() => {
 })
 
 /**
- * Stage a daily note that changes on disk: just before each of the next
- * `times` daily writes is checked, the file becomes `edit(current)` (a sync
- * pull or an editor save landing between the read and the write), so the
- * checked write is refused. Returns the spy on `noteFile.write`.
+ * Stage a concurrent change to the day's note that Rust refuses: just before
+ * each of the next `times` daily writes lands, a missing daily appears with
+ * `edit(undefined)` (a sync pull bringing it), or an existing one disappears
+ * because `edit` returns `null`. Returns the spy on `noteFile.write`.
  */
 function raceDailyWrites(
   kit: AudioMemoTestKit,
-  edit: (current: string) => string,
+  edit: (current: string | undefined) => string | null,
   times: number,
 ): MockInstance<TestNoteFileService['write']> {
   const write = kit.noteFile.write.bind(kit.noteFile)
@@ -52,7 +52,34 @@ function raceDailyWrites(
     .mockImplementation(async (path, contents, generation, expected) => {
       if (remaining > 0 && path === DAILY) {
         remaining -= 1
-        kit.noteFile.set(DAILY, edit(kit.noteFile.files().get(DAILY) ?? ''))
+        const next = edit(kit.noteFile.files().get(DAILY))
+        if (next === null) {
+          await kit.noteFile.delete(DAILY, generation)
+        } else {
+          kit.noteFile.set(DAILY, next)
+        }
+      }
+      return await write(path, contents, generation, expected)
+    })
+}
+
+/**
+ * Stage a concurrent daily edit that Rust merges: the next daily write lands
+ * as `merge(contents)` and reports it as `merged`. Returns the spy on
+ * `noteFile.write`.
+ */
+function mergeNextDailyWrite(
+  kit: AudioMemoTestKit,
+  merge: (contents: string) => string,
+): MockInstance<TestNoteFileService['write']> {
+  const write = kit.noteFile.write.bind(kit.noteFile)
+  let pending = true
+  return vi
+    .spyOn(kit.noteFile, 'write')
+    .mockImplementation(async (path, contents, generation, expected) => {
+      if (pending && path === DAILY) {
+        pending = false
+        kit.noteFile.mergeNextWrite(DAILY, merge(contents))
       }
       return await write(path, contents, generation, expected)
     })
@@ -228,7 +255,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
     kit.addRecording(MEMO.audioPath)
     const createMock = vi
       .spyOn(kit.noteFile, 'create')
-      .mockRejectedValue(new ReflectError('io', 'disk full'))
+      .mockRejectedValue(new AppError('io', 'disk full'))
     const writeMock = vi.spyOn(kit.noteFile, 'write')
 
     const outcome = await kit.reconcile()
@@ -330,7 +357,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
       const earlierName = earlier.audioPath.slice(earlier.audioPath.lastIndexOf('/') + 1)
       kit.addRecording(MEMO.audioPath)
       kit.addRecording(earlier.audioPath)
-      const refused = new ReflectError(
+      const refused = new AppError(
         'traversal',
         `local-only notes and files never leave this machine: ${earlier.audioPath}`,
       )
@@ -357,7 +384,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
   it('a pause in sharing still stops the pass instead of skipping the recording', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    kit.readBytesMock.mockRejectedValueOnce(new ReflectError('io', 'Sharing is paused'))
+    kit.readBytesMock.mockRejectedValueOnce(new AppError('io', 'Sharing is paused'))
 
     const outcome = await kit.reconcile()
 
@@ -422,7 +449,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
   it('stops before writing the transcript when the category note cannot be ensured', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    kit.ensureBacklinkTargetMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
+    kit.ensureBacklinkTargetMock.mockRejectedValue(new AppError('io', 'disk full'))
 
     const outcome = await kit.reconcile()
 
@@ -501,7 +528,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
     const earlier = audioMemoIdentity(new Date(2026, 5, 10, 9, 0, 0, 0), 'audio/mp4')
     kit.addRecording(earlier.audioPath)
     kit.addRecording(MEMO.audioPath)
-    kit.transcription.setResult(() => Promise.reject({ kind: 'network', message: 'provider down' }))
+    kit.transcription.setResult(() => Promise.reject(new AppError('network', 'provider down')))
 
     const outcome = await kit.reconcile({ formatTranscript: true })
 
@@ -518,7 +545,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
   it('a memo that failed to transcribe drains on the next pass — e.g. the next app launch', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    kit.transcription.setResult(() => Promise.reject({ kind: 'network', message: 'offline' }))
+    kit.transcription.setResult(() => Promise.reject(new AppError('network', 'offline')))
 
     const offline = await kit.reconcile()
 
@@ -620,9 +647,9 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
     let closed = false
-    kit.enrichMock.mockImplementation(async () => {
+    kit.enrichMock.mockImplementation(() => {
       closed = true
-      return { title: 'Formatted title', body: 'Formatted transcript' }
+      return Promise.resolve({ title: 'Formatted title', body: 'Formatted transcript' })
     })
 
     const outcome = await kit.reconcile({ formatTranscript: true, isStale: () => closed })
@@ -636,7 +663,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
     let closed = false
-    kit.ensureBacklinkTargetMock.mockImplementation(async () => {
+    kit.ensureBacklinkTargetMock.mockImplementation(() => {
       closed = true
       return 'Audio memos'
     })
@@ -649,10 +676,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
 
   it('a listing failure is reported, never thrown — reconcile runs unattended', async () => {
     const kit = await createAudioMemoTestKit()
-    vi.spyOn(kit.noteFile, 'listDir').mockRejectedValue({
-      kind: 'noGraph',
-      message: 'no graph open',
-    })
+    vi.spyOn(kit.noteFile, 'listDir').mockRejectedValue(new AppError('noGraph', 'no graph open'))
 
     expect(await kit.reconcile()).toEqual({
       pending: 0,
@@ -665,7 +689,7 @@ describe('AudioMemoTranscriptionService.reconcile', () => {
   it('rethrows daily-note read failures other than notFound — never writes blind', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    vi.spyOn(kit.noteFile, 'read').mockRejectedValue({ kind: 'io', message: 'disk gone' })
+    vi.spyOn(kit.noteFile, 'read').mockRejectedValue(new AppError('io', 'disk gone'))
 
     const outcome = await kit.reconcile()
 
@@ -682,9 +706,9 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
     kit.addRecording(MEMO.audioPath)
     const theirs = `---\naliases: [${earlier.base}]\n---\n\n# Transcribed on the phone\n`
     // The other device's note lands while this pass waits on the enrichment call.
-    kit.enrichMock.mockImplementationOnce(async (input) => {
+    kit.enrichMock.mockImplementationOnce((input) => {
       kit.noteFile.set(earlier.notePath, theirs)
-      return { title: 'Memo Transcript', body: input.transcript }
+      return Promise.resolve({ title: 'Memo Transcript', body: input.transcript })
     })
 
     const outcome = await kit.reconcile()
@@ -701,7 +725,7 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
     await kit.secrets.set(OPENAI_KEY, APP_REVIEW_STUB_KEY)
     kit.addRecording(MEMO.audioPath)
     const theirs = '# Transcribed on the phone\n'
-    kit.ensureBacklinkTargetMock.mockImplementation(async () => {
+    kit.ensureBacklinkTargetMock.mockImplementation(() => {
       kit.noteFile.set(MEMO.notePath, theirs)
       return 'Audio memos'
     })
@@ -713,10 +737,28 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
     expect(kit.noteFile.files().get(DAILY)).toBe('morning thoughts\n')
   })
 
-  it('keeps a daily edit made between read and write, with exactly one backlink', async () => {
+  it('keeps a daily edit that Rust merged with the backlink, writing it once', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    raceDailyWrites(kit, () => 'morning thoughts\nlunch with Ada\n', 1)
+    const write = mergeNextDailyWrite(kit, (contents) =>
+      contents.replace('morning thoughts\n', 'morning thoughts\nlunch with Ada\n'),
+    )
+
+    const outcome = await kit.reconcile()
+
+    expect(outcome).toEqual(DONE)
+    const daily = kit.noteFile.files().get(DAILY) ?? ''
+    expect(daily).toContain('lunch with Ada')
+    expect(daily.split(`[[${MEMO.base}|`)).toHaveLength(2) // exactly one backlink
+    // The merged write landed: nothing is read back and written again.
+    expect(write.mock.calls.filter(([path]) => path === DAILY)).toHaveLength(1)
+  })
+
+  it('keeps a daily note that appeared between read and write, with exactly one backlink', async () => {
+    const kit = await createAudioMemoTestKit()
+    await kit.noteFile.delete(DAILY, 3)
+    kit.addRecording(MEMO.audioPath)
+    raceDailyWrites(kit, () => 'lunch with Ada\n', 1)
 
     const outcome = await kit.reconcile()
 
@@ -728,6 +770,7 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
 
   it('stops when the backlink arrived in the race instead of adding a second', async () => {
     const kit = await createAudioMemoTestKit()
+    await kit.noteFile.delete(DAILY, 3)
     kit.addRecording(MEMO.audioPath)
     const synced = `## [[Audio memos]]\n\n- [[${MEMO.base}|From the phone]]\n`
     const write = raceDailyWrites(kit, () => synced, 1)
@@ -740,14 +783,12 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
 
   it('skips the backlink after losing the race twice, keeping the transcript', async () => {
     const kit = await createAudioMemoTestKit()
+    await kit.noteFile.delete(DAILY, 3)
     kit.addRecording(MEMO.audioPath)
-    let version = 0
+    // The day's note is created, then removed, under each write.
     const write = raceDailyWrites(
       kit,
-      () => {
-        version += 1
-        return `edit ${version}\n`
-      },
+      (daily) => (daily === undefined ? 'edit 1\n' : null),
       Infinity,
     )
 
@@ -755,14 +796,14 @@ describe('AudioMemoTranscriptionService.reconcile never writes over a concurrent
 
     expect(outcome).toEqual(DONE)
     expect(kit.noteFile.files().get(MEMO.notePath)).toContain('memo transcript')
-    expect(kit.noteFile.files().get(DAILY)).toBe('edit 2\n')
+    expect(kit.noteFile.files().has(DAILY)).toBe(false)
     expect(write.mock.calls.filter(([path]) => path === DAILY)).toHaveLength(2)
   })
 
   it('a real write failure on the daily note still stops the pass', async () => {
     const kit = await createAudioMemoTestKit()
     kit.addRecording(MEMO.audioPath)
-    vi.spyOn(kit.noteFile, 'write').mockRejectedValue(new ReflectError('io', 'disk full'))
+    vi.spyOn(kit.noteFile, 'write').mockRejectedValue(new AppError('io', 'disk full'))
 
     const outcome = await kit.reconcile()
 
@@ -850,7 +891,7 @@ describe('AudioMemoTranscriptionService.reconcile with the App Review demo key',
     const kit = await createDemoKit()
     kit.addRecording(MEMO.audioPath)
     let closed = false
-    kit.ensureBacklinkTargetMock.mockImplementation(async () => {
+    kit.ensureBacklinkTargetMock.mockImplementation(() => {
       closed = true
       return 'Audio memos'
     })

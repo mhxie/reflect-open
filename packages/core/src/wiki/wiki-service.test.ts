@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { buildIndexedNote } from '../indexing/indexed-note.ts'
 import { parseNote } from '../markdown/extract.ts'
@@ -164,7 +164,6 @@ describe('WikiService.listEntries', () => {
       title: 'Spacing Effect',
       topic: 'memory',
       isPrivate: false,
-      hasConflict: false,
       mtime: 2,
       state: 'local',
       preview: 'Spaced sessions beat cramming.',
@@ -178,7 +177,6 @@ describe('WikiService.listEntries', () => {
       displayTitle: null,
       lang: null,
       isPrivate: true,
-      hasConflict: true,
       mtime: 3,
       state: 'local',
       // Past the copy's note on its source.
@@ -277,7 +275,7 @@ describe('WikiService.listEntries', () => {
         overrideNoteFileService(inner, {
           readLocal: async (path, generation) => {
             if (path === HUB) {
-              throw new ReflectError('io', 'stream did not contain valid UTF-8')
+              throw new AppError('io', 'stream did not contain valid UTF-8')
             }
             return await inner.readLocal(path, generation)
           },
@@ -296,9 +294,7 @@ describe('WikiService.listEntries', () => {
     const { wiki } = setup({
       noteFile: (inner) =>
         overrideNoteFileService(inner, {
-          readLocal: async () => {
-            throw new TypeError('broken')
-          },
+          readLocal: () => Promise.reject(new TypeError('broken')),
         }),
     })
 

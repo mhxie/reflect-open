@@ -1,7 +1,14 @@
 import { page } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
-import { useEffect, type ReactElement, type ReactNode } from 'react'
-import { act, actAsync } from '@/test-utils/act.ts'
+import {
+  createRef,
+  useEffect,
+  useLayoutEffect,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+} from 'react'
+import { act } from '@/test-utils/act.ts'
 import { createSystemClock, type ClockService } from '@reflect/core'
 import { createTestCoreServices, createTestClockService } from '@reflect/core/testing'
 import { FocusedDailyProvider, useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
@@ -99,10 +106,10 @@ describe('DailyStream', () => {
     )
 
     const dayWindow = createDayWindow('2026-06-27')
-    await actAsync(async () => {
+    await act(async () => {
       await clock.advance(2 * 60 * 1000)
     })
-    await actAsync(async () => {
+    await act(() => {
       navigateToday()
     })
 
@@ -135,10 +142,10 @@ describe('DailyStream', () => {
 
     // Simulated sleep: the wall clock jumps but no timer fires (DOM timers
     // run on a monotonic clock that pauses while the machine sleeps).
-    await actAsync(async () => {
+    await act(() => {
       clock.setNow(new Date(2026, 5, 28, 9, 0, 0).getTime())
     })
-    await actAsync(async () => {
+    await act(() => {
       navigateToday()
     })
 
@@ -171,9 +178,17 @@ describe('DailyStream', () => {
   it('reports the focused day so the sidebar can follow it within the stream', async () => {
     const today = todayIso()
     const dayWindow = createDayWindow(today)
-    let focused: string | null = 'unset'
+    const focusedRef: RefObject<string | null> = createRef()
     function FocusProbe(): null {
-      focused = useFocusedDailyDate()
+      const focused = useFocusedDailyDate()
+
+      useLayoutEffect(() => {
+        focusedRef.current = focused
+        return () => {
+          focusedRef.current = null
+        }
+      }, [focused])
+
       return null
     }
     const view = await renderStream(
@@ -193,11 +208,11 @@ describe('DailyStream', () => {
       return el as HTMLElement
     })
     const date = dateAtIndex(dayWindow, Number(row.getAttribute('data-index')))
-    act(() => {
+    await act(() => {
       fireEvent.focusIn(row)
     })
 
-    expect(focused).toBe(date)
+    expect(focusedRef.current).toBe(date)
     await view.unmount()
   })
 

@@ -1,5 +1,5 @@
 import type { IdService } from '../ports/id-service.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { AssetStoreService, LocalOcrSupport } from '../graph/asset-store-service.ts'
 import {
   createNoteCreationService,
@@ -17,6 +17,7 @@ import type {
   DeviceNoteRead,
   LocalNoteRead,
   NoteFileService,
+  NoteWriteResult,
   ShareableNoteRead,
   VaultScanStats,
 } from '../graph/note-file-service.ts'
@@ -47,8 +48,8 @@ import { bytesToBase64, base64ToBytes } from '@reflect/utils'
 import { createTestDatabaseService } from './database.ts'
 import { createTestIdService } from './id.ts'
 
-function notFound(what: string): ReflectError {
-  return new ReflectError('notFound', `${what} not found`)
+function notFound(what: string): AppError {
+  return new AppError('notFound', `${what} not found`)
 }
 
 function byteSize(contents: string): number {
@@ -70,7 +71,7 @@ function isShareableNotePath(path: string): boolean {
  */
 function checkGeneration(current: number | undefined, generation: number | undefined): void {
   if (current !== undefined && generation !== undefined && generation !== current) {
-    throw new ReflectError('io', 'the graph changed since this command was issued; dropping it')
+    throw new AppError('io', 'the graph changed since this command was issued; dropping it')
   }
 }
 
@@ -119,6 +120,12 @@ export interface TestNoteFileService extends NoteFileService {
    */
   evict(path: string): void
   /**
+   * Make the next `write` of `path` merge: `content` becomes the file and is
+   * returned as `merged`. Without it, a checked write against a file that
+   * holds neither `expectedContents` nor the new contents rejects.
+   */
+  mergeNextWrite(path: string, content: string): void
+  /**
    * The current files by graph-relative path.
    */
   files(): ReadonlyMap<string, string>
@@ -150,6 +157,7 @@ class TestNoteFileServiceImpl implements TestNoteFileService {
   readonly #writeLog: NoteFileWrite[] = []
   readonly #readLog: NoteFileRead[] = []
   readonly #trashLog: string[] = []
+  readonly #merges = new Map<string, string>()
   readonly #recoveries = new Map<string, NoteRecovery>()
   readonly #generation: number | undefined
   readonly #localOnly: LocalOnlyFolders
@@ -166,146 +174,195 @@ class TestNoteFileServiceImpl implements TestNoteFileService {
     }
   }
 
-  async read(path: string, pinned: number): Promise<string> {
-    this.#readLog.push({ path, generation: pinned })
-    checkGeneration(this.#generation, pinned)
-    return this.#contentsOf(path)
+  read(path: string, pinned: number): Promise<string> {
+    return Promise.try(() => {
+      this.#readLog.push({ path, generation: pinned })
+      checkGeneration(this.#generation, pinned)
+      return this.#contentsOf(path)
+    })
   }
 
-  async readLocal(path: string, pinned: number): Promise<LocalNoteRead> {
-    checkGeneration(this.#generation, pinned)
-    const content = this.#contentsOf(path)
-    return this.#evicted.has(path)
-      ? { kind: 'evicted' }
-      : { kind: 'content', content, localOnly: isLocalOnlyPath(this.#localOnly, path) }
+  readLocal(path: string, pinned: number): Promise<LocalNoteRead> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const content = this.#contentsOf(path)
+      return this.#evicted.has(path)
+        ? { kind: 'evicted' }
+        : { kind: 'content', content, localOnly: isLocalOnlyPath(this.#localOnly, path) }
+    })
   }
 
-  async readShareable(path: string, pinned: number): Promise<ShareableNoteRead> {
-    checkGeneration(this.#generation, pinned)
-    if (!isShareableNotePath(path)) {
-      throw new ReflectError('traversal', `${path} is not a visible Markdown note`)
-    }
-    if (isLocalOnlyPath(this.#localOnly, path)) {
-      return { kind: 'localOnly' }
-    }
-    return { kind: 'content', content: this.#contentsOf(path) }
+  readShareable(path: string, pinned: number): Promise<ShareableNoteRead> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (!isShareableNotePath(path)) {
+        throw new AppError('traversal', `${path} is not a visible Markdown note`)
+      }
+      if (isLocalOnlyPath(this.#localOnly, path)) {
+        return { kind: 'localOnly' }
+      }
+      return { kind: 'content', content: this.#contentsOf(path) }
+    })
   }
 
-  async readForDevice(path: string, pinned: number): Promise<DeviceNoteRead> {
-    checkGeneration(this.#generation, pinned)
-    if (!isShareableNotePath(path)) {
-      throw new ReflectError('traversal', `${path} is not a visible Markdown note`)
-    }
-    return { content: this.#contentsOf(path), localOnly: isLocalOnlyPath(this.#localOnly, path) }
+  readForDevice(path: string, pinned: number): Promise<DeviceNoteRead> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (!isShareableNotePath(path)) {
+        throw new AppError('traversal', `${path} is not a visible Markdown note`)
+      }
+      return {
+        content: this.#contentsOf(path),
+        localOnly: isLocalOnlyPath(this.#localOnly, path),
+      }
+    })
   }
 
-  async write(
+  write(
     path: string,
     contents: string,
     pinned: number,
     expectedContents: string | null,
-  ): Promise<number> {
-    checkGeneration(this.#generation, pinned)
-    this.#checkExpected(path, expectedContents)
-    return this.#store(path, contents, pinned)
+  ): Promise<NoteWriteResult> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const merged = this.#merges.get(path)
+      if (merged !== undefined) {
+        this.#merges.delete(path)
+        this.#store(path, merged, pinned)
+        return { merged }
+      }
+      const current = this.#files.get(path)?.contents ?? null
+      if (current !== expectedContents && current !== contents) {
+        throw new AppError('io', 'Note changed on disk; reload before retrying')
+      }
+      if (current === contents) {
+        return { merged: null }
+      }
+      this.#store(path, contents, pinned)
+      return { merged: null }
+    })
   }
 
-  async writeKeepingModified(
+  writeKeepingModified(
     path: string,
     contents: string,
     pinned: number,
     expectedContents: string,
   ): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    if (isLocalOnlyPath(this.#localOnly, path)) {
-      throw new ReflectError('unsupported', `${path} is in a local-only folder`)
-    }
-    this.#checkExpected(path, expectedContents)
-    const kept = this.#files.get(path)?.modifiedMs ?? 0
-    this.#store(path, contents, pinned)
-    this.#files.set(path, { contents, modifiedMs: kept })
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (isLocalOnlyPath(this.#localOnly, path)) {
+        throw new AppError('unsupported', `${path} is in a local-only folder`)
+      }
+      // Never merges: a stale revision is refused.
+      if ((this.#files.get(path)?.contents ?? null) !== expectedContents) {
+        throw new AppError('io', 'Note changed on disk; reload before retrying')
+      }
+      const kept = this.#files.get(path)?.modifiedMs ?? 0
+      this.#store(path, contents, pinned)
+      this.#files.set(path, { contents, modifiedMs: kept })
+    })
   }
 
-  async create(path: string, contents: string, pinned: number): Promise<NoteCreateOutcome> {
-    checkGeneration(this.#generation, pinned)
-    if (this.#files.has(path)) {
-      return { kind: 'collision' }
-    }
-    return { kind: 'created', modifiedMs: this.#store(path, contents, pinned) }
+  create(path: string, contents: string, pinned: number): Promise<NoteCreateOutcome> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (this.#files.has(path)) {
+        return { kind: 'collision' }
+      }
+      return { kind: 'created', modifiedMs: this.#store(path, contents, pinned) }
+    })
   }
 
-  async exists(path: string): Promise<boolean> {
-    return this.#files.has(path)
+  exists(path: string): Promise<boolean> {
+    return Promise.resolve(this.#files.has(path))
   }
 
-  async delete(path: string, pinned: number): Promise<NoteDeleteOutcome> {
-    checkGeneration(this.#generation, pinned)
-    if (this.#files.delete(path)) {
-      this.#evicted.delete(path)
-      this.#trashLog.push(path)
-    }
-    return { trashed: this.#trash }
+  delete(path: string, pinned: number): Promise<NoteDeleteOutcome> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (this.#files.delete(path)) {
+        this.#evicted.delete(path)
+        this.#trashLog.push(path)
+      }
+      return { trashed: this.#trash }
+    })
   }
 
-  async writeRecovery(
+  writeRecovery(
     path: string,
     contents: string,
     ownerId: string,
     sourceRevision: string | null,
     pinned: number,
   ): Promise<NoteRecovery> {
-    checkGeneration(this.#generation, pinned)
-    if (!isLocalOnlyPath(this.#localOnly, path)) {
-      throw new ReflectError('unsupported', `${path} is not in a local-only folder`)
-    }
-    this.#tick += 1
-    const recovery: NoteRecovery = {
-      ownerId,
-      token: this.#tick.toString(16).padStart(32, '0'),
-      sourceRevision,
-      savedAtMs: this.#tick,
-      contents,
-    }
-    this.#recoveries.set(path, recovery)
-    return recovery
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (!isLocalOnlyPath(this.#localOnly, path)) {
+        throw new AppError('unsupported', `${path} is not in a local-only folder`)
+      }
+      this.#tick += 1
+      const recovery: NoteRecovery = {
+        ownerId,
+        token: this.#tick.toString(16).padStart(32, '0'),
+        sourceRevision,
+        savedAtMs: this.#tick,
+        contents,
+      }
+      this.#recoveries.set(path, recovery)
+      return recovery
+    })
   }
 
-  async readRecovery(path: string, pinned: number): Promise<NoteRecovery | null> {
-    checkGeneration(this.#generation, pinned)
-    return this.#recoveries.get(path) ?? null
+  readRecovery(path: string, pinned: number): Promise<NoteRecovery | null> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return this.#recoveries.get(path) ?? null
+    })
   }
 
-  async clearRecovery(path: string, ownerId: string, token: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    const kept = this.#recoveries.get(path)
-    if (kept?.ownerId === ownerId && kept.token === token) {
-      this.#recoveries.delete(path)
-    }
+  clearRecovery(path: string, ownerId: string, token: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const kept = this.#recoveries.get(path)
+      if (kept?.ownerId === ownerId && kept.token === token) {
+        this.#recoveries.delete(path)
+      }
+    })
   }
 
-  async listNotes(pinned: number): Promise<FileMeta[]> {
-    checkGeneration(this.#generation, pinned)
-    return this.#list(isNotePath)
+  listNotes(pinned: number): Promise<FileMeta[]> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return this.#list(isNotePath)
+    })
   }
 
-  async listAttachments(pinned: number): Promise<FileMeta[]> {
-    checkGeneration(this.#generation, pinned)
-    return this.#list(isAttachmentPath)
+  listAttachments(pinned: number): Promise<FileMeta[]> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return this.#list(isAttachmentPath)
+    })
   }
 
-  async listDir(dir: string, pinned: number): Promise<FileMeta[]> {
-    checkGeneration(this.#generation, pinned)
-    const prefix = dir.endsWith('/') ? dir : `${dir}/`
-    return this.#list((path) => path.startsWith(prefix))
+  listDir(dir: string, pinned: number): Promise<FileMeta[]> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const prefix = dir.endsWith('/') ? dir : `${dir}/`
+      return this.#list((path) => path.startsWith(prefix))
+    })
   }
 
-  async vaultScanStats(pinned: number): Promise<VaultScanStats> {
-    checkGeneration(this.#generation, pinned)
-    return {
-      notes: this.#list(isNotePath).length,
-      attachments: this.#list(isAttachmentPath).length,
-      skipped: 0,
-    }
+  vaultScanStats(pinned: number): Promise<VaultScanStats> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return {
+        notes: this.#list(isNotePath).length,
+        attachments: this.#list(isAttachmentPath).length,
+        skipped: 0,
+      }
+    })
   }
 
   set(path: string, contents: string, setOptions?: { modifiedMs?: number }): void {
@@ -314,6 +371,10 @@ class TestNoteFileServiceImpl implements TestNoteFileService {
 
   evict(path: string): void {
     this.#evicted.add(path)
+  }
+
+  mergeNextWrite(path: string, content: string): void {
+    this.#merges.set(path, content)
   }
 
   files(): ReadonlyMap<string, string> {
@@ -338,13 +399,6 @@ class TestNoteFileServiceImpl implements TestNoteFileService {
 
   recoveries(): ReadonlyMap<string, NoteRecovery> {
     return new Map(this.#recoveries)
-  }
-
-  #checkExpected(path: string, expectedContents: string | null): void {
-    const current = this.#files.get(path)?.contents ?? null
-    if (current !== expectedContents) {
-      throw new ReflectError('io', 'Note changed on disk; reload before retrying')
-    }
   }
 
   #store(path: string, contents: string, pinned: number): number {
@@ -433,7 +487,7 @@ class NoteFileOverrideService implements NoteFileService {
     contents: string,
     generation: number,
     expectedContents: string | null,
-  ): Promise<number> {
+  ): Promise<NoteWriteResult> {
     return (this.#overrides.write ?? this.#inner.write.bind(this.#inner))(
       path,
       contents,
@@ -659,37 +713,47 @@ class TestAssetStoreServiceImpl implements TestAssetStoreService {
     this.#store('path', path, await blobBytes(contents), pinned)
   }
 
-  async importFile(
+  importFile(
     sourcePath: string,
     desiredName: string,
     notePath: string,
     pinned: number,
   ): Promise<string> {
-    checkGeneration(this.#generation, pinned)
-    const bytes = this.#bytesOf(sourcePath, this.#sources)
-    const path = this.#freePath(desiredName, notePath)
-    this.#store('import', path, bytes, pinned)
-    return path
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const bytes = this.#bytesOf(sourcePath, this.#sources)
+      const path = this.#freePath(desiredName, notePath)
+      this.#store('import', path, bytes, pinned)
+      return path
+    })
   }
 
-  async writeBase64(path: string, contentsBase64: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    this.#store('base64', path, base64ToBytes(contentsBase64), pinned)
+  writeBase64(path: string, contentsBase64: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      this.#store('base64', path, base64ToBytes(contentsBase64), pinned)
+    })
   }
 
-  async readBase64(path: string, pinned: number): Promise<string> {
-    checkGeneration(this.#generation, pinned)
-    return bytesToBase64(this.#bytesOf(path, this.#files))
+  readBase64(path: string, pinned: number): Promise<string> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return bytesToBase64(this.#bytesOf(path, this.#files))
+    })
   }
 
-  async readBytes(path: string, pinned: number): Promise<Uint8Array<ArrayBuffer>> {
-    checkGeneration(this.#generation, pinned)
-    return toBytes(this.#bytesOf(path, this.#files))
+  readBytes(path: string, pinned: number): Promise<Uint8Array<ArrayBuffer>> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return toBytes(this.#bytesOf(path, this.#files))
+    })
   }
 
-  async readBytesForDevice(path: string, pinned: number): Promise<Uint8Array<ArrayBuffer>> {
-    checkGeneration(this.#generation, pinned)
-    return toBytes(this.#bytesOf(path, this.#files))
+  readBytesForDevice(path: string, pinned: number): Promise<Uint8Array<ArrayBuffer>> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return toBytes(this.#bytesOf(path, this.#files))
+    })
   }
 
   async readPdfPageForDevice(
@@ -699,86 +763,108 @@ class TestAssetStoreServiceImpl implements TestAssetStoreService {
   ): Promise<Uint8Array<ArrayBuffer>> {
     const info = await this.pdfInfo(path, pinned)
     if (page < 1 || page > info.pages.length) {
-      throw new ReflectError('invalid', `${path} has no page ${page}`)
+      throw new AppError('invalid', `${path} has no page ${page}`)
     }
     return toBytes(`${path}#page=${page}`)
   }
 
-  async pdfInfoForDevice(path: string, pinned: number): Promise<PdfInfo> {
-    return await this.pdfInfo(path, pinned)
+  pdfInfoForDevice(path: string, pinned: number): Promise<PdfInfo> {
+    return this.pdfInfo(path, pinned)
   }
 
-  async pdfInfo(path: string, pinned: number): Promise<PdfInfo> {
-    checkGeneration(this.#generation, pinned)
-    const info = this.#pdfs.get(path)
-    if (info === undefined) {
-      throw new ReflectError('invalid', `${path} is not a readable PDF`)
-    }
-    return info
+  pdfInfo(path: string, pinned: number): Promise<PdfInfo> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const info = this.#pdfs.get(path)
+      if (info === undefined) {
+        throw new AppError('invalid', `${path} is not a readable PDF`)
+      }
+      return info
+    })
   }
 
-  async localOcrSupport(pinned: number): Promise<LocalOcrSupport> {
-    checkGeneration(this.#generation, pinned)
-    return { ...this.#ocrSupport }
+  localOcrSupport(pinned: number): Promise<LocalOcrSupport> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return { ...this.#ocrSupport }
+    })
   }
 
-  async readOcrCache(key: string, pinned: number): Promise<string> {
-    checkGeneration(this.#generation, pinned)
-    const contents = this.#ocrCache.get(key)
-    if (contents === undefined) {
-      throw notFound(key)
-    }
-    return contents
+  readOcrCache(key: string, pinned: number): Promise<string> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const contents = this.#ocrCache.get(key)
+      if (contents === undefined) {
+        throw notFound(key)
+      }
+      return contents
+    })
   }
 
-  async listOcrCacheKeys(pinned: number): Promise<string[]> {
-    checkGeneration(this.#generation, pinned)
-    return [...this.#ocrCache.keys()]
+  listOcrCacheKeys(pinned: number): Promise<string[]> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      return [...this.#ocrCache.keys()]
+    })
   }
 
-  async writeOcrCache(key: string, contents: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    this.#ocrCache.set(key, contents)
+  writeOcrCache(key: string, contents: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      this.#ocrCache.set(key, contents)
+    })
   }
 
-  async open(path: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    this.#openLog.push(path)
+  open(path: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      this.#openLog.push(path)
+    })
   }
 
-  async reveal(path: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    this.#revealLog.push(path)
+  reveal(path: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      this.#revealLog.push(path)
+    })
   }
 
-  async deleteAudioMemo(path: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    if (!path.startsWith(`${AUDIO_MEMOS_DIR}/`)) {
-      throw new ReflectError('io', `not an audio memo: ${path}`)
-    }
-    this.#files.delete(path)
+  deleteAudioMemo(path: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (!path.startsWith(`${AUDIO_MEMOS_DIR}/`)) {
+        throw new AppError('io', `not an audio memo: ${path}`)
+      }
+      this.#files.delete(path)
+    })
   }
 
-  async importAudioMemo(sourcePath: string, path: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    if (this.#files.has(path)) {
-      return
-    }
-    this.#store('audio-memo', path, this.#bytesOf(sourcePath, this.#sources), pinned)
+  importAudioMemo(sourcePath: string, path: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      if (this.#files.has(path)) {
+        return
+      }
+      this.#store('audio-memo', path, this.#bytesOf(sourcePath, this.#sources), pinned)
+    })
   }
 
-  async readTranscriptCache(name: string, pinned: number): Promise<string> {
-    checkGeneration(this.#generation, pinned)
-    const contents = this.#transcripts.get(name)
-    if (contents === undefined) {
-      throw notFound(name)
-    }
-    return contents
+  readTranscriptCache(name: string, pinned: number): Promise<string> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      const contents = this.#transcripts.get(name)
+      if (contents === undefined) {
+        throw notFound(name)
+      }
+      return contents
+    })
   }
 
-  async writeTranscriptCache(name: string, contents: string, pinned: number): Promise<void> {
-    checkGeneration(this.#generation, pinned)
-    this.#transcripts.set(name, contents)
+  writeTranscriptCache(name: string, contents: string, pinned: number): Promise<void> {
+    return Promise.try(() => {
+      checkGeneration(this.#generation, pinned)
+      this.#transcripts.set(name, contents)
+    })
   }
 
   assets(): ReadonlyMap<string, Uint8Array> {
@@ -807,7 +893,7 @@ class TestAssetStoreServiceImpl implements TestAssetStoreService {
 
   #freePath(desiredName: string, notePath: string): string {
     if (isLocalOnlyReadOnlyPath(this.#localOnly, notePath)) {
-      throw new ReflectError('unsupported', `${notePath} is in a read-only local-only folder`)
+      throw new AppError('unsupported', `${notePath} is in a read-only local-only folder`)
     }
     const folder = localOnlyFolderRoot(this.#localOnly, notePath)
     const dir = folder === null ? ASSETS_DIR : `${folder}/${ASSETS_DIR}`

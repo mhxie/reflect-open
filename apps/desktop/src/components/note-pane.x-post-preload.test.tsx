@@ -37,7 +37,6 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
     title: '',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -47,7 +46,7 @@ async function renderNote(
   path: string,
   source: string,
   resolveArchive: (postId: string) => Promise<ResolvedArchive>,
-  getNote: IndexQueryService['getNote'] = async (notePath) => noteRow(notePath, false),
+  getNote: IndexQueryService['getNote'] = (notePath) => Promise.resolve(noteRow(notePath, false)),
 ) {
   const app = createTestCoreServices({
     noteFile: createTestNoteFileService({ files: { [path]: source } }),
@@ -122,7 +121,7 @@ it('renders archived X posts in the first frame when the index row is slow', asy
   const view = await renderNote(
     'notes/tweets.md',
     '![](https://x.com/jack/status/103)\n',
-    async (postId) => archivedPost(postId, 'Archived late row'),
+    (postId) => Promise.resolve(archivedPost(postId, 'Archived late row')),
     async (path) => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       return noteRow(path, false)
@@ -140,7 +139,7 @@ it('preloads nothing for a locked note and mounts at once', async () => {
     'notes/locked.md',
     '---\nprivate: true\n---\nLocked\n\n![](https://x.com/jack/status/104)\n',
     () => new Promise(() => {}),
-    async (path) => noteRow(path, true),
+    (path) => Promise.resolve(noteRow(path, true)),
   )
 
   await expect.element(page.getByText('Locked')).toBeVisible()

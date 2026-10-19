@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { BacklinkContext, BacklinkContextPage, BacklinkService } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
@@ -9,7 +10,6 @@ let getBacklinksWithContext: MockInstance<BacklinkService['getBacklinksWithConte
 
 function context(sourcePath: string, snippet: string, posFrom: number): BacklinkContext {
   return {
-    sourceHasConflict: false,
     sourcePath,
     sourceTitle: sourcePath,
     sourcePrivate: false,
@@ -51,7 +51,7 @@ describe('useBacklinkSources', () => {
         : nextPage.promise,
     )
 
-    const { result, act } = await mount()
+    const { result } = await mount()
 
     await vi.waitFor(() => expect(result.current.groups).toHaveLength(1))
     expect(getBacklinksWithContext).toHaveBeenNthCalledWith(1, 'notes/target.md', {
@@ -79,7 +79,6 @@ describe('useBacklinkSources', () => {
           {
             ...context('notes/b.md', 'second-page context', 3),
             sourcePrivate: true,
-            sourceHasConflict: true,
           },
         ],
         nextCursor: null,
@@ -94,7 +93,6 @@ describe('useBacklinkSources', () => {
         path: 'notes/a.md',
         title: 'notes/a.md',
         isPrivate: false,
-        hasConflict: false,
         snippets: [
           { key: 'notes/a.md:1', text: 'shared context', tasks: [] },
           { key: 'notes/a.md:2', text: 'first-page context', tasks: [] },
@@ -104,7 +102,6 @@ describe('useBacklinkSources', () => {
         path: 'notes/b.md',
         title: 'notes/b.md',
         isPrivate: true,
-        hasConflict: true,
         snippets: [{ key: 'notes/b.md:3', text: 'second-page context', tasks: [] }],
       },
     ])
@@ -122,7 +119,7 @@ describe('useBacklinkSources', () => {
       })
       .mockRejectedValueOnce(new Error('next page failed'))
 
-    const { result, act } = await mount()
+    const { result } = await mount()
     await vi.waitFor(() => expect(result.current.groups).toHaveLength(1))
 
     await act(() => result.current.loadMore())

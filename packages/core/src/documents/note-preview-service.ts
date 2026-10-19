@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { GraphSessionSource } from '../graph/graph-session.ts'
 import { isLocalOnlyPath } from '../graph/local-only.ts'
 import type { NoteLinkResolverService } from '../graph/note-link-resolver-service.ts'
@@ -34,7 +35,7 @@ export interface NotePreview {
   /**
    * The preview URL of an image in the note, resolved from the note's own folder.
    */
-  resolveImageUrl: (source: string) => Promise<string | undefined>
+  resolveImageUrl: (source: string) => MaybePromise<string | undefined>
   /**
    * Classify one of the note's `![[embeds]]`.
    */

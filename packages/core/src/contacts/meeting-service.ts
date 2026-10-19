@@ -451,17 +451,10 @@ class MeetingServiceImpl implements MeetingService {
     limit: number,
     lookupContacts: boolean,
   ): Promise<AttendeeSuggestions> {
-    const { suggestions, contacts, logger } = this.#deps
+    const { suggestions } = this.#deps
     const [notes, matches] = await Promise.all([
       suggestions.suggestWikiTargets(query, limit),
-      // A contacts hiccup must cost only its own rows, never the note
-      // suggestions (the same containment as the editor's `[[` menu).
-      lookupContacts
-        ? contacts.lookupPeople(query).catch((error: unknown) => {
-            logger.error('contact link suggestions failed:', error)
-            return []
-          })
-        : Promise.resolve([]),
+      lookupContacts ? this.#suggestContacts(query) : Promise.resolve([]),
     ])
     return {
       suggestions: notes.filter((suggestion) => suggestion.date === null),
@@ -556,6 +549,21 @@ class MeetingServiceImpl implements MeetingService {
     }
 
     return { appended: true, createdNotes }
+  }
+
+  /**
+   * The contact rows of the attendee menu. A contacts hiccup costs only these
+   * rows, never the note suggestions (the same containment as the editor's
+   * `[[` menu), so a failure is logged and answers no contacts.
+   */
+  async #suggestContacts(query: string): Promise<ContactMatch[]> {
+    const { contacts, logger } = this.#deps
+    try {
+      return await contacts.lookupPeople(query)
+    } catch (error: unknown) {
+      logger.error('contact link suggestions failed:', error)
+      return []
+    }
   }
 
   /**

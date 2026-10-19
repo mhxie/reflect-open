@@ -1,4 +1,5 @@
-import { formatBinding } from '@reflect/app'
+import type { MaybePromise } from '@reflect/utils'
+import { deepLinkForRoute, formatBinding } from '@reflect/app'
 import { createTestAppServices, createTestWindowService } from '@reflect/app/testing'
 import { userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,7 +18,6 @@ import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { CommandPalette } from './command-palette.tsx'
 import { PaletteProvider, usePalette } from './palette-provider.tsx'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
 
 // The palette runs on the real `PaletteSearchService` of the test app
 // services; each test scripts the index reads below it.
@@ -27,7 +27,7 @@ const retrieve = vi.fn<RetrievalService['retrieve']>()
 /**
  * Receives the `reflect://` link of every note window a test opens.
  */
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 // The preview keeps the stub from the route-content tests: hosting the real
 // ProseMirror editor is out of scope here; the preview's data path stays real.
 vi.mock('@/editor/markdown-preview.tsx', () => ({
@@ -72,7 +72,6 @@ function hit(fields: {
     summary: '',
     mtime: 0,
     isPinned: false,
-    hasConflict: false,
     isPrivate: false,
     hasDeviceOnlyContent: false,
   }
@@ -101,12 +100,12 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const app = createTestCoreServices({
     suggestions: {
       suggestWikiTargets,
-      suggestWikiLinkTargets: async () => ({
+      suggestWikiLinkTargets: () => ({
         suggestions: [],
         claimedTargetKeys: [],
         queryReadsAsDate: false,
       }),
-      suggestTags: async () => [],
+      suggestTags: () => [],
     },
     search: { searchWithFilters },
     retrieval: createTestRetrievalService({ retrieve }),
@@ -129,8 +128,8 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
-    togglePin: vi.fn(async () => {}),
-    togglePrivate: vi.fn(async () => {}),
+    togglePin: vi.fn(() => {}),
+    togglePrivate: vi.fn(() => {}),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -204,7 +203,6 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockResolvedValue([
       {
         isPrivate: false,
-        hasConflict: false,
         target: 'Recent One',
         path: 'notes/r1.md',
         title: 'Recent One',
@@ -408,7 +406,6 @@ describe('CommandPalette', () => {
     semanticEnabled = true
     retrieve.mockResolvedValue([
       {
-        hasConflict: false,
         path: 'notes/rust.md',
         title: 'Rust Notes',
         score: 0.9,
@@ -490,7 +487,6 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockResolvedValue([
       {
         isPrivate: false,
-        hasConflict: false,
         target: '2026-06-09',
         path: 'daily/2026-06-09.md',
         title: '2026-06-09',
@@ -511,7 +507,6 @@ describe('CommandPalette', () => {
     suggestWikiTargets.mockResolvedValue([
       {
         isPrivate: false,
-        hasConflict: false,
         target: 'Tim MacCaw // Dad',
         path: 'notes/tim-maccaw-dad.md',
         title: 'Tim MacCaw // Dad',

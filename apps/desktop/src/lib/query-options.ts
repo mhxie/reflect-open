@@ -11,17 +11,6 @@ import {
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
 
-/** Conflicted-note rows shared by every sync status and settings surface. */
-export function createConflictedNotesQueryOptions(
-  indexQuery: IndexQueryService,
-  root: string | undefined,
-) {
-  return queryOptions({
-    queryKey: queryKeys.index.conflictedNotes(root),
-    queryFn: () => indexQuery.getConflictedNotes(),
-  })
-}
-
 /** Duplicate note IDs shared by the Git and iCloud settings surfaces. */
 export function createDuplicateNoteIdsQueryOptions(
   indexQuery: IndexQueryService,

@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 /**
  * A background operation as product status: a label, optional progress, and
  * a lingering warning or failure so errors from backgrounded work are seen.
@@ -36,7 +37,7 @@ export interface FinishedOperation {
 
 export interface OperationAction {
   label: string
-  run: () => void | Promise<void>
+  run: () => MaybePromise<void>
 }
 
 export interface OperationOptions {

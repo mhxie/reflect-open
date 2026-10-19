@@ -17,6 +17,10 @@ const MobileGraphs = lazy(async () => {
   const { MobileGraphs } = await import('@/mobile/screens/graphs.tsx')
   return { default: MobileGraphs }
 })
+const MobileLicenses = lazy(async () => {
+  const { MobileLicenses } = await import('@/mobile/screens/licenses.tsx')
+  return { default: MobileLicenses }
+})
 const MobileSettings = lazy(async () => {
   const { MobileSettings } = await import('@/mobile/screens/settings.tsx')
   return { default: MobileSettings }
@@ -98,6 +102,8 @@ export function MobileScreen({
       return <MobileSettings key="settings" />
     case 'graphs':
       return <MobileGraphs key="graphs" />
+    case 'licenses':
+      return <MobileLicenses key="licenses" />
     default:
       return <MobileDaily key="daily" date={today} />
   }

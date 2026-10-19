@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { CalendarEvent } from '../calendar/calendar-service.ts'
 import { createMeetingService } from '../contacts/meeting-service.ts'
 import { createPersonNoteService } from '../contacts/person-note-service.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { GraphRole } from '../graph/graph-session.ts'
 import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
 import { createSuggestionService } from '../indexing/suggestion-service.ts'
@@ -121,8 +121,8 @@ function setup(
 ) {
   const archives: Array<{ sessionId: string; destination: string }> = []
   const transcribed: unknown[] = []
-  let archiveFailure: ReflectError | null = null
-  let transcribeFailure: ReflectError | null = null
+  let archiveFailure: AppError | null = null
+  let transcribeFailure: AppError | null = null
   const ipc = createTestIpcBridgeService({
     commands: {
       recorder_status: () => ({
@@ -189,7 +189,7 @@ function setup(
   const service = createRecordingService({
     recorder,
     noteFile,
-    backlinkTarget: { ensure: async (title) => title },
+    backlinkTarget: { ensure: (title) => title },
     calendar,
     meetings,
     contacts,
@@ -210,10 +210,10 @@ function setup(
     meetingCalls,
     daily: () => noteFile.files().get(DAILY) ?? '',
     failArchiveOnce: (message: string): void => {
-      archiveFailure = new ReflectError('io', message)
+      archiveFailure = new AppError('io', message)
     },
     failTranscription: (message: string): void => {
-      transcribeFailure = new ReflectError('io', message)
+      transcribeFailure = new AppError('io', message)
     },
   }
 }
@@ -274,16 +274,22 @@ describe('RecordingService.reconcile', () => {
     expect(daily().split(`[[${BASE}|`)).toHaveLength(2) // exactly one link
   })
 
-  it('a daily that keeps changing stops the pass; the next links the kept transcript', async () => {
+  it('a daily that keeps appearing and vanishing stops the pass; the next links the kept transcript', async () => {
     const { service, noteFile, archives, daily } = setup({ events: [] })
     const write = noteFile.write.bind(noteFile)
     let edits = 0
-    vi.spyOn(noteFile, 'write').mockImplementation(async (...args) => {
-      if (edits < PATCH_NOTE_ATTEMPTS) {
+    // A sync tug-of-war: each link write finds the day's note created or removed
+    // meanwhile, which Rust refuses (a moved-on note would merge instead).
+    vi.spyOn(noteFile, 'write').mockImplementation(async (path, contents, generation, expected) => {
+      if (path === DAILY && edits < PATCH_NOTE_ATTEMPTS) {
         edits += 1
-        noteFile.set(DAILY, `${daily()}edit ${edits}\n`)
+        if (noteFile.files().has(DAILY)) {
+          await noteFile.delete(DAILY, generation)
+        } else {
+          noteFile.set(DAILY, `edit ${edits}\n`)
+        }
       }
-      return await write(...args)
+      return await write(path, contents, generation, expected)
     })
     const create = vi.spyOn(noteFile, 'create')
 
@@ -293,7 +299,7 @@ describe('RecordingService.reconcile', () => {
       written: [],
       stopped: { reason: 'io', message: 'Note changed on disk; reload before retrying' },
     })
-    expect(daily()).toBe('edit 1\nedit 2\nedit 3\n')
+    expect(daily()).toBe('edit 3\n')
     expect(archives).toEqual([]) // still staged for the next pass
 
     const resumed = await service.reconcile(input())
@@ -469,7 +475,7 @@ describe('RecordingService.openSession', () => {
     session.dispose()
   })
 
-  it('does nothing in a note window: two loops would write every transcript twice', async () => {
+  it('does nothing in a note window: two loops would write every transcript twice', () => {
     const { service, ipc, transcribed } = setup({ role: 'note-window' })
     const session = service.openSession({
       generation: 4,

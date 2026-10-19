@@ -42,7 +42,6 @@ function sampleNote(overrides: Partial<IndexedNote> = {}): IndexedNote {
     isPrivate: false,
     isPinned: false,
     pinnedOrder: null,
-    hasConflict: false,
     hasContent: true,
     bodyChars: 0,
     gistUrl: null,
@@ -117,16 +116,17 @@ interface IndexServices {
 function connectIndex(db: DevIndexDb, captured: CapturedQuery[] = []): IndexServices {
   const ipc = createIpcBridgeService({
     transport: {
-      invoke: async (command, args) => {
-        if (command !== 'db_query') {
-          throw new Error(`Unexpected command: ${command}`)
-        }
-        const sql = String(args['sql'])
-        const params = (args['params'] as readonly unknown[]) ?? []
-        captured.push({ sql, params })
-        return db.query(sql, params)
-      },
-      listen: async () => () => {},
+      invoke: (command, args) =>
+        Promise.try(() => {
+          if (command !== 'db_query') {
+            throw new Error(`Unexpected command: ${command}`)
+          }
+          const sql = String(args['sql'])
+          const params = (args['params'] as readonly unknown[]) ?? []
+          captured.push({ sql, params })
+          return db.query(sql, params)
+        }),
+      listen: () => Promise.resolve(() => {}),
     },
     logger: createTestLoggerService(),
   })

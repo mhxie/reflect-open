@@ -53,7 +53,7 @@ export function useNoteStatusPublisher(
   const { clock } = useCoreServices()
   const generation = scope?.generation ?? null
   const path = scope?.path ?? null
-  const current = useRef<PublishingSession | null>(null)
+  const sessionRef = useRef<PublishingSession | null>(null)
   const stateRef = useRef(state)
   const protectionRef = useRef(protection)
   const selectionRef = useRef(selection)
@@ -64,7 +64,7 @@ export function useNoteStatusPublisher(
   })
 
   const update = useCallback((session: PublishingSession, patch: Partial<NoteStatus>) => {
-    if (!session.active || current.current !== session) {
+    if (!session.active || sessionRef.current !== session) {
       return
     }
     session.status = { ...session.status, ...patch }
@@ -91,21 +91,21 @@ export function useNoteStatusPublisher(
       active: true,
       timer: null,
     }
-    current.current = session
+    sessionRef.current = session
     return () => {
       session.active = false
       if (session.timer !== null) {
         clock.clearTimeout(session.timer)
       }
-      if (current.current === session) {
-        current.current = null
+      if (sessionRef.current === session) {
+        sessionRef.current = null
       }
       clearNoteStatus(session.scope, session.owner)
     }
   }, [clock, generation, path])
 
   useLayoutEffect(() => {
-    const session = current.current
+    const session = sessionRef.current
     if (session !== null) {
       update(session, { state: stateRef.current, protection: protectionRef.current })
     }
@@ -122,7 +122,7 @@ export function useNoteStatusPublisher(
   ])
 
   useEffect(() => {
-    const session = current.current
+    const session = sessionRef.current
     if (session === null || initialMarkdown === null) {
       return
     }
@@ -138,7 +138,7 @@ export function useNoteStatusPublisher(
     let frame = 0
     const recount = (): void => {
       frame = 0
-      const session = current.current
+      const session = sessionRef.current
       if (
         session === null ||
         session.scope.generation !== generation ||
@@ -174,7 +174,7 @@ export function useNoteStatusPublisher(
 
   return useCallback(
     (markdown: string) => {
-      const session = current.current
+      const session = sessionRef.current
       if (
         session === null ||
         session.scope.generation !== generation ||

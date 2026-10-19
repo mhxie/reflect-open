@@ -1,8 +1,9 @@
+import type { MaybePromise } from '@reflect/utils'
 import { createTestWindowService } from '@reflect/app/testing'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import type {
   DailyActivityService,
   DailyNoteService,
@@ -18,7 +19,7 @@ import {
   type TestStorageService,
 } from '@reflect/core/testing'
 import { formatDayLabel } from '@/lib/dates.ts'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 import { monthLabel, monthOf } from '@/lib/month-grid.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { fireEvent } from '@/test-utils/fire-event.ts'
@@ -32,7 +33,7 @@ const dailyDatesInRange = vi.fn<DailyNoteService['dailyDatesInRange']>()
 const listDailyActivity = vi.fn<DailyActivityService['listDailyActivity']>()
 const listDailyEditCounts = vi.fn<DailyActivityService['listDailyEditCounts']>()
 const relatedNotes = vi.fn<RetrievalService['relatedNotes']>()
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 let noteRowAnswer: NoteRow | null
 let dailySource: string
 
@@ -69,7 +70,9 @@ function createApp(storage: TestStorageService = createTestStorageService()) {
   vi.spyOn(app.dailyActivity, 'listDailyActivity').mockImplementation(listDailyActivity)
   vi.spyOn(app.dailyActivity, 'listDailyEditCounts').mockImplementation(listDailyEditCounts)
   vi.spyOn(app.tasks, 'getOpenTasks').mockResolvedValue([])
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(async () => noteRowAnswer ?? undefined)
+  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(() =>
+    Promise.resolve(noteRowAnswer ?? undefined),
+  )
   return app
 }
 
@@ -93,7 +96,6 @@ function noteRow(overrides: Partial<NoteRow> = {}): NoteRow {
     title: '2026-06-09',
     dailyDate: '2026-06-09',
     isPrivate: false,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
     ...overrides,
@@ -161,7 +163,7 @@ describe('DailyContextSidebar calendar', () => {
     await vi.waitFor(() => expect(openNoteWindow).toHaveBeenCalledTimes(1))
     await view.rerender(sidebar('2026-06-10'))
 
-    await actAsync(async () => {
+    await act(() => {
       pendingOpen.resolve(false)
     })
 
@@ -215,7 +217,6 @@ describe('DailyContextSidebar related notes', () => {
         snippet: 'borrow checker notes',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
       },
     ])
     await renderSidebar('2026-06-09')

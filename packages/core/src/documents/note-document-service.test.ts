@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { describe, expect, it } from 'vitest'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { createTestNoteSession, type TestNoteSessionOptions } from '../testing/documents.ts'
@@ -47,7 +48,7 @@ function setup(options?: {
  * landing between the read and the checked write.
  */
 function interleaveFirstWrite(
-  before: (files: TestNoteFileService) => void | Promise<void>,
+  before: (files: TestNoteFileService) => MaybePromise<void>,
 ): (files: TestNoteFileService) => NoteFileService {
   return (files) => {
     let first = true

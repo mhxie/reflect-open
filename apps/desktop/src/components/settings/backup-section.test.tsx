@@ -4,9 +4,11 @@ import { createTestOpenerService, type TestOpenerService } from '@reflect/app/te
 import type { OpenerService } from '@reflect/app'
 import type { BackupService, BackupState } from '@reflect/core'
 import {
+  type TestOpenGraph,
   createTestCoreServices,
   createTestBackupService,
   type TestBackupService,
+  type TestCoreServices,
 } from '@reflect/core/testing'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import '@/test-utils/locator.ts'
@@ -34,13 +36,18 @@ beforeEach(() => {
   signOut = vi.spyOn(backup, 'signOut')
 })
 
-async function renderSection(state: BackupState): Promise<void> {
+async function renderSection(state: BackupState, graph?: TestOpenGraph): Promise<TestCoreServices> {
   backup.setState(state)
   const app = createTestCoreServices({ backup })
   if (githubConnected) {
     await app.githubAuth.save({ kind: 'pat', token: 'ghp_test' })
   }
-  await renderInApp(<BackupSettingsField />, { app, appServices: { opener } })
+  await renderInApp(<BackupSettingsField />, {
+    app,
+    appServices: { opener },
+    graph,
+  })
+  return app
 }
 
 const AUTH_ERROR = {
@@ -49,7 +56,74 @@ const AUTH_ERROR = {
   message: 'the SSH agent offered no key this host accepts — `ssh-add` the right key',
 } as const
 
+const ICLOUD_GRAPH: TestOpenGraph = {
+  root: '/Users/alex/Library/Mobile Documents/iCloud~app/Documents/Notes',
+  name: 'Notes',
+}
+
 describe('BackupSettingsField', () => {
+  it('explains the quiet window on an iCloud graph', async () => {
+    await renderSection({ phase: 'disconnected' }, ICLOUD_GRAPH)
+    await expect
+      .element(page.getByText(/This graph already syncs through iCloud Drive/))
+      .toBeVisible()
+  })
+
+  it('describes the quiet window when an iCloud graph is connected', async () => {
+    await renderSection(
+      {
+        phase: 'connected',
+        remoteUrl: 'https://github.com/alex/notes.git',
+        repo: { owner: 'alex', name: 'notes' },
+        status: { state: 'idle' },
+      },
+      ICLOUD_GRAPH,
+    )
+    await expect
+      .element(
+        page.getByText(/Backs up to GitHub five minutes after iCloud and your edits go quiet/),
+      )
+      .toBeVisible()
+  })
+
+  it('shows the waiting countdown', async () => {
+    await renderSection({
+      phase: 'connected',
+      remoteUrl: 'https://github.com/alex/notes.git',
+      repo: { owner: 'alex', name: 'notes' },
+      status: { state: 'waiting', until: 2 * 60_000 + 1 },
+    })
+    await expect.element(page.getByText('Backs up in 2 minutes')).toBeVisible()
+  })
+
+  it('counts the waiting countdown down as time passes', async () => {
+    const app = await renderSection({
+      phase: 'connected',
+      remoteUrl: 'https://github.com/alex/notes.git',
+      repo: { owner: 'alex', name: 'notes' },
+      status: { state: 'waiting', until: 3 * 60_000 },
+    })
+    await expect.element(page.getByText('Backs up in 3 minutes')).toBeVisible()
+    await app.clock.advance(60_000)
+    await expect.element(page.getByText('Backs up in 2 minutes')).toBeVisible()
+  })
+
+  it('names no host for an iCloud graph with a generic remote', async () => {
+    await renderSection(
+      {
+        phase: 'connected',
+        remoteUrl: 'git@gitlab.com:alex/notes.git',
+        repo: null,
+        status: { state: 'idle' },
+      },
+      ICLOUD_GRAPH,
+    )
+    await expect
+      .element(page.getByText(/Pushes to the backup five minutes after iCloud/))
+      .toBeVisible()
+    await expect.element(page.getByText(/GitHub/)).not.toBeInTheDocument()
+  })
+
   it('renders a generic remote host-neutrally with the engine’s own auth message', async () => {
     await renderSection({
       phase: 'connected',

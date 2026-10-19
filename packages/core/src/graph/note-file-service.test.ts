@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import {
   createTestClockService,
   createTestFileChangeService,
@@ -37,15 +38,11 @@ describe('createNoteFileService', () => {
     ])
   })
 
-  it('reports a write as an own write stamped with the disk mtime', async () => {
+  it('reports a write as an own write', async () => {
     const { ipc, fileChanges, noteFile } = setup()
-    ipc.onCommand('note_write', () => 1_234)
-    const reported: unknown[] = []
-    fileChanges.subscribeOwnWrites((paths) => {
-      reported.push(paths)
-    })
+    ipc.onCommand('note_write', () => ({ modifiedMs: 1_234, merged: null }))
 
-    await expect(noteFile.write('notes/a.md', 'new', 7, 'old')).resolves.toBe(1_234)
+    await expect(noteFile.write('notes/a.md', 'new', 7, 'old')).resolves.toEqual({ merged: null })
 
     expect(ipc.calls()).toEqual([
       {
@@ -62,17 +59,22 @@ describe('createNoteFileService', () => {
     expect(fileChanges.ownWrites()).toEqual([['notes/a.md']])
   })
 
-  it('falls back to the clock when the platform reports no mtime', async () => {
+  it('returns the merged text of a checked write that merged with the disk', async () => {
     const { ipc, noteFile } = setup()
-    ipc.onCommand('note_write', () => null)
+    ipc.onCommand('note_write', () => ({
+      modifiedMs: 1_234,
+      merged: 'a\nB\nc',
+    }))
 
-    await expect(noteFile.write('notes/a.md', 'new', 7, 'old')).resolves.toBe(9_000)
+    await expect(noteFile.write('notes/a.md', 'a\nB', 7, 'a\nb')).resolves.toEqual({
+      merged: 'a\nB\nc',
+    })
   })
 
   it('sends `expectedContents` for a checked write and does not report a rejected one', async () => {
     const { ipc, fileChanges, noteFile } = setup()
     ipc.onCommand('note_write', () => {
-      throw { kind: 'io', message: 'Note changed on disk; reload before retrying' }
+      throw new AppError('io', 'Note changed on disk; reload before retrying')
     })
 
     await expect(noteFile.write('notes/a.md', 'new', 7, null)).rejects.toMatchObject({
@@ -120,7 +122,7 @@ describe('createNoteFileService', () => {
   it('propagates a create rejection without reporting a write', async () => {
     const { ipc, fileChanges, noteFile } = setup()
     ipc.onCommand('note_create', () => {
-      throw { kind: 'io', message: 'the graph changed since this command was issued; dropping it' }
+      throw new AppError('io', 'the graph changed since this command was issued; dropping it')
     })
 
     await expect(noteFile.create('notes/ideas.md', '# Ideas\n', 6)).rejects.toMatchObject({
@@ -394,7 +396,11 @@ describe('createTestNoteFileService', () => {
 /**
  * A note file service over a bridge answering `invoke` and a file-change fake with the given echo setting.
  */
-function installEcho(echoOwnWrites: boolean, invoke: (command: string) => unknown = () => null) {
+function installEcho(
+  echoOwnWrites: boolean,
+  invoke: (command: string) => unknown = (command) =>
+    command === 'note_write' ? { modifiedMs: null, merged: null } : null,
+) {
   const ipc = createTestIpcBridgeService()
   ipc.onCommand('note_write', () => invoke('note_write'))
   ipc.onCommand('note_delete', () => invoke('note_delete') ?? { trashed: 'system' })
@@ -413,9 +419,8 @@ describe('local write echo (Plan 19, decision 5)', () => {
 
     await noteFile.write('daily/2026-06-12.md', 'hello', 1, null)
 
-    expect(seen).toHaveLength(1)
-    expect(seen[0]![0]).toMatchObject({ path: 'daily/2026-06-12.md', kind: 'upsert' })
-    expect(seen[0]![0]!.modifiedMs).toBeTypeOf('number')
+    // The platform reported no mtime: the echo carries the clock's time.
+    expect(seen).toEqual([[{ path: 'daily/2026-06-12.md', kind: 'upsert', modifiedMs: 0 }]])
     unlisten()
   })
 
@@ -436,7 +441,7 @@ describe('local write echo (Plan 19, decision 5)', () => {
     // The reconcile's read-free skip compares the stored row's mtime against
     // the file listing — only the write's own on-disk stamp can ever match.
     const { noteFile, fileChanges } = installEcho(true, (command) =>
-      command === 'note_write' ? 1_234 : null,
+      command === 'note_write' ? { modifiedMs: 1_234, merged: null } : null,
     )
     const seen: FileChange[][] = []
     const unlisten = fileChanges.subscribe(({ changes }) => {

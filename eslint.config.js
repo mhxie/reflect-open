@@ -57,7 +57,56 @@ const viMockAllowlistRule = {
   },
 }
 
-const architecturePlugin = { rules: { 'vi-mock-allowlist': viMockAllowlistRule } }
+/**
+ * `MaybePromise<T>` from `@reflect/utils`, not a hand-written `T | Promise<T>`.
+ * The rule compares the source text of the union members. It skips the
+ * definition itself: a generic type alias whose whole body is `P | Promise<P>`
+ * for one of its type parameters `P`.
+ */
+const maybePromiseRule = {
+  meta: {
+    type: 'suggestion',
+    schema: [],
+    messages: {
+      useMaybePromise: 'Use `MaybePromise<T>` from `@reflect/utils` instead of `T | Promise<T>`.',
+    },
+  },
+  create(context) {
+    const text = (node) => context.sourceCode.getText(node)
+    const isDefinition = (union, value) =>
+      union.parent.type === 'TSTypeAliasDeclaration' &&
+      union.types.length === 2 &&
+      union.parent.typeParameters?.params.some((param) => param.name.name === text(value))
+    return {
+      TSUnionType(node) {
+        const members = new Set(node.types.map(text))
+        for (const type of node.types) {
+          const args = type.typeArguments?.params
+          if (
+            type.type !== 'TSTypeReference' ||
+            type.typeName.type !== 'Identifier' ||
+            type.typeName.name !== 'Promise' ||
+            args?.length !== 1
+          ) {
+            continue
+          }
+          const values = args[0].type === 'TSUnionType' ? args[0].types : args
+          if (isDefinition(node, args[0])) {
+            return
+          }
+          if (values.every((value) => members.has(text(value)))) {
+            context.report({ node, messageId: 'useMaybePromise' })
+            return
+          }
+        }
+      },
+    }
+  },
+}
+
+const architecturePlugin = {
+  rules: { 'maybe-promise': maybePromiseRule, 'vi-mock-allowlist': viMockAllowlistRule },
+}
 
 // ---------------------------------------------------------------------------
 // `vi.mock` allowlists
@@ -314,27 +363,24 @@ export default defineESLintConfig(
     },
     /// keep-sorted
     rules: {
-      '@eslint-react/dom-no-flush-sync': 'off',
-      '@eslint-react/exhaustive-deps': 'off',
-      '@eslint-react/naming-convention-ref-name': 'off',
       '@eslint-react/set-state-in-effect': 'off',
-      '@eslint-react/use-state': 'off',
-      '@eslint-react/web-api-no-leaked-event-listener': 'off',
       '@typescript-eslint/no-base-to-string': 'off',
-      '@typescript-eslint/no-floating-promises': 'off',
-      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
-      '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unused-vars': 'off',
-      '@typescript-eslint/only-throw-error': 'off',
-      '@typescript-eslint/prefer-promise-reject-errors': 'off',
-      '@typescript-eslint/require-await': 'off',
       'no-var': 'off',
-      'react-hooks/exhaustive-deps': 'off',
-      'react-hooks/globals': 'off',
-      'regexp/no-super-linear-backtracking': 'off',
-      'unicorn/no-computed-property-existence-check': 'off',
-      'unicorn/no-optional-chaining-on-undeclared-variable': 'off',
-      'unicorn/no-unnecessary-splice': 'off',
+    },
+  },
+  {
+    files: [`**/*.${SOURCE_EXTENSIONS}`],
+    plugins: { architecture: architecturePlugin },
+    rules: { 'architecture/maybe-promise': 'error' },
+  },
+  {
+    // Vitest types its asymmetric matchers (`expect.any`, `expect.objectContaining`, ...)
+    // as `any`, so a matcher used as a property value in `toEqual` or
+    // `toHaveBeenCalledWith` is an unsafe assignment.
+    files: [`**/*.test.${SOURCE_EXTENSIONS}`],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
     },
   },
   // Rule: core is platform-agnostic. It imports no Tauri, React, TanStack or app code.

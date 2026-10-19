@@ -16,7 +16,6 @@ function hit(path: string, overrides?: Partial<RetrievalHit>): RetrievalHit {
     snippet: `about ${path}`,
     heading: null,
     isPrivate: false,
-    hasConflict: false,
     ...overrides,
   }
 }
@@ -28,7 +27,6 @@ function row(path: string, distance: number, overrides?: Partial<ChunkHitRow>): 
     heading: null,
     text: ` about ${path} `,
     isPrivate: 0,
-    hasConflict: 0,
     modelId: 'all-MiniLM-L6-v2',
     distance,
     ...overrides,
@@ -93,10 +91,9 @@ describe('bestChunkPerNote', () => {
   })
 
   it('trims snippets and converts the private flag', () => {
-    const hits = bestChunkPerNote([row('notes/p.md', 0.1, { isPrivate: 1, hasConflict: 1 })], 12)
+    const hits = bestChunkPerNote([row('notes/p.md', 0.1, { isPrivate: 1 })], 12)
     expect(hits[0]!.snippet).toBe('about notes/p.md')
     expect(hits[0]!.isPrivate).toBe(true)
-    expect(hits[0]!.hasConflict).toBe(true)
   })
 })
 
@@ -154,9 +151,8 @@ describe('fuseRanked (reciprocal rank fusion)', () => {
   })
 
   it('keeps the private flag through fusion', () => {
-    const fused = fuseRanked([[hit('p', { isPrivate: true, hasConflict: true })]], 5)
+    const fused = fuseRanked([[hit('p', { isPrivate: true })]], 5)
     expect(fused[0]!.isPrivate).toBe(true)
-    expect(fused[0]!.hasConflict).toBe(true)
   })
 
   it('retains device-only provenance across lexical and semantic legs', () => {
@@ -188,7 +184,6 @@ describe('withMatchedBy', () => {
     snippet: '',
     heading: null,
     isPrivate: false,
-    hasConflict: false,
   })
 
   it('tags each fused hit with the leg that found it', () => {

@@ -1,12 +1,9 @@
-import { createTestWindowService } from '@reflect/app/testing'
 import { page, type Locator } from 'vitest/browser'
-import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import {
-  ReflectError,
+  AppError,
   type BackupService,
   type BackupState,
-  type ConflictedNote,
   type DuplicateIdGroup,
   type GraphSessionService,
   type IcloudStatus,
@@ -20,16 +17,12 @@ import {
   type TestPlatformOptions,
   type TestBackupService,
 } from '@reflect/core/testing'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
-import { useRouter } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SyncSection } from './sync-section.tsx'
 
 const ICLOUD_DOCUMENTS = '/Users/alex/Library/Mobile Documents/iCloud~app/Documents'
 const ICLOUD_GRAPH: TestOpenGraph = { root: `${ICLOUD_DOCUMENTS}/Notes`, name: 'Notes' }
-
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
 
 // What the app's fakes answer; each test sets them before `renderSection`.
 let icloud: {
@@ -40,7 +33,6 @@ let icloud: {
    */
   copyFails: boolean
 }
-let conflictedNotes: ConflictedNote[]
 let duplicateIds: DuplicateIdGroup[]
 let graph: TestOpenGraph
 let platform: TestPlatformOptions
@@ -60,7 +52,7 @@ async function renderSection(): Promise<void> {
   })
   if (icloud.copyFails) {
     vi.spyOn(icloudNative, 'adoptGraph').mockRejectedValue(
-      new ReflectError('io', 'test iCloud: the container is unavailable'),
+      new AppError('io', 'test iCloud: the container is unavailable'),
     )
   }
   backup.setState(backupState)
@@ -69,26 +61,13 @@ async function renderSection(): Promise<void> {
     backup,
     platform: createTestPlatformService(platform),
   })
-  vi.spyOn(app.indexQuery, 'getConflictedNotes').mockImplementation(async () => conflictedNotes)
-  vi.spyOn(app.indexQuery, 'getDuplicateNoteIds').mockImplementation(async () => duplicateIds)
-  openRecent = vi.spyOn(app.graphSession, 'openRecent').mockImplementation(async () => reopens)
-  await renderInApp(
-    <>
-      <SyncSection />
-      <RouteProbe />
-    </>,
-    {
-      app,
-      appServices: { window: createTestWindowService({ openNoteWindow }) },
-      graph,
-      route: { kind: 'settings' },
-    },
+  vi.spyOn(app.indexQuery, 'getDuplicateNoteIds').mockImplementation(() =>
+    Promise.resolve(duplicateIds),
   )
-}
-
-function RouteProbe(): ReactElement {
-  const { route } = useRouter()
-  return <output data-testid="route">{route.kind === 'note' ? route.path : route.kind}</output>
+  openRecent = vi
+    .spyOn(app.graphSession, 'openRecent')
+    .mockImplementation(() => Promise.resolve(reopens))
+  await renderInApp(<SyncSection />, { app, graph, route: { kind: 'settings' } })
 }
 
 function legend(section: Locator, text: string): Locator {
@@ -107,11 +86,9 @@ beforeEach(() => {
     pendingNotes: 0,
     copyFails: false,
   }
-  conflictedNotes = []
   duplicateIds = []
   backupState = { phase: 'disconnected' }
   reopens = true
-  openNoteWindow.mockReset().mockResolvedValue(true)
   backup = createTestBackupService()
   disconnectGraph = vi.spyOn(backup, 'disconnectGraph')
 })
@@ -137,17 +114,16 @@ describe('SyncSection', () => {
     const section = page.getByRole('region', { name: 'Sync' })
     await expect.element(legend(section, 'iCloud Drive')).toBeInTheDocument()
     await expect.element(section.getByText('All note files are downloaded.')).toBeInTheDocument()
-    await expect.element(section.getByText('No notes need review.')).toBeInTheDocument()
+    await expect.element(section.getByText('No sync forks.')).toBeInTheDocument()
     await expect.element(legend(section, 'GitHub sync')).toBeInTheDocument()
     await expect
       .element(section.getByRole('button', { name: /connect github/i }))
       .toBeInTheDocument()
   })
 
-  it('surfaces iCloud download and review counts', async () => {
+  it('surfaces iCloud download and fork counts', async () => {
     graph = ICLOUD_GRAPH
     icloud.pendingNotes = 2
-    conflictedNotes = [{ path: 'notes/a.md', title: 'A' }]
     duplicateIds = [{ id: 'note-1', paths: ['notes/a.md', 'notes/a 2.md'] }]
 
     await renderSection()
@@ -156,54 +132,7 @@ describe('SyncSection', () => {
     await expect
       .element(section.getByText('2 notes are still downloading from iCloud.'))
       .toBeInTheDocument()
-    await expect.element(section.getByText('1 note needs review, 1 sync fork')).toBeInTheDocument()
-    await expect
-      .element(section.getByRole('button', { name: /A.*notes\/a\.md/ }))
-      .toBeInTheDocument()
-  })
-
-  it('opens the conflicted note listed under GitHub sync', async () => {
-    conflictedNotes = [{ path: 'notes/conflicted.md', title: 'Conflicted note' }]
-    backupState = {
-      phase: 'connected',
-      remoteUrl: 'https://github.com/alex/notes.git',
-      repo: { owner: 'alex', name: 'notes' },
-      status: { state: 'idle' },
-    }
-
-    await renderSection()
-
-    const section = page.getByRole('region', { name: 'Sync' })
-    await section.getByRole('button', { name: /Conflicted note.*notes\/conflicted\.md/ }).click()
-
-    await expect.element(page.getByTestId('route')).toMatchTextContent('notes/conflicted.md')
-  })
-
-  it('opens a ⌘-clicked conflicted note in a new window', async () => {
-    conflictedNotes = [{ path: 'notes/conflicted.md', title: 'Conflicted note' }]
-    backupState = {
-      phase: 'connected',
-      remoteUrl: 'https://github.com/alex/notes.git',
-      repo: { owner: 'alex', name: 'notes' },
-      status: { state: 'idle' },
-    }
-
-    await renderSection()
-
-    const section = page.getByRole('region', { name: 'Sync' })
-    await section
-      .getByRole('button', { name: /Conflicted note.*notes\/conflicted\.md/ })
-      .click({ modifiers: ['ControlOrMeta'] })
-
-    await vi.waitFor(() =>
-      expect(openNoteWindow).toHaveBeenCalledWith(
-        deepLinkForRoute({
-          kind: 'note',
-          path: 'notes/conflicted.md',
-        }),
-      ),
-    )
-    expect(page.getByTestId('route').element().textContent).toBe('settings')
+    await expect.element(section.getByText('1 sync fork')).toBeInTheDocument()
   })
 })
 
@@ -251,7 +180,7 @@ describe('moving a graph to iCloud', () => {
       repo: { owner: 'alex', name: 'notes' },
       status: { state: 'idle' },
     }
-    disconnectGraph.mockRejectedValueOnce(new ReflectError('io', 'remote locked'))
+    disconnectGraph.mockRejectedValueOnce(new AppError('io', 'remote locked'))
     reopens = false
 
     const section = await confirmMove()

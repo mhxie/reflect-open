@@ -75,11 +75,7 @@ export const AllNotesRow = memo(function AllNotesRow({
           )}
         >
           <NoteTitle title={noteLabel(note)} displayTitle={note.displayTitle} lang={note.lang} />
-          <NoteStateIndicator
-            path={note.path}
-            isPrivate={note.isPrivate}
-            hasConflict={note.hasConflict}
-          />
+          <NoteStateIndicator path={note.path} isPrivate={note.isPrivate} />
         </ListRowSubject>
       </div>
       <span className="min-w-0" aria-label="Knowledge level">

@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::api::Progress;
 use hf_hub::Cache;
+use hf_hub::api::Progress;
+use hf_hub::api::sync::ApiBuilder;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -141,9 +141,7 @@ enum Runtime {
 #[derive(Default)]
 pub struct EmbedState(Mutex<Runtime>);
 
-fn lock_state<'a>(
-    state: &'a State<'a, EmbedState>,
-) -> AppResult<std::sync::MutexGuard<'a, Runtime>> {
+fn lock_state<'a>(state: &'a EmbedState) -> AppResult<std::sync::MutexGuard<'a, Runtime>> {
     state.0.lock().map_err(|err| {
         tracing::error!(?err, "embed state lock poisoned by an earlier panic");
         AppError::io("embed state lock poisoned")
@@ -342,7 +340,7 @@ pub async fn embed_ensure(
         let mut runtime = lock_state(&state)?;
         match &*runtime {
             Runtime::Ready(loaded) if std::ptr::eq(loaded.spec, spec) => {
-                return Ok(status_of(&runtime))
+                return Ok(status_of(&runtime));
             }
             Runtime::Loading { .. } => return Ok(status_of(&runtime)),
             Runtime::Ready(_) | Runtime::Uninitialized | Runtime::Failed(_) => {

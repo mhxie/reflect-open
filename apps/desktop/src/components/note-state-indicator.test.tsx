@@ -4,7 +4,7 @@ import { deriveNoteState, NO_LOCAL_ONLY_FOLDERS } from '@reflect/core'
 import '@/test-utils/locator.ts'
 import { clearNoteStatus, publishNoteStatus } from '@/editor/status/note-status-store.ts'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
-import { actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { NoteStateIndicator } from './note-state-indicator.tsx'
 
@@ -15,6 +15,17 @@ afterEach(() => {
   clearNoteStatus({ generation: 1, path }, owner)
   clearNoteStatus({ generation: 2, path }, owner)
 })
+
+/** A live session that protects the private note in graph generation 1. */
+function publishProtectedSession(): void {
+  publishNoteStatus({ generation: 1, path }, owner, {
+    characters: 12,
+    protection: { kind: 'unsupported-markdown' },
+    selectedCharacters: 0,
+    editedAt: null,
+    state: deriveNoteState(NO_LOCAL_ONLY_FOLDERS, { path, isPrivate: true, protected: true }),
+  })
+}
 
 describe('NoteStateIndicator', () => {
   it('leaves an ordinary note unmarked', async () => {
@@ -43,10 +54,12 @@ describe('NoteStateIndicator', () => {
   })
 
   it('lists every state that applies in the tooltip of a single glyph', async () => {
+    publishProtectedSession()
     const view = await renderInApp(
       <TooltipProvider delay={0}>
-        <NoteStateIndicator path={path} isPrivate hasConflict />
+        <NoteStateIndicator path={path} isPrivate />
       </TooltipProvider>,
+      { graph: { generation: 1 } },
     )
 
     const indicator = page.getByRole('img', { name: 'Protected', exact: true })
@@ -56,8 +69,11 @@ describe('NoteStateIndicator', () => {
     await expect.element(page.getByText('Private', { exact: true })).toBeVisible()
   })
 
-  it('gives a conflict priority over the Private flag with one glyph', async () => {
-    const view = await renderInApp(<NoteStateIndicator path={path} isPrivate hasConflict />)
+  it('gives protection priority over the Private flag with one glyph', async () => {
+    publishProtectedSession()
+    const view = await renderInApp(<NoteStateIndicator path={path} isPrivate />, {
+      graph: { generation: 1 },
+    })
 
     await expect.element(page.getByRole('img', { name: 'Protected' })).toBeInTheDocument()
     expect(view.container.querySelectorAll('svg')).toHaveLength(1)
@@ -75,7 +91,7 @@ describe('NoteStateIndicator', () => {
     const view = await renderInApp(<NoteStateIndicator path={path} isPrivate={false} />, {
       graph: { generation: 1 },
     })
-    await actAsync(() => {
+    await act(() => {
       publishNoteStatus({ generation: 1, path }, owner, {
         characters: 12,
         protection: null,
@@ -86,7 +102,7 @@ describe('NoteStateIndicator', () => {
     })
     await expect.element(page.getByRole('img', { name: 'Private' })).toBeInTheDocument()
 
-    await actAsync(() => view.app.graphSession.setGraph({ generation: 2 }))
+    await act(() => view.app.graphSession.setGraph({ generation: 2 }))
     await expect.element(page.getByRole('img', { name: 'Private' })).not.toBeInTheDocument()
     expect(view.container.querySelector('[role="img"]')).toBeNull()
   })
@@ -102,7 +118,7 @@ describe('NoteStateIndicator', () => {
     await renderInApp(<NoteStateIndicator path={path} isPrivate />, { graph: { generation: 1 } })
     await expect.element(page.getByRole('img', { name: 'Protected' })).toBeInTheDocument()
 
-    await actAsync(() => clearNoteStatus({ generation: 1, path }, owner))
+    await act(() => clearNoteStatus({ generation: 1, path }, owner))
     await expect.element(page.getByRole('img', { name: 'Private' })).toBeInTheDocument()
   })
 

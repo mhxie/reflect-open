@@ -14,7 +14,7 @@ import {
  */
 export type PaletteHit = Pick<
   FilteredSearchHit,
-  'path' | 'title' | 'displayTitle' | 'lang' | 'dailyDate' | 'snippet' | 'isPrivate' | 'hasConflict'
+  'path' | 'title' | 'displayTitle' | 'lang' | 'dailyDate' | 'snippet' | 'isPrivate'
 > & {
   /**
    * Found by meaning alone (hybrid search), not by its wording.
@@ -55,10 +55,9 @@ export interface NoteEntry {
    */
   related: boolean
   /**
-   * Indexed flags; undefined for a generated daily whose file does not exist.
+   * The indexed privacy flag; undefined for a generated daily whose file does not exist.
    */
   isPrivate: boolean | undefined
-  hasConflict: boolean | undefined
 }
 
 /**
@@ -144,7 +143,6 @@ export function buildPaletteSections<AppCommand extends PaletteCommand>(options:
         alias: null,
         related: hit.related === true,
         isPrivate: hit.isPrivate,
-        hasConflict: hit.hasConflict,
       })),
       commands: [],
     }
@@ -180,7 +178,6 @@ export function buildPaletteSections<AppCommand extends PaletteCommand>(options:
         alias: aliasHint(suggestion),
         related: false,
         isPrivate: suggestion.path === null ? undefined : suggestion.isPrivate,
-        hasConflict: suggestion.path === null ? undefined : suggestion.hasConflict,
       })
     }
   }
@@ -200,7 +197,6 @@ export function buildPaletteSections<AppCommand extends PaletteCommand>(options:
         alias: null,
         related: hit.related === true,
         isPrivate: hit.isPrivate,
-        hasConflict: hit.hasConflict,
       })
     }
   }

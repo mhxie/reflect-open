@@ -4,6 +4,12 @@ import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { useLinkNavigationHost } from '@/hooks/use-link-navigation-host.ts'
 import { useAppServices } from '@/services/services-provider.tsx'
 
+export type WikiLinkNavigation = (options: {
+  target: string
+  openInNewWindow: boolean
+  peek?: boolean
+}) => void
+
 /**
  * Navigation for a clicked `[[wiki link]]`. Calendar-valid ISO dates preserve
  * ordinary resolution precedence, then open their lazy daily route on a miss.
@@ -31,9 +37,7 @@ import { useAppServices } from '@/services/services-provider.tsx'
  *
  * @returns a stable click handler for the editor's wiki-link extension.
  */
-export function useWikiLinkNavigation(options?: {
-  readOnly?: boolean
-}): (options: { target: string; openInNewWindow: boolean; peek?: boolean }) => void {
+export function useWikiLinkNavigation(options?: { readOnly?: boolean }): WikiLinkNavigation {
   const { linkNavigation } = useAppServices()
   const host = useLinkNavigationHost()
   const peekNoteLink = usePeekNavigation()
@@ -59,15 +63,7 @@ export function useWikiLinkNavigation(options?: {
   )
 
   return useCallback(
-    ({
-      target,
-      openInNewWindow,
-      peek = false,
-    }: {
-      target: string
-      openInNewWindow: boolean
-      peek?: boolean
-    }) => {
+    ({ target, openInNewWindow, peek = false }) => {
       linkNavigation.followWikiLink({ target, openInNewWindow, readOnly }, peek ? peekHost : host)
     },
     [host, peekHost, linkNavigation, readOnly],

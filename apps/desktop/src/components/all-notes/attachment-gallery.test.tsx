@@ -26,7 +26,6 @@ const imageUrl = (() => {
 function entry(path: string, title: string): NoteListEntry {
   return {
     isPrivate: false,
-    hasConflict: false,
     path,
     title,
     snippet: '',

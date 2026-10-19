@@ -168,7 +168,9 @@ export async function createAudioMemoTestKit(
   const localTranscription = createTestLocalTranscriptionService()
   const enrichMock = vi
     .fn<TranscriptEnrichmentService['enrich']>()
-    .mockImplementation(async (input) => ({ title: 'Memo Transcript', body: input.transcript }))
+    .mockImplementation((input) =>
+      Promise.resolve({ title: 'Memo Transcript', body: input.transcript }),
+    )
   const transcriptEnrichment = createTranscriptEnrichmentService({
     languageModel: createTestLanguageModelService(),
   })
@@ -182,7 +184,7 @@ export async function createAudioMemoTestKit(
   const fileChanges = createTestFileChangeService()
   const readBytesMock = vi
     .spyOn(assetStore, 'readBytes')
-    .mockImplementation(async (path) => new TextEncoder().encode(assets.get(path) ?? ''))
+    .mockImplementation((path) => new TextEncoder().encode(assets.get(path) ?? ''))
 
   const service = createAudioMemoTranscriptionService({
     noteFile,

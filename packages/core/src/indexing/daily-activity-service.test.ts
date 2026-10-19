@@ -14,7 +14,7 @@ function setup(notes: TestNote[]) {
  * A database whose every query answers `rows`, for rows the real index can't hold.
  */
 function answering(rows: unknown[]): DatabaseService {
-  const runQuery = async (): Promise<unknown> => rows
+  const runQuery = (): Promise<unknown> => Promise.resolve(rows)
   return { db: createDb(runQuery), runQuery }
 }
 
@@ -23,7 +23,7 @@ function answering(rows: unknown[]): DatabaseService {
  */
 function localNoon(date: string): number {
   const [year, month, day] = date.split('-').map(Number)
-  return new Date(year!, month! - 1, day!, 12).getTime()
+  return new Date(year!, month! - 1, day, 12).getTime()
 }
 
 describe('listDailyActivity', () => {

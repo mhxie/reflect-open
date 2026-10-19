@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { z } from 'zod'
 import type { LoggerService } from '../ports/logger-service.ts'
 import { createFanOut, listenNow, type FanOut, type IpcBridgeService } from '../ipc/ipc-service.ts'
@@ -80,10 +81,9 @@ export interface FileChangeService {
    */
   subscribeReconcile(listener: () => void): Unlisten
   /**
-   * Receive the paths of this device's own note and asset writes, on every
-   * platform and whatever `echoOwnWrites` says. Only external content may
-   * advance an iCloud shadow merge base, and a watcher event alone cannot
-   * tell the two apart.
+   * Receive the paths of this device's own note and asset writes as they
+   * land, on every platform and whatever `echoOwnWrites` says: a note embed
+   * showing a note written here reloads without waiting for the watcher.
    */
   subscribeOwnWrites(listener: (paths: readonly string[]) => void): Unlisten
   /**
@@ -103,11 +103,11 @@ export interface FileChangeService {
   /**
    * Start (or restart) the native watcher for the active graph.
    */
-  startWatcher(): Promise<void>
+  startWatcher(): MaybePromise<void>
   /**
    * Stop the native watcher.
    */
-  stopWatcher(): Promise<void>
+  stopWatcher(): MaybePromise<void>
 }
 
 export interface FileChangeServiceDeps {

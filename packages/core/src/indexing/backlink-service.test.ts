@@ -65,7 +65,6 @@ describe('getBacklinksWithContext', () => {
         sourceDisplayTitle: null,
         sourceLang: null,
         sourcePrivate: false,
-        sourceHasConflict: false,
         snippet: 'daily [[target]]',
         posFrom: 6,
         tasks: [],
@@ -76,7 +75,6 @@ describe('getBacklinksWithContext', () => {
         sourceDisplayTitle: null,
         sourceLang: null,
         sourcePrivate: false,
-        sourceHasConflict: false,
         snippet: 'older [[target]]',
         posFrom: 6,
         tasks: [],
@@ -207,7 +205,6 @@ describe('getBacklinksWithContext', () => {
         sourceLang: null,
         // An unreadable source fails closed.
         sourcePrivate: true,
-        sourceHasConflict: false,
         snippet: '',
         posFrom: 5,
         tasks: [],
@@ -222,7 +219,7 @@ describe('getBacklinksWithContext', () => {
       { path: 'notes/public.md', markdown: link, mtime: 4 },
       {
         path: 'notes/indexed-locked.md',
-        markdown: `---\nprivate: true\n---\n${link}<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n`,
+        markdown: `---\nprivate: true\n---\n${link}`,
         mtime: 3,
       },
       // Locked on disk before the index caught up: the row still says public
@@ -257,10 +254,9 @@ describe('getBacklinksWithContext', () => {
     ])
     const sourceQuery = database.getQueries().find(({ sql }) => sql.includes('select distinct'))
     expect(sourceQuery?.sql).toContain('"notes"."is_private"')
-    expect(sourceQuery?.sql).toContain('"notes"."has_conflict"')
     expect(
       page.contexts.find((context) => context.sourcePath === 'notes/indexed-locked.md'),
-    ).toMatchObject({ sourcePrivate: true, sourceHasConflict: true })
+    ).toMatchObject({ sourcePrivate: true })
   })
 
   it('carries the source’s display title and language for its row title', async () => {

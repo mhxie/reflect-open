@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import {
   createTestIpcBridgeService,
   createTestLoggerService,
@@ -32,7 +32,7 @@ function setup(options: { nativeShell?: boolean } = {}) {
   let failing: string | null = null
   const control = (next: RecorderStatus) => (): RecorderStatus => {
     if (failing !== null) {
-      throw new ReflectError('io', failing)
+      throw new AppError('io', failing)
     }
     status = next
     return status

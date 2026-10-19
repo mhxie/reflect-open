@@ -179,7 +179,6 @@ interface WikiNoteRow {
   readonly mtime: number
   readonly fileHash: string
   readonly isPrivate: number
-  readonly hasConflict: number
 }
 
 interface CopyRead {
@@ -219,7 +218,6 @@ class WikiServiceImpl implements WikiService {
           'notes.mtime',
           'notes.fileHash',
           'notes.isPrivate',
-          'notes.hasConflict',
         ])
         .where('notes.kind', '=', 'note')
         .where((eb) => eb.or(languages.map((language) => inFolder('notes.path', language.folder))))
@@ -436,7 +434,6 @@ function copyOf(row: WikiNoteRow, { state, summary }: CopyRead): WikiEntryCopy {
     lang: row.lang,
     mtime: row.mtime,
     isPrivate: row.isPrivate !== 0,
-    hasConflict: row.hasConflict !== 0,
     state,
     preview: summary?.preview ?? null,
     revised: summary?.lastRevised ?? null,

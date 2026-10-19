@@ -61,7 +61,6 @@ export interface FilteredSearchHit {
    */
   mtime: number
   isPinned: boolean
-  hasConflict: boolean
   /**
    * Privacy flags from the same index snapshot as the snippet.
    */
@@ -110,13 +109,9 @@ const HIT_COLUMNS = [
   'notes.summary',
   'notes.mtime',
   'notes.isPinned',
-  'notes.hasConflict',
 ] as const
 
-type HitFlags = Pick<
-  FilteredSearchHit,
-  'isPinned' | 'isPrivate' | 'hasDeviceOnlyContent' | 'hasConflict'
->
+type HitFlags = Pick<FilteredSearchHit, 'isPinned' | 'isPrivate' | 'hasDeviceOnlyContent'>
 
 /**
  * SQLite stores the hit's flags as 0/1 integers; every result path decodes them here.
@@ -126,7 +121,6 @@ function hitFlags(row: Record<keyof HitFlags, number>): HitFlags {
     isPinned: row.isPinned !== 0,
     isPrivate: row.isPrivate !== 0,
     hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
-    hasConflict: row.hasConflict !== 0,
   }
 }
 
@@ -387,7 +381,6 @@ class SearchServiceImpl implements SearchService {
               'filteredNotes.preview',
               'filteredNotes.mtime',
               'filteredNotes.isPinned',
-              'filteredNotes.hasConflict',
               titleMatch.rank.as('titleRank'),
               // A title-only prefix already admitted by manual recall keeps its
               // historical rank (`0`). Tokenizer-only title matches such as
@@ -446,7 +439,6 @@ class SearchServiceImpl implements SearchService {
         'ranked.preview',
         'ranked.mtime',
         'ranked.isPinned',
-        'ranked.hasConflict',
         'display.ftsHighlightedTitle',
         'display.snippet',
         'display.cjkSnippet',

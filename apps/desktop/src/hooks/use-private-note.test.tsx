@@ -17,7 +17,6 @@ function row(path: string, isPrivate: boolean): NoteRow {
     title: 'Plan',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -42,7 +41,9 @@ beforeEach(() => {
   rows = {}
   app = createTestCoreServices()
   // Spied before the render: the hook reads the service when it mounts.
-  getNote = vi.spyOn(app.indexQuery, 'getNote').mockImplementation(async (path) => rows[path])
+  getNote = vi
+    .spyOn(app.indexQuery, 'getNote')
+    .mockImplementation((path) => Promise.resolve(rows[path]))
 })
 
 describe('usePrivateNoteState', () => {
@@ -95,7 +96,7 @@ describe('usePrivateNoteState', () => {
     const { result, queryClient } = await settledState('notes/plan.md', noSession)
     expect(result.current.privateNote).toBe(false)
 
-    act(() => {
+    await act(() => {
       queryClient.setQueryData(
         queryKeys.index.note('/g', 'notes/plan.md'),
         row('notes/plan.md', true),

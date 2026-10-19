@@ -64,6 +64,21 @@ const vaultScanStatsSchema = z.object({
 
 export type VaultScanStats = z.infer<typeof vaultScanStatsSchema>
 
+const noteWriteOutcomeSchema = z.object({
+  modifiedMs: z.number().nullable(),
+  merged: z.string().nullable(),
+})
+
+/**
+ * The outcome of {@link NoteFileService.write}.
+ */
+export interface NoteWriteResult {
+  /**
+   * The full text now on disk when the write merged with a newer disk text, else `null`.
+   */
+  merged: string | null
+}
+
 /**
  * Markdown notes by graph-relative path. Every write, create and delete is
  * reported to {@link FileChangeService.reportOwnWrite} after it lands.
@@ -101,20 +116,20 @@ export interface NoteFileService {
    */
   readForDevice(path: string, generation: number): Promise<DeviceNoteRead>
   /**
-   * Write a note atomically, pinned to `generation`. `expectedContents` is
-   * the source the write replaces, exactly as it was read; `null` means the
-   * file must not exist yet. Rust compares it with the file and refuses a
-   * mismatch with an `io` error, leaving the newer bytes in place. There is
-   * no unconditional write: a read-modify-write caller re-reads and
-   * re-applies its change on a mismatch (`patchNote`). Resolves with the
-   * on-disk mtime, or the clock's time when the platform reports none.
+   * Write a note atomically, pinned to `generation`. Every write is checked:
+   * `expectedContents` is the source the write replaces, exactly as it was
+   * read, and `null` means the file must not exist yet. A note whose disk
+   * text moved past `expectedContents` is merged with it (see
+   * {@link NoteWriteResult.merged}); a file that appeared where `null` was
+   * named, or vanished where a revision was, is refused with an `io` error.
+   * There is no unconditional write.
    */
   write(
     path: string,
     contents: string,
     generation: number,
     expectedContents: string | null,
-  ): Promise<number>
+  ): Promise<NoteWriteResult>
   /**
    * {@link write} for a change that is not an edit (the background AI
    * summary's frontmatter block): the file keeps its modification time, so
@@ -239,16 +254,16 @@ class NoteFileServiceImpl implements NoteFileService {
     contents: string,
     generation: number,
     expectedContents: string | null,
-  ): Promise<number> {
+  ): Promise<NoteWriteResult> {
     const { ipc, clock, fileChanges } = this.#deps
-    const diskMs = await ipc.call(
+    const outcome = await ipc.call(
       'note_write',
       { path, contents, generation, checkContents: true, expectedContents },
-      z.number().nullable(),
+      noteWriteOutcomeSchema,
     )
-    const modifiedMs = diskMs ?? clock.now()
+    const modifiedMs = outcome.modifiedMs ?? clock.now()
     fileChanges.reportOwnWrite([{ path, kind: 'upsert', modifiedMs }])
-    return modifiedMs
+    return { merged: outcome.merged }
   }
 
   async writeKeepingModified(

@@ -2,12 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CaptureEnvelope } from './capture-envelope.ts'
 import { captureIdentity } from './capture-identity.ts'
 import { DescriptionRejectedError } from '../ai/page-describer-service.ts'
-import { ReflectError } from '../errors.ts'
-import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
+import { AppError } from '../errors.ts'
 import {
   API_KEY_SECRET,
   CAPTURE_URL,
-  CHANGED_ON_DISK,
   createCaptureTestKit,
   DAILY,
   envelope,
@@ -97,7 +95,7 @@ describe('CaptureEnrichmentService', () => {
     kit.addSpool(envelope({ source: 'ios-share' }), { screenshot: false })
     expect((await kit.drain()).stopped).toBeNull()
     kit.writeNoteMock.mockClear()
-    kit.linkPreviewMock.mockRejectedValue(new ReflectError('network', 'preview unavailable'))
+    kit.linkPreviewMock.mockRejectedValue(new AppError('network', 'preview unavailable'))
 
     const outcome = await kit.reconcile({ providers: NO_PROVIDERS })
 
@@ -132,7 +130,7 @@ describe('CaptureEnrichmentService', () => {
     kit.addSpool(envelope({ source: 'ios-share' }), { screenshot: false })
     expect((await kit.drain()).stopped).toBeNull()
     kit.writeNoteMock.mockClear()
-    kit.linkPreviewMock.mockImplementation(async () => {
+    kit.linkPreviewMock.mockImplementation(() => {
       kit.noteFile.set(DAILY, `---\nprivate: true\n---\n\n${kit.noteFile.files().get(DAILY) ?? ''}`)
       return btoa('preview-jpeg')
     })
@@ -415,7 +413,7 @@ describe('CaptureEnrichmentService', () => {
       description: 'A description available without the keychain.',
       siteName: null,
     })
-    kit.installFailingSecrets(new ReflectError('io', 'keychain is unavailable'))
+    kit.installFailingSecrets(new AppError('io', 'keychain is unavailable'))
 
     const outcome = await kit.reconcile()
 
@@ -470,14 +468,14 @@ describe('CaptureEnrichmentService', () => {
 
   it('preserves capture edits made while metadata is being fetched', async () => {
     await drainOne({ source: 'ios-share', title: '' })
-    kit.scrapeMock.mockImplementation(async () => {
+    kit.scrapeMock.mockImplementation(() => {
       const source = kit.noteFile.files().get(IDENTITY.notePath) ?? ''
       kit.noteFile.set(IDENTITY.notePath, source.replace('# example.com', '# My edited title'))
-      return {
+      return Promise.resolve({
         title: 'A scraped title',
         description: 'A scraped description.',
         siteName: null,
-      }
+      })
     })
 
     const outcome = await kit.reconcile({ providers: NO_PROVIDERS })
@@ -492,13 +490,13 @@ describe('CaptureEnrichmentService', () => {
 
   it('does not send capture content to AI when the day becomes private during metadata fetch', async () => {
     await drainOne()
-    kit.scrapeMock.mockImplementation(async () => {
+    kit.scrapeMock.mockImplementation(() => {
       kit.noteFile.set(DAILY, `---\nprivate: true\n---\n\n${kit.noteFile.files().get(DAILY) ?? ''}`)
-      return {
+      return Promise.resolve({
         title: 'An article',
         description: 'A scraped description.',
         siteName: null,
-      }
+      })
     })
 
     const outcome = await kit.reconcile()
@@ -511,7 +509,7 @@ describe('CaptureEnrichmentService', () => {
 
   it('does not send capture content to AI when the day becomes private while loading its screenshot', async () => {
     await drainOne()
-    kit.readAssetMock.mockImplementation(async () => {
+    kit.readAssetMock.mockImplementation(() => {
       kit.noteFile.set(DAILY, `---\nprivate: true\n---\n\n${kit.noteFile.files().get(DAILY) ?? ''}`)
       return btoa('jpeg-bytes')
     })
@@ -544,7 +542,7 @@ describe('CaptureEnrichmentService', () => {
 
   it('a transient scrape failure leaves the capture pending; the next pass retries', async () => {
     await drainOne()
-    kit.scrapeMock.mockRejectedValueOnce(new ReflectError('network', 'offline'))
+    kit.scrapeMock.mockRejectedValueOnce(new AppError('network', 'offline'))
 
     const first = await kit.reconcile()
     expect(first.stopped?.reason).toBe('network')
@@ -570,11 +568,15 @@ describe('CaptureEnrichmentService', () => {
     )
     expect((await kit.drain()).stopped).toBeNull()
     kit.writeNoteMock.mockClear()
-    kit.scrapeMock.mockImplementation(async (url) => {
+    kit.scrapeMock.mockImplementation((url) => {
       if (url.includes('instagram')) {
-        throw new ReflectError('network', 'https://www.instagram.com answered 429')
+        return Promise.reject(new AppError('network', 'https://www.instagram.com answered 429'))
       }
-      return { title: 'An article', description: 'A scraped description.', siteName: null }
+      return Promise.resolve({
+        title: 'An article',
+        description: 'A scraped description.',
+        siteName: null,
+      })
     })
 
     const outcome = await kit.reconcile({ providers: NO_PROVIDERS })
@@ -617,13 +619,17 @@ describe('CaptureEnrichmentService', () => {
     )
     expect((await kit.drain()).stopped).toBeNull()
     kit.writeNoteMock.mockClear()
-    kit.scrapeMock.mockImplementation(async (url) => {
+    kit.scrapeMock.mockImplementation((url) => {
       if (url.includes('instagram')) {
-        throw new ReflectError('network', 'https://www.instagram.com answered 429')
+        return Promise.reject(new AppError('network', 'https://www.instagram.com answered 429'))
       }
-      return { title: 'An article', description: 'A scraped description.', siteName: null }
+      return Promise.resolve({
+        title: 'An article',
+        description: 'A scraped description.',
+        siteName: null,
+      })
     })
-    kit.installFailingSecrets(new ReflectError('io', 'keychain is unavailable'))
+    kit.installFailingSecrets(new AppError('io', 'keychain is unavailable'))
 
     const outcome = await kit.reconcile()
 
@@ -653,11 +659,11 @@ describe('CaptureEnrichmentService', () => {
     )
     expect((await kit.drain()).stopped).toBeNull()
     kit.writeNoteMock.mockClear()
-    kit.describeMock.mockImplementation(async (request) => {
+    kit.describeMock.mockImplementation((request) => {
       if (request.url.endsWith('/first')) {
-        throw new ReflectError('network', 'the provider is unavailable (429)')
+        return Promise.reject(new AppError('network', 'the provider is unavailable (429)'))
       }
-      return { title: null, description: 'An AI description of the page.' }
+      return Promise.resolve({ title: null, description: 'An AI description of the page.' })
     })
 
     const outcome = await kit.reconcile()
@@ -678,7 +684,7 @@ describe('CaptureEnrichmentService', () => {
 
   it('a permanent scrape failure enriches without meta tags', async () => {
     await drainOne()
-    kit.scrapeMock.mockRejectedValue(new ReflectError('parse', 'not an HTML page'))
+    kit.scrapeMock.mockRejectedValue(new AppError('parse', 'not an HTML page'))
 
     const outcome = await kit.reconcile()
 
@@ -745,7 +751,7 @@ describe('CaptureEnrichmentService', () => {
       description: 'A description available without AI.',
       siteName: null,
     })
-    kit.describeMock.mockRejectedValue(new ReflectError('auth', 'key rejected'))
+    kit.describeMock.mockRejectedValue(new AppError('auth', 'key rejected'))
 
     const outcome = await kit.reconcile()
 
@@ -758,7 +764,7 @@ describe('CaptureEnrichmentService', () => {
     expect(kit.noteFile.files().get(DAILY)).toContain('|A title available without AI]]')
 
     kit.scrapeMock.mockClear()
-    kit.scrapeMock.mockRejectedValue(new ReflectError('network', 'offline'))
+    kit.scrapeMock.mockRejectedValue(new AppError('network', 'offline'))
     kit.describeMock.mockResolvedValue({
       title: null,
       description: 'A description from the retry.',
@@ -827,12 +833,15 @@ describe('CaptureEnrichmentService', () => {
 
   it('preserves daily edits made while the provider call was in flight', async () => {
     await drainOne()
-    kit.describeMock.mockImplementation(async () => {
+    kit.describeMock.mockImplementation(() => {
       kit.noteFile.set(
         DAILY,
         `${kit.noteFile.files().get(DAILY) ?? ''}\n- jotted down mid-enrichment\n`,
       )
-      return { title: 'A Cleaned Up Article', description: 'An AI description of the page.' }
+      return Promise.resolve({
+        title: 'A Cleaned Up Article',
+        description: 'An AI description of the page.',
+      })
     })
 
     const outcome = await kit.reconcile()
@@ -843,13 +852,13 @@ describe('CaptureEnrichmentService', () => {
     expect(daily).toContain('|A Cleaned Up Article]]')
   })
 
-  it('keeps a daily edit that lands during the retitle write and still retitles', async () => {
+  it('keeps a daily edit that Rust merged into the retitle write, writing it once', async () => {
     await drainOne()
     kit.describeMock.mockResolvedValue({
       title: 'A Cleaned Up Article',
       description: 'An AI description of the page.',
     })
-    kit.raceNextWrite(DAILY, (daily) => `${daily ?? ''}\n- typed during the write\n`)
+    kit.mergeNextWrite(DAILY, (contents) => `${contents}\n- typed during the write\n`)
 
     const outcome = await kit.reconcile()
 
@@ -857,28 +866,20 @@ describe('CaptureEnrichmentService', () => {
     const daily = kit.noteFile.files().get(DAILY) ?? ''
     expect(daily).toContain('- typed during the write')
     expect(daily).toContain('|A Cleaned Up Article]]')
+    expect(kit.writeNoteMock.mock.calls.filter(([path]) => path === DAILY)).toHaveLength(1)
   })
 
-  it('a daily that keeps changing stops the retitle; the next pass resumes it', async () => {
+  it('a failed retitle write stops the pass; the next pass resumes it', async () => {
     await drainOne()
     kit.describeMock.mockResolvedValue({
       title: 'A Cleaned Up Article',
       description: 'An AI description of the page.',
     })
-    let edits = 0
-    kit.raceWrites(
-      DAILY,
-      (daily) => {
-        edits += 1
-        return `${daily ?? ''}\n- edit ${edits}\n`
-      },
-      PATCH_NOTE_ATTEMPTS,
-    )
+    kit.failNextWrite(DAILY, new AppError('io', 'disk full'))
 
     const first = await kit.reconcile()
 
-    expect(first.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
-    expect(kit.noteFile.files().get(DAILY)).toContain('- edit 3')
+    expect(first.stopped).toEqual({ reason: 'io', message: 'disk full' })
     expect(kit.noteFile.files().get(DAILY)).not.toContain('|A Cleaned Up Article]]')
     expect(kit.noteFile.files().get(IDENTITY.notePath)).toContain(
       'captureDailyFromTitle: An article',
@@ -888,24 +889,34 @@ describe('CaptureEnrichmentService', () => {
 
     expect(retry).toEqual({ pending: 1, enriched: 1, skipped: 0, stopped: null })
     const daily = kit.noteFile.files().get(DAILY) ?? ''
-    expect(daily).toContain('- edit 3')
     expect(daily).toContain('|A Cleaned Up Article]]')
     expect(kit.noteFile.files().get(IDENTITY.notePath)).toContain('captureStatus: done')
     expect(kit.noteFile.files().get(IDENTITY.notePath)).not.toContain('captureDailyFromTitle')
     expect(kit.describeMock).toHaveBeenCalledTimes(1)
   })
 
-  it('judges a capture edit that lands during a checkpoint write, never overwriting it', async () => {
+  it('judges a capture edit that Rust merged into a checkpoint write, never overwriting it', async () => {
     await drainOne()
-    kit.raceNextWrite(IDENTITY.notePath, (note) => (note ?? '').replace('# An article', '# Mine'))
+    kit.mergeNextWrite(IDENTITY.notePath, (contents) => contents.replace('# An article', '# Mine'))
 
     const outcome = await kit.reconcile()
 
     expect(outcome).toEqual({ pending: 1, enriched: 0, skipped: 1, stopped: null })
     const note = kit.noteFile.files().get(IDENTITY.notePath) ?? ''
     expect(note).toContain('# Mine')
-    expect(note).not.toContain('captureMetadataStatus: done')
     expect(note).toContain('captureStatus: skipped')
+    expect(kit.describeMock).not.toHaveBeenCalled()
+  })
+
+  it('skips a capture note removed during a checkpoint write, never recreating it', async () => {
+    await drainOne()
+    kit.raceNextWrite(IDENTITY.notePath, () => null)
+
+    const outcome = await kit.reconcile()
+
+    expect(outcome.stopped).toBeNull()
+    expect(outcome.enriched).toBe(0)
+    expect(kit.noteFile.files().has(IDENTITY.notePath)).toBe(false)
     expect(kit.describeMock).not.toHaveBeenCalled()
   })
 
@@ -917,11 +928,11 @@ describe('CaptureEnrichmentService', () => {
       siteName: null,
     })
     kit.writeNoteMock
-      .mockImplementationOnce(async (path, contents) => {
+      .mockImplementationOnce((path, contents) => {
         kit.noteFile.set(path, contents)
-        return 0
+        return Promise.resolve({ merged: null })
       })
-      .mockRejectedValueOnce({ kind: 'io', message: 'disk full' })
+      .mockRejectedValueOnce(new AppError('io', 'disk full'))
 
     const first = await kit.reconcile({ providers: NO_PROVIDERS })
 
@@ -960,11 +971,11 @@ describe('CaptureEnrichmentService', () => {
       siteName: null,
     })
     kit.writeNoteMock
-      .mockImplementationOnce(async (path, contents) => {
+      .mockImplementationOnce((path, contents) => {
         kit.noteFile.set(path, contents)
-        return 0
+        return Promise.resolve({ merged: null })
       })
-      .mockRejectedValueOnce(new ReflectError('io', 'disk full'))
+      .mockRejectedValueOnce(new AppError('io', 'disk full'))
 
     const first = await kit.reconcile({ providers: NO_PROVIDERS })
 
@@ -1020,15 +1031,15 @@ describe('CaptureEnrichmentService', () => {
       siteName: null,
     })
     kit.writeNoteMock
-      .mockImplementationOnce(async (path, contents) => {
+      .mockImplementationOnce((path, contents) => {
         kit.noteFile.set(path, contents)
-        return 0
+        return Promise.resolve({ merged: null })
       })
-      .mockImplementationOnce(async (path, contents) => {
+      .mockImplementationOnce((path, contents) => {
         kit.noteFile.set(path, contents)
         const prepared = kit.noteFile.files().get(IDENTITY.notePath) ?? ''
         kit.noteFile.set(IDENTITY.notePath, prepared.replace('---\n', '---\nprivate: true\n'))
-        return 0
+        return Promise.resolve({ merged: null })
       })
 
     const outcome = await kit.reconcile({ providers: NO_PROVIDERS })
@@ -1050,10 +1061,10 @@ describe('CaptureEnrichmentService', () => {
       description: 'A scraped description.',
       siteName: null,
     })
-    kit.describeMock.mockImplementation(async () => {
+    kit.describeMock.mockImplementation(() => {
       const staged = kit.noteFile.files().get(IDENTITY.notePath) ?? ''
       kit.noteFile.set(IDENTITY.notePath, staged.replace('# A scraped title', '# My edited title'))
-      return { title: 'An AI title', description: 'An AI description.' }
+      return Promise.resolve({ title: 'An AI title', description: 'An AI description.' })
     })
 
     const outcome = await kit.reconcile()

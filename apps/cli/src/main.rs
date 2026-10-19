@@ -89,17 +89,18 @@ fn parse_limit(value: &str) -> Result<usize, String> {
 /// refuse a larger `--limit` up front (a usage error, exit 2) rather than
 /// failing at the app. Lexical search reads the index and has no such bound.
 fn check_usage(cli: &Cli) {
-    if let Command::Search { limit, mode, .. } = &cli.command {
-        if *mode != SearchMode::Lexical && *limit > MAX_SEARCH_RESULTS {
-            Cli::command()
-                .error(
-                    ErrorKind::ValueValidation,
-                    format!(
-                        "--limit must be at most {MAX_SEARCH_RESULTS} for semantic and hybrid search"
-                    ),
-                )
-                .exit();
-        }
+    if let Command::Search { limit, mode, .. } = &cli.command
+        && *mode != SearchMode::Lexical
+        && *limit > MAX_SEARCH_RESULTS
+    {
+        Cli::command()
+            .error(
+                ErrorKind::ValueValidation,
+                format!(
+                    "--limit must be at most {MAX_SEARCH_RESULTS} for semantic and hybrid search"
+                ),
+            )
+            .exit();
     }
 }
 

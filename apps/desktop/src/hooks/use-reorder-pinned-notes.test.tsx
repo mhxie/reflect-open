@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { NoteActionsService, PinnedNote } from '@reflect/core'
 import {
@@ -53,8 +54,8 @@ describe('useReorderPinnedNotes', () => {
   it('does nothing for a missing note or unchanged position', async () => {
     const hook = await renderReorder()
 
-    await hook.act(() => hook.result.current('missing.md', 'b.md'))
-    await hook.act(() => hook.result.current('a.md', 'a.md'))
+    await act(() => hook.result.current('missing.md', 'b.md'))
+    await act(() => hook.result.current('a.md', 'a.md'))
 
     expect(reorderPinnedNotes).not.toHaveBeenCalled()
     expect(app.noteRows.getOverlays().size).toBe(0)
@@ -63,8 +64,8 @@ describe('useReorderPinnedNotes', () => {
   it('writes nothing without a graph', async () => {
     const hook = await renderReorder()
 
-    await hook.act(() => app.graphSession.setGraph(null))
-    await hook.act(() => hook.result.current('a.md', 'b.md'))
+    await act(() => app.graphSession.setGraph(null))
+    await act(() => hook.result.current('a.md', 'b.md'))
 
     await expect(reorderPinnedNotes.mock.results[0]?.value).resolves.toEqual([])
     expect(app.noteRows.getOverlaysOn(7).size).toBe(0)
@@ -73,7 +74,7 @@ describe('useReorderPinnedNotes', () => {
   it('records the moved order in the overlay at once and writes it', async () => {
     const hook = await renderReorder()
 
-    await hook.act(() => hook.result.current('a.md', 'b.md'))
+    await act(() => hook.result.current('a.md', 'b.md'))
 
     // A dropped between two neighbours takes the midpoint.
     expect(app.noteRows.getOverlay('a.md')).toEqual({ pinnedOrder: 2560 })
@@ -87,7 +88,7 @@ describe('useReorderPinnedNotes', () => {
     ] satisfies PinnedNote[]
     const hook = await renderReorder(bare)
 
-    await hook.act(() => hook.result.current('a.md', 'b.md'))
+    await act(() => hook.result.current('a.md', 'b.md'))
 
     expect(reorderPinnedNotes).toHaveBeenCalledExactlyOnceWith([
       { ...bare[1], pinnedOrder: 1024 },
@@ -99,7 +100,7 @@ describe('useReorderPinnedNotes', () => {
     vi.spyOn(app.noteDocuments, 'commitFrontmatter').mockRejectedValue(new Error('write failed'))
     const hook = await renderReorder()
 
-    await hook.act(() => hook.result.current('a.md', 'b.md'))
+    await act(() => hook.result.current('a.md', 'b.md'))
 
     await vi.waitFor(() => expect(app.noteRows.getOverlay('a.md')).toBeNull())
   })

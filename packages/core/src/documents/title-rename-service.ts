@@ -75,11 +75,6 @@ export interface RenameCoordinatorOptions {
    * Graph-relative path of the (possibly renamed) note.
    */
   path: string
-  /**
-   * Gate: no rename fires while false (a parked conflict contests the very
-   * content the title came from; "keep mine" re-arms, "load theirs" cancels).
-   */
-  canFire: () => boolean
 }
 
 export interface RenameCoordinator {
@@ -182,7 +177,6 @@ class RenameCoordinatorImpl implements RenameCoordinator {
       onRename: (rename) => {
         this.#runRename(rename)
       },
-      canFire: options.canFire,
       clock: deps.clock,
     })
   }
@@ -217,7 +211,7 @@ class RenameCoordinatorImpl implements RenameCoordinator {
     title: string,
     gen: number,
     localOnly: LocalOnlyFolders,
-    options?: { rewriteInboundPathLinks?: boolean },
+    options?: { rewriteInboundPathLinks?: boolean | undefined },
   ): Promise<void> {
     const { noteFile, wikiResolver, notePath, noteMove, logger } = this.#deps
     const target = await notePath.slugPathForTitle(this.#currentPath, title)

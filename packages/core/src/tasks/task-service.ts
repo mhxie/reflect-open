@@ -8,7 +8,7 @@ import {
 import type { LoggerService } from '../ports/logger-service.ts'
 import type { ProgressPort } from '../ports/progress-port.ts'
 import { NoteBusyError, type NoteDocumentService } from '../documents/note-document-service.ts'
-import { errorMessage, ReflectError } from '../errors.ts'
+import { errorMessage, AppError } from '../errors.ts'
 import { isLocalOnlyPath, type LocalOnlyFolders } from '../graph/local-only.ts'
 import { notePrivate } from '../privacy/privacy-service.ts'
 import type { DatabaseService } from '../indexing/database-service.ts'
@@ -20,7 +20,6 @@ import type { Unlisten } from '../unlisten.ts'
 import {
   applyTaskEdits,
   decodeTaskPath,
-  detectConflictMarkers,
   renderTaskSnapshot,
   type TaskEdit,
   type TaskEditResult,
@@ -379,7 +378,6 @@ interface TaskRecord {
   dailyDate: string | null
   isPinned: number
   isPrivate: number
-  hasConflict: number
   pinnedOrder: number | null
   updatedAt: number
 }
@@ -400,9 +398,10 @@ function requireInserted(result: TaskEditResult): TaskSnapshot {
 }
 
 /**
- * The inserted task of `result`, flagged from the source the write landed
- * (the last one tried, when a concurrent change forced a re-apply) and the
- * note's place in a local-only folder.
+ * The inserted task of `result`, flagged from the source the edit produced
+ * (the last one tried, when a refused write forced a re-apply) and the note's
+ * place in a local-only folder. When Rust merged the write with a concurrent
+ * change instead, the next index pass corrects the row.
  */
 function insertedTask(
   localOnly: LocalOnlyFolders,
@@ -413,7 +412,6 @@ function insertedTask(
     created: {
       ...requireInserted(result),
       isPrivate: notePrivate(result.source) || isLocalOnlyPath(localOnly, notePath),
-      hasConflict: detectConflictMarkers(result.source),
     },
     moved: result.moved,
     updatedAt: result.updatedAt,
@@ -870,7 +868,6 @@ class TaskServiceImpl implements TaskService {
         'notes.dailyDate',
         'notes.isPinned',
         'notes.isPrivate',
-        'notes.hasConflict',
         'notes.pinnedOrder',
         'notes.updatedAt',
       ])
@@ -884,8 +881,7 @@ class TaskServiceImpl implements TaskService {
   #toTaskRows(rows: readonly TaskRecord[]): OpenTask[] {
     const tasks: OpenTask[] = []
     for (const row of rows) {
-      const { astPath, markdown, breadcrumbs, checked, isPinned, isPrivate, hasConflict, ...rest } =
-        row
+      const { astPath, markdown, breadcrumbs, checked, isPinned, isPrivate, ...rest } = row
       try {
         tasks.push({
           ...rest,
@@ -897,7 +893,6 @@ class TaskServiceImpl implements TaskService {
           }),
           isPinned: isPinned !== 0,
           isPrivate: isPrivate !== 0,
-          hasConflict: hasConflict !== 0,
         })
       } catch (cause) {
         this.#deps.logger.error(
@@ -1151,7 +1146,7 @@ class TaskServiceImpl implements TaskService {
     for (let task = pending[0]; task !== undefined; task = pending[0]) {
       // After the batch's graph closes or switches, a write would land in the next graph.
       if (signal.aborted) {
-        throw new ReflectError('noGraph', 'No graph is open.')
+        throw new AppError('noGraph', 'No graph is open.')
       }
       const result = await this.writeTask(task, actionsFor(task))
       this.#relocate(session, task.notePath, result.moved)

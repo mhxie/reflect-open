@@ -48,11 +48,7 @@ export function AttachmentNoteLinksMenu({
             onClick={(event) => onOpenNote(note.path, event)}
             className="gap-1 px-2 py-1.5 text-[13px] text-text-secondary"
           >
-            <NoteStateIndicator
-              path={note.path}
-              isPrivate={note.isPrivate}
-              hasConflict={note.hasConflict}
-            />
+            <NoteStateIndicator path={note.path} isPrivate={note.isPrivate} />
             <span className="min-w-0 flex-1 truncate">
               {displayNoteTitle(note.title) || 'Untitled'}
             </span>

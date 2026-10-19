@@ -41,7 +41,6 @@ export interface WikiSuggestion {
   generated?: GeneratedDate | undefined
   /** Indexed note flags; absent when a generated date has no indexed file. */
   isPrivate?: boolean
-  hasConflict?: boolean
 }
 
 /**
@@ -114,7 +113,6 @@ export interface TitleCandidate {
   /** How many wiki links in the graph name a spelling this note claims. */
   linkCount: number
   isPrivate: boolean
-  hasConflict: boolean
 }
 
 /** One `aliases ⋈ notes` row (an alias match). */
@@ -191,7 +189,6 @@ function toScored(row: TitleCandidate, matchedAlias: string | null, rank: number
       alias,
       date: row.dailyDate,
       isPrivate: row.isPrivate,
-      hasConflict: row.hasConflict,
     },
     rank,
     usage: computeUsageBucket(row.linkCount),

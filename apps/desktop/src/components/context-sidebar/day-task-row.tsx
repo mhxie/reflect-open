@@ -75,12 +75,7 @@ export function DayTaskRow({
         </span>
         {source === null ? null : (
           <span className="truncate text-2xs text-text-muted">
-            <NoteStateIndicator
-              path={task.notePath}
-              isPrivate={task.isPrivate}
-              hasConflict={task.hasConflict}
-              className="mr-1"
-            />
+            <NoteStateIndicator path={task.notePath} isPrivate={task.isPrivate} className="mr-1" />
             {source}
           </span>
         )}

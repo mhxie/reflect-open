@@ -1,0 +1,334 @@
+//! The shared error contract every native command returns.
+//!
+//! Serializes to `{ "kind": "...", "message": "..." }` — matching the zod
+//! `AppError` discriminated union in `@reflect/core`, so the frontend can branch
+//! on `kind` with a type guard instead of inspecting opaque strings.
+
+use serde::Serialize;
+
+// The enum mirrors the full TS `AppError` contract. `Parse` is only produced
+// on the TypeScript boundary, so Rust never constructs it — kept for contract
+// parity. `Unknown` is also the fail-loud answer from the embedding
+// stand-in on platforms without an embedding runtime.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AppError {
+    /// Filesystem / IO failure.
+    Io {
+        message: String,
+        /// The libgit2 error code when the failure came from `git2`.
+        #[serde(skip)]
+        git_code: Option<i32>,
+    },
+    /// A requested note or file does not exist.
+    NotFound { message: String },
+    /// A path escaped the graph root (security guard).
+    Traversal { message: String },
+    /// An operation needs an open graph but none is set.
+    NoGraph { message: String },
+    /// Parse / validation failure.
+    Parse { message: String },
+    /// A remote rejected our credentials (token invalid/expired/insufficient).
+    Auth { message: String },
+    /// The remote is unreachable (offline, DNS, timeout) — retryable.
+    Network { message: String },
+    /// This platform (or build) cannot do what was asked, e.g. rendering a
+    /// PDF preview anywhere but macOS, or a file past a preview size limit.
+    Unsupported { message: String },
+    /// The file is password-protected and cannot be opened without asking.
+    Locked { message: String },
+    /// The file's content is not what its type promises (a `.pdf` that is
+    /// not a PDF, has no pages, or cannot be parsed).
+    Invalid { message: String },
+    /// Anything not covered above.
+    Unknown { message: String },
+}
+
+impl AppError {
+    pub fn io(message: impl Into<String>) -> Self {
+        Self::Io {
+            message: message.into(),
+            git_code: None,
+        }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::NotFound {
+            message: message.into(),
+        }
+    }
+
+    pub fn traversal(message: impl Into<String>) -> Self {
+        Self::Traversal {
+            message: message.into(),
+        }
+    }
+
+    pub fn parse(message: impl Into<String>) -> Self {
+        Self::Parse {
+            message: message.into(),
+        }
+    }
+
+    pub fn no_graph() -> Self {
+        Self::NoGraph {
+            message: "No graph is open".into(),
+        }
+    }
+
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::Unsupported {
+            message: message.into(),
+        }
+    }
+
+    pub fn locked(message: impl Into<String>) -> Self {
+        Self::Locked {
+            message: message.into(),
+        }
+    }
+
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid {
+            message: message.into(),
+        }
+    }
+}
+
+impl AppError {
+    /// The libgit2 error code, when this error came from `git2`.
+    pub fn git_code(&self) -> Option<i32> {
+        match self {
+            Self::Io { git_code, .. } => *git_code,
+            _ => None,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Io { message, .. }
+            | Self::NotFound { message }
+            | Self::Traversal { message }
+            | Self::NoGraph { message }
+            | Self::Parse { message }
+            | Self::Auth { message }
+            | Self::Network { message }
+            | Self::Unsupported { message }
+            | Self::Locked { message }
+            | Self::Invalid { message }
+            | Self::Unknown { message } => message,
+        }
+    }
+}
+
+#[cfg(feature = "git2")]
+impl From<git2::Error> for AppError {
+    fn from(err: git2::Error) -> Self {
+        use git2::{ErrorClass, ErrorCode};
+        let message = err.message().to_string();
+        // libgit2 reports HTTP auth failures inconsistently (code vs class vs
+        // message), so classify with all three; Net class is reliably "couldn't
+        // reach the remote" and maps to the retryable Network kind. The HTTP
+        // matches anchor on libgit2's "… status code: NNN" phrasing so a 401/403
+        // appearing in arbitrary content (an oid, a filename) can't false-match.
+        // Known ambiguity, accepted: GitHub can also answer 403 for secondary
+        // rate limits; at the transport layer that's indistinguishable from a
+        // rejected credential without the response body. Misclassification is
+        // not sticky — the auth state never blocks the next cycle's retry.
+        //
+        // SSH (Plan 16): Certificate code = host-key verification failure, and
+        // Ssh-class errors (no agent, rejected keys, handshake) are all fixed
+        // by user action, so they surface as Auth (needs attention) rather
+        // than retrying as Network. An ssh *connectivity* failure carries the
+        // Net class and still lands in Network.
+        let lowered = message.to_lowercase();
+        if err.code() == ErrorCode::Auth
+            || err.code() == ErrorCode::Certificate
+            || err.class() == ErrorClass::Ssh
+            || lowered.contains("status code: 401")
+            || lowered.contains("status code: 403")
+            || lowered.contains("authentication")
+            || lowered.contains("authorization")
+        {
+            return Self::Auth { message };
+        }
+        if err.class() == ErrorClass::Net {
+            return Self::Network { message };
+        }
+        Self::Io {
+            message,
+            git_code: Some(err.raw_code()),
+        }
+    }
+}
+
+/// Whether `err` is ELOOP: a symlink the open refused to follow
+/// (`O_NOFOLLOW_ANY` on Apple platforms, `O_NOFOLLOW` and the directory-fd
+/// walks everywhere) or a link cycle. Either way the path resolves through a
+/// symlink, which the graph's guards treat as a traversal.
+fn is_symlink_refusal(err: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        err.raw_os_error() == Some(libc::ELOOP)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = err;
+        false
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            Self::NotFound {
+                message: err.to_string(),
+            }
+        } else if is_symlink_refusal(&err) {
+            Self::Traversal {
+                message: format!("path resolves through a symlink: {err}"),
+            }
+        } else {
+            Self::Io {
+                message: err.to_string(),
+                git_code: None,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "rusqlite")]
+impl From<rusqlite::Error> for AppError {
+    fn from(err: rusqlite::Error) -> Self {
+        Self::Io {
+            message: err.to_string(),
+            git_code: None,
+        }
+    }
+}
+
+/// Result alias for command and helper functions.
+pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(all(test, feature = "git2"))]
+mod tests {
+    use super::AppError;
+    use git2::{ErrorClass, ErrorCode};
+
+    fn classify(code: ErrorCode, class: ErrorClass, message: &str) -> AppError {
+        AppError::from(git2::Error::new(code, class, message))
+    }
+
+    #[test]
+    fn git_auth_failures_classify_as_auth() {
+        let cases = [
+            classify(ErrorCode::Auth, ErrorClass::Http, "authentication required"),
+            classify(
+                ErrorCode::GenericError,
+                ErrorClass::Http,
+                "unexpected http status code: 401",
+            ),
+            classify(
+                ErrorCode::GenericError,
+                ErrorClass::Http,
+                "request failed with status code: 403",
+            ),
+        ];
+        for error in cases {
+            assert!(matches!(error, AppError::Auth { .. }), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn ssh_failures_classify_as_auth() {
+        // All user-fixable: unknown host key, no agent, no accepted key.
+        let cases = [
+            classify(
+                ErrorCode::Certificate,
+                ErrorClass::Ssh,
+                "remote host key is not registered in known_hosts",
+            ),
+            classify(
+                ErrorCode::GenericError,
+                ErrorClass::Ssh,
+                "failed to connect to ssh agent",
+            ),
+            classify(ErrorCode::Auth, ErrorClass::Ssh, "no key this host accepts"),
+        ];
+        for error in cases {
+            assert!(matches!(error, AppError::Auth { .. }), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn git_network_failures_classify_as_network() {
+        let error = classify(
+            ErrorCode::GenericError,
+            ErrorClass::Net,
+            "failed to resolve address for github.com",
+        );
+        assert!(matches!(error, AppError::Network { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn other_git_failures_classify_as_io() {
+        let error = classify(ErrorCode::NotFound, ErrorClass::Odb, "object not found");
+        assert!(matches!(error, AppError::Io { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn incidental_status_code_digits_do_not_classify_as_auth() {
+        // "403" inside an oid/filename must not read as an HTTP status.
+        let error = classify(
+            ErrorCode::NotFound,
+            ErrorClass::Odb,
+            "object 403fa1b2 not found",
+        );
+        assert!(matches!(error, AppError::Io { .. }), "{error:?}");
+    }
+}
+
+#[cfg(test)]
+mod io_tests {
+    use super::AppError;
+
+    #[test]
+    fn preview_errors_serialize_with_their_own_kinds() {
+        let cases = [
+            (AppError::unsupported("macOS only"), "unsupported"),
+            (AppError::locked("password-protected"), "locked"),
+            (AppError::invalid("not a PDF"), "invalid"),
+        ];
+        for (error, kind) in cases {
+            assert_eq!(
+                serde_json::to_value(&error).unwrap(),
+                serde_json::json!({ "kind": kind, "message": error.message() }),
+            );
+        }
+    }
+
+    /// A no-follow open refused at a symlink reports ELOOP; callers that skip
+    /// unreadable paths (asset descriptions, OCR) must see a traversal, not a
+    /// failure that aborts their whole pass.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_symlink_classifies_as_traversal() {
+        use std::os::unix::fs::{OpenOptionsExt, symlink};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("real.md"), "# Real").unwrap();
+        symlink(dir.path().join("real.md"), dir.path().join("link.md")).unwrap();
+        let refused = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(dir.path().join("link.md"))
+            .unwrap_err();
+        let error = AppError::from(refused);
+        assert!(matches!(error, AppError::Traversal { .. }), "{error:?}");
+
+        let missing = std::fs::File::open(dir.path().join("missing.md")).unwrap_err();
+        assert!(matches!(AppError::from(missing), AppError::NotFound { .. }));
+        let other = std::io::Error::from_raw_os_error(libc::EACCES);
+        assert!(matches!(AppError::from(other), AppError::Io { .. }));
+    }
+}

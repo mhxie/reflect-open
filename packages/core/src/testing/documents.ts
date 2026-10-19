@@ -118,16 +118,9 @@ class TestNoteSessionImpl implements TestNoteSession {
     this.#record('externalChanged')
   }
 
-  async flush(): Promise<void> {
+  flush(): Promise<void> {
     this.#record('flush')
-  }
-
-  keepMine(): void {
-    this.#record('keepMine')
-  }
-
-  loadTheirs(): void {
-    this.#record('loadTheirs')
+    return Promise.resolve()
   }
 
   restoreRecovery(): void {
@@ -154,9 +147,9 @@ class TestNoteSessionImpl implements TestNoteSession {
     return this.#options.unpersisted ?? false
   }
 
-  async prepareDelete(): Promise<boolean> {
+  prepareDelete(): Promise<boolean> {
     this.#record('prepareDelete')
-    return this.#options.unpersisted ?? false
+    return Promise.resolve(this.#options.unpersisted ?? false)
   }
 
   cancelDelete(): void {
@@ -172,31 +165,37 @@ class TestNoteSessionImpl implements TestNoteSession {
     return true
   }
 
-  async commitFrontmatter(patch: FrontmatterPatch): Promise<boolean> {
-    this.#record('commitFrontmatter', patch)
-    if (!this.#accepts) {
-      return false
-    }
-    this.#content = upsertFrontmatter(this.#content, frontmatterPatchToYaml(patch))
-    return true
+  commitFrontmatter(patch: FrontmatterPatch): Promise<boolean> {
+    return Promise.try(() => {
+      this.#record('commitFrontmatter', patch)
+      if (!this.#accepts) {
+        return false
+      }
+      this.#content = upsertFrontmatter(this.#content, frontmatterPatchToYaml(patch))
+      return true
+    })
   }
 
-  async commitBodyAppend(block: string): Promise<boolean> {
-    this.#record('commitBodyAppend', block)
-    if (!this.#accepts || block.trim() === '') {
-      return false
-    }
-    this.#content = appendBlock(this.#content, block)
-    return true
+  commitBodyAppend(block: string): Promise<boolean> {
+    return Promise.try(() => {
+      this.#record('commitBodyAppend', block)
+      if (!this.#accepts || block.trim() === '') {
+        return false
+      }
+      this.#content = appendBlock(this.#content, block)
+      return true
+    })
   }
 
-  async commitSourceEdit(transform: (source: string) => string): Promise<boolean> {
-    this.#record('commitSourceEdit', transform)
-    if (!this.#accepts) {
-      return false
-    }
-    this.#content = transform(this.#content)
-    return true
+  commitSourceEdit(transform: (source: string) => string): Promise<boolean> {
+    return Promise.try(() => {
+      this.#record('commitSourceEdit', transform)
+      if (!this.#accepts) {
+        return false
+      }
+      this.#content = transform(this.#content)
+      return true
+    })
   }
 
   dispose(): void {

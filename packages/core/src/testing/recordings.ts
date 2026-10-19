@@ -99,54 +99,34 @@ class TestRecorderServiceImpl implements TestRecorderService {
     }
   }
 
-  async toggleRecording(): Promise<void> {
+  toggleRecording(): Promise<void> {
     this.#log.push({ method: 'toggleRecording' })
-    if (!this.#status.supported) {
-      return
+    if (this.#status.supported) {
+      this.#toggle()
     }
-    const live = this.#status.recording
-    if (live === null) {
-      this.#recordings += 1
-      this.setStatus({
-        ...this.#status,
-        recording: {
-          sessionId: `recording-${this.#recordings}`,
-          startedAtMs: this.#now(),
-          warnings: [],
-        },
-      })
-      return
-    }
-    // Stopping stages the recording for the recording pass, as the native side does.
-    this.#finished.push({
-      id: live.sessionId,
-      startedAtMs: live.startedAtMs,
-      endedAtMs: this.#now(),
-      transcribed: false,
-      warnings: [...live.warnings],
-    })
-    this.setStatus({ ...this.#status, recording: null })
-    this.emitFinished(live.sessionId)
+    return Promise.resolve()
   }
 
-  async cancelRecording(): Promise<void> {
+  cancelRecording(): Promise<void> {
     this.#log.push({ method: 'cancelRecording' })
     if (this.#status.recording !== null) {
       this.setStatus({ ...this.#status, recording: null })
     }
+    return Promise.resolve()
   }
 
-  async configure(config: RecorderConfig): Promise<void> {
+  configure(config: RecorderConfig): Promise<void> {
     this.#log.push({ method: 'configure', config })
+    return Promise.resolve()
   }
 
-  async finishedRecordings(): Promise<FinishedRecording[]> {
-    return [...this.#finished]
+  finishedRecordings(): Promise<FinishedRecording[]> {
+    return Promise.resolve([...this.#finished])
   }
 
-  async transcribe(input: TranscribeRecordingInput): Promise<RecordingChannels> {
+  transcribe(input: TranscribeRecordingInput): Promise<RecordingChannels> {
     this.#log.push({ method: 'transcribe', input })
-    return (
+    return Promise.resolve(
       this.#channels ?? {
         model: input.model,
         durationMs: 0,
@@ -154,13 +134,14 @@ class TestRecorderServiceImpl implements TestRecorderService {
         them: [],
         echoSuppressed: false,
         systemSilent: false,
-      }
+      },
     )
   }
 
-  async archive(sessionId: string, destination: string): Promise<void> {
+  archive(sessionId: string, destination: string): Promise<void> {
     this.#log.push({ method: 'archive', sessionId, destination })
     this.#finished = this.#finished.filter((recording) => recording.id !== sessionId)
+    return Promise.resolve()
   }
 
   onWarning(listener: (code: string, sessionId: string) => void): Unlisten {
@@ -224,6 +205,32 @@ class TestRecorderServiceImpl implements TestRecorderService {
     for (const listener of this.#levelListeners) {
       listener(level)
     }
+  }
+
+  #toggle(): void {
+    const live = this.#status.recording
+    if (live === null) {
+      this.#recordings += 1
+      this.setStatus({
+        ...this.#status,
+        recording: {
+          sessionId: `recording-${this.#recordings}`,
+          startedAtMs: this.#now(),
+          warnings: [],
+        },
+      })
+      return
+    }
+    // Stopping stages the recording for the recording pass, as the native side does.
+    this.#finished.push({
+      id: live.sessionId,
+      startedAtMs: live.startedAtMs,
+      endedAtMs: this.#now(),
+      transcribed: false,
+      warnings: [...live.warnings],
+    })
+    this.setStatus({ ...this.#status, recording: null })
+    this.emitFinished(live.sessionId)
   }
 }
 

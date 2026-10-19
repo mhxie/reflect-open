@@ -4,6 +4,7 @@ import type { OpenDocumentsService } from '../documents/open-documents-service.t
 import type { GraphSessionService } from '../graph/graph-session-service.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { patchNote } from '../graph/patch-note.ts'
+import type { LoggerService } from '../ports/logger-service.ts'
 import { isDaily } from '../graph/paths.ts'
 import { parseNote } from '../markdown/extract.ts'
 import { splitFrontmatter } from '../markdown/frontmatter.ts'
@@ -48,7 +49,7 @@ export interface ContactSuggestionService {
    * plus every email and phone, appended as their own block. Routes through
    * the live session when the note is open — the card sits above an open
    * editor, so unsaved edits must survive — and refuses rather than clobber
-   * when the session can't take it (loading, protected, or a parked conflict).
+   * when the session can't take it (loading, protected, or disposed).
    * A closed note is patched on disk, re-validated against the exact bytes the
    * checked write replaces. Retry-safe: a body that already carries the
    * details is left alone. Throws when the title no longer matches `contact`,
@@ -155,6 +156,7 @@ export interface ContactSuggestionServiceDeps {
   readonly noteFile: NoteFileService
   readonly settings: SettingsService
   readonly graphSession: GraphSessionService
+  readonly logger: LoggerService
 }
 
 class ContactSuggestionServiceImpl implements ContactSuggestionService {
@@ -244,7 +246,12 @@ class ContactSuggestionServiceImpl implements ContactSuggestionService {
   }
 
   async requestAccess(): Promise<void> {
-    await this.#deps.contacts.requestAccess().catch(() => {})
+    try {
+      await this.#deps.contacts.requestAccess()
+    } catch (error: unknown) {
+      // A failed request leaves the access status unchanged.
+      this.#deps.logger.warn('requesting contacts access failed:', error)
+    }
   }
 
   /**

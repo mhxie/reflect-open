@@ -21,7 +21,6 @@ mod background_task;
 mod blocking;
 mod calendar;
 mod capture;
-mod conflict;
 mod contacts;
 mod db;
 mod dev_harness;
@@ -30,7 +29,6 @@ mod editor_link_preview;
 mod error;
 mod fs;
 mod git;
-mod graph_gitignore;
 mod icloud;
 mod link_preview;
 mod logging;
@@ -119,9 +117,11 @@ mod capability_tests {
             .as_array()
             .expect("capability permissions");
 
-        assert!(permissions
-            .iter()
-            .any(|permission| permission.as_str() == Some("core:window:allow-hide")));
+        assert!(
+            permissions
+                .iter()
+                .any(|permission| permission.as_str() == Some("core:window:allow-hide"))
+        );
     }
 }
 
@@ -317,7 +317,6 @@ pub fn run() {
             icloud::storage::icloud_status,
             icloud::storage::icloud_adopt_graph,
             icloud::sweep::icloud_conflicts_scan,
-            conflict::conflict_merge_text,
             icloud::watch::icloud_watch_start,
             icloud::watch::icloud_watch_stop,
             fs::graph_open,
@@ -443,7 +442,8 @@ pub fn run() {
             git::git_clone,
             git::git_commit_all,
             git::git_fetch,
-            git::git_merge_remote,
+            git::git_remote_head,
+            git::git_pull,
             git::git_push,
             quit::quit_confirm,
             windows::open_note_window,

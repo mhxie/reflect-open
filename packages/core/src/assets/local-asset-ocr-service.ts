@@ -7,7 +7,7 @@ import {
 } from '../ai/asset-describer-service.ts'
 import type { LanguageModelService } from '../ai/language-model-service.ts'
 import type { OnDeviceModelService } from '../ai/on-device-model-service.ts'
-import { errorMessage, isAppError, ReflectError, toAppError } from '../errors.ts'
+import { AppError, errorMessage, isAppError, toAppError } from '../errors.ts'
 import type { AssetStoreService } from '../graph/asset-store-service.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { descriptionPathFor } from '../graph/paths.ts'
@@ -166,7 +166,7 @@ class LocalAssetOcrServiceImpl implements LocalAssetOcrService {
     const outcome = emptyOutcome()
     const stale = (): void => {
       if (input.isStale?.() === true) {
-        throw new ReflectError('noGraph', 'The graph session ended during local OCR.')
+        throw new AppError('noGraph', 'The graph session ended during local OCR.')
       }
     }
     try {
@@ -200,11 +200,11 @@ class LocalAssetOcrServiceImpl implements LocalAssetOcrService {
       }
       const apiKey = await aiCredentials.read(config)
       if (apiKey === null) {
-        throw new ReflectError('auth', 'The selected local OCR model is missing its API key.')
+        throw new AppError('auth', 'The selected local OCR model is missing its API key.')
       }
       const verified = await onDeviceModels.verify(target, apiKey)
       if (verified.kind !== 'on-device') {
-        throw new ReflectError('auth', 'Local OCR requires a verified on-device model.')
+        throw new AppError('auth', 'Local OCR requires a verified on-device model.')
       }
       stale()
       const model = await languageModel.createFor(verified, apiKey)
@@ -286,12 +286,12 @@ class LocalAssetOcrServiceImpl implements LocalAssetOcrService {
             })
             if (body.trim() === '') {
               // A blank page or image: no complete result to cache.
-              throw new ReflectError('invalid', 'The local vision model returned empty OCR text.')
+              throw new AppError('invalid', 'The local vision model returned empty OCR text.')
             }
             const section = type.kind === 'pdf' ? `## Page ${page}\n\n${body}` : body
             characters += section.length + 2
             if (characters > MAX_LOCAL_OCR_CHARS) {
-              throw new ReflectError(
+              throw new AppError(
                 'unsupported',
                 'OCR text exceeds 200,000 characters; no partial result was cached.',
               )

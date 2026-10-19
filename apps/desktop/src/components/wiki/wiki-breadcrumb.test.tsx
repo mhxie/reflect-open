@@ -1,7 +1,7 @@
 import { createTestCoreServices } from '@reflect/core/testing'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { deepLinkForRoute } from '@reflect/app'
 import type { WikiAncestor, WikiLanguage } from '@reflect/core'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { WikiBreadcrumb } from './wiki-breadcrumb.tsx'
 

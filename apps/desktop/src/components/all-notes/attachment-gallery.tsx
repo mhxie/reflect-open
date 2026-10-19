@@ -122,12 +122,7 @@ export function AttachmentGallery({
                 }}
                 className="truncate text-left text-xs font-medium text-text hover:underline"
               >
-                <NoteStateIndicator
-                  path={note.path}
-                  isPrivate={note.isPrivate}
-                  hasConflict={note.hasConflict}
-                  className="mr-1"
-                />
+                <NoteStateIndicator path={note.path} isPrivate={note.isPrivate} className="mr-1" />
                 {title}
               </button>
               <span className="text-2xs text-text-muted">

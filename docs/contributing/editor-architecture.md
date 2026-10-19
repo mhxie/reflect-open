@@ -62,8 +62,8 @@ in-flight write) is our own echo and is ignored.
 Invariants the loop maintains:
 
 - **External changes never clobber a dirty buffer.** A clean buffer reloads
-  imperatively; a dirty one parks the external content as a `conflict` for the
-  user ("keep mine" rewrites the file, "load theirs" discards the buffer).
+  imperatively. A dirty one saves at once, the write merges with the newer
+  disk text through the conflict ladder, and the session adopts the result.
 - **Writes are generation-pinned.** Every write carries the generation of the
   graph the session was opened on, read at write time so a reopen of that
   graph carries over. Rust rejects stale ones, so a flush racing a graph

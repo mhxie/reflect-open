@@ -4,8 +4,6 @@ import type { NoteProtection } from '@/editor/status/note-protection.ts'
 import type { NoteStatusScope } from '@/editor/status/note-status-store.ts'
 import { Button } from '@/components/ui/button.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { NoteConflictBanner } from './note-conflict-banner.tsx'
-import { SyncConflictNotice } from './sync-conflict-notice.tsx'
 
 interface NoteProtectionDetailsProps {
   readonly scope: NoteStatusScope
@@ -35,26 +33,7 @@ export function NoteProtectionDetails({
 
   return (
     <div className="mb-3 space-y-2 border-b border-border pb-3 text-xs whitespace-normal">
-      {protection.kind === 'sync-conflict' ? (
-        <>
-          <p className="font-medium">Sync conflict</p>
-          <p className="text-text-secondary">Choose which versions of this note to keep.</p>
-          <SyncConflictNotice path={scope.path} />
-        </>
-      ) : protection.kind === 'external-change' ? (
-        <>
-          <p className="font-medium">External change</p>
-          <p className="break-words text-text-secondary">{protection.message}</p>
-          <p className="text-text-secondary">
-            The file changed while saving was blocked. Choose which version to keep.
-          </p>
-          <NoteConflictBanner
-            onKeepMine={protection.keepMine}
-            onLoadTheirs={protection.loadTheirs}
-            compact
-          />
-        </>
-      ) : protection.kind === 'save-blocked' ? (
+      {protection.kind === 'save-blocked' ? (
         <>
           <p className="font-medium">Saving blocked</p>
           <p className="break-words text-text-secondary">{protection.message}</p>

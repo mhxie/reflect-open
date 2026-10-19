@@ -46,7 +46,6 @@ const files: FileMeta[] = [
 const references = [
   {
     isPrivate: false,
-    hasConflict: false,
     assetPath: 'assets/photo.png',
     notePath: 'notes/trip.md',
     title: 'Trip',
@@ -54,7 +53,6 @@ const references = [
   },
   {
     isPrivate: false,
-    hasConflict: false,
     assetPath: 'photo.png',
     notePath: 'notes/later.md',
     title: 'Later',
@@ -62,7 +60,6 @@ const references = [
   },
   {
     isPrivate: false,
-    hasConflict: false,
     assetPath: 'assets/report.pdf',
     notePath: 'notes/report.md',
     title: 'Report',
@@ -107,7 +104,7 @@ function RoutedScreen(): ReactElement {
 
 async function renderScreen() {
   const app = createTestCoreServices()
-  vi.spyOn(app.attachments, 'listFiles').mockImplementation(async () => [...listing])
+  vi.spyOn(app.attachments, 'listFiles').mockImplementation(() => Promise.resolve([...listing]))
   vi.spyOn(app.attachments, 'assetUrl').mockImplementation(
     (path, generation) =>
       `${assets.broken.has(`${generation}/${path}`) ? assets.corrupt : assets.image}#reflect-asset/${generation}/${path}`,
@@ -143,6 +140,11 @@ function cardLabels(): (string | null)[] {
   return [...document.querySelectorAll('[data-attachment-index]')].map((card) =>
     card.getAttribute('aria-label'),
   )
+}
+
+/** The element holding focus, if any. */
+function focusedElement(): Element | null {
+  return document.activeElement
 }
 
 describe('AttachmentsScreen', () => {
@@ -281,13 +283,13 @@ describe('AttachmentsScreen', () => {
     // Three columns: clip, photo, report across the top; logo under clip;
     // stray under photo.
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Open clip.mp4')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Open clip.mp4')
     await userEvent.keyboard('{ArrowDown}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview logo.svg')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview logo.svg')
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview stray.jpg')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview stray.jpg')
     await userEvent.keyboard('{ArrowUp}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview photo.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview photo.png')
   })
 
   it('mounts only the cards near the viewport, and more as it scrolls', async () => {
@@ -322,7 +324,7 @@ describe('AttachmentsScreen', () => {
     const view = await renderScreen()
     await expect.element(page.getByRole('button', { name: 'Preview f000.png' })).toBeVisible()
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview f000.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview f000.png')
 
     // Scroll far past the focused card: it stays mounted, and focused.
     const scroller = page.getByTestId('attachments-scroll').element()
@@ -333,7 +335,7 @@ describe('AttachmentsScreen', () => {
     serve([{ path: 'assets/newest.png', size: 10, modifiedMs: 10_000 }, ...many])
     await view.queryClient.invalidateQueries()
     await expect.element(page.getByTestId('attachments-count')).toHaveTextContent('601')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview f000.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview f000.png')
   })
 
   it('keeps keyboard focus on a card whose file is rewritten', async () => {
@@ -342,7 +344,7 @@ describe('AttachmentsScreen', () => {
     // Into the flow at clip.mp4 (column 0), then across to photo.png (column 1).
     await userEvent.keyboard('{ArrowRight}')
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview photo.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview photo.png')
     const focused = document.activeElement
 
     serve(
@@ -398,7 +400,7 @@ describe('AttachmentsScreen', () => {
     await expect.element(page.getByRole('button', { name: 'Later' })).toBeVisible()
     await userEvent.keyboard('{ArrowRight}')
     await userEvent.keyboard('{ArrowRight}')
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Preview f000.png')
+    expect(focusedElement()?.getAttribute('aria-label')).toBe('Preview f000.png')
     // Focus moves from f000's preview into photo.png's note link (Shift-Tab
     // does this in Chromium; WebKit's tab order is platform-configured).
     const link = page.getByRole('button', { name: 'Later' }).element()

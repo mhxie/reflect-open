@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type {
   HostedAiProviderConfig,
   OpenAiCompatibleProviderConfig,
@@ -169,7 +169,7 @@ describe('AiProviderConfigService', () => {
   it('adds nothing when the keychain write fails', async () => {
     const settings = createTestSettingsService()
     const credentials = createAiCredentialService({ secretStore: createTestSecretStoreService() })
-    vi.spyOn(credentials, 'store').mockRejectedValue(new ReflectError('io', 'keychain locked'))
+    vi.spyOn(credentials, 'store').mockRejectedValue(new AppError('io', 'keychain locked'))
     const service = createAiProviderConfigService({
       settings,
       credentials,
@@ -463,7 +463,7 @@ describe('AiProviderConfigService', () => {
 
     expect(service.transcriptionConfig()).toEqual(B)
     expect(await service.resolveTranscriptionTarget()).toEqual({ config: B, apiKey: 'sk-b' })
-    expect(await service.resolveTranscriptionTarget(async () => null)).toBe('no-key')
+    expect(await service.resolveTranscriptionTarget(() => Promise.resolve(null))).toBe('no-key')
   })
 
   it('reports no transcription provider when none is capable', async () => {

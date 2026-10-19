@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { focusManager } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -34,7 +35,7 @@ describe('usePaywallGate', () => {
   it('follows the paywall service gate', async () => {
     const services = iosServices()
     services.mobile.appStoreEnvironment.setState({ value: 'Production' })
-    const { result, act } = await renderHookInApp(() => usePaywallGate(), { app: services })
+    const { result } = await renderHookInApp(() => usePaywallGate(), { app: services })
     expect(result.current).toBe('show')
 
     await act(() => {
@@ -114,7 +115,7 @@ describe('usePaywallGate', () => {
 
     it('shows the paywall on request outside the App Store, and lifts it after a purchase', async () => {
       const { iap, services } = realServices()
-      const { result, act } = await renderHookInApp(
+      const { result } = await renderHookInApp(
         () => ({ gate: usePaywallGate(), requested: usePaywallRequested() }),
         { app: services },
       )

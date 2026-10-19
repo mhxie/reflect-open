@@ -27,7 +27,6 @@ function task(overrides: Partial<OpenTask> = {}): OpenTask {
     dailyDate: null,
     isPinned: false,
     isPrivate: false,
-    hasConflict: false,
     pinnedOrder: null,
     updatedAt: 0,
     ...overrides,

@@ -78,15 +78,15 @@ export function GraphProvider({
   // the window that opened it: a note window adopts the same graph, and its
   // own copy of the warnings would only repeat them.
   const { graph, session: openSession } = state
-  const reported = useRef<GraphSession | null>(null)
+  const reportedRef = useRef<GraphSession | null>(null)
   useEffect(() => {
     if (graph === null || openSession === null || openSession.role !== 'main') {
       return
     }
-    if (reported.current === openSession) {
+    if (reportedRef.current === openSession) {
       return
     }
-    reported.current = openSession
+    reportedRef.current = openSession
     reportLocalOnlyWarnings(operations, graph)
     reportBackupWarnings(operations, graph)
   }, [graph, openSession, operations])

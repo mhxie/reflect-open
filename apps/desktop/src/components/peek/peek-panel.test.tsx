@@ -7,6 +7,7 @@ import {
   createTestNoteSession,
   type TestCoreServices,
 } from '@reflect/core/testing'
+import type { MaybePromise } from '@reflect/utils'
 import { useRouter } from '@/routing/router.tsx'
 import { routeForPath } from '@/routing/route.ts'
 import '@/test-utils/locator.ts'
@@ -29,7 +30,7 @@ const NOTE = 'notes/draft.md'
 
 /** Notes open in a pane of this window: Peek navigates to them instead. */
 let openPaths: Set<string>
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function Opener({ path }: { path: string }): ReactElement {
   const navigate = usePeekNavigation()

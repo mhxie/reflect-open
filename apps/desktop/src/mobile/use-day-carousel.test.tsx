@@ -108,11 +108,11 @@ const base: ReconcileInput = {
 }
 
 describe('reconcileCarousel', () => {
-  it('scrolls for an ordinary in-window jump', async () => {
+  it('scrolls for an ordinary in-window jump', () => {
     expect(reconcileCarousel(base)).toEqual({ action: 'scroll', index: 10 })
   })
 
-  it('does nothing for the echo of our own swipe', async () => {
+  it('does nothing for the echo of our own swipe', () => {
     // The route just echoed back the day we reported — the carousel already
     // shows that slide, so re-scrolling would be a redundant jump.
     expect(
@@ -126,7 +126,7 @@ describe('reconcileCarousel', () => {
     })
   })
 
-  it('forces a same-date arrival to cancel an in-flight swipe', async () => {
+  it('forces a same-date arrival to cancel an in-flight swipe', () => {
     expect(
       reconcileCarousel({
         ...base,
@@ -137,20 +137,20 @@ describe('reconcileCarousel', () => {
     ).toEqual({ action: 'scroll', index: 10 })
   })
 
-  it('does nothing when the date is outside the window (a re-anchor is pending)', async () => {
+  it('does nothing when the date is outside the window (a re-anchor is pending)', () => {
     expect(reconcileCarousel({ ...base, index: -1 })).toEqual({
       action: 'none',
     })
   })
 
-  it('reinitializes when the window was re-anchored', async () => {
+  it('reinitializes when the window was re-anchored', () => {
     expect(reconcileCarousel({ ...base, lastWindowStart: '2024-01-01' })).toEqual({
       action: 'reinit',
       index: 10,
     })
   })
 
-  it('reinitializes after a re-anchor even when the date matches the last report', async () => {
+  it('reinitializes after a re-anchor even when the date matches the last report', () => {
     // A far date link re-anchors *and* is later echoed back: the window change
     // must win over the echo guard, or the rebuilt slides never get shown.
     expect(
@@ -163,7 +163,7 @@ describe('reconcileCarousel', () => {
     ).toEqual({ action: 'reinit', index: 10 })
   })
 
-  it('treats an outside date as a no-op even while the window is mid-re-anchor', async () => {
+  it('treats an outside date as a no-op even while the window is mid-re-anchor', () => {
     // `index === -1` is checked first: the window effect will rebuild before
     // this reconciliation matters, so there is nothing to scroll yet.
     expect(reconcileCarousel({ ...base, index: -1, lastWindowStart: '2024-01-01' })).toEqual({
@@ -176,13 +176,13 @@ describe('shouldRecenter', () => {
   // 21 slides around the anchor; margin 5 → indices 0–4 and 16–20 trigger.
   const window = createDayWindow('2026-06-12', { past: 10, future: 10 })
 
-  it('leaves the middle of the window alone', async () => {
+  it('leaves the middle of the window alone', () => {
     expect(shouldRecenter(window, 10, 5)).toBe(false)
     expect(shouldRecenter(window, 5, 5)).toBe(false)
     expect(shouldRecenter(window, 15, 5)).toBe(false)
   })
 
-  it('re-centers within the margin of either edge', async () => {
+  it('re-centers within the margin of either edge', () => {
     expect(shouldRecenter(window, 4, 5)).toBe(true)
     expect(shouldRecenter(window, 0, 5)).toBe(true)
     expect(shouldRecenter(window, 16, 5)).toBe(true)
@@ -221,7 +221,7 @@ describe('useDayCarousel', () => {
     const { result, onSelect } = await mountCarousel()
 
     // Pointer-up: the target is known but the snap animation is still playing.
-    act(() => embla.selectAt(CENTER + 1))
+    await act(() => embla.selectAt(CENTER + 1))
 
     expect(result.current.selectedIndex).toBe(CENTER + 1)
     expect(onSelect).not.toHaveBeenCalled()
@@ -230,7 +230,7 @@ describe('useDayCarousel', () => {
   it('announces the target day at select, ahead of the settle-time report', async () => {
     const { onTarget, onSelect } = await mountCarousel()
 
-    act(() => embla.selectAt(CENTER + 1))
+    await act(() => embla.selectAt(CENTER + 1))
 
     // The strip (and its month title) follow this while the snap animates;
     // the route only moves at settle.
@@ -241,7 +241,7 @@ describe('useDayCarousel', () => {
   it('reports the landed day only when the swipe settles', async () => {
     const { result, onSelect } = await mountCarousel()
 
-    act(() => embla.settleAt(CENTER + 1))
+    await act(() => embla.settleAt(CENTER + 1))
 
     expect(onSelect).toHaveBeenCalledExactlyOnceWith('2026-06-13')
     expect(result.current.selectedIndex).toBe(CENTER + 1)
@@ -249,7 +249,7 @@ describe('useDayCarousel', () => {
 
   it('leaves the carousel alone when the settled swipe echoes back as `date`', async () => {
     const { rerender } = await mountCarousel()
-    act(() => embla.settleAt(CENTER + 1))
+    await act(() => embla.settleAt(CENTER + 1))
 
     await rerender({ date: '2026-06-13', navigationKey: '1:1:2026-06-13' })
 
@@ -273,7 +273,7 @@ describe('useDayCarousel', () => {
     // Pointer-up has aimed away from Today, but the route is still Today until
     // Embla settles. This is the window in which the fading Today button can
     // be tapped.
-    act(() => embla.selectAt(CENTER + 1))
+    await act(() => embla.selectAt(CENTER + 1))
     expect(result.current.selectedIndex).toBe(CENTER + 1)
 
     // The Today tap is a date-preserving router arrival. It must still issue
@@ -286,7 +286,7 @@ describe('useDayCarousel', () => {
     expect(onTarget).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
 
-    act(() => embla.settle())
+    await act(() => embla.settle())
     expect(onSelect).not.toHaveBeenCalled()
     expect(onTarget).toHaveBeenCalledTimes(1)
     expect(result.current.selectedIndex).toBe(CENTER)
@@ -296,7 +296,7 @@ describe('useDayCarousel', () => {
     const { result, onSelect } = await mountCarousel()
     const nearEnd = initialWindow.count - 10
 
-    act(() => embla.settleAt(nearEnd))
+    await act(() => embla.settleAt(nearEnd))
 
     const landed = dateAtIndex(initialWindow, nearEnd)
     expect(onSelect).toHaveBeenCalledExactlyOnceWith(landed)

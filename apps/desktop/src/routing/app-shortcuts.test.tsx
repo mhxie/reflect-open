@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import {
   isOstensiblyEmptyNoteSource,
   type ChatSession,
@@ -110,7 +111,7 @@ interface ShortcutsHookOptions {
 }
 
 async function shortcutsHook(options?: ShortcutsHookOptions) {
-  const readSource = async (): Promise<string> => '# A\n'
+  const readSource = (): Promise<string> => Promise.resolve('# A\n')
   const services = createTestCoreServices({
     platform: createTestPlatformService(platform),
     noteDocuments: {
@@ -130,9 +131,11 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
   isNativeMenuInstalled = vi.spyOn(appLayer.nativeMenu, 'isInstalled').mockReturnValue(false)
   getPinnedNotes = vi
     .spyOn(services.indexQuery, 'getPinnedNotes')
-    .mockImplementation(async () => [
-      ...(options?.pinned?.[services.graphSession.getState().session?.root ?? ''] ?? []),
-    ])
+    .mockImplementation(() =>
+      Promise.resolve([
+        ...(options?.pinned?.[services.graphSession.getState().session?.root ?? ''] ?? []),
+      ]),
+    )
   const createChatSession = services.chatSessions.create.bind(services.chatSessions)
   vi.spyOn(services.chatSessions, 'create').mockImplementation((options) => {
     const session = createChatSession(options)
@@ -239,7 +242,7 @@ describe('app shortcuts', () => {
   it('CMD+O updates the shelf before the file write resolves', async () => {
     const write = Promise.withResolvers<void>()
     commitNoteFrontmatter.mockReturnValueOnce(write.promise)
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => result.current.router.navigate({ kind: 'note', path: 'notes/a.md' }))
     await act(() => press('o'))
     await vi.waitFor(() =>
@@ -255,7 +258,7 @@ describe('app shortcuts', () => {
   })
 
   it('palette pin targets the focused daily note through the same context', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => result.current.router.navigate({ kind: 'daily', date: '2026-09-08' }))
     await act(() => result.current.setFocusedDailyDate('2026-09-07'))
     await act(() => result.current.context.togglePin())
@@ -266,7 +269,7 @@ describe('app shortcuts', () => {
   it('palette privacy updates the focused daily note row before the write resolves', async () => {
     const write = Promise.withResolvers<void>()
     commitNoteFrontmatter.mockReturnValueOnce(write.promise)
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => result.current.router.navigate({ kind: 'daily', date: '2026-09-08' }))
     await act(() => result.current.setFocusedDailyDate('2026-09-07'))
     const action = result.current.context.togglePrivate()
@@ -290,7 +293,7 @@ describe('app shortcuts', () => {
   })
 
   it('pin and privacy no-op on note-less routes and without a graph', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => result.current.router.navigate({ kind: 'settings' }))
     await act(() => press('o'))
     await act(() => result.current.context.togglePrivate())
@@ -327,7 +330,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘N opens a fresh note route; ⌘D returns to today; ⌘[ ⌘] traverse', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
 
     await act(() => press('n'))
     expect(result.current.router.route.kind).toBe('note')
@@ -345,7 +348,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘N from today makes back re-anchor Daily instead of restoring stale scroll', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => result.current.router.saveScrollState(735))
     expect(result.current.router.savedScroll()).toBe(735)
 
@@ -358,7 +361,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘⇧O opens the current note in a new window', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     const opened = result.current.router.route
 
@@ -369,7 +372,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘[ and ⌘] still traverse when the focused editor consumes the keydown', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     await act(() => press('d'))
     expect(result.current.router.route).toEqual({ kind: 'today' })
@@ -390,7 +393,7 @@ describe('app shortcuts', () => {
   })
 
   it('matches bracket history shortcuts by produced key on non-US layouts', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     const opened = result.current.router.route
     await act(() => press('d'))
@@ -407,7 +410,7 @@ describe('app shortcuts', () => {
   })
 
   it('mouse back and forward buttons traverse history', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     const opened = result.current.router.route
     await act(() => press('d'))
@@ -427,7 +430,7 @@ describe('app shortcuts', () => {
   })
 
   it('mouse history buttons still traverse when the surface under the pointer swallows them', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     const opened = result.current.router.route
     await act(() => press('d'))
@@ -445,7 +448,7 @@ describe('app shortcuts', () => {
   })
 
   it('ignores other mouse buttons and mutes history buttons behind the palette', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     const opened = result.current.router.route
     await act(() => press('d'))
@@ -470,14 +473,14 @@ describe('app shortcuts', () => {
   })
 
   it('⌘K opens the palette', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     expect(result.current.palette.open).toBe(false)
     await act(() => press('k'))
     expect(result.current.palette.open).toBe(true)
   })
 
   it('⌘F targets the current note and ⌘G traverses its matches', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('n'))
     const opened = result.current.router.route
     if (opened.kind !== 'note') {
@@ -502,7 +505,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘F and note commands target a peeked note', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() =>
       result.current.peek?.openPeek({
         kind: 'note',
@@ -519,7 +522,7 @@ describe('app shortcuts', () => {
   })
 
   it(String.raw`⌘\ toggles the sidebar in both directions`, async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     expect(result.current.sidebar.collapsed).toBe(false)
 
     await act(() => press('\\'))
@@ -530,7 +533,7 @@ describe('app shortcuts', () => {
   })
 
   it('defers ⌘K to a focused editor that already handled it', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     // The editor (meowdown's Mod-k) sits below window: it consumes the keydown
     // before it bubbles up, so the palette must stay closed.
     const editor = document.createElement('div')
@@ -546,14 +549,14 @@ describe('app shortcuts', () => {
   })
 
   it('⌘⇧A opens All notes', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
 
     await act(() => press('a', { shiftKey: true }))
     expect(result.current.router.route).toEqual({ kind: 'allNotes', filter: null })
   })
 
   it('⌘⇧W opens Wiki and ⌘⇧M opens Attachments', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
 
     await act(() => press('W', { shiftKey: true }))
     expect(result.current.router.route).toEqual({ kind: 'wiki', filter: null, language: null })
@@ -563,7 +566,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘⇧N starts a fresh chat when the chat route is active', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
 
     await act(() => press('j'))
     expect(result.current.router.route).toEqual({ kind: 'chat' })
@@ -573,7 +576,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘⇧N is inert outside the chat route', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
 
     await act(() => press('n', { shiftKey: true }))
     expect(result.current.router.route).toEqual({ kind: 'today' })
@@ -581,7 +584,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘1–⌘9 and ⌘0 open the first ten pinned notes', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
     const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
 
     for (const [index, digit] of digits.entries()) {
@@ -595,7 +598,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘number opens a pin from a focused editor that leaves the chord alone', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
     // Stands in for meowdown, whose heading toggles are ⌘⌥1–⌘⌥6: plain ⌘N is
     // not an editor binding, so the keydown bubbles to the app untouched.
     const toggleHeading = vi.fn()
@@ -622,7 +625,7 @@ describe('app shortcuts', () => {
   })
 
   it('matches pinned-number shortcuts by physical digit key on symbol-producing layouts', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
 
     await act(() => press('@', { code: 'Digit2' }))
 
@@ -630,7 +633,7 @@ describe('app shortcuts', () => {
   })
 
   it('strips Shift from physical digit fallback on layouts where digits require Shift', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
 
     await act(() => press('2', { code: 'Digit2', shiftKey: true }))
 
@@ -638,7 +641,7 @@ describe('app shortcuts', () => {
   })
 
   it('does not turn produced symbols with Shift into pinned-number shortcuts', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
 
     await act(() => press('@', { code: 'Digit2', shiftKey: true }))
 
@@ -646,7 +649,7 @@ describe('app shortcuts', () => {
   })
 
   it('opens pins only on the Mod key, not the other command key', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
 
     await act(() => press('2', NON_MOD_KEY))
 
@@ -654,7 +657,7 @@ describe('app shortcuts', () => {
   })
 
   it('loads pinned shortcuts with no sidebar mounted and while the sidebar is collapsed', async () => {
-    const { result, act } = await shortcutsHook({ pinned: { [GRAPH.root]: pinnedNotes() } })
+    const { result } = await shortcutsHook({ pinned: { [GRAPH.root]: pinnedNotes() } })
     await act(() => result.current.sidebar.toggleSidebar())
     await vi.waitFor(() => expect(result.current.pinned).toHaveLength(10))
 
@@ -665,7 +668,7 @@ describe('app shortcuts', () => {
   })
 
   it('uses the optimistic pinned order immediately', async () => {
-    const { result, act } = await pinnedShortcutsHook(pinnedNotes(2))
+    const { result } = await pinnedShortcutsHook(pinnedNotes(2))
     // A reorder lands in the note-row overlay before the file write does.
     await act(() =>
       app.noteRows.setOverlay('notes/pin-2.md', GRAPH.generation, {
@@ -680,7 +683,7 @@ describe('app shortcuts', () => {
   })
 
   it('missing and removed pinned slots leave the current route in place', async () => {
-    const { result, act } = await pinnedShortcutsHook(pinnedNotes(1))
+    const { result } = await pinnedShortcutsHook(pinnedNotes(1))
     await act(() => press('0'))
     expect(result.current.router.route).toEqual({ kind: 'today' })
 
@@ -693,7 +696,7 @@ describe('app shortcuts', () => {
   })
 
   it('opens a pinned daily note at its date', async () => {
-    const { result, act } = await pinnedShortcutsHook([
+    const { result } = await pinnedShortcutsHook([
       { path: 'daily/2025-05-02.md', title: '2025-05-02', dailyDate: '2025-05-02', pinnedOrder: 1 },
     ])
 
@@ -703,7 +706,7 @@ describe('app shortcuts', () => {
   })
 
   it('a saved command context reads pins from the current graph', async () => {
-    const { result, act } = await shortcutsHook({
+    const { result } = await shortcutsHook({
       pinned: {
         [GRAPH.root]: pinnedNotes(1),
         '/other': [{ path: 'notes/other.md', title: 'Other', dailyDate: null, pinnedOrder: 1 }],
@@ -727,7 +730,7 @@ describe('app shortcuts', () => {
   })
 
   it('pinned shortcuts do not navigate behind the palette', async () => {
-    const { result, act } = await pinnedShortcutsHook()
+    const { result } = await pinnedShortcutsHook()
     await act(() => result.current.palette.openPalette())
 
     await act(() => press('1'))
@@ -736,7 +739,7 @@ describe('app shortcuts', () => {
   })
 
   it('graph switching keeps its palette commands but no number shortcut', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
 
     await act(() => result.current.context.switchGraph(1))
 
@@ -746,7 +749,7 @@ describe('app shortcuts', () => {
   })
 
   it('matches uppercase keys (caps lock) and ignores auto-repeat', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'N', ...MOD_KEY }))
     })
@@ -760,7 +763,7 @@ describe('app shortcuts', () => {
   })
 
   it('is inert while the palette is open (modal owns the keyboard)', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => result.current.palette.openPalette())
     await act(() => press('n'))
     expect(result.current.router.route).toEqual({ kind: 'today' }) // nothing behind the overlay
@@ -770,7 +773,7 @@ describe('app shortcuts', () => {
   })
 
   it('⌘/ opens the cheat-sheet, closes it again, and mutes other shortcuts meanwhile', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => press('/'))
     expect(result.current.shortcuts.open).toBe(true)
 
@@ -785,7 +788,7 @@ describe('app shortcuts', () => {
   })
 
   it('ignores chords with extra modifiers', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     await act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ...MOD_KEY, altKey: true }))
     })
@@ -799,7 +802,7 @@ describe('app shortcuts on macOS', () => {
   })
 
   it('keeps the macOS webview fallback until the native menu is installed', async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     const event = new KeyboardEvent('keydown', {
       key: '\\',
       metaKey: true,
@@ -814,7 +817,7 @@ describe('app shortcuts on macOS', () => {
   })
 
   it(String.raw`leaves ⌘\ to the native macOS menu accelerator`, async () => {
-    const { result, act } = await shortcutsHook()
+    const { result } = await shortcutsHook()
     isNativeMenuInstalled.mockReturnValue(true)
     const event = new KeyboardEvent('keydown', {
       key: '\\',

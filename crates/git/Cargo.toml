@@ -1,0 +1,43 @@
+[package]
+name = "reflect-git"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Git backup and sync primitives over libgit2: init and adopt, commit, fetch, merge, push, with the merge decision table, the stale-lock recovery, the local-only and history-root guards, and note versions. No Tauri in it."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1.44"
+# Everything is vendored/static — libssh2 and openssl must never link against
+# homebrew dylibs the distributed app won't have (libssh2-sys only consults
+# pkg-config when LIBSSH2_SYS_USE_PKG_CONFIG is set, and vendored-openssl pins
+# the rest).
+git2 = { version = "0.21.0", default-features = false, features = [
+  "https",
+  "ssh",
+  "vendored-libgit2",
+  "vendored-openssl",
+] }
+# A pull checks incoming names the way APFS compares them: canonical
+# decomposition, then full Unicode case folding (`ß` is `ss` there, `ﬂ` is
+# `fl`), so it never misses a name the volume aliases (`paths.rs`).
+unicase = "2.9.0"
+unicode-normalization = "0.1.26"
+# The merge's check for a folder that holds a local-only folder.
+walkdir = "2.5.0"
+# Commit subjects never name a note whose frontmatter is not public.
+reflect-frontmatter = { workspace = true }
+reflect-graph-io = { workspace = true }
+reflect-graph-paths = { workspace = true }
+reflect-types = { workspace = true, features = ["git2"] }
+
+# Unguessable names for the entries a pull parks under `.reflect/tmp/`
+# (`displace.rs`), which walks with graph-io's descriptor-relative IO.
+[target.'cfg(unix)'.dependencies]
+getrandom = "0.4.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+reflect-graph-io = { workspace = true, features = ["test-support"] }

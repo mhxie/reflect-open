@@ -48,11 +48,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use reflect_graph_paths::{
-    folder_name_problem, same_folder, LocalOnlyFolders, LOCAL_ONLY_SETTINGS_KEY as SETTINGS_KEY,
+    LOCAL_ONLY_SETTINGS_KEY as SETTINGS_KEY, LocalOnlyFolders, folder_name_problem, same_folder,
 };
 use serde_json::{Map, Value};
 
-use crate::settings::{graph_section, GraphSection, SettingsDoc};
+use reflect_index::LocalOnlyRecord;
+
+use crate::settings::{GraphSection, SettingsDoc, graph_section};
 
 /// One graph's configuration as loaded at open.
 #[derive(Debug)]
@@ -95,20 +97,6 @@ impl Default for LoadedConfig {
 /// the read-only contract.
 const PLATFORM_ALLOWS_EDITING: bool = cfg!(all(desktop, unix));
 
-/// What a graph's index recorded about its local-only folders at its last
-/// open (`db::recorded_local_only_folders`).
-#[derive(Debug)]
-pub(crate) enum Recorded {
-    /// No index yet, or an index without a record: nothing to compare.
-    Nothing,
-    Names(Vec<String>),
-    /// The record exists but cannot be read; `corrupt` when it does not parse.
-    Unreadable {
-        reason: String,
-        corrupt: bool,
-    },
-}
-
 /// Load the configuration for the graph at `root`, already compared with
 /// what the graph's index recorded and stripped of any editability it cannot
 /// keep: no caller can skip either step.
@@ -121,7 +109,7 @@ pub(crate) fn load_for_root(root: &Path) -> LoadedConfig {
     finalize(
         with_recorded(
             loaded_from(crate::settings::load_document(), root, opened),
-            crate::db::recorded_local_only_folders(root),
+            reflect_index::recorded_local_only_folders(root),
         ),
         PLATFORM_ALLOWS_EDITING,
     )
@@ -247,10 +235,10 @@ fn quoted(names: &[String]) -> String {
 ///   does not parse carries nothing to keep, so with an entry for this graph
 ///   that names a valid folder, the index open records that entry in its
 ///   place; a record that merely could not be read is left as it is.
-pub(crate) fn with_recorded(mut loaded: LoadedConfig, recorded: Recorded) -> LoadedConfig {
+pub(crate) fn with_recorded(mut loaded: LoadedConfig, recorded: LocalOnlyRecord) -> LoadedConfig {
     let names = match recorded {
-        Recorded::Nothing => return loaded,
-        Recorded::Unreadable { reason, corrupt } => {
+        LocalOnlyRecord::Nothing => return loaded,
+        LocalOnlyRecord::Unreadable { reason, corrupt } => {
             // Only an entry that names at least one valid folder, and none
             // in both lists, replaces a corrupt record: an empty, broken, or
             // ambiguous entry is not a configuration.
@@ -274,7 +262,7 @@ pub(crate) fn with_recorded(mut loaded: LoadedConfig, recorded: Recorded) -> Loa
             ));
             return loaded;
         }
-        Recorded::Names(names) => names,
+        LocalOnlyRecord::Names(names) => names,
     };
     let listed = |name: &str| {
         loaded
@@ -603,10 +591,12 @@ mod tests {
             json!({ SETTINGS_KEY: { "/vaults/notes": { "folders": [], "rawRoot": "/raw" } } });
         let loaded = load(settings, "/vaults/notes");
         assert!(loaded.folders.is_none());
-        assert!(loaded
-            .warnings
-            .join(" ")
-            .contains("No valid local-only folder names"));
+        assert!(
+            loaded
+                .warnings
+                .join(" ")
+                .contains("No valid local-only folder names")
+        );
     }
 
     #[test]
@@ -653,8 +643,8 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn recorded(names: &[&str]) -> Recorded {
-        Recorded::Names(names.iter().map(|name| name.to_string()).collect())
+    fn recorded(names: &[&str]) -> LocalOnlyRecord {
+        LocalOnlyRecord::Names(names.iter().map(|name| name.to_string()).collect())
     }
 
     /// The entry for `/vaults/notes` (an existing folder in a real test is
@@ -672,7 +662,7 @@ mod tests {
         let config = with_recorded(loaded(&["secure"], Some("/raw")), recorded(&["SECURE"]));
         assert!(!config.unknown && config.record && config.warnings.is_empty());
         assert_eq!(names(&config), ["secure"]);
-        let config = with_recorded(LoadedConfig::default(), Recorded::Nothing);
+        let config = with_recorded(LoadedConfig::default(), LocalOnlyRecord::Nothing);
         assert!(!config.unknown && config.record && config.folders.is_none());
     }
 
@@ -722,10 +712,12 @@ mod tests {
                 .count()
         };
         assert_eq!(releases(&config), 1, "{:?}", config.warnings);
-        assert!(config
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("can now remove it")));
+        assert!(
+            config
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("can now remove it"))
+        );
         // After the index re-records without it, the leftover is silent.
         let config = with_recorded(
             entry(json!({ "folders": ["kids"], "released": ["secure"] })),
@@ -800,14 +792,16 @@ mod tests {
 
     #[test]
     fn a_recorded_name_todays_rules_refuse_stays_local_only_until_released() {
-        // Recorded before `daily` became a managed folder.
+        // LocalOnlyRecord before `daily` became a managed folder.
         let config = with_recorded(entry(json!({ "folders": [] })), recorded(&["daily"]));
         assert!(config.unknown);
         assert_eq!(names(&config), ["daily"]);
-        assert!(config
-            .folders
-            .as_ref()
-            .is_some_and(|folders| folders.contains("daily/2026-07-04.md")));
+        assert!(
+            config
+                .folders
+                .as_ref()
+                .is_some_and(|folders| folders.contains("daily/2026-07-04.md"))
+        );
         let config = with_recorded(
             entry(json!({ "folders": [], "released": ["daily"] })),
             recorded(&["daily"]),
@@ -832,7 +826,7 @@ mod tests {
 
     #[test]
     fn an_unreadable_record_pauses_and_only_an_entry_may_replace_a_corrupt_one() {
-        let corrupt = || Recorded::Unreadable {
+        let corrupt = || LocalOnlyRecord::Unreadable {
             reason: "the record does not parse".into(),
             corrupt: true,
         };
@@ -859,7 +853,7 @@ mod tests {
         // A record that merely could not be read is never replaced.
         let config = with_recorded(
             entry(json!({ "folders": ["secure"] })),
-            Recorded::Unreadable {
+            LocalOnlyRecord::Unreadable {
                 reason: "database is locked".into(),
                 corrupt: false,
             },
@@ -955,10 +949,12 @@ mod tests {
         let mobile = finalize_with(editable(), false, Some(library));
         assert!(stripped(&mobile, "desktop-only"), "{:?}", mobile.warnings);
         // Only editability goes: the folders stay local-only.
-        assert!(mobile
-            .folders
-            .as_ref()
-            .is_some_and(|folders| folders.contains("finance/secure/x.md")));
+        assert!(
+            mobile
+                .folders
+                .as_ref()
+                .is_some_and(|folders| folders.contains("finance/secure/x.md"))
+        );
 
         // Nothing editable, nothing to report.
         let plain = finalize_with(entry(json!({ "folders": ["secure"] })), false, None);
@@ -996,7 +992,7 @@ mod tests {
         let missing = with_recorded(editable(), recorded(&["secure", "kids"]));
         let corrupt = with_recorded(
             editable(),
-            Recorded::Unreadable {
+            LocalOnlyRecord::Unreadable {
                 reason: "the record does not parse".into(),
                 corrupt: true,
             },
@@ -1079,9 +1075,11 @@ mod tests {
         let settings = doc(json!({ SETTINGS_KEY: { spelled: { "folders": ["secure"] } } }));
         let loaded = from_settings(&settings, &root, &[]);
         assert!(loaded.folders.is_some());
-        assert!(loaded
-            .warnings
-            .iter()
-            .all(|warning| !warning.contains("not a graph")));
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("not a graph"))
+        );
     }
 }

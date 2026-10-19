@@ -9,7 +9,7 @@ import type {
 } from '@ai-sdk/provider'
 import type { RetrievalHit } from '../../embeddings/retrieval-service.ts'
 import { createAssetPrivacyService } from '../../assets/asset-privacy-service.ts'
-import { ReflectError } from '../../errors.ts'
+import { AppError } from '../../errors.ts'
 import { NO_LOCAL_ONLY_FOLDERS } from '../../graph/local-only.ts'
 import { project } from '../../indexing/flow-test-harness.ts'
 import { createNoteListService } from '../../indexing/note-list-service.ts'
@@ -96,7 +96,7 @@ function graphOver(
   vi.spyOn(noteFile, 'readShareable').mockImplementation(async (path) => {
     const content = effects.readNoteFn !== undefined ? await effects.readNoteFn(path) : notes[path]
     if (content === undefined) {
-      throw new ReflectError('notFound', `${path} not found`)
+      throw new AppError('notFound', `${path} not found`)
     }
     return { kind: 'content', content }
   })
@@ -105,7 +105,7 @@ function graphOver(
     vi.spyOn(retrieval, 'retrieve').mockImplementation(effects.retrieveFn)
   }
   const xArchive = createTestXArchiveService()
-  const assetReferences = { notePaths: async () => [] }
+  const assetReferences = { notePaths: () => [] }
   const graphSession = createTestGraphSessionService({ graph: { generation: 1 } })
   const assetStore = createTestAssetStoreService()
   const assetPrivacy = createAssetPrivacyService({
@@ -126,7 +126,7 @@ function graphOver(
     noteFile,
     assetStore,
     noteList: createNoteListService({ database }),
-    dailyNotes: { listDailyNotes: async () => [] },
+    dailyNotes: { listDailyNotes: () => [] },
     assetReferences,
     assetPrivacy,
     xArchive,
@@ -203,13 +203,15 @@ function sequence(
   results: LanguageModelV3StreamResult[],
 ): () => Promise<LanguageModelV3StreamResult> {
   let index = 0
-  return async () => {
+  return () => {
     const next = results[index]
     index += 1
     if (next === undefined) {
-      throw new Error(`mock model called ${index} times but only ${results.length} turns staged`)
+      return Promise.reject(
+        new Error(`mock model called ${index} times but only ${results.length} turns staged`),
+      )
     }
-    return next
+    return Promise.resolve(next)
   }
 }
 
@@ -250,7 +252,6 @@ const PUBLIC_HIT: RetrievalHit = {
   heading: null,
   isPrivate: false,
   assetTextHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-  hasConflict: false,
 }
 
 const PRIVATE_HIT: RetrievalHit = {
@@ -260,7 +261,6 @@ const PRIVATE_HIT: RetrievalHit = {
   snippet: '',
   heading: null,
   isPrivate: true,
-  hasConflict: false,
 }
 
 describe('ChatEngineService.streamTurn', () => {
@@ -508,7 +508,9 @@ describe('ChatEngineService.streamTurn history privacy', () => {
         semanticSearchEnabled: false,
         customSystemPrompt: '',
         context: null,
-        tools: tools({ readNoteFn: async () => `# ${PRIVATE_TITLE}\n\n${PRIVATE_BODY}\n` }),
+        tools: tools({
+          readNoteFn: () => Promise.resolve(`# ${PRIVATE_TITLE}\n\n${PRIVATE_BODY}\n`),
+        }),
       }),
     )
     const complete = events.at(-1)
@@ -630,8 +632,8 @@ describe('streamChatTurn', () => {
         customSystemPrompt: '',
         context: null,
         tools: tools({
-          retrieveFn: async () => [PUBLIC_HIT, PRIVATE_HIT],
-          readNoteFn: async () => 'launch plan\n',
+          retrieveFn: () => Promise.resolve([PUBLIC_HIT, PRIVATE_HIT]),
+          readNoteFn: () => Promise.resolve('launch plan\n'),
         }),
       }),
     )
@@ -673,8 +675,8 @@ describe('streamChatTurn', () => {
         customSystemPrompt: '',
         context: null,
         tools: tools({
-          retrieveFn: async () => [PUBLIC_HIT, PRIVATE_HIT],
-          readNoteFn: async () => 'launch plan\n',
+          retrieveFn: () => Promise.resolve([PUBLIC_HIT, PRIVATE_HIT]),
+          readNoteFn: () => Promise.resolve('launch plan\n'),
         }),
       }),
     )
@@ -762,8 +764,8 @@ describe('streamChatTurn', () => {
         customSystemPrompt: '',
         context: null,
         tools: tools({
-          retrieveFn: async () => [PUBLIC_HIT],
-          readNoteFn: async () => 'launch plan\n',
+          retrieveFn: () => Promise.resolve([PUBLIC_HIT]),
+          readNoteFn: () => Promise.resolve('launch plan\n'),
         }),
       }),
     )
@@ -807,8 +809,8 @@ describe('streamChatTurn', () => {
         customSystemPrompt: '',
         context: null,
         tools: tools({
-          retrieveFn: async () => [PUBLIC_HIT],
-          readNoteFn: async () => 'launch plan\n',
+          retrieveFn: () => Promise.resolve([PUBLIC_HIT]),
+          readNoteFn: () => Promise.resolve('launch plan\n'),
         }),
       }),
     )
@@ -846,7 +848,10 @@ describe('streamChatTurn', () => {
         semanticSearchEnabled: true,
         customSystemPrompt: '',
         context: null,
-        tools: tools({ retrieveFn: async () => [PUBLIC_HIT], readNoteFn: async () => 'body\n' }),
+        tools: tools({
+          retrieveFn: () => Promise.resolve([PUBLIC_HIT]),
+          readNoteFn: () => Promise.resolve('body\n'),
+        }),
       }),
     )
 

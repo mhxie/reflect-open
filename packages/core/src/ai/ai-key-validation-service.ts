@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { AiProviderId, HostedAiProviderId } from '../settings/schema.ts'
 import { anthropicDirectBrowserAccessHeaders } from './anthropic-headers.ts'
 import { APP_REVIEW_STUB_KEY } from './app-review-demo.ts'
@@ -93,7 +94,7 @@ export interface AiKeyValidationService {
    * probed through the on-device transport (`OnDeviceHttpService`), like every
    * other call to it.
    */
-  validate(input: ApiKeyValidationInput): Promise<ApiKeyValidation>
+  validate(input: ApiKeyValidationInput): MaybePromise<ApiKeyValidation>
 }
 
 export interface AiKeyValidationServiceDeps {

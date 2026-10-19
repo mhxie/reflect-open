@@ -16,7 +16,7 @@ describe('ActivityTray', () => {
 
   it('gathers background work in progress', async () => {
     const view = await renderInApp(<ActivityTray />)
-    act(() => {
+    await act(() => {
       const handle = view.appServices.operations.start('Describing assets', { background: true })
       handle.progress(1, 4)
       view.app.semanticSearch.setIndexProgress({ done: 30, total: 120 })
@@ -35,7 +35,7 @@ describe('ActivityTray', () => {
 
   it('leaves a quick index pass and foreground operations out', async () => {
     const view = await renderInApp(<ActivityTray />)
-    act(() => {
+    await act(() => {
       view.appServices.operations.start('Copying the reply')
       view.app.indexLifecycle.setFileProgress({ done: 50, total: 2000, worked: 0 })
     })
@@ -46,7 +46,7 @@ describe('ActivityTray', () => {
 
   it('flags problems, which can be dismissed, and lists finished work', async () => {
     const view = await renderInApp(<ActivityTray />)
-    act(() => {
+    await act(() => {
       const { operations } = view.appServices
       operations.start('Backing up').fail('Too large to back up (kept local): big.mov')
       operations.start('Rebuilding search index', { background: true }).dismiss()

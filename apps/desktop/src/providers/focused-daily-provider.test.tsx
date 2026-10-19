@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
 import { useRouter } from '@/routing/router.tsx'
@@ -19,7 +20,7 @@ function useFocusedDaily() {
 
 describe('FocusedDailyProvider', () => {
   it('reads back the focused day, and clears it with null', async () => {
-    const { result, act } = await renderHookInApp(useFocusedDaily, { wrapper })
+    const { result } = await renderHookInApp(useFocusedDaily, { wrapper })
     expect(result.current.date).toBeNull()
 
     await act(() => result.current.set('2026-06-01'))
@@ -30,7 +31,7 @@ describe('FocusedDailyProvider', () => {
   })
 
   it('defaults to null with a no-op setter when no provider is mounted', async () => {
-    const { result, act } = await renderHookInApp(useFocusedDaily)
+    const { result } = await renderHookInApp(useFocusedDaily)
     expect(result.current.date).toBeNull()
     await act(() => result.current.set('2026-06-01'))
     expect(result.current.date).toBeNull()
@@ -53,7 +54,7 @@ describe('useDailyContextTarget', () => {
   }
 
   it('follows the focused day, then snaps to the new routed day on navigation', async () => {
-    const { result, act } = await renderHookInApp(useHarness, routed)
+    const { result } = await renderHookInApp(useHarness, routed)
     // Nothing focused yet → the routed subject.
     expect(result.current.target).toEqual(ROUTED)
 
@@ -66,7 +67,7 @@ describe('useDailyContextTarget', () => {
   })
 
   it('resets even when re-targeting the current entry (⌘D / calendar pick on it)', async () => {
-    const { result, act } = await renderHookInApp(useHarness, routed)
+    const { result } = await renderHookInApp(useHarness, routed)
     await act(() => result.current.setFocused('2026-06-01'))
     expect(result.current.target).toEqual({ kind: 'daily', date: '2026-06-01' })
 
@@ -77,7 +78,7 @@ describe('useDailyContextTarget', () => {
   })
 
   it('ignores the focused day off the daily views (a note route keeps its note)', async () => {
-    const { result, act } = await renderHookInApp(useHarness, routed)
+    const { result } = await renderHookInApp(useHarness, routed)
     await act(() => result.current.navigate({ kind: 'note', path: 'notes/a.md' }))
     // Focus set while on a note route is irrelevant — the sidebar stays the note.
     await act(() => result.current.setFocused('2026-06-01'))

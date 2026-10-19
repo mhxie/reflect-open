@@ -23,7 +23,6 @@ export interface RetrievalHit {
    * Attachment-text identity from the same snapshot as the snippet.
    */
   assetTextHash?: string
-  hasConflict: boolean
   /**
    * Hybrid only: which leg found the note — wording, meaning, or both.
    */

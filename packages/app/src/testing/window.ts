@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { Unlisten, WindowBootstrap } from '@reflect/core'
 import {
   MAIN_WINDOW_LABEL,
@@ -50,7 +51,7 @@ export interface TestWindowService extends WindowService {
 export interface TestWindowServiceOptions {
   label?: string
   bootstrap?: WindowBootstrap
-  openNoteWindow?: (deepLink: string) => boolean | Promise<boolean>
+  openNoteWindow?: (deepLink: string) => MaybePromise<boolean>
 }
 
 class TestWindowServiceImpl implements TestWindowService {
@@ -88,15 +89,15 @@ class TestWindowServiceImpl implements TestWindowService {
     return (await this.#options?.openNoteWindow?.(deepLink)) ?? true
   }
 
-  async closeSecondaryWindows(): Promise<void> {
+  closeSecondaryWindows(): void {
     this.#closeCalls += 1
   }
 
-  async bootstrap(): Promise<WindowBootstrap> {
+  bootstrap(): Promise<WindowBootstrap> {
     if (this.#options?.bootstrap === undefined) {
-      throw new Error('test window: no bootstrap configured')
+      return Promise.reject(new Error('test window: no bootstrap configured'))
     }
-    return this.#options.bootstrap
+    return Promise.resolve(this.#options.bootstrap)
   }
 
   subscribeNavigate(listener: (url: string) => void): Unlisten {
@@ -116,11 +117,11 @@ class TestWindowServiceImpl implements TestWindowService {
     return listeners.add(listener)
   }
 
-  async focusedWindowLabel(): Promise<string | null> {
+  focusedWindowLabel(): string | null {
     return this.#focused
   }
 
-  async emitTo(target: string, event: string, payload: unknown): Promise<void> {
+  emitTo(target: string, event: string, payload: unknown): void {
     this.#emittedEvents.push({ label: target, event, payload })
   }
 
@@ -131,11 +132,11 @@ class TestWindowServiceImpl implements TestWindowService {
     }
   }
 
-  async hide(): Promise<void> {
+  hide(): void {
     this.#isHidden = true
   }
 
-  async toggleDevtools(): Promise<void> {
+  toggleDevtools(): void {
     this.#toggles += 1
   }
 

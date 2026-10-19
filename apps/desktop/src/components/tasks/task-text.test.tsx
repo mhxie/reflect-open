@@ -32,7 +32,6 @@ function row(path: string, isPrivate: boolean): NoteRow {
     title: 'Plan',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -40,7 +39,9 @@ function row(path: string, isPrivate: boolean): NoteRow {
 
 beforeEach(() => {
   previews.length = 0
-  getNote.mockReset().mockImplementation(async (path) => row(path, path === 'notes/locked.md'))
+  getNote
+    .mockReset()
+    .mockImplementation((path) => Promise.resolve(row(path, path === 'notes/locked.md')))
 })
 
 async function renderFor(notePath: string): Promise<void> {

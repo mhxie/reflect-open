@@ -1,0 +1,574 @@
+//! The index write path: note projections in, rows out.
+//!
+//! The TS↔Rust payload contract lives here ([`IndexedNote`]); all mutations are
+//! plain functions over a [`Connection`] so the command layer ([`super`]) owns
+//! transactions and generation gating while these stay directly unit-testable.
+
+use reflect_graph_paths::LocalOnlyFolders;
+use reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY;
+use reflect_index_schema::cjk::cjk_column_text;
+use rusqlite::{Connection, params};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+
+use reflect_types::{AppError, AppResult};
+
+/// A note's extracted projection, built in TS (Plan 03) and applied as one
+/// row-set. Mirrors the `indexedNoteSchema` zod contract in
+/// `packages/core/src/indexing/indexed-note.ts` field-for-field (serde
+/// `rename_all = "camelCase"` matches the camelCase payload); a change on either
+/// side must be mirrored on the other.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexedNote {
+    pub(super) path: String,
+    pub(super) id: Option<String>,
+    pub(super) title: String,
+    pub(super) display_title: Option<String>,
+    pub(super) lang: Option<String>,
+    pub(super) title_key: String,
+    /// ASCII-folded graph path: what a path-qualified link joins against.
+    pub(super) path_key: String,
+    /// 'daily' | 'note' | 'template' — templates are excluded from note surfaces.
+    pub(super) kind: String,
+    pub(super) daily_date: Option<String>,
+    pub(super) is_private: bool,
+    pub(super) is_pinned: bool,
+    pub(super) pinned_order: Option<f64>,
+    pub(super) has_content: bool,
+    #[serde(default)]
+    pub(super) has_device_only_content: bool,
+    /// Characters of display text — what the user wrote, sans Markdown syntax.
+    pub(super) body_chars: i64,
+    /// The published GitHub Gist's html url, when the note has one.
+    pub(super) gist_url: Option<String>,
+    /// The body changed since it was last published to the gist.
+    pub(super) gist_stale: bool,
+    /// The `aiSummary` frontmatter block summarizes the current body.
+    pub(super) summary_fresh: bool,
+    pub(super) file_hash: String,
+    pub(super) mtime: i64,
+    pub(super) text: String,
+    /// Description text of referenced assets (Plan 20), folded into the FTS
+    /// `body` only — never `preview` or anything AI-reachable.
+    #[serde(default)]
+    pub(super) asset_text: String,
+    pub(super) preview: String,
+    /// The fresh `aiSummary` text, which only the All Notes row shows; empty
+    /// when the note has none.
+    #[serde(default)]
+    pub(super) summary: String,
+    pub(super) links: Vec<IndexedLink>,
+    pub(super) tags: Vec<IndexedTag>,
+    pub(super) aliases: Vec<IndexedAlias>,
+    /// Every folded spelling this note answers to (see `note_claims`).
+    pub(super) claims: Vec<IndexedClaim>,
+    /// Emails the note owns via `- Email:` contact-field bullets.
+    pub(super) emails: Vec<IndexedEmail>,
+    pub(super) assets: Vec<String>,
+    pub(super) tasks: Vec<IndexedTask>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IndexedLink {
+    pub(super) kind: String,
+    pub(super) target_raw: String,
+    pub(super) target_key: String,
+    /// Folded vault path when the link names a file; None when it names a note.
+    pub(super) target_path_key: Option<String>,
+    pub(super) alias: Option<String>,
+    pub(super) pos_from: i64,
+    pub(super) pos_to: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IndexedTag {
+    pub(super) tag: String,
+    pub(super) tag_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IndexedAlias {
+    pub(super) alias: String,
+    pub(super) alias_key: String,
+}
+
+/// Precedence of the spellings a note answers to (`note_claims.tier`): the
+/// lowest tier claiming a key wins it. Mirrors `CLAIM_TIER` in
+/// `packages/core/src/indexing/indexed-note.ts`; the numbers are the storage
+/// encoding migration 0019 and the CLI read.
+pub(super) mod claim_tier {
+    /// Calendar-valid daily date.
+    pub const DAILY_DATE: i64 = 1;
+    /// Authored title. Production writes receive it from TypeScript inside
+    /// `IndexedClaim`; only the test fixtures restate it natively.
+    #[cfg(test)]
+    pub const TITLE: i64 = 2;
+    /// Frontmatter or derived alias (same test-only story as `TITLE`).
+    #[cfg(test)]
+    pub const ALIAS: i64 = 3;
+    /// Filename stem — the weakest address.
+    pub const BASENAME: i64 = 4;
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IndexedClaim {
+    /// Folded spelling this note answers to.
+    pub(super) key: String,
+    /// One of [`claim_tier`].
+    pub(super) tier: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IndexedEmail {
+    pub(super) email: String,
+    pub(super) email_key: String,
+}
+
+/// One round task (Plan 18). `ast_path` is the task's address in the note
+/// body's block AST (a JSON array of child indexes) and, with `note_path`, the
+/// row's primary key.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IndexedTask {
+    pub(super) ast_path: String,
+    /// The task's first paragraph as Markdown, marker excluded.
+    pub(super) markdown: String,
+    /// Ancestor list items' first paragraphs as Markdown, outermost first.
+    #[serde(default)]
+    pub(super) breadcrumbs: Vec<String>,
+    pub(super) checked: bool,
+    /// Explicit due date (first `[[YYYY-MM-DD]]` in the item), or None.
+    pub(super) due_date: Option<String>,
+}
+
+/// Replace all rows for `note.path` with its current projection. Caller wraps
+/// this in a transaction; statements are cached so a batch rebuild reuses them.
+///
+/// We clear the note via `remove_note` (which deletes the `notes` row and lets
+/// `ON DELETE CASCADE` clear every child table) and then insert fresh rows.
+/// The schema's foreign keys — not a hand-maintained `DELETE` list here — are the
+/// single source of truth for what belongs to a note, so new child tables (Plan
+/// 09 embeddings, etc.) need no change to this function.
+///
+/// With local-only folders, a note inside one is stored private whatever its
+/// projection says: the TypeScript projection already sets the flag, and
+/// this keeps it set for any projection that arrives without it.
+pub(super) fn apply_note(
+    conn: &Connection,
+    note: &IndexedNote,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
+    let is_private =
+        note.is_private || local_only.is_some_and(|folders| folders.contains(&note.path));
+    let search_body = if note.asset_text.is_empty() {
+        note.text.clone()
+    } else {
+        format!("{}\n{}", note.text, note.asset_text)
+    };
+    let restricted = is_private || note.has_device_only_content;
+    let restriction = "note_path = ?1 AND (?2 OR EXISTS (SELECT 1 FROM notes WHERE path = ?1 AND (is_private OR has_device_only_content))) AND (?2 != COALESCE((SELECT is_private OR has_device_only_content FROM notes WHERE path = ?1), 0) OR ?3 != COALESCE((SELECT body FROM search_fts WHERE path = ?1), ''))";
+    conn.execute(
+        &format!("DELETE FROM embedding_vectors WHERE rowid IN (SELECT id FROM embedding_chunks WHERE {restriction})"),
+        params![note.path, restricted, search_body],
+    )?;
+    conn.execute(
+        &format!("DELETE FROM embedding_chunks WHERE {restriction}"),
+        params![note.path, restricted, search_body],
+    )?;
+    remove_note(conn, &note.path)?;
+
+    conn.prepare_cached(
+        "INSERT INTO notes(path, id, title, title_key, path_key, kind, daily_date, is_private, is_pinned, pinned_order, gist_url, gist_stale, file_hash, mtime, updated_at, preview, has_content, body_chars, has_device_only_content, asset_text_hash, summary_fresh, display_title, lang, summary)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+    )?
+    .execute(params![
+        note.path,
+        note.id,
+        note.title,
+        note.title_key,
+        note.path_key,
+        note.kind,
+        note.daily_date,
+        i64::from(is_private),
+        i64::from(note.is_pinned),
+        note.pinned_order,
+        note.gist_url,
+        i64::from(note.gist_stale),
+        note.file_hash,
+        note.mtime,
+        note.preview,
+        i64::from(note.has_content),
+        note.body_chars,
+        i64::from(note.has_device_only_content),
+        Sha256::digest(note.asset_text.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        i64::from(note.summary_fresh),
+        note.display_title,
+        note.lang,
+        note.summary,
+    ])?;
+    {
+        let mut stmt = conn.prepare_cached(
+            "INSERT INTO links(source_path, kind, target_raw, target_key, target_path_key, alias, pos_from, pos_to)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for link in &note.links {
+            stmt.execute(params![
+                note.path,
+                link.kind,
+                link.target_raw,
+                link.target_key,
+                link.target_path_key,
+                link.alias,
+                link.pos_from,
+                link.pos_to
+            ])?;
+        }
+    }
+    {
+        let mut stmt =
+            conn.prepare_cached("INSERT INTO tags(note_path, tag, tag_key) VALUES(?1, ?2, ?3)")?;
+        for tag in &note.tags {
+            stmt.execute(params![note.path, tag.tag, tag.tag_key])?;
+        }
+    }
+    {
+        let mut stmt = conn.prepare_cached(
+            "INSERT INTO aliases(note_path, alias, alias_key) VALUES(?1, ?2, ?3)",
+        )?;
+        for alias in &note.aliases {
+            stmt.execute(params![note.path, alias.alias, alias.alias_key])?;
+        }
+    }
+    {
+        let mut stmt = conn
+            .prepare_cached("INSERT INTO note_claims(note_path, key, tier) VALUES(?1, ?2, ?3)")?;
+        for claim in &note.claims {
+            stmt.execute(params![note.path, claim.key, claim.tier])?;
+        }
+    }
+    {
+        let mut stmt = conn.prepare_cached(
+            "INSERT INTO note_emails(note_path, email, email_key) VALUES(?1, ?2, ?3)",
+        )?;
+        for email in &note.emails {
+            stmt.execute(params![note.path, email.email, email.email_key])?;
+        }
+    }
+    {
+        let mut stmt =
+            conn.prepare_cached("INSERT INTO assets(note_path, asset_path) VALUES(?1, ?2)")?;
+        for asset in &note.assets {
+            stmt.execute(params![note.path, asset])?;
+        }
+    }
+    {
+        let mut stmt = conn.prepare_cached(
+            "INSERT INTO tasks(note_path, ast_path, markdown, breadcrumbs, checked, due_date) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for task in &note.tasks {
+            let breadcrumbs = serde_json::to_string(&task.breadcrumbs)
+                .map_err(|err| AppError::io(format!("serialize task breadcrumbs: {err}")))?;
+            stmt.execute(params![
+                note.path,
+                task.ast_path,
+                task.markdown,
+                breadcrumbs,
+                i64::from(task.checked),
+                task.due_date
+            ])?;
+        }
+    }
+    // The FTS body carries the note text plus any referenced assets' description
+    // text (Plan 20), so a query matching a description surfaces the note. Only
+    // the search index is enriched — `preview` and the AI-reachable text above
+    // stay the note body alone.
+    // CJK runs index once more as character pairs, so a word inside a clause
+    // matches, along with the words glued to them (migration 0023).
+    let cjk = format!(
+        "{} {}",
+        cjk_column_text(&note.title),
+        cjk_column_text(&search_body)
+    );
+    conn.prepare_cached("INSERT INTO search_fts(path, title, body, cjk) VALUES(?1, ?2, ?3, ?4)")?
+        .execute(params![note.path, note.title, search_body, cjk.trim()])?;
+    Ok(())
+}
+
+/// Path-derived addressing for a moved row: the folded destination path plus
+/// the claims that derive from it. Folded in TypeScript — Rust never folds.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovedNoteAddress {
+    pub(super) path_key: String,
+    pub(super) basename_key: String,
+    /// Set only for a calendar-valid `daily/YYYY-MM-DD.md` destination.
+    pub(super) daily_date: Option<String>,
+}
+
+/// Move every row keyed by `from` to `to` — the projection half of a file
+/// rename (Plan 17). The row *moves* rather than being re-created so nothing
+/// derived is lost: pinned state, conflict flags, and (critically) embedding
+/// chunks, whose vectors must survive a rename — re-embedding costs the user
+/// real BYOK money for identical content.
+///
+/// Caller wraps this in a transaction with `defer_foreign_keys` ON: the child
+/// tables reference `notes(path)` and SQLite would otherwise reject updating
+/// the parent key while children point at it.
+///
+/// An occupied destination refuses (loudly), like the filesystem half
+/// (`move_note_file`): the collision probe raced something — the caller's
+/// transaction rolls back, the rename reports failed, and the filename
+/// drifts until the next settled rename retries. One rule, no adoption
+/// heuristics. A missing `from` row is fine: an unindexed file can still be
+/// renamed, and the watcher indexes it at the new path.
+pub(super) fn move_note(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+    address: &MovedNoteAddress,
+) -> AppResult<()> {
+    let occupied: bool = conn
+        .prepare_cached("SELECT 1 FROM notes WHERE path = ?1")?
+        .exists(params![to])?;
+    if occupied {
+        return Err(AppError::io(format!(
+            "cannot move note: {to} is already indexed"
+        )));
+    }
+    let moved = conn
+        .prepare_cached("UPDATE notes SET path = ?2, path_key = ?3 WHERE path = ?1")?
+        .execute(params![from, to, address.path_key])?;
+    conn.prepare_cached("UPDATE note_claims SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    if moved > 0 {
+        // Title and alias claims live in the content and ride along; the
+        // path-derived tiers are re-stated for the destination. The NOT EXISTS
+        // guard mirrors `projectNoteClaims`'s seen-set: a key a carried claim
+        // already holds is not claimed again. (A move that changes which tier
+        // should own a key converges on the next reprojection.)
+        conn.prepare_cached("DELETE FROM note_claims WHERE note_path = ?1 AND tier IN (?2, ?3)")?
+            .execute(params![to, claim_tier::DAILY_DATE, claim_tier::BASENAME])?;
+        if let Some(daily_date) = &address.daily_date {
+            conn.prepare_cached(
+                "INSERT INTO note_claims(note_path, key, tier)
+                 SELECT ?1, ?2, ?3
+                 WHERE NOT EXISTS (SELECT 1 FROM note_claims WHERE note_path = ?1 AND key = ?2)",
+            )?
+            .execute(params![to, daily_date, claim_tier::DAILY_DATE])?;
+        }
+        conn.prepare_cached(
+            "INSERT INTO note_claims(note_path, key, tier)
+             SELECT ?1, ?2, ?3
+             WHERE NOT EXISTS (SELECT 1 FROM note_claims WHERE note_path = ?1 AND key = ?2)",
+        )?
+        .execute(params![to, address.basename_key, claim_tier::BASENAME])?;
+    }
+    conn.prepare_cached("UPDATE links SET source_path = ?2 WHERE source_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE tags SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE aliases SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE note_emails SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE assets SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE tasks SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE embedding_chunks SET note_path = ?2 WHERE note_path = ?1")?
+        .execute(params![from, to])?;
+    conn.prepare_cached("UPDATE search_fts SET path = ?2 WHERE path = ?1")?
+        .execute(params![from, to])?;
+    Ok(())
+}
+
+/// Wipe every derived table (for a full rebuild driven by TS). Deleting `notes`
+/// cascades to every child table; `search_fts` (a virtual table, no FK) is
+/// cleared explicitly. `index_meta` is intentionally preserved across a rebuild.
+///
+/// `keep_embeddings` spares the embedding tables, which have no FK to `notes`:
+/// a projection-version rebuild changes how rows are derived, not the chunk
+/// text the vectors were computed from, and re-embedding a graph with a large
+/// model takes far longer than re-indexing it. Chunks keyed by content hash
+/// stay valid; [`prune_orphan_embeddings`] drops those whose note is gone.
+pub(super) fn clear_index(conn: &Connection, keep_embeddings: bool) -> AppResult<()> {
+    if keep_embeddings {
+        conn.execute_batch("DELETE FROM embedding_vectors WHERE rowid IN (SELECT id FROM embedding_chunks WHERE note_path IN (SELECT path FROM notes WHERE is_private OR has_device_only_content)); DELETE FROM embedding_chunks WHERE note_path IN (SELECT path FROM notes WHERE is_private OR has_device_only_content);")?;
+    }
+    conn.execute_batch("DELETE FROM notes; DELETE FROM search_fts;")?;
+    if !keep_embeddings {
+        conn.execute_batch("DELETE FROM embedding_vectors; DELETE FROM embedding_chunks;")?;
+    }
+    Ok(())
+}
+
+/// Drop embeddings whose note no longer has a row: what a rebuild that kept
+/// embeddings leaves behind for notes deleted since. `keep` names notes the
+/// rebuild couldn't read (iCloud-evicted) whose vectors are still good.
+/// Returns the chunks removed.
+pub(super) fn prune_orphan_embeddings(conn: &Connection, keep: &[String]) -> AppResult<usize> {
+    const ORPHANS: &str = "note_path NOT IN (SELECT path FROM notes)
+         AND note_path NOT IN (SELECT value FROM json_each(?1))";
+    let keep = serde_json::to_string(keep).map_err(|err| AppError::io(err.to_string()))?;
+    conn.execute(
+        &format!(
+            "DELETE FROM embedding_vectors WHERE rowid IN (
+               SELECT id FROM embedding_chunks WHERE {ORPHANS})"
+        ),
+        [&keep],
+    )?;
+    let removed = conn.execute(
+        &format!("DELETE FROM embedding_chunks WHERE {ORPHANS}"),
+        [&keep],
+    )?;
+    Ok(removed)
+}
+
+/// Re-stamp a note row's stored `mtime` (and `updated_at`, which `apply_note`
+/// keeps equal to it) without touching the projection. The reconcile calls
+/// this when a file's content hash still matches but its listed mtime doesn't
+/// — otherwise the stale stamp costs a re-read on every future pass. A path
+/// with no row matches nothing: a touch must never resurrect a removed note.
+pub(super) fn touch_note(conn: &Connection, path: &str, mtime: i64) -> AppResult<()> {
+    conn.prepare_cached("UPDATE notes SET mtime = ?2, updated_at = ?2 WHERE path = ?1")?
+        .execute(params![path, mtime])?;
+    Ok(())
+}
+
+/// Drop every row belonging to `path` (the `notes` row cascades to child
+/// tables; `search_fts` is standalone).
+pub(super) fn remove_note(conn: &Connection, path: &str) -> AppResult<()> {
+    conn.prepare_cached("DELETE FROM notes WHERE path = ?1")?
+        .execute(params![path])?;
+    conn.prepare_cached("DELETE FROM search_fts WHERE path = ?1")?
+        .execute(params![path])?;
+    Ok(())
+}
+
+/// Mark one stored row private (a row move that landed inside a local-only
+/// folder: moves carry the old row's flag without reprojecting).
+pub(super) fn mark_private(conn: &Connection, path: &str) -> AppResult<()> {
+    set_private(conn, path, true)
+}
+
+/// Set a stored row's privacy flag (a no-op when no row is stored).
+pub(super) fn set_private(conn: &Connection, path: &str, private: bool) -> AppResult<()> {
+    conn.prepare_cached("UPDATE notes SET is_private = ?2 WHERE path = ?1")?
+        .execute(params![path, private])?;
+    Ok(())
+}
+
+/// A stored row's privacy flag, or `None` when no row is stored.
+pub(super) fn row_private(conn: &Connection, path: &str) -> AppResult<Option<bool>> {
+    match conn.query_row(
+        "SELECT is_private FROM notes WHERE path = ?1",
+        params![path],
+        |row| row.get::<_, bool>(0),
+    ) {
+        Ok(private) => Ok(Some(private)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Mark every stored row inside a local-only folder private: the open-time
+/// sweep for rows written before the folder was configured, which the
+/// content-hash-gated reconcile would never reproject. Returns how many rows
+/// changed.
+pub(super) fn mark_local_only_private(
+    conn: &Connection,
+    folders: &LocalOnlyFolders,
+) -> AppResult<usize> {
+    let paths: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT path FROM notes WHERE is_private = 0")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut marked = 0;
+    for path in paths.iter().filter(|path| folders.contains(path)) {
+        mark_private(conn, path)?;
+        marked += 1;
+    }
+    Ok(marked)
+}
+
+/// The raw stored local-only record ([`LOCAL_ONLY_FOLDERS_KEY`]), or `None`
+/// when there is none: compared before and after an open records the
+/// folders, to tell whether they changed.
+pub(super) fn local_only_record(conn: &Connection) -> AppResult<Option<String>> {
+    match conn.query_row(
+        "SELECT value FROM index_meta WHERE key = ?1",
+        [LOCAL_ONLY_FOLDERS_KEY],
+        |row| row.get::<_, rusqlite::types::Value>(0),
+    ) {
+        Ok(rusqlite::types::Value::Text(text)) => Ok(Some(text)),
+        Ok(other) => Ok(Some(format!("{other:?}"))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Record the graph's local-only folder names for read-only consumers (the
+/// CLI) under [`LOCAL_ONLY_FOLDERS_KEY`], or clear the key when none are
+/// configured. Unless `replace`, the record only grows: the names already
+/// recorded stay, the current folders join them, and a record that cannot
+/// be read is left as it is.
+pub(super) fn record_local_only_folders(
+    conn: &Connection,
+    local_only: Option<&LocalOnlyFolders>,
+    replace: bool,
+) -> AppResult<()> {
+    let mut names: Vec<String> = Vec::new();
+    if !replace {
+        let unreadable = |err: &dyn std::fmt::Display| {
+            tracing::warn!(
+                %err,
+                "the index's local-only record cannot be read; this paused open leaves it as it is"
+            );
+        };
+        match conn.query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            [LOCAL_ONLY_FOLDERS_KEY],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(raw) => match serde_json::from_str::<Vec<String>>(&raw) {
+                Ok(recorded) => names = recorded,
+                Err(err) => {
+                    unreadable(&err);
+                    return Ok(());
+                }
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(err) => {
+                unreadable(&err);
+                return Ok(());
+            }
+        }
+    }
+    for name in local_only.map(LocalOnlyFolders::names).unwrap_or_default() {
+        if !names.iter().any(|kept| kept.eq_ignore_ascii_case(name)) {
+            names.push(name.clone());
+        }
+    }
+    if names.is_empty() {
+        conn.prepare_cached("DELETE FROM index_meta WHERE key = ?1")?
+            .execute(params![LOCAL_ONLY_FOLDERS_KEY])?;
+        return Ok(());
+    }
+    let names = serde_json::to_string(&names).map_err(|err| AppError::io(err.to_string()))?;
+    conn.prepare_cached(
+        "INSERT INTO index_meta(key, value) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )?
+    .execute(params![LOCAL_ONLY_FOLDERS_KEY, names])?;
+    Ok(())
+}

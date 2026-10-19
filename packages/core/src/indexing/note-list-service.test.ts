@@ -43,7 +43,7 @@ function setup(notes: TestNote[] = NOTES) {
  */
 function localNoon(date: string): number {
   const [year, month, day] = date.split('-').map(Number)
-  return new Date(year!, month! - 1, day!, 12).getTime()
+  return new Date(year!, month! - 1, day, 12).getTime()
 }
 
 describe('listNotes', () => {
@@ -70,7 +70,6 @@ describe('listNotes', () => {
       isPinned: true,
       pinnedOrder: 1,
       isPrivate: false,
-      hasConflict: false,
     })
     expect(entries[3]).toMatchObject({ path: 'notes/secret.md', isPrivate: true })
     expect(entries[4]).toMatchObject({
@@ -84,7 +83,6 @@ describe('listNotes', () => {
     // The snippet is the stored projection column, not a per-query derivation.
     expect(list?.sql).toContain('"preview"')
     expect(list?.sql).toContain('"notes"."is_private"')
-    expect(list?.sql).toContain('"notes"."has_conflict"')
     // Uncapped: the screen virtualizes instead.
     expect(list?.sql).not.toContain('limit')
     // The tag fetch joins the same note predicates — never a `note_path IN`
@@ -93,19 +91,6 @@ describe('listNotes', () => {
     expect(tags?.sql).toContain('inner join "notes"')
     expect(tags?.sql).not.toContain(' in (')
     expect(tags?.params).toEqual(['note'])
-  })
-
-  it('flags notes with sync conflict markers', async () => {
-    const { noteList } = setup([
-      {
-        path: 'notes/split.md',
-        markdown: '# Split\n<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n',
-      },
-    ])
-
-    await expect(noteList.listNotes()).resolves.toMatchObject([
-      { path: 'notes/split.md', hasConflict: true },
-    ])
   })
 
   it('includes dailies and their tags when a caller will filter by path', async () => {
@@ -387,7 +372,6 @@ describe('attachment library reads', () => {
         title: '2026-10-01',
         mtime: 9,
         isPrivate: false,
-        hasConflict: false,
       },
       {
         assetPath: 'assets/photo.png',
@@ -395,7 +379,6 @@ describe('attachment library reads', () => {
         title: 'Trip',
         mtime: 4,
         isPrivate: true,
-        hasConflict: false,
       },
     ])
     const queries = database.getQueries()

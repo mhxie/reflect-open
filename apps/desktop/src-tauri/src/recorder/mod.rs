@@ -34,7 +34,7 @@ use crate::error::{AppError, AppResult};
 use crate::local_transcription::LocalTranscriptionState;
 use device::Capture;
 use menu_bar::{Display, MenuBar};
-use session::{now_ms, part_file, part_path, FinishedSession, PartRecord, SessionManifest, Store};
+use session::{FinishedSession, PartRecord, SessionManifest, Store, now_ms, part_file, part_path};
 use transcribe::{ModelChoice, RecordingTranscript};
 use watchdog::{Action, Observation, Warning, Watchdog};
 
@@ -343,103 +343,107 @@ fn toggle(app: &AppHandle) {
 /// Once a second while `session_id` records: apply the watchdog and tick the
 /// menu bar clock. Ends when that recording does.
 fn spawn_watchdog(app: AppHandle, session_id: String) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(1));
-        let state = app.state::<RecorderState>();
-        let mut inner = state.lock();
-        let Some(active) = inner.active.as_mut() else {
-            return;
-        };
-        if active.manifest.id != session_id {
-            return;
-        }
-        let observation = match active.capture.as_ref() {
-            Some(capture) => {
-                let (mic_peak, system_peak) = capture.meters.take_peaks();
-                Observation {
-                    frames: capture.meters.frames(),
-                    mic_peak,
-                    system_peak,
-                    devices_changed: device::current_devices()
-                        .is_ok_and(|devices| devices != capture.devices),
-                    write_failed: capture.writer_failed(),
-                }
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let state = app.state::<RecorderState>();
+            let mut inner = state.lock();
+            let Some(active) = inner.active.as_mut() else {
+                return;
+            };
+            if active.manifest.id != session_id {
+                return;
             }
-            None => Observation::default(),
-        };
-        if observation.frames > 0 && !active.part_heard {
-            active.part_heard = true;
-            tracing::info!(
-                session = %session_id,
-                after_seconds = active.part_started.elapsed().as_secs_f32(),
-                "recorder: first audio arrived"
-            );
-        }
-        let mut stop = false;
-        let mut warnings = Vec::new();
-        let actions = active.watchdog.tick(observation);
-        if !actions.is_empty() {
-            tracing::info!(session = %session_id, ?actions, ?observation, "recorder: watchdog acted");
-        }
-        for action in actions {
-            match action {
-                Action::Rebuild => {
-                    end_part(active);
-                    if let Err(err) = start_part(active) {
-                        // The watchdog keeps retrying while no audio arrives.
-                        tracing::warn!(error = %err, "rebuilding the capture failed");
-                        if active.manifest.warn("captureFailed") {
-                            warnings.push("captureFailed");
-                        }
+            let observation = match active.capture.as_ref() {
+                Some(capture) => {
+                    let (mic_peak, system_peak) = capture.meters.take_peaks();
+                    Observation {
+                        frames: capture.meters.frames(),
+                        mic_peak,
+                        system_peak,
+                        devices_changed: device::current_devices()
+                            .is_ok_and(|devices| devices != capture.devices),
+                        write_failed: capture.writer_failed(),
                     }
                 }
-                Action::Warn(warning) => {
-                    active.manifest.warn(warning_code(warning));
-                    warnings.push(warning_code(warning));
+                None => Observation::default(),
+            };
+            if observation.frames > 0 && !active.part_heard {
+                active.part_heard = true;
+                tracing::info!(
+                    session = %session_id,
+                    after_seconds = active.part_started.elapsed().as_secs_f32(),
+                    "recorder: first audio arrived"
+                );
+            }
+            let mut stop = false;
+            let mut warnings = Vec::new();
+            let actions = active.watchdog.tick(observation);
+            if !actions.is_empty() {
+                tracing::info!(session = %session_id, ?actions, ?observation, "recorder: watchdog acted");
+            }
+            for action in actions {
+                match action {
+                    Action::Rebuild => {
+                        end_part(active);
+                        if let Err(err) = start_part(active) {
+                            // The watchdog keeps retrying while no audio arrives.
+                            tracing::warn!(error = %err, "rebuilding the capture failed");
+                            if active.manifest.warn("captureFailed") {
+                                warnings.push("captureFailed");
+                            }
+                        }
+                    }
+                    Action::Warn(warning) => {
+                        active.manifest.warn(warning_code(warning));
+                        warnings.push(warning_code(warning));
+                    }
+                    Action::Stop => stop = true,
                 }
-                Action::Stop => stop = true,
             }
-        }
-        if let Ok(store) = store(&app) {
-            let _ = store.save(&active.manifest);
-        }
-        for code in warnings {
-            let _ = app.emit(
-                WARNING_EVENT,
-                WarningEvent {
-                    session_id: session_id.clone(),
-                    code,
-                },
-            );
-        }
-        if stop {
-            if let Some(active) = inner.active.as_mut() {
-                active.manifest.warn("autoStopped");
+            if let Ok(store) = store(&app) {
+                let _ = store.save(&active.manifest);
             }
-            let _ = stop_recording(&app, &mut inner);
-            return;
+            for code in warnings {
+                let _ = app.emit(
+                    WARNING_EVENT,
+                    WarningEvent {
+                        session_id: session_id.clone(),
+                        code,
+                    },
+                );
+            }
+            if stop {
+                if let Some(active) = inner.active.as_mut() {
+                    active.manifest.warn("autoStopped");
+                }
+                let _ = stop_recording(&app, &mut inner);
+                return;
+            }
+            refresh_menu_bar(&app, &inner);
         }
-        refresh_menu_bar(&app, &inner);
     });
 }
 
 /// While `session_id` records: stream the louder side's input level to the
 /// recording panel's waveform.
 fn spawn_level_meter(app: AppHandle, session_id: String) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(LEVEL_INTERVAL);
-        let level = {
-            let state = app.state::<RecorderState>();
-            let inner = state.lock();
-            match inner.active.as_ref() {
-                Some(active) if active.manifest.id == session_id => active
-                    .capture
-                    .as_ref()
-                    .map_or(0.0, |capture| capture.meters.take_display_level()),
-                _ => return,
-            }
-        };
-        let _ = app.emit(LEVEL_EVENT, level);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(LEVEL_INTERVAL);
+            let level = {
+                let state = app.state::<RecorderState>();
+                let inner = state.lock();
+                match inner.active.as_ref() {
+                    Some(active) if active.manifest.id == session_id => active
+                        .capture
+                        .as_ref()
+                        .map_or(0.0, |capture| capture.meters.take_display_level()),
+                    _ => return,
+                }
+            };
+            let _ = app.emit(LEVEL_EVENT, level);
+        }
     });
 }
 

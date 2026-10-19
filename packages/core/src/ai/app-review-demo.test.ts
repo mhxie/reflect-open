@@ -64,7 +64,7 @@ describe('createDemoModel', () => {
     const assetStore = createTestAssetStoreService()
     const xArchive = createTestXArchiveService()
     const graphSession = createTestGraphSessionService({ graph: { generation: 1 } })
-    const assetReferences = { notePaths: async () => [] }
+    const assetReferences = { notePaths: () => [] }
     const assetPrivacy = createAssetPrivacyService({
       noteFile,
       xArchive,
@@ -91,7 +91,7 @@ describe('createDemoModel', () => {
         noteFile,
         assetStore,
         noteList: createNoteListService({ database }),
-        dailyNotes: { listDailyNotes: async () => [] },
+        dailyNotes: { listDailyNotes: () => [] },
         assetReferences,
         assetPrivacy,
         xArchive,

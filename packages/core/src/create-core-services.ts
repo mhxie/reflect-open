@@ -110,10 +110,6 @@ import { createGithubAuthService, type GithubAuthService } from './sync/github-a
 import { createGithubRepoService, type GithubRepoService } from './sync/github-repo-service.ts'
 import { createSyncEngineFactory, type SyncEngineFactory } from './sync/engine.ts'
 import type { BackupServiceDeps } from './sync/backup-service.ts'
-import {
-  createConflictResolutionService,
-  type ConflictResolutionService,
-} from './sync/conflict-resolution-service.ts'
 import type { ICloudDownloadServiceDeps } from './sync/icloud-download-service.ts'
 import {
   createICloudMigrationService,
@@ -403,10 +399,6 @@ export interface CoreServices {
    */
   readonly icloudMigration: ICloudMigrationService
   /**
-   * Resolves the sync conflict markers of one note as raw-text surgery.
-   */
-  readonly conflictResolution: ConflictResolutionService
-  /**
    * The embedded media of the editor's cards: X posts and YouTube videos.
    */
   readonly embedMedia: EmbedMediaService
@@ -655,19 +647,19 @@ export interface CoreAdapters {
   /**
    * Defaults to the system `IdService`.
    */
-  readonly id?: IdService
+  readonly id?: IdService | undefined
   /**
    * Defaults to a codec that cannot decode.
    */
-  readonly imageCodec?: ImageCodecService
+  readonly imageCodec?: ImageCodecService | undefined
   /**
    * Defaults to the URL shape of Apple webviews.
    */
-  readonly convertFileSrc?: FileSrcConverter
+  readonly convertFileSrc?: FileSrcConverter | undefined
   /**
    * The system's `reflect://` delivery; without one, no URL arrives.
    */
-  readonly deepLink?: DeepLinkSource
+  readonly deepLink?: DeepLinkSource | undefined
   /**
    * Builds the graph-scoped services of a session that just opened, over
    * `deps`. They must dispose themselves when `session.signal` aborts.
@@ -767,7 +759,6 @@ export const coreServiceFactories = {
   agentSkill: createAgentSkillService,
   gistPublish: createGistPublishService,
   icloudMigration: createICloudMigrationService,
-  conflictResolution: createConflictResolutionService,
   embedMedia: createEmbedMediaService,
   linkPreview: createLinkPreviewService,
   noteSessions: createNoteSessionService,
@@ -953,7 +944,7 @@ export function composeCoreServices(
     /**
      * Builds the mobile services on every platform, so a test can reach them.
      */
-    readonly alwaysBuildMobile?: boolean
+    readonly alwaysBuildMobile?: boolean | undefined
   },
 ): { services: CoreServices; internal: CoreInternalServices } {
   const create: ServiceFactories = { ...coreServiceFactories, ...factories }
@@ -1289,10 +1280,12 @@ export function composeCoreServices(
     indexLifecycle,
     noteDisplacement,
     progress,
+    clock,
     activity,
     platform,
     persistenceFlush,
     logger,
+    icloudNative,
   }
   const icloudSyncDeps: ICloudSyncServiceDeps = {
     icloudNative,
@@ -1302,6 +1295,7 @@ export function composeCoreServices(
     activity,
     clock,
     logger,
+    progress,
   }
   const icloudDownloadDeps: ICloudDownloadServiceDeps = { icloudNative, activity, clock, logger }
   const services: CoreServices = {
@@ -1322,6 +1316,7 @@ export function composeCoreServices(
       noteFile,
       settings,
       graphSession,
+      logger,
     }),
     meetings,
     agentSkill: create.agentSkill({ ipc, graphSession }),
@@ -1357,12 +1352,6 @@ export function composeCoreServices(
     }),
     icloudNative,
     icloudMigration: create.icloudMigration({ icloudNative, graphSession }),
-    conflictResolution: create.conflictResolution({
-      noteFile,
-      indexLifecycle,
-      fileChanges,
-      graphSession,
-    }),
     embedMedia: create.embedMedia({
       xArchive,
       webFetch,

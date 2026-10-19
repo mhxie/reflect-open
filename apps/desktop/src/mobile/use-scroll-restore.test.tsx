@@ -44,7 +44,7 @@ class FakeResizeObserver {
    */
   resize(): void {
     if (!this.disconnected) {
-      this.#callback([], this as unknown as ResizeObserver)
+      this.#callback([], this)
     }
   }
 }
@@ -122,8 +122,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', FakeResizeObserver)
 })
 
-afterEach(() => {
-  cleanup()
+afterEach(async () => {
+  await cleanup()
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })

@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { ReactNode } from 'react'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
@@ -29,20 +30,22 @@ import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { UpdateProvider } from '@/providers/update-provider.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { deepLinkForRoute } from '@/lib/deep-links/format.ts'
+import { deepLinkForRoute } from '@reflect/app'
 import { Sidebar } from './sidebar.tsx'
 
 /**
  * The native menu row the mocked menu "selects" when it opens.
  */
 const menuChoice = { text: 'Unpin Note' }
-const openNativeContextMenu = vi.fn(async (options: NativeContextMenuOptions) => {
-  for (const item of options.items) {
-    if (isMenuAction(item) && item.text === menuChoice.text) {
-      item.action()
+const openNativeContextMenu = vi.fn((options: NativeContextMenuOptions) =>
+  Promise.try(() => {
+    for (const item of options.items) {
+      if (isMenuAction(item) && item.text === menuChoice.text) {
+        item.action()
+      }
     }
-  }
-})
+  }),
+)
 
 function isMenuAction(item: NativeContextMenuItem): item is NativeContextMenuItem & {
   text: string
@@ -94,7 +97,7 @@ const RUST_PIN: PinnedNote = {
 const getPinnedNotes = vi.fn<() => Promise<PinnedNote[]>>()
 const hasWikiEntries = vi.fn<() => Promise<boolean>>()
 const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 // The services of the rendered app; set by `renderSidebar`.
 let opener: TestOpenerService
@@ -141,7 +144,7 @@ async function renderSidebar(
 ) {
   const navigate = vi.fn()
   const openPalette = vi.fn()
-  const readSource = async (): Promise<string> => '# Rust\n'
+  const readSource = (): Promise<string> => Promise.resolve('# Rust\n')
   operations = createTestOperationsService()
   const app = createTestCoreServices({
     progress: operations,
@@ -166,8 +169,8 @@ async function renderSidebar(
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
-    togglePin: vi.fn(async () => {}),
-    togglePrivate: vi.fn(async () => {}),
+    togglePin: vi.fn(() => {}),
+    togglePrivate: vi.fn(() => {}),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),

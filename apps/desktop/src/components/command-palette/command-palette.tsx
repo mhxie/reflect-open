@@ -244,13 +244,8 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                                   />
                                 )}
                               </span>
-                              {entry.isPrivate === undefined ||
-                              entry.hasConflict === undefined ? null : (
-                                <NoteStateIndicator
-                                  path={entry.path}
-                                  isPrivate={entry.isPrivate}
-                                  hasConflict={entry.hasConflict}
-                                />
+                              {entry.isPrivate === undefined ? null : (
+                                <NoteStateIndicator path={entry.path} isPrivate={entry.isPrivate} />
                               )}
                               {entry.related ? (
                                 <span className="shrink-0 rounded-sm bg-surface-active px-1 text-2xs text-text-muted">

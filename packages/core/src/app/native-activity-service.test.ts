@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
 import { createNativeActivityService } from './native-activity-service.ts'
 
@@ -11,7 +11,7 @@ function fakeShell(grant: boolean) {
     commands: {
       activity_begin: () => {
         if (!grant) {
-          throw new ReflectError('unknown', 'unimplemented command')
+          throw new AppError('unknown', 'unimplemented command')
         }
         return 'activity-1'
       },
@@ -24,9 +24,9 @@ function fakeShell(grant: boolean) {
 describe('NativeActivityService.run', () => {
   it('holds an activity for exactly the duration of the work', async () => {
     const { ipc, activity } = fakeShell(true)
-    const result = await activity.run('Embedding notes', async () => {
+    const result = await activity.run('Embedding notes', () => {
       expect(ipc.calls().map((call) => call.command)).toEqual(['activity_begin'])
-      return 42
+      return Promise.resolve(42)
     })
     expect(result).toBe(42)
     expect(ipc.calls()).toEqual([
@@ -38,9 +38,7 @@ describe('NativeActivityService.run', () => {
   it('ends the activity when the work fails, and rethrows', async () => {
     const { ipc, activity } = fakeShell(true)
     await expect(
-      activity.run('Embedding notes', async () => {
-        throw new Error('boom')
-      }),
+      activity.run('Embedding notes', () => Promise.reject(new Error('boom'))),
     ).rejects.toThrow('boom')
     expect(ipc.calls().at(-1)).toEqual({
       command: 'activity_end',
@@ -50,7 +48,7 @@ describe('NativeActivityService.run', () => {
 
   it('runs the work unassisted when no activity can begin', async () => {
     const { ipc, activity } = fakeShell(false)
-    expect(await activity.run('Embedding notes', async () => 'done')).toBe('done')
+    expect(await activity.run('Embedding notes', () => Promise.resolve('done'))).toBe('done')
     expect(ipc.calls().map((call) => call.command)).toEqual(['activity_begin'])
   })
 })

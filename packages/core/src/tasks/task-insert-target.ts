@@ -19,10 +19,6 @@ export interface InsertedNoteTask extends TaskSnapshot {
    * or it sits in a local-only folder.
    */
   readonly isPrivate: boolean
-  /**
-   * The written note carries sync conflict markers.
-   */
-  readonly hasConflict: boolean
 }
 
 /**
@@ -43,7 +39,6 @@ export function createInsertedTaskRow(
     dailyDate,
     isPinned,
     isPrivate: created.isPrivate,
-    hasConflict: created.hasConflict,
     pinnedOrder,
     updatedAt,
   }

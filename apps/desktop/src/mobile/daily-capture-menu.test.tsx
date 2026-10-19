@@ -2,15 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TestCoreServices } from '@reflect/core/testing'
 import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
 import { DailyCaptureMenu } from './daily-capture-menu.tsx'
+import type { MobileAudioMemoContextValue } from '@/mobile/audio-memo-provider.tsx'
+import type { Mutable } from '@reflect/utils'
 
-const memo = vi.hoisted(() => ({
-  phase: 'idle' as 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error',
+const memo = vi.hoisted((): Mutable<MobileAudioMemoContextValue> => ({
+  phase: 'idle',
   elapsedMs: 0,
   level: 0,
   pendingCount: 0,
   available: true,
   hasTranscriptionConfig: true,
-  error: null as string | null,
+  error: null,
   canRetry: false,
   drawerOpen: false,
   toggle: vi.fn(),
@@ -135,11 +137,8 @@ describe('DailyCaptureMenu', () => {
     await view.rerender(<DailyCaptureMenu />)
     await view.getByRole('button', { name: 'Show capture actions' }).click()
     await expect
-      .element(view.getByRole('button', { name: 'Record audio memo' }))
+      .element(view.getByRole('button', { name: 'Record audio memo' }).getByTestId('spinner'))
       .toBeInTheDocument()
-    expect(
-      view.container.querySelector('[data-slot="audio-memo-action"] .animate-spin'),
-    ).not.toBeNull()
     await view.getByRole('button', { name: 'Hide capture actions' }).click()
 
     memo.phase = 'error'

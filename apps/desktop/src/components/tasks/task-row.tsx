@@ -243,12 +243,7 @@ export function TaskRow({
           }}
           className="flex h-6 shrink-0 items-center whitespace-nowrap text-xs text-text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none"
         >
-          <NoteStateIndicator
-            path={task.notePath}
-            isPrivate={task.isPrivate}
-            hasConflict={task.hasConflict}
-            className="mr-1"
-          />
+          <NoteStateIndicator path={task.notePath} isPrivate={task.isPrivate} className="mr-1" />
           {noteLabel({ path: task.notePath, title: task.noteTitle })}
         </button>
       ) : null}

@@ -14,7 +14,7 @@ const BLOCKING_IO_MESSAGE = /\(os error (?:1|13|30)\)|not available offline/
  * lands: the edit resolver refused the path (`traversal`: the folder's link
  * dangles or was swapped, the folder is missing, or the path resolves into a
  * read-only folder), or the IO hit a {@link BLOCKING_IO_MESSAGE} refusal. A
- * "changed on disk" refusal is not one: it feeds the conflict prompt.
+ * "changed on disk" refusal is not one: the retry merges with the newer text.
  */
 export function isSaveBlockingError(cause: unknown): boolean {
   if (!isAppError(cause)) {

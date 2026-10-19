@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import { createGraphSession, type GraphRole, type GraphSession } from './graph-session.ts'
 import { isEditableLocalOnlyPath, isLocalOnlyPath } from './local-only.ts'
 import { createNoteRowService } from '../documents/note-row-service.ts'
@@ -64,20 +65,20 @@ function setup(options?: SetupOptions) {
     commands: {
       recent_graphs: () => {
         if (failures.recents) {
-          throw { kind: 'io', message: 'recents are corrupt' }
+          throw new AppError('io', 'recents are corrupt')
         }
         return recents
       },
       forget_recent: (args) => {
         if (failures.forget) {
-          throw { kind: 'io', message: 'cannot forget' }
+          throw new AppError('io', 'cannot forget')
         }
         recents = recents.filter((recent) => recent.root !== args['root'])
         return null
       },
       graph_open: async (args) => {
         if (failures.open) {
-          throw { kind: 'io', message: 'cannot open graph' }
+          throw new AppError('io', 'cannot open graph')
         }
         const root = String(args['path'])
         if (options?.holdOpens ?? false) {
@@ -96,7 +97,7 @@ function setup(options?: SetupOptions) {
       },
       graph_delete: () => {
         if (failures.delete) {
-          throw { kind: 'io', message: 'cannot trash' }
+          throw new AppError('io', 'cannot trash')
         }
         return null
       },
@@ -550,9 +551,7 @@ describe('GraphSessionService create', () => {
 
   it('surfaces a failed create without opening', async () => {
     const context = await start()
-    context.mobileStorage.createGraph = async () => {
-      throw new Error('cannot create')
-    }
+    context.mobileStorage.createGraph = () => Promise.reject(new Error('cannot create'))
 
     await expect(context.session.createGraphAt('/new')).resolves.toBe(false)
 
@@ -595,9 +594,7 @@ describe('GraphSessionService welcome seeding', () => {
 
   it('logs a failed seed and still syncs the index', async () => {
     const context = await start()
-    context.noteFile.vaultScanStats = async () => {
-      throw new Error('scan failed')
-    }
+    context.noteFile.vaultScanStats = () => Promise.reject(new Error('scan failed'))
 
     await context.session.openRecent('/fresh')
     await expect.poll(() => context.indexCalls()).toContain('clear')
@@ -722,7 +719,7 @@ describe('GraphSessionService index reactions', () => {
     expect(context.reloads).toHaveLength(1)
   })
 
-  it('follows healed moves and requests downloads for stale placeholders', async () => {
+  it('follows healed moves and requests downloads for stale placeholders', () => {
     const context = setup()
     const onMoved = vi.spyOn(context.indexLifecycle, 'onMoved')
     const onStale = vi.spyOn(context.indexLifecycle, 'onStalePlaceholders')

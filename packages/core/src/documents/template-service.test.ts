@@ -213,7 +213,7 @@ describe('createTemplate', () => {
   it('gives up after three lost claims instead of probing forever', async () => {
     const { templates, noteFile } = setup({
       wrapNoteFile: (files) =>
-        overrideNoteFileService(files, { create: async () => ({ kind: 'collision' }) }),
+        overrideNoteFileService(files, { create: () => Promise.resolve({ kind: 'collision' }) }),
     })
 
     await expect(templates.createTemplate('Daily Review')).rejects.toThrow(

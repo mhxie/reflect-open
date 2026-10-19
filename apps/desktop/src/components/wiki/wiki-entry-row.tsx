@@ -137,11 +137,7 @@ export const WikiEntryRow = memo(function WikiEntryRow({
         >
           {isIndex ? <Waypoints aria-hidden className="size-3.5 flex-none text-accent" /> : null}
           <NoteTitle title={entry.title} displayTitle={entry.displayTitle} lang={entry.lang} />
-          <NoteStateIndicator
-            path={entry.path}
-            isPrivate={entry.isPrivate}
-            hasConflict={entry.hasConflict}
-          />
+          <NoteStateIndicator path={entry.path} isPrivate={entry.isPrivate} />
         </ListRowSubject>
         {isIndex ? (
           <Badge variant="secondary" className="h-4 rounded px-1.5 text-[10px]">

@@ -7,11 +7,11 @@ export function NoteDisplacements(): null {
   const { noteDisplacement, noteMove } = useCoreServices()
   const { graph, status } = useGraph()
   const generation = status === 'ready' ? graph?.generation : undefined
-  const currentGeneration = useRef(generation)
+  const currentGenerationRef = useRef(generation)
   // Committed before the subscription effect's cleanup runs, so a generation
   // that has changed is seen at once; never written during render.
   useLayoutEffect(() => {
-    currentGeneration.current = generation
+    currentGenerationRef.current = generation
   }, [generation])
 
   useEffect(() => {
@@ -19,7 +19,7 @@ export function NoteDisplacements(): null {
       return
     }
     let active = true
-    const isCurrent = (): boolean => active && currentGeneration.current === generation
+    const isCurrent = (): boolean => active && currentGenerationRef.current === generation
     const unlisten = noteDisplacement.onDisplaced((displacement) => {
       if (!isCurrent() || displacement.generation !== generation) {
         return

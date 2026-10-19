@@ -2,12 +2,12 @@ import { createTestCoreServices, createTestNoteFileService } from '@reflect/core
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import '@/styles/index.css'
-import { Suspense, type ReactElement } from 'react'
+import { Suspense, use, type ReactElement } from 'react'
 import {
+  AppError,
   buildIndexedNote,
   normalizeWikiLanguages,
   parseNote,
-  ReflectError,
   type Settings,
 } from '@reflect/core'
 import { wikiRoute, type Route } from '@/routing/route.ts'
@@ -182,7 +182,7 @@ function RouteProbe(): ReactElement {
 function RoutedScreen(): ReactElement {
   const { route } = useRouter()
   if (route.kind === 'note' && pendingNoteLoad !== undefined) {
-    throw pendingNoteLoad
+    use(pendingNoteLoad)
   }
   return route.kind === 'wiki' ? (
     <WikiScreen filter={route.filter} language={route.language} />
@@ -212,7 +212,7 @@ async function renderScreen(language: string | null = null) {
   const readLocal = app.noteFile.readLocal.bind(app.noteFile)
   vi.spyOn(app.noteFile, 'readLocal').mockImplementation(async (path, generation) => {
     if (unreadable.has(path)) {
-      throw new ReflectError('io', 'stream did not contain valid UTF-8')
+      throw new AppError('io', 'stream did not contain valid UTF-8')
     }
     if (fixture.files[path] === undefined && citers[path] === undefined) {
       return { kind: 'evicted' }
@@ -720,7 +720,7 @@ describe('WikiScreen', () => {
   })
 
   it('explains a listing that fails', async () => {
-    listingFailure = new ReflectError('io', 'database is locked')
+    listingFailure = new AppError('io', 'database is locked')
     const view = await renderScreen()
 
     await expect

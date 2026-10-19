@@ -1,4 +1,4 @@
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { AI_SUMMARY_MAX_CHARS } from '../markdown/ai-summary.ts'
 import type { CloudNoteContent, CloudSafe } from '../privacy/privacy-service.ts'
 import type { CloudTarget, VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
@@ -82,17 +82,17 @@ function classify(
   if (sdk.APICallError.isInstance(cause)) {
     const status = cause.statusCode ?? 0
     if (status === 401 || status === 403) {
-      return new ReflectError('auth', `the provider rejected the API key (${status})`)
+      return new AppError('auth', `the provider rejected the API key (${status})`)
     }
     if (status === 429 || status >= 500) {
-      return new ReflectError('network', `the provider is unavailable (${status})`)
+      return new AppError('network', `the provider is unavailable (${status})`)
     }
     if (status >= 400) {
       return null
     }
   }
   if (cause instanceof DOMException && cause.name === 'TimeoutError') {
-    return new ReflectError('network', 'the summary request timed out')
+    return new AppError('network', 'the summary request timed out')
   }
   return cause instanceof Error ? cause : new Error(String(cause))
 }
@@ -100,7 +100,7 @@ function classify(
 /**
  * Summarize one note. Resolves `null` when the model refused this note (a
  * 4xx other than auth) or answered nothing usable — retrying the same note
- * can't help. Throws {@link ReflectError} (`auth`, `network`) for failures the
+ * can't help. Throws {@link AppError} (`auth`, `network`) for failures the
  * caller should retry later; the summary pass is the retry layer
  * (`maxRetries: 0`).
  */

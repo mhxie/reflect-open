@@ -64,7 +64,7 @@ async function renderScreen() {
   deleteGraph = vi.spyOn(app.graphSession, 'deleteGraph').mockResolvedValue()
   listOllamaModels = vi
     .spyOn(app.onDeviceModels, 'listOllamaModels')
-    .mockImplementation(async () => ollamaModels)
+    .mockImplementation(() => Promise.resolve(ollamaModels))
   // The Wiki section's trust report row: no report written yet.
   app.ipc.onCommand('wiki_trust_report_read', () => null)
   return await renderInApp(
@@ -216,7 +216,7 @@ describe('SettingsScreen', () => {
   })
 
   it('reflects the spoken language an earlier version stored', async () => {
-    stored = { transcriptionLanguage: 'zh' } as Partial<Settings>
+    stored = { transcriptionLanguage: 'zh' }
     await renderScreen()
 
     await expect
@@ -700,7 +700,7 @@ describe('SettingsScreen', () => {
       ],
       defaultAiProviderId: 'cloud',
       aiSummaries: 'cloud',
-    } as Partial<Settings>
+    }
     await renderScreen()
     await expect
       .element(page.getByRole('combobox', { name: 'AI summaries' }))
@@ -745,7 +745,7 @@ describe('SettingsScreen', () => {
       aiSummaries: 'cloud',
       aiSummariesCloudModel: haiku,
       aiSummariesCloudConsent: haiku,
-    } as Partial<Settings>
+    }
     await renderScreen()
     await expect
       .element(page.getByRole('button', { name: 'Start summarizing' }))
@@ -776,7 +776,7 @@ describe('SettingsScreen', () => {
       aiSummariesCloudConsent: { configId: 'cloud', modelId: 'claude-haiku-4-5' },
       // An earlier build's go-ahead named no model and grants nothing here.
       aiSummariesCloudConfirmed: true,
-    } as Partial<Settings>
+    }
     await renderScreen()
     await page.getByRole('button', { name: 'Start summarizing' }).click()
 
@@ -810,7 +810,7 @@ describe('SettingsScreen', () => {
       ],
       defaultAiProviderId: 'ollama',
       aiSummaries: 'cloud',
-    } as Partial<Settings>
+    }
     await renderScreen()
     await expect
       .element(
@@ -1099,7 +1099,7 @@ describe('SettingsScreen', () => {
     stored = { semanticSearchEnabled: true }
     embedRuntime.setStatus({ status: 'ready', model: 'embeddinggemma-300m', dims: 768 })
     await renderScreen()
-    act(() => app.semanticSearch.setIndexProgress({ done: 1200, total: 6000 }))
+    await act(() => app.semanticSearch.setIndexProgress({ done: 1200, total: 6000 }))
 
     await expect
       .element(page.getByRole('progressbar', { name: /semantic index/i }))

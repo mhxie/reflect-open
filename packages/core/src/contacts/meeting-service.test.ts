@@ -312,7 +312,7 @@ describe('resolveAttendeeTargets', () => {
   it('writes unaddressable-owner identities as plain text', async () => {
     seedNotes(database, [personNote('notes/jane.md', 'Jane', ['jane@corp.com'])])
     const wikiResolver = Object.assign(createWikiResolverService({ database }), {
-      getWikiAddressForPath: async () => null,
+      getWikiAddressForPath: () => Promise.resolve(null),
     })
     const unaddressable = meetingService({
       wikiResolver,
@@ -648,7 +648,7 @@ describe('attendee identity outcomes', () => {
   it('writes an unaddressable owner as plain text without creating', async () => {
     seedNotes(database, [personNote('notes/jane.md', 'Jane', ['jane@corp.com'])])
     const wikiResolver = Object.assign(createWikiResolverService({ database }), {
-      getWikiAddressForPath: async () => null,
+      getWikiAddressForPath: () => Promise.resolve(null),
     })
     const unaddressable = meetingService({
       wikiResolver,
@@ -671,9 +671,7 @@ describe('attendee identity outcomes', () => {
       personNotes: {
         resolvePersonContact: (contact) => personNotes.resolvePersonContact(contact),
         ensurePersonNote: (input) => personNotes.ensurePersonNote(input),
-        resolvePerson: async () => {
-          throw new Error('index unavailable')
-        },
+        resolvePerson: () => Promise.reject(new Error('index unavailable')),
       },
     })
 
@@ -697,7 +695,7 @@ describe('attendee identity outcomes', () => {
       personNotes: {
         resolvePerson: (values) => personNotes.resolvePerson(values),
         resolvePersonContact: (contact) => personNotes.resolvePersonContact(contact),
-        ensurePersonNote: async () => ({
+        ensurePersonNote: () => ({
           kind: 'blocked',
           emails: ['ada@example.com'],
           reason: 'identity-conflict',
@@ -897,9 +895,7 @@ describe('attendeeSuggestions', () => {
       logger,
       contacts: {
         ...contacts,
-        lookupPeople: async () => {
-          throw failure
-        },
+        lookupPeople: () => Promise.reject(failure),
       },
     }).attendeeSuggestions('gra', 6, true)
 
@@ -912,7 +908,7 @@ describe('attendeeSuggestions', () => {
 
   it('drops daily notes from the suggestions', async () => {
     const suggestions = createSuggestionService({ database })
-    vi.spyOn(suggestions, 'suggestWikiTargets').mockImplementation(async () => [
+    vi.spyOn(suggestions, 'suggestWikiTargets').mockImplementation(() => [
       {
         target: '2026-07-01',
         path: 'daily/2026-07-01.md',

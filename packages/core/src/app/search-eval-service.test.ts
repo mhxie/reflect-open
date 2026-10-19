@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import { createTestClockService } from '../testing/clock.ts'
 import {
   createTestEmbeddingRuntimeService,
@@ -34,7 +34,7 @@ function setup(job: SearchEvalJob | null = JOB) {
   const retrieval = createTestRetrievalService({
     retrieve: (query, options) => {
       if (query === 'broken') {
-        throw new ReflectError('io', 'index unavailable')
+        throw new AppError('io', 'index unavailable')
       }
       return [
         {
@@ -44,7 +44,6 @@ function setup(job: SearchEvalJob | null = JOB) {
           snippet: '',
           heading: null,
           isPrivate: false,
-          hasConflict: false,
         },
       ]
     },

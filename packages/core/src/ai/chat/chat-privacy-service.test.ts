@@ -2,7 +2,7 @@ import type { ModelMessage } from '@reflect/modules/ai'
 import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it } from 'vitest'
 import { createAssetPrivacyService } from '../../assets/asset-privacy-service.ts'
-import { ReflectError } from '../../errors.ts'
+import { AppError } from '../../errors.ts'
 import {
   createLocalOnlyFolders,
   isLocalOnlyPath,
@@ -92,19 +92,21 @@ async function openIndex(notes: Record<string, string>, options: IndexOptions = 
   const localOnly = createLocalOnlyFolders(options.localOnlyFolders ?? [])
   const reads: string[] = []
   const noteFile = overrideNoteFileService(createTestNoteFileService(), {
-    readShareable: async (path) => {
+    readShareable: (path) => {
       reads.push(path)
       if (isLocalOnlyPath(localOnly, path)) {
-        return { kind: 'localOnly' }
+        return Promise.resolve({ kind: 'localOnly' })
       }
       const content = notes[path]
       if (content === undefined) {
-        throw new ReflectError('notFound', `${path} not found`)
+        return Promise.reject(new AppError('notFound', `${path} not found`))
       }
-      return { kind: 'content', content }
+      return Promise.resolve({ kind: 'content', content })
     },
-    listAttachments: async () =>
-      (options.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 })),
+    listAttachments: () =>
+      Promise.resolve(
+        (options.attachments ?? []).map((path) => ({ path, size: 1, modifiedMs: 1 })),
+      ),
   })
   const xArchive = createTestXArchiveService()
   const assetReferences = createAssetReferences({ database, xArchive })
@@ -849,12 +851,12 @@ describe('hasRestrictedSearchSources', () => {
   /** The service and the reader of a graph whose live sources are `notes`. */
   async function searchFixture(notes: Record<string, string>, options: IndexOptions = {}) {
     const fixture = await openIndex(notes, options)
-    const readNote = async (path: string): Promise<string> => {
+    const readNote = (path: string): Promise<string> => {
       const content = notes[path]
       if (content === undefined) {
-        throw new ReflectError('notFound', 'missing')
+        return Promise.reject(new AppError('notFound', 'missing'))
       }
-      return content
+      return Promise.resolve(content)
     }
     return { ...fixture, readNote }
   }

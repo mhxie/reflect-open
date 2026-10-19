@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { ClockService } from '../ports/clock-service.ts'
 import { requireGraphSession, type GraphSessionSource } from '../graph/graph-session.ts'
 import type { ProgressPort } from '../ports/progress-port.ts'
@@ -166,7 +167,7 @@ export interface AttachmentService {
   /**
    * The open graph's catalog, waiting for its first listing. Rejects when no graph is open.
    */
-  loadCatalog(): Promise<AttachmentCatalog>
+  loadCatalog(): MaybePromise<AttachmentCatalog>
   /**
    * Load the catalog of `generation` and keep it fresh: re-list when a batch
    * names an attachment path, or on a reconcile request.
@@ -209,10 +210,7 @@ export interface AttachmentService {
    * first page (its bytes never reach an `<img>`). Answers synchronously once
    * the catalog is loaded and waits for it before that.
    */
-  resolveImageUrl(
-    notePath: string,
-    source: string,
-  ): string | undefined | Promise<string | undefined>
+  resolveImageUrl(notePath: string, source: string): MaybePromise<string | undefined>
   /**
    * The `reflect-asset://` URL that serves the attachment at `path` of graph
    * session `generation` off the UI thread.
@@ -238,7 +236,7 @@ export interface AttachmentService {
     notePath: string,
     source: string,
     generation: number,
-  ): Promise<string | undefined>
+  ): MaybePromise<string | undefined>
   /**
    * An attachment embed renders as an image (a PDF too, previewed through the
    * editor's `resolveEmbed`) or a file pill, a note as a link chip to it, and
@@ -254,7 +252,7 @@ export interface AttachmentService {
    * session first, then the catalog. Undefined for anything else, a file the
    * catalog doesn't list, or a failed listing.
    */
-  resolveFileInfo(notePath: string, href: string): Promise<{ size: number } | undefined>
+  resolveFileInfo(notePath: string, href: string): MaybePromise<{ size: number } | undefined>
   /**
    * Stream a pasted or dropped file into the attachment folder of the note at
    * `notePath`. Rust picks the folder from the note: the graph's `assets/`, or
@@ -266,7 +264,11 @@ export interface AttachmentService {
    * (a local-only folder's attachment never enters the Git backup). Resolves
    * `null`, saving nothing, when no graph is open.
    */
-  saveFile(file: File, notePath: string, options?: SaveFileOptions): Promise<AssetSaveResult | null>
+  saveFile(
+    file: File,
+    notePath: string,
+    options?: SaveFileOptions,
+  ): MaybePromise<AssetSaveResult | null>
   createSaveScope(): AttachmentSaveScope
   /**
    * The Attach file… command: each picked source copied file-to-file into the
@@ -280,13 +282,13 @@ export interface AttachmentService {
    * Copy failures and a lost editor are reported as one failed operation.
    * Does nothing when no graph is open.
    */
-  attachFilesToNote(request: AttachFilesRequest): Promise<void>
+  attachFilesToNote(request: AttachFilesRequest): MaybePromise<void>
   /**
    * Open an attachment in its default app. A refused open falls back to
    * revealing the file; failures surface as operations, never a rejection.
    * Does nothing when no graph is open.
    */
-  openOrReveal(path: string): Promise<void>
+  openOrReveal(path: string): MaybePromise<void>
   /**
    * Show the graph file at `path` (a note or an attachment, one inside a
    * local-only folder included) in the system file manager, for graph
@@ -366,7 +368,7 @@ export function wikiEmbedDisplay(target: string): WikiEmbedDisplay | undefined {
 }
 
 export interface AttachmentSaveScopeDeps {
-  readonly save: (file: File, notePath: string) => Promise<AssetSaveResult | null>
+  readonly save: (file: File, notePath: string) => MaybePromise<AssetSaveResult | null>
 }
 
 class AttachmentSaveScopeImpl implements AttachmentSaveScope {
@@ -531,10 +533,7 @@ class AttachmentServiceImpl implements AttachmentService {
           assetOpenPath(source, this.#resolveAttachmentPath(notePath, source, generation)))
   }
 
-  resolveImageUrl(
-    notePath: string,
-    source: string,
-  ): string | undefined | Promise<string | undefined> {
+  resolveImageUrl(notePath: string, source: string): MaybePromise<string | undefined> {
     return this.#resolveImageUrl(notePath, source, this.#openGeneration())
   }
 
@@ -835,7 +834,7 @@ class AttachmentServiceImpl implements AttachmentService {
     notePath: string,
     source: string,
     generation: number | null,
-  ): string | undefined | Promise<string | undefined> {
+  ): MaybePromise<string | undefined> {
     if (/^https?:\/\//i.test(source)) {
       // A note in a local-only folder must not reach the network.
       const localOnly =

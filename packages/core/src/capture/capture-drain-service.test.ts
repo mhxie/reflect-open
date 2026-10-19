@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AppError } from '../errors.ts'
 import { PATCH_NOTE_ATTEMPTS } from '../graph/patch-note.ts'
 import fixtures from './bookmark-envelope.fixtures.json' with { type: 'json' }
 import type { TextCaptureEnvelope } from './capture-envelope.ts'
@@ -241,7 +242,7 @@ describe('CaptureDrainService', () => {
 
   it('keeps the spool retryable when the Links note cannot be ensured', async () => {
     kit.addSpool(envelope())
-    kit.ensureBacklinkTargetMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
+    kit.ensureBacklinkTargetMock.mockRejectedValue(new AppError('io', 'disk full'))
 
     const outcome = await kit.drain()
 
@@ -442,7 +443,7 @@ describe('CaptureDrainService', () => {
 
   it('saves a capture whose screenshot cannot decode, without wedging the pass', async () => {
     kit.addSpool(envelope())
-    kit.promoteMock.mockRejectedValue({ kind: 'parse', message: 'screenshot does not decode' })
+    kit.promoteMock.mockRejectedValue(new AppError('parse', 'screenshot does not decode'))
 
     const outcome = await kit.drain()
 
@@ -486,10 +487,10 @@ describe('CaptureDrainService', () => {
     expect(kit.captureInbox.files().size).toBe(2)
   })
 
-  it('keeps a daily edit that lands mid-drain and links the capture exactly once', async () => {
+  it('keeps a daily edit that Rust merged with the link, writing it once', async () => {
     kit.noteFile.set(DAILY, '# Thursday\n')
     kit.addSpool(envelope(), { screenshot: false })
-    kit.raceNextWrite(DAILY, (daily) => `${daily ?? ''}\nTyped while the capture drained.\n`)
+    kit.mergeNextWrite(DAILY, (contents) => `${contents}\nTyped while the capture drained.\n`)
 
     const outcome = await kit.drain()
 
@@ -497,17 +498,31 @@ describe('CaptureDrainService', () => {
     const daily = kit.noteFile.files().get(DAILY) ?? ''
     expect(daily).toContain('Typed while the capture drained.')
     expect(daily.match(/\[\[capture-2026-06-11-153022-845-7c9e/g)).toHaveLength(1)
+    // The merged write landed: nothing is read back and written again.
+    expect(kit.writeNoteMock.mock.calls.filter(([path]) => path === DAILY)).toHaveLength(1)
   })
 
-  it('a daily that keeps changing stops the pass; the next pass links the capture once', async () => {
-    kit.noteFile.set(DAILY, '# Thursday\n')
+  it('keeps a daily note that appeared mid-drain and links the capture exactly once', async () => {
+    kit.addSpool(envelope(), { screenshot: false })
+    kit.raceNextWrite(DAILY, () => '# Thursday\n\nTyped on the phone.\n')
+
+    const outcome = await kit.drain()
+
+    expect(outcome).toEqual({ pending: 1, drained: 1, deduped: 0, invalid: 0, stopped: null })
+    const daily = kit.noteFile.files().get(DAILY) ?? ''
+    expect(daily).toContain('Typed on the phone.')
+    expect(daily.match(/\[\[capture-2026-06-11-153022-845-7c9e/g)).toHaveLength(1)
+  })
+
+  it('a daily that keeps appearing and vanishing stops the pass; the next pass links once', async () => {
     kit.addSpool(envelope(), { screenshot: false })
     let edits = 0
+    // A sync tug-of-war: every write finds the day's note created or removed meanwhile.
     kit.raceWrites(
       DAILY,
       (daily) => {
         edits += 1
-        return `${daily ?? ''}\nedit ${edits}\n`
+        return daily === undefined ? `# Thursday\n\nedit ${edits}\n` : null
       },
       PATCH_NOTE_ATTEMPTS,
     )
@@ -515,7 +530,7 @@ describe('CaptureDrainService', () => {
     const stopped = await kit.drain()
 
     expect(stopped.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
-    expect(kit.noteFile.files().get(DAILY)).toBe('# Thursday\n\nedit 1\n\nedit 2\n\nedit 3\n')
+    expect(kit.noteFile.files().get(DAILY)).toBe('# Thursday\n\nedit 3\n')
     expect(kit.captureInbox.files().size).toBe(1) // kept for the next pass
 
     const resumed = await kit.drain()
@@ -543,7 +558,7 @@ describe('CaptureDrainService', () => {
     expect(kit.captureInbox.files().size).toBe(0)
   })
 
-  it('never refreshes over a capture note edited after it was matched', async () => {
+  it('keeps an edit made to a matched capture note, merged into its refresh', async () => {
     kit.addSpool(
       envelope({
         id: '00000000-0000-4000-8000-000000000001',
@@ -553,18 +568,39 @@ describe('CaptureDrainService', () => {
     await kit.drain()
     const originalNotePath = 'notes/capture-2026-06-11-093000-000-0000.md'
     kit.addSpool(envelope())
-    kit.raceNextWrite(originalNotePath, (note) => `${note ?? ''}\nMy own notes.\n`)
+    kit.mergeNextWrite(originalNotePath, (contents) => `${contents}\nMy own notes.\n`)
 
     const outcome = await kit.drain()
 
-    expect(outcome.stopped).toMatchObject({ reason: 'io' })
-    expect(kit.noteFile.files().get(originalNotePath)).toContain('My own notes.')
+    expect(outcome.stopped).toBeNull()
+    const refreshes = kit.writeNoteMock.mock.calls.filter(([path]) => path === originalNotePath)
+    expect(refreshes).toHaveLength(1)
+    expect(kit.noteFile.files().get(originalNotePath)).toBe(`${refreshes[0]?.[1]}\nMy own notes.\n`)
+    expect(kit.captureInbox.files().size).toBe(0)
+  })
+
+  it('never recreates a matched capture note removed before its refresh', async () => {
+    kit.addSpool(
+      envelope({
+        id: '00000000-0000-4000-8000-000000000001',
+        capturedAt: new Date(2026, 5, 11, 9, 30, 0, 0).toISOString(),
+      }),
+    )
+    await kit.drain()
+    const originalNotePath = 'notes/capture-2026-06-11-093000-000-0000.md'
+    kit.addSpool(envelope())
+    kit.raceNextWrite(originalNotePath, () => null)
+
+    const outcome = await kit.drain()
+
+    expect(outcome.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
+    expect(kit.noteFile.files().has(originalNotePath)).toBe(false)
     expect(kit.captureInbox.files().size).toBe(2) // kept: the next pass re-matches and retries
   })
 
   it('a write failure stops the pass with the error kind', async () => {
     kit.addSpool(envelope())
-    kit.writeNoteMock.mockRejectedValue({ kind: 'io', message: 'disk full' })
+    kit.writeNoteMock.mockRejectedValue(new AppError('io', 'disk full'))
 
     const outcome = await kit.drain()
 
@@ -662,27 +698,39 @@ describe('CaptureDrainService (text captures)', () => {
     expect(kit.noteFile.files().get(DAILY)).toBe('Wrote some prose.\n\n- call the bank\n')
   })
 
-  it('keeps a daily edit that lands mid-drain, appending after it', async () => {
+  it('keeps a daily edit that Rust merged with the appended line, writing it once', async () => {
     kit.noteFile.set(DAILY, '- morning standup\n')
     addTextSpool(textEnvelope())
-    kit.raceNextWrite(DAILY, (daily) => `${daily ?? ''}- typed meanwhile\n`)
+    kit.mergeNextWrite(DAILY, (contents) =>
+      contents.replace('- call the bank\n', '- typed meanwhile\n- call the bank\n'),
+    )
 
     await kit.drain()
 
     expect(kit.noteFile.files().get(DAILY)).toBe(
       '- morning standup\n- typed meanwhile\n- call the bank\n',
     )
+    expect(kit.writeNoteMock.mock.calls.filter(([path]) => path === DAILY)).toHaveLength(1)
+    expect(kit.captureInbox.files().size).toBe(0)
   })
 
-  it('a daily that keeps changing keeps the spool, with nothing appended', async () => {
-    kit.noteFile.set(DAILY, '- morning standup\n')
+  it('keeps a daily note that appeared mid-drain, appending after it', async () => {
+    addTextSpool(textEnvelope())
+    kit.raceNextWrite(DAILY, () => '- typed meanwhile\n')
+
+    await kit.drain()
+
+    expect(kit.noteFile.files().get(DAILY)).toBe('- typed meanwhile\n- call the bank\n')
+  })
+
+  it('a daily that keeps appearing and vanishing keeps the spool, with nothing appended', async () => {
     addTextSpool(textEnvelope())
     let edits = 0
     kit.raceWrites(
       DAILY,
       (daily) => {
         edits += 1
-        return `${daily ?? ''}- edit ${edits}\n`
+        return daily === undefined ? `- edit ${edits}\n` : null
       },
       PATCH_NOTE_ATTEMPTS,
     )
@@ -690,16 +738,12 @@ describe('CaptureDrainService (text captures)', () => {
     const stopped = await kit.drain()
 
     expect(stopped.stopped).toEqual({ reason: 'io', message: CHANGED_ON_DISK.message })
-    expect(kit.noteFile.files().get(DAILY)).toBe(
-      '- morning standup\n- edit 1\n- edit 2\n- edit 3\n',
-    )
+    expect(kit.noteFile.files().get(DAILY)).toBe('- edit 3\n')
     expect(kit.captureInbox.files().size).toBe(1)
 
     await kit.drain()
 
-    expect(kit.noteFile.files().get(DAILY)).toBe(
-      '- morning standup\n- edit 1\n- edit 2\n- edit 3\n- call the bank\n',
-    )
+    expect(kit.noteFile.files().get(DAILY)).toBe('- edit 3\n- call the bank\n')
     expect(kit.captureInbox.files().size).toBe(0)
   })
 
@@ -767,9 +811,7 @@ it('isolates a failed bookmark write from later page captures', async () => {
   const name = `${bookmark.id}.json`
   kit.captureInbox.add(name, JSON.stringify(bookmark), { modifiedMs: -1 })
   kit.addSpool(envelope())
-  const writeXPost = vi.fn(async () => {
-    throw new Error('Daily note busy')
-  })
+  const writeXPost = vi.fn(() => Promise.reject(new Error('Daily note busy')))
   const outcome = await kit.drain({ writeXPost })
   expect(outcome.drained).toBe(1)
   expect(outcome.invalid).toBe(0)

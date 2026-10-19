@@ -32,7 +32,6 @@ function lexicalHit(path: string, title: string): FilteredSearchHit {
     summary: '',
     mtime: 0,
     isPinned: false,
-    hasConflict: false,
     isPrivate: false,
     hasDeviceOnlyContent: false,
   }
@@ -49,7 +48,6 @@ function setup() {
         snippet: 'borrow checker notes',
         heading: null,
         isPrivate: false,
-        hasConflict: false,
         matchedBy: 'semantic',
       },
       {
@@ -59,7 +57,6 @@ function setup() {
         snippet: '',
         heading: null,
         isPrivate: false,
-        hasConflict: true,
         matchedBy: 'both',
       },
     ],
@@ -72,9 +69,9 @@ function setup() {
   const service = createPaletteSearchService({
     suggestions: createSuggestionService({ database: createTestDatabaseService() }),
     search: {
-      searchWithFilters: async (parsed) => {
+      searchWithFilters: (parsed) => {
         searches.push(parsed)
-        return [lexicalHit('notes/lexical.md', 'Lexical')]
+        return Promise.resolve([lexicalHit('notes/lexical.md', 'Lexical')])
       },
     },
     retrieval,
@@ -147,7 +144,6 @@ describe('PaletteSearchService', () => {
         snippet: 'borrow checker notes',
         related: true,
         isPrivate: false,
-        hasConflict: false,
       },
       {
         path: 'daily/2026-06-08.md',
@@ -156,7 +152,6 @@ describe('PaletteSearchService', () => {
         snippet: null,
         related: false,
         isPrivate: false,
-        hasConflict: true,
       },
     ])
     const options: RetrieveOptions = { mode: 'hybrid' }
@@ -196,7 +191,6 @@ describe('PaletteSearchService', () => {
           dailyDate: null,
           snippet: 'body',
           isPrivate: false,
-          hasConflict: false,
         },
       ],
       filtered: false,

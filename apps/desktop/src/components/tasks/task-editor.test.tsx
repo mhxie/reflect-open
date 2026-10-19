@@ -27,7 +27,6 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
     title: 'Plan',
     dailyDate: null,
     isPrivate,
-    hasConflict: false,
     gistUrl: null,
     gistStale: false,
   }
@@ -53,7 +52,7 @@ async function renderTaskEditor(task: OpenTask) {
   const app = createTestCoreServices()
   const getNote = vi
     .spyOn(app.indexQuery, 'getNote')
-    .mockImplementation(async (path) => noteRow(path, path === 'notes/locked.md'))
+    .mockImplementation((path) => Promise.resolve(noteRow(path, path === 'notes/locked.md')))
   app.xArchive.setPost('101', archivedPost('101'))
   const noop = (): void => {}
   const view = await renderInApp(
@@ -131,7 +130,7 @@ describe('TaskEditor network policy', () => {
     expect(editor).not.toBeNull()
 
     const beforeLock = commands(view).length
-    act(() => {
+    await act(() => {
       view.queryClient.setQueryData(queryKeys.index.note('/g', path), noteRow(path, true))
     })
     await expect.element(page.getByTestId('embed-link')).toHaveTextContent(X_URL)

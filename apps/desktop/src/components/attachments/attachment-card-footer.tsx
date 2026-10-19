@@ -48,7 +48,6 @@ export function AttachmentCardFooter({
             <NoteStateIndicator
               path={firstNote.path}
               isPrivate={firstNote.isPrivate}
-              hasConflict={firstNote.hasConflict}
               className="mr-1"
             />
             {noteLabel(firstNote.title)}

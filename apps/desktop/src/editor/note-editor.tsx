@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import { EditorInputTraits } from '@/editor/editor-input-traits.tsx'
 import { shouldEmbedFile } from '@/editor/embed-file.ts'
 import { noteTitleFromFile } from '@/editor/file-title.ts'
@@ -60,7 +61,7 @@ import {
   type Ref,
 } from 'react'
 
-type WikilinkHoverRenderer = (hit: WikilinkHoverHit) => ReactNode | Promise<ReactNode>
+type WikilinkHoverRenderer = (hit: WikilinkHoverHit) => MaybePromise<ReactNode>
 
 // See apps/youtube-relay/README.md.
 const YOUTUBE_RELAY_URL = 'https://youtube-relay-reflect.vercel.app/'
@@ -213,7 +214,7 @@ interface NoteEditorProps {
    */
   resolveAssetOpenPath?: (src: string) => string | null
   /** Open a vetted graph-relative asset path in the OS default application. */
-  openAsset?: (path: string) => Promise<void> | void
+  openAsset?: (path: string) => MaybePromise<void>
   /**
    * Persist a pasted/dropped file (any kind) and return its markdown
    * destination, or null to decline. meowdown inserts `![](dest)` for images
@@ -253,7 +254,7 @@ interface NoteEditorProps {
    * renders no card. Must be a stable function: a new identity re-runs the
    * resolution for the currently hovered link.
    */
-  renderWikilinkHoverCard?: WikilinkHoverRenderer
+  renderWikilinkHoverCard?: WikilinkHoverRenderer | undefined
   /** Click on an inline `#tag`. The tag name arrives without the leading `#`. */
   onTagClick?: (tag: string) => void
   /** Search notes for the `[[` autocomplete menu. */
@@ -521,7 +522,7 @@ export function NoteEditor({
         openLightbox({ type: 'image', src: displayUrl, alt }, element)
       })
     },
-    [openLightbox, handleResolveImageUrl],
+    [handleResolveImageUrl, logger, openLightbox],
   )
 
   const handleXPostMediaClick: XPostMediaClickHandler = useCallback(

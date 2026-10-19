@@ -1,7 +1,7 @@
 import { page, userEvent, type Locator } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ReflectError,
+  AppError,
   settingsSchema,
   type AiProviderConfig,
   type HostedAiProviderConfig,
@@ -86,7 +86,7 @@ beforeEach(() => {
   const set = secrets.set.bind(secrets)
   vi.spyOn(secrets, 'set').mockImplementation(async (name, value) => {
     if (failSecretSet) {
-      throw new ReflectError('io', 'keychain locked')
+      throw new AppError('io', 'keychain locked')
     }
     await set(name, value)
   })
@@ -383,7 +383,7 @@ describe('AiProvidersSection on this Mac', () => {
       baseUrl: OLLAMA_URL,
       keyHint: '',
       ...overrides,
-    } as AiProviderConfig
+    }
   }
 
   function onDeviceSwitch(): Locator {

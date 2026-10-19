@@ -6,7 +6,7 @@ import {
   type TestBackupService,
   type TestCoreServices,
 } from '@reflect/core/testing'
-import { act, actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { useWikiTrustReport } from './use-wiki-trust-report.ts'
 
@@ -52,7 +52,7 @@ function changes(backup: TestBackupService): number {
 }
 
 async function poll(client: QueryClient): Promise<void> {
-  await actAsync(async () => {
+  await act(async () => {
     await client.refetchQueries({ queryKey: ['wiki-trust'] })
   })
 }
@@ -110,7 +110,7 @@ describe('useWikiTrustReport and a backup that starts mid-read', () => {
       expect(app.ipc.calls().map((call) => call.command)).toContain('wiki_trust_report_read'),
     )
     // The graph's services (with its backup) start while the read is out.
-    act(() => {
+    await act(() => {
       app.graphSession.setGraph({})
     })
     release()

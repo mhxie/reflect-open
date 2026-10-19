@@ -858,8 +858,11 @@ class AssetDescriptionServiceImpl implements AssetDescriptionService {
    * created only while no file exists, or replacing only the managed
    * description that was read. A slow provider call sits between that check and
    * this write, so a sync pull or the user may have put a file there since; it
-   * is kept and the asset skipped (`false`). A write refused while the file is
-   * unchanged is a real failure: it rethrows and stops the pass.
+   * is kept and the asset skipped (`false`). The replacement keeps the file's
+   * modification time (a regenerated description is not an edit), which also
+   * makes Rust refuse a moved-on file instead of merging generated text into
+   * it. A write refused while the file is unchanged is a real failure: it
+   * rethrows and stops the pass.
    */
   async #persistDescription(
     path: string,
@@ -872,7 +875,7 @@ class AssetDescriptionServiceImpl implements AssetDescriptionService {
       return (await noteFile.create(path, description, generation)).kind === 'created'
     }
     try {
-      await noteFile.write(path, description, generation, existing)
+      await noteFile.writeKeepingModified(path, description, generation, existing)
       return true
     } catch (cause) {
       if ((await this.#readDescriptionSource(path, generation)) !== existing) {

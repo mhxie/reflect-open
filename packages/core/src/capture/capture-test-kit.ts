@@ -73,7 +73,10 @@ export const DAILY = 'daily/2026-06-11.md'
 export const CAPTURE_URL = 'https://example.com/article'
 
 /**
- * Rust's refusal of a write whose expected contents no longer match the file.
+ * Rust's refusal of a write whose named revision no longer applies: a file
+ * appeared where the write expected none, or the file it replaces is gone.
+ * A file that merely changed is merged instead (see
+ * {@link CaptureTestKit.mergeNextWrite}).
  */
 export const CHANGED_ON_DISK = {
   kind: 'io',
@@ -121,17 +124,31 @@ export interface CaptureTestKit {
    */
   installFailingSecrets(error: Error): void
   /**
-   * Stage a concurrent change: just before the next write to `path` is
-   * checked, the file becomes `edit(current)` — a sync pull or an editor save
-   * landing between a pass's read and its write. The note writes keep the
-   * checked-write rule of the in-memory graph, so the write is refused.
+   * Stage a concurrent change that Rust refuses: just before the next write
+   * to `path` lands, a missing file appears with `edit(undefined)` (a sync
+   * pull bringing it), or an existing one disappears because `edit` returns
+   * `null`. Changing an existing file's contents would merge, not refuse:
+   * stage that with {@link mergeNextWrite}.
    */
-  raceNextWrite(path: string, edit: (current: string | undefined) => string): void
+  raceNextWrite(path: string, edit: (current: string | undefined) => string | null): void
   /**
-   * Stage a note that keeps changing: the next `times` writes to `path` each
-   * find it changed by `edit` just before they are checked, so each is refused.
+   * {@link raceNextWrite} for the next `times` writes to `path`, so each is refused.
    */
-  raceWrites(path: string, edit: (current: string | undefined) => string, times: number): void
+  raceWrites(
+    path: string,
+    edit: (current: string | undefined) => string | null,
+    times: number,
+  ): void
+  /**
+   * Stage a concurrent change that Rust merges: the next write to `path`
+   * lands as `merge(contents)`, the result of merging the written contents
+   * with a newer disk text, and reports it as `merged`.
+   */
+  mergeNextWrite(path: string, merge: (contents: string) => string): void
+  /**
+   * Make the next write to `path` fail with `error`, as a full disk does.
+   */
+  failNextWrite(path: string, error: Error): void
   /**
    * Spool one capture (envelope JSON + screenshot sibling unless disabled).
    */
@@ -232,16 +249,51 @@ class CaptureTestKitImpl implements CaptureTestKit {
     this.#secretStore = store
   }
 
-  raceNextWrite(path: string, edit: (current: string | undefined) => string): void {
+  raceNextWrite(path: string, edit: (current: string | undefined) => string | null): void {
     this.raceWrites(path, edit, 1)
   }
 
-  raceWrites(path: string, edit: (current: string | undefined) => string, times: number): void {
+  raceWrites(
+    path: string,
+    edit: (current: string | undefined) => string | null,
+    times: number,
+  ): void {
     let remaining = times
     this.writeNoteMock.mockImplementation(async (target, contents, generation, expected) => {
       if (remaining > 0 && target === path) {
         remaining -= 1
-        this.noteFile.set(path, edit(this.noteFile.files().get(path)))
+        const current = this.noteFile.files().get(path)
+        const next = edit(current)
+        if ((current === undefined) === (next === null)) {
+          throw new Error(`a race on ${path} must create a missing file or remove an existing one`)
+        }
+        if (next === null) {
+          await this.noteFile.delete(path, generation)
+        } else {
+          this.noteFile.set(path, next)
+        }
+      }
+      return await this.#write(target, contents, generation, expected)
+    })
+  }
+
+  mergeNextWrite(path: string, merge: (contents: string) => string): void {
+    let pending = true
+    this.writeNoteMock.mockImplementation(async (target, contents, generation, expected) => {
+      if (pending && target === path) {
+        pending = false
+        this.noteFile.mergeNextWrite(path, merge(contents))
+      }
+      return await this.#write(target, contents, generation, expected)
+    })
+  }
+
+  failNextWrite(path: string, error: Error): void {
+    let pending = true
+    this.writeNoteMock.mockImplementation(async (target, contents, generation, expected) => {
+      if (pending && target === path) {
+        pending = false
+        throw error
       }
       return await this.#write(target, contents, generation, expected)
     })

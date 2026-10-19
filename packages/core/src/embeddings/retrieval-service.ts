@@ -1,5 +1,5 @@
 import { sql } from 'kysely'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { GraphSessionSource } from '../graph/graph-session.ts'
 import type { LocalOnlyFolders } from '../graph/local-only.ts'
 import type { LoggerService } from '../ports/logger-service.ts'
@@ -64,7 +64,6 @@ export interface ChunkHitRow {
   isPrivate: number
   hasDeviceOnlyContent?: number
   assetTextHash?: string
-  hasConflict: number
   /**
    * The model that embedded the chunk; its catalog entry holds the noise cutoff.
    */
@@ -94,7 +93,6 @@ interface NoteSnapshot {
   isPrivate: boolean
   hasDeviceOnlyContent: boolean
   assetTextHash?: string | undefined
-  hasConflict: boolean
 }
 
 /**
@@ -113,7 +111,6 @@ function retrievalHit(
     isPrivate: note.isPrivate,
     ...(note.hasDeviceOnlyContent ? { hasDeviceOnlyContent: true } : {}),
     ...(note.assetTextHash === undefined ? {} : { assetTextHash: note.assetTextHash }),
-    hasConflict: note.hasConflict,
   }
 }
 
@@ -145,7 +142,6 @@ export function bestChunkPerNote(
           isPrivate: row.isPrivate !== 0,
           hasDeviceOnlyContent:
             row.hasDeviceOnlyContent !== undefined && row.hasDeviceOnlyContent !== 0,
-          hasConflict: row.hasConflict !== 0,
         },
         { score: 1 - row.distance, snippet: row.text.trim(), heading: row.heading },
       ),
@@ -351,7 +347,7 @@ class RetrievalServiceImpl implements RetrievalService {
       seeds.rows.map(async (seed) => {
         const result = await sql<ChunkHitRow>`
           SELECT c.note_path AS path, n.title, n.display_title AS displayTitle, n.lang, c.heading, c.text,
-                 (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
+                 (n.is_private OR c.is_private) AS isPrivate, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
           FROM embedding_vectors v
           JOIN embedding_chunks c ON c.id = v.rowid
           JOIN notes n ON n.path = c.note_path
@@ -374,12 +370,12 @@ class RetrievalServiceImpl implements RetrievalService {
     const { database, embeddingRuntime } = this.#deps
     const status = await embeddingRuntime.status()
     if (status.status !== 'ready') {
-      throw new ReflectError('io', 'embedding model is not loaded')
+      throw new AppError('io', 'embedding model is not loaded')
     }
     const [vector] = await embeddingRuntime.embedTexts([query], 'query', status.model)
     const result = await sql<ChunkHitRow>`
       SELECT c.note_path AS path, n.title, n.display_title AS displayTitle, n.lang, c.heading, c.text,
-             (n.is_private OR c.is_private) AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
+             (n.is_private OR c.is_private) AS isPrivate, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash, c.model_id AS modelId, v.distance
       FROM embedding_vectors v
       JOIN embedding_chunks c ON c.id = v.rowid
       JOIN notes n ON n.path = c.note_path
@@ -448,13 +444,12 @@ class RetrievalServiceImpl implements RetrievalService {
       lang: string | null
       snippet: string
       isPrivate: number
-      hasConflict: number
       hasDeviceOnlyContent: number
       assetTextHash: string
     }>`
       SELECT search_fts.path AS path, n.title AS title, n.display_title AS displayTitle, n.lang,
              snippet(search_fts, 2, ${HIGHLIGHT_START}, ${HIGHLIGHT_END}, '…', 10) AS snippet,
-             n.is_private AS isPrivate, n.has_conflict AS hasConflict, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash
+             n.is_private AS isPrivate, n.has_device_only_content AS hasDeviceOnlyContent, n.asset_text_hash AS assetTextHash
       FROM search_fts
       JOIN notes n ON n.path = search_fts.path
       WHERE search_fts MATCH ${match} AND n.kind != 'template'
@@ -470,7 +465,6 @@ class RetrievalServiceImpl implements RetrievalService {
             ...row,
             isPrivate: row.isPrivate !== 0,
             hasDeviceOnlyContent: row.hasDeviceOnlyContent !== 0,
-            hasConflict: row.hasConflict !== 0,
           },
           { score: 0, snippet: row.snippet, heading: null },
         ),

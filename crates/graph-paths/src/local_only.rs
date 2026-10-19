@@ -338,7 +338,7 @@ mod tests {
 
     use serde::Deserialize;
 
-    use super::{folder_name_problem, LocalOnlyFolders};
+    use super::{LocalOnlyFolders, folder_name_problem};
 
     #[derive(Deserialize)]
     struct Fixture {
@@ -639,9 +639,11 @@ mod tests {
         // Control: the disjoint raw store grants the hop.
         let disjoint = LocalOnlyFolders::new(["secure"], Some(&stores.raw)).expect("folders");
         assert_eq!(disjoint.raw_root_problem(&stores.graph), None);
-        assert!(disjoint
-            .link_target(&stores.graph, Path::new("finance/secure"))
-            .is_some());
+        assert!(
+            disjoint
+                .link_target(&stores.graph, Path::new("finance/secure"))
+                .is_some()
+        );
     }
 
     #[cfg(unix)]

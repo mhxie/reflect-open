@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { ReactNode } from 'react'
 import { act } from '@/test-utils/act.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -22,7 +23,7 @@ import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 const dispatchDeepLink = vi.fn<(url: string) => void>()
 const resolveMarkdownHref = vi.fn()
 // Receives the `reflect://` link of every note window a test opens.
-const openNoteWindow = vi.fn<(deepLink: string) => boolean | Promise<boolean>>()
+const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactNode {
   const { route } = useRouter()
@@ -64,9 +65,9 @@ async function mount(sourcePath: string | null): Promise<void> {
   onLinkClick = result.current
 }
 
-function click(href: string, metaKey = false): MouseEvent {
+async function click(href: string, metaKey = false): Promise<MouseEvent> {
   const event = new MouseEvent('click', { cancelable: true, metaKey })
-  act(() => onLinkClick({ href, event, mod: metaKey }))
+  await act(() => onLinkClick({ href, event, mod: metaKey }))
   return event
 }
 
@@ -84,28 +85,28 @@ beforeEach(async () => {
 
 describe('useMarkdownLinkClick', () => {
   it('opens an http(s) link in the OS browser and blocks the frame navigation', async () => {
-    const event = click('https://example.com')
+    const event = await click('https://example.com')
 
     expect(opener.openedUrls()).toEqual(['https://example.com'])
     expect(event.defaultPrevented).toBe(true)
   })
 
   it('routes a reflect:// link through the in-app deep-link intake, not the URL opener', async () => {
-    click('reflect://note/abc123')
+    await click('reflect://note/abc123')
 
     expect(dispatchDeepLink).toHaveBeenCalledWith('reflect://note/abc123')
     expect(opener.openedUrls()).toEqual([])
   })
 
   it('⌘-clicks a rendered reflect:// link into a secondary window', async () => {
-    click('reflect://note/abc123', true)
+    await click('reflect://note/abc123', true)
 
     await vi.waitFor(() => expect(openNoteWindow).toHaveBeenCalledWith('reflect://note/abc123'))
     expect(dispatchDeepLink).not.toHaveBeenCalled()
   })
 
   it('opens a custom app scheme in its OS default app', async () => {
-    const event = click('x-devonthink-item://40C88434-68B6-4DCB-A258-754679764C3C')
+    const event = await click('x-devonthink-item://40C88434-68B6-4DCB-A258-754679764C3C')
 
     expect(opener.openedUrls()).toEqual([
       'x-devonthink-item://40C88434-68B6-4DCB-A258-754679764C3C',
@@ -119,8 +120,8 @@ describe('useMarkdownLinkClick', () => {
     ['data:text/html,<script>alert(1)</script>'],
     ['file:///etc/passwd'],
     ['blob:https://example.com/uuid'],
-  ])('drops the unsafe scheme %s without opening anything', (href) => {
-    const event = click(href)
+  ])('drops the unsafe scheme %s without opening anything', async (href) => {
+    const event = await click(href)
 
     expect(opener.openedUrls()).toEqual([])
     expect(dispatchDeepLink).not.toHaveBeenCalled()
@@ -132,7 +133,7 @@ describe('useMarkdownLinkClick', () => {
       kind: 'resolved',
       path: 'projects/roadmap/plan.md',
     })
-    const event = click('./roadmap/plan.md')
+    const event = await click('./roadmap/plan.md')
 
     expect(resolveMarkdownHref).toHaveBeenCalledWith('projects/TASKS.md', './roadmap/plan.md', 7)
     await expect
@@ -143,7 +144,7 @@ describe('useMarkdownLinkClick', () => {
   })
 
   it('opens an attachment link through the graph asset opener, not the URL opener', async () => {
-    click('assets/cat.png')
+    await click('assets/cat.png')
 
     await vi.waitFor(() => expect(attachments.opened()).toEqual(['assets/cat.png']))
     expect(opener.openedUrls()).toEqual([])
@@ -153,8 +154,8 @@ describe('useMarkdownLinkClick', () => {
   it('drops attachment and note links when the Markdown belongs to no note', async () => {
     await mount(null)
 
-    const asset = click('assets/cat.png')
-    const note = click('notes/foo.md')
+    const asset = await click('assets/cat.png')
+    const note = await click('notes/foo.md')
 
     expect(attachments.opened()).toEqual([])
     expect(resolveMarkdownHref).not.toHaveBeenCalled()

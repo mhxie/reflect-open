@@ -1,4 +1,4 @@
-import { act, actAsync } from '@/test-utils/act.ts'
+import { act } from '@/test-utils/act.ts'
 import { describe, expect, it } from 'vitest'
 import type { AiProviderConfig, OpenAiCompatibleProviderConfig } from '@reflect/core'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
@@ -35,12 +35,12 @@ describe('useAiProviders', () => {
   it('drops the attestation when the default model changes, and keeps it for the same model', async () => {
     const { result } = await renderLoaded([ATTESTED])
 
-    act(() => {
+    await act(() => {
       result.current.setDefaultModel('ollama', 'llama3.2')
     })
     expect(result.current.providers[0]).toMatchObject({ onDevice: ATTESTED.onDevice })
 
-    act(() => {
+    await act(() => {
       result.current.setDefaultModel('ollama', 'qwen3')
     })
     expect(result.current.providers[0]).toMatchObject({ model: 'qwen3', onDevice: null })
@@ -56,14 +56,14 @@ describe('useAiProviders', () => {
     }
     const { result, app } = await renderLoaded([{ ...ATTESTED, onDevice: null }, lan])
 
-    act(() => {
+    await act(() => {
       result.current.setOnDevice('ollama', true)
       result.current.setOnDevice('lan', true)
     })
     expect(local(app.settings.get().aiProviders, 0)).toEqual(ATTESTED)
     expect(local(app.settings.get().aiProviders, 1).onDevice ?? null).toBeNull()
 
-    act(() => {
+    await act(() => {
       result.current.setOnDevice('ollama', false)
     })
     expect(result.current.providers[0]).toMatchObject({ onDevice: null })
@@ -86,7 +86,7 @@ describe('useAiProviders', () => {
       supportsImages: true,
     } as const
 
-    await actAsync(async () => {
+    await act(async () => {
       await result.current.addProvider({
         ...draft,
         baseUrl: 'http://localhost:11434/v1/',
@@ -117,7 +117,7 @@ describe('useAiProviders', () => {
   it('changes the declared image support and context window', async () => {
     const { result, app } = await renderLoaded([ATTESTED])
 
-    act(() => {
+    await act(() => {
       result.current.setCapabilities('ollama', { supportsImages: true, contextWindow: 8192 })
     })
     expect(local(app.settings.get().aiProviders, 0)).toMatchObject({
@@ -125,7 +125,7 @@ describe('useAiProviders', () => {
       contextWindow: 8192,
     })
 
-    act(() => {
+    await act(() => {
       result.current.setCapabilities('ollama', { contextWindow: null })
     })
     expect(local(app.settings.get().aiProviders, 0).contextWindow).toBeUndefined()

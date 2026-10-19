@@ -98,20 +98,23 @@ describe('createCoreServices', () => {
 
   it('reports note writes to the composed file-change service', async () => {
     const ipc = createTestIpcBridgeService({
-      commands: { note_write: () => null },
+      commands: { note_write: () => ({ modifiedMs: null, merged: null }) },
     })
     const { services, internal } = composeCoreServices({
       ...requiredAdapters(),
       ipc,
       logger: createTestLoggerService(),
       clock: createTestClockService({ now: 5 }),
+      platform: createTestPlatformService({ appPlatform: 'ios' }),
     })
-    const written: string[] = []
-    services.fileChanges.subscribeOwnWrites((paths) => {
-      written.push(...paths)
+    const seen: { source: string; paths: string[] }[] = []
+    services.fileChanges.subscribe((batch) => {
+      seen.push({ source: batch.source, paths: batch.changes.map((change) => change.path) })
     })
-    await expect(internal.noteFile.write('notes/a.md', 'a', 1, null)).resolves.toBe(5)
-    expect(written).toEqual(['notes/a.md'])
+    await expect(internal.noteFile.write('notes/a.md', 'a', 1, null)).resolves.toEqual({
+      merged: null,
+    })
+    expect(seen).toEqual([{ source: 'own-write', paths: ['notes/a.md'] }])
   })
 
   it('builds the index reads over the composed database', async () => {

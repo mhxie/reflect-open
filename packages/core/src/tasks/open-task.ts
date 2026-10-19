@@ -19,10 +19,6 @@ export interface OpenTask extends TaskRow {
    * The note's indexed privacy flag (locked, unreadable frontmatter, or local-only).
    */
   isPrivate: boolean
-  /**
-   * The note carries sync conflict markers.
-   */
-  hasConflict: boolean
   pinnedOrder: number | null
   updatedAt: number
 }

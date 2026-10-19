@@ -12,13 +12,13 @@ use std::ptr::NonNull;
 
 use objc2_core_foundation::{CFData, CFMutableData, CFRetained, CFString, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{
-    kCGColorSpaceSRGB, CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext,
-    CGDataProvider, CGImage, CGImageAlphaInfo, CGInterpolationQuality, CGPDFBox, CGPDFDocument,
-    CGPDFPage,
+    CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGDataProvider,
+    CGImage, CGImageAlphaInfo, CGInterpolationQuality, CGPDFBox, CGPDFDocument, CGPDFPage,
+    kCGColorSpaceSRGB,
 };
 use objc2_image_io::CGImageDestination;
 
-use super::{raster_size, PageBox, PageRequest, PageSize, PdfError};
+use super::{PageBox, PageRequest, PageSize, PdfError, raster_size};
 
 pub(super) const SUPPORTED: bool = true;
 
@@ -258,8 +258,8 @@ mod tests {
     fn encrypted(user_password: &str, owner_password: &str) -> Vec<u8> {
         use objc2_core_foundation::CFDictionary;
         use objc2_core_graphics::{
-            kCGPDFContextOwnerPassword, kCGPDFContextUserPassword, CGDataConsumer,
-            CGPDFContextBeginPage, CGPDFContextClose, CGPDFContextCreate, CGPDFContextEndPage,
+            CGDataConsumer, CGPDFContextBeginPage, CGPDFContextClose, CGPDFContextCreate,
+            CGPDFContextEndPage, kCGPDFContextOwnerPassword, kCGPDFContextUserPassword,
         };
         let data = CFMutableData::new(None, 0).unwrap();
         let consumer = CGDataConsumer::with_cf_data(Some(&data)).unwrap();

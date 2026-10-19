@@ -8,8 +8,8 @@
 
 use std::fmt;
 
-use crate::scalar::{classify_scalar, ValueClass};
-use crate::scan::{line_scan_private, load, Load, NodeKind, Tree};
+use crate::scalar::{ValueClass, classify_scalar};
+use crate::scan::{Load, NodeKind, Tree, line_scan_private, load};
 use crate::split::split_block;
 
 /// How a note's frontmatter classifies for privacy. Only `Public` may reach
@@ -301,7 +301,9 @@ mod tests {
 
     #[test]
     fn an_alias_bomb_returns_quickly_without_loading() {
-        let mut bomb = String::from("private: false\na: &a [\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\"]\n");
+        let mut bomb = String::from(
+            "private: false\na: &a [\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\"]\n",
+        );
         let names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
         for pair in names.windows(2) {
             let refs = vec![format!("*{}", pair[0]); 9].join(",");

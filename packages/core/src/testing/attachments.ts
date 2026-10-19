@@ -16,7 +16,7 @@ import {
   type WikiEmbedDisplay,
 } from '../documents/attachment-service.ts'
 import type { Unlisten } from '../unlisten.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { FileMeta, PdfInfo } from '../graph/schemas.ts'
 import { assetFileName, assetLinkDestination } from '../graph/asset-names.ts'
 import {
@@ -137,9 +137,11 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     return this.#openGeneration() === null ? null : this.#catalog
   }
 
-  async loadCatalog(): Promise<AttachmentCatalog> {
-    requireGraphSession(this.#graphSession)
-    return this.#catalog
+  loadCatalog(): Promise<AttachmentCatalog> {
+    return Promise.try(() => {
+      requireGraphSession(this.#graphSession)
+      return this.#catalog
+    })
   }
 
   watchCatalog(): Unlisten {
@@ -159,20 +161,24 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     }
   }
 
-  async listFiles(): Promise<FileMeta[]> {
-    return this.#files.map(({ path, size, modifiedMs }) => ({
-      path,
-      size,
-      modifiedMs: modifiedMs ?? 0,
-    }))
+  listFiles(): Promise<FileMeta[]> {
+    return Promise.resolve(
+      this.#files.map(({ path, size, modifiedMs }) => ({
+        path,
+        size,
+        modifiedMs: modifiedMs ?? 0,
+      })),
+    )
   }
 
-  async pdfInfo(path: string): Promise<PdfInfo> {
-    const info = this.#options?.pdfs?.[path]
-    if (info === undefined) {
-      throw new ReflectError('invalid', `${path} is not a readable PDF`)
-    }
-    return info
+  pdfInfo(path: string): Promise<PdfInfo> {
+    return Promise.try(() => {
+      const info = this.#options?.pdfs?.[path]
+      if (info === undefined) {
+        throw new AppError('invalid', `${path} is not a readable PDF`)
+      }
+      return info
+    })
   }
 
   resolveAttachmentPath(notePath: string, destination: string): string | null {
@@ -207,17 +213,19 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     return `${this.assetUrl(path, generation)}?reflect-preview=thumb&width=${width}`
   }
 
-  async resolvePreviewImageUrl(
+  resolvePreviewImageUrl(
     notePath: string,
     source: string,
     generation: number,
   ): Promise<string | undefined> {
-    const path = this.#resolveAttachmentPath(notePath, source, generation)
-    if (path === null || path.toLowerCase().endsWith('.svg')) {
-      return
-    }
-    const url = this.#resolveImageUrl(notePath, source, generation)
-    return url === undefined ? undefined : `${url}?reflect-preview=raster`
+    return Promise.try(() => {
+      const path = this.#resolveAttachmentPath(notePath, source, generation)
+      if (path === null || path.toLowerCase().endsWith('.svg')) {
+        return
+      }
+      const url = this.#resolveImageUrl(notePath, source, generation)
+      return url === undefined ? undefined : `${url}?reflect-preview=raster`
+    })
   }
 
   resolveWikiEmbed(target: string): WikiEmbedDisplay | undefined {
@@ -228,30 +236,34 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     return isManagedAssetPath(href) || resolveAttachmentLink(notePath, href, null) !== null
   }
 
-  async resolveFileInfo(notePath: string, href: string): Promise<{ size: number } | undefined> {
-    const path = this.#resolveAttachmentPath(notePath, href, this.#openGeneration())
-    const size = path === null ? undefined : this.#catalog.size(path)
-    return size === undefined ? undefined : { size }
+  resolveFileInfo(notePath: string, href: string): Promise<{ size: number } | undefined> {
+    return Promise.try(() => {
+      const path = this.#resolveAttachmentPath(notePath, href, this.#openGeneration())
+      const size = path === null ? undefined : this.#catalog.size(path)
+      return size === undefined ? undefined : { size }
+    })
   }
 
-  async saveFile(file: File, notePath: string): Promise<AssetSaveResult | null> {
-    const generation = this.#openGeneration()
-    if (generation === null) {
-      return null
-    }
-    if (this.#saveFailure !== null) {
-      return { ok: false, error: this.#saveFailure }
-    }
-    const path = `assets/${assetFileName(file.name)}`
-    this.#saveLog.push({
-      name: file.name,
-      type: file.type,
-      size: file.size,
-      generation,
-      path,
-      notePath,
+  saveFile(file: File, notePath: string): Promise<AssetSaveResult | null> {
+    return Promise.try(() => {
+      const generation = this.#openGeneration()
+      if (generation === null) {
+        return null
+      }
+      if (this.#saveFailure !== null) {
+        return { ok: false, error: this.#saveFailure }
+      }
+      const path = `assets/${assetFileName(file.name)}`
+      this.#saveLog.push({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        generation,
+        path,
+        notePath,
+      })
+      return { ok: true, path, destination: assetLinkDestination(path) }
     })
-    return { ok: true, path, destination: assetLinkDestination(path) }
   }
 
   createSaveScope(): AttachmentSaveScope {
@@ -260,29 +272,33 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     })
   }
 
-  async attachFilesToNote(request: AttachFilesRequest): Promise<void> {
+  attachFilesToNote(request: AttachFilesRequest): Promise<void> {
     if (this.#openGeneration() !== null) {
       this.#attachLog.push(request)
     }
+    return Promise.resolve()
   }
 
-  async openOrReveal(path: string): Promise<void> {
+  openOrReveal(path: string): Promise<void> {
     if (this.#openGeneration() === null) {
-      return
+      return Promise.resolve()
     }
     if (this.#options?.refuseOpen === true) {
       this.#revealLog.push(path)
     } else {
       this.#openLog.push(path)
     }
+    return Promise.resolve()
   }
 
-  async reveal(path: string, generation: number): Promise<void> {
-    // Rust refuses a reveal for any session but the open one.
-    if (generation !== this.#openGeneration()) {
-      throw new ReflectError('io', 'the graph changed since this command was issued; dropping it')
-    }
-    this.#revealLog.push(path)
+  reveal(path: string, generation: number): Promise<void> {
+    return Promise.try(() => {
+      // Rust refuses a reveal for any session but the open one.
+      if (generation !== this.#openGeneration()) {
+        throw new AppError('io', 'the graph changed since this command was issued; dropping it')
+      }
+      this.#revealLog.push(path)
+    })
   }
 
   setCatalog(entries: readonly TestAttachmentEntry[]): void {

@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag};
 use reflect_frontmatter::{
-    backup_privacy, normalize_line_endings_keeping_privacy, parse_frontmatter, split_frontmatter,
-    BackupPrivacy, Frontmatter,
+    BackupPrivacy, Frontmatter, backup_privacy, normalize_line_endings_keeping_privacy,
+    parse_frontmatter, split_frontmatter,
 };
-use reflect_graph_paths::{eviction_placeholder, LocalOnlyFolders};
+use reflect_graph_paths::{LocalOnlyFolders, eviction_placeholder};
 
 use crate::error::CliError;
 use crate::keys::fold_key;
@@ -62,14 +62,13 @@ fn unescape_markdown_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            if let Some(next) = chars.clone().next() {
-                if next.is_ascii_punctuation() {
-                    out.push(next);
-                    chars.next();
-                    continue;
-                }
-            }
+        if ch == '\\'
+            && let Some(next) = chars.clone().next()
+            && next.is_ascii_punctuation()
+        {
+            out.push(next);
+            chars.next();
+            continue;
         }
         out.push(ch);
     }
@@ -202,19 +201,20 @@ fn render_embedded_wiki_links(title: &str) -> Option<String> {
     let mut replaced = false;
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'[' && bytes.get(index + 1) == Some(&b'[') {
-            if let Some(inner_end) = find_wiki_inner_end(bytes, index + 2) {
-                let inner = &title[index + 2..inner_end];
-                let (target, alias) = match inner.find('|') {
-                    Some(pipe) => (inner[..pipe].trim(), inner[pipe + 1..].trim()),
-                    None => (inner.trim(), ""),
-                };
-                if !target.is_empty() {
-                    replaced = true;
-                    rendered.push_str(if alias.is_empty() { target } else { alias });
-                    index = inner_end + 2;
-                    continue;
-                }
+        if bytes[index] == b'['
+            && bytes.get(index + 1) == Some(&b'[')
+            && let Some(inner_end) = find_wiki_inner_end(bytes, index + 2)
+        {
+            let inner = &title[index + 2..inner_end];
+            let (target, alias) = match inner.find('|') {
+                Some(pipe) => (inner[..pipe].trim(), inner[pipe + 1..].trim()),
+                None => (inner.trim(), ""),
+            };
+            if !target.is_empty() {
+                replaced = true;
+                rendered.push_str(if alias.is_empty() { target } else { alias });
+                index = inner_end + 2;
+                continue;
             }
         }
         let ch_len = title[index..].chars().next().map_or(1, char::len_utf8);
@@ -421,13 +421,13 @@ pub fn ensure_not_private(
         Err(_) if eviction_placeholder(&absolute).is_some_and(|path| path.is_file()) => {
             return Err(CliError::Runtime(format!(
                 "note is unavailable until iCloud downloads it: {rel_path}"
-            )))
+            )));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => {
             return Err(CliError::Runtime(format!(
                 "could not read {rel_path}: {error}"
-            )))
+            )));
         }
     };
     refuse_withheld(rel_path, backup_privacy(&bytes))
@@ -449,14 +449,14 @@ pub(crate) fn checked_note_path(root: &Path, rel_path: &str) -> Result<PathBuf, 
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(CliError::Runtime(format!(
                     "refusing symlinked note path: {rel_path}"
-                )))
+                )));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(CliError::Runtime(format!(
                     "could not inspect {rel_path}: {error}"
-                )))
+                )));
             }
         }
     }
@@ -520,8 +520,10 @@ mod tests {
             ensure_not_private(&root, folded, Some(&folders)),
             Err(CliError::Private(_))
         ));
-        assert!(read_note(&root, "people/plan.md", Some(&folders))
-            .is_err_and(|err| !matches!(err, CliError::Private(_))));
+        assert!(
+            read_note(&root, "people/plan.md", Some(&folders))
+                .is_err_and(|err| !matches!(err, CliError::Private(_)))
+        );
     }
 
     /// The CLI fails closed: a note whose frontmatter can't be read is

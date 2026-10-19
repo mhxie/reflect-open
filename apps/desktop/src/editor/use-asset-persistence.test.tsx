@@ -1,6 +1,7 @@
+import { act } from '@/test-utils/act.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ReflectError,
+  AppError,
   LARGE_FILE_BYTES,
   createAttachmentService,
   createLocalOnlyFolders,
@@ -132,7 +133,7 @@ describe('useAssetPersistence', () => {
 
   it('opens attachments in the graph session', async () => {
     const attachments = installAttachments()
-    const { act } = await renderPersistence({ generation: 3 })
+    await renderPersistence({ generation: 3 })
 
     await act(async () => {
       await persistence!.openAsset('assets/q3-report.pdf')
@@ -143,7 +144,7 @@ describe('useAssetPersistence', () => {
 
   it('declines without a graph session', async () => {
     const attachments = installAttachments()
-    const { act } = await renderPersistence({ generation: null })
+    await renderPersistence({ generation: null })
 
     let saved: string | null = 'sentinel'
     await act(async () => {
@@ -161,7 +162,7 @@ describe('useAssetPersistence', () => {
 
   it('shows the latest failed save until the next success', async () => {
     const attachments = installAttachments()
-    const { act } = await renderPersistence({ generation: 3 })
+    await renderPersistence({ generation: 3 })
 
     attachments.failSaves({ kind: 'image', message: 'disk full' })
     await act(async () => {
@@ -196,14 +197,14 @@ describe('useAssetPersistence', () => {
     const view = await renderPersistence({ generation: 3, path: 'notes/a.md' })
 
     let savePromise: Promise<string | null> | null = null
-    await view.act(() => {
+    await act(() => {
       savePromise = persistence!.saveFile(fileOf('slow.pdf', 'application/pdf'))
     })
 
     // The user moves on; the save then fails for the note they left.
     await view.rerender({ path: 'notes/b.md' })
-    await view.act(async () => {
-      upload.reject(new ReflectError('io', 'late failure'))
+    await act(async () => {
+      upload.reject(new AppError('io', 'late failure'))
       await savePromise
     })
 
@@ -215,7 +216,7 @@ describe('useAssetPersistence', () => {
 describe('useAssetPersistence saveFile for local-only notes', () => {
   it('names the note, links its folder’s copy vault-root-absolute, and warns about no Git limit', async () => {
     const { progress, uploadedFor } = installRoutingAttachments()
-    const { act } = await renderPersistence({
+    await renderPersistence({
       generation: 3,
       path: 'My Finance/secure/bank.md',
       localOnly: true,
@@ -243,14 +244,14 @@ describe('useAssetPersistence saveFile for local-only notes', () => {
     const view = await renderPersistence({ generation: 3, path: 'notes/plan.md', localOnly: true })
 
     let saved: string | null = null
-    await view.act(async () => {
+    await act(async () => {
       saved = await persistence!.saveFile(fileOf('a.png', 'image/png'))
     })
     expect(saved).toMatch(/^assets\/pasted-\d+\.png$/)
 
     // The same pane now shows an editable local-only note.
     await view.rerender({ path: 'My Finance/secure/bank.md' })
-    await view.act(async () => {
+    await act(async () => {
       saved = await persistence!.saveFile(fileOf('b.png', 'image/png'))
     })
 

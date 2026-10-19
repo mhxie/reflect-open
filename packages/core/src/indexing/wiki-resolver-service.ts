@@ -161,7 +161,6 @@ class WikiResolverServiceImpl implements WikiResolverService {
         'dailyDate',
         'mtime',
         'isPrivate',
-        'hasConflict',
       ])
       .executeTakeFirst()
     if (note === undefined) {
@@ -174,7 +173,6 @@ class WikiResolverServiceImpl implements WikiResolverService {
           ...note,
           linkCount: 0,
           isPrivate: note.isPrivate !== 0,
-          hasConflict: note.hasConflict !== 0,
         },
       ],
       [],

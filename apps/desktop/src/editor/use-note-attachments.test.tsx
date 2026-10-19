@@ -1,3 +1,4 @@
+import { act } from '@/test-utils/act.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
@@ -40,7 +41,7 @@ describe('useNoteAttachments', () => {
 
   it('re-renders when the catalog changes', async () => {
     let renders = 0
-    const { act, app: services } = await renderHookInApp(
+    const { app: services } = await renderHookInApp(
       () => {
         renders += 1
         attachments = useNoteAttachments('Home.md')
@@ -62,7 +63,7 @@ describe('useNoteAttachments', () => {
   })
 
   it('resolves against the new generation when the graph reopens', async () => {
-    const { act, app } = await renderHookInApp(
+    const { app } = await renderHookInApp(
       () => {
         attachments = useNoteAttachments('Home.md')
       },

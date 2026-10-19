@@ -1,3 +1,4 @@
+import type { MaybePromise } from '@reflect/utils'
 import type { ClockService } from '../ports/clock-service.ts'
 import type { LoggerService } from '../ports/logger-service.ts'
 import type { SettingsService } from '../settings/settings-service.ts'
@@ -31,7 +32,7 @@ import {
   type SemanticSearchGraphSource,
   type SemanticSearchService,
 } from '../embeddings/semantic-search-service.ts'
-import { ReflectError } from '../errors.ts'
+import { AppError } from '../errors.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import type { DatabaseService } from '../indexing/database-service.ts'
@@ -123,12 +124,12 @@ class TestEmbeddingRuntimeServiceImpl implements TestEmbeddingRuntimeService {
         },
         embed_texts: (args) => {
           if (this.#status.status !== 'ready') {
-            throw new ReflectError('unknown', `embedding model is ${this.#status.status}`)
+            throw new AppError('unknown', `embedding model is ${this.#status.status}`)
           }
           const model = typeof args['model'] === 'string' ? args['model'] : null
           if (model !== null && model !== this.#status.model) {
             // The native runtime refuses another model's vectors under `model`.
-            throw new ReflectError('invalid', `the loaded embedding model is not ${model}`)
+            throw new AppError('invalid', `the loaded embedding model is not ${model}`)
           }
           const texts = Array.isArray(args['texts']) ? args['texts'].map(String) : []
           this.#embedded.push({
@@ -212,11 +213,11 @@ export interface TestRetrievalServiceOptions {
   /**
    * Answers `retrieve`. Defaults to no hits.
    */
-  retrieve?: (query: string, options?: RetrieveOptions) => RetrievalHit[] | Promise<RetrievalHit[]>
+  retrieve?: (query: string, options?: RetrieveOptions) => MaybePromise<RetrievalHit[]>
   /**
    * Answers `relatedNotes`. Defaults to no neighbors.
    */
-  relatedNotes?: (path: string, limit?: number) => RetrievalHit[] | Promise<RetrievalHit[]>
+  relatedNotes?: (path: string, limit?: number) => MaybePromise<RetrievalHit[]>
 }
 
 export interface TestRetrievalService extends RetrievalService {
@@ -328,10 +329,10 @@ export interface TestEmbeddingIndexServiceOptions {
    */
   backfill?: (options: EmbeddingBackfillOptions) => Promise<EmbeddingBackfillResult>
   /**
-   * Called before a chunk set is written. A returned value other than
-   * `undefined` rejects the write with that value, unrecorded.
+   * Called before a chunk set is written. A returned `Error`
+   * rejects the write with it, unrecorded.
    */
-  failApply?: (apply: TestEmbeddingApply) => unknown
+  failApply?: (apply: TestEmbeddingApply) => Error | undefined
   /**
    * What `embed_prepare_index` answers: whether it reset the table. Defaults to `false`.
    */
@@ -398,10 +399,7 @@ async function storeChunks(
       const at = existing.findIndex((row) => row.content_hash === chunk.contentHash)
       const row = existing[at]
       if (row === undefined) {
-        throw new ReflectError(
-          'parse',
-          `unchanged chunk has no stored row (hash ${chunk.contentHash})`,
-        )
+        throw new AppError('parse', `unchanged chunk has no stored row (hash ${chunk.contentHash})`)
       }
       existing.splice(at, 1)
       await database.runQuery(

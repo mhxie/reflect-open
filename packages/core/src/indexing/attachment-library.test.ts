@@ -7,7 +7,7 @@ function file(path: string, modifiedMs: number, extra: Partial<FileMeta> = {}): 
 }
 
 function reference(assetPath: string, notePath: string, mtime = 1): AttachmentReferenceRow {
-  return { assetPath, notePath, title: notePath, mtime, isPrivate: false, hasConflict: false }
+  return { assetPath, notePath, title: notePath, mtime, isPrivate: false }
 }
 
 describe('buildAttachmentLibrary', () => {
@@ -35,13 +35,9 @@ describe('buildAttachmentLibrary', () => {
     const [entry] = buildAttachmentLibrary(
       [file('assets/photo.png', 1)],
       [
-        {
-          ...reference('assets/photo.png', 'notes/trip.md', 5),
-          isPrivate: true,
-          hasConflict: true,
-        },
+        { ...reference('assets/photo.png', 'notes/trip.md', 5), isPrivate: true },
         reference('photo.png', 'daily/2026-10-01.md', 9),
-        { ...reference('photo.png', 'notes/trip.md', 5), isPrivate: true, hasConflict: true },
+        { ...reference('photo.png', 'notes/trip.md', 5), isPrivate: true },
         reference('notes/assets/photo.png', 'notes/other.md', 7),
         reference('assets/other.png', 'notes/unrelated.md', 8),
       ],
@@ -54,7 +50,6 @@ describe('buildAttachmentLibrary', () => {
         mtime: 9,
         tags: [],
         isPrivate: false,
-        hasConflict: false,
       },
       {
         path: 'notes/trip.md',
@@ -62,7 +57,6 @@ describe('buildAttachmentLibrary', () => {
         mtime: 5,
         tags: [],
         isPrivate: true,
-        hasConflict: true,
       },
     ])
   })

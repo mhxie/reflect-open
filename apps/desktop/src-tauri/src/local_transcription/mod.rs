@@ -18,18 +18,18 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use hf_hub::api::sync::ApiBuilder;
 use hf_hub::api::Progress;
+use hf_hub::api::sync::ApiBuilder;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::error::{AppError, AppResult};
 use crate::fs::GraphState;
 use engine::{Engine, TranscriptSegment};
-use models::{ModelSpec, MODEL_REPO};
+use models::{MODEL_REPO, ModelSpec};
 use qwen::{QwenEngine, QwenModel};
 use updates::UpdateReport;
-use utterances::{speech_regions, ChunkPlan, QWEN_PLAN, WHISPER_PLAN};
+use utterances::{ChunkPlan, QWEN_PLAN, WHISPER_PLAN, speech_regions};
 
 /// Where recordings live; transcription reads nothing else.
 const AUDIO_MEMOS_PREFIX: &str = "audio-memos/";
@@ -48,7 +48,9 @@ const PROGRESS_EMIT_STEP: u64 = 8 * 1024 * 1024;
 /// memos buys nothing.
 pub fn prepare_process_environment() {
     if std::env::var_os("GGML_METAL_NO_RESIDENCY").is_none() {
-        std::env::set_var("GGML_METAL_NO_RESIDENCY", "1");
+        // SAFETY: called before any other thread exists, so no concurrent
+        // environment read can race this write.
+        unsafe { std::env::set_var("GGML_METAL_NO_RESIDENCY", "1") };
     }
 }
 
@@ -595,7 +597,7 @@ fn recording_path(graph: &GraphState, generation: u64, path: &str) -> AppResult<
         return Err(AppError::traversal(format!("not an audio memo: {path}")));
     }
     let (root, local_only) = crate::fs::graph_for(graph, Some(generation))?;
-    crate::fs::resolve_shareable_in_graph(&root, path, local_only.as_deref())
+    crate::fs::resolve_shareable(&root, path, local_only.as_deref())
 }
 
 /// Transcribe one recording under `audio-memos/` on the device. Pinned to
@@ -625,10 +627,10 @@ pub async fn local_transcription_transcribe(
             Err(audio::DecodeError::Undecodable(detail)) => {
                 return Ok(LocalTranscript::Undecodable {
                     reason: format!("the recording couldn't be decoded ({detail})"),
-                })
+                });
             }
             Err(audio::DecodeError::Unreadable(detail)) => {
-                return Err(format!("the recording couldn't be read ({detail})"))
+                return Err(format!("the recording couldn't be read ({detail})"));
             }
         };
         let segments = model.transcribe_memo(&samples, &languages, prompt.as_deref())?;
@@ -803,9 +805,11 @@ mod tests {
         let text = engine::join_segments(&segments);
         println!("{text}\n{segments:#?}");
         assert!(!segments.is_empty());
-        assert!(segments
-            .windows(2)
-            .all(|pair| pair[0].start_ms <= pair[1].start_ms));
+        assert!(
+            segments
+                .windows(2)
+                .all(|pair| pair[0].start_ms <= pair[1].start_ms)
+        );
         if let Ok(expected) = std::env::var("REFLECT_WHISPER_TEST_EXPECT") {
             assert!(text.contains(&expected), "{text}");
         }

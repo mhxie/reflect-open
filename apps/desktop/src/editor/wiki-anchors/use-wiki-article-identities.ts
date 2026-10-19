@@ -25,10 +25,9 @@ export function useWikiArticleIdentities(source: string): (title: string) => str
       ),
     [source],
   )
-  const [resolved, setResolved] = useState<{ key: string; values: ReadonlyMap<string, string> }>({
-    key: '',
-    values: new Map(),
-  })
+  const [resolved, setResolved] = useState<{ key: string; values: ReadonlyMap<string, string> }>(
+    () => ({ key: '', values: new Map() }),
+  )
   const key = `${graphKey ?? ''}:${generation ?? ''}:${namesKey}`
   useEffect(() => {
     if (generation === null || graphKey === null) return

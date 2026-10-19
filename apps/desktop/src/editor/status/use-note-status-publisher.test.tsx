@@ -123,12 +123,10 @@ describe('useNoteStatusPublisher', () => {
     expect(secondRetry).toHaveBeenCalledOnce()
   })
 
-  it('expires both conflict choices after pane replacement, graph changes, and unmount', async () => {
+  it("expires a replaced pane's retry, then its successor's across a graph change and unmount", async () => {
     let generation = 63
-    const firstKeep = vi.fn()
-    const firstLoad = vi.fn()
-    const secondKeep = vi.fn()
-    const secondLoad = vi.fn()
+    const firstRetry = vi.fn()
+    const secondRetry = vi.fn()
     const protectedState: NoteState = {
       ...EDITABLE,
       kind: 'protected',
@@ -136,68 +134,52 @@ describe('useNoteStatusPublisher', () => {
       isReadOnly: true,
     }
     const first = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/conflict.md', 63), 'first\n', protectedState, {
-        protection: {
-          kind: 'external-change',
-          message: 'First blocked',
-          keepMine: firstKeep,
-          loadTheirs: firstLoad,
-        },
+      useNoteStatusPublisher(scope('notes/blocked.md', 63), 'first\n', protectedState, {
+        protection: { kind: 'save-blocked', message: 'First blocked', retrySave: firstRetry },
       }),
     )
-    const reader = await renderHook(() => useNoteStatus(scope('notes/conflict.md', generation)))
+    const reader = await renderHook(() => useNoteStatus(scope('notes/blocked.md', generation)))
     const oldProtection = reader.result.current?.protection
-    if (oldProtection?.kind !== 'external-change') {
-      throw new Error('Expected first conflict recovery')
+    if (oldProtection?.kind !== 'save-blocked') {
+      throw new Error('Expected first blocked-save recovery')
     }
     const protection: NoteProtection = {
-      kind: 'external-change',
+      kind: 'save-blocked',
       message: 'Second blocked',
-      keepMine: secondKeep,
-      loadTheirs: secondLoad,
+      retrySave: secondRetry,
     }
     const second = await renderHook(() =>
-      useNoteStatusPublisher(scope('notes/conflict.md', generation), 'second\n', protectedState, {
+      useNoteStatusPublisher(scope('notes/blocked.md', generation), 'second\n', protectedState, {
         protection,
       }),
     )
     await reader.rerender()
     await first.unmount()
-    oldProtection.keepMine()
-    oldProtection.loadTheirs()
-    expect(firstKeep).not.toHaveBeenCalled()
-    expect(firstLoad).not.toHaveBeenCalled()
+    oldProtection.retrySave()
+    expect(firstRetry).not.toHaveBeenCalled()
 
     const successor = reader.result.current?.protection
-    if (successor?.kind !== 'external-change') {
-      throw new Error('Expected successor conflict recovery')
+    if (successor?.kind !== 'save-blocked') {
+      throw new Error('Expected successor blocked-save recovery')
     }
-    successor.keepMine()
-    successor.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledOnce()
-    expect(secondLoad).toHaveBeenCalledOnce()
+    successor.retrySave()
+    expect(secondRetry).toHaveBeenCalledOnce()
 
     generation = 64
     await second.rerender()
     await reader.rerender()
-    successor.keepMine()
-    successor.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledOnce()
-    expect(secondLoad).toHaveBeenCalledOnce()
+    successor.retrySave()
+    expect(secondRetry).toHaveBeenCalledOnce()
 
     const current = reader.result.current?.protection
-    if (current?.kind !== 'external-change') {
-      throw new Error('Expected current conflict recovery')
+    if (current?.kind !== 'save-blocked') {
+      throw new Error('Expected current blocked-save recovery')
     }
-    current.keepMine()
-    current.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledTimes(2)
-    expect(secondLoad).toHaveBeenCalledTimes(2)
+    current.retrySave()
+    expect(secondRetry).toHaveBeenCalledTimes(2)
     await second.unmount()
-    current.keepMine()
-    current.loadTheirs()
-    expect(secondKeep).toHaveBeenCalledTimes(2)
-    expect(secondLoad).toHaveBeenCalledTimes(2)
+    current.retrySave()
+    expect(secondRetry).toHaveBeenCalledTimes(2)
   })
 
   it('counts the loaded note, recounts after typing settles, and clears on unmount', async () => {

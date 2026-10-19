@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isAppError } from '../errors.ts'
+import { AppError, isAppError } from '../errors.ts'
 import { CHANGED_ON_DISK, fakeNoteStore, type FakeNoteStore } from '../testing/fake-note-store.ts'
 import {
   createTestClockService,
@@ -23,7 +23,7 @@ const PATH = 'notes/plan.md'
 /** The store as a patch's IO, with a missing note read as `null`. */
 function storeIo(store: FakeNoteStore): NotePatchIo {
   return {
-    read: async (path) => store.files.get(path) ?? null,
+    read: (path) => store.files.get(path) ?? null,
     write: (path, contents, expectedContents) =>
       store.writeNote(path, contents, 1, expectedContents),
   }
@@ -162,10 +162,10 @@ describe('patchNoteWith', () => {
   })
 
   it('surfaces a real write failure at once when the file did not change', async () => {
-    const diskFull = { kind: 'io', message: 'disk full' }
+    const diskFull = new AppError('io', 'disk full')
     const io: NotePatchIo = {
-      read: async () => '# Plan\n',
-      write: vi.fn(async () => {
+      read: () => '# Plan\n',
+      write: vi.fn(() => {
         throw diskFull
       }),
     }
@@ -175,14 +175,14 @@ describe('patchNoteWith', () => {
   })
 
   it('surfaces the refusal when the note cannot be re-read', async () => {
-    const graphSwitched = { kind: 'io', message: 'the graph changed since this command was issued' }
+    const graphSwitched = new AppError('io', 'the graph changed since this command was issued')
     const read = vi
       .fn<NotePatchIo['read']>()
       .mockResolvedValueOnce('# Plan\n')
-      .mockRejectedValue({ kind: 'noGraph', message: 'No graph is open' })
+      .mockRejectedValue(new AppError('noGraph', 'No graph is open'))
     const io: NotePatchIo = {
       read,
-      write: async () => {
+      write: () => {
         throw graphSwitched
       },
     }
@@ -209,7 +209,7 @@ describe('patchNote', () => {
       commands: {
         note_read: (args) => {
           const contents = files.get(String(args['path']))
-          if (contents === undefined) throw { kind: 'notFound', message: 'missing' }
+          if (contents === undefined) throw new AppError('notFound', 'missing')
           return contents
         },
         note_write: (args) => {
