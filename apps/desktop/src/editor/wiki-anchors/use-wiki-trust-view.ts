@@ -19,6 +19,7 @@ import { useGraph } from '@/providers/graph-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
+import type { WikiReaderStatus } from './wiki-reader-record.ts'
 import { wikiClaimPending } from './wiki-article-pending.ts'
 import { wikiStandingStyle } from './wiki-trust-labels.ts'
 import type { WikiTrustView } from './wiki-trust-view.ts'
@@ -84,14 +85,19 @@ function excerptOf(index: WikiArticleIndex, from: number, to: number): string {
   return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS - 1).trimEnd()}…` : text
 }
 
-/** Whether the reader questioned the claim on `today`: a guard against repeats, not a trust rule. */
-function questionedOn(index: WikiArticleIndex, claimId: string, today: string): boolean {
+/** Whether the reader recorded `status` on the claim `today`: a guard against repeats, not a trust rule. */
+function recordedOn(
+  index: WikiArticleIndex,
+  claimId: string,
+  status: WikiReaderStatus,
+  today: string,
+): boolean {
   return index.ledgers.some(
     (ledger) =>
       ledger.valid &&
       ledger.owner === claimId &&
       ledger.block.passes.some(
-        (pass) => pass.agent === 'reader' && pass.status === 'flagged' && pass.at === today,
+        (pass) => pass.agent === 'reader' && pass.status === status && pass.at === today,
       ),
   )
 }
@@ -117,14 +123,14 @@ function sourcesOf(
  * into the editor's own Markdown, so a claim whose editor text differs from
  * it has an unsaved edit and shows as changed at once. A translation copy
  * shows its source entry's verdicts, as changed while its own ledger holds
- * an unreviewed edit, and offers no question (the record belongs in the source's ledger). `question` is absent where the note is
- * read-only. Null while trust display is off, no report loaded, or the
- * report leaves the note out.
+ * an unreviewed edit, and takes no reader record (it belongs in the source's
+ * ledger). `record` is absent where the note is read-only. Null while trust
+ * display is off, no report loaded, or the report leaves the note out.
  */
 export function useWikiTrustView(
   path: string,
   index: WikiArticleIndex | null,
-  question: ((claimId: string) => boolean) | undefined,
+  record: ((claimId: string, status: WikiReaderStatus) => boolean) | undefined,
   asEditor: (markdown: string) => string,
 ): TrustViewResult {
   const { graph } = useGraph()
@@ -232,14 +238,18 @@ export function useWikiTrustView(
         : savedTexts !== null && savedTexts.get(claim.id) !== texts.get(claim.id)
       if (edited && standing.state === 'current')
         standing = { state: 'changed', verdict: standing.verdict }
+      // A current dispute can be dismissed; any other claim can be questioned.
+      const reader: WikiReaderStatus =
+        wikiStandingStyle(standing) === 'disputed' ? 'verified' : 'flagged'
       trusts.set(claim.id, {
         claimId: claim.id,
         excerpt: excerptOf(index, claim.from, claim.to),
         standing,
         sources: sourcesOf(report, standing),
         sourceThreshold: report.sourceThreshold,
-        questionedToday: !translation && questionedOn(index, claim.id, today),
-        ...(translation || question === undefined ? {} : { question: () => question(claim.id) }),
+        reader,
+        recordedToday: !translation && recordedOn(index, claim.id, reader, today),
+        ...(translation || record === undefined ? {} : { record: () => record(claim.id, reader) }),
       })
     }
     const all = [...trusts.values()]
@@ -263,7 +273,7 @@ export function useWikiTrustView(
     texts,
     sourcePath,
     translation,
-    question,
+    record,
     today,
   ])
 }

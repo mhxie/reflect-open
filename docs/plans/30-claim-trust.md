@@ -112,6 +112,13 @@ In every style:
   <today>` to the claim's ledger, creating the ledger when there is none, at
   most once a day per claim and only where the note is editable. The harness
   decides what resolves it.
+- **Dismiss the doubt.** On a disputed claim whose text is unchanged since
+  its evaluation, the card offers this instead: it appends `@pass: reader |
+  status: verified | at: <today>` the same way. An edited claim offers the
+  question, since the dispute concerned the old text.
+  The harness lets the dismissal resolve the dispute but never raise the
+  tier, and does not check a dismissed source-check flag again until the
+  claim is edited.
 - **Footer.** The note footer says how many claims need work and steps through
   them; when none do, it says how many are not yet evaluated, and otherwise
   stays silent.
@@ -130,7 +137,8 @@ mark; the pill became the mark after the claim.
   the Wiki screen follows in step 3.
 - **Records** a person makes while reading or editing, in schema syntax:
   `editor | pending` for substantive edits made in the editor (never for host
-  reloads), `reader | flagged` for a question.
+  reloads), `reader | flagged` for a question, `reader | verified` for a
+  dismissed doubt.
 - **`reflect trust-report`** prints where to publish the report and, with
   `--json`, which local-only folders' notes to leave out of it.
 - **The graph's agent skill** (Settings → Agents) teaches any coding agent the

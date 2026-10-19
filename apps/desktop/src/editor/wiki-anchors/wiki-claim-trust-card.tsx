@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import type { WikiClaimStanding, WikiSourceStanding } from '@reflect/core'
 import { cn } from '@/lib/utils.ts'
 import { useAppServices } from '@/services/services-provider.tsx'
+import type { WikiReaderStatus } from './wiki-reader-record.ts'
 import { wikiStandingLabel, wikiStandingStyle } from './wiki-trust-labels.ts'
 
 /** What the trust card shows about one claim, and the one action it offers. */
@@ -14,15 +15,17 @@ export interface WikiClaimTrust {
   readonly sources: readonly (WikiSourceStanding & { readonly key: string })[]
   /** The harness's trust threshold on the weight scale, when it published one. */
   readonly sourceThreshold: number | null
-  /** The reader already questioned this claim today. */
-  readonly questionedToday: boolean
-  /** Record the reader's doubt, reporting whether it was written; absent where the note cannot be edited. */
-  readonly question?: () => boolean
+  /** What the card's action records: `verified` dismisses a current dispute, `flagged` questions any other claim. */
+  readonly reader: WikiReaderStatus
+  /** The reader already recorded `reader` on this claim today. */
+  readonly recordedToday: boolean
+  /** Record `reader`, reporting whether it was written; absent where the note cannot be edited. */
+  readonly record?: () => boolean
 }
 
 interface WikiClaimTrustCardProps {
   readonly trust: WikiClaimTrust
-  /** Whether the note accepts the question record now. */
+  /** Whether the note accepts the reader's record now. */
   readonly editable: boolean
 }
 
@@ -85,16 +88,32 @@ function SourceRow({ source, threshold }: SourceRowProps): ReactElement {
   )
 }
 
+/** The card's one action: a disputed claim's doubt can be dismissed, any other claim questioned. */
+const READER_ACTIONS = {
+  flagged: {
+    label: 'Question this claim',
+    title: 'Flags the claim in its evidence for your agent to review; ⌘Z undoes it',
+    done: 'You questioned this claim today.',
+  },
+  verified: {
+    label: 'Dismiss the doubt',
+    title:
+      'Records in its evidence that you checked the claim and it holds; this settles the doubt but never raises the tier. ⌘Z undoes it',
+    done: 'You dismissed the doubt today.',
+  },
+} as const
+
 /**
  * The harness's verdict on one claim, read aloud: tier, why, what would
  * raise it, and the sources it rests on with their weights. Reflect adds
  * nothing of its own beyond saying when the text changed since evaluation.
  */
 export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps): ReactElement {
-  const { standing, question } = trust
+  const { standing, record, reader } = trust
   const verdict = standing.state === 'unevaluated' ? null : standing.verdict
+  const action = READER_ACTIONS[reader]
   // Set on a written press, before the ledger reparses, so a double press records once.
-  const [asked, setAsked] = useState<'recorded' | 'refused' | null>(null)
+  const [asked, setAsked] = useState<WikiReaderStatus | 'refused' | null>(null)
   return (
     <section aria-label={`Claim ${trust.claimId.toUpperCase()} trust`} className="space-y-2">
       <header className="space-y-1">
@@ -138,9 +157,8 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
           ))}
         </ul>
       ) : null}
-      {question === undefined || !editable ? null : trust.questionedToday ||
-        asked === 'recorded' ? (
-        <p className="text-text-secondary">You questioned this claim today.</p>
+      {record === undefined || !editable ? null : trust.recordedToday || asked === reader ? (
+        <p className="text-text-secondary">{action.done}</p>
       ) : asked === 'refused' ? (
         <p className="text-text-secondary">
           Fix this claim’s entry in the Evidence section first; the problem is listed there.
@@ -149,12 +167,12 @@ export function WikiClaimTrustCard({ trust, editable }: WikiClaimTrustCardProps)
         <button
           type="button"
           onClick={() => {
-            setAsked(question() ? 'recorded' : 'refused')
+            setAsked(record() ? reader : 'refused')
           }}
-          title="Flags the claim in its evidence for your agent to review; ⌘Z undoes it"
+          title={action.title}
           className="rounded-md border border-border-strong px-2 py-1 font-medium text-text-secondary shadow-input transition-colors duration-100 hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
         >
-          Question this claim
+          {action.label}
         </button>
       )}
     </section>

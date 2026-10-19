@@ -150,6 +150,11 @@ The records:
 - `@pass: reader | status: flagged | at: YYYY-MM-DD` when a person questions a
   claim while reading, at most once a day per claim. What resolves it is your
   rule; Reflect shows only your verdict.
+- `@pass: reader | status: verified | at: YYYY-MM-DD` when a person dismisses
+  the doubt on a disputed claim, at most once a day per claim. Let it resolve
+  the dispute without raising the tier, and keep it settled until the claim's
+  text changes. A claim can carry a question and a dismissal from the same
+  day.
 
 ## Privacy
 
