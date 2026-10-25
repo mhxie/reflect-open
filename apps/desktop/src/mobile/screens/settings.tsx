@@ -5,6 +5,8 @@ import {
   aiProvider,
   aiProviderRequiresApiKey,
   errorMessage,
+  githubRepoOf,
+  redactRemoteUrl,
   marketingVersion,
   CHAT_SYSTEM_PROMPT_MAX_LENGTH,
   DEFAULT_WIKI_TRUST_REPORT_PATH,
@@ -31,6 +33,7 @@ import { AddAiProviderDrawer } from '@/mobile/add-ai-provider-drawer.tsx'
 import { AiPromptDrawer } from '@/mobile/ai-prompt-drawer.tsx'
 import { AiProviderActionsDrawer } from '@/mobile/ai-provider-actions-drawer.tsx'
 import { ConnectGithubDrawer } from '@/mobile/connect-github-drawer.tsx'
+import { GithubSignInDrawer } from '@/mobile/github-sign-in-drawer.tsx'
 import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/mobile/legal-urls.ts'
 import { MobileScreenHeader } from '@/mobile/screen-header.tsx'
 import { TextSettingDrawer } from '@/mobile/text-setting-drawer.tsx'
@@ -57,7 +60,7 @@ import { useAppServices } from '@/services/services-provider.tsx'
 import { formatFullDate } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { CountdownText } from '@/components/countdown-text.tsx'
-import { useSyncContext } from '@/providers/sync-provider.tsx'
+import { useGitSyncContext } from '@/providers/sync-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 
 const TRUST_DISPLAY_OPTIONS: readonly SegmentedOption<WikiTrustDisplay>[] = [
@@ -166,9 +169,10 @@ export function MobileSettings(): ReactElement {
   const { unlocked: debugUnlocked, tap: versionTap } = useDebugUnlockTap()
   const crashTest = useCrashTest()
   const environment = useAppStoreEnvironment()
-  const sync = useSyncContext()
+  const sync = useGitSyncContext()
   const [disconnecting, setDisconnecting] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
+  const [signInOpen, setSignInOpen] = useState(false)
   const { providers, defaultProvider, addProvider, removeProvider, makeDefault, setDefaultModel } =
     useAiProviders()
   const [addProviderOpen, setAddProviderOpen] = useState(false)
@@ -192,17 +196,26 @@ export function MobileSettings(): ReactElement {
     enabled: graph !== null,
   })
 
-  const backup = sync?.backup ?? null
-  const status = getMobileSyncStatus(backup)
-  const repo = backup !== null && backup.phase === 'connected' ? backup.repo : null
+  const gitSync = sync?.state ?? null
+  const status = getMobileSyncStatus(gitSync)
+  // A graph with a remote, connected or waiting for its sign-in.
+  const remote =
+    gitSync !== null && (gitSync.phase === 'connected' || gitSync.phase === 'needsCredential')
+      ? gitSync
+      : null
+  const repo = remote !== null ? githubRepoOf(remote.remote) : null
+  // A GitHub remote whose sign-in is gone resumes with a sign-in alone.
+  const needsGithubSignIn =
+    gitSync !== null && gitSync.phase === 'needsCredential' && gitSync.remote.kind === 'github'
   // The connect entry point is local-graph-only (iCloud sync and a Git remote
   // are mutually exclusive per graph, Plan 21) and waits out the controller's
   // `loading` phase so the row never flashes on a graph that turns out to be
   // connected.
-  const canConnect = mobileStorageKind === 'local' && backup?.phase === 'disconnected'
+  const canConnect = mobileStorageKind === 'local' && gitSync?.phase === 'disconnected'
 
-  // Stop backing this graph up and forget the GitHub credential (one graph
-  // per device — unlinking is signing out). The local clone stays; the
+  // Stop backing this graph up and, for a GitHub remote, forget the GitHub
+  // credential (one graph per device — unlinking is signing out). A host
+  // sign-in stays in the keychain, as on desktop. The local clone stays; the
   // controller restarts into its disconnected state, and re-connecting
   // re-onboards.
   async function disconnect(): Promise<void> {
@@ -212,9 +225,11 @@ export function MobileSettings(): ReactElement {
     setDisconnecting(true)
     try {
       await sync.disconnectGraph()
-      await sync.signOut()
+      if (repo !== null) {
+        await sync.signOut()
+      }
     } catch (err) {
-      logger.error('GitHub disconnect failed:', errorMessage(err))
+      logger.error('Disconnect failed:', errorMessage(err))
     } finally {
       setDisconnecting(false)
     }
@@ -402,7 +417,7 @@ export function MobileSettings(): ReactElement {
             />
           </SettingsGroup>
 
-          {repo !== null || status !== null || canConnect ? (
+          {remote !== null || status !== null || canConnect ? (
             <SettingsGroup
               header="Backup"
               footer={
@@ -415,14 +430,19 @@ export function MobileSettings(): ReactElement {
             >
               {repo !== null ? (
                 <SettingsValueRow label="GitHub" value={`${repo.owner}/${repo.name}`} />
+              ) : remote !== null ? (
+                <SettingsValueRow label="Remote" value={redactRemoteUrl(remote.remoteUrl)} />
               ) : null}
               {status !== null ? <SettingsValueRow label="Status" value={status.label} /> : null}
               {canConnect ? (
                 <SettingsActionRow label="Connect GitHub" onPress={() => setConnectOpen(true)} />
               ) : null}
-              {repo !== null ? (
+              {needsGithubSignIn ? (
+                <SettingsActionRow label="Sign in to GitHub" onPress={() => setSignInOpen(true)} />
+              ) : null}
+              {remote !== null ? (
                 <SettingsActionRow
-                  label="Disconnect GitHub"
+                  label={repo !== null ? 'Disconnect GitHub' : 'Stop backing up'}
                   tone="destructive"
                   pending={disconnecting}
                   onPress={() => void disconnect()}
@@ -551,6 +571,7 @@ export function MobileSettings(): ReactElement {
         </div>
       </main>
       <ConnectGithubDrawer open={connectOpen} onOpenChange={setConnectOpen} />
+      <GithubSignInDrawer open={signInOpen} onOpenChange={setSignInOpen} />
       <AddAiProviderDrawer
         open={addProviderOpen}
         onOpenChange={setAddProviderOpen}

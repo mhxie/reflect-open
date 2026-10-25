@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { AppPlatform } from '@reflect/core'
 import { NoteDisplacements } from '@/components/note-displacements.tsx'
+import { OutdatedWebEngineBanner } from '@/components/outdated-web-engine-banner.tsx'
 import { Toaster } from '@/components/ui/toast.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { MobileApp } from '@/mobile/mobile-app.tsx'
@@ -17,6 +18,7 @@ export function MobileRoot({ platform }: { platform: AppPlatform }): ReactElemen
       <NoteDisplacements />
       <TooltipProvider>
         <MobileApp />
+        <OutdatedWebEngineBanner />
         <Toaster position="top-center" />
       </TooltipProvider>
     </GraphProvider>

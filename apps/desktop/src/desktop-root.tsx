@@ -3,6 +3,7 @@ import { App } from '@/app.tsx'
 import { AppErrorBoundary } from '@/components/app-error-boundary.tsx'
 import { NoteDisplacements } from '@/components/note-displacements.tsx'
 import { attachOperationToasts } from '@/components/operation-toasts.ts'
+import { OutdatedWebEngineBanner } from '@/components/outdated-web-engine-banner.tsx'
 import { Toaster } from '@/components/ui/toast.tsx'
 import { WindowDragRegion } from '@/components/window-drag-region.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
@@ -57,6 +58,7 @@ export function DesktopRoot(): ReactElement {
             <SidebarWidthEffect />
             <WindowDragRegion />
             <App />
+            <OutdatedWebEngineBanner />
             <Toaster />
           </TooltipProvider>
         </GraphProvider>

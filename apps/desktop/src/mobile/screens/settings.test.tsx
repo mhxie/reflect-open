@@ -1,11 +1,11 @@
 import { act } from '@/test-utils/act.ts'
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BackupState, Settings } from '@reflect/core'
+import type { GitSyncState, Settings } from '@reflect/core'
 import {
   createTestAppInfoService,
   createTestCoreServices,
-  createTestBackupService,
+  createTestGitSyncService,
   seedNotes,
 } from '@reflect/core/testing'
 import '@/test-utils/locator.ts'
@@ -31,11 +31,12 @@ vi.mock('@/components/ui/drawer.tsx', () => ({
   DrawerTitle: ({ children }: { children?: import('react').ReactNode }) => <h2>{children}</h2>,
 }))
 
-function connected(status: Extract<BackupState, { phase: 'connected' }>['status']): BackupState {
+function connected(status: Extract<GitSyncState, { phase: 'connected' }>['status']): GitSyncState {
   return {
     phase: 'connected',
     remoteUrl: 'https://github.com/alex/notes.git',
-    repo: { owner: 'alex', name: 'notes' },
+    remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
+    isPrimaryChannel: true,
     status,
   }
 }
@@ -52,22 +53,22 @@ interface MountOptions {
   /**
    * The backup state. `null` runs no backup.
    */
-  backup?: BackupState | null
+  gitSync?: GitSyncState | null
 }
 
 /**
  * The graph "Field Notes" with two indexed notes, on a backup that is connected and idle.
  */
 async function mount(options?: MountOptions) {
-  const backup = createTestBackupService({
-    state: options?.backup ?? connected({ state: 'idle' }),
+  const gitSync = createTestGitSyncService({
+    state: options?.gitSync ?? connected({ state: 'idle' }),
   })
   const app = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     appInfo: createTestAppInfoService('1.2.3-beta.4'),
-    backup,
+    gitSync,
     // A note window's graph runs no backup.
-    role: options?.backup === null ? 'note-window' : 'main',
+    role: options?.gitSync === null ? 'note-window' : 'main',
   })
   seedNotes(app.database, [
     { path: 'notes/a.md', markdown: '# A\n' },
@@ -82,7 +83,7 @@ async function mount(options?: MountOptions) {
     route: { kind: 'settings' },
     ...(options?.settings === undefined ? {} : { settings: options.settings }),
   })
-  return Object.assign(view, { backup, updateSettings })
+  return Object.assign(view, { gitSync, updateSettings })
 }
 
 type MountedSettings = Awaited<ReturnType<typeof mount>>
@@ -380,15 +381,60 @@ describe('MobileSettings', () => {
     await user.click(page.getByRole('button', { name: 'Disconnect GitHub' }))
 
     await vi.waitFor(() => {
-      const methods = view.backup.calls().map((call) => call.method)
+      const methods = view.gitSync.calls().map((call) => call.method)
       expect(methods.filter((method) => method === 'disconnectGraph')).toHaveLength(1)
       expect(methods.filter((method) => method === 'signOut')).toHaveLength(1)
     })
   })
 
+  it('offers a GitHub sign-in for a remote that waits for it', async () => {
+    await mount({
+      gitSync: {
+        phase: 'needsCredential',
+        remoteUrl: 'https://github.com/alex/notes.git',
+        remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
+      },
+    })
+
+    await expect.element(page.getByText('alex/notes')).toBeVisible()
+    await expect.element(page.getByText('Sign-in needed')).toBeVisible()
+    await expect.element(page.getByText(/Sign in to GitHub to resume/)).toBeVisible()
+    await expect
+      .element(page.getByRole('button', { name: 'Connect GitHub', exact: true }))
+      .not.toBeInTheDocument()
+
+    await userEvent.click(page.getByRole('button', { name: 'Sign in to GitHub' }))
+    await expect.element(page.getByRole('heading', { name: 'Sign in to GitHub' })).toBeVisible()
+  })
+
+  it('names a host remote without its user info and stops it without a sign-out', async () => {
+    const user = userEvent
+    const view = await mount({
+      gitSync: {
+        phase: 'needsCredential',
+        remoteUrl: 'https://alex:token@gitlab.com/alex/notes.git',
+        remote: { kind: 'https', origin: 'https://gitlab.com' },
+      },
+    })
+
+    await expect.element(page.getByText('https://gitlab.com/alex/notes.git')).toBeVisible()
+    await expect.element(page.getByText(/token/)).not.toBeInTheDocument()
+    await expect.element(page.getByText('Sign-in needed')).toBeVisible()
+    await expect
+      .element(page.getByRole('button', { name: 'Sign in to GitHub' }))
+      .not.toBeInTheDocument()
+
+    await user.click(page.getByRole('button', { name: 'Stop backing up' }))
+    await vi.waitFor(() => {
+      const methods = view.gitSync.calls().map((call) => call.method)
+      expect(methods.filter((method) => method === 'disconnectGraph')).toHaveLength(1)
+      expect(methods).not.toContain('signOut')
+    })
+  })
+
   it('offers Connect GitHub for a disconnected local graph and opens the sheet', async () => {
     const user = userEvent
-    await mount({ storageKind: 'local', backup: { phase: 'disconnected' } })
+    await mount({ storageKind: 'local', gitSync: { phase: 'disconnected' } })
 
     await expect
       .element(page.getByText('Sync notes with Reflect on your other devices.'))
@@ -409,7 +455,7 @@ describe('MobileSettings', () => {
   })
 
   it('never offers connect for iCloud graphs — they sync through the container', async () => {
-    await mount({ backup: { phase: 'disconnected' } })
+    await mount({ gitSync: { phase: 'disconnected' } })
 
     await expect
       .element(page.getByRole('button', { name: 'Connect GitHub' }))
@@ -418,7 +464,7 @@ describe('MobileSettings', () => {
   })
 
   it('waits out the loading phase — no connect row that could flash', async () => {
-    await mount({ storageKind: 'local', backup: { phase: 'loading' } })
+    await mount({ storageKind: 'local', gitSync: { phase: 'loading' } })
 
     await expect
       .element(page.getByRole('button', { name: 'Connect GitHub' }))
@@ -427,7 +473,7 @@ describe('MobileSettings', () => {
   })
 
   it('degrades to the local groups where no sync lifecycle is mounted', async () => {
-    await mount({ backup: null })
+    await mount({ gitSync: null })
 
     await expect.element(page.getByText('Field Notes')).toBeVisible()
     await expect.element(page.getByText('1.2.3')).toBeVisible()

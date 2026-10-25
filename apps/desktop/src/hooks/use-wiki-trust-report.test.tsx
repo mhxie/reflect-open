@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { QueryClient } from '@tanstack/react-query'
 import {
-  createTestBackupService,
+  createTestGitSyncService,
   createTestCoreServices,
-  type TestBackupService,
+  type TestGitSyncService,
   type TestCoreServices,
 } from '@reflect/core/testing'
 import { act } from '@/test-utils/act.ts'
@@ -33,10 +33,10 @@ let readGate: Promise<void> | null
  * Core services whose bridge answers `wiki_trust_report_read` from `file`, with
  * `backup` as the graph's backup service (none when it is null).
  */
-function appWith(backup: TestBackupService | null): TestCoreServices {
+function appWith(backup: TestGitSyncService | null): TestCoreServices {
   const app: TestCoreServices = createTestCoreServices({
     database: createWasmTestDatabaseService(),
-    ...(backup === null ? {} : { backup }),
+    ...(backup === null ? {} : { gitSync: backup }),
   })
   onTestFinished(() => app.database.close())
   app.ipc.onCommand('wiki_trust_report_read', async (args) => {
@@ -51,7 +51,7 @@ function appWith(backup: TestBackupService | null): TestCoreServices {
 /**
  * How often the hook told `backup` that a graph file changed.
  */
-function changes(backup: TestBackupService): number {
+function changes(backup: TestGitSyncService): number {
   return backup.calls().filter((call) => call.method === 'fileChanged').length
 }
 
@@ -68,7 +68,7 @@ beforeEach(() => {
 
 describe('useWikiTrustReport and backup', () => {
   it('tells backup once per new version or deletion, never for an unchanged file', async () => {
-    const backup = createTestBackupService()
+    const backup = createTestGitSyncService()
     const { result, queryClient } = await renderHookInApp(() => useWikiTrustReport(true), {
       app: appWith(backup),
       settings: SETTINGS,
@@ -100,7 +100,7 @@ describe('useWikiTrustReport and backup', () => {
 
 describe('useWikiTrustReport and a backup that starts mid-read', () => {
   it('tells the backup running when the report arrives', async () => {
-    const backup = createTestBackupService()
+    const backup = createTestGitSyncService()
     const app = appWith(backup)
     let release = (): void => {}
     readGate = new Promise((resolve) => (release = resolve))

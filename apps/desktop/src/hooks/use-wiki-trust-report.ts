@@ -9,7 +9,7 @@ import {
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSyncContext } from '@/providers/sync-provider.tsx'
+import { useGitSyncContext } from '@/providers/sync-provider.tsx'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
@@ -111,7 +111,7 @@ export function useWikiTrustReport(always = false): WikiTrustReportState {
   const client = useQueryClient()
   // Read when a report arrives, not when its read began: backup may start
   // while a read is still in flight.
-  const syncContext = useSyncContext()
+  const syncContext = useGitSyncContext()
   const syncRef = useRef(syncContext)
   useEffect(() => {
     syncRef.current = syncContext

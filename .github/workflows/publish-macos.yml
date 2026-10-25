@@ -91,11 +91,14 @@ jobs:
             exit 1
           fi
 
+      # Any master job can write the caches, so a release build starts cold.
       - uses: ./.github/actions/setup-node
+        with:
+          cache: false
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: ${{ matrix.target }}
+          cache: false
 
       # The universal build also compiles the x86_64 slice on this arm64 runner.
       - name: Add the x86_64 macOS target
@@ -116,7 +119,7 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: pnpm release:macos --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/macos-artifacts"
+        run: pnpm build:macos --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/macos-artifacts"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -127,7 +130,9 @@ jobs:
           # The DMG and the updater archive are already compressed; zipping
           # them again wastes minutes for nothing.
           compression-level: 0
-          retention-days: 30
+          # The dSYMs symbolicate crash reports. 90 days is the most a public
+          # repository allows; the release keeps another copy.
+          retention-days: 90
 
       # Uploads clobber, so a failed run can be retried.
       - name: Upload the assets to the draft release

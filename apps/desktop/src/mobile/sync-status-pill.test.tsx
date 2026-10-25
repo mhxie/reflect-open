@@ -1,7 +1,7 @@
 import { page } from 'vitest/browser'
 import { describe, expect, it } from 'vitest'
-import type { BackupState } from '@reflect/core'
-import { createTestCoreServices, createTestBackupService } from '@reflect/core/testing'
+import type { GitSyncState } from '@reflect/core'
+import { createTestCoreServices, createTestGitSyncService } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SyncStatusPill } from './sync-status-pill.tsx'
@@ -11,19 +11,20 @@ import { SyncStatusPill } from './sync-status-pill.tsx'
  * something to say, plain language only.
  */
 
-function connected(status: Extract<BackupState, { phase: 'connected' }>['status']): BackupState {
+function connected(status: Extract<GitSyncState, { phase: 'connected' }>['status']): GitSyncState {
   return {
     phase: 'connected',
     remoteUrl: 'https://github.com/alex/notes.git',
-    repo: { owner: 'alex', name: 'notes' },
+    remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
+    isPrimaryChannel: true,
     status,
   }
 }
 
-async function mount(backup: BackupState = connected({ state: 'idle' })): Promise<void> {
+async function mount(gitSync: GitSyncState = connected({ state: 'idle' })): Promise<void> {
   const app = createTestCoreServices({
     database: createWasmTestDatabaseService(),
-    backup: createTestBackupService({ state: backup }),
+    gitSync: createTestGitSyncService({ state: gitSync }),
   })
   await renderInApp(<SyncStatusPill />, { app, graph: { root: '/g', name: 'G', generation: 3 } })
 }

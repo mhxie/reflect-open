@@ -4,11 +4,11 @@ How to produce a signed, notarized macOS build of Reflect for distribution outsi
 Mac App Store.
 
 ```bash
-pnpm release:macos                 # signed + notarized build for this Mac's architecture
+pnpm build:macos                   # signed + notarized build for this Mac's architecture
 ```
 
-The helper lives at `apps/desktop/scripts/release-macos.ts` and is exposed as
-`pnpm release:macos` from the repo root. It only builds. `publish-macos.yml` uploads the
+The helper lives at `apps/desktop/scripts/build-macos.ts` and is exposed as
+`pnpm build:macos` from the repo root. It only builds. `publish-macos.yml` uploads the
 assets into the draft release, and the finalize job in `publish-desktop.yml` publishes it.
 
 ## What you need
@@ -66,13 +66,15 @@ after every install. If the login keychain holds a code-signing identity named
 `Reflect Local Signing` (self-signed is fine), the install signs with it instead and
 permissions carry over from build to build.
 
-## What `pnpm release:macos` does
+## What `pnpm build:macos` does
 
 1. Reads the Developer ID identity from `APPLE_SIGNING_IDENTITY`.
 2. Loads notarization credentials from environment variables (see
    [Releasing from CI](#releasing-from-ci) below).
 3. Runs `pnpm tauri build --target <target> --bundles app`, which stages the `reflect`
-   CLI sidecar for that target and signs the app bundle. The release helper then
+   CLI sidecar for that target and signs the app bundle. Cargo strips the symbols from
+   `reflect-open` and both sidecars and keeps them in a dSYM next to each executable
+   (see [Symbolicating a crash](#symbolicating-a-crash)). The release helper then
    re-signs the bundled sidecars without the app's restricted entitlements, re-signs the
    `.app` with its entitlement file plus the flavor-specific identity entitlements from
    its embedded provisioning profile, notarizes the finalized `.app` via `notarytool`,
@@ -97,11 +99,11 @@ Bundles land under `target/<target-triple>/release/bundle/`, for example
 ## Commands and flags
 
 ```bash
-pnpm release:macos                 # build + notarize + verify
-pnpm release:macos --target=x86_64-apple-darwin  # the same for Intel
-pnpm release:macos --target=universal-apple-darwin  # one app for Apple Silicon and Intel
-pnpm release:macos --no-notarize   # signed-only build (runs locally; Gatekeeper rejects it elsewhere)
-pnpm release:macos --artifact-dir=<dir>  # also copy the release assets to <dir>
+pnpm build:macos                   # build + notarize + verify
+pnpm build:macos --target=x86_64-apple-darwin  # the same for Intel
+pnpm build:macos --target=universal-apple-darwin  # one app for Apple Silicon and Intel
+pnpm build:macos --no-notarize     # signed-only build (runs locally; Gatekeeper rejects it elsewhere)
+pnpm build:macos --artifact-dir=<dir>  # also copy the release assets to <dir>
 ```
 
 CI runs `--target=<triple> --artifact-dir=<dir>` once per macOS build and uploads the
@@ -197,8 +199,9 @@ hand-edit the changelogs or manifests outside the flows above, and do not use
 `Release-As:` commit footers: human version interventions go through the manifest
 files, and a major
 graduation such as `1.0.0` is a one-time `release-as` in both config files. The first beta of
-a new cycle is tagged without a number (`v0.6.0-beta`, then `-beta.1`, `-beta.2`, …)
-— a release-please naming quirk, not a bug.
+a new cycle is `-beta.1` (`v0.6.0-beta.1`, then `-beta.2`, `-beta.3`, …). release-please
+uses `prerelease-type` as the whole prerelease part of a cycle's first version, so
+`config.beta.json` sets it to `beta.1` instead of `beta`.
 
 ### Retrying a release
 
@@ -275,8 +278,7 @@ Three flavors ship as distinct, coexisting apps:
 The base `tauri.conf.json` is the stable flavor and uses the shipped gradient icon
 (`icons/`). Beta and dev are config overlays (`src-tauri/tauri.beta.conf.json`,
 `src-tauri/tauri.dev.conf.json`) merged with `--config`; their icons are the same
-artwork recolored via `magick -modulate` (beta `104,100,120`, dev `92,100,231`; see
-`src-tauri/icons/README.md`). `release:macos` picks the flavor from the version
+artwork in another color (`icons-beta/`, `icons-dev/`; see `src-tauri/icons/README.md`). `build:macos` picks the flavor from the version
 (prerelease → beta, else stable), so a release always matches the updater feed compiled
 into it; `publish-macos.yml` needs no flavor knowledge.
 
@@ -295,7 +297,7 @@ Local builds:
 pnpm tauri:dev                                   # run Reflect Dev (green), isolated identifier
 pnpm tauri:build:dev                             # bundle Reflect Dev
 pnpm tauri:build:beta                            # bundle Reflect Beta locally (unsigned)
-pnpm release:macos --no-notarize                 # signed-only build of the version's flavor
+pnpm build:macos --no-notarize                   # signed-only build of the version's flavor
 ```
 
 Because GitHub rewrites spaces in uploaded asset names to dots, the updater manifest URL
@@ -354,6 +356,35 @@ seconds rather than after the build and notarization. See the
 [Tauri macOS signing docs](https://v2.tauri.app/distribute/sign/macos/) for background
 on the runner keychain setup.
 
+## Symbolicating a crash
+
+Release builds strip the symbols from `reflect-open` and both sidecars.
+`pnpm build:macos` keeps them in dSYMs and checks that each dSYM matches its
+executable. `publish-macos.yml` attaches them to the GitHub release as
+`<asset>_<version>_<arch>.dSYMs.zip`, and the workflow artifact keeps another
+copy for 90 days.
+
+1. Get the crash report: `~/Library/Logs/DiagnosticReports/reflect-open-*.ips` on the
+   user's Mac, or Console → Crash Reports.
+2. In the report, find `reflect-open` under `usedImages` and note its `uuid`,
+   `arch`, and `base`. A frame's address is `base` plus its `imageOffset`.
+3. Download the dSYMs of that version:
+
+   ```bash
+   gh release download v<version> --repo team-reflect/reflect-open --pattern '*.dSYMs.zip'
+   ```
+
+4. Unzip each file and run `dwarfdump --uuid <triple>/reflect-open.dSYM`. Use the
+   dSYM whose UUID matches the report.
+5. Symbolicate:
+
+   ```bash
+   atos -o <triple>/reflect-open.dSYM/Contents/Resources/DWARF/reflect-open -arch <arch> -l <base> <address>...
+   ```
+
+   Rust names are mangled. Pipe the output through `rustfilt`
+   (`cargo install rustfilt`) to read them.
+
 ## Troubleshooting
 
 - **`codesign` cannot find the identity**: the cert isn't in your *login* keychain, or
@@ -377,5 +408,5 @@ on the runner keychain setup.
 
 ## Current limitations
 
-- iOS/TestFlight distribution is handled separately by `pnpm release:ios`; see
+- iOS/TestFlight distribution is handled separately by `pnpm build:ios` and `pnpm upload:testflight`; see
   [iOS TestFlight Builds](ios-testflight.md).

@@ -149,3 +149,9 @@ zip = { version = "9.0.5", default-features = false }
 # unrepresentative. The workspace's own crates stay quick to rebuild.
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+# One codegen unit lets LLVM optimize each crate as a whole: about 10% smaller
+# downloads, for slower release builds. Set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+# for faster local release builds.
+codegen-units = 1

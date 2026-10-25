@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.16.0-beta.12](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.11...v0.16.0-beta.12) (2026-10-23)
+
+
+### Features
+
+* classify remotes and resolve a sign-in per remote ([#1690](https://github.com/team-reflect/reflect-open/issues/1690)) ([25f07d3](https://github.com/team-reflect/reflect-open/commit/25f07d37e80f5839bfbe63d5190a01da63206bb6))
+* **desktop:** rebuild app icons as layered artwork ([#1699](https://github.com/team-reflect/reflect-open/issues/1699)) ([eb1e5ea](https://github.com/team-reflect/reflect-open/commit/eb1e5eaac0aa4c7f9aef99dc85a88b274113213f))
+
+
+### Bug Fixes
+
+* bind a stored sign-in to scheme, host and port ([#1691](https://github.com/team-reflect/reflect-open/issues/1691)) ([f28b9ef](https://github.com/team-reflect/reflect-open/commit/f28b9efe71eb02bbe1d762dd054dcaf31ad3c5c0))
+
+## [0.16.0-beta.11](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.10...v0.16.0-beta.11) (2026-10-20)
+
+
+### Features
+
+* **desktop:** warn when the system web engine is too old ([#1682](https://github.com/team-reflect/reflect-open/issues/1682)) ([6a634f6](https://github.com/team-reflect/reflect-open/commit/6a634f6f87ba576ad844ba7e81888d9ea21ddf68))
+* probe a remote url and keep a sign-in on its own host ([#1688](https://github.com/team-reflect/reflect-open/issues/1688)) ([da542f2](https://github.com/team-reflect/reflect-open/commit/da542f27c9ba8f18210e09e2630e18fcc1975565))
+
+
+### Bug Fixes
+
+* **ios:** keep editor menus clear of the status bar ([#1686](https://github.com/team-reflect/reflect-open/issues/1686)) ([63ac7b1](https://github.com/team-reflect/reflect-open/commit/63ac7b1f9a19d6c5265eae2b8a555b1414f34054))
+* load on Safari before 16.4 ([#1681](https://github.com/team-reflect/reflect-open/issues/1681)) ([3281339](https://github.com/team-reflect/reflect-open/commit/3281339366e31a482276ee4d13df6f6046e5af34))
+* show the note title on fallback `[[` link addresses ([#1673](https://github.com/team-reflect/reflect-open/issues/1673)) ([0c787cc](https://github.com/team-reflect/reflect-open/commit/0c787ccfc63f02285d45f2389f88eb40bdc199e7))
+
 ## [0.16.0-beta.10](https://github.com/team-reflect/reflect-open/compare/v0.16.0-beta.9...v0.16.0-beta.10) (2026-10-19)
 
 

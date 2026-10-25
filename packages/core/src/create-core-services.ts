@@ -107,9 +107,14 @@ import {
 import { createGistService, type GistService } from './sync/gist-service.ts'
 import { createGistPublishService, type GistPublishService } from './sync/gist-publish-service.ts'
 import { createGithubAuthService, type GithubAuthService } from './sync/github-auth-service.ts'
+import {
+  createGitHostCredentialService,
+  type GitHostCredentialService,
+} from './sync/git-host-credential-service.ts'
+import { createCredentialResolver, type CredentialResolver } from './sync/credential-resolver.ts'
 import { createGithubRepoService, type GithubRepoService } from './sync/github-repo-service.ts'
 import { createSyncEngineFactory, type SyncEngineFactory } from './sync/engine.ts'
-import type { BackupServiceDeps } from './sync/backup-service.ts'
+import type { GitSyncServiceDeps } from './sync/git-sync-service.ts'
 import type { ICloudDownloadServiceDeps } from './sync/icloud-download-service.ts'
 import {
   createICloudMigrationService,
@@ -382,8 +387,12 @@ export interface CoreServices {
    */
   readonly githubAuth: GithubAuthService
   /**
-   * The Rust git primitives for the open graph's repository: the commands the
-   * backup composes, and a note's last committed version for the note state.
+   * The sign-ins of the other HTTPS git hosts, one per origin.
+   */
+  readonly hostCredentials: GitHostCredentialService
+  /**
+   * The Rust git primitives for the open graph's repository: the commands
+   * git sync composes, and a note's last committed version for the note state.
    */
   readonly gitRepository: GitRepositoryService
   /**
@@ -735,6 +744,8 @@ export const coreServiceFactories = {
   persistenceFlush: createPersistenceFlushService,
   gitRepository: createGitRepositoryService,
   githubAuth: createGithubAuthService,
+  hostCredentials: createGitHostCredentialService,
+  credentialResolver: createCredentialResolver,
   githubRepos: createGithubRepoService,
   gists: createGistService,
   noteRows: createNoteRowService,
@@ -817,6 +828,10 @@ export interface CoreInternalServices {
    * Builds the sync engine of one graph session.
    */
   readonly syncEngines: SyncEngineFactory
+  /**
+   * Which sign-in a remote gets.
+   */
+  readonly credentials: CredentialResolver
   /**
    * Bounded outbound web fetches that the native side performs.
    */
@@ -1132,7 +1147,7 @@ export function composeCoreServices(
     logger,
     createServices: (session) => {
       return adapters.createGraphServices(session, {
-        backup: backupDeps,
+        gitSync: gitSyncDeps,
         icloudSync: icloudSyncDeps,
         icloudDownload: icloudDownloadDeps,
         capture: services.capture,
@@ -1159,6 +1174,8 @@ export function composeCoreServices(
   })
   const gitRepository = create.gitRepository({ ipc })
   const githubAuth = create.githubAuth({ secretStore, http: adapters.http, clock })
+  const hostCredentials = create.hostCredentials({ secretStore, logger })
+  const credentials = create.credentialResolver({ githubAuth, hostCredentials, logger })
   const githubRepos = create.githubRepos({ http: adapters.http })
   const gists = create.gists({ http: adapters.http })
   const syncEngines = create.syncEngines({ git: gitRepository, clock })
@@ -1272,10 +1289,12 @@ export function composeCoreServices(
     privacy,
   })
   const imageCodec = adapters.imageCodec ?? createUnavailableImageCodec()
-  const backupDeps: BackupServiceDeps = {
+  const gitSyncDeps: GitSyncServiceDeps = {
     git: gitRepository,
     syncEngines,
+    credentials,
     githubAuth,
+    hostCredentials,
     githubRepos,
     fileChanges,
     indexLifecycle,
@@ -1340,6 +1359,7 @@ export function composeCoreServices(
     noteLinkResolver,
     knowledgeLevels: create.knowledgeLevels({ noteFile, graphSession }),
     githubAuth,
+    hostCredentials,
     gitRepository,
     gistPublish: create.gistPublish({
       gists,
@@ -1556,6 +1576,7 @@ export function composeCoreServices(
     githubRepos,
     gists,
     syncEngines,
+    credentials,
     webFetch,
     xArchive,
     audioRecorder,

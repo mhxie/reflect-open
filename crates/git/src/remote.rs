@@ -6,6 +6,7 @@
 //! the SSH agent.
 
 use std::cell::{Cell, RefCell};
+use std::net::Ipv6Addr;
 use std::path::Path;
 
 use git2::{
@@ -37,13 +38,16 @@ pub struct RemoteDelta {
     pub behind: usize,
 }
 
-/// Where `origin` says the current branch is, next to the last-fetched
-/// tracking ref. `remote_oid` is `None` when the remote has no such branch.
+/// Where the remote says the current branch is, next to the last-fetched
+/// tracking ref. `remote_oid` is `None` when the remote has no such branch;
+/// `default_branch` is the branch the remote's HEAD points at, `None` when
+/// the remote is empty.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteTip {
     pub remote_oid: Option<String>,
     pub tracking_oid: Option<String>,
+    pub default_branch: Option<String>,
 }
 
 /// Result of a push attempt. `pushed: false` with `non_fast_forward: true` is
@@ -119,7 +123,7 @@ fn resolve_credential(
         return Err(git2::Error::new(
             ErrorCode::Auth,
             ErrorClass::Http,
-            "HTTPS sign-in is only supported for github.com — use an SSH remote URL (git@host:owner/repo.git) for other hosts",
+            "no sign-in is stored for this host — add one in Settings → Sync, or use the SSH form of the remote URL",
         ));
     }
     Err(git2::Error::new(
@@ -136,19 +140,101 @@ struct Tried {
     ssh_agent: bool,
 }
 
+/// Where an `http(s)://` URL points: scheme, host and effective port, the
+/// three parts a stored sign-in is bound to. `None` for every other URL
+/// form, and for an http(s) URL this parser cannot read.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct HttpOrigin {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+}
+
+pub(super) fn http_origin(url: &str) -> Option<HttpOrigin> {
+    let (scheme, rest) = url.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let default_port = match scheme.as_str() {
+        "https" => 443,
+        "http" => 80,
+        _ => return None,
+    };
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let (host, port) = match host_port.strip_prefix('[') {
+        // A bracketed IPv6 literal is stored in its canonical form, so
+        // `[::1]` and `[0:0:0:0:0:0:0:1]` compare equal, and keeps its
+        // brackets so it never compares equal to a host name.
+        Some(bracketed) => {
+            let (address, after) = bracketed.split_once(']')?;
+            let address: Ipv6Addr = address.parse().ok()?;
+            let port = match after.strip_prefix(':') {
+                Some(port) => port.parse().ok()?,
+                None if after.is_empty() => default_port,
+                None => return None,
+            };
+            (format!("[{address}]"), port)
+        }
+        None => match host_port.rsplit_once(':') {
+            // An unbracketed IPv6 literal, or any other host with a colon
+            // in it, is not a readable origin.
+            Some((host, _)) if host.contains(':') => return None,
+            Some((host, port)) => (host.to_ascii_lowercase(), port.parse().ok()?),
+            None => (host_port.to_ascii_lowercase(), default_port),
+        },
+    };
+    (!host.is_empty()).then_some(HttpOrigin { scheme, host, port })
+}
+
 /// `RemoteCallbacks` with the credential chain, shared by every network call.
-fn callbacks_with_credentials<'cb>(credential: Option<GitCredential>) -> RemoteCallbacks<'cb> {
+///
+/// A [`GitCredential`] is only ever presented to the origin of `remote_url`:
+/// libgit2 follows one redirect and then asks the callback again for the
+/// new URL, which would hand it a sign-in stored for another origin, or send
+/// it over plain http after an https-to-http redirect.
+fn callbacks_with_credentials<'cb>(
+    credential: Option<GitCredential>,
+    remote_url: &str,
+) -> RemoteCallbacks<'cb> {
     let mut callbacks = RemoteCallbacks::new();
     let mut tried = Tried::default();
-    callbacks.credentials(move |_url, username_from_url, allowed| {
+    let expected = http_origin(remote_url);
+    callbacks.credentials(move |url, username_from_url, allowed| {
+        if credential.is_some() {
+            guard_origin(expected.as_ref(), url)?;
+        }
         resolve_credential(credential.as_ref(), username_from_url, allowed, &mut tried)
     });
     callbacks
 }
 
+/// Refuse to present a sign-in anywhere but the origin it was stored for.
+/// With no readable origin to compare against (a non-http remote, or an
+/// http URL the parser rejects) the sign-in is withheld rather than sent.
+pub(super) fn guard_origin(expected: Option<&HttpOrigin>, url: &str) -> Result<(), git2::Error> {
+    let Some(expected) = expected else {
+        return Err(git2::Error::new(
+            git2::ErrorCode::Auth,
+            git2::ErrorClass::Http,
+            "the stored sign-in is only sent to an http(s) remote",
+        ));
+    };
+    if http_origin(url).as_ref() != Some(expected) {
+        return Err(git2::Error::new(
+            git2::ErrorCode::Auth,
+            git2::ErrorClass::Http,
+            "the host redirected elsewhere; the stored sign-in was not sent",
+        ));
+    }
+    Ok(())
+}
+
 fn origin(repo: &Repository) -> AppResult<git2::Remote<'_>> {
     repo.find_remote("origin")
         .map_err(|_| AppError::not_found("no backup remote is configured for this graph"))
+}
+
+fn remote_url(remote: &git2::Remote<'_>) -> String {
+    remote.url().unwrap_or_default().to_string()
 }
 
 /// Fetch `origin` (configured refspecs) and report ahead/behind for the
@@ -158,24 +244,35 @@ pub(super) fn fetch(root: &Path, credential: Option<GitCredential>) -> AppResult
     {
         let mut remote = origin(&repo)?;
         let mut opts = FetchOptions::new();
-        opts.remote_callbacks(callbacks_with_credentials(credential));
+        opts.remote_callbacks(callbacks_with_credentials(credential, &remote_url(&remote)));
         remote.fetch(&[] as &[&str], Some(&mut opts), None)?;
     }
     local_delta(&repo)
 }
 
 /// Read the current branch's tip from the remote ref advertisement, without
-/// downloading objects or touching the working tree.
-pub(super) fn remote_head(root: &Path, credential: Option<GitCredential>) -> AppResult<RemoteTip> {
+/// downloading objects or touching the working tree. `url` probes a remote
+/// that is not `origin` (a connect checks a sign-in before it stores
+/// anything); `None` asks `origin`.
+pub(super) fn remote_head(
+    root: &Path,
+    url: Option<&str>,
+    credential: Option<GitCredential>,
+) -> AppResult<RemoteTip> {
     let repo = open_existing(root)?;
     let branch = current_branch(&repo)?;
     let ref_name = format!("refs/heads/{branch}");
-    let mut remote = origin(&repo)?;
-    remote.connect_auth(
-        Direction::Fetch,
-        Some(callbacks_with_credentials(credential)),
-        None,
-    )?;
+    let mut remote = match url {
+        Some(url) => repo.remote_anonymous(url)?,
+        None => origin(&repo)?,
+    };
+    let callbacks = callbacks_with_credentials(credential, &remote_url(&remote));
+    remote.connect_auth(Direction::Fetch, Some(callbacks), None)?;
+    let default_branch = remote
+        .default_branch()
+        .ok()
+        .and_then(|name| name.as_str().ok().map(str::to_string))
+        .map(|name| name.trim_start_matches("refs/heads/").to_string());
     let remote_oid = remote
         .list()?
         .iter()
@@ -189,6 +286,7 @@ pub(super) fn remote_head(root: &Path, credential: Option<GitCredential>) -> App
     Ok(RemoteTip {
         remote_oid,
         tracking_oid,
+        default_branch,
     })
 }
 
@@ -230,7 +328,7 @@ fn count_commits(repo: &Repository, from: git2::Oid) -> AppResult<usize> {
 /// restore never writes into a folder that has content.
 pub(super) fn clone(url: &str, target: &Path, credential: Option<GitCredential>) -> AppResult<()> {
     let mut fetch_options = FetchOptions::new();
-    fetch_options.remote_callbacks(callbacks_with_credentials(credential));
+    fetch_options.remote_callbacks(callbacks_with_credentials(credential, url));
     git2::build::RepoBuilder::new()
         .fetch_options(fetch_options)
         .clone(url, target)?;
@@ -292,7 +390,7 @@ pub(super) fn push(
     let sideband: RefCell<String> = RefCell::new(String::new());
     let stale = Cell::new(false);
     let result = {
-        let mut callbacks = callbacks_with_credentials(credential);
+        let mut callbacks = callbacks_with_credentials(credential, &remote_url(&remote));
         // libgit2 checks the fast-forward and builds the pack against the
         // server's live branch, not the last-fetched one the guard checked:
         // a stale one can reach a root the server no longer has, which the
@@ -386,7 +484,7 @@ fn classify_rejection(message: String, sideband: &str) -> PushOutcome {
 mod credential_tests {
     use git2::{Cred, CredentialType, ErrorCode};
 
-    use super::{GitCredential, Tried, resolve_credential};
+    use super::{GitCredential, Tried, guard_origin, http_origin, resolve_credential};
 
     fn github() -> GitCredential {
         GitCredential {
@@ -491,7 +589,7 @@ mod credential_tests {
     }
 
     #[test]
-    fn generic_https_fails_fast_with_the_ssh_suggestion() {
+    fn generic_https_without_a_sign_in_names_the_fix() {
         let mut tried = Tried::default();
         let err = expect_err(resolve_credential(
             None,
@@ -500,7 +598,32 @@ mod credential_tests {
             &mut tried,
         ));
         assert_eq!(err.code(), ErrorCode::Auth);
-        assert!(err.message().contains("SSH remote URL"), "{err}");
+        assert!(err.message().contains("no sign-in is stored"), "{err}");
+    }
+
+    #[test]
+    fn a_sign_in_is_withheld_from_another_origin() {
+        let expected = http_origin("https://gitlab.com/alex/notes.git");
+        assert!(
+            guard_origin(
+                expected.as_ref(),
+                "https://gitlab.com/alex/notes.git/info/refs"
+            )
+            .is_ok()
+        );
+        assert!(guard_origin(expected.as_ref(), "https://GITLAB.com:443/alex/notes.git").is_ok());
+        let err = guard_origin(expected.as_ref(), "https://evil.example/alex/notes.git")
+            .expect_err("another host must be refused");
+        assert_eq!(err.code(), ErrorCode::Auth);
+        assert!(err.message().contains("redirected"), "{err}");
+        let err = guard_origin(expected.as_ref(), "http://gitlab.com/alex/notes.git")
+            .expect_err("plain http must be refused");
+        assert!(err.message().contains("redirected"), "{err}");
+        // A remote with no readable origin never receives the sign-in.
+        let err = guard_origin(None, "https://anything.example/x")
+            .expect_err("an unreadable origin must withhold the sign-in");
+        assert_eq!(err.code(), ErrorCode::Auth);
+        assert!(err.message().contains("only sent"), "{err}");
     }
 
     #[test]

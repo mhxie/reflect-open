@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { BackupState, NoteState } from '@reflect/core'
+import type { GitSyncState, NoteState } from '@reflect/core'
 import { noteDetails } from './note-details.ts'
 
 const EDITABLE: NoteState = {
@@ -11,11 +11,17 @@ const EDITABLE: NoteState = {
 }
 const COMMITTED = { version: 'abc123def4', pending: false, unavailable: false }
 
-function connected(status: Extract<BackupState, { phase: 'connected' }>['status']): BackupState {
-  return { phase: 'connected', remoteUrl: 'https://github.com/test/notes', repo: null, status }
+function connected(status: Extract<GitSyncState, { phase: 'connected' }>['status']): GitSyncState {
+  return {
+    phase: 'connected',
+    remoteUrl: 'https://github.com/test/notes',
+    remote: { kind: 'github', repo: { owner: 'test', name: 'notes' } },
+    isPrimaryChannel: true,
+    status,
+  }
 }
 
-function backupLabel(backup: BackupState | undefined, state: NoteState = EDITABLE): string {
+function backupLabel(backup: GitSyncState | undefined, state: NoteState = EDITABLE): string {
   return noteDetails({ state, backup, version: COMMITTED }).backup[0]?.value ?? ''
 }
 
@@ -92,6 +98,13 @@ describe('noteDetails', () => {
   it('folds live graph sync into the Backup row', () => {
     expect(backupLabel({ phase: 'loading' })).toBe('Checking')
     expect(backupLabel({ phase: 'disconnected' })).toBe('Backup off')
+    expect(
+      backupLabel({
+        phase: 'needsCredential',
+        remoteUrl: 'https://git.example.com/test/notes.git',
+        remote: { kind: 'https', origin: 'https://git.example.com' },
+      }),
+    ).toBe('Sign-in needed')
     expect(backupLabel(connected({ state: 'syncing' }))).toBe('Syncing')
     // The quiet window before the next backup still reads as backed up.
     expect(backupLabel(connected({ state: 'waiting', until: 5_000 }))).toBe('Backed up')

@@ -29,7 +29,7 @@ export function useNoteSummaries(graph: GraphInfo): void {
   const { noteSummaries } = useCoreServices()
   const { operations, window } = useAppServices()
   const { settings, updateSettings } = useSettings()
-  const backup = useMaybeGraphServices()?.backup ?? null
+  const backup = useMaybeGraphServices()?.gitSync ?? null
   const offer = useMemo(() => createNoteSummaryOffer(operations), [operations])
   const providers: AiProvidersState = {
     providers: settings.aiProviders,

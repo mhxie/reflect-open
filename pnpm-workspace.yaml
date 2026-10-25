@@ -23,9 +23,9 @@ minimumReleaseAgeExclude:
   - '@post-embed/*'
   - '@prosemirror-adapter/*'
   - prosemirror-flat-list
-  - prosemirror-view
-  - '@ai-sdk/*'
-  - ai
+
+patchedDependencies:
+  mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
 
 # Keep these commented examples for future pkg.pr.new testing; do not remove them.
 # blockExoticSubdeps: false
@@ -38,6 +38,6 @@ minimumReleaseAgeExclude:
 # master) from tarballs vendored by
 # apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
-  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.77.0-cdde84f3734a.tgz
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.1-cdde84f3734a.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.80.3-cdde84f3734a.tgz
+  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.77.0-a0b7cb52de45.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.2-a0b7cb52de45.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.81.1-a0b7cb52de45.tgz

@@ -9,6 +9,7 @@ import {
   resolveNoYouTubeVideo,
 } from '@/editor/local-only-render.ts'
 import { MediaLightbox } from '@/editor/media-lightbox.tsx'
+import { MenuBoundaryContext } from '@/editor/menu-boundary.ts'
 import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { useXPostResolver, X_MEDIA_URL_PROTOCOLS } from '@/editor/use-x-post-resolver.ts'
 import { lightboxItemFromXPostMedia } from '@/editor/x-post-media-lightbox-item.ts'
@@ -51,6 +52,7 @@ import { createMarkdownSourceMap } from '@meowdown/core'
 import { TextSelection } from '@prosekit/pm/state'
 import { errorMessage, isPdfAttachmentPath, type TimeFormat } from '@reflect/core'
 import {
+  use,
   useCallback,
   useImperativeHandle,
   useLayoutEffect,
@@ -346,6 +348,7 @@ export function NoteEditor({
 }: NoteEditorProps): ReactElement {
   const { platform, logger } = useCoreServices()
   const touchEditor = platform.surface.touchEditor
+  const menuBoundary = use(MenuBoundaryContext)
   const graphXPostResolver = useXPostResolver()
   const graphYouTubeVideoResolver = useYouTubeVideoResolver()
   const resolveWikilink = useWikilinkResolver()
@@ -604,6 +607,7 @@ export function NoteEditor({
         onWikilinkSearch={onWikilinkSearch}
         onTagSearch={onTagSearch}
         onSelectionMenuSearch={onSelectionMenuSearch}
+        collisionBoundary={menuBoundary}
         pendingReplacementActions={pendingReplacementActions}
         onPendingReplacementResolve={onPendingReplacementResolve}
         onSlashMenuSearch={onSlashMenuSearch}

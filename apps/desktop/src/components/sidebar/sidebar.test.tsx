@@ -24,7 +24,7 @@ import {
   type TestOpenerService,
   type TestOperationsService,
 } from '@reflect/app/testing'
-import { createTestCoreServices, createTestBackupService } from '@reflect/core/testing'
+import { createTestCoreServices, createTestGitSyncService } from '@reflect/core/testing'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import type { Route } from '@/routing/route.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
@@ -152,7 +152,7 @@ async function renderSidebar(
       commitSourceEdit: () => Promise.reject(new Error('commitSourceEdit is not stubbed')),
       isOstensiblyEmpty: isOstensiblyEmptyNoteSource,
     },
-    backup: createTestBackupService({ state: { phase: 'disconnected' } }),
+    gitSync: createTestGitSyncService({ state: { phase: 'disconnected' } }),
   })
   const appLayer = createTestAppServices(app, {
     window: createTestWindowService({ openNoteWindow }),
