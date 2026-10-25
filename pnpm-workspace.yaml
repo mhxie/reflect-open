@@ -38,6 +38,6 @@ patchedDependencies:
 # master) from tarballs vendored by
 # apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
-  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.77.0-a0b7cb52de45.tgz
-  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.2-a0b7cb52de45.tgz
-  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.81.1-a0b7cb52de45.tgz
+  '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.77.0-c74e3d70efd2.tgz
+  '@meowdown/core': file:vendor/meowdown/meowdown-core-0.81.3-c74e3d70efd2.tgz
+  '@meowdown/react': file:vendor/meowdown/meowdown-react-0.81.2-c74e3d70efd2.tgz
