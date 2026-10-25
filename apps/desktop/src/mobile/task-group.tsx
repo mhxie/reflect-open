@@ -13,7 +13,7 @@ import { addTargetForGroup, taskGroupHeaderStyle } from '@/lib/tasks/task-group-
 import { cn } from '@/lib/utils.ts'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
-import { useMobileAppServices } from '@/mobile/mobile-services.ts'
+import { useMobileServices } from '@/mobile/mobile-services.ts'
 import { MobileTaskRow } from '@/mobile/task-row.tsx'
 
 interface MobileTaskGroupProps {
@@ -73,7 +73,7 @@ export function MobileTaskGroup({
   revealedTaskKey,
   setRevealedTaskKey,
 }: MobileTaskGroupProps): ReactElement {
-  const { haptics } = useMobileAppServices()
+  const { haptics } = useMobileServices()
   const localOnly = useLocalOnlyFolders()
   const showSource = group.kind !== 'note'
   const { notePath } = group

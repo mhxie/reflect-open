@@ -688,11 +688,12 @@ describe('follow', () => {
         return await backfill()
       },
     })
-    await queueDrained()
+    await expect
+      .poll(() => index.applied().map((apply) => apply.path))
+      .toEqual(['notes/a.md', 'notes/b.md'])
 
     expect(index.prepares()).toEqual([{ model: MODEL, dims: 384, generation: 7 }])
     expect(preparedBeforeBackfill).toEqual([1])
-    expect(index.applied().map((apply) => apply.path)).toEqual(['notes/a.md', 'notes/b.md'])
     stop()
   })
 
@@ -717,9 +718,7 @@ describe('follow', () => {
         }
       },
     })
-    await queueDrained()
-
-    expect(events).toEqual(['begin', '1/2', '2/2', 'end'])
+    await expect.poll(() => events).toEqual(['begin', '1/2', '2/2', 'end'])
     stop()
   })
 
@@ -737,10 +736,8 @@ describe('follow', () => {
         events.push(`${done}/${total}`)
       },
     })
-    await queueDrained()
-
     // The first note was mid-embed when the follow stopped: it lands, unreported.
-    expect(index.applied().map((apply) => apply.path)).toEqual(['notes/a.md'])
+    await expect.poll(() => index.applied().map((apply) => apply.path)).toEqual(['notes/a.md'])
     expect(events).toEqual([])
   })
 
@@ -769,12 +766,13 @@ describe('follow', () => {
       dims: 384,
       localOnly: NONE,
     })
-    await queueDrained()
-    expect(index.applied().map((apply) => apply.path)).toEqual(['notes/a.md', 'notes/b.md'])
+    await expect
+      .poll(() => index.applied().map((apply) => apply.path))
+      .toEqual(['notes/a.md', 'notes/b.md'])
 
     noteFile.set('notes/a.md', '# A\n\nRewritten text.\n')
     indexLifecycle.emitApplied([{ kind: 'upsert', path: 'notes/a.md' }], 7)
-    await queueDrained()
+    await expect.poll(() => index.applied()).toHaveLength(3)
 
     const last = index.applied().at(-1)!
     expect([last.path, last.generation]).toEqual(['notes/a.md', 7])
@@ -794,9 +792,7 @@ describe('follow', () => {
     await queueDrained()
 
     indexLifecycle.emitApplied([{ kind: 'remove', path: 'notes/a.md' }], 7)
-    await queueDrained()
-
-    expect(index.removed()).toEqual([{ path: 'notes/a.md', generation: 7 }])
+    await expect.poll(() => index.removed()).toEqual([{ path: 'notes/a.md', generation: 7 }])
     await expect(storedPaths()).resolves.toEqual(['notes/b.md'])
     stop()
   })
@@ -810,7 +806,7 @@ describe('follow', () => {
       dims: 384,
       localOnly: NONE,
     })
-    await queueDrained()
+    await expect.poll(() => index.applied()).toHaveLength(2)
     const before = index.applied().length
 
     indexLifecycle.emitApplied(null, 7)
@@ -830,7 +826,7 @@ describe('follow', () => {
       dims: 384,
       localOnly: NONE,
     })
-    await queueDrained()
+    await expect.poll(() => index.applied()).toHaveLength(2)
     const applied = index.applied().length
 
     indexLifecycle.emitApplied([{ kind: 'upsert', path: 'notes/a.md' }], 6)
@@ -851,7 +847,7 @@ describe('follow', () => {
       dims: 384,
       localOnly: NONE,
     })
-    await queueDrained()
+    await expect.poll(() => index.applied()).toHaveLength(2)
     const applied = index.applied().length
 
     indexLifecycle.emitApplied(
@@ -896,7 +892,7 @@ describe('follow', () => {
       dims: 384,
       localOnly: NONE,
     })
-    await queueDrained()
+    await expect.poll(() => index.applied()).toHaveLength(2)
     const applied = index.applied().length
 
     noteFile.set('notes/a.md', '# A\n\nGamma text.\n')
@@ -909,7 +905,7 @@ describe('follow', () => {
       ],
       7,
     )
-    await queueDrained()
+    await expect.poll(() => index.applied()).toHaveLength(applied + 1)
 
     expect(logger.getErrors().map((entry) => entry.message)).toEqual([
       'embedding sync failed for notes/a.md:',

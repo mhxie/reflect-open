@@ -11,17 +11,6 @@ import {
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@/routing/route.ts'
 
-/** Duplicate note IDs shared by the Git and iCloud settings surfaces. */
-export function createDuplicateNoteIdsQueryOptions(
-  indexQuery: IndexQueryService,
-  root: string | undefined,
-) {
-  return queryOptions({
-    queryKey: queryKeys.index.duplicateNoteIds(root),
-    queryFn: () => indexQuery.getDuplicateNoteIds(),
-  })
-}
-
 /** Templates shared by the settings list and insertion picker. */
 export function createTemplatesQueryOptions(
   indexQuery: IndexQueryService,

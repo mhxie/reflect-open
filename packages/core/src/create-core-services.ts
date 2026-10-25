@@ -389,7 +389,7 @@ export interface CoreServices {
   /**
    * The sign-ins of the other HTTPS git hosts, one per origin.
    */
-  readonly hostCredentials: GitHostCredentialService
+  readonly gitHostCredentials: GitHostCredentialService
   /**
    * The Rust git primitives for the open graph's repository: the commands
    * git sync composes, and a note's last committed version for the note state.
@@ -744,7 +744,7 @@ export const coreServiceFactories = {
   persistenceFlush: createPersistenceFlushService,
   gitRepository: createGitRepositoryService,
   githubAuth: createGithubAuthService,
-  hostCredentials: createGitHostCredentialService,
+  gitHostCredentials: createGitHostCredentialService,
   credentialResolver: createCredentialResolver,
   githubRepos: createGithubRepoService,
   gists: createGistService,
@@ -1148,6 +1148,8 @@ export function composeCoreServices(
     createServices: (session) => {
       return adapters.createGraphServices(session, {
         gitSync: gitSyncDeps,
+        githubConnector: { githubAuth, githubRepos },
+        gitHostConnector: { git: gitRepository, gitHostCredentials },
         icloudSync: icloudSyncDeps,
         icloudDownload: icloudDownloadDeps,
         capture: services.capture,
@@ -1174,8 +1176,8 @@ export function composeCoreServices(
   })
   const gitRepository = create.gitRepository({ ipc })
   const githubAuth = create.githubAuth({ secretStore, http: adapters.http, clock })
-  const hostCredentials = create.hostCredentials({ secretStore, logger })
-  const credentials = create.credentialResolver({ githubAuth, hostCredentials, logger })
+  const gitHostCredentials = create.gitHostCredentials({ secretStore, logger })
+  const credentials = create.credentialResolver({ githubAuth, gitHostCredentials, logger })
   const githubRepos = create.githubRepos({ http: adapters.http })
   const gists = create.gists({ http: adapters.http })
   const syncEngines = create.syncEngines({ git: gitRepository, clock })
@@ -1294,8 +1296,7 @@ export function composeCoreServices(
     syncEngines,
     credentials,
     githubAuth,
-    hostCredentials,
-    githubRepos,
+    gitHostCredentials,
     fileChanges,
     indexLifecycle,
     noteDisplacement,
@@ -1359,7 +1360,7 @@ export function composeCoreServices(
     noteLinkResolver,
     knowledgeLevels: create.knowledgeLevels({ noteFile, graphSession }),
     githubAuth,
-    hostCredentials,
+    gitHostCredentials,
     gitRepository,
     gistPublish: create.gistPublish({
       gists,

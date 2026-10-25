@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { AboutSection } from './settings/about-section.tsx'
+import { AccountsSection } from './settings/accounts-section.tsx'
 import { AgentsSection } from './settings/agents-section.tsx'
 import { AiChatSection } from './settings/ai-chat-section.tsx'
 import { AiPromptsSection } from './settings/ai-prompts-section.tsx'
@@ -45,6 +46,7 @@ export function SettingsScreen(): ReactElement {
         <AgentsSection />
         <IntegrationsSection />
         <SyncSection />
+        <AccountsSection />
         <ImportSection />
         <AboutSection />
         <DestructiveSection />

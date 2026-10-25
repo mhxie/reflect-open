@@ -134,7 +134,7 @@ export function DescribeAssetsField(): ReactElement {
           onClick={() => setConfirming(true)}
           className="text-text-secondary"
         >
-          {running ? 'Backfilling…' : 'Backfill assets'}
+          {running ? 'Scanning…' : 'Scan existing files'}
         </Button>
         {!hasProvider ? (
           <p className="mt-2 text-xs text-text-muted">Add an AI provider to enable this.</p>
@@ -149,7 +149,7 @@ export function DescribeAssetsField(): ReactElement {
         >
           <DialogContent showCloseButton={false} className="max-w-sm">
             <DialogHeader>
-              <DialogTitle>Backfill assets?</DialogTitle>
+              <DialogTitle>Scan existing files?</DialogTitle>
               <DialogDescription>
                 {settings.localOcrProviderId
                   ? 'Images and PDFs, including those in private notes, will be read by your selected local vision model. OCR text stays on this Mac. PDF OCR is supported on macOS.'
@@ -162,7 +162,7 @@ export function DescribeAssetsField(): ReactElement {
                 Cancel
               </Button>
               <Button type="button" size="sm" onClick={() => void runBackfill()}>
-                Backfill assets
+                Scan existing files
               </Button>
             </DialogFooter>
           </DialogContent>
