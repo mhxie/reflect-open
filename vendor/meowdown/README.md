@@ -1,11 +1,11 @@
 # Vendored Meowdown packages
 
-Built from Meowdown fork commit `c74e3d70efd2086ea32b6a11092a029bac0ac175`. Source file SHA-256: `7eed093719231b6a433e1e9d12b6e1f1b41004f692db188eb2ff3078400dba05`. The lockfile pins each archive's integrity.
+Built from Meowdown fork commit `173cf3a01946311e9912d01f6e1fc3e3452968c1`. Source file SHA-256: `a496a0c2e732722d365af645a21622845dae135f53880a6f156118bbfcac9293`. The lockfile pins each archive's integrity.
 
 | Package | SHA-256 |
 | --- | --- |
-| meowdown-markdown-0.77.0-c74e3d70efd2.tgz | `5fd13ecb8ade39b122ef971edb3f7ed23982db7c15b43bea07f808fd7443c838` |
-| meowdown-core-0.81.3-c74e3d70efd2.tgz | `7f720c79b42e0849327a590b74bcb625b8e4186f66af9f78b1128987402d93e3` |
-| meowdown-react-0.81.2-c74e3d70efd2.tgz | `ec95f7dd80f136c4badd8fe686cff2f9bc6ff0e2b0ab7a5d406f9e58b9fdec3d` |
+| meowdown-markdown-0.77.0-173cf3a01946.tgz | `5fd13ecb8ade39b122ef971edb3f7ed23982db7c15b43bea07f808fd7443c838` |
+| meowdown-core-0.82.0-173cf3a01946.tgz | `a72ccd3f720c1022f542eda51a633439bcdce5597fe485f8fddd4c9d57240d2f` |
+| meowdown-react-0.82.0-173cf3a01946.tgz | `09581ce5e5d9c48d51492ffb66d96baeddea12ee3758fc736a4a2a166cabb677` |
 
 To refresh, run `node apps/desktop/scripts/vendor-meowdown.mjs /path/to/meowdown`, then `pnpm install`. Snapshot mode records local source content without creating a commit.
