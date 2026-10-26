@@ -42,7 +42,7 @@ function renderSection(date: string) {
       <RouteProbe />
     </>,
     {
-      app,
+      core: app,
       graph: {
         root: '/g',
         name: 'g',

@@ -33,7 +33,7 @@ async function renderFields(): Promise<void> {
       <WikiTrustReportField />
     </>,
     {
-      app,
+      core: app,
       graph: { root: '/graphs/Personal', name: 'Personal', generation: 3 },
       settings: {
         wikiTrustDisplay: 'inline',

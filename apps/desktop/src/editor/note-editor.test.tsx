@@ -58,13 +58,15 @@ let resolveYouTubeVideo: MockInstance<EmbedMediaService['resolveYouTubeVideo']>
  * Render `ui` in the app, on a platform with the facts `platform`.
  */
 async function render(ui: ReactNode, platform?: TestPlatformOptions) {
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     platform: createTestPlatformService(platform),
   })
-  onTestFinished(() => app.database.close())
-  resolveYouTubeVideo = vi.spyOn(app.embedMedia, 'resolveYouTubeVideo').mockResolvedValue(undefined)
-  return await renderInApp(ui, { app })
+  onTestFinished(() => core.database.close())
+  resolveYouTubeVideo = vi
+    .spyOn(core.embedMedia, 'resolveYouTubeVideo')
+    .mockResolvedValue(undefined)
+  return await renderInApp(ui, { core })
 }
 
 const TOUCH_EDITOR: TestPlatformOptions = { surface: { touchEditor: true } }
@@ -320,7 +322,7 @@ describe('NoteEditor touch-surface input hygiene', () => {
     await expect.element(pmRoot).toHaveAttribute('autocorrect', 'on')
   })
 
-  it('leaves the contenteditable untouched on desktop', async () => {
+  it('leaves the input traits unset on desktop', async () => {
     await render(<NoteEditor privateNote={false} initialContent="Hello" />)
     await expect.element(pmRoot).toBeVisible()
     await expect.element(pmRoot).not.toHaveAttribute('autocapitalize')

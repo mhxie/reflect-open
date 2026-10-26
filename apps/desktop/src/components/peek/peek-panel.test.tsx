@@ -76,7 +76,7 @@ async function renderPeek(): Promise<TestCoreServices> {
       <RouteProbe />
     </PeekProvider>,
     {
-      app,
+      core: app,
       appServices: { window: createTestWindowService({ openNoteWindow }) },
       graph: { root: '/g', name: 'g', generation: 3 },
       settings: { dateFormat: 'mdy' },

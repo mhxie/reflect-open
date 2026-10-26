@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeParseJson } from '@reflect/utils'
 import { transcriptSegmentSchema, type TranscriptSegment } from '../ai/local-transcription.ts'
 
 /**
@@ -156,12 +157,8 @@ const partResultSchema = z.union([
 
 /** Parse a cached result, or `null` for anything unrecognizable. */
 export function decodePartResult(raw: string): AudioMemoPartResult | null {
-  try {
-    const parsed = partResultSchema.safeParse(JSON.parse(raw))
-    return parsed.success ? parsed.data : null
-  } catch {
-    return null
-  }
+  const parsed = partResultSchema.safeParse(safeParseJson(raw))
+  return parsed.success ? parsed.data : null
 }
 
 export function encodePartResult(result: AudioMemoPartResult): string {

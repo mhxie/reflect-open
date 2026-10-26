@@ -122,7 +122,7 @@ async function renderScreen() {
       <PeekProbe />
     </PeekProvider>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 7 },
       route: { kind: 'attachments', type: null, tag: null },
       settings: { dateFormat: 'iso', timeFormat: '24h' },

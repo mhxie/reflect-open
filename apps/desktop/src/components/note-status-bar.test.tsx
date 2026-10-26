@@ -156,7 +156,7 @@ async function renderBar(initialRoute: Route, options: BarOptions = {}) {
     />
   )
   return await renderInApp(options.around === undefined ? bar : options.around(bar), {
-    app,
+    core: app,
     graph: {
       root: options.root ?? '/g',
       name: 'g',

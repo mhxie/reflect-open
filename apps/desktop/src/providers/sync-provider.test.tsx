@@ -38,11 +38,11 @@ describe('useGitSync', () => {
   })
 
   it('reads loading, and no context, where the graph runs no backup', async () => {
-    const app = createTestCoreServices({
+    const core = createTestCoreServices({
       database: createWasmTestDatabaseService(),
       role: 'note-window',
     })
-    await renderInApp(<Probe />, { app })
+    await renderInApp(<Probe />, { core })
 
     const button = page.getByRole('button', { name: 'loading' })
     await expect.element(button).toHaveAttribute('data-context', 'none')
@@ -67,7 +67,7 @@ describe('useGitSync', () => {
       role: 'note-window',
     })
     onTestFinished(() => noteWindow.database.close())
-    await renderInApp(<ChangedProbe />, { app: noteWindow })
+    await renderInApp(<ChangedProbe />, { core: noteWindow })
     await page.getByRole('button', { name: 'changed' }).last().click()
   })
 })

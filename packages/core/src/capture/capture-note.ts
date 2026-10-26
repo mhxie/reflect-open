@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { parseUrl, sha256Hex } from '@reflect/utils'
+import { safeParseUrl, sha256Hex } from '@reflect/utils'
 import { isAppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
@@ -48,7 +48,7 @@ const PAGE_TEXT_END = '<!-- reflect-capture-page-text:end -->'
 /** The capture's display title: the page title, else the URL's host. */
 export function displayTitle(envelope: Pick<CaptureEnvelope, 'title' | 'url'>): string {
   const title = wikiLinkSafe(envelope.title)
-  return title !== '' ? title : parseUrl(envelope.url)?.host || envelope.url
+  return title !== '' ? title : safeParseUrl(envelope.url)?.host || envelope.url
 }
 
 function captureNoteBody(

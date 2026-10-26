@@ -46,10 +46,10 @@ async function renderSnippet(
   text: string = SNIPPET,
   onWikilinkClick: () => void = () => {},
 ) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-  operations = app.progress
+  const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  operations = core.progress
   writeTask = vi
-    .spyOn(app.tasks, 'writeTask')
+    .spyOn(core.tasks, 'writeTask')
     .mockResolvedValue({ source: '', moved: [], inserted: [], tasks: [], updatedAt: 0 })
   return await renderInApp(
     <BacklinkSnippet
@@ -59,7 +59,7 @@ async function renderSnippet(
       tasks={tasks}
       onWikilinkClick={onWikilinkClick}
     />,
-    { app, graph: GRAPH },
+    { core, graph: GRAPH },
   )
 }
 
@@ -231,11 +231,11 @@ describe('BacklinkSnippet network policy', () => {
     'x_archive_write',
     'capture_oembed_fetch',
   ]
-  let app: TestCoreServices
+  let core: TestCoreServices
 
   beforeEach(() => {
-    app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-    onTestFinished(() => app.database.close())
+    core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    onTestFinished(() => core.database.close())
   })
 
   /**
@@ -244,10 +244,10 @@ describe('BacklinkSnippet network policy', () => {
    * fetches.
    */
   const commands = (): string[] => [
-    ...app.ipc.calls().map((call) => call.command),
-    ...app.xArchive.resolves().map(() => 'x_archive_resolve'),
-    ...app.xArchive.writes().map(() => 'x_archive_write'),
-    ...app.xArchive.syndicationRequests().map(() => 'x_syndication_fetch'),
+    ...core.ipc.calls().map((call) => call.command),
+    ...core.xArchive.resolves().map(() => 'x_archive_resolve'),
+    ...core.xArchive.writes().map(() => 'x_archive_write'),
+    ...core.xArchive.syndicationRequests().map(() => 'x_syndication_fetch'),
   ]
 
   const remoteImages = (container: HTMLElement): string[] => {
@@ -269,7 +269,7 @@ describe('BacklinkSnippet network policy', () => {
   }
 
   it('never looks up embeds or loads remote images for a locked tracked source', async () => {
-    const view = await renderInApp(snippet(true), { app, graph: GRAPH })
+    const view = await renderInApp(snippet(true), { core, graph: GRAPH })
     await expect.element(view.getByTestId('embed-link')).toHaveTextContent(X_URL)
     expect(remoteImages(view.container)).toEqual([])
     for (const command of REMOTE_COMMANDS) {
@@ -279,14 +279,14 @@ describe('BacklinkSnippet network policy', () => {
   })
 
   it('looks them up for a public source (control)', async () => {
-    const view = await renderInApp(snippet(false), { app, graph: GRAPH })
+    const view = await renderInApp(snippet(false), { core, graph: GRAPH })
     await vi.waitFor(() => expect(commands()).toContain('x_archive_resolve'))
     await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
     await view.unmount()
   })
 
   it('drops remote media at once when the source turns private', async () => {
-    const view = await renderInApp(snippet(false), { app, graph: GRAPH })
+    const view = await renderInApp(snippet(false), { core, graph: GRAPH })
     await vi.waitFor(() => expect(remoteImages(view.container)).toEqual([IMAGE]))
 
     await view.rerender(snippet(true))

@@ -54,7 +54,7 @@ describe('useAiProviders', () => {
       baseUrl: 'http://192.168.1.5:11434/v1',
       keyHint: '',
     }
-    const { result, app } = await renderLoaded([{ ...ATTESTED, onDevice: null }, lan])
+    const { result, core: app } = await renderLoaded([{ ...ATTESTED, onDevice: null }, lan])
 
     await act(() => {
       result.current.setOnDevice('ollama', true)
@@ -76,7 +76,7 @@ describe('useAiProviders', () => {
       model: 'gpt-5.5',
       keyHint: 'wxyz1',
     }
-    const { result, app } = await renderLoaded([hosted])
+    const { result, core: app } = await renderLoaded([hosted])
     const draft = {
       provider: 'openai-compatible',
       model: 'llama3.2',
@@ -115,7 +115,7 @@ describe('useAiProviders', () => {
   })
 
   it('changes the declared image support and context window', async () => {
-    const { result, app } = await renderLoaded([ATTESTED])
+    const { result, core: app } = await renderLoaded([ATTESTED])
 
     await act(() => {
       result.current.setCapabilities('ollama', { supportsImages: true, contextWindow: 8192 })

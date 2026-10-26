@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod'
+import { safeParseJson } from '@reflect/utils'
 import type { LoggerService } from './logger-service.ts'
 
 /**
@@ -128,13 +129,8 @@ export function createWebStorageService(deps: WebStorageServiceDeps): StorageSer
  * Parses the JSON stored at `key`; `undefined` when it is missing, malformed, or fails `schema`.
  */
 export function getJson<T>(store: KeyValueStore, key: string, schema: ZodType<T>): T | undefined {
-  try {
-    const value: unknown = JSON.parse(store.get(key) ?? '')
-    const result = schema.safeParse(value)
-    return result.success ? result.data : undefined
-  } catch {
-    return undefined
-  }
+  const result = schema.safeParse(safeParseJson(store.get(key) ?? ''))
+  return result.success ? result.data : undefined
 }
 
 /**

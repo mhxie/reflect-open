@@ -87,7 +87,7 @@ async function setup(options?: SetupOptions) {
     },
   }
   const graphSession = createTestGraphSessionService()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     graphSession,
     suggestions: {
@@ -110,7 +110,7 @@ async function setup(options?: SetupOptions) {
   })
   const sourcePath = options?.sourcePath === undefined ? SOURCE : options.sourcePath
   const { result } = await renderHookInApp(() => useEditorAutocomplete(sourcePath), {
-    app,
+    core,
     graph: options?.graph === null ? null : { generation: 7, localOnlyFolders: ['secure'] },
   })
   return { result, operations, created }

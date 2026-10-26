@@ -61,7 +61,7 @@ function renderEntry() {
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       appServices: appLayer,
       graph: { root: '/g', name: 'g', generation: 1 },
       route: { kind: 'note', path: 'wiki/Anchoring.md' },

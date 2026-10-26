@@ -23,7 +23,7 @@ async function renderBreadcrumb(path: string) {
       <WikiBreadcrumb path={path} />
     </div>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 1 },
       settings: { wikiLanguages: LANGUAGES },
     },

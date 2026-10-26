@@ -1,4 +1,4 @@
-import { parseUrl } from '@reflect/utils'
+import { safeParseUrl } from '@reflect/utils'
 import type { GithubRepoRef } from './types.ts'
 
 /**
@@ -26,7 +26,7 @@ const URL_USER_INFO = /^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i
  */
 export function classifyRemote(url: string): GitRemote {
   if (/^https?:\/\//i.test(url)) {
-    const parsed = parseUrl(url)
+    const parsed = safeParseUrl(url)
     if (parsed === null) {
       return { kind: 'path' }
     }
@@ -41,7 +41,7 @@ export function classifyRemote(url: string): GitRemote {
     return { kind: 'https', origin: parsed.origin }
   }
   if (/^ssh:\/\//i.test(url)) {
-    const parsed = parseUrl(url)
+    const parsed = safeParseUrl(url)
     return parsed === null ? { kind: 'path' } : { kind: 'ssh', host: parsed.hostname }
   }
   if (ANY_SCHEME.test(url)) {
@@ -66,7 +66,7 @@ export function githubRemoteUrl(ref: GithubRepoRef): string {
  * embeds (`https://alex:token@host/...`) is dropped. Other forms carry none.
  */
 export function redactRemoteUrl(url: string): string {
-  const parsed = parseUrl(url)
+  const parsed = safeParseUrl(url)
   if (parsed === null) {
     // A URL the parser rejects can still carry user info; strip it by shape.
     return url.replace(URL_USER_INFO, '$1')

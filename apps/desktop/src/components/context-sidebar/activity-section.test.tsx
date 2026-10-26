@@ -37,7 +37,7 @@ async function renderSection(width = 300) {
       <RouteProbe />
     </>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g' },
       settings: { dateFormat: 'iso', weekStartDay: 'monday', activityHeatmapEnabled },
     },

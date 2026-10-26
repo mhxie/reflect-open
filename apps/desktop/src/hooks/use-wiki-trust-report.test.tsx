@@ -70,7 +70,7 @@ describe('useWikiTrustReport and backup', () => {
   it('tells backup once per new version or deletion, never for an unchanged file', async () => {
     const backup = createTestGitSyncService()
     const { result, queryClient } = await renderHookInApp(() => useWikiTrustReport(true), {
-      app: appWith(backup),
+      core: appWith(backup),
       settings: SETTINGS,
     })
     await vi.waitFor(() => expect(result.current.status).toBe('ready'))
@@ -106,7 +106,7 @@ describe('useWikiTrustReport and a backup that starts mid-read', () => {
     readGate = new Promise((resolve) => (release = resolve))
     // The graph opens without its services, so no backup runs yet.
     const { result } = await renderHookInApp(() => useWikiTrustReport(true), {
-      app,
+      core: app,
       settings: SETTINGS,
       graphState: { services: null },
     })
@@ -129,7 +129,7 @@ describe('useWikiTrustReport with an idle observer', () => {
     const { result } = await renderHookInApp(
       // The idle observer renders last, so its options are the query's latest.
       () => ({ watching: useWikiTrustReport(true), idle: useWikiTrustReport() }),
-      { app: appWith(null), settings: SETTINGS },
+      { core: appWith(null), settings: SETTINGS },
     )
     await vi.waitFor(() => expect(result.current.watching.status).toBe('ready'))
     expect(result.current.idle.status).toBe('off')

@@ -37,7 +37,7 @@ let embedRuntime: TestEmbeddingRuntimeService
 let ollamaModels: OllamaModels
 
 // The services of the rendered app; set by `renderScreen`.
-let app: ReturnType<typeof createApp>
+let core: ReturnType<typeof createCore>
 let forget: MockInstance<GraphSessionService['forgetRecent']>
 let deleteGraph: MockInstance<GraphSessionService['deleteGraph']>
 let listOllamaModels: MockInstance<CoreServices['onDeviceModels']['listOllamaModels']>
@@ -46,12 +46,12 @@ let listOllamaModels: MockInstance<CoreServices['onDeviceModels']['listOllamaMod
  * Every settings document the app persisted, oldest first.
  */
 function saved(): Settings[] {
-  return app.settings.saves()
+  return core.settings.saves()
 }
 
 // The screen runs off macOS desktop (no Agents, iCloud or Calendar rows), with
 // a graph open and its git sync disconnected.
-function createApp() {
+function createCore() {
   return createTestCoreServices({
     database: createWasmTestDatabaseService(),
     embeddingRuntime: embedRuntime,
@@ -61,21 +61,21 @@ function createApp() {
 }
 
 async function renderScreen() {
-  app = createApp()
-  forget = vi.spyOn(app.graphSession, 'forgetRecent').mockResolvedValue()
-  deleteGraph = vi.spyOn(app.graphSession, 'deleteGraph').mockResolvedValue()
+  core = createCore()
+  forget = vi.spyOn(core.graphSession, 'forgetRecent').mockResolvedValue()
+  deleteGraph = vi.spyOn(core.graphSession, 'deleteGraph').mockResolvedValue()
   listOllamaModels = vi
-    .spyOn(app.onDeviceModels, 'listOllamaModels')
+    .spyOn(core.onDeviceModels, 'listOllamaModels')
     .mockImplementation(() => Promise.resolve(ollamaModels))
   // The Wiki section's trust report row: no report written yet.
-  app.ipc.onCommand('wiki_trust_report_read', () => null)
+  core.ipc.onCommand('wiki_trust_report_read', () => null)
   return await renderInApp(
     <>
       <SettingsScreen />
       <ShortcutsDialog />
     </>,
     {
-      app,
+      core,
       graph: openGraph,
       settings: stored,
       queryClient: new QueryClient({
@@ -1101,7 +1101,7 @@ describe('SettingsScreen', () => {
     stored = { semanticSearchEnabled: true }
     embedRuntime.setStatus({ status: 'ready', model: 'embeddinggemma-300m', dims: 768 })
     await renderScreen()
-    await act(() => app.semanticSearch.setIndexProgress({ done: 1200, total: 6000 }))
+    await act(() => core.semanticSearch.setIndexProgress({ done: 1200, total: 6000 }))
 
     await expect
       .element(page.getByRole('progressbar', { name: /semantic index/i }))
@@ -1143,7 +1143,7 @@ describe('SettingsScreen', () => {
     // The whole chain: button → the index lifecycle's visible rebuild → wipe,
     // then the projection-version stamp that marks a completed rebuild. (The
     // graph is empty here, so there is no apply batch in between.)
-    const indexCalls = (): string[] => app.indexStore.calls().map((call) => call.method)
+    const indexCalls = (): string[] => core.indexStore.calls().map((call) => call.method)
     await vi.waitFor(() => expect(indexCalls()).toContain('clear'))
     await vi.waitFor(() => expect(indexCalls()).toContain('setMeta'))
   })

@@ -50,7 +50,7 @@ function pinnedTitles(): string | null {
  */
 async function renderSection(path: string, showTrash = false, copies = 1, width?: number) {
   operations = createTestOperationsService()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     progress: operations,
     noteDocuments: {
@@ -67,9 +67,9 @@ async function renderSection(path: string, showTrash = false, copies = 1, width?
       hasMacosTitleBarOverlay: false,
     }),
   })
-  vi.spyOn(app.indexQuery, 'getPinnedNotes').mockImplementation(getPinnedNotes)
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
-  trash = vi.spyOn(app.noteActions, 'trashOne').mockResolvedValue({ trashed: 'system' })
+  vi.spyOn(core.indexQuery, 'getPinnedNotes').mockImplementation(getPinnedNotes)
+  vi.spyOn(core.indexQuery, 'getNote').mockImplementation(getNote)
+  trash = vi.spyOn(core.noteActions, 'trashOne').mockResolvedValue({ trashed: 'system' })
   const view = await renderInApp(
     <>
       {Array.from({ length: copies }, (_, copy) => (
@@ -84,7 +84,7 @@ async function renderSection(path: string, showTrash = false, copies = 1, width?
       <PinnedTitles />
     </>,
     {
-      app,
+      core,
       graph: {
         root: '/g',
         name: 'g',

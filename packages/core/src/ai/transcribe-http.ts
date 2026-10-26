@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeParseJson } from '@reflect/utils'
 import { AppError } from '../errors.ts'
 import type { TranscriptionProvider } from './provider-config.ts'
 
@@ -143,7 +144,7 @@ const errorBodySchema = z.object({
  * rejection as auth only costs a retry, the reverse costs the recording.
  */
 function isInvalidKeyBody(body: string): boolean {
-  const parsed = errorBodySchema.safeParse(safeJson(body))
+  const parsed = errorBodySchema.safeParse(safeParseJson(body))
   if (!parsed.success) {
     return false
   }
@@ -177,15 +178,8 @@ export function httpError(provider: TranscriptionProvider, status: number, body:
 
 /** The provider's own error message when the body carries one, else the raw body. */
 export function providerErrorMessage(body: string): string {
-  const parsed = z.object({ error: z.object({ message: z.string() }) }).safeParse(safeJson(body))
+  const parsed = z
+    .object({ error: z.object({ message: z.string() }) })
+    .safeParse(safeParseJson(body))
   return parsed.success ? parsed.data.error.message : body.slice(0, 200)
-}
-
-/** `JSON.parse` that answers `null` instead of throwing — for probing bodies. */
-export function safeJson(body: string): unknown {
-  try {
-    return JSON.parse(body)
-  } catch {
-    return null
-  }
 }

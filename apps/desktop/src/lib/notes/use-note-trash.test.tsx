@@ -22,7 +22,7 @@ beforeEach(() => {
 
 async function mount(graph: TestOpenGraph | null = GRAPH) {
   return await renderHookInApp(() => useNoteTrash(), {
-    app: createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile }),
+    core: createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile }),
     graph,
   })
 }
@@ -83,7 +83,7 @@ describe('useNoteTrash', () => {
       const outcome = await trashFile(path, generation)
       return path === 'secure/bank.md' ? { trashed: 'graph' } : outcome
     })
-    const { result, app } = await mount()
+    const { result, core: app } = await mount()
 
     let trashed = false
     await act(async () => {

@@ -29,7 +29,7 @@ async function renderActions(
   const install = vi.spyOn(updates, 'install').mockResolvedValue(undefined)
   const skip = vi.spyOn(updates, 'skip').mockResolvedValue(undefined)
   const clear = vi.spyOn(updates, 'clear').mockImplementation(() => {})
-  await renderInApp(<LocalModelActions model={model} status={status} />, { app, appServices })
+  await renderInApp(<LocalModelActions model={model} status={status} />, { core: app, appServices })
   return { download, remove, install, skip, clear }
 }
 

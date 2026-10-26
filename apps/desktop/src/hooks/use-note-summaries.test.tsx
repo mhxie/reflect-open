@@ -39,7 +39,7 @@ describe('useNoteSummaries', () => {
     onTestFinished(() => app.database.close())
     const openSession = vi.spyOn(app.noteSummaries, 'openSession')
 
-    await renderHookInApp(() => useNoteSummaries(GRAPH), { app })
+    await renderHookInApp(() => useNoteSummaries(GRAPH), { core: app })
 
     expect(openSession).toHaveBeenCalledTimes(1)
     const [options] = openSession.mock.calls[0] ?? []
@@ -55,7 +55,7 @@ describe('useNoteSummaries', () => {
     onTestFinished(() => app.database.close())
     const openSession = vi.spyOn(app.noteSummaries, 'openSession')
 
-    await renderHookInApp(() => useNoteSummaries(GRAPH), { app })
+    await renderHookInApp(() => useNoteSummaries(GRAPH), { core: app })
 
     expect(openSession).toHaveBeenCalledTimes(1)
     const [options] = openSession.mock.calls[0] ?? []

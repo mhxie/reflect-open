@@ -47,7 +47,7 @@ describe('useNoteGitVersion', () => {
       open: false,
       isLocalOnly: false,
     }
-    const hook = await renderHookInApp(() => useNoteGitVersion(options), { app })
+    const hook = await renderHookInApp(() => useNoteGitVersion(options), { core: app })
     expect(versionCalls(app)).toEqual([])
 
     options = { ...options, open: true, isLocalOnly: true }
@@ -75,7 +75,7 @@ describe('useNoteGitVersion', () => {
           isLocalOnly: false,
         })
       },
-      { app },
+      { core: app },
     )
     await vi.waitFor(() => expect(hook.result.current.version).toBe('abc123def4'))
     expect(versionCalls(app)).toHaveLength(1)
@@ -113,7 +113,7 @@ describe('useNoteGitVersion', () => {
           isLocalOnly: false,
         })
       },
-      { app },
+      { core: app },
     )
     await vi.waitFor(() => expect(versionCalls(app)).toEqual([['notes/shared.md', 21]]))
 
@@ -144,7 +144,7 @@ describe('useNoteGitVersion', () => {
           isLocalOnly: false,
         })
       },
-      { app },
+      { core: app },
     )
 
     await vi.waitFor(() => expect(hook.result.current.unavailable).toBe(true))

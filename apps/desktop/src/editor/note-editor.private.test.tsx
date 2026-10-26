@@ -83,7 +83,7 @@ afterEach(() => {
 // covered in note-editor.test.tsx; this pins the wiring).
 describe('NoteEditor privateNote wiring', () => {
   it('wires no-op embed resolvers, graph-only images, no link preview, and no auto-embed', async () => {
-    await renderInApp(editor(true), { app })
+    await renderInApp(editor(true), { core: app })
     const props = lastProps()
 
     expect(props.remoteMedia).toBe(false)
@@ -100,7 +100,7 @@ describe('NoteEditor privateNote wiring', () => {
   })
 
   it('wires the network back in for an ordinary note', async () => {
-    await renderInApp(editor(false), { app })
+    await renderInApp(editor(false), { core: app })
     const props = lastProps()
 
     expect(props.remoteMedia).toBe(true)
@@ -114,7 +114,7 @@ describe('NoteEditor privateNote wiring', () => {
   })
 
   it('switches resolvers held from before a Lock toggle, so a late call stays local', async () => {
-    const view = await renderInApp(editor(false), { app })
+    const view = await renderInApp(editor(false), { core: app })
     const before = lastProps()
 
     await view.rerender(editor(true))

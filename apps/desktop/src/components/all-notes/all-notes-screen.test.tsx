@@ -161,7 +161,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
   if (options.knowledgeLevels !== undefined) {
     files[KNOWLEDGE_LEVELS_PATH] = options.knowledgeLevels
   }
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({
       files,
@@ -171,7 +171,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
   })
   for (const note of notes) {
     const source = noteMarkdown(note)
-    app.database.applyProjection({
+    core.database.applyProjection({
       ...buildIndexedNote(parseNote({ path: note.path, source }), {
         fileHash: `hash-${note.path}`,
         mtime: note.mtime,
@@ -186,11 +186,11 @@ async function renderScreen(options: RenderScreenOptions = {}) {
   }
   // The facet counts are scripted: the fixture pins `book` although no listed
   // note carries it, so the Custom menu has a pinned facet to mark.
-  vi.spyOn(app.noteList, 'listNoteTags').mockResolvedValue(facetRows)
-  deleteNote = vi.spyOn(app.noteFile, 'delete')
-  updateSettingsElsewhere = app.settings.update
-  settingsUpdates = vi.spyOn(app.settings, 'update')
-  settingsUpdatesWith = vi.spyOn(app.settings, 'updateWith')
+  vi.spyOn(core.noteList, 'listNoteTags').mockResolvedValue(facetRows)
+  deleteNote = vi.spyOn(core.noteFile, 'delete')
+  updateSettingsElsewhere = core.settings.update
+  settingsUpdates = vi.spyOn(core.settings, 'update')
+  settingsUpdatesWith = vi.spyOn(core.settings, 'updateWith')
   return await renderInApp(
     <>
       {/* The screen fills its container (`h-full`); hand it the viewport
@@ -201,7 +201,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
       <ReArrive />
     </>,
     {
-      app,
+      core,
       graph: { root: '/g', name: 'g', generation: 1 },
       route: { kind: 'allNotes', filter: options.filter ?? null },
       settings: {
@@ -226,7 +226,7 @@ function openedNoteWindows(view: ScreenView): readonly string[] {
 }
 
 function pinnedTags(view: ScreenView): readonly string[] {
-  return view.app.settings.get().allNotesFilterTags
+  return view.core.settings.get().allNotesFilterTags
 }
 
 async function openPinnedFilters(view: ScreenView): Promise<void> {
@@ -290,7 +290,7 @@ describe('AllNotesScreen', () => {
       notes: noteRows.map((row, index) => ({ ...row, isPrivate: privacy[index] ?? false })),
     })
     const setNotesPrivate = vi
-      .spyOn(view.app.noteActions, 'setNotesPrivate')
+      .spyOn(view.core.noteActions, 'setNotesPrivate')
       .mockResolvedValue({ changed: [], skipped: 0 })
     await expect.element(view.getByText('Tokyo Gâteau')).toBeVisible()
     expect(view.getByRole('button', { name: /private \(/ }).query()).toBeNull()
@@ -487,7 +487,7 @@ describe('AllNotesScreen', () => {
       knowledgeLevels: JSON.stringify(knowledgeLevelContract),
     })
     await expect.element(view.getByText('No L3 notes.')).toBeVisible()
-    view.app.noteFile.set(
+    view.core.noteFile.set(
       KNOWLEDGE_LEVELS_PATH,
       JSON.stringify({
         ...knowledgeLevelContract,
@@ -785,8 +785,8 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(view.getByRole('button', { name: 'All', exact: true })).toBeInTheDocument()
     await expect.element(view.getByRole('button', { name: 'PDF', exact: true })).toBeInTheDocument()
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
-    await view.app.settings.flush()
-    const saved = view.app.settings.saves().at(-1)
+    await view.core.settings.flush()
+    const saved = view.core.settings.saves().at(-1)
     expect(saved?.allNotesFilterTags).toEqual([])
     await view.unmount()
 
@@ -1155,7 +1155,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(1) // newest first: Health (Jan 15) above Tokyo (Jan 10)
 
     await view.getByRole('button', { name: 'Sort by subject' }).click()
-    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
+    expect(view.core.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     await expect
       .element(view.getByRole('button', { name: 'Subject, sorted A to Z' }))
       .toBeInTheDocument()
@@ -1168,7 +1168,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(-1)
 
     await view.getByRole('button', { name: 'Sort by updated' }).click()
-    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
+    expect(view.core.settings.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
     await view.getByRole('button', { name: 'Updated, sorted newest first' }).click()
     await expect
       .element(view.getByRole('button', { name: 'Updated, sorted oldest first' }))
@@ -1215,7 +1215,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     view.getByRole('button', { name: 'Sort by subject' }).element().focus()
     await userEvent.keyboard('{Enter}')
 
-    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
+    expect(view.core.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
@@ -1280,7 +1280,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
       expect(deleteNote).toHaveBeenCalledWith('notes/health.md', 1)
       expect(deleteNote).toHaveBeenCalledWith('notes/tokyo.md', 1)
     })
-    expect(view.app.noteFile.trashed()).toEqual(['notes/health.md', 'notes/tokyo.md'])
+    expect(view.core.noteFile.trashed()).toEqual(['notes/health.md', 'notes/tokyo.md'])
     // Optimistic removal: the rows leave at once — the test harness has no file
     // watcher to drive the reindex that would otherwise refresh the list.
     await expectLocatorToHaveCount(view.getByText('Health Stacked'), 0)
@@ -1348,7 +1348,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     await expectLocatorToHaveCount(page.getByText('Trash 1 note?'), 0)
     await vi.waitFor(() => {
       expect(
-        view.app.progress
+        view.core.progress
           .getAll()
           .map((operation) => `${operation.status}:${operation.message ?? ''}`),
       ).toContain('failed:disk on fire')

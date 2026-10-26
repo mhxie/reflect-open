@@ -16,4 +16,5 @@ export { base64ByteLength, base64ToBytes, base64ToUtf8, bytesToBase64 } from './
 export { blobChunks } from './blob.ts'
 export { timeoutSignal } from './abort.ts'
 export type { MaybePromise, Mutable } from './types.ts'
-export { parseUrl } from './url.ts'
+export { safeParseJson } from './json.ts'
+export { safeParseUrl } from './url.ts'

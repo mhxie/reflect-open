@@ -35,19 +35,19 @@ function RouteProbe(): ReactNode {
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
-function createApp() {
-  const app = createTestCoreServices({
+function createCore() {
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     retrieval: createTestRetrievalService({ relatedNotes }),
   })
-  onTestFinished(() => app.database.close())
-  return app
+  onTestFinished(() => core.database.close())
+  return core
 }
 
 /**
  * Renders the sidebar in a clipping frame like AppShell's context region, `height` px tall if given.
  */
-async function renderSidebar(path: string, height?: number, app = createApp()) {
+async function renderSidebar(path: string, height?: number, core = createCore()) {
   return await renderInApp(
     <>
       <div data-testid="context-frame" className="overflow-hidden" style={{ height }}>
@@ -56,7 +56,7 @@ async function renderSidebar(path: string, height?: number, app = createApp()) {
       <RouteProbe />
     </>,
     {
-      app,
+      core,
       // `archive` is a read-only local-only folder.
       graph: { root: '/g', name: 'g', localOnlyFolders: ['archive'] },
       settings: {
@@ -99,11 +99,11 @@ describe('NoteContextSidebar', () => {
 
   it("keeps a wiki entry's language switch pinned above the scrolling sections", async () => {
     relatedNotes.mockResolvedValue(neighbors)
-    const app = createApp()
-    vi.spyOn(app.wiki, 'copies').mockResolvedValue([
+    const core = createCore()
+    vi.spyOn(core.wiki, 'copies').mockResolvedValue([
       { language: { label: 'English', folder: 'wiki' }, path: 'wiki/rust.md' },
     ])
-    const view = await renderSidebar('wiki/rust.md', 360, app)
+    const view = await renderSidebar('wiki/rust.md', 360, core)
     const languages = view.getByRole('group', { name: 'Language' })
     await expect.element(languages).toBeVisible()
     const neighbor = view.getByText('Neighbor 0')

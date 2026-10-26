@@ -173,7 +173,7 @@ function renderScreen() {
       <RouteProbe />
     </>,
     {
-      app,
+      core,
       // `vault/` is a read-only local-only folder.
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['vault'] },
       settings: {
@@ -230,17 +230,17 @@ async function revealSwipeActions(
 
 let storage: TestStorageService
 
-let app: Omit<TestCoreServices, 'tasks'> & { tasks: TaskService }
+let core: Omit<TestCoreServices, 'tasks'> & { tasks: TaskService }
 
 beforeEach(async () => {
   await page.viewport(375, 700)
   // A fresh service per test, so its recently-completed set starts empty.
-  app = createTestCoreServices({
+  core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     // Reduced motion: an instant settle, so row transforms can be asserted synchronously.
     platform: createTestPlatformService({ reducedMotion: true }),
   })
-  const { tasks } = app
+  const { tasks } = core
   getOpenTasks = vi.spyOn(tasks, 'getOpenTasks').mockResolvedValue([])
   getCompletedTasks = vi.spyOn(tasks, 'getCompletedTasks').mockResolvedValue([])
   writeTask = vi.spyOn(tasks, 'writeTask').mockResolvedValue(WRITTEN)
@@ -255,12 +255,12 @@ beforeEach(async () => {
     moved: [],
     updatedAt: 0,
   })
-  storage = app.storage
-  haptics = app.mobile.haptics
+  storage = core.storage
+  haptics = core.mobile.haptics
   // Today is 2026-06-14.
-  app.clock.setNow(new Date(2026, 5, 14, 12).getTime())
+  core.clock.setNow(new Date(2026, 5, 14, 12).getTime())
   // A wiki-link tap resolves to this note.
-  vi.spyOn(app.noteCreation, 'resolveOrCreateNoteWithTitle').mockResolvedValue({
+  vi.spyOn(core.noteCreation, 'resolveOrCreateNoteWithTitle').mockResolvedValue({
     kind: 'resolved',
     path: 'notes/other.md',
   })

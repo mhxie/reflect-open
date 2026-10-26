@@ -60,39 +60,39 @@ const NO_LIFECYCLES: GraphLifecycleFlags = {
 }
 
 /**
- * The deps of the per-session services, taken from the test app.
+ * The deps of the per-session services, taken from the test core services.
  */
-function sessionDeps(app: TestCoreServices) {
-  const { icloudNative, fileChanges, indexLifecycle, activity, clock, logger } = app
+function sessionDeps(core: TestCoreServices) {
+  const { icloudNative, fileChanges, indexLifecycle, activity, clock, logger } = core
   return {
     gitSync: {
-      git: app.gitRepository,
-      syncEngines: app.syncEngines,
-      credentials: app.credentials,
-      githubAuth: app.githubAuth,
-      gitHostCredentials: app.gitHostCredentials,
+      git: core.gitRepository,
+      syncEngines: core.syncEngines,
+      credentials: core.credentials,
+      githubAuth: core.githubAuth,
+      gitHostCredentials: core.gitHostCredentials,
       fileChanges,
       indexLifecycle,
-      noteDisplacement: app.noteDisplacement,
-      progress: app.progress,
+      noteDisplacement: core.noteDisplacement,
+      progress: core.progress,
       clock,
       activity,
-      platform: app.platform,
-      persistenceFlush: app.persistenceFlush,
+      platform: core.platform,
+      persistenceFlush: core.persistenceFlush,
       icloudNative,
       logger,
     },
-    githubConnector: { githubAuth: app.githubAuth, githubRepos: app.githubRepos },
-    gitHostConnector: { git: app.gitRepository, gitHostCredentials: app.gitHostCredentials },
+    githubConnector: { githubAuth: core.githubAuth, githubRepos: core.githubRepos },
+    gitHostConnector: { git: core.gitRepository, gitHostCredentials: core.gitHostCredentials },
     icloudSync: {
       icloudNative,
       fileChanges,
       indexLifecycle,
-      openDocuments: app.openDocuments,
+      openDocuments: core.openDocuments,
       activity,
       clock,
       logger,
-      progress: app.progress,
+      progress: core.progress,
     },
     icloudDownload: { icloudNative, activity, clock, logger },
   }
@@ -102,9 +102,9 @@ function sessionDeps(app: TestCoreServices) {
  * One graph session's services over recording doubles.
  */
 function setup(options?: SetupOptions) {
-  const app = createTestCoreServices({ database: createNodeTestDatabaseService() })
-  const assetSessions = trackAssetDescriptionSessions(app.assetDescription)
-  const ocrSessions = trackAssetOcrMaintenanceSessions(app.assetDescription)
+  const core = createTestCoreServices({ database: createNodeTestDatabaseService() })
+  const assetSessions = trackAssetDescriptionSessions(core.assetDescription)
+  const ocrSessions = trackAssetOcrMaintenanceSessions(core.assetDescription)
   const controller = new AbortController()
   const session = createGraphSession(
     {
@@ -122,8 +122,8 @@ function setup(options?: SetupOptions) {
   const chats: { attached: number; detached: number }[] = []
   const icloudSyncs: { options: ICloudSyncServiceOptions; service: TestICloudSyncService }[] = []
   const downloads: { options: ICloudDownloadServiceOptions; calls: string[] }[] = []
-  const createChat = app.chatSessions.create.bind(app.chatSessions)
-  vi.spyOn(app.chatSessions, 'create').mockImplementation((chatOptions) => {
+  const createChat = core.chatSessions.create.bind(core.chatSessions)
+  vi.spyOn(core.chatSessions, 'create').mockImplementation((chatOptions) => {
     const chat = createChat(chatOptions)
     const record = { attached: 0, detached: 0 }
     chats.push(record)
@@ -136,12 +136,12 @@ function setup(options?: SetupOptions) {
     return chat
   })
   const deps: GraphServicesDeps = {
-    ...sessionDeps(app),
-    capture: app.capture,
-    assetDescription: app.assetDescription,
-    chatSessions: app.chatSessions,
-    attachments: app.attachments,
-    graphSession: app.graphSession,
+    ...sessionDeps(core),
+    capture: core.capture,
+    assetDescription: core.assetDescription,
+    chatSessions: core.chatSessions,
+    attachments: core.attachments,
+    graphSession: core.graphSession,
   }
   const factories: Partial<GraphServiceFactories> = {
     gitSync: (_deps, gitSyncOptions) => {
@@ -173,7 +173,7 @@ function setup(options?: SetupOptions) {
     factories,
   )
   return {
-    app,
+    core,
     assetSessions,
     ocrSessions,
     controller,
@@ -197,7 +197,7 @@ describe('createGraphServices', () => {
 
   it('starts every lifecycle it is given over the session generations', async () => {
     const context = setup()
-    await context.app.settings.whenLoaded()
+    await context.core.settings.whenLoaded()
 
     expect(context.graph.gitSync).toBe(context.gitSync)
     expect(context.gitSyncOptionsLog).toEqual([
@@ -205,8 +205,8 @@ describe('createGraphServices', () => {
     ])
     expect(context.gitSync.calls()).toEqual([{ method: 'start' }])
     expect(context.chats).toEqual([{ attached: 1, detached: 0 }])
-    expect(context.app.attachments.watchers()).toBe(1)
-    expect(context.app.capture.sessions()).toEqual([
+    expect(context.core.attachments.watchers()).toBe(1)
+    expect(context.core.capture.sessions()).toEqual([
       { generation: 3, starts: 1, schedules: 0, disposed: false },
     ])
     expect(context.assetSessions()).toEqual([
@@ -242,15 +242,15 @@ describe('createGraphServices', () => {
       },
     ])
     expect(context.icloudSyncs.map((sync) => sync.options.indexGeneration)).toEqual([null])
-    expect(context.app.capture.sessions()).toHaveLength(1)
-    expect(context.app.attachments.watchers()).toBe(1)
+    expect(context.core.capture.sessions()).toHaveLength(1)
+    expect(context.core.attachments.watchers()).toBe(1)
     expect(context.chats).toEqual([{ attached: 1, detached: 0 }])
 
     context.controller.abort()
     expect(context.gitSync.calls().at(-1)).toEqual({ method: 'dispose' })
     expect(context.icloudSyncs[0]?.service.calls()).toEqual(['start', 'dispose'])
-    expect(context.app.capture.sessions()[0]?.disposed).toBe(true)
-    expect(context.app.attachments.watchers()).toBe(0)
+    expect(context.core.capture.sessions()[0]?.disposed).toBe(true)
+    expect(context.core.attachments.watchers()).toBe(0)
     expect(context.chats).toEqual([{ attached: 1, detached: 1 }])
   })
 
@@ -260,8 +260,8 @@ describe('createGraphServices', () => {
     expect(context.graph.gitSync).toBeNull()
     expect(context.gitSyncOptionsLog).toEqual([])
     expect(context.chats).toEqual([{ attached: 1, detached: 0 }])
-    expect(context.app.attachments.watchers()).toBe(1)
-    expect(context.app.capture.sessions()).toEqual([])
+    expect(context.core.attachments.watchers()).toBe(1)
+    expect(context.core.capture.sessions()).toEqual([])
     expect(context.assetSessions()).toEqual([])
     expect(context.ocrSessions()).toEqual([])
     expect(context.icloudSyncs).toEqual([])
@@ -277,8 +277,8 @@ describe('createGraphServices', () => {
 
     expect(context.gitSync.calls().at(-1)).toEqual({ method: 'dispose' })
     expect(context.chats).toEqual([{ attached: 1, detached: 1 }])
-    expect(context.app.attachments.watchers()).toBe(0)
-    expect(context.app.capture.sessions()[0]?.disposed).toBe(true)
+    expect(context.core.attachments.watchers()).toBe(0)
+    expect(context.core.capture.sessions()[0]?.disposed).toBe(true)
     expect(context.assetSessions()[0]?.disposed).toBe(true)
     expect(context.ocrSessions()[0]?.disposed).toBe(true)
     expect(context.icloudSyncs[0]?.service.calls()).toEqual(['start', 'dispose'])
@@ -301,14 +301,14 @@ describe('createGraphServices', () => {
   it('refreshes downloads of the session root and refreshes the index after them', () => {
     const context = setup({ root: ICLOUD_ROOT, lifecycles: { icloudDownload: true } })
     expect(context.downloads.map((download) => download.options.root)).toEqual([ICLOUD_ROOT])
-    const refreshIndex = vi.spyOn(context.app.graphSession, 'refreshIndex')
+    const refreshIndex = vi.spyOn(context.core.graphSession, 'refreshIndex')
     context.downloads[0]?.options.refreshIndex()
     expect(refreshIndex).toHaveBeenCalledTimes(1)
     expect(context.downloads[0]?.calls).toEqual(['start'])
   })
 
   it('leaves nothing running for a session that already ended', () => {
-    const app = createTestCoreServices({ database: createNodeTestDatabaseService() })
+    const core = createTestCoreServices({ database: createNodeTestDatabaseService() })
     const controller = new AbortController()
     controller.abort()
     const session = createGraphSession(
@@ -319,20 +319,20 @@ describe('createGraphServices', () => {
     createGraphServices(
       session,
       {
-        ...sessionDeps(app),
-        capture: app.capture,
-        assetDescription: app.assetDescription,
-        chatSessions: app.chatSessions,
-        attachments: app.attachments,
-        graphSession: app.graphSession,
+        ...sessionDeps(core),
+        capture: core.capture,
+        assetDescription: core.assetDescription,
+        chatSessions: core.chatSessions,
+        attachments: core.attachments,
+        graphSession: core.graphSession,
       },
       MAIN_LIFECYCLES,
       { gitSync: () => gitSync },
     )
 
     expect(gitSync.calls()).toEqual([{ method: 'start' }, { method: 'dispose' }])
-    expect(app.attachments.watchers()).toBe(0)
-    expect(app.capture.sessions()[0]?.disposed).toBe(true)
+    expect(core.attachments.watchers()).toBe(0)
+    expect(core.capture.sessions()[0]?.disposed).toBe(true)
   })
 })
 

@@ -62,7 +62,7 @@ async function renderStrip() {
       <RecordingStrip />
       <PeekProbe />
     </PeekProvider>,
-    { app },
+    { core: app },
   )
 }
 

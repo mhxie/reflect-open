@@ -1,4 +1,5 @@
 import type { MaybePromise } from '@reflect/utils'
+import { safeParseJson } from '@reflect/utils'
 import { z } from 'zod'
 import type { ModelMessage } from '@reflect/modules/ai'
 import type { LoggerService } from '../../ports/logger-service.ts'
@@ -321,10 +322,6 @@ function parseTurn(row: StoredMessageRow): ChatTurn | null {
 }
 
 function parseJson<TOutput>(raw: string, schema: z.ZodType<TOutput>): TOutput | null {
-  try {
-    const result = schema.safeParse(JSON.parse(raw))
-    return result.success ? result.data : null
-  } catch {
-    return null
-  }
+  const result = schema.safeParse(safeParseJson(raw))
+  return result.success ? result.data : null
 }

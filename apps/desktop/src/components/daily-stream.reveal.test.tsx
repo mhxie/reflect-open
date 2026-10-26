@@ -71,7 +71,7 @@ it('reveals the linked heading in the arrival day only, once', async () => {
       </div>
       <FollowDayLink date={yesterday} />
     </>,
-    { app, route: { kind: 'today' }, settings: { dateFormat: 'mdy' } },
+    { core: app, route: { kind: 'today' }, settings: { dateFormat: 'mdy' } },
   )
 
   await vi.waitFor(() => expect(reveals).toEqual([{ date: yesterday, fragment: 'Agenda' }]))

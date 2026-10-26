@@ -7,6 +7,10 @@
 //! line-disjoint. A mid-note edit puts the note's own following lines in both
 //! tails (they overlap), which refuses the union and falls through to the
 //! word-level merge, never a silently duplicated half-note.
+//!
+//! Before any line comparison, a side that is the other typed further (a
+//! character prefix of it, ignoring trailing whitespace) yields the longer
+//! side: an extended last line is one line, not two appends.
 
 /// Union `first` and `second` when they diverge append-only. `None` when the
 /// shape doesn't qualify (overlapping tails — a real edit, not an append).
@@ -19,6 +23,17 @@ pub fn append_union(base: Option<&str>, first: &str, second: &str) -> Option<Str
     {
         return None;
     }
+
+    // One side is a character prefix of the other: the longer side already
+    // holds every character of the shorter one.
+    let (first_trimmed, second_trimmed) = (first.trim_end(), second.trim_end());
+    if second_trimmed.starts_with(first_trimmed) {
+        return Some(second.to_string());
+    }
+    if first_trimmed.starts_with(second_trimmed) {
+        return Some(first.to_string());
+    }
+
     let first_lines: Vec<&str> = first.split('\n').collect();
     let second_lines: Vec<&str> = second.split('\n').collect();
 
@@ -29,15 +44,6 @@ pub fn append_union(base: Option<&str>, first: &str, second: &str) -> Option<Str
         .count();
     let first_tail = trim_trailing_blank(&first_lines[shared..]);
     let second_tail = trim_trailing_blank(&second_lines[shared..]);
-
-    // One side is a pure prefix of the other: the longer side already holds
-    // everything.
-    if first_tail.is_empty() {
-        return Some(second.to_string());
-    }
-    if second_tail.is_empty() {
-        return Some(first.to_string());
-    }
 
     // Overlapping non-blank lines mean the divergence isn't append-shaped.
     let first_set: std::collections::BTreeSet<&str> = first_tail
@@ -88,18 +94,25 @@ fn trim_trailing_blank<'a>(lines: &'a [&'a str]) -> &'a [&'a str] {
 mod tests {
     use super::*;
 
-    #[test]
-    fn both_devices_appended_to_the_same_daily_note() {
-        let first = "# 2026-07-04\n\n- morning standup\n- mac task\n";
-        let second = "# 2026-07-04\n\n- morning standup\n- phone capture\n";
-        assert_eq!(
-            append_union(None, first, second),
-            Some("# 2026-07-04\n\n- morning standup\n- mac task\n- phone capture\n".to_string())
-        );
-    }
+    // The tests follow `append_union`'s exits in order: the base guard, the
+    // character-prefix check, the overlap guard, and the union itself.
+
+    // Base guard: a side that deleted base lines is an edit.
 
     #[test]
-    fn a_pure_append_keeps_the_longer_side() {
+    fn a_side_that_deleted_base_lines_refuses_the_union() {
+        let base = "- a\n- b\n";
+        let first = "- a\n";
+        let second = "- a\n- b\n- phone\n";
+        assert_eq!(append_union(Some(base), first, second), None);
+        assert_eq!(append_union(Some(base), second, first), None);
+    }
+
+    // Character prefix: one side is the other typed further, so the longer
+    // side wins.
+
+    #[test]
+    fn an_appended_line_keeps_the_longer_side() {
         let first = "# Note\n\n- a\n";
         let second = "# Note\n\n- a\n- b\n";
         assert_eq!(append_union(None, first, second), Some(second.to_string()));
@@ -107,16 +120,25 @@ mod tests {
     }
 
     #[test]
-    fn creation_collision_with_no_shared_content_unions_both() {
-        // Two devices created today's note offline with different content and
-        // no template seed: nothing shared, keep both bodies.
-        let first = "- from the mac\n";
-        let second = "- from the phone\n";
-        assert_eq!(
-            append_union(None, first, second),
-            Some("- from the mac\n- from the phone\n".to_string())
-        );
+    fn an_extended_last_line_keeps_the_longer_side() {
+        let first = "# Note\n\n- a\n- water the ferns\n";
+        let second = "# Note\n\n- a\n- water the ferns on the balcony\n";
+        assert_eq!(append_union(None, first, second), Some(second.to_string()));
+        assert_eq!(append_union(None, second, first), Some(second.to_string()));
     }
+
+    #[test]
+    fn sides_equal_up_to_trailing_blank_lines_keep_one_side() {
+        // Both sides are equal after trimming; the second-extends-first arm
+        // wins, so the second side comes back. Which side is irrelevant (the
+        // ladder catches whitespace-equality earlier) — determinism is what
+        // matters.
+        let first = "- a\n";
+        let second = "- a\n\n";
+        assert_eq!(append_union(None, first, second), Some(second.to_string()));
+    }
+
+    // Overlap guard: a line in both tails means a mid-note edit.
 
     #[test]
     fn a_mid_note_edit_refuses_the_union() {
@@ -126,18 +148,21 @@ mod tests {
         assert_eq!(append_union(None, first, second), None);
     }
 
+    // Union: both sides appended different lines, so keep both tails, the
+    // first side's tail first.
+
     #[test]
-    fn identical_up_to_trailing_blank_lines_keeps_one_side() {
-        // Both tails are blank after trimming; the first-tail-empty arm wins,
-        // so the second side comes back. Which side is irrelevant (the ladder
-        // catches whitespace-equality earlier) — determinism is what matters.
-        let first = "- a\n";
-        let second = "- a\n\n";
-        assert_eq!(append_union(None, first, second), Some(second.to_string()));
+    fn two_appends_to_a_daily_note_union() {
+        let first = "# 2026-07-04\n\n- morning standup\n- mac task\n";
+        let second = "# 2026-07-04\n\n- morning standup\n- phone capture\n";
+        assert_eq!(
+            append_union(None, first, second),
+            Some("# 2026-07-04\n\n- morning standup\n- mac task\n- phone capture\n".to_string())
+        );
     }
 
     #[test]
-    fn a_base_that_both_sides_extend_unions() {
+    fn two_appends_to_a_base_union() {
         let base = "- a\n- b\n";
         let first = "- a\n- b\n- mac\n";
         let second = "- a\n- b\n- phone\n";
@@ -148,11 +173,14 @@ mod tests {
     }
 
     #[test]
-    fn a_side_that_deleted_base_lines_refuses_the_union() {
-        let base = "- a\n- b\n";
-        let first = "- a\n";
-        let second = "- a\n- b\n- phone\n";
-        assert_eq!(append_union(Some(base), first, second), None);
-        assert_eq!(append_union(Some(base), second, first), None);
+    fn two_notes_with_no_shared_content_union() {
+        // Two devices created today's note offline with different content and
+        // no template seed: nothing shared, keep both bodies.
+        let first = "- from the mac\n";
+        let second = "- from the phone\n";
+        assert_eq!(
+            append_union(None, first, second),
+            Some("- from the mac\n- from the phone\n".to_string())
+        );
     }
 }

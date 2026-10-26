@@ -21,8 +21,8 @@ async function renderField(settings?: Partial<Settings>) {
       ...settings,
     },
   })
-  const { app } = view
-  return { view, app, backfill: vi.spyOn(app.assetDescription, 'backfillVisibly') }
+  const { core } = view
+  return { view, core, backfill: vi.spyOn(core.assetDescription, 'backfillVisibly') }
 }
 
 describe('DescribeAssetsField', () => {
@@ -40,7 +40,7 @@ describe('DescribeAssetsField', () => {
         server: 'openai-compatible',
       },
     } as const
-    const { app, backfill } = await renderField({
+    const { core, backfill } = await renderField({
       aiProviders: [PROVIDER, local],
       localOcrProviderId: 'local',
     })
@@ -51,7 +51,7 @@ describe('DescribeAssetsField', () => {
     await page.getByRole('button', { name: /^backfill assets$/i }).click()
     // The pass reads the selected model from settings when it starts.
     expect(backfill).toHaveBeenCalledTimes(1)
-    expect(app.settings.get().localOcrProviderId).toBe('local')
+    expect(core.settings.get().localOcrProviderId).toBe('local')
   })
 
   it('names the selected OCR model when closed, not its entry id', async () => {
@@ -76,11 +76,11 @@ describe('DescribeAssetsField', () => {
   })
 
   it('reflects and toggles the automatic OCR setting', async () => {
-    const { app } = await renderField()
+    const { core } = await renderField()
     const toggle = page.getByRole('switch', { name: /ocr new assets automatically/i })
     await expect.element(toggle).toHaveAttribute('aria-checked', 'true')
     await toggle.click()
-    await vi.waitFor(() => expect(app.settings.get().describeAssets).toBe(false))
+    await vi.waitFor(() => expect(core.settings.get().describeAssets).toBe(false))
   })
 
   it('disables the backfill until an AI provider is configured', async () => {

@@ -22,7 +22,7 @@ async function renderPages(info: PdfInfo | Error) {
     <div style={{ width: 600, height: 400, display: 'flex' }}>
       <PdfPeekPages generation={3} path="papers/a.pdf" />
     </div>,
-    { app, servicesOnly: true },
+    { core: app, servicesOnly: true },
   )
   return { app, pdfInfo }
 }

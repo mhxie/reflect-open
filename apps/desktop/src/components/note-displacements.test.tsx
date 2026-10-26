@@ -59,7 +59,7 @@ describe('NoteDisplacements', () => {
   it('subscribes on the mobile surface within its graph provider', async () => {
     const { app, follow, deliver, subscriptions } = setup({ mobile: true })
     app.graphSession.setGraph(GRAPH)
-    await renderInApp(<MobileRoot platform="ios" />, { app, servicesOnly: true })
+    await renderInApp(<MobileRoot platform="ios" />, { core: app, servicesOnly: true })
     await vi.waitFor(() => expect(subscriptions()).toBe(1))
 
     deliver(0, GRAPH.generation)
@@ -69,7 +69,7 @@ describe('NoteDisplacements', () => {
 
   it('uses the file generation rather than the independent index generation', async () => {
     const { app, follow, deliver, subscriptions } = setup()
-    await renderInApp(<NoteDisplacements />, { app, graph: GRAPH })
+    await renderInApp(<NoteDisplacements />, { core: app, graph: GRAPH })
     await vi.waitFor(() => expect(subscriptions()).toBe(1))
 
     deliver(0, GRAPH.indexGeneration)
@@ -83,7 +83,7 @@ describe('NoteDisplacements', () => {
 
   it('rejects old events after a graph switch, including delivery to the disposed listener', async () => {
     const { app, follow, deliver, subscriptions } = setup()
-    await renderInApp(<NoteDisplacements />, { app, graph: GRAPH })
+    await renderInApp(<NoteDisplacements />, { core: app, graph: GRAPH })
     await vi.waitFor(() => expect(subscriptions()).toBe(1))
     deliver(0, 7)
     const oldGuard = follow.mock.calls[0]?.[4]
@@ -106,7 +106,7 @@ describe('NoteDisplacements', () => {
     const { app, follow, deliver, release, unlisten, subscriptions } = setup({
       gateListen: true,
     })
-    const view = await renderInApp(<NoteDisplacements />, { app, graph: GRAPH })
+    const view = await renderInApp(<NoteDisplacements />, { core: app, graph: GRAPH })
     await vi.waitFor(() => expect(subscriptions()).toBe(1))
     await view.unmount()
     deliver(0, 7)

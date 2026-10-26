@@ -117,7 +117,7 @@ describe('useEditorAiMenu', () => {
       ({ privateNote }: { privateNote: boolean } = { privateNote: false }) => {
         return useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef })
       },
-      { app, settings: { aiProviders: [PROVIDER] }, initialProps: { privateNote: false } },
+      { core: app, settings: { aiProviders: [PROVIDER] }, initialProps: { privateNote: false } },
     )
     const items = await hook.result.current.onSelectionMenuSearch?.('Rewrite', {
       selectedText: 'private selection',
@@ -154,7 +154,7 @@ describe('useEditorAiMenu', () => {
           editorRef,
         })
       },
-      { app, settings: { aiProviders: [PROVIDER] } },
+      { core: app, settings: { aiProviders: [PROVIDER] } },
     )
     const items = await hook.result.current.onSelectionMenuSearch?.('Rewrite', {
       selectedText: 'public selection',

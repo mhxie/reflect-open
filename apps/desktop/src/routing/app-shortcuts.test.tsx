@@ -86,7 +86,7 @@ const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 // The platform of the next `shortcutsHook`; each `describe` sets it.
 let platform: TestPlatformOptions
 // The services of the rendered app; set by `shortcutsHook`.
-let app: TestCoreServices
+let core: TestCoreServices
 let appLayer: AppServices
 let openRecent: MockInstance<GraphSessionService['openRecent']>
 let openRouteInNewWindow: MockInstance<LinkNavigationService['openRouteInNewWindow']>
@@ -124,7 +124,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
       isOstensiblyEmpty: isOstensiblyEmptyNoteSource,
     },
   })
-  app = services
+  core = services
   appLayer = createTestAppServices(services)
   openRecent = vi.spyOn(services.graphSession, 'openRecent').mockResolvedValue(true)
   openRouteInNewWindow = vi
@@ -158,7 +158,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
       }
     },
     {
-      app: services,
+      core: services,
       appServices: appLayer,
       graph: GRAPH,
       graphState: {
@@ -248,7 +248,7 @@ describe('app shortcuts', () => {
     await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/a.md', { pinned: 1024 }, 1)
     })
-    expect(app.noteRows.getOverlay('notes/a.md')).toEqual({ isPinned: true, pinnedOrder: 1024 })
+    expect(core.noteRows.getOverlay('notes/a.md')).toEqual({ isPinned: true, pinnedOrder: 1024 })
     await act(() => press('o'))
     expect(commitNoteFrontmatter).toHaveBeenCalledTimes(1)
     write.resolve()
@@ -263,7 +263,7 @@ describe('app shortcuts', () => {
     await act(() => result.current.setFocusedDailyDate('2026-09-07'))
     await act(() => result.current.context.togglePin())
     expect(commitNoteFrontmatter).toHaveBeenCalledWith('daily/2026-09-07.md', { pinned: 1024 }, 1)
-    expect(app.noteRows.getOverlay('daily/2026-09-07.md')).toMatchObject({ isPinned: true })
+    expect(core.noteRows.getOverlay('daily/2026-09-07.md')).toMatchObject({ isPinned: true })
   })
 
   it('palette privacy updates the focused daily note row before the write resolves', async () => {
@@ -280,7 +280,7 @@ describe('app shortcuts', () => {
         1,
       )
     })
-    expect(app.noteRows.getOverlay('daily/2026-09-07.md')).toEqual({ isPrivate: true })
+    expect(core.noteRows.getOverlay('daily/2026-09-07.md')).toEqual({ isPrivate: true })
     write.resolve()
     await action
     // The toggle confirms itself with an Undo, as from every other privacy control.
@@ -294,7 +294,7 @@ describe('app shortcuts', () => {
     await act(() => result.current.router.navigate({ kind: 'settings' }))
     await act(() => press('o'))
     await act(() => result.current.context.togglePrivate())
-    await act(() => app.graphSession.setGraph(null))
+    await act(() => core.graphSession.setGraph(null))
     await act(() => result.current.router.navigate({ kind: 'note', path: 'notes/a.md' }))
     await act(() => press('o'))
     await act(() => result.current.context.togglePrivate())
@@ -670,7 +670,7 @@ describe('app shortcuts', () => {
     const { result } = await pinnedShortcutsHook(pinnedNotes(2))
     // A reorder lands in the note-row overlay before the file write does.
     await act(() => {
-      app.noteRows.setOverlay('notes/pin-2.md', GRAPH.generation, {
+      core.noteRows.setOverlay('notes/pin-2.md', GRAPH.generation, {
         isPinned: true,
         pinnedOrder: 0,
       })
@@ -688,7 +688,7 @@ describe('app shortcuts', () => {
 
     // An unpin lands in the overlay first: the slot it frees opens nothing.
     await act(() => {
-      app.noteRows.setOverlay('notes/pin-1.md', GRAPH.generation, { isPinned: false })
+      core.noteRows.setOverlay('notes/pin-1.md', GRAPH.generation, { isPinned: false })
     })
     await act(() => press('1'))
     expect(result.current.router.route).toEqual({ kind: 'today' })
@@ -713,7 +713,7 @@ describe('app shortcuts', () => {
     })
     await vi.waitFor(() => expect(result.current.pinned).toHaveLength(1))
     const context = result.current.context
-    await act(() => app.graphSession.setGraph({ root: '/other', name: 'Other', generation: 2 }))
+    await act(() => core.graphSession.setGraph({ root: '/other', name: 'Other', generation: 2 }))
     await vi.waitFor(() => {
       expect(result.current.pinned).toMatchObject([{ path: 'notes/other.md' }])
     })
@@ -722,7 +722,7 @@ describe('app shortcuts', () => {
     await act(() => context.openPinnedNote(0))
 
     expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/other.md' })
-    await act(() => app.graphSession.setGraph(null))
+    await act(() => core.graphSession.setGraph(null))
     await act(() => result.current.router.navigate({ kind: 'settings' }))
     await act(() => context.openPinnedNote(0))
     expect(result.current.router.route).toEqual({ kind: 'settings' })

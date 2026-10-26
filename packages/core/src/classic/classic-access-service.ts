@@ -1,4 +1,5 @@
 import type { MaybePromise } from '@reflect/utils'
+import { safeParseJson } from '@reflect/utils'
 import pkceChallenge from 'pkce-challenge'
 import { z } from 'zod'
 import type { ClockService } from '../ports/clock-service.ts'
@@ -376,12 +377,12 @@ class ClassicAccessServiceImpl implements ClassicAccessService {
   async #readStored(): Promise<ClassicAccess | null> {
     const raw = await this.#deps.secretStore.get(CLASSIC_ACCESS_SECRET)
     if (raw === null) return null
-    try {
-      return classicAccessSchema.parse(JSON.parse(raw))
-    } catch (error) {
-      this.#deps.logger.error('Ignoring an unreadable Reflect Classic access record', error)
+    const parsed = classicAccessSchema.safeParse(safeParseJson(raw))
+    if (!parsed.success) {
+      this.#deps.logger.error('Ignoring an unreadable Reflect Classic access record', parsed.error)
       return null
     }
+    return parsed.data
   }
 
   async #recheck(): Promise<ClassicAccess | null> {

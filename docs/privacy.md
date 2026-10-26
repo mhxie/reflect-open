@@ -420,8 +420,8 @@ sit inside the synced graph.
 ## Exception diagnostics (on in official release builds)
 
 - **Where:** Sentry. The React/WebView SDK handles JavaScript exceptions; on iOS a
-  native SDK handles host-process crashes, fully blocking main-thread hangs, watchdog
-  terminations, and converted Apple MetricKit diagnostics — the failures that never
+  native SDK handles host-process crashes, watchdog terminations, and converted Apple
+  MetricKit diagnostics (including main-thread hangs) — the failures that never
   reach the JavaScript layer, and that arrive in TestFlight with no usable stack.
 - **What:** an allow-listed diagnostic containing the JavaScript exception class (or a
   fixed native failure category), sanitized stack locations, the app/build version, and

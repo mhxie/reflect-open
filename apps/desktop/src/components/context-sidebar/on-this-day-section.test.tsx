@@ -25,7 +25,7 @@ async function renderSection(date: string) {
       <OnThisDaySection date={date} />
       <RouteProbe />
     </>,
-    { app, graph: { root: '/g', name: 'g' }, settings: { dateFormat: 'mdy' } },
+    { core: app, graph: { root: '/g', name: 'g' }, settings: { dateFormat: 'mdy' } },
   )
 }
 

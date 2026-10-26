@@ -61,7 +61,7 @@ async function renderFollowing(
       <FollowLink fragment={fragment} />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       graph: {
         root: '/g',
         name: 'g',

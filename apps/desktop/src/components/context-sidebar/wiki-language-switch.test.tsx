@@ -32,7 +32,7 @@ async function renderSection(path: string) {
       <RouteProbe />
     </>,
     {
-      app,
+      core: app,
       appServices: { window: createTestWindowService({ openNoteWindow }) },
       graph: { root: '/g', name: 'g' },
       settings: { wikiLanguages: [ENGLISH, CHINESE, JAPANESE] },

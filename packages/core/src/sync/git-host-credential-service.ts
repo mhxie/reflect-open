@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeParseJson } from '@reflect/utils'
 import { errorMessage } from '../errors.ts'
 import type { LoggerService } from '../ports/logger-service.ts'
 import type { SecretStoreService } from '../secrets/secret-store-service.ts'
@@ -6,6 +7,8 @@ import type { Unlisten } from '../unlisten.ts'
 import type { GitCredential } from './git-repository-service.ts'
 
 const credentialSchema = z.object({ username: z.string().min(1), secret: z.string().min(1) })
+
+type StoredCredential = Pick<GitCredential, 'username' | 'secret'>
 
 /**
  * The keychain entry holding the sign-in of one origin, e.g.
@@ -30,7 +33,7 @@ export interface GitHostCredentialService {
   /**
    * Stores the sign-in of `origin`, replacing any prior one, and notifies subscribers.
    */
-  save(origin: string, credential: GitCredential): Promise<void>
+  save(origin: string, credential: StoredCredential): Promise<void>
   /**
    * Removes the sign-in of `origin` and notifies subscribers; a missing entry is not an error.
    */
@@ -67,15 +70,15 @@ class GitHostCredentialServiceImpl implements GitHostCredentialService {
     if (raw === null) {
       return null
     }
-    const parsed = credentialSchema.safeParse(parseJson(raw))
+    const parsed = credentialSchema.safeParse(safeParseJson(raw))
     if (!parsed.success) {
       logger.error(`the stored sign-in for ${origin} is unreadable; treating it as absent`)
       return null
     }
-    return parsed.data
+    return { origin, ...parsed.data }
   }
 
-  async save(origin: string, credential: GitCredential): Promise<void> {
+  async save(origin: string, credential: StoredCredential): Promise<void> {
     const validated = credentialSchema.parse(credential)
     await this.#deps.secretStore.set(gitHostCredentialSecretName(origin), JSON.stringify(validated))
     this.#notify()
@@ -108,12 +111,4 @@ export function createGitHostCredentialService(
   deps: GitHostCredentialServiceDeps,
 ): GitHostCredentialService {
   return new GitHostCredentialServiceImpl(deps)
-}
-
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return undefined
-  }
 }

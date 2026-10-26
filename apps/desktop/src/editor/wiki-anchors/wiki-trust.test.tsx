@@ -154,7 +154,7 @@ function createApp(): TestCoreServices {
  * Render `ui` in `app`, over `queryClient` and with `settings`.
  */
 function render(ui: ReactNode) {
-  return renderInApp(ui, { app, queryClient, settings })
+  return renderInApp(ui, { core: app, queryClient, settings })
 }
 
 async function editorFixture(source = SOURCE, path = PATH) {

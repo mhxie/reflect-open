@@ -31,7 +31,7 @@ function wrapBacklinkContexts(contexts: BacklinkContext[]): BacklinkContextPage 
   return { contexts, nextCursor: null, indexedLinkCount: contexts.length }
 }
 
-function createApp() {
+function createCore() {
   const services = createTestCoreServices({ database: createWasmTestDatabaseService() })
   vi.spyOn(services.backlinks, 'getBacklinksWithContext').mockImplementation(
     getBacklinksWithContext,
@@ -45,7 +45,7 @@ function createApp() {
 }
 
 // One app per test, so a panel rendered twice shares its session storage.
-let app: ReturnType<typeof createApp>
+let core: ReturnType<typeof createCore>
 
 function RouteProbe(): ReactNode {
   const { route, arrivalFocusEditor } = useRouter()
@@ -58,7 +58,7 @@ function RouteProbe(): ReactNode {
 
 function renderInGraph(ui: ReactNode, queryClient?: QueryClient) {
   return renderInApp(ui, {
-    app,
+    core,
     appServices: { window: createTestWindowService({ openNoteWindow }) },
     // The graph's local-only folders are `secure`.
     graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
@@ -82,7 +82,7 @@ beforeEach(() => {
   resolveMarkdownHref.mockReset()
   resolveWikiTarget.mockReset()
   openNoteWindow.mockReset().mockResolvedValue(true)
-  app = createApp()
+  core = createCore()
 })
 
 describe('BacklinksPanel', () => {

@@ -25,13 +25,13 @@ import {
  * the attachment listing and PDF page sizes after the watcher reports an
  * attachment change, and what the app holds per graph when graphs change.
  */
-export function installQueryInvalidation(app: CoreServices, { window }: AppServices): Unlisten {
+export function installQueryInvalidation(core: CoreServices, { window }: AppServices): Unlisten {
   const unlisteners = [
     // The Attachments library lists the files themselves (with their times),
     // so it re-lists on the same signals as the attachment catalog: a batch
     // naming an attachment, or a folder change only a re-listing explains.
     // A rewritten PDF drops every cached page-size read, even at the same size.
-    app.fileChanges.subscribe(({ changes }) => {
+    core.fileChanges.subscribe(({ changes }) => {
       if (changes.some((change) => isAttachmentPath(change.path))) {
         invalidateAttachmentFiles()
       }
@@ -39,16 +39,16 @@ export function installQueryInvalidation(app: CoreServices, { window }: AppServi
         resetPdfInfo()
       }
     }),
-    app.fileChanges.subscribeReconcile(invalidateAttachmentFiles),
-    app.capture.onXPostsWritten(invalidateXPostQueries),
-    app.assetDescription.onDescriptionsIndexed(invalidateIndexQueries),
+    core.fileChanges.subscribeReconcile(invalidateAttachmentFiles),
+    core.capture.onXPostsWritten(invalidateXPostQueries),
+    core.assetDescription.onDescriptionsIndexed(invalidateIndexQueries),
     // The history menus list conversations through React Query.
-    app.chatSessions.onConversationsChanged(invalidateChatQueries),
+    core.chatSessions.onConversationsChanged(invalidateChatQueries),
     // Applied watcher batches stream every couple of seconds during a bulk
     // sync — the throttled variant collapses them to one refetch round per
     // window (an isolated batch still invalidates immediately).
-    app.indexLifecycle.onApplied(throttledInvalidateIndexQueries),
-    app.indexLifecycle.onReconciled((event) => {
+    core.indexLifecycle.onApplied(throttledInvalidateIndexQueries),
+    core.indexLifecycle.onReconciled((event) => {
       // A manual rebuild bypasses the watcher pipeline (whose onApplied
       // refreshes the caches), so cached note lists, backlinks, and tags
       // would otherwise show pre-rebuild rows until some unrelated change
@@ -58,16 +58,16 @@ export function installQueryInvalidation(app: CoreServices, { window }: AppServi
       }
     }),
     // On a switch, the session-held "Similar notes" results of the prior graph go.
-    app.graphSession.onGraphReleased((reason) => {
+    core.graphSession.onGraphReleased((reason) => {
       if (reason === 'switch') {
         dropSimilarNotesQueries()
       }
     }),
-    app.graphSession.onGraphReleased(dropXPostQueries),
+    core.graphSession.onGraphReleased(dropXPostQueries),
     // The delete trashed a directory the chooser may list: drop the cached
     // iCloud listing so the chooser refetches it rather than showing the
     // deleted graph.
-    app.graphSession.onGraphDeleted(dropIcloudStatusQuery),
+    core.graphSession.onGraphDeleted(dropIcloudStatusQuery),
   ]
   if (!window.isMainWindow()) {
     // A note window runs no indexer: the Rust `index:written` broadcast

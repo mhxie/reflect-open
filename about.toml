@@ -16,6 +16,7 @@ accepted = [
   "NCSA",
   # whisper-rs and whisper-rs-sys (on-device transcription).
   "Unlicense",
+  "BSL-1.0",
 ]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true

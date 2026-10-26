@@ -1,6 +1,6 @@
 import type { MaybePromise } from '@reflect/utils'
 import type { XPostEnvelope } from './bookmark-envelope.ts'
-import { sha256Hex } from '@reflect/utils'
+import { safeParseJson, sha256Hex } from '@reflect/utils'
 import {
   inboxEnvelopeSchema,
   type InboxEnvelope,
@@ -114,13 +114,7 @@ function isXPost(envelope: InboxEnvelope): envelope is XPostEnvelope {
 }
 
 function parseEnvelope(raw: string): InboxEnvelope | null {
-  let json: unknown
-  try {
-    json = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  const parsed = inboxEnvelopeSchema.safeParse(json)
+  const parsed = inboxEnvelopeSchema.safeParse(safeParseJson(raw))
   return parsed.success ? parsed.data : null
 }
 

@@ -63,7 +63,7 @@ async function renderSheet(task: OpenTask) {
       onOpenNote={() => {}}
     />,
     {
-      app,
+      core: app,
       graph: GRAPH,
       route: { kind: 'tasks' },
       settings: { editorMarkdownSyntax: 'hide', dateFormat: 'mdy', contactsEnabled: false },
@@ -77,7 +77,7 @@ async function renderSheet(task: OpenTask) {
  * X archive's resolves, writes and syndication fetches.
  */
 function commands(view: Awaited<ReturnType<typeof renderSheet>>['view']): string[] {
-  const { app } = view
+  const { core: app } = view
   return [
     ...app.ipc.calls().map((call) => call.command),
     ...app.xArchive.resolves().map(() => 'x_archive_resolve'),
@@ -115,7 +115,7 @@ describe('MobileTaskEditSheet network policy', () => {
     )
     await page.getByTestId('wikilink').getByText('Brand New Idea').click()
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(view.app.noteFile.writes()).toEqual([])
-    expect([...view.app.noteFile.files().keys()]).toEqual([])
+    expect(view.core.noteFile.writes()).toEqual([])
+    expect([...view.core.noteFile.files().keys()]).toEqual([])
   })
 })

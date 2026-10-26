@@ -79,7 +79,7 @@ async function renderGallery(
       registerScrollToIndex={registerScrollToIndex}
     />,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 7 },
       settings: { dateFormat: 'iso', timeFormat: '24h' },
     },

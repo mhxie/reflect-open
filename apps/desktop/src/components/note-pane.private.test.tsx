@@ -131,7 +131,7 @@ async function renderNote(path: string, files: Record<string, string>) {
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       queryClient,
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
       settings: {

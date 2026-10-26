@@ -90,7 +90,7 @@ function PeekProbe(): ReactNode {
 
 async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const navigate = vi.fn()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     suggestions: {
       suggestWikiTargets,
@@ -110,11 +110,11 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     }),
     noteFile: createTestNoteFileService({ files }),
   })
-  const appLayer = createTestAppServices(app, {
+  const appLayer = createTestAppServices(core, {
     window: createTestWindowService({ openNoteWindow }),
   })
   const fullContext: CommandContext = {
-    services: app,
+    services: core,
     app: appLayer,
     navigate,
     route: () => ({ kind: 'today' }),
@@ -154,13 +154,13 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
       </PaletteProvider>
     </PeekProvider>,
     {
-      app,
+      core,
       appServices: appLayer,
       graph: { root: '/g', name: 'g', generation: 1 },
       settings: { semanticSearchEnabled: semanticEnabled, dateFormat: 'mdy' },
     },
   )
-  return { view, navigate, app }
+  return { view, navigate, core }
 }
 
 describe('CommandPalette', () => {
@@ -353,11 +353,11 @@ describe('CommandPalette', () => {
   it('bound commands show keycap hints', async () => {
     suggestWikiTargets.mockResolvedValue([])
     searchWithFilters.mockResolvedValue([])
-    const { view, app } = await renderPalette('> go to today')
+    const { view, core } = await renderPalette('> go to today')
     const row = view.getByText('Go to today')
     await expect.element(row).toBeInTheDocument()
     const item = row.element().closest('[cmdk-item]')
-    for (const key of formatBinding('Mod-d', app.platform.isApplePlatform)) {
+    for (const key of formatBinding('Mod-d', core.platform.isApplePlatform)) {
       expect(item?.textContent).toContain(key)
     }
   })

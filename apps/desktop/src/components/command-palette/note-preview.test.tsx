@@ -33,7 +33,7 @@ async function renderedFor(path: string): Promise<{ remoteEmbeds?: boolean }> {
         related: false,
       }}
     />,
-    { app, graph: GRAPH, settings: { dateFormat: 'mdy' } },
+    { core: app, graph: GRAPH, settings: { dateFormat: 'mdy' } },
   )
   await expect.element(view.getByTestId('markdown-preview')).toBeVisible()
   await view.unmount()
