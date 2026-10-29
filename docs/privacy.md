@@ -1,17 +1,16 @@
 # What leaves the device, and when
 
-Reflect is local-first: your notes are markdown files in a folder you chose, the search
-index is SQLite in `.reflect/` beside them, and **no Reflect-hosted server exists in any
-path** — there is no product analytics and no account. Official release builds send
-scrubbed WebView diagnostics to Sentry, and official iOS release builds also send scrubbed
-native crash diagnostics. Every network call the app can make is listed here, with what it
-carries.
+Reflect is local-first: notes are markdown files in a folder you chose, and the search index is
+SQLite in `.reflect/` beside them. **No Reflect-hosted server exists in any path**: there is no
+product analytics and no account. Official release builds send scrubbed diagnostics to Sentry.
+This file lists every network call the app can make, with what it carries.
 
-The one hard rule sits above all of it: **a note with `private: true` frontmatter never
-has its content sent to any external service.** This is enforced in code at every AI
-call site (the `CloudSafe` type brand in `packages/core/src/ai/` — content for a
-cloud provider cannot even be constructed from a private note, and the flag is re-read from
-disk at call time), and it is covered by tests. The rule fails closed: frontmatter Reflect
+The hard rule above all of it: **a note with `private: true` frontmatter never has its content
+sent to any external service.** Code enforces this at every AI call site: the `CloudSafe` type
+brand in `packages/core/src/ai/` cannot carry a private note to a cloud provider, and the flag is re-read
+from disk at call time. Tests cover it.
+
+The rule fails closed: frontmatter Reflect
 can't read with certainty — YAML that doesn't parse but mentions `private` (in any
 case), a `private` value that is neither true nor false, a key spelled like `private`
 but not exactly (`Private: true`) set to anything but false, a block hidden behind a
@@ -21,8 +20,8 @@ locked" until the YAML is fixed.
 
 ## AI chat (off until you add a key)
 
-- **Where:** directly to the provider whose API key *you* added — OpenAI, Anthropic,
-  Google, or OpenRouter. Keys are bring-your-own; Reflect proxies nothing.
+- **Where:** directly to the provider whose key *you* added (OpenAI, Anthropic, Google, or
+  OpenRouter). Reflect proxies nothing.
 - **What:** your chat messages and configured system prompt, plus what the model's
   tools read from your graph: search snippets, note content, and note listings. The
   configured prompt is stored in the device's ordinary settings file and is sent with
@@ -80,18 +79,14 @@ reads currently return unsupported.
 
 ## Audio memos (off until you add a key)
 
-- **Where:** directly to your configured providers. OpenAI or Google receives the
-  recording for speech-to-text. A small text model from your configured OpenAI,
-  Anthropic, or Google provider receives the fresh transcript to create the memo
-  title and, when Transcription auto-format is enabled, add punctuation, paragraphs,
-  and light Markdown to the body.
-- **What:** the recorded audio bytes and the transcript produced from that recording.
-  Existing note content is never read or sent. The resulting Markdown is written
-  locally. Because no note content is read, recording works even when today's note is
-  private. Turn Transcription auto-format off in Settings to store the raw provider
-  transcript; the title-generation call still receives that transcript.
-- **When:** when you record a memo, and on retry for memos still awaiting
-  transcription.
+- **Where:** directly to your configured providers. OpenAI or Google gets the recording for
+  speech-to-text. A small text model (OpenAI, Anthropic, or Google) gets the fresh transcript to
+  make the memo title and, with Transcription auto-format on, to add punctuation, paragraphs,
+  and light Markdown.
+- **What:** the audio and its transcript only. Existing note content is never read or sent, so
+  recording works even when today's note is private. With auto-format off, the raw transcript
+  is stored, and the title call still gets it.
+- **When:** when you record a memo, and on retry for memos still awaiting transcription.
 - **On-device engine (macOS):** choosing *On this Mac* in Settings transcribes with a
   Whisper or Qwen3-ASR model running locally on Metal; the recording never leaves the
   device. The model downloads **from Hugging Face** when you ask for it (0.6–4.7 GB),
@@ -163,24 +158,23 @@ summarized usually isn't sent again.
 
 ## Semantic search (off by default)
 
-- Embeddings are computed **on-device** (a bundled ONNX runtime running the model
+- Embeddings are computed **on-device** (bundled ONNX runtime, using the model
   chosen in Settings → Search) and stored in `.reflect/`. Note content never leaves
   the machine for embedding.
 - Enabling it downloads the chosen model (91 MB or 1.3 GB) **from Hugging Face, once**;
-  choosing another model downloads that one. These requests carry no user data; models
-  are cached locally afterwards.
-- It is not available on Intel Macs or on iOS, which have no embedding runtime.
+  choosing another model downloads that one. These requests carry no user data;
+  models are cached locally afterwards.
+- Not available on Intel Macs or iOS, which have no embedding runtime.
 
 ## Backup & sync (off until you connect)
 
-- **Where:** the git repository you connect — GitHub guided in-app (created **private**
-  by default; a public repo requires explicit confirmation), or any git host over SSH.
-- **What:** the whole graph as git commits — including notes marked `private: true`.
-  The privacy flag blocks *services that read your content*; backup is your own
-  repository, and excluding private notes from it would silently lose them. The
-  one exception is [local-only folders](#local-only-folders-macos), which are
-  never staged.
-- **When:** after you connect, on the background backup cadence and on "Back up now".
+- **Where:** the git repository you connect: GitHub, guided in-app (created **private** by
+  default; public needs explicit confirmation), or any git host over SSH.
+- **What:** the whole graph as git commits, **including** `private: true` notes. The flag blocks
+  *services that read your content*. Backup is your own repository, and excluding private notes
+  would silently lose them. The exception is
+  [local-only folders](#local-only-folders-macos-off-by-default), which are never staged.
+- **When:** after you connect, on the background cadence and on "Back up now".
 - **Large files stay out.** A file of 95 MiB or more is never committed (GitHub
   rejects files over 100 MB, failing the whole push); Reflect reports each one whose
   changes it withheld. To lower the limit for a graph, add an entry to the settings
@@ -193,7 +187,7 @@ summarized usually isn't sent again.
 
   It applies the next time the graph opens, and Reflect keeps the entry as written
   when it saves its own settings, as it does for
-  [local-only folders](#local-only-folders-macos). A value outside that range, or an
+  [local-only folders](#local-only-folders-macos-off-by-default). A value outside that range, or an
   entry for a path that does not exist, is shown as a warning when the graph opens,
   and the 95 MiB limit applies.
 - **Separate histories are never joined on their own** (this fork). Every backup
@@ -204,7 +198,7 @@ summarized usually isn't sent again.
   whose root the backup lacks, checked against the backup as it stands when the push
   starts. The pause comes before your notes, the branch, the index, or the merge
   state change (the fetch that found the other history has already downloaded its
-  commits into the graph's `.git` folder), shows in Settings → Backup, and names each
+  commits into the graph's `.git` folder), shows in Settings → Sync, and names each
   commit. If the other history is expected (say, a device that started its own graph
   joined this backup), list the full 40-character ids under the graph's root path in
   the settings file, then reopen the graph:
@@ -230,40 +224,33 @@ summarized usually isn't sent again.
   as written when it saves its own settings; an id that is not a full commit id, or an
   entry for a path that does not exist, is shown as a warning when the graph opens and
   is ignored.
-- GitHub sign-in uses the OAuth device flow against `github.com`; the token is stored
-  in the OS keychain.
+- GitHub sign-in uses the OAuth device flow against `github.com`. The token is in the OS
+  keychain.
 
 ## Browser capture (the Chrome extension)
 
-- **Where:** nowhere on the network. The **Reflect Capture** extension hands each
-  capture to a local native-messaging host (`reflect-capture-host`) that the desktop
-  app registers on your machine; the host spools it to the capture inbox on disk
-  (`<graph>/.reflect/inbox/`) and the app drains it on next launch. **No Reflect-hosted
-  server, no third party, and no other destination is ever contacted** — the extension
-  stores no keys and makes no AI or network calls of its own.
-- **What:** the page you explicitly capture (toolbar button or ⌘⇧K): its URL,
-  title, your current text selection, a screenshot of the visible tab, and, only when
-  you tick "Capture page text", the page's extracted text. When enabled, X bookmark
-  and like capture observe the corresponding request on x.com and save the post
-  identifier and available post snapshot locally. Bookmark capture defaults to on;
-  like capture defaults to off. Both settings are independent in the extension's
-  options page. Existing likes and actions in native X apps are not imported.
-  Unliking does not remove content from Reflect. A request can be saved even if
-  X later rejects it. Unrelated browsing content is not captured.
-- **When:** when you capture a page or perform an enabled bookmark or like action
-  on x.com in this browser. Disabling a setting stops new captures; accepted ones
-  remain queued. If the desktop app isn't reachable yet, the capture is
-  held in the browser's local extension storage and retried automatically until it
-  spools — it is never sent anywhere else in the meantime.
-- Once a capture lands in your graph, the desktop app's rules above apply unchanged:
-  enrichment may request the captured URL directly to read page metadata. On macOS and
-  iOS, Reflect also asks Apple's LinkPresentation framework for one representative
-  image when the capture has no screenshot. These requests go to the captured website
-  and any redirects or subresources selected by the operating system, never through a
-  Reflect server. The app re-reads the capture and daily note before and after each
-  request; `private: true` prevents the request or discards its result. A successful
-  image is downscaled and stored as a local JPEG in the graph. Any BYOK AI enrichment
-  then follows the provider rules above.
+- **Where:** nowhere on the network. The **Reflect Capture** extension hands each capture to a
+  local native-messaging host (`reflect-capture-host`) that the desktop app registers. The host
+  writes it to the capture inbox (`<graph>/.reflect/inbox/`), and the app drains it on next
+  launch. The extension stores no keys and makes no network or AI calls of its own.
+- **What:** the page you explicitly capture (toolbar button or ⌘⇧K): URL, title, current
+  selection, a screenshot of the visible tab, and the extracted page text only when you tick
+  "Capture page text". When enabled, X bookmark and like capture watch that request on x.com and
+  save the post identifier and available snapshot locally. Bookmark capture defaults to on, like
+  capture to off, each set separately in the extension options. Existing likes and native X app
+  actions are not imported. Unliking does not remove content. A request can be saved even if X
+  later rejects it. Unrelated browsing is not captured.
+- **When:** when you capture a page, or do an enabled bookmark or like on x.com in this browser.
+  Turning a setting off stops new captures; accepted ones stay queued. If the desktop app is not
+  reachable, the capture waits in the extension's local storage and retries. It is never sent
+  anywhere else meanwhile.
+- After a capture lands, the app's rules apply. Enrichment may fetch the captured URL directly
+  for page metadata. On macOS and iOS, when the capture has no screenshot, Reflect also asks
+  Apple's LinkPresentation for one representative image. These requests go to the captured site
+  (and redirects or subresources the OS picks), never through a Reflect server. The app re-reads
+  the capture and daily note before and after each request, and `private: true` prevents the
+  request or discards its result. The image is downscaled and stored as a local JPEG. BYOK AI
+  enrichment follows the provider rules above.
 
 ## Local-only folders (macOS, off by default)
 
@@ -403,86 +390,74 @@ sit inside the synced graph.
 
 ## Apple Contacts (off by default)
 
-- **Where:** nowhere on the network. Enabling the Contacts integration reads the
-  **macOS/iOS contacts store on-device** (the same store System Settings governs),
-  behind the standard OS permission prompt. There is no Reflect copy of your address
-  book: lookups are live queries, nothing is mirrored into `.reflect/`, and Reflect
-  never writes back to Contacts.
-- **What:** a note title or a meeting attendee's email is matched against your
-  contacts; a match's name, email, and phone are shown on a suggestion card. Contact
-  details enter a note **only when you click Add**, at which point they are ordinary
-  markdown you own — covered by the same rules as anything else you type (including
-  `private: true` and backup).
-- **When:** only while the integration is on, and only for the note being viewed (or
-  the meeting being added). Turning it off — in Settings or in the OS privacy pane —
-  stops all reads immediately.
+- **Where:** nowhere on the network. The integration reads the **on-device macOS/iOS contacts
+  store** behind the standard OS permission prompt. Lookups are live queries: nothing is
+  mirrored into `.reflect/`, and Reflect never writes to Contacts.
+- **What:** a note title or a meeting attendee's email is matched against your contacts. A
+  match's name, email, and phone show on a suggestion card. They enter a note **only when you
+  click Add**, and then follow the same rules as anything you type (including `private: true`
+  and backup).
+- **When:** only while the integration is on, and only for the note being viewed (or the meeting
+  being added). Turning it off, in Settings or the OS privacy pane, stops all reads at once.
 
 ## Exception diagnostics (on in official release builds)
 
-- **Where:** Sentry. The React/WebView SDK handles JavaScript exceptions; on iOS a
-  native SDK handles host-process crashes, watchdog terminations, and converted Apple
-  MetricKit diagnostics (including main-thread hangs) — the failures that never
-  reach the JavaScript layer, and that arrive in TestFlight with no usable stack.
-- **What:** an allow-listed diagnostic containing the JavaScript exception class (or a
-  fixed native failure category), sanitized stack locations, the app/build version, and
-  whether the exception was marked handled. Native reports also carry non-identifying
-  OS/device model, architecture, memory, storage, battery, and thermal facts, which are
-  what distinguish a resource termination from a code defect. A small set of vetted
-  JavaScript structural error messages that cannot contain document data is kept; every
-  native exception value and all other exception text is redacted. JavaScript filenames
-  and native loaded-image names are reduced to basenames.
-- **Never collected:** request data, note content, note titles, graph paths, local
-  filesystem paths, native source paths, frame variables, source context lines, thread
-  names, breadcrumbs, console or Rust tracing output, session replay, performance
-  traces and profiles, screenshots, view hierarchy, raw MetricKit payloads, and user
-  identifiers. Sentry is also configured not to store the transport IP address with
-  events.
-- **When:** only when an official desktop or iOS release raises an uncaught JavaScript
-  error, an unhandled promise rejection, or a caught/recoverable React error — and on
-  iOS, the native failure categories above. The WebView SDK initializes only in official
-  builds carrying the release DSN. The iOS native SDK initializes only in release
-  configurations of the official `app.reflect.ios` bundle; debug builds compile the
-  call out entirely, and forks run under their own bundle identifier and stay silent.
-- **Operational safeguards:** Sentry's server-side and default scrubbers are enabled, IP
-  address storage and server-side JavaScript source scraping are disabled, and explicit
-  sensitive-field rules cover notes, graph paths, requests, and user identifiers. Private
-  JavaScript source maps and native dSYMs are uploaded during official builds so stacks
-  are readable; native symbol uploads exclude sources, and neither kind of symbol file
-  ships as readable source in the app bundle.
+- **Where:** Sentry. The WebView SDK handles JavaScript exceptions. On iOS a native SDK handles
+  host-process crashes, watchdog terminations, and Apple MetricKit diagnostics (including
+  main-thread hangs): failures that never reach JavaScript and arrive in TestFlight with no
+  usable stack.
+- **What:** an allow-listed report: the JavaScript exception class (or a fixed native failure
+  category), sanitized stack locations, the app version, and whether it was handled. Native
+  reports add non-identifying OS/device model, architecture, memory, storage, battery, and
+  thermal facts, which tell a resource termination from a code defect. A small set of vetted
+  JavaScript structural messages that cannot contain document data is kept. All other exception
+  text, and every native exception value, is redacted. Filenames and loaded-image names are cut
+  to basenames.
+- **Never collected:** request data, note content or titles, graph paths, filesystem or native
+  source paths, frame variables, source context lines, thread names, breadcrumbs, console or
+  Rust tracing output, session replay, performance traces and profiles, screenshots, view
+  hierarchy, raw MetricKit payloads, user identifiers, and the transport IP address.
+- **When:** only when an official desktop or iOS release raises an uncaught JavaScript error, an
+  unhandled promise rejection, or a caught React error, plus the iOS native categories above.
+  The WebView SDK starts only in official builds with the release DSN. The iOS native SDK starts
+  only in release configurations of the official `app.reflect.ios` bundle. Debug builds compile
+  it out, and forks run under their own bundle ID and stay silent.
+- **Safeguards:** Sentry's server-side and default scrubbers are on, IP storage and server-side
+  source scraping are off, and explicit sensitive-field rules cover notes, graph paths,
+  requests, and user identifiers. Official builds upload private source maps and native dSYMs
+  (without sources) so stacks are readable. No symbol file ships as readable source in the app.
 
 ## Housekeeping calls
 
-- **API key validation:** adding a provider key sends one cheap authenticated probe to
-  that provider to test it. No content.
-- **Update check:** the packaged app fetches a release manifest (`latest.json`) from
-  this repository's GitHub Releases on launch and every six hours. Stable builds check
-  the latest stable release; beta builds check the beta feed. The app downloads the
-  update archive only when you ask it to install. No user data is sent; payloads are
-  verified against a public key compiled into the app before installing. Offline, the
-  check fails silently and the app carries on.
+- **API key validation:** adding a key sends one cheap authenticated probe to that provider. No
+  content.
+- **Update check:** the packaged app fetches `latest.json` from this repository's GitHub
+  Releases on launch and every six hours, from the stable or beta feed to match the build. It
+  downloads the update only when you ask to install, and verifies it against a public key
+  compiled into the app. No user data is sent. Offline, the check fails silently.
 
 ## Secrets
 
-API keys and tokens live in the **OS keychain only** — never in markdown, never in
-`.reflect/`, never in git. Deleting a provider in Settings deletes its keychain entry.
+API keys and tokens live in the **OS keychain only**: never in markdown, `.reflect/`, or git.
+Deleting a provider in Settings deletes its keychain entry.
 
 ## Summary table
 
 | Call | Destination | Carries note content? | Off by default? |
 | --- | --- | --- | --- |
-| AI chat | Your chosen provider or verified local model | Yes — cloud tools block private and device-only sources | Yes (needs configuration) |
-| AI summaries | The verified local model you pick by default; the cloud provider and model you choose and agree to for public notes | Yes — private notes are never sent to the cloud | On this Mac by default; the cloud asks for each provider and model — nothing is sent until you start it, then existing public long notes are read in the background |
-| Local image/PDF OCR | Your verified local vision model | Yes — stays on your machine | Yes (explicit model selection) |
-| Audio transcription | Your chosen providers | No existing note content; audio and its fresh transcript | Yes (needs your key) |
-| On-device transcription | Nowhere (on-device) | — (audio stays on your Mac) | Yes (opt-in download) |
-| Recording on the Mac | Nowhere (on-device) | — (audio and transcript stay on your Mac) | Yes (each recording is started by you) |
+| AI chat | Your chosen provider or verified local model | Yes; cloud tools block private and device-only sources | Yes (needs configuration) |
+| AI summaries | The verified local model you pick by default; the cloud provider and model you choose and agree to for public notes | Yes; private notes are never sent to the cloud | On this Mac by default; the cloud asks for each provider and model — nothing is sent until you start it, then existing public long notes are read in the background |
+| Local image/PDF OCR | Your verified local vision model | Yes; stays on your machine | Yes (explicit model selection) |
+| Audio transcription | Your chosen providers | No; only audio and its fresh transcript | Yes (needs your key) |
+| On-device transcription | Nowhere (on-device) | No (audio stays on your Mac) | Yes (opt-in download) |
+| Recording on the Mac | Nowhere (on-device) | No (audio and transcript stay on your Mac) | Yes (each recording is started by you) |
 | Transcription model update check | Hugging Face | No | On once the model is downloaded |
-| Embeddings | Nowhere (on-device) | — | Yes (opt-in download) |
+| Embeddings | Nowhere (on-device) | No | Yes (opt-in download) |
 | Model download | Hugging Face | No | Yes (opt-in) |
-| Backup | Your git repository | Yes — including private notes, never local-only folders | Yes (needs connecting) |
-| Key validation | The provider | No | — (only when adding a key) |
+| Backup | Your git repository | Yes, including private notes; local-only folders are excluded | Yes (needs connecting) |
+| Key validation | The provider | No | Only when adding a key |
 | Update check | GitHub Releases | No | On in packaged builds |
-| Browser capture | Nowhere (local host on disk) | — (stays on your machine) | — (only when you capture) |
+| Browser capture | Nowhere (local host on disk) | Stays on your machine | Only when you capture |
 | Capture metadata and preview | The captured website, via Reflect and Apple LinkPresentation | URL only; private captures are blocked | No (after an explicit capture) |
-| Contacts lookup | Nowhere (on-device OS store) | — (stays on your machine) | Yes (opt-in) |
-| Exception diagnostics | Sentry | No — free-form messages and context are redacted | No (official releases) |
+| Contacts lookup | Nowhere (on-device OS store) | Stays on your machine | Yes (opt-in) |
+| Exception diagnostics | Sentry | No; free-form messages and context are redacted | No (official releases) |
