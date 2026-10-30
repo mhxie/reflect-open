@@ -9,13 +9,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
-import type {
-  AudioMemoPhase,
-  AudioMemoSession,
-  AudioMemoSessionState,
-  GraphInfo,
-  Unlisten,
-} from '@reflect/core'
+import type { AudioMemoSession, AudioMemoSessionState, GraphInfo, Unlisten } from '@reflect/core'
 import {
   dismissRecordingReminder,
   showRecordingReminder,
@@ -35,8 +29,6 @@ import { useServiceState } from '@/services/use-service-state.ts'
  * native recorder (microphone and system audio), whose live level feeds the
  * waveform instead of a media stream.
  */
-
-export type { AudioMemoPhase }
 
 export type AudioMemoContextValue = AudioMemoSessionState &
   Pick<AudioMemoSession, 'cancel' | 'retry' | 'discard'> & {

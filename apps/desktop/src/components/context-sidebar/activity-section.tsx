@@ -1,5 +1,5 @@
 import { useMemo, type ReactElement } from 'react'
-import { activityThresholds, heatmapWeeks, weekStartDow } from '@reflect/core'
+import { activityThresholds, heatmapWeeks, getWeekStartWeekday } from '@reflect/core'
 import { useDailyActivity } from '@/hooks/use-daily-activity.ts'
 import { useDailyEditCounts } from '@/hooks/use-daily-edit-counts.ts'
 import { useElementWidth } from '@/hooks/use-element-width.ts'
@@ -22,7 +22,7 @@ export function ActivitySection(): ReactElement | null {
   const editCounts = useDailyEditCounts(enabled)
   const [measure, width] = useElementWidth()
   const weekCount = weekColumnsFitting(width)
-  const weekStartsOn = weekStartDow(settings.weekStartDay)
+  const weekStartsOn = getWeekStartWeekday(settings.weekStartDay)
   const weeks = useMemo(
     () => heatmapWeeks(today, weekCount - 1, weekStartsOn),
     [today, weekCount, weekStartsOn],

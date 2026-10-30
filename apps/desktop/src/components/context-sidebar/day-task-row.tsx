@@ -1,13 +1,17 @@
 import type { ReactElement } from 'react'
 import { Circle, CircleCheck } from 'lucide-react'
-import { displayNoteTitle, isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
+import {
+  displayNoteTitle,
+  isLocalOnlyReadOnlyPath,
+  type OpenTask,
+  formatShortDate,
+} from '@reflect/core'
 import { isModEvent } from '@meowdown/core'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import type { NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
-import { formatShortDate } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 
 interface DayTaskRowProps {

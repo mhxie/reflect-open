@@ -9,7 +9,7 @@ import {
   type WikiLanguage,
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
-import type { AllNotesFilter } from '@/routing/route.ts'
+import type { AllNotesFilter } from '@reflect/app'
 
 /** Templates shared by the settings list and insertion picker. */
 export function createTemplatesQueryOptions(

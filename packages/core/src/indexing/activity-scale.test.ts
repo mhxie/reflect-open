@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDaysIso } from '@reflect/utils'
+import { addDaysToIsoDate } from '@reflect/utils'
 import {
   activityLevel,
   activityThresholds,
@@ -12,14 +12,14 @@ describe('activityThresholds', () => {
 
   it('uses quartiles once there is enough history', () => {
     const activity = Array.from({ length: 20 }, (_, index) => {
-      return day(addDaysIso('2026-01-01', index), (index + 1) * 10)
+      return day(addDaysToIsoDate('2026-01-01', index), (index + 1) * 10)
     })
     expect(activityThresholds(activity)).toEqual([60, 110, 160])
   })
 
   it('ignores repeated sizes, so templated days still spread across levels', () => {
     const activity = [
-      ...Array.from({ length: 12 }, (_, index) => day(addDaysIso('2026-01-01', index), 50)),
+      ...Array.from({ length: 12 }, (_, index) => day(addDaysToIsoDate('2026-01-01', index), 50)),
       day('2026-02-01', 400),
     ]
     expect(activityThresholds(activity)).toEqual([100, 200, 300])

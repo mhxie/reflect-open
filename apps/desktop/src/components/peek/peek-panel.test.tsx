@@ -9,7 +9,7 @@ import {
 } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
 import { useRouter } from '@/routing/router.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'

@@ -13,6 +13,7 @@ import {
   findWikiClaim,
   readWikiClaimIndex,
   wikiClaimId,
+  formatRecencyLabel,
 } from '@reflect/core'
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
 import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
@@ -60,7 +61,7 @@ import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.ts
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
-import { formatRecencyLabel, todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { cn } from '@/lib/utils.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
 import { useNoteSearchQuery, useNoteSearchReport } from '@/providers/note-find-provider.tsx'
@@ -143,7 +144,7 @@ interface NotePaneProps {
 /** Reveal an exact claim range, or an ordinary heading for non-claim fragments. */
 function revealFragment(editor: NoteEditorHandle, fragment: string): boolean {
   if (wikiClaimId(fragment) !== null) {
-    const claim = findWikiClaim(readWikiClaimIndex(editor.getMarkdown(), todayIso()), fragment)
+    const claim = findWikiClaim(readWikiClaimIndex(editor.getMarkdown(), getIsoToday()), fragment)
     if (claim?.kind === 'range') return editor.revealSourceRange?.(claim.from, claim.to) ?? false
     else if (claim?.heading !== null && claim?.heading !== undefined)
       return editor.revealHeading(claim.heading)

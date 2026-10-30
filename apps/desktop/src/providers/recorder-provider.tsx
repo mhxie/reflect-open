@@ -1,6 +1,6 @@
 import { createContext, use, useEffect, useMemo, type ReactElement, type ReactNode } from 'react'
 import type { GraphInfo, Unlisten } from '@reflect/core'
-import { formatTimeOfDay } from '@/lib/dates.ts'
+import { formatTimeOfDay } from '@reflect/core'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { useServiceState } from '@/services/use-service-state.ts'
 

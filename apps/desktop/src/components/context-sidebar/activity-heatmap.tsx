@@ -1,10 +1,11 @@
 import { memo, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
-import { format } from 'date-fns'
+import { formatDate } from '@reflect/utils'
 import {
   activityLevel,
   monthLabelColumns,
   type ActivityLevel,
   type ActivityThresholds,
+  formatDayLabel,
 } from '@reflect/core'
 import {
   Tooltip,
@@ -13,7 +14,6 @@ import {
   createTooltipHandle,
 } from '@/components/ui/tooltip.tsx'
 import { activityDaySummary } from '@/lib/activity-day-summary.ts'
-import { formatDayLabel, parseIsoDate } from '@/lib/dates.ts'
 import {
   HEATMAP_CELL,
   HEATMAP_GAP,
@@ -110,14 +110,14 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
               className="whitespace-nowrap"
               style={LABEL_STYLE}
             >
-              {labeledColumns.has(column) ? format(parseIsoDate(week[0]!), 'MMM') : null}
+              {labeledColumns.has(column) ? formatDate(week[0]!, 'MMM') : null}
             </span>
           ))}
         </div>
         {Array.from({ length: 7 }, (_, row) => (
           <div key={row} role="row" className="contents">
             <span role="rowheader" style={LABEL_STYLE}>
-              {LABELED_ROWS.has(row) ? format(parseIsoDate(weeks[0]![row]!), 'EEE') : null}
+              {LABELED_ROWS.has(row) ? formatDate(weeks[0]![row]!, 'EEE') : null}
             </span>
             {weeks.map((week) => {
               const date = week[row]!

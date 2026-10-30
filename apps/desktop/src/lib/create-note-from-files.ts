@@ -5,7 +5,7 @@ import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { shouldEmbedFile } from '@/editor/embed-file.ts'
 import { noteTitleFromFile } from '@/editor/file-title.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
-import { routesEqual } from '@/routing/route.ts'
+import { routesEqual } from '@reflect/app'
 
 /** How long the new note's editor gets to mount before the files give up on it. */
 const MOUNT_TIMEOUT_MS = 3000

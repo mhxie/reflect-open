@@ -6,7 +6,7 @@ import {
   unregisterNoteEditorHandle,
 } from '@/editor/editor-handle-registry.ts'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
-import type { Route } from '@/routing/route.ts'
+import type { Route } from '@reflect/app'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import {
   createNoteFromFiles,

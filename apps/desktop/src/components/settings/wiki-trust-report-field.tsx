@@ -1,7 +1,6 @@
 import { useState, type ReactElement } from 'react'
-import { normalizeWikiTrustReportPath } from '@reflect/core'
+import { normalizeWikiTrustReportPath, formatRecencyLabel } from '@reflect/core'
 import { useWikiTrustReport, type WikiTrustReportState } from '@/hooks/use-wiki-trust-report.ts'
-import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'

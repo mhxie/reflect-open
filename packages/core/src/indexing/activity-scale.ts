@@ -1,4 +1,4 @@
-import { addDaysIso, weekdayIso } from '@reflect/utils'
+import { addDaysToIsoDate, getWeekday } from '@reflect/utils'
 import { isNotNullish } from '@ocavue/utils'
 import type { DailyActivity } from './daily-activity-service.ts'
 
@@ -57,10 +57,10 @@ export function activityLevel(
  * numbering). Dates after `today` are included; callers leave them blank.
  */
 export function heatmapWeeks(today: string, weeksBefore: number, weekStartsOn: number): string[][] {
-  const currentWeekStart = addDaysIso(today, -((weekdayIso(today) - weekStartsOn + 7) % 7))
+  const currentWeekStart = addDaysToIsoDate(today, -((getWeekday(today) - weekStartsOn + 7) % 7))
   return Array.from({ length: weeksBefore + 1 }, (_, column) => {
-    const start = addDaysIso(currentWeekStart, (column - weeksBefore) * 7)
-    return Array.from({ length: 7 }, (_, row) => addDaysIso(start, row))
+    const start = addDaysToIsoDate(currentWeekStart, (column - weeksBefore) * 7)
+    return Array.from({ length: 7 }, (_, row) => addDaysToIsoDate(start, row))
   })
 }
 

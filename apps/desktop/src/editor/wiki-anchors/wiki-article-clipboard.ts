@@ -10,7 +10,7 @@ import { dropPoint } from '@prosekit/pm/transform'
 import type { EditorView } from '@prosekit/pm/view'
 import { readWikiClaimIndex } from '@reflect/core'
 import { toast } from '@/components/ui/toast.tsx'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { wikiEditorRange, type WikiArticleProjection } from './wiki-article-projection.ts'
 import { ledgerOwnerOf } from './wiki-article-nodes.ts'
 import { appendWikiArticleRecords, type WikiArticleLedgerRecord } from './wiki-article-records.ts'
@@ -27,7 +27,7 @@ interface ClaimMoveRange {
 
 /** Ordinary prose copy drops range identity and its administrative records. */
 export function stripWikiClaimOwnership(source: string): string {
-  const index = readWikiClaimIndex(source, todayIso())
+  const index = readWikiClaimIndex(source, getIsoToday())
   const spans = [
     ...index.markers.filter((marker) => marker.id !== null),
     ...index.ledgers.filter((ledger) => ledger.owner !== null),
@@ -257,7 +257,7 @@ function literalMoveSource(view: EditorView, range: ClaimMoveRange, slice: Slice
   makeLeadingMarkersPortable(transaction)
   let source = createMarkdownSourceMap(transaction.doc).markdown
   const present = new Set(
-    readWikiClaimIndex(source, todayIso()).ledgers.map((ledger) => ledger.owner),
+    readWikiClaimIndex(source, getIsoToday()).ledgers.map((ledger) => ledger.owner),
   )
   const missing = range.ledgers.filter((ledger) => !present.has(ledger.id))
   if (missing.length > 0)

@@ -1,10 +1,14 @@
 import type { ReactElement } from 'react'
 import type { ImageUrlResolver, WikiEmbedResolver } from '@meowdown/core'
-import { dateFromDailyPath, type DateFormat, type NoteTitleMetadata } from '@reflect/core'
+import {
+  dateFromDailyPath,
+  type DateFormat,
+  type NoteTitleMetadata,
+  formatDayLabel,
+} from '@reflect/core'
 import { NoteTitle } from './note-title.tsx'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { usePreviewOverflow } from '@/hooks/use-preview-overflow.ts'
-import { formatDayLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 
 interface WikiLinkHoverPreviewProps {

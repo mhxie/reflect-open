@@ -1,11 +1,10 @@
 import { useCallback, type MouseEvent } from 'react'
-import { NATIVE_MENU_SEPARATOR, type NativeContextMenuItem } from '@reflect/app'
+import { NATIVE_MENU_SEPARATOR, type NativeContextMenuItem, routeForPath } from '@reflect/app'
 import { errorMessage, type PinnedNote } from '@reflect/core'
 import { usePeek, usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { copyNoteDeepLink } from '@/lib/clipboard-actions.ts'
 import { useGraph } from '@/providers/graph-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 /**

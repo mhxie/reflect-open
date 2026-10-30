@@ -13,9 +13,3 @@ interface ImportMetaEnv {
   /** `1` in a dev app launched to score search (`src/dev/search-eval-runner.tsx`). */
   readonly VITE_SEARCH_EVAL?: string
 }
-
-/**
- * App version injected by Vite.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-declare const __REFLECT_VERSION__: string

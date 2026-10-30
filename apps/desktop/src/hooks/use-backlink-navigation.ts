@@ -1,11 +1,10 @@
 import { useCallback } from 'react'
-import type { WikilinkClickHandler } from '@meowdown/core'
+import { type WikilinkClickHandler, isModEvent } from '@meowdown/core'
 import { isLocalOnlyPath } from '@reflect/core'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { useNoteLinkNavigation, type ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
-import { routeForPath } from '@/routing/route.ts'
-import { isModEvent } from '@meowdown/core'
+import { routeForPath } from '@reflect/app'
 
 /** A snippet's `[[wiki link]]` click, with the path of the note the snippet is from. */
 export type BacklinkWikilinkClick = (

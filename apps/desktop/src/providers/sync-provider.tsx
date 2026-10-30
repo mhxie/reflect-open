@@ -9,8 +9,6 @@ import {
 import { useMaybeGraphServices } from '@/services/services-provider.tsx'
 import { useServiceState } from '@/services/use-service-state.ts'
 
-export type { GitSyncState, ConnectExistingResult } from '@reflect/core'
-
 /**
  * The git sync surface. Unlike the actions, `fileChanged` never throws: where
  * the graph runs no git sync it does nothing.

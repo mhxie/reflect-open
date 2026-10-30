@@ -13,7 +13,7 @@ import {
   type Settings,
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
-import type { AllNotesFilter } from '@/routing/route.ts'
+import type { AllNotesFilter } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { act } from '@/test-utils/act.ts'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'

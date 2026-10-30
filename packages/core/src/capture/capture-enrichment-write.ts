@@ -2,12 +2,12 @@ import type { CaptureIdentity } from './capture-identity.ts'
 import { sha256Hex } from '@reflect/utils'
 import {
   captureNoteMeta,
-  notePrivate,
   noteSource,
   retitleDailyEntry,
   type CaptureNoteMeta,
   type CaptureStatus,
 } from './capture-note.ts'
+import { notePrivate } from '../privacy/privacy-service.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { patchNote, readNoteOrNull } from '../graph/patch-note.ts'
 import { dailyPath } from '../graph/paths.ts'

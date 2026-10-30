@@ -25,20 +25,20 @@ const CSS_HEIGHT = 28
 function drawBars(context: CanvasRenderingContext2D, color: string, bars: readonly number[]): void {
   context.clearRect(0, 0, CSS_WIDTH, CSS_HEIGHT)
   context.fillStyle = color
+  // roundRect is Safari 16+; older WebKit records with square bars.
+  const rounded = typeof context.roundRect === 'function'
+  context.beginPath()
   for (const [index, amplitude] of bars.entries()) {
     const height = Math.max(BAR_WIDTH, amplitude * CSS_HEIGHT)
     const left = index * (BAR_WIDTH + BAR_GAP)
     const top = (CSS_HEIGHT - height) / 2
-    // roundRect is Safari 16+; an un-updated older WebKit still records,
-    // it just gets square bars instead of a crash.
-    if (typeof context.roundRect === 'function') {
-      context.beginPath()
+    if (rounded) {
       context.roundRect(left, top, BAR_WIDTH, height, BAR_WIDTH / 2)
-      context.fill()
     } else {
-      context.fillRect(left, top, BAR_WIDTH, height)
+      context.rect(left, top, BAR_WIDTH, height)
     }
   }
+  context.fill()
 }
 
 /** Prepare the canvas for device pixels; returns its context and bar color. */

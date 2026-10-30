@@ -1,15 +1,7 @@
-import { useState, type ReactElement } from 'react'
+import { useCallback, useState, type ReactElement } from 'react'
 import { canTrashNote, errorMessage, isLocalOnlyPath, KEPT_IN_GRAPH_TRASH } from '@reflect/core'
 import { Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button.tsx'
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-} from '@/components/ui/dialog.tsx'
+import { ConfirmActionDialog } from '@/components/confirm-action-dialog.tsx'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { useRouter } from '@/routing/router.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
@@ -34,17 +26,9 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
   const { operations } = useAppServices()
   const localOnly = useLocalOnlyFolders()
   const [confirmingTrash, setConfirmingTrash] = useState(false)
-  const [isTrashing, setIsTrashing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  if (!canTrashNote(path)) {
-    return null
-  }
-
-  const onTrash = async (): Promise<void> => {
+  const trash = useCallback(async (): Promise<void> => {
     const operation = operations.start('Trashing note')
-    setIsTrashing(true)
-    setError(null)
     try {
       const outcome = await noteActions.trashOne(path)
       if (outcome?.trashed === 'graph') {
@@ -52,15 +36,16 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
       } else {
         operation.done()
       }
-      setConfirmingTrash(false)
-      navigate({ kind: 'today' })
     } catch (cause) {
-      const message = errorMessage(cause)
-      setError(message)
-      operation.fail(message)
-    } finally {
-      setIsTrashing(false)
+      operation.fail(errorMessage(cause))
+      throw cause
     }
+    navigate({ kind: 'today' })
+  }, [operations, noteActions, path, navigate])
+  const closeConfirm = useCallback(() => setConfirmingTrash(false), [])
+
+  if (!canTrashNote(path)) {
+    return null
   }
 
   return (
@@ -78,32 +63,21 @@ export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | 
         </span>
       </button>
 
-      <Dialog
-        open={confirmingTrash}
-        onOpenChange={(open) => !isTrashing && setConfirmingTrash(open)}
-      >
-        <DialogContent>
-          <DialogTitle>Trash this note?</DialogTitle>
-          <DialogDescription>
-            {isLocalOnlyPath(localOnly, path)
+      {confirmingTrash ? (
+        <ConfirmActionDialog
+          title="Trash this note?"
+          description={
+            isLocalOnlyPath(localOnly, path)
               ? 'It moves to your system Trash by way of a private holding folder. Put Back returns it to that folder, not here.'
-              : 'It moves to your system Trash, where you can restore it.'}
-          </DialogDescription>
-          {error !== null ? <p className="text-sm text-destructive">{error}</p> : null}
-          <DialogFooter>
-            <DialogClose
-              render={
-                <Button variant="ghost" disabled={isTrashing}>
-                  Cancel
-                </Button>
-              }
-            />
-            <Button variant="destructive" disabled={isTrashing} onClick={() => void onTrash()}>
-              Trash note
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              : 'It moves to your system Trash, where you can restore it.'
+          }
+          confirmLabel="Trash note"
+          pendingLabel="Trashing…"
+          variant="destructive"
+          onConfirm={trash}
+          onClose={closeConfirm}
+        />
+      ) : null}
     </>
   )
 }

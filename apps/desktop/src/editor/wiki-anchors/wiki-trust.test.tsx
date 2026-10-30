@@ -10,7 +10,7 @@ import {
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
@@ -130,7 +130,7 @@ function createApp(): TestCoreServices {
   // Today is the date a question records.
   const services = createTestCoreServices({
     database: createWasmTestDatabaseService(),
-    clock: createTestClockService({ today: todayIso() }),
+    clock: createTestClockService({ today: getIsoToday() }),
   })
   onTestFinished(() => services.database.close())
   services.ipc.onCommand('wiki_trust_report_read', (args) => ({
@@ -526,7 +526,7 @@ describe('claim trust from the harness report', () => {
     await editorFixture(
       SOURCE.replace(
         '## Evidence\n',
-        `## Evidence\n\n\`\`\`anchors c2\n@pass: reader | status: flagged | at: ${todayIso()}\n\`\`\`\n`,
+        `## Evidence\n\n\`\`\`anchors c2\n@pass: reader | status: flagged | at: ${getIsoToday()}\n\`\`\`\n`,
       ),
     )
     await page.getByRole('button', { name: 'Claim C2: Disputed' }).click()

@@ -4,7 +4,7 @@ import { errorMessage, markdownNoteReference, splitWikiLinkTarget } from '@refle
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteEmbedNavigationOptions {

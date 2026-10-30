@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react'
 import { isModEvent } from '@meowdown/core'
 import { useOnThisDay } from '@/hooks/use-on-this-day.ts'
-import { formatDayLabel } from '@/lib/dates.ts'
+import { formatDayLabel } from '@reflect/core'
 import { useSettings } from '@/providers/settings-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
 import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { SidebarSection } from './sidebar-section.tsx'
 

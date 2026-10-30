@@ -165,13 +165,6 @@ export interface IndexNoteOptions {
   mtime?: number | undefined
 }
 
-export {
-  INDEX_APPLY_BATCH_SIZE,
-  type IndexApplyBatch,
-  type MtimeTouchBatch,
-  type SkippedIndexedNote,
-} from './index-store-service.ts'
-
 /**
  * Turns markdown files into index rows.
  */

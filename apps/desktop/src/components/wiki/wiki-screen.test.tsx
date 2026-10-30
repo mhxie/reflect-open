@@ -10,7 +10,7 @@ import {
   parseNote,
   type Settings,
 } from '@reflect/core'
-import { wikiRoute, type Route } from '@/routing/route.ts'
+import { wikiRoute, type Route } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'

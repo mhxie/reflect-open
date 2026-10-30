@@ -10,10 +10,10 @@ import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Spinner } from '@/components/ui/spinner.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
-import { formatRecordingElapsed } from '@/lib/recording-time.ts'
+import { formatElapsed } from '@reflect/utils'
 import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
 import { useOptionalRecorder } from '@/providers/recorder-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
 
 const STRIP_CLASS =
   'mx-4 mt-2 flex min-h-8 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 text-xs shadow-xs'
@@ -87,9 +87,7 @@ export function RecordingStrip(): ReactElement | null {
           <div className="min-w-0 flex-1 overflow-hidden">
             {waveformSource === null ? null : <RecordingWaveform source={waveformSource} />}
           </div>
-          <span className="shrink-0 font-medium tabular-nums">
-            {formatRecordingElapsed(memo.elapsedMs)}
-          </span>
+          <span className="shrink-0 font-medium tabular-nums">{formatElapsed(memo.elapsedMs)}</span>
           <button
             type="button"
             aria-label="Discard recording"

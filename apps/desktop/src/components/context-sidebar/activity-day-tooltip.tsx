@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { activityDaySummary } from '@/lib/activity-day-summary.ts'
-import { formatCompactDate } from '@/lib/dates.ts'
+import { formatCompactDate } from '@reflect/core'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { ActivityEditedTitles } from './activity-edited-titles.tsx'
 

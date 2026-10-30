@@ -1,7 +1,6 @@
 import type { MouseEvent, ReactElement } from 'react'
-import { displayNoteTitle, type AttachmentLibraryEntry } from '@reflect/core'
+import { displayNoteTitle, type AttachmentLibraryEntry, formatRecencyLabel } from '@reflect/core'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
-import { formatRecencyLabel } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { attachmentFilename, CARD_FOOTER_HEIGHT } from './attachment-media.ts'
 import { AttachmentNoteLinksMenu } from './attachment-note-links-menu.tsx'

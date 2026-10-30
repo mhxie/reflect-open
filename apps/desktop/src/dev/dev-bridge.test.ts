@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { foldGraphPath, type IndexedNote } from '@reflect/core'
+import {
+  createAssetStoreService,
+  createIpcBridgeService,
+  foldGraphPath,
+  type IndexedNote,
+} from '@reflect/core'
+import {
+  createTestClockService,
+  createTestFileChangeService,
+  createTestLoggerService,
+} from '@reflect/core/testing'
+import { createDevAssetStore } from '@/dev/dev-asset-store.ts'
 import { createDevBridge } from '@/dev/dev-bridge.ts'
 import { createDevFileStore } from '@/dev/dev-file-store.ts'
 import { createDevIndexDb } from '@/dev/dev-index-db.ts'
@@ -50,7 +61,7 @@ describe('dev bridge index_reconcile_scan', () => {
   it('classifies candidates and orphans like the native scan', async () => {
     const files = createDevFileStore({ 'notes/settled.md': '# Settled' })
     const index = await createDevIndexDb()
-    const bridge = createDevBridge({ files, index })
+    const bridge = createDevBridge({ files, index, assets: createDevAssetStore() })
 
     // The seeded file's row matches its listed mtime and has settled.
     const settledMtime = files.list()[0]!.modifiedMs
@@ -85,6 +96,7 @@ describe('dev bridge desktop boot surface', () => {
     const bridge = createDevBridge({
       files,
       index: await createDevIndexDb(),
+      assets: createDevAssetStore(),
     })
 
     const recents = (await bridge.invoke('recent_graphs', {})) as Array<Record<string, unknown>>
@@ -112,6 +124,7 @@ describe('dev bridge background task parity', () => {
     const bridge = createDevBridge({
       files: createDevFileStore({}),
       index: await createDevIndexDb(),
+      assets: createDevAssetStore(),
     })
 
     await expect(bridge.invoke('background_task_begin', {})).resolves.toBeNull()
@@ -126,6 +139,7 @@ describe('dev bridge on-device transport', () => {
     const bridge = createDevBridge({
       files: createDevFileStore({}),
       index: await createDevIndexDb(),
+      assets: createDevAssetStore(),
     })
 
     for (const command of ['on_device_http_send', 'on_device_http_read', 'on_device_http_cancel']) {
@@ -148,6 +162,7 @@ describe('dev bridge note_create parity', () => {
       const bridge = createDevBridge({
         files,
         index: await createDevIndexDb(),
+        assets: createDevAssetStore(),
       })
 
       await expect(
@@ -166,7 +181,11 @@ describe('dev bridge note_create parity', () => {
 
   it('refuses a checked write when the note changed on disk', async () => {
     const files = createDevFileStore({ 'notes/a.md': '# Disk\n' })
-    const bridge = createDevBridge({ files, index: await createDevIndexDb() })
+    const bridge = createDevBridge({
+      files,
+      index: await createDevIndexDb(),
+      assets: createDevAssetStore(),
+    })
 
     await expect(
       bridge.invoke('note_write', {
@@ -195,6 +214,7 @@ describe('dev bridge note_create parity', () => {
     const bridge = createDevBridge({
       files,
       index: await createDevIndexDb(),
+      assets: createDevAssetStore(),
     })
 
     await expect(
@@ -215,6 +235,7 @@ describe('dev bridge note_create parity', () => {
     const bridge = createDevBridge({
       files,
       index: await createDevIndexDb(),
+      assets: createDevAssetStore(),
     })
 
     await expect(
@@ -235,7 +256,14 @@ describe('dev bridge note_create parity', () => {
 describe('dev bridge note_write parity', () => {
   async function bridgeOver(initial: Record<string, string>) {
     const files = createDevFileStore(initial)
-    return { files, bridge: createDevBridge({ files, index: await createDevIndexDb() }) }
+    return {
+      files,
+      bridge: createDevBridge({
+        files,
+        index: await createDevIndexDb(),
+        assets: createDevAssetStore(),
+      }),
+    }
   }
 
   it('refuses a write that names no contents to replace', async () => {
@@ -271,5 +299,50 @@ describe('dev bridge note_write parity', () => {
     await write('notes/fresh.md', null)
     expect(files.read('notes/plan.md')).toBe('# New\n')
     expect(files.read('notes/fresh.md')).toBe('# New\n')
+  })
+})
+
+describe('dev bridge assets', () => {
+  it('serves the asset store end to end', async () => {
+    const assets = createDevAssetStore()
+    const bridge = createDevBridge({
+      files: createDevFileStore({}),
+      index: await createDevIndexDb(),
+      assets,
+    })
+    const assetStore = createAssetStoreService({
+      ipc: createIpcBridgeService({ transport: bridge, logger: createTestLoggerService() }),
+      clock: createTestClockService(),
+      fileChanges: createTestFileChangeService(),
+    })
+    const image = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+
+    await expect(assetStore.uploadBlob('cat.png', image, 'notes/cats.md', 1)).resolves.toBe(
+      'assets/cat.png',
+    )
+    await expect(assetStore.uploadBlob('cat.png', image, 'notes/cats.md', 1)).resolves.toBe(
+      'assets/cat-2.png',
+    )
+    await assetStore.uploadToPath('assets/dog.png', image, 1)
+    await expect(assetStore.uploadToPath('assets/dog.png', image, 1)).rejects.toThrow(
+      'target already exists',
+    )
+    await expect(assetStore.uploadBlob('cat.png', image, 'notes/cats.md', 0)).rejects.toThrow(
+      'graph changed',
+    )
+
+    await expect(assetStore.readBytes('assets/cat-2.png', 1)).resolves.toEqual(
+      new Uint8Array([1, 2, 3]),
+    )
+    await expect(assetStore.readBase64('assets/dog.png', 1)).resolves.toBe('AQID')
+    const listed = (await bridge.invoke('list_attachments', { generation: 1 })) as Array<{
+      path: string
+    }>
+    expect(listed.map((file) => file.path)).toEqual([
+      'assets/cat.png',
+      'assets/cat-2.png',
+      'assets/dog.png',
+    ])
+    expect(assets.convertFileSrc('1/assets/cat.png', 'reflect-asset')).toMatch(/^blob:/)
   })
 })

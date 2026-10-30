@@ -18,7 +18,7 @@ import { MarkdownView, type MarkdownBlockRenderer, type NoteEmbedRenderer } from
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
 import { useWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { cn } from '@/lib/utils.ts'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import {
   readWikiEvidenceNode,
   readWikiSourceLinkPair,
@@ -183,7 +183,7 @@ export function MarkdownPreview({
           <NoteTitle title={node.textContent} {...titleMetadata} wrap />,
         )
       }
-      const asOf = todayIso()
+      const asOf = getIsoToday()
       const projection = articleReader.project(doc, asOf)
       const article = renderWikiArticleBlock(
         context,

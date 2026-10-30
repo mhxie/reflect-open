@@ -11,9 +11,9 @@ import {
   isPrivateNoteError,
   notePrivate,
   type CloudNoteContent,
-  type CloudSafe,
   type PrivacyService,
 } from '../../privacy/privacy-service.ts'
+import type { CloudSafe } from '../../privacy/cloud-safe.ts'
 
 /**
  * The read_notes tool's executor (Plan 10): resolve a graph-relative note

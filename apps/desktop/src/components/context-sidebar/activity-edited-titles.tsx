@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react'
-import { dateFromDailyPath, displayNoteTitle } from '@reflect/core'
+import { dateFromDailyPath, displayNoteTitle, formatShortDate } from '@reflect/core'
 import { useNotesEditedOn } from '@/hooks/use-notes-edited-on.ts'
-import { formatShortDate } from '@/lib/dates.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 
 /** Titles shown in the day tooltip before "+N more". */

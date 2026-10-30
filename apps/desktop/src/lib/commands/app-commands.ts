@@ -1,8 +1,14 @@
 import { reverseNoteListSort, type NoteCreationService, type NoteListSort } from '@reflect/core'
-import type { CommandService } from '@reflect/app'
+import {
+  type CommandService,
+  allNotesRoute,
+  type Route,
+  routeForPath,
+  routesEqual,
+  wikiRoute,
+} from '@reflect/app'
 import { attachFilesToNote } from '@/lib/attach-files.ts'
 import { copyNoteDeepLink, copyNotePath, publishGistAndCopyLink } from '@/lib/clipboard-actions.ts'
-import { allNotesRoute, type Route, routeForPath, routesEqual, wikiRoute } from '@/routing/route.ts'
 import type { AppCommand, CommandContext } from './types.ts'
 
 /**

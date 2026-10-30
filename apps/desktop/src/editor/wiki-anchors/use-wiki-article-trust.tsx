@@ -11,7 +11,7 @@ import type { useEditor } from '@meowdown/react'
 import { undo } from '@prosekit/pm/history'
 import type { WikiArticleIndex } from '@reflect/core'
 import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
@@ -105,7 +105,7 @@ export function useWikiArticleTrust(
       const transaction =
         index === undefined
           ? null
-          : wikiReaderTransaction(view.state, index, claimId, status, todayIso())
+          : wikiReaderTransaction(view.state, index, claimId, status, getIsoToday())
       if (transaction === null) return false
       view.dispatch(transaction)
       return true

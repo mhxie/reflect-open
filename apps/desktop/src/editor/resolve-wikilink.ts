@@ -7,8 +7,9 @@ import {
   splitWikiLinkTarget,
   wikiCitationDescription,
   type DateFormat,
+  formatDayLabel,
 } from '@reflect/core'
-import { formatDayLabel, isIsoDate, todayIso } from '@/lib/dates.ts'
+import { isIsoDate, getIsoToday } from '@reflect/utils'
 import { useDateFormat } from '@/hooks/use-date-format.ts'
 
 /**
@@ -27,7 +28,7 @@ export function createWikilinkResolver(dateFormat: DateFormat): WikilinkResolver
     const alias = pipe === -1 ? '' : target.slice(pipe + 1).trim()
     const citation =
       alias === 'ref' && isWikiCitationTarget(canonical) ? readWikiCitationMetadata(metadata) : null
-    if (citation !== null && citation.validAt <= todayIso()) {
+    if (citation !== null && citation.validAt <= getIsoToday()) {
       const { name, fragment } = splitWikiLinkTarget(canonical)
       return {
         target: canonical,

@@ -6,9 +6,9 @@ import {
   firstExistingAttachment,
   type NoteListEntry,
   type PreviewableAttachmentType,
+  formatRecencyLabel,
 } from '@reflect/core'
 import { AttachmentPreviewImage } from '@/components/attachment-preview-image.tsx'
-import { formatRecencyLabel } from '@/lib/dates.ts'
 import { createAttachmentPreviewsQueryOptions } from '@/lib/query-options.ts'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'

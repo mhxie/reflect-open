@@ -4,7 +4,7 @@ import { usePalette } from '@/components/command-palette/palette-provider.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
@@ -19,7 +19,7 @@ import { useShortcuts } from '@/providers/shortcuts-provider.tsx'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
 import { useTheme } from '@/providers/theme-provider.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
-import { focusedNotePathForRoute, routeForPath } from './route.ts'
+import { focusedNotePathForRoute, routeForPath } from '@reflect/app'
 import { useRouter } from './router.tsx'
 
 /**
@@ -123,7 +123,7 @@ export function useAppShortcuts(): CommandContext {
   const workingNotePath = useCallback((): string | null => {
     return (
       peekedPathRef.current ??
-      focusedNotePathForRoute(routeRef.current, todayIso(), focusedDailyDateRef.current)
+      focusedNotePathForRoute(routeRef.current, getIsoToday(), focusedDailyDateRef.current)
     )
   }, [])
   useEffect(() => {

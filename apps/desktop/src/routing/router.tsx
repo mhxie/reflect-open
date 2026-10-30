@@ -10,9 +10,8 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
-import type { NavigateOptions } from '@reflect/app'
+import type { NavigateOptions, Route } from '@reflect/app'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
-import type { Route } from './route.ts'
 
 export type RouterNavigate = (route: Route, options?: NavigateOptions) => void
 
@@ -77,8 +76,6 @@ interface RouterValue {
 }
 
 const RouterContext = createContext<RouterValue | null>(null)
-
-export type { NavigateOptions }
 
 interface RouterProviderProps {
   /** The launch route; defaults to today (the daily note is the spine). */

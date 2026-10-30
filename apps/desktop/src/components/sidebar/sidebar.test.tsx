@@ -11,10 +11,12 @@ import {
   type PinnedNote,
   type SettingsService,
 } from '@reflect/core'
-import type {
-  GraphBootService,
-  NativeContextMenuItem,
-  NativeContextMenuOptions,
+import {
+  type GraphBootService,
+  type NativeContextMenuItem,
+  type NativeContextMenuOptions,
+  deepLinkForRoute,
+  type Route,
 } from '@reflect/app'
 import {
   createTestAppServices,
@@ -26,14 +28,12 @@ import {
 } from '@reflect/app/testing'
 import { createTestCoreServices, createTestGitSyncService } from '@reflect/core/testing'
 import type { CommandContext } from '@/lib/commands/types.ts'
-import type { Route } from '@/routing/route.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { AudioMemoProvider } from '@/providers/audio-memo-provider.tsx'
 import { SidebarProvider } from '@/providers/sidebar-provider.tsx'
 import { UpdateProvider } from '@/providers/update-provider.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { deepLinkForRoute } from '@reflect/app'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { Sidebar } from './sidebar.tsx'
 

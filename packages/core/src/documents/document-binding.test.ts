@@ -12,11 +12,8 @@ import {
   type DocumentBinding,
   type DocumentCoordinator,
 } from './document-binding.ts'
-import {
-  createNoteSessionService,
-  type NoteSession,
-  type NoteSessionSnapshot,
-} from './note-session-service.ts'
+import { createNoteSessionService } from './note-session-service.ts'
+import type { NoteSession, NoteSessionSnapshot } from './note-session-types.ts'
 import { createOpenDocumentsService, type OpenDocumentsService } from './open-documents-service.ts'
 
 /**

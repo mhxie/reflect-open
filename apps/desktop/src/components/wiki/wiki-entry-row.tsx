@@ -4,6 +4,8 @@ import {
   noteTitlePresentation,
   type WikiEntry,
   type WikiIndexRow,
+  formatDayRecencyLabel,
+  formatRecencyLabel,
 } from '@reflect/core'
 import { ChevronDown, ChevronRight, Languages, Waypoints } from 'lucide-react'
 import { ListRow } from '@/components/all-notes/list-row.tsx'
@@ -13,7 +15,6 @@ import { NoteTitle } from '@/components/note-title.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
-import { formatDayRecencyLabel, formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useSettings } from '@/providers/settings-provider.tsx'

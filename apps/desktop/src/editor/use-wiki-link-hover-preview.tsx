@@ -9,7 +9,7 @@ import {
   type DateFormat,
 } from '@reflect/core'
 import { WikiLinkHoverPreview } from '@/components/wiki-link-hover-preview.tsx'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface WikiLinkHoverPreviewOptions {
@@ -39,7 +39,7 @@ export function useWikiLinkHoverPreview({
       let sourceTitle: string | undefined
       let claimFragment: string | undefined
       if (fragment !== null && wikiClaimId(fragment) !== null) {
-        const index = readWikiArticle(preview.source, todayIso())
+        const index = readWikiArticle(preview.source, getIsoToday())
         if (findWikiClaim(index, fragment) === null) {
           return null
         }

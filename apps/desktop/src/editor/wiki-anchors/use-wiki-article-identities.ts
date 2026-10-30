@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { readWikiArticle, splitWikiLinkTarget } from '@reflect/core'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { useMaybeGraph } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
@@ -16,7 +16,7 @@ export function useWikiArticleIdentities(source: string): (title: string) => str
     return JSON.stringify(
       [
         ...new Set(
-          readWikiArticle(source, todayIso())
+          readWikiArticle(source, getIsoToday())
             .references.filter((reference) => reference.kind === 'note')
             .map((reference) => splitWikiLinkTarget(reference.target).name),
         ),

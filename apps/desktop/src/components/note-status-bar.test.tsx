@@ -23,7 +23,7 @@ import {
   type NoteStatus,
   type NoteStatusScope,
 } from '@/editor/status/note-status-store.ts'
-import type { Route } from '@/routing/route.ts'
+import type { Route } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { toast } from '@/components/ui/toast.tsx'
