@@ -3,7 +3,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { dateFromDailyPath, displayNoteTitle, formatDayLabel } from '@reflect/core'
 import { NotePane } from '@/components/note-pane.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 import { PEEK_HEADER_BUTTON } from './peek-header-button.ts'
 import { PeekFrame } from './peek-frame.tsx'
@@ -17,7 +17,7 @@ export interface NotePeekProps {
 /** A peeked note: fully editable, with "Open" promoting it to the main view. */
 export function NotePeek({ target, onClose }: NotePeekProps): ReactElement {
   const { navigate } = useRouter()
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const row = useNoteRow(target.path)
   const dailyDate = dateFromDailyPath(target.path)
   const title =

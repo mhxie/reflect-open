@@ -1,4 +1,5 @@
-import { useSyncExternalStore, type ReactElement } from 'react'
+import type { ReactElement } from 'react'
+import { useStore } from '@/lib/use-store.ts'
 import { isIndexProgressWorthShowing } from '@reflect/core'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
@@ -11,10 +12,7 @@ import { useCoreServices } from '@/services/services-provider.tsx'
  */
 export function IndexProgressPill(): ReactElement | null {
   const { indexLifecycle } = useCoreServices()
-  const progress = useSyncExternalStore(
-    indexLifecycle.subscribeFileProgress,
-    indexLifecycle.fileProgress,
-  )
+  const progress = useStore(indexLifecycle.fileProgress)
 
   if (progress === null || !isIndexProgressWorthShowing(progress)) {
     return null

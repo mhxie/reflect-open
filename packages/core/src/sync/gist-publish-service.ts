@@ -74,7 +74,7 @@ class GistPublishServiceImpl implements GistPublishService {
 
   async publish(path: string): Promise<GistPublishResult | null> {
     const { noteRows, progress, graphSession } = this.#deps
-    const session = graphSession.getState().session
+    const session = graphSession.get().session
     if (session === null || !this.#claim(path)) {
       return null
     }
@@ -101,7 +101,7 @@ class GistPublishServiceImpl implements GistPublishService {
 
   async unpublish(path: string): Promise<GistPublishResult | null> {
     const { noteRows, progress, graphSession } = this.#deps
-    const session = graphSession.getState().session
+    const session = graphSession.get().session
     if (session === null || !this.#claim(path)) {
       return null
     }

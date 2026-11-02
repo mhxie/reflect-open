@@ -15,8 +15,8 @@ import { shownWikiTrustReport, useWikiTrustReport } from '@/hooks/use-wiki-trust
 import { getIsoToday } from '@reflect/utils'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
 import type { WikiReaderStatus } from './wiki-reader-record.ts'
@@ -134,9 +134,9 @@ export function useWikiTrustView(
   record: ((claimId: string, status: WikiReaderStatus) => boolean) | undefined,
   asEditor: (markdown: string) => string,
 ): TrustViewResult {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { wiki, icloudNative, fileChanges } = useCoreServices()
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const languages = useWikiLanguages()
   const report = shownWikiTrustReport(useWikiTrustReport())
   const today = useToday()

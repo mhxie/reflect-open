@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo, useGraphStatus } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** Follow pull displacements only while their issuing file graph session is active. */
 export function NoteDisplacements(): null {
   const { noteDisplacement, noteMove } = useCoreServices()
-  const { graph, status } = useGraph()
+  const graph = useGraphInfo()
+  const status = useGraphStatus()
   const generation = status === 'ready' ? graph?.generation : undefined
   const currentGenerationRef = useRef(generation)
   // Committed before the subscription effect's cleanup runs, so a generation

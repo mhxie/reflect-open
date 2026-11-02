@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select.tsx'
 import { useSummaryModelChoice } from '@/hooks/use-summary-model-choice.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { ModelCombobox } from './model-combobox.tsx'
 
 /** How a provider entry reads in the picker: its provider, then what tells two apart. */
@@ -40,7 +40,7 @@ function startingModel(config: AiProviderConfig): string {
  * entry and model; choosing another asks again.
  */
 export function CloudSummaryModelPicker(): ReactElement {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const { chooseCloud, startCloud } = useSummaryModelChoice()
   const choice = settings.aiSummariesCloudModel
   const config = cloudSummaryConfig(

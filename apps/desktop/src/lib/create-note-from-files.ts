@@ -73,7 +73,7 @@ export async function createNoteFromFiles(
   const saved: { file: File; assetPath: string }[] = []
   const failed: string[] = []
   for (const file of files) {
-    if (graphSession.getState().session?.generation !== generation) {
+    if (graphSession.get().session?.generation !== generation) {
       failed.push(`${file.name}: the graph it was dropped in is no longer open`)
       continue
     }

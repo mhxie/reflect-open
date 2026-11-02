@@ -6,7 +6,7 @@ import {
   type NoteTagFacet,
   formatShortDate,
 } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { usePinnedTagFilters } from '@/hooks/use-pinned-tag-filters.ts'
 import { PinnedTagFiltersEditor } from '@/components/tag-filters/pinned-tag-filters-editor.tsx'
 import type { AllNotesFilter } from '@reflect/app'
@@ -38,7 +38,7 @@ export function AllNotesFilters({
   levels,
   onSelect,
 }: AllNotesFiltersProps): ReactElement {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const { tags: pinned, pinTag } = usePinnedTagFilters()
   const stripRef = useRef<HTMLDivElement>(null)
   const tag = filter?.kind === 'tag' ? filter.tag : null

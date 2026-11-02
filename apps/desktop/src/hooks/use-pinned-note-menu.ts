@@ -4,7 +4,7 @@ import { errorMessage, type PinnedNote } from '@reflect/core'
 import { usePeek, usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { copyNoteDeepLink } from '@/lib/clipboard-actions.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -14,7 +14,7 @@ import { useAppServices, useCoreServices } from '@/services/services-provider.ts
  * Returns the row's `onContextMenu` handler.
  */
 export function usePinnedNoteMenu(note: PinnedNote): (event: MouseEvent<HTMLElement>) => void {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const services = useCoreServices()
   const appServices = useAppServices()
   const canPeek = usePeek() !== null

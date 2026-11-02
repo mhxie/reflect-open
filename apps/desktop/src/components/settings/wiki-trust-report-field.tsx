@@ -2,7 +2,7 @@ import { useState, type ReactElement } from 'react'
 import { normalizeWikiTrustReportPath, formatRecencyLabel } from '@reflect/core'
 import { useWikiTrustReport, type WikiTrustReportState } from '@/hooks/use-wiki-trust-report.ts'
 import { cn } from '@/lib/utils.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 
@@ -65,7 +65,8 @@ function statusOf(
  * names a JSON file Reflect may read.
  */
 export function WikiTrustReportField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { platform } = useCoreServices()
@@ -80,7 +81,7 @@ export function WikiTrustReportField(): ReactElement {
       setError('Use a .json path inside the graph, outside .reflect/ and .git/.')
       return
     }
-    updateSettings({ wikiTrustReportPath: path })
+    settingsService.update({ wikiTrustReportPath: path })
     setDraft(null)
     setError(null)
   }

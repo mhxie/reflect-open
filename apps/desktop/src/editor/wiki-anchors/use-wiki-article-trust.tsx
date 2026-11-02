@@ -13,7 +13,7 @@ import type { WikiArticleIndex } from '@reflect/core'
 import { Popover, PopoverContent } from '@/components/ui/popover.tsx'
 import { getIsoToday } from '@reflect/utils'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { useWikiTrustView, type WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 import { wikiReaderTransaction, type WikiReaderStatus } from './wiki-reader-record.ts'
@@ -95,7 +95,7 @@ export function useWikiArticleTrust(
   index: WikiArticleIndex | null,
   published: { readonly current: () => void },
 ): WikiArticleTrust {
-  const display = useSettings().settings.wikiTrustDisplay
+  const display = useSettingsStore().wikiTrustDisplay
   const { logger } = useCoreServices()
   const record = useCallback(
     (claimId: string, status: WikiReaderStatus) => {

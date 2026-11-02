@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { tasksForDay, withStruckRows, type DayTasks } from '@reflect/core'
 import { useRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { useServiceState } from '@/services/use-service-state.ts'
 
@@ -12,9 +12,9 @@ import { useServiceState } from '@/services/use-service-state.ts'
  * tell a day with no tasks from one whose tasks are still being read.
  */
 export function useDayTasks(day: string, today: string): DayTasks | undefined {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { tasks } = useCoreServices()
-  const { open } = useServiceState(tasks, tasks.getState)
+  const { open } = useServiceState(tasks, tasks.get)
   const struck = useRecentlyCompleted(graph?.root ?? null, open)
   return useMemo(
     () => (open === undefined ? undefined : tasksForDay(withStruckRows(open, struck), day, today)),

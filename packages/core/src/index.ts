@@ -16,6 +16,7 @@ export {
   type IpcBridgeService,
 } from './ipc/ipc-service.ts'
 export type { Unlisten } from './unlisten.ts'
+export { combineStores, deriveStore, type Store, WritableStore } from './store.ts'
 
 export { type HapticsService } from './ipc/haptics-service.ts'
 export { type AudioRecorderFinalSegment } from './audio/audio-recorder-service.ts'
@@ -25,7 +26,11 @@ export {
   type MobileStorageKind,
   type MobileStorageService,
 } from './ipc/mobile-storage-service.ts'
-export { githubAppInstallUrl, type GithubAuthService } from './sync/github-auth-service.ts'
+export {
+  githubAppInstallUrl,
+  type GithubAuthService,
+  type GithubAuthState,
+} from './sync/github-auth-service.ts'
 export { newRepoUrl, parseRepoInput } from './sync/github-repo-service.ts'
 export type { GithubRepoRef } from './sync/types.ts'
 export { type GitSyncService, type GitSyncState } from './sync/git-sync-service.ts'
@@ -569,6 +574,7 @@ export { previousTaskKey, todaysDailyTarget } from './tasks/task-navigation.ts'
 export { withDraftDueDate } from './tasks/task-schedule-content.ts'
 export {
   withoutReopenedTasks,
+  type RecentlyCompleted,
   type TaskAction,
   type TaskService,
   type TaskWriteResult,

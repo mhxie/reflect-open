@@ -21,7 +21,7 @@ import { MediaLightbox } from '@/editor/media-lightbox.tsx'
 import { useElementWidth } from '@/hooks/use-element-width.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { routeForPath } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
@@ -72,7 +72,7 @@ interface LightboxFile {
  * stays put; the router's per-entry scroll memory is wired by hand.
  */
 export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactElement {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const generation = graph?.generation ?? null
   const { attachments } = useCoreServices()
   const { navigate } = useRouter()

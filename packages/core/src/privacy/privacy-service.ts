@@ -492,7 +492,7 @@ class PrivacyServiceImpl implements PrivacyService {
   }
 
   #session(): GateSession | null {
-    return this.#deps.graphSession.getState().session
+    return this.#deps.graphSession.get().session
   }
 
   /**

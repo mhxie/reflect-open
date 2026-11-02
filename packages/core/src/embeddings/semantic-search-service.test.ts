@@ -89,7 +89,7 @@ async function setup(options?: {
   const indexLifecycle = createTestIndexLifecycleService({
     logger,
     progress,
-    graphSession: { getState: () => ({ session }), subscribe: () => () => {} },
+    graphSession: { get: () => ({ session }), subscribe: () => () => {} },
     indexStore: createTestIndexStoreService({
       fail: (call) => {
         return options?.failClear === true && call.method === 'clear'
@@ -295,7 +295,7 @@ describe('start', () => {
     })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
     expect(embeddingIndex.follows()).toEqual([])
 
@@ -368,7 +368,7 @@ describe('start', () => {
     const { semanticSearch, runtime, embeddingIndex } = await setup({ model: GEMMA })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
 
     // Only ever the configured model is asked for; the loaded one writes nothing.
@@ -406,7 +406,7 @@ describe('start', () => {
     })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus().status).toBe('failed'))
+    await vi.waitFor(() => expect(runtime.get().status).toBe('failed'))
     await flush()
 
     // The one load an untouched runtime gets; `failed` starts no second one.
@@ -419,7 +419,7 @@ describe('start', () => {
     const { semanticSearch, runtime, embeddingIndex } = await setup({ role: 'note-window' })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
 
     expect(runtime.ensureCalls()).toBe(0)
@@ -450,7 +450,7 @@ describe('start', () => {
     graphSession.setState({ indexGeneration: null })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
 
     expect(embeddingIndex.follows()).toEqual([])

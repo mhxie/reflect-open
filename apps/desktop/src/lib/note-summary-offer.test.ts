@@ -25,7 +25,7 @@ function handlers(destination: NoteSummaryDestination | null): {
 }
 
 async function pressStart(operations: TestOperationsService): Promise<void> {
-  const [offer, ...rest] = operations.getAll()
+  const [offer, ...rest] = operations.get()
   expect(rest).toEqual([])
   await offer!.action!.run()
 }
@@ -38,7 +38,7 @@ describe('createNoteSummaryOffer', () => {
     // A later pass re-raising the ask replaces it rather than stacking a second.
     summaries.offer({ notes: 12, ...NANO }, answer)
 
-    expect(operations.getAll()).toEqual([
+    expect(operations.get()).toEqual([
       expect.objectContaining({
         label: 'Summarize 12 notes with OpenAI (gpt-5.4-nano)?',
         persistent: true,
@@ -46,7 +46,7 @@ describe('createNoteSummaryOffer', () => {
     ])
     await pressStart(operations)
     expect(answer.start).toHaveBeenCalledExactlyOnceWith(NANO.choice)
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('asks again instead of agreeing when the model changed meanwhile', async () => {
@@ -60,9 +60,7 @@ describe('createNoteSummaryOffer', () => {
 
     await pressStart(operations)
     expect(start).not.toHaveBeenCalled()
-    expect(operations.getAll()[0]?.label).toBe(
-      'Summarize 1 note with Anthropic (claude-haiku-4-5)?',
-    )
+    expect(operations.get()[0]?.label).toBe('Summarize 1 note with Anthropic (claude-haiku-4-5)?')
 
     // Another model on the same entry is another destination too.
     destination = {
@@ -71,18 +69,18 @@ describe('createNoteSummaryOffer', () => {
     }
     await pressStart(operations)
     expect(start).not.toHaveBeenCalled()
-    expect(operations.getAll()[0]?.label).toBe('Summarize 1 note with Anthropic (claude-opus-4-8)?')
+    expect(operations.get()[0]?.label).toBe('Summarize 1 note with Anthropic (claude-opus-4-8)?')
 
     destination = null
     await pressStart(operations)
     expect(start).not.toHaveBeenCalled()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('takes back an ask that no longer applies', () => {
     const { operations, summaries } = setup()
     summaries.offer({ notes: 1, ...NANO }, handlers(NANO))
     summaries.withdraw()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 })

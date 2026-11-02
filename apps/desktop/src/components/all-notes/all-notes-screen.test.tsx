@@ -218,7 +218,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
 type ScreenView = Awaited<ReturnType<typeof renderScreen>>
 
 function probedRoute(view: ScreenView): unknown {
-  return view.appServices.navigation.getState().route
+  return view.appServices.navigation.get().route
 }
 
 function openedNoteWindows(view: ScreenView): readonly string[] {
@@ -1349,7 +1349,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     await vi.waitFor(() => {
       expect(
         view.core.progress
-          .getAll()
+          .get()
           .map((operation) => `${operation.status}:${operation.message ?? ''}`),
       ).toContain('failed:disk on fire')
     })

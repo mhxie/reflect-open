@@ -11,9 +11,9 @@ import { activeNoteStateKinds, noteStatePresentation } from '@/lib/note-state-pr
 import { cn } from '@/lib/utils.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import { useGitSyncContext } from '@/providers/sync-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
+import { useGitSyncState } from '@/providers/sync-provider.tsx'
 import { focusedNotePathForRoute } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
@@ -55,9 +55,9 @@ export function NoteStatusBar({
   const { route } = useRouter()
   const today = useToday()
   const focusedDailyDate = useFocusedDailyDate()
-  const { settings } = useSettings()
-  const { graph } = useGraph()
-  const sync = useGitSyncContext()
+  const settings = useSettingsStore()
+  const graph = useGraphInfo()
+  const sync = useGitSyncState()
   const peekedPath = usePeekedNotePath()
   const path = explicitPath ?? peekedPath ?? focusedNotePathForRoute(route, today, focusedDailyDate)
   const generation = graph?.generation ?? null
@@ -113,7 +113,7 @@ export function NoteStatusBar({
   const { state } = status
   const kinds = activeNoteStateKinds(state)
   const labels = kinds.map((kind) => noteStatePresentation(kind).label)
-  const sections = noteDetails({ state, backup: sync?.state, version })
+  const sections = noteDetails({ state, backup: sync, version })
   const canTogglePrivacy = scope !== null && !state.isLocalOnly && !state.isProtected
   const editedAt = Math.max(mtime ?? 0, status.editedAt ?? 0)
   const characters = numberFormat.format(status.characters)

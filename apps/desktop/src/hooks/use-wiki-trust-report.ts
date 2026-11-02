@@ -8,9 +8,9 @@ import {
   type WikiTrustReportFile,
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useGitSyncContext } from '@/providers/sync-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useGitSyncActions } from '@/providers/sync-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** How often an open graph re-checks the report file for a new version. */
@@ -105,13 +105,13 @@ async function loadReport(
  * watcher do.
  */
 export function useWikiTrustReport(always = false): WikiTrustReportState {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { wiki } = useCoreServices()
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const client = useQueryClient()
   // Read when a report arrives, not when its read began: backup may start
   // while a read is still in flight.
-  const syncContext = useGitSyncContext()
+  const syncContext = useGitSyncActions()
   const syncRef = useRef(syncContext)
   useEffect(() => {
     syncRef.current = syncContext

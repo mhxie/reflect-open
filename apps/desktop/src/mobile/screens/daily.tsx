@@ -8,8 +8,8 @@ import { DailyCaptureMenu } from '@/mobile/daily-capture-menu.tsx'
 import { DayCarousel } from '@/mobile/day-carousel.tsx'
 import { useDailyArrivals } from '@/mobile/use-daily-arrivals.ts'
 import { useSwipeTarget } from '@/mobile/use-swipe-target.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 
 /**
@@ -25,8 +25,8 @@ import { useRouter } from '@/routing/router.tsx'
  */
 export function MobileDaily({ date }: { date: string }): ReactElement {
   const { navigate, entryId, arrivalSeq, arrivalFocusEditor } = useRouter()
-  const { graph } = useGraph()
-  const { settings } = useSettings()
+  const graph = useGraphInfo()
+  const settings = useSettingsStore()
   const path = dailyPath(date)
   const status = useNoteStatus(graph === null ? null : { generation: graph.generation, path })
   const statusBarVisible = settings.statusBarEnabled && status !== null

@@ -10,6 +10,6 @@ export function useLocalOnlyFolders(): LocalOnlyFolders {
   const { graphSession } = useCoreServices()
   return useServiceState(
     graphSession,
-    () => graphSession.getState().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS,
+    () => graphSession.get().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS,
   )
 }

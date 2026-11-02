@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactElement } from 'react'
 import { displayNoteTitle, type AttachmentLibraryEntry, formatRecencyLabel } from '@reflect/core'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { attachmentFilename, CARD_FOOTER_HEIGHT } from './attachment-media.ts'
 import { AttachmentNoteLinksMenu } from './attachment-note-links-menu.tsx'
 
@@ -24,7 +24,7 @@ export function AttachmentCardFooter({
   entry,
   onOpenNote,
 }: AttachmentCardFooterProps): ReactElement {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const [firstNote] = entry.notes
   const filename = attachmentFilename(entry.path)
   return (

@@ -397,7 +397,7 @@ describe('pinning a note in a read-only local-only folder', () => {
     expect(noteRows.getOverlay('finance/secure/a.md')).toBeNull()
     expect(files.getReads()).toEqual([])
     expect(files.writes()).toEqual([])
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
   })
 
   it('pins a note in an editable local-only folder', async () => {
@@ -668,7 +668,7 @@ describe('togglePrivate', () => {
 
     await actions.togglePrivate('notes/a.md')
 
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
     expect(files.getWrites('notes/a.md')).toEqual([
       '---\ntitle: Diary\nprivate: true\n---\n\nsecret\n',
     ])
@@ -686,7 +686,7 @@ describe('togglePrivate', () => {
     expect(files.getReads()).toEqual([])
     expect(files.writes()).toEqual([])
     expect(noteRows.getOverlays().size).toBe(0)
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
   })
 
   it('reports a read failure through progress and writes nothing', async () => {
@@ -1105,7 +1105,7 @@ describe('trashMany', () => {
       keptInGraph: [],
     })
 
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
   })
 
   it('trashes every note in order under one operation', async () => {
@@ -1122,7 +1122,7 @@ describe('trashMany', () => {
     expect(files.trashed()).toEqual(['notes/a.md', 'notes/b.md'])
     expect([...noteRows.getOverlays().keys()]).toEqual(['notes/a.md', 'notes/b.md'])
     expect(progress.started()).toMatchObject([{ label: 'Trashing notes', ended: true }])
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
   })
 
   it('says when the system Trash refused notes and the graph’s trash kept them', async () => {
@@ -1319,7 +1319,7 @@ describe('with no graph open', () => {
     ).resolves.toEqual([])
 
     expect(files.writes()).toEqual([])
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
   })
 
   it('rejects a trash and fails a batch trash with the reason', async () => {

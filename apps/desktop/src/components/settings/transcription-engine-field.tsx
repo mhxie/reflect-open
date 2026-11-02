@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import type { TranscriptionEngine } from '@reflect/core'
 import { cn } from '@/lib/utils.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
 
@@ -26,7 +26,8 @@ const ENGINE_OPTIONS: EngineOption[] = [
 
 /** Where audio memos are transcribed (macOS offers the on-device engine). */
 export function TranscriptionEngineField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
 
   return (
     <SettingsField
@@ -56,7 +57,7 @@ export function TranscriptionEngineField(): ReactElement {
                   name="transcription-engine"
                   value={option.value}
                   checked={selected}
-                  onChange={() => updateSettings({ transcriptionEngine: option.value })}
+                  onChange={() => settingsService.update({ transcriptionEngine: option.value })}
                   className="mt-0.5 shrink-0 accent-accent"
                 />
               </SettingsOptionCard>

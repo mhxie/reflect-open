@@ -6,8 +6,8 @@ import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import type { NoteEntry } from '@reflect/app'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useDateFormat } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -25,8 +25,8 @@ interface NotePreviewProps {
 }
 
 export function NotePreview({ entry }: NotePreviewProps): ReactElement {
-  const { graph } = useGraph()
-  const { settings } = useSettings()
+  const graph = useGraphInfo()
+  const dateFormat = useDateFormat()
   const { noteDocuments } = useCoreServices()
   const localOnly = useLocalOnlyFolders()
   const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(entry.path)
@@ -65,9 +65,7 @@ export function NotePreview({ entry }: NotePreviewProps): ReactElement {
   return (
     <div data-testid="palette-preview" className="h-full px-5 py-4">
       {entry.date !== null ? (
-        <h2 className="mb-3 text-lg font-semibold">
-          {formatDayLabel(entry.date, settings.dateFormat)}
-        </h2>
+        <h2 className="mb-3 text-lg font-semibold">{formatDayLabel(entry.date, dateFormat)}</h2>
       ) : null}
       {content}
     </div>

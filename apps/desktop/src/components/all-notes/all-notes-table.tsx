@@ -5,7 +5,7 @@ import { formatShortDate } from '@reflect/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import type { AllNotesFilter } from '@reflect/app'
 import { ALL_NOTES_GRID, AllNotesRow } from './all-notes-row.tsx'
 import { ATTACHMENT_FILTER_NOUNS } from './attachment-filter-labels.ts'
@@ -51,7 +51,7 @@ export function AllNotesTable({
   onOpen,
   registerScrollToIndex,
 }: AllNotesTableProps): ReactElement | null {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const rows = notes ?? []
   const { clickSelect, isSelected } = selection
   const virtualizerRef = useRef<VirtualizerHandle>(null)

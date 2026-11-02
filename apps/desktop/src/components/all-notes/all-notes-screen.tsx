@@ -17,9 +17,9 @@ import { createAllNotesQueryOptions } from '@/lib/query-options.ts'
 import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useScrollToIndexBridge } from '@/lib/use-scroll-to-index-bridge.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { routeForPath, type AllNotesFilter } from '@reflect/app'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { useRouter } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
@@ -55,9 +55,10 @@ interface AllNotesScreenProps {
  * wired to the router's per-entry scroll memory by hand.
  */
 export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { noteList } = useCoreServices()
-  const { settings, updateSettingsWith } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const knowledgeLevels = useKnowledgeLevels()
   const sort = settings.allNotesSort
   const { navigate } = useRouter()
@@ -109,11 +110,11 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
     filter?.kind === 'level' && knowledgeLevels !== undefined && knowledgeLevels.kind !== 'ready'
   const handleSort = useCallback(
     (key: NoteListSortKey) => {
-      updateSettingsWith((current) => ({
+      settingsService.updateWith((current) => ({
         allNotesSort: chooseNoteListSort(current.allNotesSort, key),
       }))
     },
-    [updateSettingsWith],
+    [settingsService],
   )
 
   const ready = sortedNotes !== undefined

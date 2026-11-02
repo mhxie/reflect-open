@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 const NO_COUNTS: ReadonlyMap<string, number> = new Map()
@@ -11,7 +11,7 @@ const NO_COUNTS: ReadonlyMap<string, number> = new Map()
  * fresh by index invalidation. Fetches nothing while `enabled` is false.
  */
 export function useDailyEditCounts(enabled: boolean): ReadonlyMap<string, number> {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { dailyActivity } = useCoreServices()
   const { data } = useQuery({
     queryKey: queryKeys.index.dailyEditCounts(graph?.root),

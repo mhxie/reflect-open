@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { isWikiPath, type WikiCopy } from '@reflect/core'
 import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -11,7 +11,7 @@ import { useCoreServices } from '@/services/services-provider.tsx'
  * a translation created or deleted elsewhere shows up on the next refetch.
  */
 export function useWikiCopies(path: string): readonly WikiCopy[] | undefined {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { wiki } = useCoreServices()
   const languages = useWikiLanguages()
   const inWiki = isWikiPath(path, languages)

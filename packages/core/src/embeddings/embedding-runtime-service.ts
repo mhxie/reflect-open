@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import type { LoggerService } from '../ports/logger-service.ts'
 import type { IpcBridgeService } from '../ipc/ipc-service.ts'
+import { WritableStore, type Store } from '../store.ts'
 import type { Unlisten } from '../unlisten.ts'
+import { isDeepEqual } from '@ocavue/utils'
 
 /**
 
@@ -49,9 +51,11 @@ export type EmbedTextRole = 'query' | 'passage'
 
 /**
  * The local embedding model (Plan 09): download, load, status, and text
- * vectors. Platforms without a runtime answer `unsupported`.
+ * vectors. Platforms without a runtime answer `unsupported`. As a store, it
+ * holds the last observed status (events and polls), `uninitialized` before
+ * the first one; it listens for status events only while subscribed.
  */
-export interface EmbeddingRuntimeService {
+export interface EmbeddingRuntimeService extends Store<EmbedStatus> {
   /**
    * Poll the runtime status.
    */
@@ -81,14 +85,6 @@ export interface EmbeddingRuntimeService {
    * under that id.
    */
   embedTexts(texts: readonly string[], role?: EmbedTextRole, model?: string): Promise<number[][]>
-  /**
-   * Call `listener` with every status this service observes (events and polls).
-   */
-  subscribe(listener: (status: EmbedStatus) => void): Unlisten
-  /**
-   * The last observed status; `uninitialized` before the first one.
-   */
-  lastStatus(): EmbedStatus
 }
 
 const STATUS_EVENT = 'embed:status'
@@ -119,8 +115,7 @@ export interface EmbeddingRuntimeServiceDeps {
 
 class EmbeddingRuntimeServiceImpl implements EmbeddingRuntimeService {
   readonly #deps: EmbeddingRuntimeServiceDeps
-  readonly #listeners = new Set<(status: EmbedStatus) => void>()
-  #last = UNINITIALIZED
+  readonly #status = new WritableStore<EmbedStatus>(UNINITIALIZED, isDeepEqual)
   #events: StatusEvents | null = null
 
   constructor(deps: EmbeddingRuntimeServiceDeps) {
@@ -143,12 +138,14 @@ class EmbeddingRuntimeServiceImpl implements EmbeddingRuntimeService {
       return initial
     }
     return await new Promise((resolve) => {
-      const unsubscribe = this.subscribe((next) => {
+      const check = (): void => {
+        const next = this.#status.get()
         if (isTerminalStatus(next)) {
           unsubscribe()
           resolve(next)
         }
-      })
+      }
+      const unsubscribe = this.subscribe(check)
       void (this.#events?.registered ?? Promise.resolve(null)).then(async (failure) => {
         if (failure !== null) {
           // Without the event stream no terminal status can arrive: settle now.
@@ -162,6 +159,7 @@ class EmbeddingRuntimeServiceImpl implements EmbeddingRuntimeService {
         } catch (cause) {
           logger.warn('failed to poll the embedding runtime status', cause)
         }
+        check()
       })
     })
   }
@@ -190,36 +188,22 @@ class EmbeddingRuntimeServiceImpl implements EmbeddingRuntimeService {
     )
   }
 
-  subscribe(listener: (status: EmbedStatus) => void): Unlisten {
-    // Wrapped for identity, so one function added twice detaches independently.
-    const deliver = (status: EmbedStatus): void => {
-      listener(status)
-    }
-    this.#listeners.add(deliver)
+  readonly get = this.#status.get
+
+  readonly subscribe = (listener: VoidFunction): Unlisten => {
+    const unlisten = this.#status.subscribe(listener)
     this.#events ??= this.#startEvents()
-    let attached = true
     return () => {
-      if (!attached) {
-        return
-      }
-      attached = false
-      this.#listeners.delete(deliver)
-      if (this.#listeners.size === 0) {
+      unlisten()
+      if (!this.#status.subscribed()) {
         this.#events?.stop()
         this.#events = null
       }
     }
   }
 
-  lastStatus(): EmbedStatus {
-    return this.#last
-  }
-
   #observe(status: EmbedStatus): EmbedStatus {
-    this.#last = status
-    for (const listener of this.#listeners) {
-      listener(status)
-    }
+    this.#status.set(status)
     return status
   }
 

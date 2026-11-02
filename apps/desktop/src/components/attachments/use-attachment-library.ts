@@ -5,7 +5,7 @@ import {
   createAttachmentFilesQueryOptions,
   createAttachmentReferencesQueryOptions,
 } from '@/lib/query-options.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -16,7 +16,7 @@ import { useCoreServices } from '@/services/services-provider.tsx'
  * independently.
  */
 export function useAttachmentLibrary(): readonly AttachmentLibraryEntry[] | undefined {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { attachments, noteList } = useCoreServices()
   const enabled = graph !== null
   const generation = graph?.generation ?? 0

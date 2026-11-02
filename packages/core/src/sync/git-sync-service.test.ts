@@ -313,7 +313,7 @@ function fakeServices(options: FakeOptions = {}) {
     generation: options.openGeneration ?? GENERATION,
     indexGeneration: 1,
   })
-  const graphSession: GraphSessionSource = { getState: () => ({ session: openSession }) }
+  const graphSession: GraphSessionSource = { get: () => ({ session: openSession }) }
   noteDisplacement = createNoteDisplacementService({
     ipc: createTestIpcBridgeService({ logger }),
     clock,
@@ -397,7 +397,7 @@ function commitCount(calls: string[]): number {
 function trackStates(gitSync: GitSyncService): GitSyncState[] {
   const states: GitSyncState[] = []
   gitSync.subscribe(() => {
-    states.push(gitSync.getState())
+    states.push(gitSync.get())
   })
   return states
 }
@@ -410,7 +410,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1, root: ICLOUD_ROOT })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'waiting', until: 5 * 60_000 },
       })
@@ -431,7 +431,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({ status: { state: 'idle' } })
+      expect(gitSync.get()).toMatchObject({ status: { state: 'idle' } })
     })
     const states = trackStates(gitSync)
     await gitSync.syncNow()
@@ -444,6 +444,30 @@ describe('createGitSyncService', () => {
     gitSync.dispose()
   })
 
+  it('keeps the state reference and notifies no listener after unsubscribe or dispose', async () => {
+    fakeServices()
+    const gitSync = createGitSync({ indexGeneration: 1 })
+    await gitSync.start()
+    await vi.waitFor(() => {
+      expect(gitSync.get()).toMatchObject({ status: { state: 'idle' } })
+    })
+    const state = gitSync.get()
+    expect(gitSync.get()).toBe(state)
+
+    const unsubscribed = vi.fn()
+    gitSync.subscribe(unsubscribed)()
+    await gitSync.syncNow()
+    await flush()
+    expect(unsubscribed).not.toHaveBeenCalled()
+
+    const listener = vi.fn()
+    gitSync.subscribe(listener)
+    gitSync.dispose()
+    await gitSync.start()
+    await flush()
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('a folder graph never enters quiet mode', async () => {
     const { calls } = fakeServices()
     const gitSync = createGitSync({ indexGeneration: 1 })
@@ -451,7 +475,7 @@ describe('createGitSyncService', () => {
     await vi.waitFor(() => {
       expect(calls).toContain('fetch')
     })
-    expect(gitSync.getState()).toMatchObject({ status: { state: 'idle' } })
+    expect(gitSync.get()).toMatchObject({ status: { state: 'idle' } })
     expect(icloudNative.calls()).toEqual([])
     gitSync.dispose()
   })
@@ -464,7 +488,7 @@ describe('createGitSyncService', () => {
       const gitSync = createGitSync({ indexGeneration: 1, root })
       await gitSync.start()
       await vi.waitFor(() => {
-        const state = gitSync.getState()
+        const state = gitSync.get()
         expect.assert(state.phase === 'connected')
         expect(state.status.state).toMatch(/idle|waiting/)
       })
@@ -549,7 +573,7 @@ describe('createGitSyncService', () => {
       failing.git.onPull(() => ({ ...PULLED, committed: true, ahead: 1 }))
       void failing.gitSync.syncNow()
       await vi.waitFor(() => {
-        expect(failing.gitSync.getState()).toMatchObject({ status: { state: 'error' } })
+        expect(failing.gitSync.get()).toMatchObject({ status: { state: 'error' } })
       })
       const before = probed()
       await advance(5 * 60_000)
@@ -567,7 +591,7 @@ describe('createGitSyncService', () => {
     try {
       await gitSync.start()
       await vi.waitFor(() => {
-        expect(gitSync.getState()).toMatchObject({ status: { state: 'idle' } })
+        expect(gitSync.get()).toMatchObject({ status: { state: 'idle' } })
       })
       git.onCommitAll(() => {
         activity.setHidden(true)
@@ -590,11 +614,11 @@ describe('createGitSyncService', () => {
     const { secrets } = fakeServices()
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
-    expect(gitSync.getState()).toMatchObject({ phase: 'connected' })
+    expect(gitSync.get()).toMatchObject({ phase: 'connected' })
 
     await gitSyncDeps.githubAuth.clear()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({ phase: 'needsCredential' })
+      expect(gitSync.get()).toMatchObject({ phase: 'needsCredential' })
     })
 
     expect(secrets.snapshot()).not.toHaveProperty('github-auth')
@@ -605,14 +629,14 @@ describe('createGitSyncService', () => {
     const { calls } = fakeServices({ auth: null, remoteUrl: 'https://gitlab.com/alex/notes.git' })
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
-    expect(gitSync.getState()).toMatchObject({ phase: 'needsCredential' })
+    expect(gitSync.get()).toMatchObject({ phase: 'needsCredential' })
 
     await gitSyncDeps.gitHostCredentials.save('https://gitlab.com', {
       username: 'alex',
       secret: 'glpat-1',
     })
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({ phase: 'connected' })
+      expect(gitSync.get()).toMatchObject({ phase: 'connected' })
     })
     await vi.waitFor(() => {
       expect(calls).toContain('fetch')
@@ -629,7 +653,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
 
-    expect(gitSync.getState()).toEqual({
+    expect(gitSync.get()).toEqual({
       phase: 'needsCredential',
       remoteUrl: 'https://github.com/alex/notes.git',
       remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
@@ -675,7 +699,7 @@ describe('createGitSyncService', () => {
       expect(calls).toContain('fetch')
     })
 
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'connected',
       remoteUrl: 'git@gitlab.com:alex/notes.git',
       remote: { kind: 'ssh', host: 'gitlab.com' },
@@ -700,7 +724,7 @@ describe('createGitSyncService', () => {
     await vi.waitFor(() => {
       expect(invocations.some(({ command }) => command === 'push')).toBe(true)
     })
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'connected',
       remote: { kind: 'https', origin: 'https://gitlab.com' },
     })
@@ -732,7 +756,7 @@ describe('createGitSyncService', () => {
     )
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'needsCredential',
       remote: { kind: 'https', origin: 'https://gitlab.com:8443' },
     })
@@ -767,7 +791,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
 
-    expect(gitSync.getState()).toEqual({
+    expect(gitSync.get()).toEqual({
       phase: 'needsCredential',
       remoteUrl: 'https://gitlab.com/alex/notes.git',
       remote: { kind: 'https', origin: 'https://gitlab.com' },
@@ -795,7 +819,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
 
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'needsCredential',
       remote: { kind: 'https', origin: 'https://gitlab.com' },
     })
@@ -814,7 +838,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
 
-    expect(gitSync.getState()).toMatchObject({ phase: 'needsCredential' })
+    expect(gitSync.get()).toMatchObject({ phase: 'needsCredential' })
     await vi.waitFor(() => {
       expect(calls).toContain('commitAll')
     })
@@ -865,7 +889,7 @@ describe('createGitSyncService', () => {
     await gitSync.start()
 
     // The UI never learns about local history — the graph reads as disconnected.
-    expect(gitSync.getState()).toEqual({ phase: 'disconnected' })
+    expect(gitSync.get()).toEqual({ phase: 'disconnected' })
     const setup = invocations.find(({ command }) => command === 'setup')
     expect(setup?.args).toMatchObject({ remoteUrl: null, branch: null, generation: GENERATION })
     await vi.waitFor(() => {
@@ -981,7 +1005,7 @@ describe('createGitSyncService', () => {
     await gitSync.start()
     await flush()
 
-    expect(gitSync.getState()).toEqual({ phase: 'disconnected' })
+    expect(gitSync.get()).toEqual({ phase: 'disconnected' })
     expect(calls).not.toContain('setup')
     expect(calls).not.toContain('commitAll')
     gitSync.dispose()
@@ -995,7 +1019,7 @@ describe('createGitSyncService', () => {
     await gitSync.disconnectGraph()
 
     expect(calls).toContain('disconnect')
-    expect(gitSync.getState()).toEqual({ phase: 'disconnected' })
+    expect(gitSync.get()).toEqual({ phase: 'disconnected' })
     gitSync.dispose()
   })
 
@@ -1004,7 +1028,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
 
-    expect(gitSync.getState()).toEqual({ phase: 'disconnected' })
+    expect(gitSync.get()).toEqual({ phase: 'disconnected' })
     expect(calls).not.toContain('commitAll')
     expect(logger.getErrors()).toEqual([{ message: 'backup start failed:', cause: 'broken repo' }])
     gitSync.dispose()
@@ -1014,7 +1038,7 @@ describe('createGitSyncService', () => {
     const { invocations } = fakeServices({ remoteUrl: null })
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
-    expect(gitSync.getState()).toEqual({ phase: 'disconnected' })
+    expect(gitSync.get()).toEqual({ phase: 'disconnected' })
 
     await gitSync.connectRemote('https://github.com/alex/notes.git', 'main')
 
@@ -1024,7 +1048,7 @@ describe('createGitSyncService', () => {
       branch: 'main',
       generation: GENERATION,
     })
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'connected',
       remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
     })
@@ -1043,12 +1067,12 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'error', errorKind: 'rejected' },
       })
     })
-    const state = gitSync.getState()
+    const state = gitSync.get()
     expect(
       state.phase === 'connected' && state.status.state === 'error' && state.status.message,
     ).toContain('alex/notes')
@@ -1065,7 +1089,7 @@ describe('createGitSyncService', () => {
     })
     // Let the probe's rejection settle before asserting nothing changed.
     await flush()
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'connected',
       status: { state: 'error', errorKind: 'auth' },
     })
@@ -1080,7 +1104,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'offline' },
       })
@@ -1094,7 +1118,7 @@ describe('createGitSyncService', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'offline' },
       })
@@ -1331,7 +1355,7 @@ describe('createGitSyncService', () => {
     try {
       await gitSync.start()
       await vi.waitFor(() => {
-        expect(progress.getAll().some((operation) => operation.status === 'warning')).toBe(true)
+        expect(progress.get().some((operation) => operation.status === 'warning')).toBe(true)
       })
       expect(noteDisplacement.isRecentlyDisplaced(from, to)).toBe(false)
     } finally {
@@ -1355,9 +1379,9 @@ describe('createGitSyncService', () => {
     await gitSync.start()
 
     await vi.waitFor(() => {
-      expect(progress.getAll()).toHaveLength(2)
+      expect(progress.get()).toHaveLength(2)
     })
-    const [frozen, editable] = progress.getAll()
+    const [frozen, editable] = progress.get()
     expect(frozen).toMatchObject({ label: 'Syncing', status: 'warning', persistent: false })
     expect(frozen?.message).toContain('archive/2019.md')
     expect(frozen?.message).not.toContain('finance/secure/remote.md')
@@ -1479,7 +1503,7 @@ describe('createGitSyncService', () => {
       // The second callback already fanned out synchronously, but its direct
       // index write is queued behind the first gated batch.
       expect(calls.filter((command) => command === 'applyChanges')).toHaveLength(1)
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'syncing' },
       })
@@ -1487,7 +1511,7 @@ describe('createGitSyncService', () => {
       releaseIndexApply()
       await vi.waitFor(() => {
         expect(calls.filter((command) => command === 'applyChanges')).toHaveLength(2)
-        expect(gitSync.getState()).toMatchObject({
+        expect(gitSync.get()).toMatchObject({
           phase: 'connected',
           status: { state: 'idle' },
         })
@@ -1554,14 +1578,14 @@ describe('createGitSyncService', () => {
     await vi.waitFor(() => {
       expect(calls).toContain('applyChanges')
     })
-    expect(gitSync.getState()).toMatchObject({
+    expect(gitSync.get()).toMatchObject({
       phase: 'connected',
       status: { state: 'syncing' },
     })
 
     releaseIndexApply()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'idle' },
       })
@@ -1583,7 +1607,7 @@ describe('createGitSyncService', () => {
     await gitSync.start()
 
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'idle' },
       })
@@ -1697,7 +1721,7 @@ describe('GitSyncService.catchUp', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'error', errorKind: 'auth' },
       })
@@ -1720,7 +1744,7 @@ describe('GitSyncService.catchUp', () => {
     const gitSync = createGitSync({ indexGeneration: 1 })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'error', errorKind: 'rejected' },
       })
@@ -1775,7 +1799,7 @@ describe('GitSyncService.catchUp', () => {
     const gitSync = createGitSync({ indexGeneration: 1, root: ICLOUD_ROOT })
     await gitSync.start()
     await vi.waitFor(() => {
-      expect(gitSync.getState()).toMatchObject({
+      expect(gitSync.get()).toMatchObject({
         phase: 'connected',
         status: { state: 'waiting' },
       })

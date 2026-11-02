@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import { normalizeWikiFolder, normalizeWikiLanguages } from '@reflect/core'
 import { X } from 'lucide-react'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsSection } from './section.tsx'
 import { WikiTrustDisplayField } from './wiki-trust-display-field.tsx'
@@ -18,7 +18,8 @@ const INPUT_CLASS =
  * read the language list.
  */
 export function WikiSection(): ReactElement {
-  const { settings, updateSettingsWith } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const languages = settings.wikiLanguages
   const [label, setLabel] = useState('')
   const [folder, setFolder] = useState('')
@@ -42,7 +43,7 @@ export function WikiSection(): ReactElement {
     }
     // Applied to the loaded settings, not this render's: an edit made while
     // they still load must not replace the saved list with the defaults.
-    updateSettingsWith((current) => ({
+    settingsService.updateWith((current) => ({
       wikiLanguages: normalizeWikiLanguages([
         ...current.wikiLanguages,
         { label: name, folder: normalized },
@@ -55,7 +56,7 @@ export function WikiSection(): ReactElement {
 
   const removeLanguage = (removed: string): void => {
     // The first language is the source and stays, whatever was on screen.
-    updateSettingsWith((current) => ({
+    settingsService.updateWith((current) => ({
       wikiLanguages: current.wikiLanguages.filter(
         (language, index) => index === 0 || language.folder !== removed,
       ),

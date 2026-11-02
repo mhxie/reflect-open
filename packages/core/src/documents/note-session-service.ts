@@ -289,7 +289,7 @@ class NoteSessionImpl implements NoteSession {
     this.#applyContent = options.applyContent
     this.#onContent = options.onContent
     this.#reconcilePendingEditorInput = options.reconcilePendingEditorInput
-    this.#graph = deps.graphSession.getState().session
+    this.#graph = deps.graphSession.get().session
     this.#io = sessionIo(deps, this.#graph, options)
     this.path = options.path
     this.#createIfMissing = options.createIfMissing ?? false

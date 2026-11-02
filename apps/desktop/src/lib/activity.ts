@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react'
+import { useCallback, useMemo } from 'react'
 import { isIndexProgressWorthShowing, type FinishedOperation, type Operation } from '@reflect/core'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
+import { useStore } from '@/lib/use-store.ts'
 import { useServiceState } from '@/services/use-service-state.ts'
 
 /** One piece of work in progress, as the activity tray lists it. */
@@ -27,18 +28,12 @@ export interface Activity {
 export function useActivity(): Activity {
   const { indexLifecycle, semanticSearch } = useCoreServices()
   const { operations } = useAppServices()
-  const current = useServiceState(
-    operations,
-    useCallback(() => operations.getAll(), [operations]),
-  )
+  const current = useStore(operations)
   const history = useServiceState(
     operations,
     useCallback(() => operations.getHistory(), [operations]),
   )
-  const index = useSyncExternalStore(
-    indexLifecycle.subscribeFileProgress,
-    indexLifecycle.fileProgress,
-  )
+  const index = useStore(indexLifecycle.fileProgress)
   const semantic = useServiceState(semanticSearch, semanticSearch.getIndexProgress)
   return useMemo(() => {
     const running: ActivityItem[] = []

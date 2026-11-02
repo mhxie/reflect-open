@@ -5,7 +5,7 @@ import { useDailyEditCounts } from '@/hooks/use-daily-edit-counts.ts'
 import { useElementWidth } from '@/hooks/use-element-width.ts'
 import { weekColumnsFitting } from '@/lib/heatmap-grid.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { ActivityHeatmap } from './activity-heatmap.tsx'
 import { SidebarSection } from './sidebar-section.tsx'
 
@@ -16,7 +16,7 @@ import { SidebarSection } from './sidebar-section.tsx'
  */
 export function ActivitySection(): ReactElement | null {
   const today = useToday()
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const enabled = settings.activityHeatmapEnabled
   const activity = useDailyActivity(enabled)
   const editCounts = useDailyEditCounts(enabled)

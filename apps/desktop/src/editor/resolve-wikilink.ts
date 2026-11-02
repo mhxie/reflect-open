@@ -10,7 +10,7 @@ import {
   formatDayLabel,
 } from '@reflect/core'
 import { isIsoDate, getIsoToday } from '@reflect/utils'
-import { useDateFormat } from '@/hooks/use-date-format.ts'
+import { useDateFormat } from '@/providers/settings-provider.tsx'
 
 /**
  * The wiki-link chip rule shared by every meowdown surface: `[[target|alias]]`

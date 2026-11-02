@@ -300,7 +300,7 @@ class RetrievalServiceImpl implements RetrievalService {
   }
 
   async retrieve(query: string, options?: RetrieveOptions): Promise<RetrievalHit[]> {
-    const localOnly = this.#deps.graphSession.getState().session?.localOnly ?? null
+    const localOnly = this.#deps.graphSession.get().session?.localOnly ?? null
     const limit = options?.limit ?? 12
     const mode = options?.mode ?? 'hybrid'
     const excludePrivateContent = options?.excludePrivateContent ?? false

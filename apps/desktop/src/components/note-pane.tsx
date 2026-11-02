@@ -63,9 +63,18 @@ import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
 import { getIsoToday } from '@reflect/utils'
 import { cn } from '@/lib/utils.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useNoteSearchQuery, useNoteSearchReport } from '@/providers/note-find-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import {
+  useDateFormat,
+  useEditorBulletAfterHeading,
+  useEditorDefaultBullet,
+  useEditorMarkdownSyntax,
+  useEditorSmoothCaretAnimation,
+  useEditorSpellCheck,
+  useTimeFormat,
+  useSettingsStore,
+} from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NotePaneProps {
@@ -190,8 +199,15 @@ export function NotePaneComponent({
   reveal,
   onRevealed,
 }: NotePaneProps): ReactElement {
-  const { graph } = useGraph()
-  const { settings } = useSettings()
+  const graph = useGraphInfo()
+  const settings = useSettingsStore()
+  const dateFormat = useDateFormat()
+  const timeFormat = useTimeFormat()
+  const editorMarkdownSyntax = useEditorMarkdownSyntax()
+  const editorSpellCheck = useEditorSpellCheck()
+  const editorSmoothCaretAnimation = useEditorSmoothCaretAnimation()
+  const editorDefaultBullet = useEditorDefaultBullet()
+  const editorBulletAfterHeading = useEditorBulletAfterHeading()
   const { noteCreation, platform } = useCoreServices()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
@@ -246,7 +262,7 @@ export function NotePaneComponent({
     saveError,
   } = useAssetPersistence(path, openPdf)
   const renderWikilinkHoverCard = useWikiLinkHoverPreview({
-    dateFormat: settings.dateFormat,
+    dateFormat,
   })
   // Read-only navigation only resolves: a link from a local-only note must
   // never create a note.
@@ -551,10 +567,7 @@ export function NotePaneComponent({
   // setting is on (old Reflect's every-note default). The seed only changes what
   // the editor shows; persistence is untouched, so a not-yet-created daily
   // placeholder stays uncreated until the user types — see `default-bullet.ts`.
-  const editorSeed = editorBodyWithDefaultBullet(
-    document.initialContent,
-    settings.editorDefaultBullet,
-  )
+  const editorSeed = editorBodyWithDefaultBullet(document.initialContent, editorDefaultBullet)
 
   return (
     <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
@@ -594,13 +607,13 @@ export function NotePaneComponent({
         // input, in place: the session (and its buffer) never changes.
         readOnly={document.saveBlocked}
         onChange={handleEditorChange}
-        markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
-        spellCheck={settings.editorSpellCheck}
+        markMode={markModeFromSyntax(editorMarkdownSyntax)}
+        spellCheck={editorSpellCheck}
         searchQuery={searchQuery}
         onSearchChange={handleSearchChange}
-        smoothCaretAnimation={settings.editorSmoothCaretAnimation}
-        timeFormat={settings.timeFormat}
-        bulletAfterHeading={settings.editorBulletAfterHeading}
+        smoothCaretAnimation={editorSmoothCaretAnimation}
+        timeFormat={timeFormat}
+        bulletAfterHeading={editorBulletAfterHeading}
         backspaceDeletesEmptyFirstBlock={dailyNote}
         // The grip drag-reorders blocks and the "+" inserts a paragraph below.
         blockHandle={true}
@@ -642,9 +655,7 @@ export function NotePaneComponent({
         <EditorAiKeymap onTrigger={aiMenu.openMenu} />
         <NoteTitlePresentationBridge
           metadata={
-            markModeFromSyntax(settings.editorMarkdownSyntax) === 'show'
-              ? undefined
-              : document.titleMetadata
+            markModeFromSyntax(editorMarkdownSyntax) === 'show' ? undefined : document.titleMetadata
           }
         />
         {outline ? <OutlineBridge path={path} /> : null}

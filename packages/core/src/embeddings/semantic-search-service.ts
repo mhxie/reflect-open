@@ -4,6 +4,7 @@ import type { LoggerService } from '../ports/logger-service.ts'
 import type { StorageService } from '../ports/storage-service.ts'
 import type { GraphSessionState } from '../graph/graph-session-service.ts'
 import type { IndexLifecycleService } from '../indexing/index-lifecycle-service.ts'
+import { deriveStore, type Store } from '../store.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type { SettingsService } from '../settings/settings-service.ts'
 import type { EmbeddingBackfillResult, EmbeddingIndexService } from './embedding-index-service.ts'
@@ -30,10 +31,9 @@ const BACKFILL_ACTIVITY = 'Embedding notes for semantic search'
 /**
  * The open graph as {@link SemanticSearchService} reads it; a `GraphSessionService` is one.
  */
-export interface SemanticSearchGraphSource {
-  getState: () => Pick<GraphSessionState, 'graph' | 'indexGeneration' | 'indexing' | 'session'>
-  subscribe: (listener: () => void) => Unlisten
-}
+export type SemanticSearchGraphSource = Store<
+  Pick<GraphSessionState, 'graph' | 'indexGeneration' | 'indexing' | 'session'>
+>
 
 /**
  * How far the running embedding backfill has walked the graph's notes.
@@ -158,7 +158,7 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
         if (source !== 'rebuild') {
           return
         }
-        const { session } = graphSession.getState()
+        const { session } = graphSession.get()
         const embed = await embeddingRuntime.status()
         if (embed.status === 'ready' && session !== null && session.generation === fileGeneration) {
           await embeddingIndex.backfill({
@@ -206,7 +206,7 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
       const current = settings.get()
       const enabled = current.semanticSearchEnabled && this.#mainWindow
       const wanted = current.semanticModel
-      const status = embeddingRuntime.lastStatus()
+      const status = embeddingRuntime.get()
       const loadedModel = status.status === 'ready' ? status.model : null
 
       const nextLoadGate = `${enabled} ${status.status} ${loadedModel ?? ''} ${wanted}`
@@ -224,7 +224,7 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
       // the file-write generation in GraphInfo — the counters are independent.
       // Ready means ready with the configured model: until a switch lands,
       // the previous model must not write vectors into the table.
-      const { graph, indexGeneration: generation, indexing, session } = graphSession.getState()
+      const { graph, indexGeneration: generation, indexing, session } = graphSession.get()
       const loaded = status.status === 'ready' && status.model === wanted ? status : null
       const target =
         enabled &&
@@ -274,7 +274,10 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
     }
 
     const unlisteners = [
-      settings.subscribe(react),
+      deriveStore(
+        settings,
+        (value) => `${value.semanticSearchEnabled} ${value.semanticModel}`,
+      ).subscribe(react),
       embeddingRuntime.subscribe(react),
       graphSession.subscribe(react),
     ]

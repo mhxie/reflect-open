@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { readWikiArticle, splitWikiLinkTarget } from '@reflect/core'
 import { getIsoToday } from '@reflect/utils'
-import { useMaybeGraph } from '@/providers/graph-provider.tsx'
+import { useMaybeGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -9,7 +9,7 @@ import { useCoreServices } from '@/services/services-provider.tsx'
  */
 export function useWikiArticleIdentities(source: string): (title: string) => string | null {
   const { noteLinkResolver } = useCoreServices()
-  const graph = useMaybeGraph()?.graph ?? null
+  const graph = useMaybeGraphInfo()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const namesKey = useMemo(() => {

@@ -2,29 +2,38 @@ import { createContext, use, useEffect, useMemo, useRef, type ReactNode } from '
 import type { GraphBootService } from '@reflect/app'
 import type {
   AppPlatform,
+  GraphInfo,
   GraphServices,
   GraphSession,
   GraphSessionService,
   GraphSessionState,
+  GraphStatus,
+  RecentGraph,
+  Store,
 } from '@reflect/core'
 import { reportBackupWarnings } from '@/lib/backup-warnings.ts'
 import { reportLocalOnlyWarnings } from '@/lib/local-only-warnings.ts'
+import { useSelector } from '@/lib/use-store.ts'
 import {
   GraphServicesProvider,
   useAppServices,
   useCoreServices,
 } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
-import { useMobileGraphBoot, type MobileGraphBoot } from './use-mobile-graph-boot.ts'
 
 /**
- * The graph context surface: the session state and its actions, the
- * mobile-only slice documented on {@link MobileGraphBoot}, and the platform.
+ * The graph context surface: the graph session, its actions, and the
+ * platform. All of them are stable; read the session state through the
+ * slice hooks below.
  */
-type GraphContextValue = GraphSessionState<GraphServices> &
-  Pick<GraphBootService, 'pickAndOpen' | 'chooseGraph' | 'openRecent' | 'deleteGraph'> &
-  Pick<GraphSessionService, 'refreshIndex'> &
-  MobileGraphBoot & {
+type GraphContextValue = Pick<
+  GraphBootService,
+  'pickAndOpen' | 'chooseGraph' | 'openRecent' | 'deleteGraph'
+> &
+  Pick<GraphSessionService, 'refreshIndex'> & {
+    /**
+     * The active graph session of this webview.
+     */
+    graphSession: GraphSessionService<GraphServices>
     /**
      * `GraphBootService.createGraphAt`.
      */
@@ -39,6 +48,52 @@ type GraphContextValue = GraphSessionState<GraphServices> &
      */
     platform: AppPlatform
   }
+
+type State = GraphSessionState<GraphServices>
+
+function selectStatus(state: State): GraphStatus {
+  return state.status
+}
+
+function selectGraph(state: State): GraphInfo | null {
+  return state.graph
+}
+
+function selectMaybeGraph(state: State | null): GraphInfo | null {
+  return state?.graph ?? null
+}
+
+function selectIndexGeneration(state: State): number | null {
+  return state.indexGeneration
+}
+
+function selectIndexing(state: State): boolean {
+  return state.indexing
+}
+
+function selectError(state: State): string | null {
+  return state.error
+}
+
+function selectRecents(state: State): RecentGraph[] {
+  return state.recents
+}
+
+function selectSession(state: State): GraphSession | null {
+  return state.session
+}
+
+function selectServices(state: State): GraphServices | null {
+  return state.services
+}
+
+/**
+ * The state of a missing graph session: outside a `GraphProvider`.
+ */
+const NO_GRAPH_SESSION: Store<null> = {
+  get: () => null,
+  subscribe: () => () => {},
+}
 
 const GraphContext = createContext<GraphContextValue | null>(null)
 
@@ -64,18 +119,19 @@ export function GraphProvider({
   platform?: AppPlatform
 }) {
   const { graphSession: session } = useCoreServices()
-  const { graphBoot, operations } = useAppServices()
-  const state = useServiceState(session, session.getState)
+  const { graphBoot, mobileOnboarding, operations } = useAppServices()
+  const services = useSelector(session, selectServices)
+  const graph = useSelector(session, selectGraph)
+  const openSession = useSelector(session, selectSession)
 
   // Desktop main-window boot reopens the most recent graph or shows the
   // chooser; a secondary note window adopts the main window's graph. Mobile
-  // opens through its hook below.
+  // opens through the onboarding service below.
   useEffect(() => graphBoot.boot(), [graphBoot])
 
   // A graph's local-only and backup settings problems show once per open, in
   // the window that opened it: a note window adopts the same graph, and its
   // own copy of the warnings would only repeat them.
-  const { graph, session: openSession } = state
   const reportedRef = useRef<GraphSession | null>(null)
   useEffect(() => {
     if (graph === null || openSession === null || openSession.role !== 'main') {
@@ -89,14 +145,13 @@ export function GraphProvider({
     reportBackupWarnings(operations, graph)
   }, [graph, openSession, operations])
 
-  // The mobile bootstrap + onboarding slice (Plans 19/21) lives in its own
-  // service; it opens and parks through the session.
-  const mobile = useMobileGraphBoot()
+  // The mobile bootstrap + onboarding (Plans 19/21) lives in its own
+  // service; it opens and parks through the session. Inert on desktop.
+  useEffect(() => mobileOnboarding.boot(), [mobileOnboarding])
 
   const value = useMemo<GraphContextValue>(
     () => ({
-      ...state,
-      ...mobile,
+      graphSession: session,
       pickAndOpen: () => graphBoot.pickAndOpen(),
       chooseGraph: () => graphBoot.chooseGraph(),
       openRecent: (root) => graphBoot.openRecent(root),
@@ -106,30 +161,81 @@ export function GraphProvider({
       forget: (root) => graphBoot.forgetRecent(root),
       platform,
     }),
-    [session, graphBoot, state, mobile, platform],
+    [session, graphBoot, platform],
   )
 
   return (
     <GraphContext value={value}>
-      <GraphServicesProvider services={state.services}>{children}</GraphServicesProvider>
+      <GraphServicesProvider services={services}>{children}</GraphServicesProvider>
     </GraphContext>
   )
 }
 
 /**
- * Access the active graph + open/choose actions. Use within a GraphProvider.
+ * The graph session, its open/choose actions, and the platform. Use within a
+ * GraphProvider.
  */
-export function useGraph(): GraphContextValue {
-  const context = useMaybeGraph()
+export function useGraphActions(): GraphContextValue {
+  const context = use(GraphContext)
   if (!context) {
-    throw new Error('useGraph must be used within a GraphProvider')
+    throw new Error('useGraphActions must be used within a GraphProvider')
   }
   return context
 }
 
 /**
- * The active graph + open/choose actions, or `null` outside a GraphProvider.
+ * The lifecycle status of the active graph.
  */
-export function useMaybeGraph(): GraphContextValue | null {
-  return use(GraphContext)
+export function useGraphStatus(): GraphStatus {
+  return useSelector(useGraphActions().graphSession, selectStatus)
+}
+
+/**
+ * The open graph, or `null` while none is open.
+ */
+export function useGraphInfo(): GraphInfo | null {
+  return useSelector(useGraphActions().graphSession, selectGraph)
+}
+
+/**
+ * The open graph, or `null` while none is open or outside a GraphProvider.
+ */
+export function useMaybeGraphInfo(): GraphInfo | null {
+  const store: Store<State | null> = use(GraphContext)?.graphSession ?? NO_GRAPH_SESSION
+  return useSelector(store, selectMaybeGraph)
+}
+
+/**
+ * The open index session generation (`GraphSessionState.indexGeneration`).
+ */
+export function useIndexGeneration(): number | null {
+  return useSelector(useGraphActions().graphSession, selectIndexGeneration)
+}
+
+/**
+ * True while the background index reconcile is running.
+ */
+export function useGraphIndexing(): boolean {
+  return useSelector(useGraphActions().graphSession, selectIndexing)
+}
+
+/**
+ * The last error of the graph flows, or `null`.
+ */
+export function useGraphError(): string | null {
+  return useSelector(useGraphActions().graphSession, selectError)
+}
+
+/**
+ * The recently opened graphs.
+ */
+export function useGraphRecents(): RecentGraph[] {
+  return useSelector(useGraphActions().graphSession, selectRecents)
+}
+
+/**
+ * The open graph as one object, or `null` while none is open.
+ */
+export function useGraphSession(): GraphSession | null {
+  return useSelector(useGraphActions().graphSession, selectSession)
 }

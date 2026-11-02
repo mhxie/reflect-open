@@ -1,6 +1,11 @@
 import type { ReactElement } from 'react'
 import { TRANSCRIPTION_PROMPT_MAX_LENGTH, normalizeTranscriptionPrompt } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import {
+  useSettingsService,
+  useSettingsStore,
+  useTranscriptionFormat,
+  useTranscriptionPrompt,
+} from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { LocalModelField } from './local-model-field.tsx'
 import { SettingsSection } from './section.tsx'
@@ -14,34 +19,35 @@ import { TranscriptionLanguagesField } from './transcription-languages-field.tsx
  * The engine choice exists on macOS only, where whisper.cpp runs on Metal.
  */
 export function AudioMemosSection(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const transcriptionFormat = useTranscriptionFormat()
+  const transcriptionPrompt = useTranscriptionPrompt()
+  const settingsService = useSettingsService()
+  const { transcriptionEngine } = useSettingsStore()
   const { platform } = useCoreServices()
 
   return (
     <SettingsSection id="audio-memos">
       {platform.isMacosDesktop ? <TranscriptionEngineField /> : null}
-      {platform.isMacosDesktop && settings.transcriptionEngine === 'local' ? (
-        <LocalModelField />
-      ) : null}
+      {platform.isMacosDesktop && transcriptionEngine === 'local' ? <LocalModelField /> : null}
       <TranscriptionLanguagesField />
-      {settings.transcriptionEngine === 'cloud' ? (
+      {transcriptionEngine === 'cloud' ? (
         <SettingsSwitchField
           legend="Transcription auto-format"
           description="Use AI to add punctuation, paragraphs, and light Markdown while preserving the original meaning."
-          checked={settings.transcriptionFormat}
-          onCheckedChange={(transcriptionFormat) => updateSettings({ transcriptionFormat })}
+          checked={transcriptionFormat}
+          onCheckedChange={(transcriptionFormat) => settingsService.update({ transcriptionFormat })}
         />
       ) : null}
       <SettingsTextareaField
         legend="Transcription helper text"
         description="Context given to the transcription engine with every audio memo, such as names it tends to misspell."
         ariaLabel="Transcription helper text"
-        value={settings.transcriptionPrompt}
+        value={transcriptionPrompt}
         placeholder="This transcription mentions the following names:"
         maxLength={TRANSCRIPTION_PROMPT_MAX_LENGTH}
         rows={2}
         normalize={normalizeTranscriptionPrompt}
-        onSave={(transcriptionPrompt) => updateSettings({ transcriptionPrompt })}
+        onSave={(transcriptionPrompt) => settingsService.update({ transcriptionPrompt })}
       />
     </SettingsSection>
   )

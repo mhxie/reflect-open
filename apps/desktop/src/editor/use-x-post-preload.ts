@@ -4,7 +4,7 @@ import { useQueries } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { xPostQueryOptions } from '@/editor/use-x-post-resolver.ts'
 import { queryClient } from '@/lib/query-client.ts'
-import { useMaybeGraph } from '@/providers/graph-provider.tsx'
+import { useMaybeGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 // Longest wait before mounting anyway; cold-start archive reads measured up to 258 ms.
@@ -28,7 +28,7 @@ export type XPostPreloadPrivacy = 'public' | 'private' | 'pending'
  */
 export function useXPostPreload(markdown: string | null, privacy: XPostPreloadPrivacy): boolean {
   const { embedMedia } = useCoreServices()
-  const root = useMaybeGraph()?.graph?.root ?? null
+  const root = useMaybeGraphInfo()?.root ?? null
   const postIds = useMemo(() => {
     const ids = new Set<string>()
     for (const url of markdown === null ? [] : collectImages(markdown)) {

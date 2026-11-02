@@ -1,29 +1,23 @@
-import type {
-  ClockService,
-  FinishedOperation,
-  Operation,
-  OperationHandle,
-  OperationOptions,
-  ProgressPort,
-  Unlisten,
+import {
+  WritableStore,
+  type ClockService,
+  type FinishedOperation,
+  type Operation,
+  type OperationHandle,
+  type OperationOptions,
+  type ProgressPort,
+  type Store,
 } from '@reflect/core'
 
 /**
- * The app-wide list of visible background operations.
+ * The app-wide list of visible background operations, newest last.
+ * Listeners run synchronously inside the mutation that caused them.
  */
-export interface OperationsService extends ProgressPort {
+export interface OperationsService extends ProgressPort, Store<readonly Operation[]> {
   /**
    * Removes an operation by id.
    */
   dismiss(id: number): void
-  /**
-   * Listeners run synchronously inside the mutation that caused them.
-   */
-  subscribe(listener: () => void): Unlisten
-  /**
-   * The current operations, newest last. The array changes identity on every change.
-   */
-  getAll(): readonly Operation[]
   /**
    * The background operations that finished this session, newest first, as
    * the activity tray's history lists them. The array changes identity when
@@ -110,9 +104,8 @@ class OperationHandleImpl implements OperationHandle {
 class OperationsServiceImpl implements OperationsService {
   readonly #deps: OperationsServiceDeps
   #nextId = 1
-  #operations: readonly Operation[] = []
+  readonly #operations = new WritableStore<readonly Operation[]>([])
   #history: readonly FinishedOperation[] = []
-  readonly #listeners = new Set<() => void>()
 
   constructor(deps: OperationsServiceDeps) {
     this.#deps = deps
@@ -126,8 +119,8 @@ class OperationsServiceImpl implements OperationsService {
     const { clock } = this.#deps
     const id = this.#nextId++
     const persistent = options?.persistent ?? false
-    this.#operations = [
-      ...this.#operations,
+    this.#operations.set([
+      ...this.#operations.get(),
       {
         id,
         label,
@@ -139,17 +132,19 @@ class OperationsServiceImpl implements OperationsService {
         action: options?.action ?? null,
         message: null,
       },
-    ]
-    this.#emit()
+    ])
     return new OperationHandleImpl(this, clock, id, persistent)
   }
 
+  readonly get = this.#operations.get
+
+  readonly subscribe = this.#operations.subscribe
+
   dismiss(id: number): void {
-    const removed = this.#operations.find((operation) => operation.id === id)
+    const removed = this.#operations.get().find((operation) => operation.id === id)
     if (removed === undefined) {
       return
     }
-    this.#operations = this.#operations.filter((operation) => operation.id !== id)
     if (removed.background) {
       const { label, status, message } = removed
       this.#history = [
@@ -157,18 +152,7 @@ class OperationsServiceImpl implements OperationsService {
         ...this.#history,
       ].slice(0, HISTORY_LIMIT)
     }
-    this.#emit()
-  }
-
-  subscribe(listener: () => void): Unlisten {
-    this.#listeners.add(listener)
-    return () => {
-      this.#listeners.delete(listener)
-    }
-  }
-
-  getAll(): readonly Operation[] {
-    return this.#operations
+    this.#operations.set(this.#operations.get().filter((operation) => operation.id !== id))
   }
 
   getHistory(): readonly FinishedOperation[] {
@@ -177,7 +161,7 @@ class OperationsServiceImpl implements OperationsService {
 
   patch(id: number, change: Partial<Operation>): void {
     let changed = false
-    this.#operations = this.#operations.map((operation) => {
+    const operations = this.#operations.get().map((operation) => {
       if (operation.id !== id) {
         return operation
       }
@@ -185,13 +169,7 @@ class OperationsServiceImpl implements OperationsService {
       return { ...operation, ...change }
     })
     if (changed) {
-      this.#emit()
-    }
-  }
-
-  #emit(): void {
-    for (const listener of this.#listeners) {
-      listener()
+      this.#operations.set(operations)
     }
   }
 }

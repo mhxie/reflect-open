@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { activityDaySummary } from '@/lib/activity-day-summary.ts'
 import { formatCompactDate } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { ActivityEditedTitles } from './activity-edited-titles.tsx'
 
 export interface ActivityDayTooltipProps {
@@ -21,7 +21,7 @@ export function ActivityDayTooltip({
   characters,
   editCounts,
 }: ActivityDayTooltipProps): ReactElement {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   return (
     <>
       <div>

@@ -5,19 +5,14 @@ import type {
   OperationOptions,
   ProgressPort,
 } from '../ports/progress-port.ts'
-import type { Unlisten } from '../unlisten.ts'
+import { WritableStore, type Store } from '../store.ts'
 
 /**
  * A {@link ProgressPort} that lists its operations without timers: an entry
  * leaves on `done()` or `dismiss()`, and a warning or failure stays.
  */
-export interface TestProgressPort extends ProgressPort {
-  /**
-   * The current operations, newest last.
-   */
-  getAll(): readonly Operation[]
+export interface TestProgressPort extends ProgressPort, Store<readonly Operation[]> {
   dismiss(id: number): void
-  subscribe(listener: () => void): Unlisten
   /**
    * The background operations that left, newest first. This port keeps no
    * clock: `endedAt` is 0.
@@ -50,10 +45,13 @@ export type ProgressSnapshot = Omit<Operation, 'id' | 'action'> & {
 
 class TestProgressPortImpl implements TestProgressPort {
   #nextId = 1
-  #operations: readonly Operation[] = []
+  readonly #operations = new WritableStore<readonly Operation[]>([])
   #history: readonly FinishedOperation[] = []
   readonly #started = new Map<number, StartedOperation>()
-  readonly #listeners = new Set<() => void>()
+
+  readonly get = this.#operations.get
+
+  readonly subscribe = this.#operations.subscribe
 
   start(label: string, options?: OperationOptions): OperationHandle {
     const id = this.#nextId++
@@ -68,9 +66,8 @@ class TestProgressPortImpl implements TestProgressPort {
       action: options?.action ?? null,
       message: null,
     }
-    this.#operations = [...this.#operations, operation]
     this.#started.set(id, { ...operation, ended: false })
-    this.#emit()
+    this.#operations.set([...this.#operations.get(), operation])
     return {
       progress: (done, total) => this.#patch(id, { progress: { done, total } }),
       done: () => this.dismiss(id),
@@ -84,13 +81,8 @@ class TestProgressPortImpl implements TestProgressPort {
     this.start(label, options).fail(message)
   }
 
-  getAll(): readonly Operation[] {
-    return this.#operations
-  }
-
   dismiss(id: number): void {
-    const removed = this.#operations.find((operation) => operation.id === id)
-    this.#operations = this.#operations.filter((operation) => operation.id !== id)
+    const removed = this.#operations.get().find((operation) => operation.id === id)
     if (removed?.background === true) {
       const { label, status, message } = removed
       this.#history = [{ id, label, status, message, endedAt: 0 }, ...this.#history]
@@ -99,14 +91,7 @@ class TestProgressPortImpl implements TestProgressPort {
     if (started !== undefined) {
       this.#started.set(id, { ...started, ended: true })
     }
-    this.#emit()
-  }
-
-  subscribe(listener: () => void): Unlisten {
-    this.#listeners.add(listener)
-    return () => {
-      this.#listeners.delete(listener)
-    }
+    this.#operations.set(this.#operations.get().filter((operation) => operation.id !== id))
   }
 
   getHistory(): readonly FinishedOperation[] {
@@ -114,11 +99,11 @@ class TestProgressPortImpl implements TestProgressPort {
   }
 
   findByLabel(label: string): Operation | undefined {
-    return this.#operations.findLast((operation) => operation.label === label)
+    return this.#operations.get().findLast((operation) => operation.label === label)
   }
 
   snapshot(): ProgressSnapshot[] {
-    return this.#operations.map(({ id: _id, action, ...rest }) => ({
+    return this.#operations.get().map(({ id: _id, action, ...rest }) => ({
       ...rest,
       action: action?.label ?? null,
     }))
@@ -129,20 +114,15 @@ class TestProgressPortImpl implements TestProgressPort {
   }
 
   #patch(id: number, change: Partial<Operation>): void {
-    this.#operations = this.#operations.map((operation) => {
-      return operation.id === id ? { ...operation, ...change } : operation
-    })
     const started = this.#started.get(id)
     if (started !== undefined) {
       this.#started.set(id, { ...started, ...change })
     }
-    this.#emit()
-  }
-
-  #emit(): void {
-    for (const listener of this.#listeners) {
-      listener()
-    }
+    this.#operations.set(
+      this.#operations.get().map((operation) => {
+        return operation.id === id ? { ...operation, ...change } : operation
+      }),
+    )
   }
 }
 

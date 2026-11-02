@@ -170,7 +170,7 @@ class RenameCoordinatorImpl implements RenameCoordinator {
 
   constructor(deps: TitleRenameServiceDeps, options: RenameCoordinatorOptions) {
     this.#deps = deps
-    this.#graph = deps.graphSession.getState().session
+    this.#graph = deps.graphSession.get().session
     this.#currentPath = options.path
     this.#tracker = createTitleRenameTracker({
       path: options.path,
@@ -255,7 +255,7 @@ class RenameCoordinatorImpl implements RenameCoordinator {
    * {@link writeGenerationFor} picks the generation.
    */
   #localOnly(graph: GraphSession): LocalOnlyFolders {
-    const { session } = this.#deps.graphSession.getState()
+    const { session } = this.#deps.graphSession.get()
     return session !== null && session.root === graph.root ? session.localOnly : graph.localOnly
   }
 

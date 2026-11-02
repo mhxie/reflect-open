@@ -21,7 +21,12 @@ import {
   useTaskEditorFinalizer,
   type TaskEditorApi,
 } from '@/lib/tasks/use-task-editor-finalizer.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import {
+  useEditorMarkdownSyntax,
+  useEditorSmoothCaretAnimation,
+  useEditorSpellCheck,
+  useTimeFormat,
+} from '@/providers/settings-provider.tsx'
 
 /**
  * The inline task editor (Plan 18, V1 parity): the sole-selected task swaps its
@@ -163,7 +168,10 @@ export function TaskEditor({
   checkboxToggleControllerRef,
   convertControllerRef,
 }: TaskEditorProps): ReactElement {
-  const { settings } = useSettings()
+  const timeFormat = useTimeFormat()
+  const editorMarkdownSyntax = useEditorMarkdownSyntax()
+  const editorSpellCheck = useEditorSpellCheck()
+  const editorSmoothCaretAnimation = useEditorSmoothCaretAnimation()
   // The task's note decides the policy: a link from a local-only note only
   // navigates, never creating a note, and a private note stays off the network.
   const localOnly = isLocalOnlyPath(useLocalOnlyFolders(), task.notePath)
@@ -223,10 +231,10 @@ export function TaskEditor({
         privateNote={privateNote}
         singleParagraph
         onChange={onChange}
-        markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
-        spellCheck={settings.editorSpellCheck}
-        smoothCaretAnimation={settings.editorSmoothCaretAnimation}
-        timeFormat={settings.timeFormat}
+        markMode={markModeFromSyntax(editorMarkdownSyntax)}
+        spellCheck={editorSpellCheck}
+        smoothCaretAnimation={editorSmoothCaretAnimation}
+        timeFormat={timeFormat}
         // A one-line editor has nothing to reorder, so keep the gutter grip off.
         blockHandle={false}
         onWikiLinkClick={navigate}

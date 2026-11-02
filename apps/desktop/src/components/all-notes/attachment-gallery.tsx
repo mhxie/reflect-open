@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FileText } from 'lucide-react'
 import {
@@ -13,8 +13,9 @@ import { createAttachmentPreviewsQueryOptions } from '@/lib/query-options.ts'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
+import { useStore } from '@/lib/use-store.ts'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 
@@ -44,8 +45,8 @@ export function AttachmentGallery({
   onOpen,
   registerScrollToIndex,
 }: AttachmentGalleryProps): ReactElement {
-  const { graph } = useGraph()
-  const { settings } = useSettings()
+  const graph = useGraphInfo()
+  const settings = useSettingsStore()
   const { noteList, attachments } = useCoreServices()
   const generation = graph?.generation ?? null
   const { data: previews } = useQuery({
@@ -54,11 +55,7 @@ export function AttachmentGallery({
   })
   // An attachment reference names several candidate paths; the catalog says
   // which exists.
-  const subscribeCatalog = useCallback(
-    (listener: () => void) => attachments.onCatalogChanged(listener),
-    [attachments],
-  )
-  const catalog = useSyncExternalStore(subscribeCatalog, () => attachments.peekCatalog())
+  const catalog = useStore(attachments.catalog)
   const listRef = useRef<HTMLUListElement>(null)
 
   // Cards render in the list's order, so the selection's index is the card's.

@@ -26,7 +26,7 @@ import { useAssetPersistence, type AssetPersistence } from './use-asset-persiste
 let persistence: AssetPersistence | null = null
 // The app of the latest `renderPersistence`; the attachment services read its graph.
 let core: ReturnType<typeof createTestCoreServices<{ attachments: AttachmentService }>>
-const graphSession = { getState: () => core.graphSession.getState() }
+const graphSession = { get: () => core.graphSession.get() }
 // The attachment service of the next `renderPersistence`.
 let attachmentService: AttachmentService = createTestAttachmentService({ graphSession })
 
@@ -236,7 +236,7 @@ describe('useAssetPersistence saveFile for local-only notes', () => {
     expect(uploadedFor()).toEqual(['My Finance/secure/bank.md'])
     expect(saved).toBe('/My%20Finance/secure/assets/huge-scan.mov')
     // It never enters the Git backup, so the backup's size limits don't apply.
-    expect(progress.getAll().filter((operation) => operation.status === 'warning')).toEqual([])
+    expect(progress.get().filter((operation) => operation.status === 'warning')).toEqual([])
     // The pill sizes it from the save itself, by the link it inserted.
     await expect(persistence!.resolveFileInfo(saved!)).resolves.toEqual({
       size: LARGE_FILE_BYTES + 1,

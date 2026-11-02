@@ -133,7 +133,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
   isNativeMenuInstalled = vi.spyOn(appLayer.nativeMenu, 'isInstalled').mockReturnValue(false)
   getPinnedNotes = vi.spyOn(services.indexQuery, 'getPinnedNotes').mockImplementation(() => {
     return Promise.resolve([
-      ...(options?.pinned?.[services.graphSession.getState().session?.root ?? ''] ?? []),
+      ...(options?.pinned?.[services.graphSession.get().session?.root ?? ''] ?? []),
     ])
   })
   const createChatSession = services.chatSessions.create.bind(services.chatSessions)

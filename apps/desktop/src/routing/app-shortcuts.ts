@@ -8,17 +8,19 @@ import { getIsoToday } from '@reflect/utils'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
-import { useMaybeChatSession } from '@/providers/chat-provider.tsx'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphActions, useGraphInfo, useGraphRecents } from '@/providers/graph-provider.tsx'
 import { useHeadingPicker } from '@/providers/heading-picker-provider.tsx'
 import { useNoteFindActions } from '@/providers/note-find-provider.tsx'
 import { useNoteTemplates } from '@/providers/note-templates-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsService } from '@/providers/settings-provider.tsx'
 import { useShortcuts } from '@/providers/shortcuts-provider.tsx'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
-import { useTheme } from '@/providers/theme-provider.tsx'
-import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
+import {
+  useAppServices,
+  useCoreServices,
+  useMaybeGraphServices,
+} from '@/services/services-provider.tsx'
 import { focusedNotePathForRoute, routeForPath } from '@reflect/app'
 import { useRouter } from './router.tsx'
 
@@ -57,9 +59,6 @@ const NATIVE_MACOS_MENU_COMMAND_IDS = new Set([
  * the native menu's command items dispatch into the same guard path while
  * mounted (`setMenuCommandDispatch`).
  */
-
-function doNothing(): void {}
-
 export function useAppShortcuts(): CommandContext {
   const services = useCoreServices()
   const appServices = useAppServices()
@@ -68,8 +67,9 @@ export function useAppShortcuts(): CommandContext {
   const { commands, nativeMenu } = appServices
   const focusedDailyDate = useFocusedDailyDate()
   const peekedPath = usePeekedNotePath()
-  const { resolvedTheme, setTheme } = useTheme()
-  const { graph, recents, openRecent } = useGraph()
+  const graph = useGraphInfo()
+  const recents = useGraphRecents()
+  const { openRecent } = useGraphActions()
   // Keeps the shared pinned query active while the workspace sidebar is
   // collapsed, so ⌘1–⌘0 always see the shelf in its sidebar order.
   const pinnedNotes = usePinnedNotes()
@@ -85,8 +85,11 @@ export function useAppShortcuts(): CommandContext {
   const { toggleSidebar } = useSidebar()
   const { toggle: toggleAudioMemo } = useAudioMemo()
   // The hook can outlive the open graph, and its chat session with it.
-  const newChat = useMaybeChatSession()?.newChat ?? doNothing
-  const { settings, updateSettings, updateSettingsWith } = useSettings()
+  const chat = useMaybeGraphServices()?.chat
+  const newChat = useCallback(() => {
+    chat?.newChat()
+  }, [chat])
+  const settingsService = useSettingsService()
   const {
     openForPath: openNoteFindForPath,
     next: findNextInNote,
@@ -116,7 +119,6 @@ export function useAppShortcuts(): CommandContext {
   const focusedDailyDateRef = useRef(focusedDailyDate)
   const peekedPathRef = useRef(peekedPath)
   const pinnedNotesRef = useRef(pinnedNotes)
-  const wikiLanguagesRef = useRef(settings.wikiLanguages)
   // The note being worked on: a peeked note, else the focused stream day (so a
   // note-scoped command targets the day the context sidebar shows — see
   // `effectiveDailyDate`), else the routed note.
@@ -138,7 +140,6 @@ export function useAppShortcuts(): CommandContext {
     focusedDailyDateRef.current = focusedDailyDate
     peekedPathRef.current = peekedPath
     pinnedNotesRef.current = pinnedNotes
-    wikiLanguagesRef.current = settings.wikiLanguages
   })
 
   const context = useMemo<CommandContext>(
@@ -170,7 +171,7 @@ export function useAppShortcuts(): CommandContext {
       back,
       forward,
       clearScrollState,
-      toggleTheme: () => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark'),
+      toggleTheme: appServices.theme.toggleTheme,
       toggleSidebar,
       newChat,
       openNoteFind: () => {
@@ -201,15 +202,15 @@ export function useAppShortcuts(): CommandContext {
       openTemplateCreate,
       openHeadingPicker,
       enableSemanticSearch: () => {
-        updateSettings({ semanticSearchEnabled: true })
+        settingsService.update({ semanticSearchEnabled: true })
         // EmbeddingsSync loads an untouched runtime; a `failed` one only
         // retries on an explicit action like this command.
         void semanticSearch.retryFailedModel()
       },
       sortAllNotes: (update) => {
-        updateSettingsWith((current) => ({ allNotesSort: update(current.allNotesSort) }))
+        settingsService.updateWith((current) => ({ allNotesSort: update(current.allNotesSort) }))
       },
-      wikiLanguages: () => wikiLanguagesRef.current,
+      wikiLanguages: () => settingsService.get().wikiLanguages,
     }),
     [
       services,
@@ -219,8 +220,6 @@ export function useAppShortcuts(): CommandContext {
       back,
       forward,
       clearScrollState,
-      resolvedTheme,
-      setTheme,
       openPalette,
       openShortcuts,
       openTemplatePicker,
@@ -232,8 +231,7 @@ export function useAppShortcuts(): CommandContext {
       findNextInNote,
       findPreviousInNote,
       toggleAudioMemo,
-      updateSettings,
-      updateSettingsWith,
+      settingsService,
       semanticSearch,
     ],
   )

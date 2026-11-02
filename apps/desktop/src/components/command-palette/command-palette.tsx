@@ -10,7 +10,7 @@ import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { routeForPath, type NoteEntry } from '@reflect/app'
 import { cn } from '@/lib/utils.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useDateFormat } from '@/providers/settings-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { NoteTitle } from '@/components/note-title.tsx'
 import { COMMAND_ICONS, FALLBACK_COMMAND_ICON } from './command-icons.ts'
@@ -60,7 +60,7 @@ interface PendingNoteOpen {
 
 export function CommandPalette({ context }: CommandPaletteProps): ReactElement | null {
   const { open, query, setQuery, closePalette } = usePalette()
-  const { settings } = useSettings()
+  const dateFormat = useDateFormat()
   const { sections, resultsSettled, searchFailed } = usePaletteResults(open, query)
   const navigateNoteLink = useNoteLinkNavigation()
   const peekNoteLink = usePeekNavigation()
@@ -233,7 +233,7 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                                 {entry.phrase !== null ? (
                                   entry.phrase
                                 ) : entry.date !== null ? (
-                                  formatDayLabel(entry.date, settings.dateFormat)
+                                  formatDayLabel(entry.date, dateFormat)
                                 ) : (
                                   <NoteTitle
                                     title={entry.title}
@@ -253,7 +253,7 @@ export function CommandPalette({ context }: CommandPaletteProps): ReactElement |
                             </span>
                             {entry.phrase !== null && entry.date !== null ? (
                               <span className="block truncate text-xs text-text-muted">
-                                {formatDayLabel(entry.date, settings.dateFormat)}
+                                {formatDayLabel(entry.date, dateFormat)}
                               </span>
                             ) : null}
                             {entry.alias !== null ? (

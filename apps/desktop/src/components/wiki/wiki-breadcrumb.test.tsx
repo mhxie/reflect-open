@@ -33,7 +33,7 @@ async function renderBreadcrumb(path: string) {
 type BreadcrumbView = Awaited<ReturnType<typeof renderBreadcrumb>>
 
 function probedRoute(view: BreadcrumbView): unknown {
-  return view.appServices.navigation.getState().route
+  return view.appServices.navigation.get().route
 }
 
 beforeEach(() => {

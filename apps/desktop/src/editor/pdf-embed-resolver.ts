@@ -64,7 +64,7 @@ async function resolvePdfEmbed(
   src: string,
 ): Promise<HostEmbed | undefined> {
   const { attachments, noteAttachments, mobileApp, openAsset } = options
-  if (attachments.peekCatalog() === null) {
+  if (attachments.catalog.get() === null) {
     try {
       await attachments.loadCatalog()
     } catch {
@@ -84,7 +84,7 @@ async function resolvePdfEmbed(
         attachments,
         generation,
         path,
-        attachments.peekCatalog()?.size(path),
+        attachments.catalog.get()?.size(path),
       ),
     )
     const view = createPdfPagesView({

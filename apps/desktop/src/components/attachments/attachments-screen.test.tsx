@@ -133,7 +133,7 @@ async function renderScreen() {
 type ScreenView = Awaited<ReturnType<typeof renderScreen>>
 
 function probedRoute(view: ScreenView): unknown {
-  return view.appServices.navigation.getState().route
+  return view.appServices.navigation.get().route
 }
 
 /** The card preview buttons, in DOM (reading) order. */

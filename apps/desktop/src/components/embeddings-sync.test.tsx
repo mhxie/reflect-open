@@ -33,7 +33,7 @@ describe('EmbeddingsSync', () => {
   it('starts no embedding work while semantic search is disabled', async () => {
     const view = await renderInApp(<EmbeddingsSync />, { servicesOnly: true })
     view.core.graphSession.setGraph({ root: '/g', name: 'g', generation: 1, indexGeneration: 7 })
-    await vi.waitFor(() => expect(view.core.embeddingRuntime.lastStatus().status).toBe('ready'))
+    await vi.waitFor(() => expect(view.core.embeddingRuntime.get().status).toBe('ready'))
 
     expect(view.core.embeddingRuntime.ensureCalls()).toBe(0)
     expect(view.core.embeddingIndex.follows()).toEqual([])

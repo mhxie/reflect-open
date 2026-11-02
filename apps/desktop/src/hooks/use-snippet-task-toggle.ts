@@ -4,7 +4,7 @@ import { isLocalOnlyReadOnlyPath, type SnippetTask, type TaskLocator } from '@re
 import type { TaskClickHandler } from '@meowdown/react'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { mutationKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface SnippetToggleInput {
@@ -29,7 +29,7 @@ export function useSnippetTaskToggle(
   notePath: string,
   tasks: readonly SnippetTask[],
 ): TaskClickHandler | undefined {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { tasks: taskService } = useCoreServices()
   const localOnly = useLocalOnlyFolders()
 

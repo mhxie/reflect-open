@@ -23,8 +23,8 @@ import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useToday } from '@/lib/use-today.ts'
 import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { routeForPath, wikiRoute } from '@reflect/app'
 import { useRouter } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
@@ -62,8 +62,9 @@ interface WikiScreenProps {
  * their own pipeline.
  */
 export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): ReactElement {
-  const { graph } = useGraph()
-  const { settings, updateSettingsWith } = useSettings()
+  const graph = useGraphInfo()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const { navigate } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
   const today = useToday()
@@ -147,13 +148,13 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
 
   const handleSort = useCallback(
     (key: WikiSortKey) => {
-      updateSettingsWith((current) => ({ wikiSort: chooseWikiSort(current.wikiSort, key) }))
+      settingsService.updateWith((current) => ({ wikiSort: chooseWikiSort(current.wikiSort, key) }))
     },
-    [updateSettingsWith],
+    [settingsService],
   )
   const handleToggleFold = useCallback(
     (key: string, all: boolean) => {
-      updateSettingsWith((current) => {
+      settingsService.updateWith((current) => {
         const fold = !current.wikiFoldedTopics.includes(key)
         const keys =
           all && layout?.kind === 'grouped'
@@ -163,7 +164,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
         return { wikiFoldedTopics: fold ? [...rest, ...keys] : rest }
       })
     },
-    [updateSettingsWith, layout],
+    [settingsService, layout],
   )
 
   const handleToggleExpanded = useCallback((key: string) => {
@@ -226,7 +227,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
           {filter?.kind === 'index' ? null : (
             <WikiLayoutTabs
               grouped={grouped}
-              onChange={(next) => updateSettingsWith(() => ({ wikiGroupByTopic: next }))}
+              onChange={(next) => settingsService.updateWith(() => ({ wikiGroupByTopic: next }))}
             />
           )}
         </div>

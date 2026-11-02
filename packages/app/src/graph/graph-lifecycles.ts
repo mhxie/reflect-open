@@ -92,7 +92,7 @@ export function createAppGraphServices(
   }
   disposers.push(
     whileActive(
-      () => mobileOnboarding.getState().kind === 'icloud',
+      () => mobileOnboarding.get().kind === 'icloud',
       mobileOnboarding.subscribe,
       () => openGraphLifecycle(session, deps, 'icloudDownload'),
     ),
