@@ -178,7 +178,9 @@ class LocalAssetOcrServiceImpl implements LocalAssetOcrService {
         }
         return outcome
       }
-      const config = aiProviderConfig.list().find((entry) => entry.id === input.localOcrProviderId)
+      const config = aiProviderConfig
+        .get()
+        .providers.find((entry) => entry.id === input.localOcrProviderId)
       if (
         config === undefined ||
         config.provider !== 'openai-compatible' ||

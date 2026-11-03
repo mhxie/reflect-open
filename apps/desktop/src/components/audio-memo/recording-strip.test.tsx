@@ -3,35 +3,34 @@ import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactElement } from 'react'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
-import type { AudioMemoContextValue } from '@/providers/audio-memo-provider.tsx'
+import { WritableStore, type AudioMemoSessionState } from '@reflect/core'
+import { AudioMemoContext } from '@/providers/audio-memo-provider.tsx'
+import { act } from '@/test-utils/act.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { Mutable } from '@reflect/utils'
 
-const memo = vi.hoisted((): Mutable<AudioMemoContextValue> => ({
+const memo: Mutable<AudioMemoSessionState> = {
   phase: 'idle',
-  elapsedMs: 0,
   stream: null,
   nativeRecorder: false,
-  subscribeLevel: null,
   available: true,
   unavailableReason: null,
   error: null,
   canRetry: false,
-  toggle: vi.fn(),
-  cancel: vi.fn(),
-  retry: vi.fn(),
-  discard: vi.fn(),
   pendingCount: 0,
   recorderState: 'idle',
-}))
+}
+const state = new WritableStore<AudioMemoSessionState>({ ...memo })
+const elapsedMs = new WritableStore(0)
+const actions = { toggle: vi.fn(), cancel: vi.fn(), retry: vi.fn(), discard: vi.fn() }
+const session = { get: state.get, subscribe: state.subscribe, elapsedMs }
 const recorder = vi.hoisted(() => ({
   lastTranscript: null as string | null,
   dismissTranscript: vi.fn(),
 }))
 
-vi.mock('@/providers/audio-memo-provider.tsx', () => ({ useAudioMemo: () => ({ ...memo }) }))
 vi.mock('@/providers/recorder-provider.tsx', () => ({
   useOptionalRecorder: () => ({ ...recorder }),
 }))
@@ -45,6 +44,7 @@ function PeekProbe(): ReactElement {
 }
 
 async function renderStrip() {
+  state.set({ ...memo })
   const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.indexQuery, 'getNote').mockImplementation((path) => {
@@ -58,10 +58,12 @@ async function renderStrip() {
     })
   })
   return await renderInApp(
-    <PeekProvider>
-      <RecordingStrip />
-      <PeekProbe />
-    </PeekProvider>,
+    <AudioMemoContext value={{ session, ...actions, subscribeLevel: null }}>
+      <PeekProvider>
+        <RecordingStrip />
+        <PeekProbe />
+      </PeekProvider>
+    </AudioMemoContext>,
     { core: app },
   )
 }
@@ -69,7 +71,7 @@ async function renderStrip() {
 beforeEach(() => {
   vi.clearAllMocks()
   memo.phase = 'idle'
-  memo.elapsedMs = 0
+  elapsedMs.set(0)
   memo.error = null
   memo.canRetry = false
   recorder.lastTranscript = null
@@ -83,13 +85,15 @@ describe('RecordingStrip', () => {
 
   it('shows the elapsed time while recording, and discards', async () => {
     memo.phase = 'recording'
-    memo.elapsedMs = 83_000
+    elapsedMs.set(83_000)
     await renderStrip()
 
     const strip = page.getByRole('status', { name: 'Recording' })
     await expect.element(strip.getByText('1:23')).toBeVisible()
+    await act(() => elapsedMs.set(84_000))
+    await expect.element(strip.getByText('1:24')).toBeVisible()
     await userEvent.click(strip.getByRole('button', { name: 'Discard recording' }))
-    expect(memo.cancel).toHaveBeenCalled()
+    expect(actions.cancel).toHaveBeenCalled()
   })
 
   it('shows progress while transcribing', async () => {
@@ -107,9 +111,9 @@ describe('RecordingStrip', () => {
 
     await expect.element(page.getByText('provider down')).toBeVisible()
     await userEvent.click(page.getByRole('button', { name: 'Retry' }))
-    expect(memo.retry).toHaveBeenCalled()
+    expect(actions.retry).toHaveBeenCalled()
     await userEvent.click(page.getByRole('button', { name: 'Discard', exact: true }))
-    expect(memo.discard).toHaveBeenCalled()
+    expect(actions.discard).toHaveBeenCalled()
   })
 
   it('a non-resumable failure hides Retry', async () => {

@@ -139,7 +139,7 @@ async function renderBar(initialRoute: Route, options: BarOptions = {}) {
     ...(options.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),
   })
   onTestFinished(() => app.database.close())
-  app.clock.setToday('2026-10-03')
+  app.clock.setNow(new Date('2026-10-03T12:00:00').getTime())
   app.gitRepository.onNoteVersion(() => 'abc123def4')
   const mtime = options.mtime ?? null
   vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(() => {

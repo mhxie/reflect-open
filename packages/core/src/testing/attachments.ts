@@ -120,15 +120,15 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     this.#files = options?.catalog ?? []
     this.#catalog = new WritableStore(createAttachmentCatalog(this.#files))
     this.catalog = this.#catalog
-    const defaultSession = createGraphSession({
-      root: '/graphs/test',
-      name: 'test',
-      generation: 1,
-      indexGeneration: 1,
-    })
-    this.#graphSession = options?.graphSession ?? {
-      get: () => ({ session: defaultSession }),
+    const defaultGraphSession = {
+      session: createGraphSession({
+        root: '/graphs/test',
+        name: 'test',
+        generation: 1,
+        indexGeneration: 1,
+      }),
     }
+    this.#graphSession = options?.graphSession ?? { get: () => defaultGraphSession }
   }
 
   loadCatalog(): Promise<AttachmentCatalog> {

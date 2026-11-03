@@ -2,7 +2,7 @@ import { createContext, use, useEffect, useMemo, type ReactElement, type ReactNo
 import type { GraphInfo, Unlisten } from '@reflect/core'
 import { formatTimeOfDay } from '@reflect/core'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useStore } from '@/lib/use-store.ts'
 
 /**
  * The native recorder on the desktop (macOS 14.2+): every recording, a memo
@@ -63,8 +63,12 @@ interface RecorderProviderProps {
 
 export function RecorderProvider({ graph, children }: RecorderProviderProps): ReactElement {
   const { recorder, recordings, settings } = useCoreServices()
-  const status = useServiceState(recorder, recorder.getState)
-  const progress = useServiceState(recordings, recordings.getState)
+  const status = useStore(
+    useMemo(() => ({ get: recorder.getState, subscribe: recorder.subscribe }), [recorder]),
+  )
+  const progress = useStore(
+    useMemo(() => ({ get: recordings.getState, subscribe: recordings.subscribe }), [recordings]),
+  )
 
   // One pass loop per graph session while the recorder exists. The session
   // does nothing in a note window: two loops would write every transcript twice.

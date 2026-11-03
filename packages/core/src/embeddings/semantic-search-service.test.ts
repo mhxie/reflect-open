@@ -18,6 +18,7 @@ import {
   seedNotes,
   type TestNote,
 } from '../testing/index.ts'
+import { WritableStore } from '../store.ts'
 import type {
   EmbeddingBackfillOptions,
   EmbeddingBackfillResult,
@@ -89,7 +90,7 @@ async function setup(options?: {
   const indexLifecycle = createTestIndexLifecycleService({
     logger,
     progress,
-    graphSession: { get: () => ({ session }), subscribe: () => () => {} },
+    graphSession: new WritableStore({ session }),
     indexStore: createTestIndexStoreService({
       fail: (call) => {
         return options?.failClear === true && call.method === 'clear'

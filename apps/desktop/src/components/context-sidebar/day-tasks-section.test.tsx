@@ -59,7 +59,7 @@ beforeEach(() => {
   // A fresh app per test, so its task service's recently-completed set starts empty.
   app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
-  app.clock.setToday(TODAY)
+  app.clock.setNow(new Date(`${TODAY}T12:00:00`).getTime())
   getOpenTasks = vi.spyOn(app.tasks, 'getOpenTasks').mockResolvedValue([])
   writeTask = vi.spyOn(app.tasks, 'writeTask').mockResolvedValue(WRITTEN)
 })

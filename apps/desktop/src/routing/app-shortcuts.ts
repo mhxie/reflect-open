@@ -4,7 +4,6 @@ import { usePalette } from '@/components/command-palette/palette-provider.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
-import { getIsoToday } from '@reflect/utils'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
@@ -125,9 +124,9 @@ export function useAppShortcuts(): CommandContext {
   const workingNotePath = useCallback((): string | null => {
     return (
       peekedPathRef.current ??
-      focusedNotePathForRoute(routeRef.current, getIsoToday(), focusedDailyDateRef.current)
+      focusedNotePathForRoute(routeRef.current, services.today.get(), focusedDailyDateRef.current)
     )
-  }, [])
+  }, [services.today])
   useEffect(() => {
     paletteOpenRef.current = paletteOpen
     shortcutsOpenRef.current = shortcutsOpen

@@ -25,7 +25,7 @@ function RouteProbe(): ReactNode {
 async function renderSection(width = 300) {
   const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
-  app.clock.setToday(TODAY)
+  app.clock.setNow(new Date(`${TODAY}T12:00:00`).getTime())
   vi.spyOn(app.dailyActivity, 'listDailyActivity').mockImplementation(listDailyActivity)
   vi.spyOn(app.dailyActivity, 'listDailyEditCounts').mockImplementation(listDailyEditCounts)
   vi.spyOn(app.noteList, 'listNotes').mockImplementation(listNotes)

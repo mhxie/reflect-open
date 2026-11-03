@@ -23,7 +23,8 @@ import { UpdateProvider } from '@/providers/update-provider.tsx'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { act } from '@/test-utils/act.ts'
-import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { renderInApp, renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { usePinnedTagFilters } from '@/hooks/use-pinned-tag-filters.ts'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ShortcutsDialog } from './shortcuts-dialog.tsx'
 import { SettingsScreen } from './settings-screen.tsx'
@@ -890,6 +891,24 @@ describe('SettingsScreen', () => {
           allNotesFilterTags: ['person'],
         },
       ])
+    })
+  })
+
+  it('removes two pinned filters before a re-render', async () => {
+    const { result, core: services } = await renderHookInApp(() => usePinnedTagFilters(), {
+      settings: { allNotesFilterTags: ['book', 'person'] },
+    })
+
+    await act(() => {
+      result.current.unpinTag('book')
+      result.current.unpinTag('person')
+    })
+
+    await vi.waitFor(() => {
+      expect(services.settings.saves().at(-1)).toEqual({
+        ...DEFAULT_SETTINGS,
+        allNotesFilterTags: [],
+      })
     })
   })
 

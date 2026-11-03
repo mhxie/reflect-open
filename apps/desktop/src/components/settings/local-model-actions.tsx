@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
 import {
   errorMessage,
   formatModelSize,
@@ -8,7 +8,7 @@ import {
 } from '@reflect/core'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useStore } from '@/lib/use-store.ts'
 import { ModelDownloadProgress } from './model-download-progress.tsx'
 
 const PRIMARY_BUTTON =
@@ -32,7 +32,12 @@ interface LocalModelActionsProps {
 export function LocalModelActions({ model, status }: LocalModelActionsProps): ReactElement | null {
   const { localTranscription } = useCoreServices()
   const { localModelUpdates } = useAppServices()
-  const update = useServiceState(localModelUpdates, localModelUpdates.getPending)
+  const update = useStore(
+    useMemo(
+      () => ({ get: localModelUpdates.getPending, subscribe: localModelUpdates.subscribe }),
+      [localModelUpdates],
+    ),
+  )
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const download = (): void => {
     // The status events carry progress and the outcome; nothing to add here.

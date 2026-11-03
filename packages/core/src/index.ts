@@ -117,11 +117,7 @@ export {
   type FrontmatterPatch,
 } from './documents/note-session-frontmatter.ts'
 export { type ChatModelSelection } from './settings/schema.ts'
-export {
-  type CloudGraphContext,
-  cloudSafeLinkHref,
-  notePrivate,
-} from './privacy/privacy-service.ts'
+export { type CloudGraphContext, notePrivate } from './privacy/privacy-service.ts'
 export { type CloudSafe } from './privacy/cloud-safe.ts'
 export {
   calendarEventSchema,
@@ -136,6 +132,7 @@ export {
   type UpdatedPreset,
 } from './search/all-notes-filters.ts'
 export { createDailyNoteService, type DailyNoteService } from './daily/daily-note-service.ts'
+export { createTodayService, type TodayService } from './daily/today-service.ts'
 export { type TemplateService } from './documents/template-service.ts'
 export {
   isOstensiblyEmptyNoteSource,
@@ -318,7 +315,6 @@ export {
   clampSidebarWidth,
   TRANSCRIPTION_PROMPT_MAX_LENGTH,
   normalizeTranscriptionPrompt,
-  TIME_FORMATS,
   timeFormatSchema,
   DATE_FORMATS,
   dateFormatSchema,
@@ -437,7 +433,7 @@ export { isOnDeviceOption, resolveOnDeviceTarget, withOnDeviceModel } from './pr
 export { type OnDeviceModelService } from './ai/on-device-model-service.ts'
 export { OLLAMA_BASE_URL, type OllamaModel, type OllamaModels } from './ai/ollama-models.ts'
 export { smallModelConfig } from './ai/small-model.ts'
-export { type AiProviderCapabilities, type AiProvidersState } from './ai/provider-config.ts'
+export { type AiProviderCapabilities } from './ai/provider-config.ts'
 // Fork: on-device transcription (docs/fork-features.md, Mac audio).
 export { type LocalModelStatus, type LocalModelUpdateReport } from './ai/local-transcription.ts'
 export { type LocalTranscriptionService } from './ai/local-transcription-service.ts'
@@ -447,7 +443,11 @@ export {
   type LocalTranscriptionModelId,
 } from './ai/local-transcription-models.ts'
 
-export { TRANSCRIPTION_PROVIDERS } from './ai/provider-config.ts'
+export {
+  defaultAiProvider,
+  TRANSCRIPTION_PROVIDERS,
+  type AiProvidersState,
+} from './ai/provider-config.ts'
 export { chatModelOptions, type ChatModelOption } from './ai/chat/model-options.ts'
 export { type NoteHitSummary } from './ai/chat/note-tools-service.ts'
 export { chatSystemPrompt } from './ai/chat/system-prompt.ts'

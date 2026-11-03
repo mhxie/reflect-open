@@ -52,7 +52,7 @@ import { useAppStoreEnvironment } from '@/mobile/use-app-store-environment.ts'
 import { useSubscriptionControls } from '@/mobile/use-subscription-controls.ts'
 import { setPerfHudEnabled, usePerfHudEnabled } from '@/perf-hud/flag.ts'
 import { useGraphActions, useGraphInfo } from '@/providers/graph-provider.tsx'
-import { useMobileGraphBoot } from '@/providers/use-mobile-graph-boot.ts'
+import { useMobileStorageKind } from '@/providers/use-mobile-graph-boot.ts'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 import { getMobileSyncStatus, remoteLabel, type MobileSyncDetail } from '@reflect/app'
 import {
@@ -139,7 +139,7 @@ export function MobileSettings(): ReactElement {
   const { back, canBack, navigate } = useRouter()
   const graph = useGraphInfo()
   const { platform } = useGraphActions()
-  const { mobileStorageKind } = useMobileGraphBoot()
+  const mobileStorageKind = useMobileStorageKind()
   const isIos = platform === 'ios'
   const subscriptionControls = useSubscriptionControls()
   const { opener } = useAppServices()

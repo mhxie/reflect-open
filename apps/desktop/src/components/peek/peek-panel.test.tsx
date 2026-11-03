@@ -62,7 +62,7 @@ function RouteProbe(): ReactElement {
 async function renderPeek(): Promise<TestCoreServices> {
   const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
-  app.clock.setToday('2026-10-03')
+  app.clock.setNow(new Date('2026-10-03T12:00:00').getTime())
   vi.spyOn(app.openDocuments, 'sessionFor').mockImplementation((path) => {
     return openPaths.has(path) ? createTestNoteSession({ path }) : null
   })

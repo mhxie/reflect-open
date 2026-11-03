@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useMemo, type ReactElement, type ReactNode } from 'react'
 import { Sparkles } from 'lucide-react'
 import { formatModelSize, semanticModel } from '@reflect/core'
 import { InlineAlert } from '@/components/inline-alert.tsx'
@@ -9,7 +9,7 @@ import {
   useSettingsStore,
 } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useStore } from '@/lib/use-store.ts'
 import { DescribeAssetsField } from './describe-assets-field.tsx'
 import { SettingsField } from './field.tsx'
 import { ModelDownloadProgress } from './model-download-progress.tsx'
@@ -32,7 +32,12 @@ export function SearchSection(): ReactElement {
   const settingsService = useSettingsService()
   const status = useEmbedStatus()
   const { semanticSearch } = useCoreServices()
-  const indexProgress = useServiceState(semanticSearch, semanticSearch.getIndexProgress)
+  const indexProgress = useStore(
+    useMemo(
+      () => ({ get: semanticSearch.getIndexProgress, subscribe: semanticSearch.subscribe }),
+      [semanticSearch],
+    ),
+  )
 
   let control: ReactNode
   if (status.status === 'unsupported') {

@@ -130,7 +130,7 @@ function createApp(): TestCoreServices {
   // Today is the date a question records.
   const services = createTestCoreServices({
     database: createWasmTestDatabaseService(),
-    clock: createTestClockService({ today: getIsoToday() }),
+    clock: createTestClockService({ now: Date.now() }),
   })
   onTestFinished(() => services.database.close())
   services.ipc.onCommand('wiki_trust_report_read', (args) => ({

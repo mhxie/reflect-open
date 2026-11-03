@@ -4,7 +4,12 @@ import { MicIcon } from '@/components/icons/mic-icon.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { cn } from '@/lib/utils.ts'
-import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
+import {
+  useAudioMemo,
+  useAudioMemoAvailable,
+  useAudioMemoPhase,
+  useAudioMemoUnavailableReason,
+} from '@/providers/audio-memo-provider.tsx'
 
 /**
  * The microphone beside the sidebar search box. Idle it starts a memo;
@@ -17,9 +22,12 @@ import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
  */
 export function AudioMemoButton(): ReactElement {
   const memo = useAudioMemo()
+  const phase = useAudioMemoPhase()
+  const available = useAudioMemoAvailable()
+  const unavailableReason = useAudioMemoUnavailableReason()
 
-  if (memo.phase === 'recording' || memo.phase === 'error') {
-    const recording = memo.phase === 'recording'
+  if (phase === 'recording' || phase === 'error') {
+    const recording = phase === 'recording'
     return (
       <Button
         variant="destructive"
@@ -55,22 +63,22 @@ export function AudioMemoButton(): ReactElement {
             variant="ghost"
             size="icon-sm"
             aria-label="Record audio memo"
-            aria-disabled={!memo.available || undefined}
+            aria-disabled={!available || undefined}
             onClick={() => {
-              if (memo.available) {
+              if (available) {
                 memo.toggle()
               }
             }}
             className={cn(
               'text-text-muted hover:text-text-secondary dark:hover:text-text',
-              !memo.available && 'opacity-50 hover:bg-transparent hover:text-text-muted',
+              !available && 'opacity-50 hover:bg-transparent hover:text-text-muted',
             )}
           >
             <MicIcon className="size-5" />
           </Button>
         }
       />
-      <TooltipContent side="bottom">{memo.unavailableReason ?? 'Record audio memo'}</TooltipContent>
+      <TooltipContent side="bottom">{unavailableReason ?? 'Record audio memo'}</TooltipContent>
     </Tooltip>
   )
 }

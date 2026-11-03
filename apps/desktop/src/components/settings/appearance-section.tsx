@@ -7,6 +7,7 @@ import {
   useSettingsStore,
   useThemeSetting,
 } from '@/providers/settings-provider.tsx'
+import { useAppServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
 import { SettingsSection } from './section.tsx'
@@ -25,14 +26,13 @@ const THEME_OPTIONS: ThemeOption[] = [
 ]
 
 /**
- * Theme picker as radio cards (the original app's idiom) and the activity
- * heatmap toggle. Edits the settings document directly — the ThemeEffect
- * applies whatever is persisted, so this section needs no theme context.
+ * Theme picker as radio cards, with activity heatmap and status bar toggles.
  */
 export function AppearanceSection(): ReactElement {
   const settings = useSettingsStore()
-  const theme = useThemeSetting()
   const settingsService = useSettingsService()
+  const theme = useThemeSetting()
+  const { theme: themeService } = useAppServices()
 
   return (
     <SettingsSection id="appearance">
@@ -54,7 +54,7 @@ export function AppearanceSection(): ReactElement {
                   name="theme"
                   value={value}
                   checked={selected}
-                  onChange={() => settingsService.update({ theme: value })}
+                  onChange={() => themeService.setPreference(value)}
                   className="sr-only"
                 />
                 <Icon aria-hidden strokeWidth={1.75} className="size-4" />

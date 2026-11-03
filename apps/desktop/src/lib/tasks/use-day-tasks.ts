@@ -3,7 +3,7 @@ import { tasksForDay, withStruckRows, type DayTasks } from '@reflect/core'
 import { useRecentlyCompleted } from '@/lib/tasks/recently-completed.ts'
 import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useStore } from '@/lib/use-store.ts'
 
 /**
  * {@link tasksForDay} over the open tasks `TaskService` keeps fresh, merged
@@ -14,7 +14,7 @@ import { useServiceState } from '@/services/use-service-state.ts'
 export function useDayTasks(day: string, today: string): DayTasks | undefined {
   const graph = useGraphInfo()
   const { tasks } = useCoreServices()
-  const { open } = useServiceState(tasks, tasks.get)
+  const { open } = useStore(tasks)
   const struck = useRecentlyCompleted(graph?.root ?? null, open)
   return useMemo(
     () => (open === undefined ? undefined : tasksForDay(withStruckRows(open, struck), day, today)),

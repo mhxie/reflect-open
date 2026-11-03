@@ -96,11 +96,11 @@ export {
   createDayWindow,
   dateAtIndex,
   extendDayWindowBack,
-  FUTURE_DAYS,
   indexOfDate,
   indexWithin,
   neighborDate,
   PAST_DAYS,
+  type DayScrollPosition,
   type DayWindow,
   type DayWindowRadius,
 } from './daily/day-window.ts'
@@ -115,7 +115,6 @@ export {
 export {
   createWeekWindow,
   monthPickTarget,
-  WEEK_WINDOW_RADIUS,
   weekAtIndex,
   weekIndexOf,
   weekOf,
@@ -138,12 +137,7 @@ export {
   type NativeMenuService,
   type NativeSubmenu,
 } from './commands/native-menu-service.ts'
-export {
-  buildPaletteSections,
-  type NoteEntry,
-  type PaletteHit,
-  type PaletteSections,
-} from './search/palette-entries.ts'
+export { type NoteEntry, type PaletteHit, type PaletteSections } from './search/palette-entries.ts'
 export { type PaletteSearchService } from './search/palette-search-service.ts'
 export { deepLinkForRoute } from './navigation/deep-link-format.ts'
 export { type DeepLinkRouter } from './navigation/deep-link-router.ts'
@@ -152,7 +146,11 @@ export {
   type LinkNavigationHost,
   type LinkNavigationService,
 } from './navigation/link-navigation-service.ts'
-export { type NavigateOptions, type NavigationService } from './navigation/navigation-service.ts'
+export {
+  type NavigateOptions,
+  type NavigationService,
+  type ScrollPosition,
+} from './navigation/navigation-service.ts'
 export {
   allNotesFilterTag,
   allNotesRoute,
@@ -182,11 +180,10 @@ export {
   type PickFolderOptions,
 } from './app/dialog-service.ts'
 export {
-  createPlatformService,
   type ColorScheme,
   type PlatformMedia,
-  type PlatformService,
-} from './app/platform-service.ts'
+  type SystemPreferencesService,
+} from './app/system-preferences-service.ts'
 export { type GraphBootService } from './graph/graph-boot-service.ts'
 export {
   type MobileOnboardingService,

@@ -6,6 +6,7 @@ import type { GraphSessionState } from '../graph/graph-session-service.ts'
 import type { IndexLifecycleService } from '../indexing/index-lifecycle-service.ts'
 import { deriveStore, type Store } from '../store.ts'
 import type { Unlisten } from '../unlisten.ts'
+import type { Settings } from '../settings/schema.ts'
 import type { SettingsService } from '../settings/settings-service.ts'
 import type { EmbeddingBackfillResult, EmbeddingIndexService } from './embedding-index-service.ts'
 import type { EmbeddingRuntimeService, EmbedStatus } from './embedding-runtime-service.ts'
@@ -142,6 +143,10 @@ export interface SemanticSearchServiceDeps {
   readonly logger: LoggerService
 }
 
+function selectSemanticSearchConfig(settings: Settings): string {
+  return `${settings.semanticSearchEnabled} ${settings.semanticModel}`
+}
+
 class SemanticSearchServiceImpl implements SemanticSearchService {
   readonly #deps: SemanticSearchServiceDeps
   readonly #stopFollowingRebuilds: () => void
@@ -274,10 +279,7 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
     }
 
     const unlisteners = [
-      deriveStore(
-        settings,
-        (value) => `${value.semanticSearchEnabled} ${value.semanticModel}`,
-      ).subscribe(react),
+      deriveStore(settings, selectSemanticSearchConfig).subscribe(react),
       embeddingRuntime.subscribe(react),
       graphSession.subscribe(react),
     ]
