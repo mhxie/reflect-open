@@ -13,6 +13,7 @@ import {
   createTestAttachmentService,
   createTestClockService,
   createTestFileChangeService,
+  createTestLoggerService,
   createTestNoteFileService,
   createTestProgressPort,
   createTestPlatformService,
@@ -96,6 +97,7 @@ function installRoutingAttachments() {
     clock: createTestClockService({ now: 1_700_000_000_000 }),
     platform: createTestPlatformService(),
     graphSession,
+    logger: createTestLoggerService(),
   })
   return {
     progress,
@@ -197,6 +199,7 @@ describe('useAssetPersistence', () => {
       clock,
       platform: createTestPlatformService(),
       graphSession,
+      logger: createTestLoggerService(),
     })
     const view = await renderPersistence({ generation: 3, path: 'notes/a.md' })
 

@@ -26,7 +26,7 @@ import { AiPreviewActions } from '@/editor/ai-menu/ai-preview-actions.tsx'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useAiPrompts } from '@/hooks/use-ai-prompts.ts'
 import { useAiProviders } from '@/hooks/use-ai-providers.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -86,7 +86,7 @@ export function useEditorAiMenu({
   const { providers } = useAiProviders()
   const { selectionTransform } = useCoreServices()
   const { prompts } = useAiPrompts()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
 
   const runRef = useRef<ActiveRun | null>(null)
   const privateNoteRef = useRef(privateNote)

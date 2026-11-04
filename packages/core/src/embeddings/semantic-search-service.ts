@@ -33,7 +33,7 @@ const BACKFILL_ACTIVITY = 'Embedding notes for semantic search'
  * The open graph as {@link SemanticSearchService} reads it; a `GraphSessionService` is one.
  */
 export type SemanticSearchGraphSource = Store<
-  Pick<GraphSessionState, 'graph' | 'indexGeneration' | 'indexing' | 'session'>
+  Pick<GraphSessionState, 'graph' | 'indexGeneration' | 'session'>
 >
 
 /**
@@ -191,8 +191,15 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
   readonly getIndexProgress = (): SemanticIndexProgress | null => this.#progress
 
   start(): Unlisten {
-    const { embeddingRuntime, embeddingIndex, settings, graphSession, nativeActivity, logger } =
-      this.#deps
+    const {
+      embeddingRuntime,
+      embeddingIndex,
+      settings,
+      graphSession,
+      indexLifecycle,
+      nativeActivity,
+      logger,
+    } = this.#deps
     if (this.#consumeLegacyOptIn()) {
       settings.update({ semanticSearchEnabled: true })
     }
@@ -229,7 +236,8 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
       // the file-write generation in GraphInfo — the counters are independent.
       // Ready means ready with the configured model: until a switch lands,
       // the previous model must not write vectors into the table.
-      const { graph, indexGeneration: generation, indexing, session } = graphSession.get()
+      const { graph, indexGeneration: generation, session } = graphSession.get()
+      const indexing = indexLifecycle.progress.get() === 'reconciling'
       const loaded = status.status === 'ready' && status.model === wanted ? status : null
       const target =
         enabled &&
@@ -282,6 +290,7 @@ class SemanticSearchServiceImpl implements SemanticSearchService {
       deriveStore(settings, selectSemanticSearchConfig).subscribe(react),
       embeddingRuntime.subscribe(react),
       graphSession.subscribe(react),
+      indexLifecycle.progress.subscribe(react),
     ]
     // A later start reads the last status the runtime observed; the first one polls.
     embeddingRuntime.status().catch((cause: unknown) => {

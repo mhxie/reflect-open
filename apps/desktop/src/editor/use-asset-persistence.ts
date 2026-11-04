@@ -10,7 +10,7 @@ import type { AssetSaveError } from '@reflect/core'
 import { createPdfEmbedResolver } from '@/editor/pdf-embed-resolver.ts'
 import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
 import { useStore } from '@/lib/use-store.ts'
-import { useMaybeGraphInfo } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 export interface AssetPersistence {
@@ -76,7 +76,7 @@ export function useAssetPersistence(
   path: string,
   openPdf?: (path: string) => void,
 ): AssetPersistence {
-  const graph = useMaybeGraphInfo()
+  const graph = useGraphInfo()
   const generation = graph?.generation ?? null
   const { attachments, platform } = useCoreServices()
   const noteAttachments = useNoteAttachments(path)

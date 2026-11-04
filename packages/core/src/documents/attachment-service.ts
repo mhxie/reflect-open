@@ -26,6 +26,7 @@ import { isAttachmentPath, isSafeVisibleGraphPath } from '../graph/paths.ts'
 import { pdfPageWidthBucket } from '../graph/pdf-pages.ts'
 import type { FileMeta, PdfInfo } from '../graph/schemas.ts'
 import type { FileChangeService } from '../indexing/file-change-service.ts'
+import type { LoggerService } from '../ports/logger-service.ts'
 import type { Unlisten } from '../unlisten.ts'
 import { WritableStore, type Store } from '../store.ts'
 import { formatBytes } from '../lib/format-bytes.ts'
@@ -435,6 +436,7 @@ export interface AttachmentServiceDeps {
   readonly clock: ClockService
   readonly platform: FileSrcSource
   readonly graphSession: GraphSessionSource
+  readonly logger: LoggerService
 }
 
 class AttachmentServiceImpl implements AttachmentService {
@@ -745,6 +747,7 @@ class AttachmentServiceImpl implements AttachmentService {
         return catalog
       },
       (error: unknown) => {
+        this.#deps.logger.warn('listing attachments failed:', error)
         if (target.listing === listing) {
           target.listing = null
         }

@@ -89,7 +89,6 @@ function graphPatch(
       status: 'choosing',
       graph: null,
       indexGeneration: null,
-      indexing: false,
       error: null,
       session: null,
       services: null,
@@ -108,7 +107,6 @@ function graphPatch(
     status: 'ready',
     graph: info,
     indexGeneration,
-    indexing: false,
     error: null,
     session: createGraphSession(
       {

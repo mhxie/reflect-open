@@ -357,7 +357,6 @@ describe('GraphBootService note windows', () => {
       status: 'choosing',
       graph: null,
       indexGeneration: null,
-      indexing: false,
       recents,
     })
     expect(context.window.closeSecondaryWindowsCalls()).toBe(2)

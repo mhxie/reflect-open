@@ -68,8 +68,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
   const { navigate } = useRouter()
   const navigateNoteLink = useNoteLinkNavigation()
   const today = useToday()
-  // In state, not a ref, so scroll restoration re-runs once the element attaches.
-  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const { wikiLanguages: languages, wikiSort: sort, wikiGroupByTopic: grouped } = settings
@@ -110,7 +109,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
       : { kind: 'flat', entries: visible }
   }, [entries, openLanguage, filter, sort, grouped, languages, collapsed])
   const totals = useMemo(() => wikiTotals(entries ?? []), [entries])
-  const { onScroll } = useScrollRestoration(scrollElement, layout !== undefined)
+  const { onScroll } = useScrollRestoration(scrollRef, layout !== undefined)
 
   // The flat, render-order paths of visible rows (folded topics hide theirs),
   // which the selection and its shortcuts act on.
@@ -233,7 +232,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
         </div>
       </header>
       <div
-        ref={setScrollElement}
+        ref={scrollRef}
         data-testid="wiki-scroll"
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-auto"

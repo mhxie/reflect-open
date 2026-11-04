@@ -84,6 +84,7 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
   const [lightboxFile, setLightboxFile] = useState<LightboxFile | null>(null)
   // State, not a ref, so scroll restoration re-runs once the element attaches.
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const scrollRef = useMemo(() => ({ current: scrollElement }), [scrollElement])
   const [setFlowElement, flowWidth] = useElementWidth()
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -105,7 +106,7 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
   }, [library, type])
 
   const ready = entries !== undefined && (entries.length === 0 || flowWidth > 0)
-  const { onScroll } = useScrollRestoration(scrollElement, ready)
+  const { onScroll } = useScrollRestoration(scrollRef, ready)
 
   // Move focus into the surface on mount so the arrow keys work at once.
   useEffect(() => {

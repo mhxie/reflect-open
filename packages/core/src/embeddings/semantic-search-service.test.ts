@@ -124,8 +124,10 @@ async function setup(options?: {
       indexGeneration: 7,
       localOnlyFolders: options?.localOnlyFolders ?? [],
     },
-    ...(options?.indexing === true ? { state: { indexing: true } } : {}),
   })
+  if (options?.indexing === true) {
+    indexLifecycle.setProgress('reconciling')
+  }
   const activity: ActivityEvent[] = []
   const record = (event: ActivityEvent['event'], reason: string): void => {
     activity.push({
@@ -291,7 +293,7 @@ describe('start', () => {
   })
 
   it('waits for the index pass to settle before backfilling', async () => {
-    const { semanticSearch, runtime, embeddingIndex, graphSession } = await setup({
+    const { semanticSearch, runtime, embeddingIndex, indexLifecycle } = await setup({
       indexing: true,
     })
 
@@ -300,22 +302,22 @@ describe('start', () => {
     await flush()
     expect(embeddingIndex.follows()).toEqual([])
 
-    graphSession.setState({ indexing: false })
+    indexLifecycle.setProgress('live')
     expect(embeddingIndex.follows()).toEqual([{ generation: 7, modelId: MODEL }])
     stop()
   })
 
   it('stops following while a later index pass runs, and follows anew after it', async () => {
-    const { semanticSearch, embeddingIndex, graphSession, indexLifecycle } = await setup()
+    const { semanticSearch, embeddingIndex, indexLifecycle } = await setup()
     const stop = semanticSearch.start()
     await vi.waitFor(() => expect(embeddingIndex.follows()).toHaveLength(1))
 
-    graphSession.setState({ indexing: true })
+    indexLifecycle.setProgress('reconciling')
     indexLifecycle.emitApplied([{ kind: 'remove', path: 'notes/a.md' }], 7)
     await flush()
     expect(embeddingIndex.removed()).toEqual([])
 
-    graphSession.setState({ indexing: false })
+    indexLifecycle.setProgress('live')
     expect(embeddingIndex.follows()).toEqual([
       { generation: 7, modelId: MODEL },
       { generation: 7, modelId: MODEL },

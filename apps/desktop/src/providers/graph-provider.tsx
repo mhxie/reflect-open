@@ -5,11 +5,10 @@ import type {
   GraphInfo,
   GraphServices,
   GraphSession,
-  GraphSessionService,
   GraphSessionState,
   GraphStatus,
+  IndexLifecycleProgress,
   RecentGraph,
-  Store,
 } from '@reflect/core'
 import { reportBackupWarnings } from '@/lib/backup-warnings.ts'
 import { reportLocalOnlyWarnings } from '@/lib/local-only-warnings.ts'
@@ -21,18 +20,13 @@ import {
 } from '@/services/services-provider.tsx'
 
 /**
- * The graph context surface: the graph session, its actions, and the
- * platform. All of them are stable; read the session state through the
- * slice hooks below.
+ * The graph context surface: the graph actions and the platform. All of them
+ * are stable; read the session state through the slice hooks below.
  */
 type GraphContextValue = Pick<
   GraphBootService,
   'pickAndOpen' | 'chooseGraph' | 'openRecent' | 'deleteGraph'
 > & {
-  /**
-   * The active graph session of this webview.
-   */
-  graphSession: GraphSessionService<GraphServices>
   /**
    * `GraphBootService.createGraphAt`.
    */
@@ -58,16 +52,12 @@ function selectGraph(state: State): GraphInfo | null {
   return state.graph
 }
 
-function selectMaybeGraph(state: State | null): GraphInfo | null {
-  return state?.graph ?? null
-}
-
 function selectIndexGeneration(state: State): number | null {
   return state.indexGeneration
 }
 
-function selectIndexing(state: State): boolean {
-  return state.indexing
+function selectReconciling(progress: IndexLifecycleProgress): boolean {
+  return progress === 'reconciling'
 }
 
 function selectError(state: State): string | null {
@@ -84,14 +74,6 @@ function selectSession(state: State): GraphSession | null {
 
 function selectServices(state: State): GraphServices | null {
   return state.services
-}
-
-/**
- * The state of a missing graph session: outside a `GraphProvider`.
- */
-const NO_GRAPH_SESSION: Store<null> = {
-  get: () => null,
-  subscribe: () => () => {},
 }
 
 const GraphContext = createContext<GraphContextValue | null>(null)
@@ -117,10 +99,14 @@ export function GraphProvider({
   platform?: AppPlatform
 }) {
   const { graphSession: session } = useCoreServices()
-  const { graphBoot, mobileOnboarding, operations } = useAppServices()
+  const { graphBoot, mobileOnboarding, operations, whatsNew } = useAppServices()
   const services = useSelector(session, selectServices)
   const graph = useSelector(session, selectGraph)
   const openSession = useSelector(session, selectSession)
+
+  // Ahead of the boot effects, so What's New sees whether this launch passes
+  // through the chooser or the onboarding.
+  useEffect(() => whatsNew.start(), [whatsNew])
 
   // Desktop main-window boot reopens the most recent graph or shows the
   // chooser; a secondary note window adopts the main window's graph. Mobile
@@ -149,7 +135,6 @@ export function GraphProvider({
 
   const value = useMemo<GraphContextValue>(
     () => ({
-      graphSession: session,
       pickAndOpen: () => graphBoot.pickAndOpen(),
       chooseGraph: () => graphBoot.chooseGraph(),
       openRecent: (root) => graphBoot.openRecent(root),
@@ -158,7 +143,7 @@ export function GraphProvider({
       forget: (root) => graphBoot.forgetRecent(root),
       platform,
     }),
-    [session, graphBoot, platform],
+    [graphBoot, platform],
   )
 
   return (
@@ -169,8 +154,7 @@ export function GraphProvider({
 }
 
 /**
- * The graph session, its open/choose actions, and the platform. Use within a
- * GraphProvider.
+ * The graph open/choose actions and the platform. Use within a GraphProvider.
  */
 export function useGraphActions(): GraphContextValue {
   const context = use(GraphContext)
@@ -181,58 +165,57 @@ export function useGraphActions(): GraphContextValue {
 }
 
 /**
+ * A slice of the core graph session's state.
+ */
+function useGraphSelector<T>(selector: (state: State) => T): T {
+  return useSelector(useCoreServices().graphSession, selector)
+}
+
+/**
  * The lifecycle status of the active graph.
  */
 export function useGraphStatus(): GraphStatus {
-  return useSelector(useGraphActions().graphSession, selectStatus)
+  return useGraphSelector(selectStatus)
 }
 
 /**
  * The open graph, or `null` while none is open.
  */
 export function useGraphInfo(): GraphInfo | null {
-  return useSelector(useGraphActions().graphSession, selectGraph)
-}
-
-/**
- * The open graph, or `null` while none is open or outside a GraphProvider.
- */
-export function useMaybeGraphInfo(): GraphInfo | null {
-  const store: Store<State | null> = use(GraphContext)?.graphSession ?? NO_GRAPH_SESSION
-  return useSelector(store, selectMaybeGraph)
+  return useGraphSelector(selectGraph)
 }
 
 /**
  * The open index session generation (`GraphSessionState.indexGeneration`).
  */
 export function useIndexGeneration(): number | null {
-  return useSelector(useGraphActions().graphSession, selectIndexGeneration)
+  return useGraphSelector(selectIndexGeneration)
 }
 
 /**
  * True while the background index reconcile is running.
  */
 export function useGraphIndexing(): boolean {
-  return useSelector(useGraphActions().graphSession, selectIndexing)
+  return useSelector(useCoreServices().indexLifecycle.progress, selectReconciling)
 }
 
 /**
  * The last error of the graph flows, or `null`.
  */
 export function useGraphError(): string | null {
-  return useSelector(useGraphActions().graphSession, selectError)
+  return useGraphSelector(selectError)
 }
 
 /**
  * The recently opened graphs.
  */
 export function useGraphRecents(): RecentGraph[] {
-  return useSelector(useGraphActions().graphSession, selectRecents)
+  return useGraphSelector(selectRecents)
 }
 
 /**
  * The open graph as one object, or `null` while none is open.
  */
 export function useGraphSession(): GraphSession | null {
-  return useSelector(useGraphActions().graphSession, selectSession)
+  return useGraphSelector(selectSession)
 }

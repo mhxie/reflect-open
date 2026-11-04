@@ -3,7 +3,7 @@ import { canTrashNote, errorMessage, isLocalOnlyPath, KEPT_IN_GRAPH_TRASH } from
 import { Trash2 } from 'lucide-react'
 import { ConfirmActionDialog } from '@/components/confirm-action-dialog.tsx'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 interface NoteTrashActionProps {
@@ -21,7 +21,7 @@ interface NoteTrashActionProps {
  * delete helper enforces the same rule before touching disk.
  */
 export function NoteTrashAction({ path }: NoteTrashActionProps): ReactElement | null {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const { noteActions } = useCoreServices()
   const { operations } = useAppServices()
   const localOnly = useLocalOnlyFolders()

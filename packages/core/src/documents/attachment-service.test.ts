@@ -10,6 +10,7 @@ import {
   createTestClockService,
   createTestFileChangeService,
   createTestGraphSessionService,
+  createTestLoggerService,
   createTestNoteFileService,
   createTestProgressPort,
   createTestPlatformService,
@@ -76,6 +77,7 @@ function setup(options?: {
         : {}),
     },
   })
+  const logger = createTestLoggerService()
   const attachments = createAttachmentService({
     assetStore,
     noteFile,
@@ -84,8 +86,9 @@ function setup(options?: {
     clock,
     platform: createTestPlatformService(),
     graphSession: graph,
+    logger,
   })
-  return { attachments, assetStore, noteFile, fileChanges, progress, clock, graph }
+  return { attachments, assetStore, noteFile, fileChanges, progress, clock, graph, logger }
 }
 
 /**
@@ -727,6 +730,20 @@ describe('watchCatalog', () => {
 
     expect(attachments.catalog.get()).toBe(first)
     expect(changes).toBe(1)
+  })
+
+  it('logs a failed listing', async () => {
+    const { attachments, logger } = setup({
+      noteFile: Object.assign(createTestNoteFileService(), {
+        listAttachments: failing('bridge down'),
+      }),
+    })
+
+    attachments.watchCatalog(3)
+
+    await expect
+      .poll(() => logger.getWarnings().map((entry) => entry.message))
+      .toEqual(['listing attachments failed:'])
   })
 })
 

@@ -55,7 +55,6 @@ import { noteProtection } from '@/editor/status/note-protection.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useTemplateSlashItems } from '@/editor/use-template-slash-items.ts'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
-import { useLinkPreview } from '@/editor/use-link-preview.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
@@ -208,7 +207,7 @@ export function NotePaneComponent({
   const editorSmoothCaretAnimation = useEditorSmoothCaretAnimation()
   const editorDefaultBullet = useEditorDefaultBullet()
   const editorBulletAfterHeading = useEditorBulletAfterHeading()
-  const { noteCreation, platform } = useCoreServices()
+  const { noteCreation, platform, linkPreview } = useCoreServices()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const dailyNote = isDaily(path)
@@ -270,12 +269,10 @@ export function NotePaneComponent({
   const onLinkClick = useMarkdownLinkClick(path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
-  const linkPreviewSession = useMemo(() => {
-    return graphKey === null || localOnly
-      ? null
-      : { path, graphKey, sessionEpoch: document.sessionEpoch }
-  }, [path, graphKey, localOnly, document.sessionEpoch])
-  const resolveLinkPreview = useLinkPreview(linkPreviewSession)
+  const resolveLinkPreview = useMemo(
+    () => (graph !== null && !localOnly ? linkPreview.createResolver(path) : undefined),
+    [graph, localOnly, linkPreview, path],
+  )
 
   const bindEditor = document.bindEditor
   const aiEditorRef = useRef<NoteEditorHandle | null>(null)
