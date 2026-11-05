@@ -8,7 +8,7 @@ import {
   type TestCoreServices,
 } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { routeForPath } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
@@ -55,7 +55,7 @@ function PdfOpener(): ReactElement {
 }
 
 function RouteProbe(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 

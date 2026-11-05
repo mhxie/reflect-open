@@ -1,4 +1,4 @@
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { act } from '@/test-utils/act.ts'
 import { useState, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -363,6 +363,22 @@ describe('useDayCarousel', () => {
     expect(scroller.scrollLeft).toBe(CENTER * WIDTH)
   })
 
+  it('stays on the selected day when its editor is tapped', async () => {
+    const { scroller, onSelect } = await mountCarousel()
+    const editor = await vi.waitFor(() => {
+      const element = slide(DATE)?.querySelector<HTMLElement>('[contenteditable="true"]')
+      expect(element).toBeTruthy()
+      return element!
+    })
+    await touch(editor, 'start')
+    await touch(editor, 'end')
+    await act(() => editor.focus())
+
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(scroller.scrollLeft).toBe(CENTER * WIDTH)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
   it('blurs an editor left focused on the day a swipe leaves', async () => {
     const { scroller, onSelect } = await mountCarousel()
     const editor = await vi.waitFor(() => {
@@ -377,5 +393,36 @@ describe('useDayCarousel', () => {
 
     await vi.waitFor(() => expect(onSelect).toHaveBeenCalledOnce())
     expect(slide(DATE)!.contains(document.activeElement)).toBe(false)
+  })
+
+  it('keeps Tab out of the days on either side of the selected day', async () => {
+    await mountCarousel()
+    const editor = await vi.waitFor(() => {
+      const element = slide(DATE)?.querySelector<HTMLElement>('[contenteditable="true"]')
+      expect(element).toBeTruthy()
+      return element!
+    })
+    await act(() => editor.focus({ preventScroll: true }))
+
+    await userEvent.tab()
+
+    expect(slide('2026-06-11')!.contains(document.activeElement)).toBe(false)
+    expect(slide('2026-06-13')!.contains(document.activeElement)).toBe(false)
+  })
+
+  it('lets focus into a day once a swipe settles on it', async () => {
+    const { scroller, onSelect } = await mountCarousel()
+
+    await scrollElement({ element: scroller, left: (CENTER + 1) * WIDTH, touch: true })
+    await vi.waitFor(() => expect(onSelect).toHaveBeenCalledOnce())
+    const editor = await vi.waitFor(() => {
+      const element = slide('2026-06-13')?.querySelector<HTMLElement>('[contenteditable="true"]')
+      expect(element).toBeTruthy()
+      return element!
+    })
+    await act(() => editor.focus({ preventScroll: true }))
+
+    expect(document.activeElement).toBe(editor)
+    expect(slide(DATE)!.hasAttribute('inert')).toBe(true)
   })
 })

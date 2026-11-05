@@ -27,6 +27,8 @@ interface WikiArticleBridgeProps {
 
 /** Hosts the note's shared claim projection and its local authoring action. */
 export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgeProps): ReactElement {
+  'use no memo' // Extension factories capture ref-backed callbacks for use after render.
+
   const editor = useEditor<EditorExtension>()
   const { logger } = useCoreServices()
   const { opener } = useAppServices()

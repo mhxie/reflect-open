@@ -4,7 +4,7 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
 import { addDaysToIsoDate, getIsoToday } from '@reflect/utils'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions, useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -41,7 +41,7 @@ vi.mock('@/components/note-pane.tsx', async () => {
   }
 })
 function FollowDayLink({ date }: { date: string }): null {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   useEffect(() => {
     navigate({ kind: 'daily', date }, { revealHeading: 'Agenda' })
   }, [navigate, date])
@@ -49,7 +49,7 @@ function FollowDayLink({ date }: { date: string }): null {
 }
 
 function Stream(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return (
     <DailyStream
       target={route.kind === 'daily' ? { kind: 'date', date: route.date } : { kind: 'today' }}

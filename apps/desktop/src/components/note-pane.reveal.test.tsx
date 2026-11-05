@@ -3,7 +3,7 @@ import { expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
 import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -29,7 +29,7 @@ const ENTRY = [
 
 /** Follows a heading link once mounted, the way a wiki-link click does. */
 function FollowLink({ fragment }: { fragment: string }): ReactElement | null {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   useEffect(() => {
     navigate({ kind: 'note', path: 'wiki/Anchoring.md' }, { revealHeading: fragment })
   }, [navigate, fragment])

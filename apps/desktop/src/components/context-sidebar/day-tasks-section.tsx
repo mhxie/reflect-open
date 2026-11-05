@@ -3,7 +3,7 @@ import { getTaskKey, type OpenTask } from '@reflect/core'
 import { useDayTasks } from '@/lib/tasks/use-day-tasks.ts'
 import { useTaskActions } from '@/lib/tasks/use-task-actions.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { DayTaskRow } from './day-task-row.tsx'
 import { SidebarSection } from './sidebar-section.tsx'
@@ -43,7 +43,7 @@ function capRuns(runs: readonly TaskRun[], limit: number): TaskRun[] {
  */
 export function DayTasksSection({ date }: DayTasksSectionProps): ReactElement {
   const today = useToday()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const navigateNoteLink = usePeekNavigation(date)
   const dayTasks = useDayTasks(date, today)
   const actions = useTaskActions()

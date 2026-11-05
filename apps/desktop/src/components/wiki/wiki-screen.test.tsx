@@ -11,7 +11,7 @@ import {
   type Settings,
 } from '@reflect/core'
 import { wikiRoute, type Route } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -176,12 +176,12 @@ beforeEach(() => {
 
 /** The route on screen: a navigation whose destination suspends commits once it is ready. */
 function RouteProbe(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
 function RoutedScreen(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   if (route.kind === 'note' && pendingNoteLoad !== undefined) {
     use(pendingNoteLoad)
   }

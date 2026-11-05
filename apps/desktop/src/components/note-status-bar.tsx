@@ -15,7 +15,7 @@ import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useGitSyncState } from '@/providers/sync-provider.tsx'
 import { focusedNotePathForRoute } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { NoteProtectionDetails } from '@/components/note-protection-details.tsx'
 import { NoteStatusMenu } from '@/components/note-status-menu.tsx'
@@ -52,7 +52,7 @@ export function NoteStatusBar({
   placement = 'overlay',
   path: explicitPath,
 }: NoteStatusBarProps): ReactElement | null {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   const today = useToday()
   const focusedDailyDate = useFocusedDailyDate()
   const settings = useSettingsStore()

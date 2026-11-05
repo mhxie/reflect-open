@@ -26,7 +26,7 @@ import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
 import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { routeForPath, wikiRoute } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { WikiFilters } from './wiki-filters.tsx'
 import { WikiLanguageTabs } from './wiki-language-tabs.tsx'
@@ -65,7 +65,7 @@ export function WikiScreen({ filter: routeFilter, language }: WikiScreenProps): 
   const graph = useGraphInfo()
   const settings = useSettingsStore()
   const settingsService = useSettingsService()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const navigateNoteLink = useNoteLinkNavigation()
   const today = useToday()
   const scrollRef = useRef<HTMLDivElement>(null)

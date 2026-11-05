@@ -1,4 +1,5 @@
 import { useId, useState, type ReactElement, type ReactNode } from 'react'
+import appIcon from '@/assets/app-icon.png'
 import { useQuery } from '@tanstack/react-query'
 import {
   DEFAULT_WIKI_TRUST_REPORT_PATH,
@@ -41,12 +42,13 @@ import { TextSettingDrawer } from '@/mobile/text-setting-drawer.tsx'
 import {
   SettingsActionRow,
   SettingsGroup,
+  SettingsHeroRow,
   SettingsNavRow,
-  SettingsSegmentedRow,
+  SettingsMenuRow,
   SettingsSelectRow,
   SettingsSwitchRow,
   SettingsValueRow,
-  type SegmentedOption,
+  type SettingsMenuOption,
 } from '@/mobile/settings-list.tsx'
 import { useStore } from '@/lib/use-store.ts'
 import { useMobileServices } from '@/mobile/mobile-services.ts'
@@ -74,15 +76,15 @@ import {
 } from '@/providers/settings-provider.tsx'
 import { CountdownText } from '@/components/countdown-text.tsx'
 import { useGitSyncActions, useGitSyncState } from '@/providers/sync-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 
-const TRUST_DISPLAY_OPTIONS: readonly SegmentedOption<WikiTrustDisplay>[] = [
+const TRUST_DISPLAY_OPTIONS: readonly SettingsMenuOption<WikiTrustDisplay>[] = [
   { value: 'inline', label: 'Inline' },
   { value: 'margin', label: 'Margin' },
   { value: 'on-demand', label: 'On demand' },
   { value: 'off', label: 'Off' },
 ]
-const PAYWALL_PHASE_OPTIONS: readonly SegmentedOption<PaywallPhase | 'off'>[] = [
+const PAYWALL_PHASE_OPTIONS: readonly SettingsMenuOption<PaywallPhase | 'off'>[] = [
   { value: 'off', label: 'Off' },
   { value: 'hidden', label: 'Hidden' },
   { value: 'skippable', label: 'Skippable' },
@@ -127,7 +129,7 @@ function PaywallPhaseRow(): ReactElement {
   const { paywall } = useMobileServices()
   const override = useStore(paywall.phaseOverride)
   return (
-    <SettingsSegmentedRow
+    <SettingsMenuRow
       label="Paywall"
       value={override ?? 'off'}
       options={PAYWALL_PHASE_OPTIONS}
@@ -136,7 +138,7 @@ function PaywallPhaseRow(): ReactElement {
   )
 }
 
-const THEME_OPTIONS: readonly SegmentedOption<ThemePreference>[] = [
+const THEME_OPTIONS: readonly SettingsMenuOption<ThemePreference>[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
@@ -150,19 +152,19 @@ function aiProviderValue(provider: AiProviderConfig, defaultProviderId: string |
   return provider.id === defaultProviderId ? `${credential} · Default` : credential
 }
 
-const TEXT_SIZE_OPTIONS: readonly SegmentedOption<EditorTextSize>[] = [
+const TEXT_SIZE_OPTIONS: readonly SettingsMenuOption<EditorTextSize>[] = [
   { value: 'small', label: 'Small' },
   { value: 'medium', label: 'Medium' },
   { value: 'large', label: 'Large' },
 ]
 
-const WEEK_START_OPTIONS: readonly SegmentedOption<WeekStartDay>[] = [
+const WEEK_START_OPTIONS: readonly SettingsMenuOption<WeekStartDay>[] = [
   { value: 'sunday', label: 'Sunday' },
   { value: 'monday', label: 'Monday' },
   { value: 'saturday', label: 'Saturday' },
 ]
 
-const TIME_FORMAT_OPTIONS: readonly SegmentedOption<TimeFormat>[] = [
+const TIME_FORMAT_OPTIONS: readonly SettingsMenuOption<TimeFormat>[] = [
   { value: '12h', label: '12-hour' },
   { value: '24h', label: '24-hour' },
 ]
@@ -191,7 +193,8 @@ function SyncDetail({ detail }: { detail: MobileSyncDetail }): ReactNode {
  * device's GitHub sign-in, independent of the graph.
  */
 export function MobileSettings(): ReactElement {
-  const { back, canBack, navigate } = useRouter()
+  const { canBack } = useRouterState()
+  const { back, navigate } = useRouterActions()
   const graph = useGraphInfo()
   const { platform } = useGraphActions()
   const mobileStorageKind = useMobileStorageKind()
@@ -307,9 +310,9 @@ export function MobileSettings(): ReactElement {
 
   const storageLabel =
     mobileStorageKind === 'icloud'
-      ? 'iCloud Drive'
+      ? 'Stored in iCloud Drive'
       : mobileStorageKind === 'local'
-        ? 'This device'
+        ? 'Stored on this device'
         : undefined
 
   return (
@@ -318,24 +321,25 @@ export function MobileSettings(): ReactElement {
         title="Settings"
         onBack={() => (canBack ? back() : navigate({ kind: 'today' }))}
       />
-      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-safe">
-        <div className="flex flex-col gap-6 px-4 py-4">
-          <SettingsGroup header="Graph">
-            <SettingsNavRow
-              label={graph?.name ?? '—'}
-              value={storageLabel}
+      <main className="min-h-0 flex-1 overflow-y-auto bg-surface-app px-safe pb-safe">
+        <div className="flex flex-col gap-8 px-4 py-5">
+          <SettingsGroup>
+            <SettingsHeroRow
+              title={graph?.name ?? '—'}
+              subtitle={storageLabel}
+              media={<img src={appIcon} alt="" className="size-full object-cover" />}
               onPress={() => navigate({ kind: 'graphs' })}
             />
           </SettingsGroup>
 
           <SettingsGroup header="Appearance">
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Theme"
               value={theme}
               options={THEME_OPTIONS}
               onChange={(theme) => settingsService.update({ theme })}
             />
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Text size"
               value={editorTextSize}
               options={TEXT_SIZE_OPTIONS}
@@ -358,13 +362,13 @@ export function MobileSettings(): ReactElement {
           </SettingsGroup>
 
           <SettingsGroup header="Week and time">
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Week start"
               value={weekStartDay}
               options={WEEK_START_OPTIONS}
               onChange={(weekStartDay) => settingsService.update({ weekStartDay })}
             />
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Time format"
               value={timeFormat}
               options={TIME_FORMAT_OPTIONS}
@@ -400,7 +404,7 @@ export function MobileSettings(): ReactElement {
             header="Wiki"
             footer="Claim trust comes from your agent harness’s report; this device keeps its own path."
           >
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Claim trust"
               value={settings.wikiTrustDisplay}
               options={TRUST_DISPLAY_OPTIONS}

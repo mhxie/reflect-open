@@ -17,6 +17,8 @@ interface WikiAnchorsBridgeProps {
  * whose arrows would skip a folded block and Delete/Backspace would join it.
  */
 export function WikiAnchorsBridge({ onWikiLinkClick }: WikiAnchorsBridgeProps): null {
+  'use no memo' // Extension factories capture ref-backed callbacks for use after render.
+
   const { opener } = useAppServices()
   const navigateRef = useRef(onWikiLinkClick)
   useEffect(() => {

@@ -10,7 +10,7 @@ import { useDailyArrivals } from '@/mobile/use-daily-arrivals.ts'
 import { useSwipeTarget } from '@/mobile/use-swipe-target.ts'
 import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useSettingsStore } from '@/providers/settings-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 
 /**
  * The mobile spine (Plan 19, V1 parity): a month header + week calendar strip
@@ -24,7 +24,8 @@ import { useRouter } from '@/routing/router.tsx'
  * day change scrolls the carousel rather than remounting it.
  */
 export function MobileDaily({ date }: { date: string }): ReactElement {
-  const { navigate, entryId, arrivalSeq, arrivalFocusEditor } = useRouter()
+  const { entryId, arrivalSeq, arrivalFocusEditor } = useRouterState()
+  const { navigate } = useRouterActions()
   const graph = useGraphInfo()
   const settings = useSettingsStore()
   const path = dailyPath(date)

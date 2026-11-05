@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import type { CoreServices, DailyActivityService, NoteListEntry } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -18,7 +18,7 @@ const listNotes = vi.fn<CoreServices['noteList']['listNotes']>()
 let activityHeatmapEnabled: boolean
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 

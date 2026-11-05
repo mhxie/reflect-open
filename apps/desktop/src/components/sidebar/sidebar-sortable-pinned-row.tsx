@@ -6,7 +6,7 @@ import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { usePinnedNoteMenu } from '@/hooks/use-pinned-note-menu.ts'
 import { routeForPath, routesEqual } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { SidebarPinnedRowPreview } from './sidebar-pinned-row-preview.tsx'
 import { isModEvent } from '@meowdown/core'
 import { useNoteLabel } from '@/hooks/use-note-label.ts'
@@ -20,7 +20,7 @@ export const SidebarSortablePinnedRow = memo(function SidebarSortablePinnedRow({
   note,
   binding,
 }: SidebarSortablePinnedRowProps): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   const navigateNoteLink = useNoteLinkNavigation()
   const peekNoteLink = usePeekNavigation()
   const handleContextMenu = usePinnedNoteMenu(note)

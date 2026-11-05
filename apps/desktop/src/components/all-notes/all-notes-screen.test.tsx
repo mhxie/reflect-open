@@ -14,7 +14,7 @@ import {
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
 import type { AllNotesFilter } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { act } from '@/test-utils/act.ts'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { hover } from '@/test-utils/mouse.ts'
@@ -107,13 +107,13 @@ function noteMarkdown(note: SeedNote): string {
 }
 
 function RoutedScreen(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <AllNotesScreen filter={route.kind === 'allNotes' ? route.filter : null} />
 }
 
 /** Navigates to the already-active route — the sidebar-click-while-here case. */
 function ReArrive(): ReactElement {
-  const { navigate, back } = useRouter()
+  const { navigate, back } = useRouterActions()
   return (
     <>
       <button
@@ -232,7 +232,7 @@ function pinnedTags(view: ScreenView): readonly string[] {
 async function openPinnedFilters(view: ScreenView): Promise<void> {
   await view
     .getByRole('group', { name: 'Filter notes' })
-    .getByRole('button', { expanded: false })
+    .getByRole('combobox', { expanded: false })
     .click()
   await page.getByRole('button', { name: 'Manage pinned filters…' }).click()
   await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
@@ -622,7 +622,7 @@ describe('AllNotesScreen', () => {
   it('offers pinned and unpinned tags in Custom and shows the chosen filter', async () => {
     const view = await renderScreen()
 
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     const listbox = page.getByRole('listbox')
     await expect.element(listbox).toMatchTextContent('#travel')
     await expect.element(listbox).toMatchTextContent('2')
@@ -640,7 +640,7 @@ describe('AllNotesScreen', () => {
     expect(view.getByText('Health Stacked').query()).toBeNull()
     // The trigger adopts the active custom tag.
     await expect
-      .element(view.getByRole('button', { name: /#travel/, expanded: false }))
+      .element(view.getByRole('combobox', { name: /#travel/, expanded: false }))
       .toBeInTheDocument()
     await view.getByRole('button', { name: 'Tue, June 9th, 2026' }).click()
     await expect.poll(() => probedRoute(view)).toEqual({ kind: 'daily', date: '2026-06-09' })
@@ -651,7 +651,7 @@ describe('AllNotesScreen', () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     const input = page.getByPlaceholder('Filter by any tag…')
 
     // An exact existing tag isn't duplicated as a "Filter by" item.
@@ -665,6 +665,10 @@ describe('AllNotesScreen', () => {
 
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'zettel' } })
     await expect.element(view.getByText('No notes tagged #zettel.')).toBeInTheDocument()
+
+    // Reopening starts from an empty search.
+    await view.getByRole('combobox', { name: '#zettel' }).click()
+    await expect.element(page.getByPlaceholder('Filter by any tag…')).toHaveValue('')
     await view.unmount()
   })
 
@@ -672,13 +676,13 @@ describe('AllNotesScreen', () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     const input = page.getByPlaceholder('Filter by any tag…')
     await input.fill('TRAVEL')
 
-    // cmdk's default filter (command-score) folds case like `foldTag` does,
-    // so a differently-cased query keeps the existing facet reachable instead
-    // of dead-ending with a hidden list and a suppressed "Filter by" offer.
+    // Base UI's default filter folds case like `foldTag` does, so a
+    // differently-cased query keeps the existing facet reachable instead of
+    // dead-ending with a hidden list and a suppressed "Filter by" offer.
     await expect.element(page.getByRole('option', { name: /#travel/ })).toBeInTheDocument()
     expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
 
@@ -693,20 +697,20 @@ describe('AllNotesScreen — pinned tag management', () => {
     const view = await renderScreen({ filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: /#travel/, expanded: false }).click()
+    await view.getByRole('combobox', { name: /#travel/, expanded: false }).click()
     await page.getByRole('button', { name: 'Pin #travel', exact: true }).click()
 
     expect(pinnedTags(view)).toEqual(['book', 'person', 'travel'])
     expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#travel'])
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toBeInTheDocument()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toBeInTheDocument()
     await view.unmount()
   })
 
   it('searches configured pins even when a pin has no graph facet', async () => {
     const view = await renderScreen()
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     await page.getByPlaceholder('Filter by any tag…').fill('#PERSON')
 
     await expect.element(page.getByRole('option', { name: /#person/ })).toMatchTextContent('Pinned')
@@ -780,7 +784,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await page.getByRole('button', { name: 'Done', exact: true }).click()
     expect(pinnedTabOrder(view)).toEqual([])
     await expect
-      .element(view.getByRole('button', { name: /#travel/, expanded: false }))
+      .element(view.getByRole('combobox', { name: /#travel/, expanded: false }))
       .toHaveFocus()
     await expect.element(view.getByRole('button', { name: 'All', exact: true })).toBeInTheDocument()
     await expect.element(view.getByRole('button', { name: 'PDF', exact: true })).toBeInTheDocument()
@@ -827,7 +831,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(page.getByRole('button', { name: 'Actions for #book' })).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     await view.unmount()
   })
 
@@ -854,7 +858,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       await expect
         .element(page.getByRole('list', { name: 'Pinned filters' }))
         .not.toBeInTheDocument()
-      await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+      await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     } finally {
       await view.unmount()
     }
@@ -893,7 +897,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .not.toHaveAttribute('aria-pressed', 'true')
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     await view.unmount()
   })
 
@@ -932,7 +936,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(handle).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     await view.unmount()
   })
 
@@ -1049,7 +1053,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .getByRole('button', { name: 'All', exact: true })
       .element()
       .getBoundingClientRect()
-    const custom = group.getByRole('button', { name: 'Custom' }).element().getBoundingClientRect()
+    const custom = group.getByRole('combobox', { name: 'Custom' }).element().getBoundingClientRect()
     const container = view.getByTestId('screen-container').element().getBoundingClientRect()
 
     expect(all.left).toBeGreaterThanOrEqual(container.left)
@@ -1072,7 +1076,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(view.getByRole('button', { name: /Trash \(1\)/ })).toBeVisible()
     expect(strip?.clientWidth).toBeGreaterThan(0)
     const selectedCustom = group
-      .getByRole('button', { name: 'Custom' })
+      .getByRole('combobox', { name: 'Custom' })
       .element()
       .getBoundingClientRect()
     const newNote = view
@@ -1080,7 +1084,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .element()
       .getBoundingClientRect()
     expect(selectedCustom.right).toBeLessThanOrEqual(newNote.left)
-    await group.getByRole('button', { name: 'Custom' }).click()
+    await group.getByRole('combobox', { name: 'Custom' }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
     await vi.waitFor(() => {
       expect(probedRoute(view)).toEqual({
@@ -1303,7 +1307,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: /Custom/ }).click()
+    await view.getByRole('combobox', { name: /Custom/ }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
     await expect.element(view.getByText('Tue, June 9th, 2026')).toBeInTheDocument()
 

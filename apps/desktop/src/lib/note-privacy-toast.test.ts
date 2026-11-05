@@ -1,18 +1,31 @@
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+  type MockInstance,
+} from 'vitest'
 import {
   createNodeTestDatabaseService,
   createTestCoreServices,
   createTestNoteFileService,
 } from '@reflect/core/testing'
-import type { MockToastAddOptions } from '@/test-utils/toast.ts'
+import type { ToastController } from '@/lib/use-toasts.ts'
+import { toast } from '@/components/ui/toast.tsx'
+import { clickToastAction } from '@/test-utils/toast.tsx'
 import { setNotesPrivate, toggleNotePrivate } from './note-privacy-toast.ts'
 
-const toast = vi.hoisted(() => ({ add: vi.fn<(options: MockToastAddOptions) => string>() }))
+let addToast: MockInstance<ToastController['add']>
 
-vi.mock('@/components/ui/toast.tsx', () => ({ toast }))
+beforeEach(() => {
+  addToast = vi.spyOn(toast, 'add').mockReturnValue('privacy-toast')
+})
 
 afterEach(() => {
-  toast.add.mockClear()
+  addToast.mockRestore()
 })
 
 function setup(files: Record<string, string>) {
@@ -27,7 +40,7 @@ function setup(files: Record<string, string>) {
  * Click the Undo on the newest toast.
  */
 function undo(): void {
-  toast.add.mock.lastCall?.[0].actionProps?.onClick()
+  clickToastAction(addToast.mock.lastCall?.[0])
 }
 
 describe('toggleNotePrivate', () => {
@@ -37,7 +50,7 @@ describe('toggleNotePrivate', () => {
     await toggleNotePrivate(noteActions, 'notes/a.md')
 
     expect(noteFile.files().get('notes/a.md')).toBe('---\nprivate: true\n---\n\n# A\n')
-    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Marked private' }))
+    expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Marked private' }))
     undo()
     await vi.waitFor(() => expect(noteFile.files().get('notes/a.md')).toBe('# A\n'))
   })
@@ -47,7 +60,7 @@ describe('toggleNotePrivate', () => {
 
     await toggleNotePrivate(noteActions, 'notes/a.md')
 
-    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'No longer private' }))
+    expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'No longer private' }))
   })
 
   it('offers no Undo when nothing was written', async () => {
@@ -55,7 +68,7 @@ describe('toggleNotePrivate', () => {
 
     await toggleNotePrivate(noteActions, 'notes/a.md')
 
-    expect(toast.add).not.toHaveBeenCalled()
+    expect(addToast).not.toHaveBeenCalled()
   })
 })
 
@@ -74,8 +87,8 @@ describe('setNotesPrivate', () => {
     )
 
     expect(result).toEqual({ changed: ['notes/a.md', 'daily/2026-10-01.md'], skipped: 0 })
-    expect(toast.add).toHaveBeenCalledOnce()
-    expect(toast.add).toHaveBeenCalledWith(
+    expect(addToast).toHaveBeenCalledOnce()
+    expect(addToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Marked 2 notes private' }),
     )
     undo()
@@ -91,6 +104,6 @@ describe('setNotesPrivate', () => {
       changed: [],
       skipped: 1,
     })
-    expect(toast.add).not.toHaveBeenCalled()
+    expect(addToast).not.toHaveBeenCalled()
   })
 })

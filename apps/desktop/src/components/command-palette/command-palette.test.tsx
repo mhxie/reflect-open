@@ -4,7 +4,12 @@ import { createTestAppServices, createTestWindowService } from '@reflect/app/tes
 import { userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEffect, type ReactNode } from 'react'
-import type { RetrievalService, SearchService, SuggestionService } from '@reflect/core'
+import type {
+  RetrievalService,
+  SearchService,
+  SuggestionService,
+  WikiSuggestion,
+} from '@reflect/core'
 import {
   createTestCoreServices,
   createTestEmbeddingRuntimeService,
@@ -13,7 +18,7 @@ import {
 } from '@reflect/core/testing'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import type { CommandContext } from '@/lib/commands/types.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -79,7 +84,7 @@ function OpenOnMount({ query }: { query: string }) {
 }
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
@@ -356,7 +361,7 @@ describe('CommandPalette', () => {
     const { view, core } = await renderPalette('> go to today')
     const row = view.getByText('Go to today')
     await expect.element(row).toBeInTheDocument()
-    const item = row.element().closest('[cmdk-item]')
+    const item = row.element().closest('[role="option"]')
     for (const key of formatBinding('Mod-d', core.platform.isApplePlatform)) {
       expect(item?.textContent).toContain(key)
     }
@@ -426,7 +431,7 @@ describe('CommandPalette', () => {
     const { view } = await renderPalette('note')
     await expect.element(view.getByRole('option', { name: 'First' })).toBeInTheDocument()
 
-    // cmdk highlights the top hit; its content renders in the preview pane.
+    // The top hit is highlighted; its content renders in the preview pane.
     const preview = view.getByTestId('palette-preview')
     await expect.element(preview).toMatchTextContent('first body')
 
@@ -466,6 +471,29 @@ describe('CommandPalette', () => {
 
     await userEvent.keyboard('{Enter}')
     await vi.waitFor(() => expect(toggleTheme).toHaveBeenCalled())
+  })
+
+  it('highlights the top note once notes arrive after matching commands', async () => {
+    const pending = Promise.withResolvers<WikiSuggestion[]>()
+    suggestWikiTargets.mockReturnValue(pending.promise)
+    searchWithFilters.mockResolvedValue([])
+    files = { 'notes/theme.md': '# Theme ideas\n\ntheme body\n' }
+    const { view } = await renderPalette('theme')
+    await expect.element(view.getByText('Toggle theme')).toBeInTheDocument()
+
+    pending.resolve([
+      {
+        target: 'Theme ideas',
+        path: 'notes/theme.md',
+        title: 'Theme ideas',
+        alias: null,
+        date: null,
+      },
+    ])
+    await expect.element(view.getByTestId('palette-preview')).toMatchTextContent('theme body')
+
+    await userEvent.keyboard('{Enter}')
+    await expect.element(view.getByTestId('route')).toMatchTextContent('notes/theme.md')
   })
 
   it('> command mode renders the single column without a preview pane', async () => {

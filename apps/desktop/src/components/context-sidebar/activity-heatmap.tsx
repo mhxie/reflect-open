@@ -22,7 +22,7 @@ import {
 } from '@/lib/heatmap-grid.ts'
 import { cn } from '@/lib/utils.ts'
 import { useSettingsStore } from '@/providers/settings-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { ActivityDayTooltip } from './activity-day-tooltip.tsx'
 
 export interface ActivityHeatmapProps {
@@ -64,7 +64,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({
   today,
 }: ActivityHeatmapProps): ReactElement {
   const settings = useSettingsStore()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const labeledColumns = useMemo(() => new Set(monthLabelColumns(weeks)), [weeks])
   // Column-major day order, matching the arrow-key arithmetic in `nextHeatmapIndex`.
   const days = useMemo(() => weeks.flat(), [weeks])

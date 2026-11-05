@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactElement } from 'react'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { NotePeek } from './note-peek.tsx'
 import { PdfPeek } from './pdf-peek.tsx'
 import { usePeek } from './peek-provider.tsx'
@@ -12,7 +12,7 @@ import { usePeek } from './peek-provider.tsx'
  */
 export function PeekPanel(): ReactElement | null {
   const peek = usePeek()
-  const { route } = useRouter()
+  const { route } = useRouterState()
   const closePeek = peek?.closePeek
   const firstRouteRef = useRef(route)
 

@@ -38,8 +38,6 @@ export function defineDesktopProject(project: {
         '@prosekit/pm/model',
         '@prosekit/pm/transform',
         '@prosekit/pm/view',
-        'cmdk',
-        'embla-carousel-react',
         'react-dom/client',
         'react-error-boundary',
         'virtua',

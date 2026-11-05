@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import type { WikiService } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiLanguageSwitch } from './wiki-language-switch.tsx'
@@ -18,7 +18,7 @@ const wikiCopies = vi.fn<WikiService['copies']>()
 const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 

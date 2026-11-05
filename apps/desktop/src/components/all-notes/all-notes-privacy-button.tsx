@@ -32,15 +32,13 @@ export function AllNotesPrivacyButton({ notes }: AllNotesPrivacyButtonProps): Re
 
   const apply = async (): Promise<void> => {
     setBusy(true)
-    try {
-      await setNotesPrivate(
-        noteActions,
-        targets.map((note) => note.path),
-        makePrivate,
-      )
-    } finally {
+    await setNotesPrivate(
+      noteActions,
+      targets.map((note) => note.path),
+      makePrivate,
+    ).finally(() => {
       setBusy(false)
-    }
+    })
   }
 
   return (

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance
 import type { ReactNode } from 'react'
 import type { OpenTask, TaskService, TaskWriteResult } from '@reflect/core'
 import { createTestCoreServices, makeOpenTask, type TestCoreServices } from '@reflect/core/testing'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -27,7 +27,7 @@ function dailyTask(date: string, markdown: string, astPath: number[] = [0]): Ope
 }
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 

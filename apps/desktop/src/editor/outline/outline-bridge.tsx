@@ -39,6 +39,8 @@ interface OutlineBridgeProps {
  * because a jump needs exact editor positions. See docs/plans/26-note-outline.md.
  */
 export function OutlineBridge({ path }: OutlineBridgeProps): null {
+  'use no memo' // Extension factories capture ref-backed callbacks for use after render.
+
   const editor = useEditor<EditorExtension>()
   const { logger } = useCoreServices()
   // Not meowdown's `onDocChange`, which skips `setMarkdown` (an external

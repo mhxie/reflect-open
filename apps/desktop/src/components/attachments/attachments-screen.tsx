@@ -23,7 +23,7 @@ import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { routeForPath } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { AttachmentFlow } from './attachment-flow.tsx'
 import {
@@ -75,7 +75,7 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
   const graph = useGraphInfo()
   const generation = graph?.generation ?? null
   const { attachments } = useCoreServices()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const navigateNoteLink = useNoteLinkNavigation()
   const openPeek = usePeek()?.openPeek
   const library = useAttachmentLibrary()

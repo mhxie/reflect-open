@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { foldTag, isTagName, type NoteTagFacet } from '@reflect/core'
-import { ArrowLeft, ChevronDown, Pin, Settings2 } from 'lucide-react'
+import { ArrowLeft, Pin, Settings2 } from 'lucide-react'
 import { isPinnedTagDragEscape } from '@/components/tag-filters/cancel-pinned-tag-drag.ts'
 import { Button } from '@/components/ui/button.tsx'
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command.tsx'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx'
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from '@/components/ui/combobox.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { cn } from '@/lib/utils.ts'
 
@@ -32,8 +32,8 @@ interface CustomFilterMenuProps {
 }
 
 /**
- * The filter group's last segment: a combobox (shadcn's Popover + Command
- * pairing). All Notes can add a pinned-filter editor to the same popover.
+ * The filter group's last segment: a combobox with its search input inside
+ * the popup. All Notes can add a pinned-filter editor to the same popup.
  * The search input doubles as free entry — typing
  * any valid tag name offers a "Filter by #tag" item, so the filter isn't
  * limited to tags the facet query happened to return.
@@ -72,8 +72,9 @@ export function CustomFilterMenu({
   // so people type them that way too. Same parsing as the pinned-filter editor.
   const typed = query.trim().replace(/^#+/, '').trim()
   const typedKey = foldTag(typed)
-  const listed = facets.some((facet) => foldTag(facet.tag) === typedKey)
-  const offerTyped = typed !== '' && !listed && isTagName(typed)
+  const counts = new Map(facets.map((facet) => [foldTag(facet.tag), facet.count]))
+  const offerTyped = typed !== '' && !counts.has(typedKey) && isTagName(typed)
+  const tags = facets.map((facet) => facet.tag)
 
   let emptyMessage = 'No matching tags.'
   if (typed === '') {
@@ -83,7 +84,7 @@ export function CustomFilterMenu({
   }
 
   const trigger = (
-    <PopoverTrigger
+    <ComboboxTrigger
       {...(management === undefined ? {} : { render: <TooltipTrigger /> })}
       aria-pressed={activeTag !== null}
       aria-label={activeTag !== null ? `#${activeTag}` : label}
@@ -98,12 +99,22 @@ export function CustomFilterMenu({
       <span className={cn(management !== undefined && 'min-w-0 truncate')}>
         {activeTag !== null ? `#${activeTag}` : label}
       </span>
-      <ChevronDown aria-hidden strokeWidth={1.75} className="size-3.5 shrink-0" />
-    </PopoverTrigger>
+    </ComboboxTrigger>
   )
 
   return (
-    <Popover
+    <Combobox
+      items={offerTyped ? [...tags, typed] : tags}
+      itemToStringLabel={(tag: string) => `#${tag}`}
+      isItemEqualToValue={(tag: string, value: string) => foldTag(tag) === foldTag(value)}
+      filter={(tag: string) => foldTag(tag).includes(typedKey)}
+      value={activeTag}
+      onValueChange={(tag: string | null) => {
+        if (tag !== null) choose(tag)
+      }}
+      inputValue={query}
+      onInputValueChange={setQuery}
+      autoHighlight
       open={open}
       onOpenChange={(next, details) => {
         if (
@@ -133,13 +144,13 @@ export function CustomFilterMenu({
           </TooltipContent>
         </Tooltip>
       )}
-      <PopoverContent
+      <ComboboxContent
         align="end"
         sideOffset={6}
-        aria-label={managing ? 'Pinned filters' : 'Tag filters'}
+        aria-label={managing ? 'Pinned filters' : 'Filter by another tag'}
         className={cn(
           'max-h-(--available-height) max-w-[calc(100vw-1.5rem)] overflow-y-auto',
-          management !== undefined ? 'w-80' : 'w-56 p-0',
+          management !== undefined ? 'w-80 p-1' : 'w-56',
         )}
       >
         {managing ? (
@@ -189,53 +200,33 @@ export function CustomFilterMenu({
                 <span className="min-w-0 truncate">Pin #{activeTag}</span>
               </Button>
             ) : null}
-            <Command label="Filter by another tag">
-              <CommandInput
-                ref={inputRef}
-                value={query}
-                onValueChange={setQuery}
-                placeholder="Filter by any tag…"
-              />
-              <CommandList>
-                {/* A force-mounted item never counts as a match, so cmdk would
-                show the empty state right above it — render one or the other. */}
-                {offerTyped ? null : <CommandEmpty>{emptyMessage}</CommandEmpty>}
-                {facets.length > 0 ? (
-                  <CommandGroup>
-                    {facets.map((facet) => (
-                      <CommandItem
-                        key={foldTag(facet.tag)}
-                        value={facet.tag}
-                        keywords={[`#${facet.tag}`]}
-                        data-checked={
-                          activeTag !== null && foldTag(activeTag) === foldTag(facet.tag)
-                        }
-                        onSelect={() => choose(facet.tag)}
-                      >
-                        <span className="min-w-0 flex-1 truncate">#{facet.tag}</span>
+            <ComboboxInput
+              ref={inputRef}
+              showTrigger={false}
+              aria-label="Filter by another tag"
+              placeholder="Filter by any tag…"
+            />
+            <ComboboxEmpty>{emptyMessage}</ComboboxEmpty>
+            <ComboboxList>
+              {(tag: string) => {
+                const count = counts.get(foldTag(tag))
+                return (
+                  <ComboboxItem key={foldTag(tag)} value={tag}>
+                    {count === undefined ? (
+                      <span className="min-w-0 flex-1 truncate">Filter by #{tag}</span>
+                    ) : (
+                      <>
+                        <span className="min-w-0 flex-1 truncate">#{tag}</span>
                         <span className="shrink-0 text-xs tabular-nums text-text-muted">
-                          {pinnedKeys.has(foldTag(facet.tag)) ? 'Pinned · ' : ''}
-                          {facet.count}
+                          {pinnedKeys.has(foldTag(tag)) ? 'Pinned · ' : ''}
+                          {count}
                         </span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                ) : null}
-                {offerTyped ? (
-                  // The group needs forceMount too: cmdk hides a group whenever
-                  // no item inside it matches the query, even force-mounted ones.
-                  <CommandGroup forceMount>
-                    <CommandItem
-                      forceMount
-                      value={`custom:${typed}`}
-                      onSelect={() => choose(typed)}
-                    >
-                      <span className="min-w-0 flex-1 truncate">Filter by #{typed}</span>
-                    </CommandItem>
-                  </CommandGroup>
-                ) : null}
-              </CommandList>
-            </Command>
+                      </>
+                    )}
+                  </ComboboxItem>
+                )
+              }}
+            </ComboboxList>
             {management !== undefined ? (
               <Button
                 type="button"
@@ -252,7 +243,7 @@ export function CustomFilterMenu({
             ) : null}
           </>
         )}
-      </PopoverContent>
-    </Popover>
+      </ComboboxContent>
+    </Combobox>
   )
 }

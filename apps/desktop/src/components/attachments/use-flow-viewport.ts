@@ -33,7 +33,9 @@ export function useFlowViewport(
       })
     }
     const onScroll = (): void => {
-      frame ??= requestAnimationFrame(measure)
+      if (frame === null) {
+        frame = requestAnimationFrame(measure)
+      }
     }
     // Observing reports the initial size too, which takes the first measure.
     const observer = new ResizeObserver(measure)
