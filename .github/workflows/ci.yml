@@ -206,7 +206,7 @@ jobs:
   apple-lint:
     needs: classify
     if: needs.classify.outputs.stack-middle == 'false'
-    runs-on: macos-26
+    runs-on: xcode-27
     # No sidecars, as in lint-rust and test-rust.
     env:
       TAURI_CONFIG: '{"bundle":{"externalBin":null}}'
@@ -215,9 +215,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-xcode
+
       - uses: ./.github/actions/setup-rust
-        with:
-          targets: aarch64-apple-ios
 
       - name: Check desktop library
         run: cargo check -p reflect-open --lib
