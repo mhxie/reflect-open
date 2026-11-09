@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/select.tsx'
 import { useOllamaModels } from '@/hooks/use-ollama-models.ts'
 import { useSummaryModelChoice } from '@/hooks/use-summary-model-choice.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { OnDeviceAttestationDialog } from './on-device-attestation-dialog.tsx'
 
 /** The command the setup hints suggest for getting a first model. */
@@ -64,7 +64,7 @@ function Hint({ children }: HintProps): ReactElement {
  * adds its provider entry. With nothing to pick, it says how to get a model.
  */
 export function LocalSummaryModelPicker(): ReactElement {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const { chooseLocal, chooseOllamaModel } = useSummaryModelChoice()
   const ollama = useOllamaModels(true)
   const [attesting, setAttesting] = useState<string | null>(null)

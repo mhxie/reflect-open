@@ -1,6 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createGraphServices, type GraphInfo, type GraphLifecycleFlags } from '@reflect/core'
-import { createTestBackupService, createTestCoreServices } from '@reflect/core/testing'
+import { createTestGitSyncService, createTestCoreServices } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteSummaries } from './use-note-summaries.ts'
@@ -20,7 +20,7 @@ const GRAPH: GraphInfo = {
  * Only the lifecycles every session runs: no backup.
  */
 const NO_LIFECYCLES: GraphLifecycleFlags = {
-  backup: false,
+  gitSync: false,
   icloudSync: false,
   capture: false,
   assetDescription: false,
@@ -31,12 +31,15 @@ const NO_LIFECYCLES: GraphLifecycleFlags = {
 
 describe('useNoteSummaries', () => {
   it('catches up with the graph’s backup before a pass summarizes', async () => {
-    const backup = createTestBackupService({ state: { phase: 'disconnected' } })
-    const app = createTestCoreServices({ database: createWasmTestDatabaseService(), backup })
+    const backup = createTestGitSyncService({ state: { phase: 'disconnected' } })
+    const app = createTestCoreServices({
+      database: createWasmTestDatabaseService(),
+      gitSync: backup,
+    })
     onTestFinished(() => app.database.close())
     const openSession = vi.spyOn(app.noteSummaries, 'openSession')
 
-    await renderHookInApp(() => useNoteSummaries(GRAPH), { app })
+    await renderHookInApp(() => useNoteSummaries(GRAPH), { core: app })
 
     expect(openSession).toHaveBeenCalledTimes(1)
     const [options] = openSession.mock.calls[0] ?? []
@@ -52,7 +55,7 @@ describe('useNoteSummaries', () => {
     onTestFinished(() => app.database.close())
     const openSession = vi.spyOn(app.noteSummaries, 'openSession')
 
-    await renderHookInApp(() => useNoteSummaries(GRAPH), { app })
+    await renderHookInApp(() => useNoteSummaries(GRAPH), { core: app })
 
     expect(openSession).toHaveBeenCalledTimes(1)
     const [options] = openSession.mock.calls[0] ?? []

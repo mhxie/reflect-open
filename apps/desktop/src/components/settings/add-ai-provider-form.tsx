@@ -9,6 +9,7 @@ import {
   isHttpBaseUrl,
   isLoopbackHttpUrl,
   isPlainHttpRemoteBaseUrl,
+  type NewAiProvider,
 } from '@reflect/core'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
@@ -22,7 +23,6 @@ import {
 } from '@/components/ui/select.tsx'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { useAddAiProviderSubmit } from '@/hooks/use-add-ai-provider-submit.ts'
-import type { NewAiProvider } from '@/hooks/use-ai-providers.ts'
 import { parseContextWindowInput } from '@/lib/on-device-settings.ts'
 import { AddAiProviderLocalFields } from './add-ai-provider-local-fields.tsx'
 import type { AddAiProviderValues } from './add-ai-provider-values.ts'

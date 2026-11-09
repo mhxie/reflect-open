@@ -5,22 +5,22 @@ import { LINGER_MS, MIN_VISIBLE_MS } from './operations-service.ts'
 describe('createOperationsService', () => {
   it('tracks start, progress, and done', async () => {
     const operations = createTestOperationsService()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
 
     const handle = operations.start('Renaming "A" to "B"')
-    expect(operations.getAll()).toHaveLength(1)
-    expect(operations.getAll()[0]!.label).toBe('Renaming "A" to "B"')
-    expect(operations.getAll()[0]!.progress).toBeNull()
+    expect(operations.get()).toHaveLength(1)
+    expect(operations.get()[0]!.label).toBe('Renaming "A" to "B"')
+    expect(operations.get()[0]!.progress).toBeNull()
 
     handle.progress(3, 12)
-    expect(operations.getAll()[0]!.progress).toEqual({ done: 3, total: 12 })
+    expect(operations.get()[0]!.progress).toEqual({ done: 3, total: 12 })
 
     handle.done()
-    expect(operations.getAll()).toHaveLength(1)
+    expect(operations.get()).toHaveLength(1)
     await operations.clock.advance(MIN_VISIBLE_MS - 1)
-    expect(operations.getAll()).toHaveLength(1)
+    expect(operations.get()).toHaveLength(1)
     await operations.clock.advance(1)
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('removes a finished operation at once after the minimum visible time', async () => {
@@ -28,7 +28,7 @@ describe('createOperationsService', () => {
     const handle = operations.start('slow')
     await operations.clock.advance(MIN_VISIBLE_MS)
     handle.done()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
     expect(operations.clock.pendingTimers()).toBe(0)
   })
 
@@ -42,9 +42,9 @@ describe('createOperationsService', () => {
     })
 
     await operations.clock.advance(LINGER_MS + MIN_VISIBLE_MS - 1)
-    expect(operations.getAll()).toHaveLength(1)
+    expect(operations.get()).toHaveLength(1)
     await operations.clock.advance(1)
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('keeps a warning operation without marking it failed', async () => {
@@ -65,7 +65,7 @@ describe('createOperationsService', () => {
     ])
 
     await operations.clock.advance(LINGER_MS + MIN_VISIBLE_MS)
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('scopes handles: finishing one operation leaves others running', async () => {
@@ -74,7 +74,7 @@ describe('createOperationsService', () => {
     operations.start('second')
     first.done()
     await operations.clock.advance(MIN_VISIBLE_MS)
-    expect(operations.getAll().map((operation) => operation.label)).toEqual(['second'])
+    expect(operations.get().map((operation) => operation.label)).toEqual(['second'])
   })
 
   it('stores optional metadata and can dismiss immediately', async () => {
@@ -85,7 +85,7 @@ describe('createOperationsService', () => {
       persistent: true,
       action,
     })
-    expect(operations.getAll()[0]).toMatchObject({
+    expect(operations.get()[0]).toMatchObject({
       label: 'Install update',
       description: 'Reflect 1.2.3 is ready.',
       persistent: true,
@@ -93,10 +93,10 @@ describe('createOperationsService', () => {
     })
 
     await operations.clock.advance(30_000)
-    expect(operations.getAll()).toHaveLength(1)
+    expect(operations.get()).toHaveLength(1)
 
     handle.dismiss()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('keeps persistent failures visible until dismissed by id', async () => {
@@ -108,7 +108,7 @@ describe('createOperationsService', () => {
     expect(failed).toMatchObject({ status: 'failed', message: 'signature failed' })
 
     operations.dismiss(failed!.id)
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('notifies listeners on every change until they unsubscribe', () => {
@@ -120,17 +120,18 @@ describe('createOperationsService', () => {
     const handle = operations.start('job')
     handle.progress(1, 2)
     expect(calls).toBe(2)
-    const before = operations.getAll()
+    const before = operations.get()
     unlisten()
     handle.dismiss()
     expect(calls).toBe(2)
-    expect(operations.getAll()).not.toBe(before)
+    expect(operations.get()).not.toBe(before)
   })
 
   it('ignores changes to an operation that is gone', () => {
     const operations = createTestOperationsService()
     const handle = operations.start('job')
     handle.dismiss()
+    const before = operations.get()
     let calls = 0
     operations.subscribe(() => {
       calls++
@@ -138,13 +139,14 @@ describe('createOperationsService', () => {
     handle.progress(1, 2)
     operations.dismiss(999)
     expect(calls).toBe(0)
+    expect(operations.get()).toBe(before)
   })
 
   it('keeps finished background operations in the history, newest first', async () => {
     const operations = createTestOperationsService()
     const describing = operations.start('Describing assets', { background: true })
     operations.start('Saving').done()
-    expect(operations.getAll()[0]).toMatchObject({ label: 'Describing assets', background: true })
+    expect(operations.get()[0]).toMatchObject({ label: 'Describing assets', background: true })
 
     await operations.clock.advance(MIN_VISIBLE_MS)
     expect(operations.getHistory()).toEqual([])
@@ -154,7 +156,7 @@ describe('createOperationsService', () => {
     rebuilding.fail('disk full')
     await operations.clock.advance(LINGER_MS + MIN_VISIBLE_MS)
 
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
     // Each entry ends when its handle removes it: at once for a done after the
     // minimum visible time, after the linger for a failure.
     expect(operations.getHistory()).toEqual([

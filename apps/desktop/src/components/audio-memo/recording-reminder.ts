@@ -1,5 +1,5 @@
-import { toast } from '@/components/ui/toast.tsx'
-import { formatRecordingElapsed } from '@/lib/recording-time.ts'
+import type { ToastController } from '@/lib/use-toasts.ts'
+import { formatElapsed } from '@reflect/utils'
 
 const REMINDER_TOAST_ID = 'audio-memo-reminder'
 
@@ -9,11 +9,15 @@ const REMINDER_TOAST_ID = 'audio-memo-reminder'
  * gives out; the nudge carries the stop control with it. One toast id, so a
  * later reminder replaces the earlier one instead of stacking.
  */
-export function showRecordingReminder(elapsedMs: number, stop: () => void): void {
-  toast.add({
+export function showRecordingReminder(
+  toastController: ToastController,
+  elapsedMs: number,
+  stop: () => void,
+): void {
+  toastController.add({
     id: REMINDER_TOAST_ID,
     title: 'Still recording',
-    description: formatRecordingElapsed(elapsedMs),
+    description: formatElapsed(elapsedMs),
     actionProps: {
       children: 'Stop and save',
       onClick: stop,
@@ -26,6 +30,6 @@ export function showRecordingReminder(elapsedMs: number, stop: () => void): void
  * claiming a session is running, and its stop control would land on whatever
  * recording started next.
  */
-export function dismissRecordingReminder(): void {
-  toast.close(REMINDER_TOAST_ID)
+export function dismissRecordingReminder(toastController: ToastController): void {
+  toastController.close(REMINDER_TOAST_ID)
 }

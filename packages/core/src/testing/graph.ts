@@ -27,11 +27,11 @@ import {
   type NoteLinkResolverService,
 } from '../graph/note-link-resolver-service.ts'
 import {
-  ASSETS_DIR,
   AUDIO_MEMOS_DIR,
   isAttachmentPath,
   isNotePath,
   isSafeVisibleGraphPath,
+  pickFreeAssetPath,
 } from '../graph/paths.ts'
 import type {
   FileMeta,
@@ -896,15 +896,8 @@ class TestAssetStoreServiceImpl implements TestAssetStoreService {
       throw new AppError('unsupported', `${notePath} is in a read-only local-only folder`)
     }
     const folder = localOnlyFolderRoot(this.#localOnly, notePath)
-    const dir = folder === null ? ASSETS_DIR : `${folder}/${ASSETS_DIR}`
-    const dot = desiredName.lastIndexOf('.')
-    const stem = dot > 0 ? desiredName.slice(0, dot) : desiredName
-    const extension = dot > 0 ? desiredName.slice(dot) : ''
-    let path = `${dir}/${desiredName}`
-    for (let suffix = 2; this.#files.has(path); suffix++) {
-      path = `${dir}/${stem}-${suffix}${extension}`
-    }
-    return path
+    const scoped = (path: string): string => (folder === null ? path : `${folder}/${path}`)
+    return scoped(pickFreeAssetPath(desiredName, (candidate) => this.#files.has(scoped(candidate))))
   }
 
   #store(

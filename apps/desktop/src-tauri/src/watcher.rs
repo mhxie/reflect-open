@@ -38,8 +38,10 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use file_id::{FileId, get_file_id};
-use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{DebounceEventResult, Debouncer, FileIdCache, new_debouncer_opt};
+use notify::{EventKindMask, RecommendedWatcher, RecursiveMode};
+use notify_debouncer_full::{
+    DebounceEventHandler, DebounceEventResult, Debouncer, FileIdCache, new_debouncer_opt,
+};
 use reflect_graph_paths::{
     GraphPathKind, LocalOnlyFolders, LocalOnlyLink, classify, evicted_logical_path,
     eviction_placeholder, has_pruned_component, is_pruned_dir_name, to_slash_lossy, wire_path,
@@ -51,6 +53,8 @@ use crate::error::{AppError, AppResult};
 use crate::fs::GraphState;
 use reflect_types::events::{INDEX_CHANGED, INDEX_RECONCILE};
 use reflect_types::{ChangeKind, FileChange};
+
+type GraphDebouncer = Debouncer<RecommendedWatcher, PrunedFileIdMap>;
 
 /// Holds the active watch; dropping it stops the background watch thread.
 #[derive(Default)]
@@ -65,6 +69,7 @@ struct ActiveWatch {
     /// a successor installed for another graph (or a restart).
     session: u64,
     root: PathBuf,
+    root_id: FileId,
     local_only: Option<Arc<LocalOnlyFolders>>,
     /// Cleared once this watch is replaced or stopped: a debouncer an
     /// in-flight refresh still holds must emit nothing more.
@@ -79,7 +84,7 @@ impl Drop for ActiveWatch {
 
 /// The debouncer plus the local-only link targets it also watches.
 struct LinkedWatch {
-    debouncer: Debouncer<RecommendedWatcher, PrunedFileIdMap>,
+    debouncer: GraphDebouncer,
     /// The links whose targets are watched, shared with the event handler,
     /// which translates raw-store paths back to graph paths through them.
     links: Arc<RwLock<Vec<LocalOnlyLink>>>,
@@ -488,6 +493,26 @@ fn lock_watcher<'a>(
     })
 }
 
+/// Watch `root` recursively and hand each debounced batch to `handler`.
+///
+/// Only changes are subscribed. On Linux the default also reports opens, and
+/// the reconcile pass opens every directory: each pass would trigger the next.
+fn watch_graph(
+    root: &Path,
+    extra_roots: Arc<RwLock<Vec<PathBuf>>>,
+    handler: impl DebounceEventHandler,
+) -> notify::Result<GraphDebouncer> {
+    let mut debouncer = new_debouncer_opt(
+        Duration::from_millis(400),
+        None,
+        handler,
+        PrunedFileIdMap::with_extra_roots(root.to_path_buf(), extra_roots),
+        notify::Config::default().with_event_kinds(EventKindMask::CORE),
+    )?;
+    debouncer.watch(root, RecursiveMode::Recursive)?;
+    Ok(debouncer)
+}
+
 /// Start (or restart) watching the active graph; emits `index:changed`
 /// batches and `index:reconcile` signals.
 ///
@@ -509,10 +534,25 @@ pub fn watch_start(
     let root = graph_guard.root.clone().ok_or_else(AppError::no_graph)?;
     let local_only = graph_guard.local_only();
 
+    let mut active = lock_watcher(&watcher)?;
+    let root_id = get_file_id(&root);
+    // Every index pass ends here. Keep a watcher on this very directory at this
+    // path: the file ID differs for a folder replaced at the same path. On
+    // Linux, a dropped watcher keeps its thread and inotify fd while events
+    // keep arriving, so replacing it on every pass leaks.
+    let unchanged = root_id.as_ref().is_ok_and(|root_id| {
+        active.as_ref().is_some_and(|active| {
+            active.root == root && &active.root_id == root_id && active.local_only == local_only
+        })
+    });
+    if unchanged {
+        return Ok(());
+    }
     // Drop any previous watcher first: if installing the new one fails we're then
     // left with no watcher, rather than the previous graph's still driving
     // index:changed against the now-current graph.
-    *lock_watcher(&watcher)? = None;
+    *active = None;
+    let root_id = root_id.map_err(|err| AppError::io(err.to_string()))?;
 
     let started = std::time::Instant::now();
     let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
@@ -530,9 +570,9 @@ pub fn watch_start(
     let handler_app = app.clone();
     let handler_refresh = Arc::clone(&refresh);
     let handler_live = Arc::clone(&live);
-    let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, PrunedFileIdMap>(
-        Duration::from_millis(400),
-        None,
+    let debouncer = watch_graph(
+        &root,
+        Arc::clone(&extra_roots),
         move |result: DebounceEventResult| {
             if !handler_live.load(Ordering::SeqCst) {
                 return; // replaced or stopped; kept alive only by a refresh
@@ -571,17 +611,10 @@ pub fn watch_start(
                 request_link_refresh(handler_app.clone(), session, Arc::clone(&handler_refresh));
             }
         },
-        PrunedFileIdMap::with_extra_roots(root.clone(), Arc::clone(&extra_roots)),
-        notify::Config::default(),
     )
     .map_err(|err| AppError::io(err.to_string()))?;
 
-    debouncer
-        .watch(&root, RecursiveMode::Recursive)
-        .map_err(|err| AppError::io(err.to_string()))?;
-
-    // Dropping any previous debouncer here stops its thread.
-    *lock_watcher(&watcher)? = Some(ActiveWatch {
+    *active = Some(ActiveWatch {
         watch: Arc::new(Mutex::new(LinkedWatch {
             debouncer,
             links,
@@ -589,9 +622,11 @@ pub fn watch_start(
         })),
         session,
         root,
+        root_id,
         local_only,
         live,
     });
+    drop(active);
     drop(graph_guard);
     if follows_links {
         // Off the main thread: discovery walks the graph.
@@ -802,6 +837,39 @@ mod tests {
             root,
         );
         assert_eq!(effects, BatchEffects::default());
+    }
+
+    /// Reading the graph is not a change. On Linux, inotify can report opens,
+    /// and the reconcile pass opens every directory: if those reached the
+    /// handler, each pass would trigger the next.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reading_the_graph_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::create_dir_all(root.join(".git/objects/aa")).unwrap();
+        std::fs::write(root.join("notes/a.md"), "# a").unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _debouncer = watch_graph(root, Arc::default(), sender).unwrap();
+
+        for entry in WalkDir::new(root) {
+            let entry = entry.unwrap();
+            if entry.file_type().is_file() {
+                std::fs::read(entry.path()).unwrap();
+            }
+        }
+        let batch = receiver.recv_timeout(Duration::from_secs(1));
+        assert!(batch.is_err(), "a read-only walk reported {batch:?}");
+
+        // The watcher still reports a real change.
+        let written = root.join("notes/b.md");
+        std::fs::write(&written, "# b").unwrap();
+        let batch = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        assert!(batch.iter().any(|event| event.paths.contains(&written)));
     }
 
     #[test]
@@ -1213,6 +1281,7 @@ mod tests {
             watch: Arc::clone(&watch),
             session: 7,
             root: root.clone(),
+            root_id: get_file_id(&root).unwrap(),
             local_only: Some(Arc::new(folders)),
             live: Arc::new(AtomicBool::new(true)),
         });

@@ -1,4 +1,4 @@
-import type { CalendarEvent } from '../calendar/commands.ts'
+import type { CalendarEvent } from '../calendar/calendar-service.ts'
 import { displayEvents } from '../calendar/events.ts'
 
 /**

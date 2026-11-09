@@ -10,10 +10,21 @@ import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Spinner } from '@/components/ui/spinner.tsx'
 import { useNoteRow } from '@/hooks/use-note-row.ts'
-import { formatRecordingElapsed } from '@/lib/recording-time.ts'
-import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
+import { formatElapsed } from '@reflect/utils'
+import {
+  useAudioMemo,
+  useAudioMemoCanRetry,
+  useAudioMemoError,
+  useAudioMemoPhase,
+  useAudioMemoStream,
+} from '@/providers/audio-memo-provider.tsx'
+import { useSelector } from '@/lib/use-store.ts'
 import { useOptionalRecorder } from '@/providers/recorder-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
+
+function selectElapsedSeconds(elapsedMs: number): number {
+  return Math.floor(elapsedMs / 1000)
+}
 
 const STRIP_CLASS =
   'mx-4 mt-2 flex min-h-8 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 text-xs shadow-xs'
@@ -68,7 +79,12 @@ function TranscriptReady({
 export function RecordingStrip(): ReactElement | null {
   const memo = useAudioMemo()
   const recorder = useOptionalRecorder()
-  const { stream, subscribeLevel } = memo
+  const { session, subscribeLevel } = memo
+  const phase = useAudioMemoPhase()
+  const stream = useAudioMemoStream()
+  const error = useAudioMemoError()
+  const canRetry = useAudioMemoCanRetry()
+  const elapsedSeconds = useSelector(session.elapsedMs, selectElapsedSeconds)
   const waveformSource = useMemo((): WaveformSource | null => {
     if (stream !== null) {
       return { kind: 'stream', stream }
@@ -76,7 +92,7 @@ export function RecordingStrip(): ReactElement | null {
     return subscribeLevel === null ? null : { kind: 'levels', subscribe: subscribeLevel }
   }, [stream, subscribeLevel])
 
-  switch (memo.phase) {
+  switch (phase) {
     case 'recording':
       return (
         <div role="status" aria-label="Recording" className={STRIP_CLASS}>
@@ -88,7 +104,7 @@ export function RecordingStrip(): ReactElement | null {
             {waveformSource === null ? null : <RecordingWaveform source={waveformSource} />}
           </div>
           <span className="shrink-0 font-medium tabular-nums">
-            {formatRecordingElapsed(memo.elapsedMs)}
+            {formatElapsed(elapsedSeconds * 1000)}
           </span>
           <button
             type="button"
@@ -110,8 +126,8 @@ export function RecordingStrip(): ReactElement | null {
     case 'error':
       return (
         <div role="alert" className={`${STRIP_CLASS} flex-wrap py-1.5`}>
-          <p className="w-full text-destructive">{memo.error}</p>
-          {memo.canRetry ? (
+          <p className="w-full text-destructive">{error}</p>
+          {canRetry ? (
             <Button size="xs" variant="secondary" onClick={() => memo.retry()}>
               Retry
             </Button>

@@ -52,7 +52,7 @@ async function renderGallery(
   registerScrollToIndex: (scrollToIndex: (index: number) => void) => void = vi.fn(),
 ) {
   const attachments = createTestAttachmentService({
-    graphSession: { getState: () => app.graphSession.getState() },
+    graphSession: { get: () => app.graphSession.get() },
     catalog: [
       { path: 'papers/a.pdf', size: 10 },
       { path: 'assets/map.png', size: 10 },
@@ -79,7 +79,7 @@ async function renderGallery(
       registerScrollToIndex={registerScrollToIndex}
     />,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 7 },
       settings: { dateFormat: 'iso', timeFormat: '24h' },
     },

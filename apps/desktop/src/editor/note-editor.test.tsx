@@ -58,13 +58,15 @@ let resolveYouTubeVideo: MockInstance<EmbedMediaService['resolveYouTubeVideo']>
  * Render `ui` in the app, on a platform with the facts `platform`.
  */
 async function render(ui: ReactNode, platform?: TestPlatformOptions) {
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     platform: createTestPlatformService(platform),
   })
-  onTestFinished(() => app.database.close())
-  resolveYouTubeVideo = vi.spyOn(app.embedMedia, 'resolveYouTubeVideo').mockResolvedValue(undefined)
-  return await renderInApp(ui, { app })
+  onTestFinished(() => core.database.close())
+  resolveYouTubeVideo = vi
+    .spyOn(core.embedMedia, 'resolveYouTubeVideo')
+    .mockResolvedValue(undefined)
+  return await renderInApp(ui, { core })
 }
 
 const TOUCH_EDITOR: TestPlatformOptions = { surface: { touchEditor: true } }
@@ -320,7 +322,7 @@ describe('NoteEditor touch-surface input hygiene', () => {
     await expect.element(pmRoot).toHaveAttribute('autocorrect', 'on')
   })
 
-  it('leaves the contenteditable untouched on desktop', async () => {
+  it('leaves the input traits unset on desktop', async () => {
     await render(<NoteEditor privateNote={false} initialContent="Hello" />)
     await expect.element(pmRoot).toBeVisible()
     await expect.element(pmRoot).not.toHaveAttribute('autocapitalize')
@@ -373,12 +375,8 @@ describe('NoteEditor image lightbox', () => {
     await pmRoot.getByAltText('Cat').click()
     const opener = page.getByRole('button', { name: 'Open' })
     await expect.element(opener).toBeVisible()
-    expect(opener.element().parentElement?.className).toContain(
-      'top-[max(env(safe-area-inset-top),1rem)]',
-    )
-    expect(opener.element().parentElement?.className).toContain(
-      'right-[max(env(safe-area-inset-right),1rem)]',
-    )
+    expect(opener.element().parentElement?.className).toContain('top-safe-or-4')
+    expect(opener.element().parentElement?.className).toContain('right-safe-or-4')
   })
 
   it('shows mobile close chrome inside iOS safe-area bounds', async () => {
@@ -387,12 +385,8 @@ describe('NoteEditor image lightbox', () => {
     await pmRoot.getByAltText('Cat').click()
     const close = page.getByRole('button', { name: 'Close', exact: true })
     await expect.element(close).toBeVisible()
-    expect(close.element().parentElement?.className).toContain(
-      'top-[max(env(safe-area-inset-top),1rem)]',
-    )
-    expect(close.element().parentElement?.className).toContain(
-      'left-[max(env(safe-area-inset-left),1rem)]',
-    )
+    expect(close.element().parentElement?.className).toContain('top-safe-or-4')
+    expect(close.element().parentElement?.className).toContain('left-safe-or-4')
     await expect
       .element(page.getByRole('dialog', { name: 'Image preview' }).locate('.bg-black'))
       .toBeInTheDocument()

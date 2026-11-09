@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { sha256Hex } from '@reflect/utils'
+import { safeParseUrl, sha256Hex } from '@reflect/utils'
 import { isAppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { wikiLinkSafe } from '../markdown/edit.ts'
@@ -7,8 +7,6 @@ import { upsertFrontmatter } from '../markdown/frontmatter.ts'
 import type { Frontmatter } from '../markdown/model.ts'
 import type { CaptureIdentity } from './capture-identity.ts'
 import type { CaptureEnvelope } from './capture-envelope.ts'
-
-export { notePrivate } from '../privacy/checkers.ts'
 
 /**
  * Enrichment lifecycle of a capture note, in its frontmatter. `skipped` means
@@ -42,21 +40,13 @@ export function captureNoteMeta(frontmatter: Frontmatter): CaptureNoteMeta | nul
   return parsed.success ? parsed.data : null
 }
 
-function urlHost(url: string): string {
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
-}
-
 const PAGE_TEXT_START = '<!-- reflect-capture-page-text:start -->'
 const PAGE_TEXT_END = '<!-- reflect-capture-page-text:end -->'
 
 /** The capture's display title: the page title, else the URL's host. */
 export function displayTitle(envelope: Pick<CaptureEnvelope, 'title' | 'url'>): string {
   const title = wikiLinkSafe(envelope.title)
-  return title !== '' ? title : urlHost(envelope.url)
+  return title !== '' ? title : safeParseUrl(envelope.url)?.host || envelope.url
 }
 
 function captureNoteBody(

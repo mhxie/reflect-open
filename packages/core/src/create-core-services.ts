@@ -107,9 +107,14 @@ import {
 import { createGistService, type GistService } from './sync/gist-service.ts'
 import { createGistPublishService, type GistPublishService } from './sync/gist-publish-service.ts'
 import { createGithubAuthService, type GithubAuthService } from './sync/github-auth-service.ts'
+import {
+  createGitHostCredentialService,
+  type GitHostCredentialService,
+} from './sync/git-host-credential-service.ts'
+import { createCredentialResolver, type CredentialResolver } from './sync/credential-resolver.ts'
 import { createGithubRepoService, type GithubRepoService } from './sync/github-repo-service.ts'
 import { createSyncEngineFactory, type SyncEngineFactory } from './sync/engine.ts'
-import type { BackupServiceDeps } from './sync/backup-service.ts'
+import type { GitSyncServiceDeps } from './sync/git-sync-service.ts'
 import type { ICloudDownloadServiceDeps } from './sync/icloud-download-service.ts'
 import {
   createICloudMigrationService,
@@ -133,6 +138,10 @@ import {
   createAppStoreEnvironmentService,
   type AppStoreEnvironmentService,
 } from './monetization/app-store-environment-service.ts'
+import {
+  createInstallClockService,
+  type InstallClockService,
+} from './monetization/install-clock-service.ts'
 import { createPaywallService, type PaywallService } from './monetization/paywall-service.ts'
 import {
   createSubscriptionService,
@@ -155,8 +164,11 @@ import { createNoteFileService, type NoteFileService } from './graph/note-file-s
 import {
   createGraphSessionService,
   type GraphSessionService,
+  type GraphSessionState,
 } from './graph/graph-session-service.ts'
+import type { Store } from './store.ts'
 import { createDailyNoteService, type DailyNoteService } from './daily/daily-note-service.ts'
+import { createTodayService, type TodayService } from './daily/today-service.ts'
 import { createAttachmentService, type AttachmentService } from './documents/attachment-service.ts'
 import { createNoteMoveService, type NoteMoveService } from './documents/note-move-service.ts'
 import {
@@ -177,10 +189,8 @@ import {
   createNotePreviewService,
   type NotePreviewService,
 } from './documents/note-preview-service.ts'
-import {
-  createNoteSessionService,
-  type NoteSessionService,
-} from './documents/note-session-service.ts'
+import { createNoteSessionService } from './documents/note-session-service.ts'
+import type { NoteSessionService } from './documents/note-session-types.ts'
 import {
   createOpenDocumentsService,
   type OpenDocumentsService,
@@ -233,7 +243,7 @@ import {
   type WikiResolverService,
 } from './indexing/wiki-resolver-service.ts'
 import { createIndexStoreService, type IndexStoreService } from './indexing/index-store-service.ts'
-import { createAppStoreService } from './ipc/app-store-service.ts'
+import { createAppStoreService, type AppStoreService } from './ipc/app-store-service.ts'
 import { createIapService } from './ipc/iap-service.ts'
 import type { IpcBridgeService } from './ipc/ipc-service.ts'
 import {
@@ -249,7 +259,6 @@ import {
 import { createPrivacyService, type PrivacyService } from './privacy/privacy-service.ts'
 import { createSettingsService, type SettingsService } from './settings/settings-service.ts'
 import { createAgentSkillService, type AgentSkillService } from './ai/agent-skill-service.ts'
-import { createAppInfoService, type AppInfoService } from './ports/app-info-service.ts'
 import {
   createNativeActivityService,
   type NativeActivityService,
@@ -259,7 +268,7 @@ import { createBackgroundReconcilerFactory } from './reconcile/background-reconc
 import type { ClockService } from './ports/clock-service.ts'
 import type { HttpService } from './ports/http-service.ts'
 import { createSystemIdService, type IdService } from './ports/id-service.ts'
-import { isMobilePlatform } from './ports/platform-facts.ts'
+import { isMobilePlatform, type PlatformFacts } from './ports/platform-facts.ts'
 import type { ActivityPort } from './ports/activity-port.ts'
 import type { ProgressPort } from './ports/progress-port.ts'
 import { createUnavailableImageCodec, type ImageCodecService } from './ports/image-codec-service.ts'
@@ -272,7 +281,6 @@ import {
   type PersistenceFlushService,
 } from './graph/persistence-flush-service.ts'
 import { appleFileSrc, type FileSrcConverter } from './ports/file-src.ts'
-import type { PlatformFacts } from './ports/platform-facts.ts'
 import { createWebStorageService, type StorageService } from './ports/storage-service.ts'
 import type { GraphServices, GraphServicesDeps } from './create-graph-services.ts'
 import type { AudioRecorderService } from './audio/audio-recorder-service.ts'
@@ -290,7 +298,7 @@ export interface CoreServices {
    */
   readonly logger: LoggerService
   /**
-   * Wall time, monotonic time, the local date, and timers.
+   * Wall time, monotonic time, and timers.
    */
   readonly clock: ClockService
   /**
@@ -309,10 +317,6 @@ export interface CoreServices {
    * Host filesystem path building, in the host platform's path syntax.
    */
   readonly path: PathService
-  /**
-   * Facts about the running application build.
-   */
-  readonly appInfo: AppInfoService
   /**
    * Live reads of the OS calendar database.
    */
@@ -382,8 +386,12 @@ export interface CoreServices {
    */
   readonly githubAuth: GithubAuthService
   /**
-   * The Rust git primitives for the open graph's repository: the commands the
-   * backup composes, and a note's last committed version for the note state.
+   * The sign-ins of the other HTTPS git hosts, one per origin.
+   */
+  readonly gitHostCredentials: GitHostCredentialService
+  /**
+   * The Rust git primitives for the open graph's repository: the commands
+   * git sync composes, and a note's last committed version for the note state.
    */
   readonly gitRepository: GitRepositoryService
   /**
@@ -450,6 +458,10 @@ export interface CoreServices {
    * The optimistic read overlay for note index rows.
    */
   readonly noteRows: NoteRowService
+  /**
+   * The local calendar date, notified whenever it changes.
+   */
+  readonly today: TodayService
   /**
    * The date questions about notes: today, which days have a daily note, and the wake onto a new day.
    */
@@ -597,7 +609,15 @@ export interface MobileServices {
    */
   readonly appStoreEnvironment: AppStoreEnvironmentService
   /**
-   * Whether the paywall replaces the app, and the actions that lift it.
+   * StoreKit's App Store sheets and prompts.
+   */
+  readonly appStore: AppStoreService
+  /**
+   * Time since this device's first launch, which schedules the paywall.
+   */
+  readonly installClock: InstallClockService
+  /**
+   * Whether the paywall covers the app, and the actions that lift it.
    */
   readonly paywall: PaywallService
   /**
@@ -683,6 +703,7 @@ export const coreServiceFactories = {
   appStore: createAppStoreService,
   subscription: createSubscriptionService,
   appStoreEnvironment: createAppStoreEnvironmentService,
+  installClock: createInstallClockService,
   haptics: createHapticsService,
   nativeAction: createNativeActionService,
   paywall: createPaywallService,
@@ -735,6 +756,8 @@ export const coreServiceFactories = {
   persistenceFlush: createPersistenceFlushService,
   gitRepository: createGitRepositoryService,
   githubAuth: createGithubAuthService,
+  gitHostCredentials: createGitHostCredentialService,
+  credentialResolver: createCredentialResolver,
   githubRepos: createGithubRepoService,
   gists: createGistService,
   noteRows: createNoteRowService,
@@ -748,12 +771,12 @@ export const coreServiceFactories = {
   transcriptEnrichment: createTranscriptEnrichmentService,
   audioMemo: createAudioMemoService,
   chatHistory: createChatHistoryService,
+  today: createTodayService,
   dailyNotes: createDailyNoteService,
   chatPrivacy: createChatPrivacyService,
   noteTools: createNoteToolsService,
   chatEngine: createChatEngineService,
   chatGraphContext: createChatGraphContextService,
-  appInfo: createAppInfoService,
   contactSuggestions: createContactSuggestionService,
   meetings: createMeetingService,
   agentSkill: createAgentSkillService,
@@ -817,6 +840,10 @@ export interface CoreInternalServices {
    * Builds the sync engine of one graph session.
    */
   readonly syncEngines: SyncEngineFactory
+  /**
+   * Which sign-in a remote gets.
+   */
+  readonly credentials: CredentialResolver
   /**
    * Bounded outbound web fetches that the native side performs.
    */
@@ -989,16 +1016,20 @@ export function composeCoreServices(
     const appStore = create.appStore({ ipc })
     const subscription = create.subscription({ iap, storage, clock, platform, logger })
     const appStoreEnvironment = create.appStoreEnvironment({ appStore, storage, platform })
+    const installClock = create.installClock({ secretStore, clock, activity, platform, logger })
     const haptics = create.haptics({ ipc, logger })
     const nativeAction = create.nativeAction({ audioRecorder, clock, platform, logger })
     return {
       haptics,
       subscription,
       appStoreEnvironment,
+      appStore,
+      installClock,
       paywall: create.paywall({
         subscription,
         classicAccess,
         appStoreEnvironment,
+        installClock,
         iap,
         appStore,
         platform,
@@ -1019,7 +1050,10 @@ export function composeCoreServices(
   const assetStore = create.assetStore({ ipc, clock, fileChanges })
   const openDocuments = create.openDocuments({ fileChanges })
   // Read at call time: the graph session is built later.
-  const lateGraphSession = { getState: () => graphSession.getState() }
+  const lateGraphSession: Store<GraphSessionState<GraphServices>> = {
+    get: () => graphSession.get(),
+    subscribe: (listener) => graphSession.subscribe(listener),
+  }
   const indexQuery = create.indexQuery({ database })
   const wikiResolver = create.wikiResolver({ database })
   const backlinks = create.backlinks({ database, noteFile, graphSession: lateGraphSession })
@@ -1067,8 +1101,7 @@ export function composeCoreServices(
   const noteDocuments = create.noteDocuments({
     openDocuments,
     noteFile,
-    // Read at call time: the graph session is built later.
-    graphSession: { getState: () => graphSession.getState() },
+    graphSession: lateGraphSession,
   })
   const noteMove = create.noteMove({ ipc, noteFile, indexStore, openDocuments, logger })
   const captureInbox = create.captureInbox({ ipc })
@@ -1099,21 +1132,15 @@ export function composeCoreServices(
     clock,
     logger,
     progress,
-    // Read at call time: the graph session is built on this lifecycle.
-    graphSession: {
-      getState: () => graphSession.getState(),
-      subscribe: (listener) => graphSession.subscribe(listener),
-    },
+    // The graph session is built on this lifecycle.
+    graphSession: lateGraphSession,
     activity,
     platform,
     role: adapters.role,
   })
   const noteRows = create.noteRows({
-    // Read at call time: the graph session is built on these rows.
-    graphSession: {
-      getState: () => graphSession.getState(),
-      subscribe: (listener) => graphSession.subscribe(listener),
-    },
+    // The graph session is built on these rows.
+    graphSession: lateGraphSession,
   })
   const icloudNative = create.icloudNative({ ipc, logger })
   const graphSession = create.graphSession({
@@ -1132,7 +1159,9 @@ export function composeCoreServices(
     logger,
     createServices: (session) => {
       return adapters.createGraphServices(session, {
-        backup: backupDeps,
+        gitSync: gitSyncDeps,
+        githubConnector: { githubAuth, githubRepos },
+        gitHostConnector: { git: gitRepository, gitHostCredentials },
         icloudSync: icloudSyncDeps,
         icloudDownload: icloudDownloadDeps,
         capture: services.capture,
@@ -1151,6 +1180,7 @@ export function composeCoreServices(
     clock,
     platform: fileSrc,
     graphSession,
+    logger,
   })
   const persistenceFlush = create.persistenceFlush({
     settings,
@@ -1159,6 +1189,8 @@ export function composeCoreServices(
   })
   const gitRepository = create.gitRepository({ ipc })
   const githubAuth = create.githubAuth({ secretStore, http: adapters.http, clock })
+  const gitHostCredentials = create.gitHostCredentials({ secretStore, logger })
+  const credentials = create.credentialResolver({ githubAuth, gitHostCredentials, logger })
   const githubRepos = create.githubRepos({ http: adapters.http })
   const gists = create.gists({ http: adapters.http })
   const syncEngines = create.syncEngines({ git: gitRepository, clock })
@@ -1239,6 +1271,7 @@ export function composeCoreServices(
       ? buildMobileServices()
       : null
   const chatHistory = create.chatHistory({ ipc, database, logger })
+  const today = create.today({ clock })
   const dailyNotes = create.dailyNotes({ database, clock, activity })
   const chatPrivacy = create.chatPrivacy({
     database,
@@ -1272,11 +1305,12 @@ export function composeCoreServices(
     privacy,
   })
   const imageCodec = adapters.imageCodec ?? createUnavailableImageCodec()
-  const backupDeps: BackupServiceDeps = {
+  const gitSyncDeps: GitSyncServiceDeps = {
     git: gitRepository,
     syncEngines,
+    credentials,
     githubAuth,
-    githubRepos,
+    gitHostCredentials,
     fileChanges,
     indexLifecycle,
     noteDisplacement,
@@ -1307,7 +1341,6 @@ export function composeCoreServices(
     platform,
     storage,
     path,
-    appInfo: create.appInfo({ ipc }),
     calendar,
     contacts,
     contactSuggestions: create.contactSuggestions({
@@ -1340,6 +1373,7 @@ export function composeCoreServices(
     noteLinkResolver,
     knowledgeLevels: create.knowledgeLevels({ noteFile, graphSession }),
     githubAuth,
+    gitHostCredentials,
     gitRepository,
     gistPublish: create.gistPublish({
       gists,
@@ -1417,6 +1451,7 @@ export function composeCoreServices(
       graphSession,
     }),
     noteRows,
+    today,
     dailyNotes,
     templates: create.templates({
       noteFile,
@@ -1479,6 +1514,7 @@ export function composeCoreServices(
       embeddingRuntime,
       settings,
       clock,
+      today,
       id,
       imageCodec,
       logger,
@@ -1556,6 +1592,7 @@ export function composeCoreServices(
     githubRepos,
     gists,
     syncEngines,
+    credentials,
     webFetch,
     xArchive,
     audioRecorder,

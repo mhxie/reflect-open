@@ -6,7 +6,7 @@ import {
   type KnowledgeLevelsState,
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 export type KnowledgeLevelState =
@@ -16,7 +16,7 @@ export type KnowledgeLevelState =
 
 /** All note surfaces share one cached, generation-pinned copy of the graph's path rules. */
 export function useKnowledgeLevels(): KnowledgeLevelsState | undefined {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { knowledgeLevels } = useCoreServices()
   const client = useQueryClient()
   const root = graph?.root

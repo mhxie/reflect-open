@@ -2,7 +2,8 @@ import { page } from 'vitest/browser'
 import { describe, expect, it } from 'vitest'
 import { useEffect, useRef, type ReactElement } from 'react'
 import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
-import { useRouter, type NavigateOptions } from '@/routing/router.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
+import type { NavigateOptions } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -22,7 +23,8 @@ function Arrival({
   path: string
   options?: NavigateOptions | undefined
 }): ReactElement | null {
-  const { route, navigate } = useRouter()
+  const { route } = useRouterState()
+  const { navigate } = useRouterActions()
   const navigatedRef = useRef(false)
   useEffect(() => {
     if (!navigatedRef.current) {
@@ -34,11 +36,11 @@ function Arrival({
 }
 
 async function renderArrival(path: string, options?: NavigateOptions): Promise<void> {
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { 'notes/target.md': '# Target\n' } }),
   })
-  await renderInApp(<Arrival path={path} options={options} />, { app })
+  await renderInApp(<Arrival path={path} options={options} />, { core })
 }
 
 describe('MobileNote focus contract', () => {

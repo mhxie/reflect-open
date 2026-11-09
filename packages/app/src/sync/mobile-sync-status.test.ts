@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { BackupState } from '@reflect/core'
+import type { GitSyncState } from '@reflect/core'
 import { getMobileSyncStatus, type MobileSyncStatus } from './mobile-sync-status.ts'
 
 /**
@@ -7,33 +7,71 @@ import { getMobileSyncStatus, type MobileSyncStatus } from './mobile-sync-status
  * become the words mobile shows, never git terms.
  */
 
-function connected(status: Extract<BackupState, { phase: 'connected' }>['status']): BackupState {
+function connected(status: Extract<GitSyncState, { phase: 'connected' }>['status']): GitSyncState {
   return {
     phase: 'connected',
     remoteUrl: 'https://github.com/alex/notes.git',
-    repo: { owner: 'alex', name: 'notes' },
+    remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
+    isPrimaryChannel: true,
     status,
   }
 }
 
-function statusFor(backup: BackupState): MobileSyncStatus | null {
-  return getMobileSyncStatus(backup)
+function statusFor(gitSync: GitSyncState): MobileSyncStatus | null {
+  return getMobileSyncStatus(gitSync)
 }
 
 describe('engine state', () => {
-  it('has nothing to say without a configured backup', () => {
+  it('has nothing to say without a configured remote', () => {
     expect(statusFor({ phase: 'loading' })).toBeNull()
     expect(statusFor({ phase: 'disconnected' })).toBeNull()
   })
 
-  it('rests on Backed up — the quiet tone the pill hides on', () => {
-    const status = statusFor(connected({ state: 'idle' }))
-    expect(status).toEqual({ label: 'Backed up', tone: 'ok', detail: null })
+  it('asks for a sign-in when the remote waits for one', () => {
+    expect(
+      statusFor({
+        phase: 'needsCredential',
+        remoteUrl: 'https://github.com/alex/notes.git',
+        remote: { kind: 'github', repo: { owner: 'alex', name: 'notes' } },
+      }),
+    ).toEqual({
+      label: 'Sign-in needed',
+      tone: 'attention',
+      detail: {
+        kind: 'message',
+        text: 'Signed out of GitHub. Sign in under Accounts to resume.',
+      },
+    })
   })
 
-  it('maps a waiting window to Backed up with the time the backup is due', () => {
+  it('asks a host remote for its sign-in, and names the reason for plain HTTP', () => {
+    const waiting = (origin: string): GitSyncState => ({
+      phase: 'needsCredential',
+      remoteUrl: `${origin}/alex/notes.git`,
+      remote: { kind: 'https', origin },
+    })
+    expect(statusFor(waiting('https://gitlab.com'))).toEqual({
+      label: 'Sign-in needed',
+      tone: 'attention',
+      detail: {
+        kind: 'message',
+        text: 'gitlab.com needs a username and an access token or password.',
+      },
+    })
+    expect(statusFor(waiting('http://gitea.local'))?.detail).toEqual({
+      kind: 'message',
+      text: 'Reflect does not send sign-ins over plain http. Use the https address of this repository.',
+    })
+  })
+
+  it('rests on Up to date — the quiet tone the pill hides on', () => {
+    const status = statusFor(connected({ state: 'idle' }))
+    expect(status).toEqual({ label: 'Up to date', tone: 'ok', detail: null })
+  })
+
+  it('maps a waiting window to Up to date with the time the next sync is due', () => {
     expect(statusFor(connected({ state: 'waiting', until: 2 * 60_000 + 1 }))).toEqual({
-      label: 'Backed up',
+      label: 'Up to date',
       tone: 'ok',
       detail: { kind: 'countdown', until: 2 * 60_000 + 1 },
     })
@@ -67,7 +105,7 @@ describe('engine state', () => {
 })
 
 describe('getMobileSyncStatus', () => {
-  it('has nothing to say without a backup lifecycle', () => {
+  it('has nothing to say without a sync lifecycle', () => {
     expect(getMobileSyncStatus(null)).toBeNull()
   })
 

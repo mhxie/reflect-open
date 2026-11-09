@@ -11,7 +11,7 @@ import {
 import { useNoteLinkNavigation, type NoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { notePathForRoute, routeForPath, type NoteRoute } from '@/routing/route.ts'
+import { notePathForRoute, routeForPath, type NoteRoute } from '@reflect/app'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** A note shown in the peek panel, with the route its "Open" button takes. */

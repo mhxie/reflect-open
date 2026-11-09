@@ -4,62 +4,57 @@ import { page } from 'vitest/browser'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
-import { useSync, useSyncContext } from './sync-provider.tsx'
+import { useGitSyncActions, useGitSyncState } from './sync-provider.tsx'
 
 function Probe(): ReactElement {
-  const sync = useSync()
-  const context = useSyncContext()
-  async function backUpNow(): Promise<void> {
+  const state = useGitSyncState()
+  const actions = useGitSyncActions()
+  async function syncNow(): Promise<void> {
     try {
-      await sync.backUpNow()
+      await actions.syncNow()
     } catch {
       // The probe only records the call.
     }
   }
   return (
-    <button
-      type="button"
-      data-context={context === null ? 'none' : 'some'}
-      onClick={() => void backUpNow()}
-    >
-      {sync.backup.phase}
+    <button type="button" onClick={() => void syncNow()}>
+      {state.phase}
     </button>
   )
 }
 
-describe('useSync', () => {
+describe('useGitSyncState', () => {
   it('publishes the graph backup state and passes actions through', async () => {
-    const { backup } = await renderInApp(<Probe />, { sync: { phase: 'loading' } })
+    const { gitSync } = await renderInApp(<Probe />, { sync: { phase: 'loading' } })
 
-    backup?.setState({ phase: 'disconnected' })
+    gitSync?.setState({ phase: 'disconnected' })
     await page.getByRole('button', { name: 'disconnected' }).click()
 
-    expect(backup?.calls()).toEqual([{ method: 'start' }, { method: 'backUpNow' }])
+    expect(gitSync?.calls()).toEqual([{ method: 'start' }, { method: 'syncNow' }])
   })
 
-  it('reads loading, and no context, where the graph runs no backup', async () => {
-    const app = createTestCoreServices({
+  it('reads loading where the graph runs no backup', async () => {
+    const core = createTestCoreServices({
       database: createWasmTestDatabaseService(),
       role: 'note-window',
     })
-    await renderInApp(<Probe />, { app })
+    await renderInApp(<Probe />, { core })
 
-    const button = page.getByRole('button', { name: 'loading' })
-    await expect.element(button).toHaveAttribute('data-context', 'none')
+    await expect.element(page.getByRole('button', { name: 'loading' })).toBeInTheDocument()
   })
 
   it('passes a change the watcher does not report through, and ignores it without a backup', async () => {
     function ChangedProbe(): ReactElement {
-      const sync = useSync()
+      const sync = useGitSyncActions()
       return (
         <button type="button" onClick={() => sync.fileChanged()}>
           changed
         </button>
       )
     }
-    const { backup } = await renderInApp(<ChangedProbe />, { sync: { phase: 'loading' } })
+    const { gitSync } = await renderInApp(<ChangedProbe />, { sync: { phase: 'loading' } })
     await page.getByRole('button', { name: 'changed' }).click()
-    expect(backup?.calls()).toEqual([{ method: 'start' }, { method: 'fileChanged' }])
+    expect(gitSync?.calls()).toEqual([{ method: 'start' }, { method: 'fileChanged' }])
 
     // A note window runs no backup: the same call is a no-op, not a throw.
     const noteWindow = createTestCoreServices({
@@ -67,7 +62,7 @@ describe('useSync', () => {
       role: 'note-window',
     })
     onTestFinished(() => noteWindow.database.close())
-    await renderInApp(<ChangedProbe />, { app: noteWindow })
+    await renderInApp(<ChangedProbe />, { core: noteWindow })
     await page.getByRole('button', { name: 'changed' }).last().click()
   })
 })

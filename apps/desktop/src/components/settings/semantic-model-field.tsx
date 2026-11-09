@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { formatModelSize, SEMANTIC_MODELS, type SemanticModelId } from '@reflect/core'
 import { cn } from '@/lib/utils.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
@@ -12,12 +12,13 @@ import { SettingsOptionCard } from './option-card.tsx'
  * note, so a switch costs one full pass over the graph.
  */
 export function SemanticModelField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const { semanticSearch } = useCoreServices()
   const model = settings.semanticModel
 
   function choose(next: SemanticModelId): void {
-    updateSettings({ semanticModel: next })
+    settingsService.update({ semanticModel: next })
     // EmbeddingsSync never retries a failed load on its own; choosing a model
     // is an explicit action, so it does (the update above is synchronous, so
     // the retry reads the new model).

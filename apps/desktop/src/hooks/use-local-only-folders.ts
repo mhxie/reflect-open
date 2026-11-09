@@ -1,6 +1,10 @@
-import { NO_LOCAL_ONLY_FOLDERS, type LocalOnlyFolders } from '@reflect/core'
+import { NO_LOCAL_ONLY_FOLDERS, type GraphSessionState, type LocalOnlyFolders } from '@reflect/core'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useSelector } from '@/lib/use-store.ts'
+
+function selectLocalOnlyFolders(state: GraphSessionState): LocalOnlyFolders {
+  return state.session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS
+}
 
 /**
  * The open graph's local-only folders, for the predicates of
@@ -8,8 +12,5 @@ import { useServiceState } from '@/services/use-service-state.ts'
  */
 export function useLocalOnlyFolders(): LocalOnlyFolders {
   const { graphSession } = useCoreServices()
-  return useServiceState(
-    graphSession,
-    () => graphSession.getState().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS,
-  )
+  return useSelector(graphSession, selectLocalOnlyFolders)
 }

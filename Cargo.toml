@@ -57,7 +57,12 @@ core-foundation = "0.10.1"
 dbus-secret-service-keyring-store = "1.0.1"
 dirs = "7.0.0"
 dispatch2 = "0.3.1"
-fastembed = "7.1.1"
+# Text embeddings only. The default `image-models` feature turns on every
+# `image` format (AVIF encoder, EXR, TIFF, ...) through feature unification.
+fastembed = { version = "7.5.0", default-features = false, features = [
+  "hf-hub-native-tls",
+  "ort-download-binaries-native-tls",
+] }
 file-id = "0.2.3"
 getrandom = "0.4.3"
 # Everything is vendored/static: libssh2 and openssl must never link against
@@ -79,8 +84,8 @@ jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 keyring-core = "1.0.1"
 libc = "0.2.189"
 log = "0.4.34"
-notify = "8.2.0"
-notify-debouncer-full = "0.7.0"
+notify = "9.0.0-rc.7"
+notify-debouncer-full = "0.8.0-rc.2"
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false }
 objc2-audio-toolbox = { version = "0.3.2", default-features = false }
@@ -99,7 +104,7 @@ proptest = "1.12.0"
 pulldown-cmark = "0.13.4"
 qwen3-asr = { version = "0.2.2", default-features = false }
 realfft = "3.5.0"
-reconcile-text = "0.13.2"
+reconcile-text = "0.14.1"
 # reqwest 0.12 rides the exact version tauri-plugin-http already compiles.
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls"] }
 rtrb = "0.4.0"
@@ -114,19 +119,19 @@ sha2 = "0.11.1"
 sqlite-vec = "0.1.9"
 symphonia = { version = "0.6.1", default-features = false }
 symphonia-adapter-libopus = "0.3.0"
-tauri = "2.12.4"
-tauri-build = "2.7.3"
+tauri = "2.12.5"
+tauri-build = "2.7.4"
 tauri-plugin = { version = "2.7.2", features = ["build"] }
-tauri-plugin-deep-link = "2.6.1"
-tauri-plugin-dialog = "2.8.3"
+tauri-plugin-deep-link = "2.6.3"
+tauri-plugin-dialog = "2.8.4"
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-http = "2.8.3"
 tauri-plugin-iap = "0.9.1"
 tauri-plugin-log = "2.10.1"
 tauri-plugin-opener = "2.7.2"
 tauri-plugin-process = "2.4.0"
-tauri-plugin-single-instance = "2.5.2"
-tauri-plugin-updater = "2.14.0"
+tauri-plugin-single-instance = "2.5.5"
+tauri-plugin-updater = "2.14.1"
 tauri-plugin-window-state = "2.5.0"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
@@ -149,3 +154,9 @@ zip = { version = "9.0.5", default-features = false }
 # unrepresentative. The workspace's own crates stay quick to rebuild.
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+# One codegen unit lets LLVM optimize each crate as a whole: about 10% smaller
+# downloads, for slower release builds. Set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+# for faster local release builds.
+codegen-units = 1

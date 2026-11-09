@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { wikiAncestorIndexPaths, type WikiAncestor } from '@reflect/core'
 import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -25,7 +25,7 @@ const LOADING: WikiAncestorsState = { kind: 'loading' }
  * or adding or deleting an index shows up on the next refetch.
  */
 export function useWikiAncestors(path: string): WikiAncestorsState {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { wiki } = useCoreServices()
   const languages = useWikiLanguages()
   const possible = useMemo(

@@ -2,9 +2,9 @@ import { createTestCoreServices } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
-import { addDaysIso, todayIso } from '@/lib/dates.ts'
+import { addDaysToIsoDate, getIsoToday } from '@reflect/utils'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions, useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -41,7 +41,7 @@ vi.mock('@/components/note-pane.tsx', async () => {
   }
 })
 function FollowDayLink({ date }: { date: string }): null {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   useEffect(() => {
     navigate({ kind: 'daily', date }, { revealHeading: 'Agenda' })
   }, [navigate, date])
@@ -49,7 +49,7 @@ function FollowDayLink({ date }: { date: string }): null {
 }
 
 function Stream(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return (
     <DailyStream
       target={route.kind === 'daily' ? { kind: 'date', date: route.date } : { kind: 'today' }}
@@ -59,7 +59,7 @@ function Stream(): ReactElement {
 
 it('reveals the linked heading in the arrival day only, once', async () => {
   reveals.length = 0
-  const yesterday = addDaysIso(todayIso(), -1)
+  const yesterday = addDaysToIsoDate(getIsoToday(), -1)
   const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
   // The stream's today is the clock's; the link targets the real yesterday.
@@ -71,7 +71,7 @@ it('reveals the linked heading in the arrival day only, once', async () => {
       </div>
       <FollowDayLink date={yesterday} />
     </>,
-    { app, route: { kind: 'today' }, settings: { dateFormat: 'mdy' } },
+    { core: app, route: { kind: 'today' }, settings: { dateFormat: 'mdy' } },
   )
 
   await vi.waitFor(() => expect(reveals).toEqual([{ date: yesterday, fragment: 'Agenda' }]))

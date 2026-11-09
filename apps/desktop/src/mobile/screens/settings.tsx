@@ -1,73 +1,144 @@
 import { useId, useState, type ReactElement, type ReactNode } from 'react'
-import { getMobileSyncStatus, type MobileSyncDetail } from '@reflect/app'
+import appIcon from '@/assets/app-icon.png'
 import { useQuery } from '@tanstack/react-query'
 import {
+  DEFAULT_WIKI_TRUST_REPORT_PATH,
+  normalizeWikiTrustReportPath,
+  type WikiTrustDisplay,
   aiProvider,
   aiProviderRequiresApiKey,
   errorMessage,
   marketingVersion,
   CHAT_SYSTEM_PROMPT_MAX_LENGTH,
-  DEFAULT_WIKI_TRUST_REPORT_PATH,
   TRANSCRIPTION_PROMPT_MAX_LENGTH,
   normalizeChatSystemPrompt,
-  normalizeWikiTrustReportPath,
   normalizeTranscriptionPrompt,
   type AiPrompt,
   type AiProviderConfig,
-  type DateFormat,
   type EditorTextSize,
+  type PaywallPhase,
   type ThemePreference,
   type TimeFormat,
   type WeekStartDay,
-  type WikiTrustDisplay,
+  DATE_FORMATS,
+  formatFullDate,
 } from '@reflect/core'
 import { useAiPrompts } from '@/hooks/use-ai-prompts.ts'
 import { useAiProviders } from '@/hooks/use-ai-providers.ts'
-import { useAppVersion } from '@/hooks/use-app-version.ts'
-import { usePaywallRequested } from '@/hooks/use-paywall-requested.ts'
+import { useGithubConnected } from '@/hooks/use-github-connected.ts'
+import { useAsyncAction } from '@/hooks/use-async-action.ts'
 import { useCrashTest, useDebugUnlockTap } from '@/hooks/use-debug-unlock.ts'
 import { queryKeys } from '@/lib/query-client.ts'
 import { AddAiProviderDrawer } from '@/mobile/add-ai-provider-drawer.tsx'
 import { AiPromptDrawer } from '@/mobile/ai-prompt-drawer.tsx'
 import { AiProviderActionsDrawer } from '@/mobile/ai-provider-actions-drawer.tsx'
 import { ConnectGithubDrawer } from '@/mobile/connect-github-drawer.tsx'
-import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/mobile/legal-urls.ts'
+import { ConnectGitHostDrawer } from '@/mobile/connect-git-host-drawer.tsx'
+import { ConnectRepositoryDrawer } from '@/mobile/connect-repository-drawer.tsx'
+import { GithubSignInDrawer } from '@/mobile/github-sign-in-drawer.tsx'
+import { PRIVACY_POLICY_URL } from '@/mobile/legal-urls.ts'
 import { MobileScreenHeader } from '@/mobile/screen-header.tsx'
 import { TextSettingDrawer } from '@/mobile/text-setting-drawer.tsx'
 import {
   SettingsActionRow,
   SettingsGroup,
+  SettingsHeroRow,
   SettingsNavRow,
-  SettingsSegmentedRow,
+  SettingsMenuRow,
   SettingsSelectRow,
   SettingsSwitchRow,
   SettingsValueRow,
-  type SegmentedOption,
+  type SettingsMenuOption,
 } from '@/mobile/settings-list.tsx'
-import { useActiveSubscription } from '@/mobile/use-active-subscription.ts'
+import { useStore } from '@/lib/use-store.ts'
+import { useMobileServices } from '@/mobile/mobile-services.ts'
 import { useAppStoreEnvironment } from '@/mobile/use-app-store-environment.ts'
+import { useSubscriptionControls } from '@/mobile/use-subscription-controls.ts'
+import { setPerfHudEnabled, usePerfHudEnabled } from '@/perf-hud/flag.ts'
+import { useGraphActions, useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useMobileStorageKind } from '@/providers/use-mobile-graph-boot.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
+import { getMobileSyncStatus, remoteLabel, type MobileSyncDetail } from '@reflect/app'
 import {
-  classicAccessMessage,
-  useClassicAccess,
-  useClassicSignOut,
-} from '@/mobile/use-classic-access.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useMobileAppServices } from '@/mobile/mobile-services.ts'
-import { useAppServices } from '@/services/services-provider.tsx'
-import { formatFullDate } from '@/lib/dates.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+  useChatSystemPrompt,
+  useDateFormat,
+  useEditorBulletAfterHeading,
+  useEditorDefaultBullet,
+  useEditorSmoothCaretAnimation,
+  useEditorTextSize,
+  useSettingsService,
+  useSettingsStore,
+  useThemeSetting,
+  useTimeFormat,
+  useTranscriptionFormat,
+  useTranscriptionPrompt,
+  useWeekStartDay,
+} from '@/providers/settings-provider.tsx'
 import { CountdownText } from '@/components/countdown-text.tsx'
-import { useSyncContext } from '@/providers/sync-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useGitSyncActions, useGitSyncState } from '@/providers/sync-provider.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 
-const TRUST_DISPLAY_OPTIONS: readonly SegmentedOption<WikiTrustDisplay>[] = [
+const TRUST_DISPLAY_OPTIONS: readonly SettingsMenuOption<WikiTrustDisplay>[] = [
   { value: 'inline', label: 'Inline' },
   { value: 'margin', label: 'Margin' },
   { value: 'on-demand', label: 'On demand' },
   { value: 'off', label: 'Off' },
 ]
+const PAYWALL_PHASE_OPTIONS: readonly SettingsMenuOption<PaywallPhase | 'off'>[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'hidden', label: 'Hidden' },
+  { value: 'skippable', label: 'Skippable' },
+  { value: 'required', label: 'Required' },
+]
 
-const THEME_OPTIONS: readonly SegmentedOption<ThemePreference>[] = [
+/**
+ * Shows What's New again in this session.
+ */
+function WhatsNewRow(): ReactElement {
+  const { whatsNew } = useAppServices()
+  const override = useStore(whatsNew.override)
+  return (
+    <SettingsSwitchRow
+      label="Simulate What’s New"
+      checked={override}
+      onCheckedChange={whatsNew.setOverride}
+    />
+  )
+}
+
+/**
+ * Shows the review page after What's New in this session.
+ */
+function ReviewRow(): ReactElement {
+  const { review } = useAppServices()
+  const override = useStore(review.override)
+  return (
+    <SettingsSwitchRow
+      label="Simulate review page"
+      checked={override}
+      onCheckedChange={review.setOverride}
+    />
+  )
+}
+
+/**
+ * Simulates a paywall phase for this session, so a TestFlight build can walk
+ * through every phase.
+ */
+function PaywallPhaseRow(): ReactElement {
+  const { paywall } = useMobileServices()
+  const override = useStore(paywall.phaseOverride)
+  return (
+    <SettingsMenuRow
+      label="Paywall"
+      value={override ?? 'off'}
+      options={PAYWALL_PHASE_OPTIONS}
+      onChange={(next) => paywall.setPhaseOverride(next === 'off' ? null : next)}
+    />
+  )
+}
+
+const THEME_OPTIONS: readonly SettingsMenuOption<ThemePreference>[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
@@ -81,21 +152,19 @@ function aiProviderValue(provider: AiProviderConfig, defaultProviderId: string |
   return provider.id === defaultProviderId ? `${credential} · Default` : credential
 }
 
-const TEXT_SIZE_OPTIONS: readonly SegmentedOption<EditorTextSize>[] = [
+const TEXT_SIZE_OPTIONS: readonly SettingsMenuOption<EditorTextSize>[] = [
   { value: 'small', label: 'Small' },
   { value: 'medium', label: 'Medium' },
   { value: 'large', label: 'Large' },
 ]
 
-const DATE_FORMATS: readonly DateFormat[] = ['mdy', 'dmy', 'iso']
-
-const WEEK_START_OPTIONS: readonly SegmentedOption<WeekStartDay>[] = [
+const WEEK_START_OPTIONS: readonly SettingsMenuOption<WeekStartDay>[] = [
   { value: 'sunday', label: 'Sunday' },
   { value: 'monday', label: 'Monday' },
   { value: 'saturday', label: 'Saturday' },
 ]
 
-const TIME_FORMAT_OPTIONS: readonly SegmentedOption<TimeFormat>[] = [
+const TIME_FORMAT_OPTIONS: readonly SettingsMenuOption<TimeFormat>[] = [
   { value: '12h', label: '12-hour' },
   { value: '24h', label: '24-hour' },
 ]
@@ -106,7 +175,7 @@ function SyncDetail({ detail }: { detail: MobileSyncDetail }): ReactNode {
   }
   return (
     <>
-      Backs up in <CountdownText until={detail.until} />
+      Syncs in <CountdownText until={detail.until} />
     </>
   )
 }
@@ -116,59 +185,58 @@ function SyncDetail({ detail }: { detail: MobileSyncDetail }): ReactNode {
  * iOS inset-grouped idiom, replacing the old bottom-sheet hodgepodge. The
  * graph row discloses into the Graphs switcher screen; appearance and editor
  * preferences edit the shared settings document (the same keys desktop
- * exposes); the backup group mirrors the status pill's engine state, connects
- * GitHub for the local graph (the {@link ConnectGithubDrawer} sheet — iCloud
- * graphs sync through the container instead, Plan 21), and can disconnect.
+ * exposes); the Git repository group mirrors the status pill's engine state,
+ * connects a repository for the local graph through one door (the
+ * {@link ConnectRepositoryDrawer} choice, then the {@link ConnectGithubDrawer}
+ * or {@link ConnectGitHostDrawer} sheet — iCloud graphs sync through the
+ * container instead, Plan 21), and can stop. The Accounts group is the
+ * device's GitHub sign-in, independent of the graph.
  */
 export function MobileSettings(): ReactElement {
-  const { back, canBack, navigate } = useRouter()
-  const { graph, mobileStorageKind, platform } = useGraph()
+  const { canBack } = useRouterState()
+  const { back, navigate } = useRouterActions()
+  const graph = useGraphInfo()
+  const { platform } = useGraphActions()
+  const mobileStorageKind = useMobileStorageKind()
   const isIos = platform === 'ios'
-  const subscription = useActiveSubscription()
-  const classicAccess = useClassicAccess()
-  const classicSignOut = useClassicSignOut()
-  const { paywall, noteList, logger } = useMobileAppServices()
-  const { opener } = useAppServices()
-  const [, setPaywallRequested] = usePaywallRequested()
-  const [restorePending, setRestorePending] = useState(false)
-  const [redeemPending, setRedeemPending] = useState(false)
-  const [subscriptionMessage, setSubscriptionMessage] = useState<string | null>(null)
-
-  const handleRestore = async (): Promise<void> => {
-    setRestorePending(true)
-    setSubscriptionMessage(null)
-    try {
-      const found = await paywall.restore()
-      if (found === null) {
-        setSubscriptionMessage('No previous purchase found for this Apple account.')
-      }
-    } catch {
-      setSubscriptionMessage('Restore failed. Check your connection and try again.')
-    } finally {
-      setRestorePending(false)
-    }
-  }
-
-  const handleRedeem = async (): Promise<void> => {
-    setRedeemPending(true)
-    setSubscriptionMessage(null)
-    try {
-      await paywall.redeemCode()
-    } catch {
-      setSubscriptionMessage('Could not open the redemption sheet. Try again.')
-    } finally {
-      setRedeemPending(false)
-    }
-  }
-  const { settings, updateSettings } = useSettings()
+  const subscriptionControls = useSubscriptionControls()
+  const { opener, review } = useAppServices()
+  const { githubAuth, platform: platformService, noteList, logger } = useCoreServices()
+  const theme = useThemeSetting()
+  const editorTextSize = useEditorTextSize()
+  const selectedDateFormat = useDateFormat()
+  const weekStartDay = useWeekStartDay()
+  const timeFormat = useTimeFormat()
+  const editorSmoothCaretAnimation = useEditorSmoothCaretAnimation()
+  const editorDefaultBullet = useEditorDefaultBullet()
+  const editorBulletAfterHeading = useEditorBulletAfterHeading()
+  const chatSystemPrompt = useChatSystemPrompt()
+  const transcriptionFormat = useTranscriptionFormat()
+  const transcriptionPrompt = useTranscriptionPrompt()
+  const settingsService = useSettingsService()
+  const settings = useSettingsStore()
   const [today] = useState(() => new Date())
-  const version = useAppVersion()
   const { unlocked: debugUnlocked, tap: versionTap } = useDebugUnlockTap()
   const crashTest = useCrashTest()
+  const perfHudEnabled = usePerfHudEnabled()
   const environment = useAppStoreEnvironment()
-  const sync = useSyncContext()
-  const [disconnecting, setDisconnecting] = useState(false)
-  const [connectOpen, setConnectOpen] = useState(false)
+  // Development and TestFlight installs show the prerelease tag; anything else hides it.
+  const showPrerelease =
+    platformService.isDev || environment.value === 'Sandbox' || environment.value === 'Xcode'
+  const versionLabel = showPrerelease
+    ? platformService.appVersion
+    : marketingVersion(platformService.appVersion)
+  const gitSync = useGitSyncState()
+  const { disconnectGraph } = useGitSyncActions()
+  const githubConnected = useGithubConnected()
+  const disconnectAction = useAsyncAction()
+  const signOutAction = useAsyncAction()
+  const [signInOpen, setSignInOpen] = useState(false)
+  // Which connect sheet is open: the host choice, or one host's own flow.
+  // `remoteUrl` prefills the host form for a remote that is already set.
+  const [sheet, setSheet] = useState<
+    { kind: 'choose' } | { kind: 'github' } | { kind: 'host'; remoteUrl?: string } | null
+  >(null)
   const { providers, defaultProvider, addProvider, removeProvider, makeDefault, setDefaultModel } =
     useAiProviders()
   const [addProviderOpen, setAddProviderOpen] = useState(false)
@@ -192,75 +260,90 @@ export function MobileSettings(): ReactElement {
     enabled: graph !== null,
   })
 
-  const backup = sync?.backup ?? null
-  const status = getMobileSyncStatus(backup)
-  const repo = backup !== null && backup.phase === 'connected' ? backup.repo : null
-  // The connect entry point is local-graph-only (iCloud sync and a Git remote
-  // are mutually exclusive per graph, Plan 21) and waits out the controller's
-  // `loading` phase so the row never flashes on a graph that turns out to be
+  const status = getMobileSyncStatus(gitSync)
+  // A graph with a remote, connected or waiting for its sign-in.
+  const remote =
+    gitSync.phase === 'connected' || gitSync.phase === 'needsCredential' ? gitSync : null
+  // A host remote that waits for its sign-in can get one here. Plain HTTP
+  // cannot: the resolver never sends a sign-in in the clear.
+  const canAddSignIn =
+    remote?.phase === 'needsCredential' &&
+    remote.remote.kind === 'https' &&
+    !remote.remote.origin.startsWith('http:')
+  // A host remote whose sign-in the host refused gets a new one here.
+  const canUpdateSignIn =
+    remote?.phase === 'connected' &&
+    remote.remote.kind === 'https' &&
+    remote.status.state === 'error' &&
+    remote.status.errorKind === 'auth'
+  // The connect entry points are local-graph-only (iCloud sync and a Git remote
+  // are mutually exclusive per graph, Plan 21) and wait out the controller's
+  // `loading` phase so the rows never flash on a graph that turns out to be
   // connected.
-  const canConnect = mobileStorageKind === 'local' && backup?.phase === 'disconnected'
+  const canConnect = mobileStorageKind === 'local' && gitSync.phase === 'disconnected'
 
-  // Stop backing this graph up and forget the GitHub credential (one graph
-  // per device — unlinking is signing out). The local clone stays; the
-  // controller restarts into its disconnected state, and re-connecting
-  // re-onboards.
+  // Stop syncing this graph: drop its remote. The local clone and every
+  // sign-in stay; the controller restarts into its disconnected state.
   async function disconnect(): Promise<void> {
-    if (sync === null) {
-      return
-    }
-    setDisconnecting(true)
-    try {
-      await sync.disconnectGraph()
-      await sync.signOut()
-    } catch (err) {
-      logger.error('GitHub disconnect failed:', errorMessage(err))
-    } finally {
-      setDisconnecting(false)
-    }
+    await disconnectAction.run(async () => {
+      try {
+        await disconnectGraph()
+      } catch (err) {
+        logger.error('stop syncing failed:', errorMessage(err))
+      }
+    })
+  }
+
+  // Forget the GitHub sign-in of this device; every GitHub repository stops
+  // syncing until the next sign-in.
+  async function signOut(): Promise<void> {
+    await signOutAction.run(async () => {
+      try {
+        await githubAuth.clear()
+      } catch (err) {
+        logger.error('GitHub sign-out failed:', errorMessage(err))
+        // Rethrown so `signOutAction.error` shows it in the Accounts footer.
+        throw err
+      }
+    })
   }
 
   const storageLabel =
     mobileStorageKind === 'icloud'
-      ? 'iCloud Drive'
+      ? 'Stored in iCloud Drive'
       : mobileStorageKind === 'local'
-        ? 'This device'
+        ? 'Stored on this device'
         : undefined
 
   return (
-    <div
-      className="flex h-full w-screen flex-col"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
-    >
+    <div className="flex h-full w-screen flex-col pt-safe">
       <MobileScreenHeader
         title="Settings"
         onBack={() => (canBack ? back() : navigate({ kind: 'today' }))}
       />
-      <main
-        className="min-h-0 flex-1 overflow-y-auto"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div className="flex flex-col gap-6 px-4 py-4">
-          <SettingsGroup header="Graph">
-            <SettingsNavRow
-              label={graph?.name ?? '—'}
-              value={storageLabel}
+      <main className="min-h-0 flex-1 overflow-y-auto bg-surface-app px-safe pb-safe">
+        <div className="flex flex-col gap-8 px-4 py-5">
+          <SettingsGroup>
+            <SettingsHeroRow
+              title={graph?.name ?? '—'}
+              subtitle={storageLabel}
+              media={<img src={appIcon} alt="" className="size-full object-cover" />}
               onPress={() => navigate({ kind: 'graphs' })}
             />
           </SettingsGroup>
 
           <SettingsGroup header="Appearance">
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Theme"
-              value={settings.theme}
+              value={theme}
               options={THEME_OPTIONS}
-              onChange={(theme) => updateSettings({ theme })}
+              onChange={(theme) => settingsService.update({ theme })}
             />
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Text size"
-              value={settings.editorTextSize}
+              value={editorTextSize}
               options={TEXT_SIZE_OPTIONS}
-              onChange={(editorTextSize) => updateSettings({ editorTextSize })}
+              onChange={(editorTextSize) => settingsService.update({ editorTextSize })}
             />
           </SettingsGroup>
 
@@ -272,45 +355,47 @@ export function MobileSettings(): ReactElement {
               <SettingsSelectRow
                 key={dateFormat}
                 label={formatFullDate(today, dateFormat)}
-                selected={settings.dateFormat === dateFormat}
-                onPress={() => updateSettings({ dateFormat })}
+                selected={selectedDateFormat === dateFormat}
+                onPress={() => settingsService.update({ dateFormat })}
               />
             ))}
           </SettingsGroup>
 
           <SettingsGroup header="Week and time">
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Week start"
-              value={settings.weekStartDay}
+              value={weekStartDay}
               options={WEEK_START_OPTIONS}
-              onChange={(weekStartDay) => updateSettings({ weekStartDay })}
+              onChange={(weekStartDay) => settingsService.update({ weekStartDay })}
             />
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Time format"
-              value={settings.timeFormat}
+              value={timeFormat}
               options={TIME_FORMAT_OPTIONS}
-              onChange={(timeFormat) => updateSettings({ timeFormat })}
+              onChange={(timeFormat) => settingsService.update({ timeFormat })}
             />
           </SettingsGroup>
 
           <SettingsGroup header="Editor">
             <SettingsSwitchRow
               label="Smooth caret animation"
-              checked={settings.editorSmoothCaretAnimation}
+              checked={editorSmoothCaretAnimation}
               onCheckedChange={(editorSmoothCaretAnimation) => {
-                updateSettings({ editorSmoothCaretAnimation })
+                settingsService.update({ editorSmoothCaretAnimation })
               }}
             />
             <SettingsSwitchRow
               label="Start with a bullet"
-              checked={settings.editorDefaultBullet}
-              onCheckedChange={(editorDefaultBullet) => updateSettings({ editorDefaultBullet })}
+              checked={editorDefaultBullet}
+              onCheckedChange={(editorDefaultBullet) => {
+                return settingsService.update({ editorDefaultBullet })
+              }}
             />
             <SettingsSwitchRow
               label="Bullet after a heading"
-              checked={settings.editorBulletAfterHeading}
+              checked={editorBulletAfterHeading}
               onCheckedChange={(editorBulletAfterHeading) => {
-                updateSettings({ editorBulletAfterHeading })
+                settingsService.update({ editorBulletAfterHeading })
               }}
             />
           </SettingsGroup>
@@ -319,11 +404,11 @@ export function MobileSettings(): ReactElement {
             header="Wiki"
             footer="Claim trust comes from your agent harness’s report; this device keeps its own path."
           >
-            <SettingsSegmentedRow
+            <SettingsMenuRow
               label="Claim trust"
               value={settings.wikiTrustDisplay}
               options={TRUST_DISPLAY_OPTIONS}
-              onChange={(wikiTrustDisplay) => updateSettings({ wikiTrustDisplay })}
+              onChange={(wikiTrustDisplay) => settingsService.update({ wikiTrustDisplay })}
             />
             <SettingsNavRow
               label="Trust report"
@@ -350,9 +435,7 @@ export function MobileSettings(): ReactElement {
             <SettingsActionRow label="Add AI provider" onPress={() => setAddProviderOpen(true)} />
             <SettingsNavRow
               label="System prompt"
-              value={
-                normalizeChatSystemPrompt(settings.chatSystemPrompt) === '' ? 'Default' : 'Custom'
-              }
+              value={normalizeChatSystemPrompt(chatSystemPrompt) === '' ? 'Default' : 'Custom'}
               onPress={() => setSystemPromptOpen(true)}
             />
           </SettingsGroup>
@@ -387,24 +470,22 @@ export function MobileSettings(): ReactElement {
           >
             <SettingsSwitchRow
               label="Transcription auto-format"
-              checked={settings.transcriptionFormat}
+              checked={transcriptionFormat}
               descriptionId={audioMemoDescriptionId}
-              onCheckedChange={(transcriptionFormat) => updateSettings({ transcriptionFormat })}
+              onCheckedChange={(transcriptionFormat) => {
+                return settingsService.update({ transcriptionFormat })
+              }}
             />
             <SettingsNavRow
               label="Helper text"
-              value={
-                normalizeTranscriptionPrompt(settings.transcriptionPrompt) === ''
-                  ? 'None'
-                  : 'Custom'
-              }
+              value={normalizeTranscriptionPrompt(transcriptionPrompt) === '' ? 'None' : 'Custom'}
               onPress={() => setTranscriptionPromptOpen(true)}
             />
           </SettingsGroup>
 
-          {repo !== null || status !== null || canConnect ? (
+          {remote !== null || canConnect ? (
             <SettingsGroup
-              header="Backup"
+              header="Git repository"
               footer={
                 canConnect ? (
                   'Sync notes with Reflect on your other devices.'
@@ -413,110 +494,118 @@ export function MobileSettings(): ReactElement {
                 )
               }
             >
-              {repo !== null ? (
-                <SettingsValueRow label="GitHub" value={`${repo.owner}/${repo.name}`} />
+              {remote !== null ? (
+                <SettingsValueRow
+                  label="Remote"
+                  value={remoteLabel(remote.remote, remote.remoteUrl)}
+                />
               ) : null}
               {status !== null ? <SettingsValueRow label="Status" value={status.label} /> : null}
-              {canConnect ? (
-                <SettingsActionRow label="Connect GitHub" onPress={() => setConnectOpen(true)} />
-              ) : null}
-              {repo !== null ? (
+              {canAddSignIn ? (
                 <SettingsActionRow
-                  label="Disconnect GitHub"
+                  label="Add sign-in"
+                  onPress={() => setSheet({ kind: 'host', remoteUrl: remote.remoteUrl })}
+                />
+              ) : null}
+              {canUpdateSignIn ? (
+                <SettingsActionRow
+                  label="Update sign-in"
+                  onPress={() => setSheet({ kind: 'host', remoteUrl: remote.remoteUrl })}
+                />
+              ) : null}
+              {canConnect ? (
+                <SettingsActionRow
+                  label="Connect a repository"
+                  onPress={() => setSheet({ kind: 'choose' })}
+                />
+              ) : null}
+              {remote !== null ? (
+                <SettingsActionRow
+                  label="Stop syncing"
                   tone="destructive"
-                  pending={disconnecting}
+                  pending={disconnectAction.pending}
                   onPress={() => void disconnect()}
                 />
               ) : null}
             </SettingsGroup>
           ) : null}
 
-          {isIos ? (
-            <SettingsGroup
-              header="Subscription"
-              footer={subscriptionMessage ?? classicAccessMessage(classicAccess)}
-            >
-              <SettingsValueRow
-                label="Plan"
-                value={
-                  subscription.value === 'monthly'
-                    ? 'Monthly'
-                    : subscription.value === 'yearly'
-                      ? 'Yearly'
-                      : classicAccess.active && classicAccess.value !== null
-                        ? `Reflect Classic, until ${formatFullDate(new Date(classicAccess.value.expiresAt), settings.dateFormat)}`
-                        : subscription.isLoading || classicAccess.isLoading
-                          ? 'Checking…'
-                          : 'Not subscribed'
-                }
+          <SettingsGroup
+            header="Accounts"
+            footer={
+              signOutAction.error ??
+              'GitHub is used for GitHub repositories and for sharing notes as gists.'
+            }
+          >
+            {githubConnected ? (
+              <SettingsActionRow
+                label="Sign out of GitHub"
+                tone="destructive"
+                pending={signOutAction.pending}
+                onPress={() => void signOut()}
               />
-              {subscription.value === null && !classicAccess.active ? (
-                // The request flips usePaywallGate to 'show', so the gate in
-                // mobile-app.tsx replaces the app with the paywall immediately.
-                // It is what makes that work outside the App Store, where the
-                // gate otherwise never shows the paywall at all.
-                <SettingsActionRow
-                  label="Subscribe"
-                  onPress={() => {
-                    setPaywallRequested(true)
-                  }}
-                />
-              ) : subscription.value !== null ? (
+            ) : (
+              <SettingsActionRow label="Sign in to GitHub" onPress={() => setSignInOpen(true)} />
+            )}
+          </SettingsGroup>
+
+          {isIos ? (
+            <SettingsGroup header="Subscription" footer={subscriptionControls.message}>
+              <SettingsValueRow label="Plan" value={subscriptionControls.planLabel} />
+              {subscriptionControls.canSubscribe ? (
+                <SettingsActionRow label="Subscribe" onPress={subscriptionControls.subscribe} />
+              ) : subscriptionControls.canManage ? (
                 <SettingsActionRow
                   label="Manage Subscription"
-                  onPress={() => {
-                    opener.openUrlSync('https://apps.apple.com/account/subscriptions')
-                  }}
+                  onPress={subscriptionControls.manage}
                 />
               ) : null}
-              {classicAccess.value !== null ? (
+              {subscriptionControls.classicAccount !== null ? (
                 <>
                   <SettingsValueRow
                     label="Verified Account"
-                    value={classicAccess.value.email ?? 'Unknown'}
+                    value={subscriptionControls.classicAccount}
                   />
                   <SettingsActionRow
                     label="Remove Reflect Classic Verification"
                     tone="destructive"
-                    pending={classicSignOut.isPending}
-                    onPress={() => {
-                      classicSignOut.mutate()
-                    }}
+                    pending={subscriptionControls.removeClassicVerificationPending}
+                    onPress={subscriptionControls.removeClassicVerification}
                   />
                 </>
               ) : null}
               <SettingsActionRow
                 label="Redeem Code"
-                pending={redeemPending}
-                onPress={() => {
-                  void handleRedeem()
-                }}
+                pending={subscriptionControls.redeemPending}
+                onPress={subscriptionControls.redeem}
               />
               <SettingsActionRow
                 label="Restore Purchases"
-                pending={restorePending}
-                onPress={() => {
-                  void handleRestore()
-                }}
+                pending={subscriptionControls.restorePending}
+                onPress={subscriptionControls.restore}
               />
-              <SettingsActionRow
-                label="Terms of Use"
-                onPress={() => {
-                  opener.openUrlSync(TERMS_OF_USE_URL)
-                }}
-              />
+              <SettingsActionRow label="Terms of Use" onPress={subscriptionControls.openTerms} />
             </SettingsGroup>
           ) : null}
 
+          <SettingsGroup header="Feedback">
+            {isIos ? <SettingsActionRow label="Rate Reflect" onPress={review.writeReview} /> : null}
+            <SettingsActionRow
+              label="Join the Discord community"
+              onPress={() => review.sendFeedback('discord')}
+            />
+            <SettingsActionRow
+              label="Report a bug on GitHub"
+              onPress={() => review.sendFeedback('github')}
+            />
+            <SettingsActionRow label="Email support" onPress={() => review.sendFeedback('email')} />
+          </SettingsGroup>
+
           <SettingsGroup header="About">
+            <SettingsValueRow label="Version" value={versionLabel} onPress={versionTap} />
             <SettingsValueRow
               label="Notes"
               value={notes === undefined ? '…' : String(notes.length)}
-            />
-            <SettingsValueRow
-              label="Version"
-              value={version === null ? '…' : marketingVersion(version)}
-              onPress={versionTap}
             />
             <SettingsNavRow
               label="Open Source Licenses"
@@ -541,6 +630,16 @@ export function MobileSettings(): ReactElement {
                   value={environment.value ?? (environment.isError ? 'Unknown' : 'Loading…')}
                 />
               ) : null}
+              {isIos && (environment.value === 'Sandbox' || environment.value === 'Xcode') ? (
+                <PaywallPhaseRow />
+              ) : null}
+              <WhatsNewRow />
+              <ReviewRow />
+              <SettingsSwitchRow
+                label="Performance HUD"
+                checked={perfHudEnabled}
+                onCheckedChange={setPerfHudEnabled}
+              />
               <SettingsActionRow
                 label="Trigger test error"
                 tone="destructive"
@@ -550,7 +649,33 @@ export function MobileSettings(): ReactElement {
           ) : null}
         </div>
       </main>
-      <ConnectGithubDrawer open={connectOpen} onOpenChange={setConnectOpen} />
+      <ConnectRepositoryDrawer
+        open={sheet?.kind === 'choose'}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSheet(null)
+          }
+        }}
+        onChoose={(host) => setSheet(host === 'github' ? { kind: 'github' } : { kind: 'host' })}
+      />
+      <ConnectGithubDrawer
+        open={sheet?.kind === 'github'}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSheet(null)
+          }
+        }}
+      />
+      <ConnectGitHostDrawer
+        open={sheet?.kind === 'host'}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSheet(null)
+          }
+        }}
+        remoteUrl={sheet?.kind === 'host' ? sheet.remoteUrl : undefined}
+      />
+      <GithubSignInDrawer open={signInOpen} onOpenChange={setSignInOpen} />
       <AddAiProviderDrawer
         open={addProviderOpen}
         onOpenChange={setAddProviderOpen}
@@ -577,7 +702,7 @@ export function MobileSettings(): ReactElement {
         open={trustReportOpen}
         onOpenChange={setTrustReportOpen}
         onSave={(path) => {
-          updateSettings({
+          settingsService.update({
             wikiTrustReportPath: path === '' ? DEFAULT_WIKI_TRUST_REPORT_PATH : path,
           })
         }}
@@ -590,10 +715,10 @@ export function MobileSettings(): ReactElement {
         maxLength={CHAT_SYSTEM_PROMPT_MAX_LENGTH}
         rows={8}
         normalize={normalizeChatSystemPrompt}
-        value={settings.chatSystemPrompt}
+        value={chatSystemPrompt}
         open={systemPromptOpen}
         onOpenChange={setSystemPromptOpen}
-        onSave={(chatSystemPrompt) => updateSettings({ chatSystemPrompt })}
+        onSave={(chatSystemPrompt) => settingsService.update({ chatSystemPrompt })}
       />
       <TextSettingDrawer
         title="Transcription helper text"
@@ -603,10 +728,10 @@ export function MobileSettings(): ReactElement {
         maxLength={TRANSCRIPTION_PROMPT_MAX_LENGTH}
         rows={3}
         normalize={normalizeTranscriptionPrompt}
-        value={settings.transcriptionPrompt}
+        value={transcriptionPrompt}
         open={transcriptionPromptOpen}
         onOpenChange={setTranscriptionPromptOpen}
-        onSave={(transcriptionPrompt) => updateSettings({ transcriptionPrompt })}
+        onSave={(transcriptionPrompt) => settingsService.update({ transcriptionPrompt })}
       />
       <AiPromptDrawer
         prompt={editingPrompt}

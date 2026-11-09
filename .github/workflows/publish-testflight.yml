@@ -7,6 +7,10 @@ on:
         description: Immutable commit targeted by the release tag.
         required: true
         type: string
+      flavor:
+        description: beta or stable
+        required: true
+        type: string
     secrets:
       APPLE_API_KEY:
         required: true
@@ -28,10 +32,10 @@ permissions:
 
 jobs:
   testflight:
-    name: Build iOS
+    name: TestFlight
     if: github.repository == 'team-reflect/reflect-open'
     environment: release_app
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,6 +44,10 @@ jobs:
           # release snapshot. Always build the verified immutable tag commit.
           ref: ${{ inputs.commit }}
           persist-credentials: false
+          # The build number counts commits. A blobless clone fetches the
+          # whole history without the file contents of older commits.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Verify TestFlight secrets are configured
         env:
@@ -54,32 +62,47 @@ jobs:
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::missing TestFlight secret(s): ${missing[*]} — see docs/ios-testflight.md"
+            echo "::error::missing TestFlight secret(s): ${missing[*]} — see docs/distribution.md"
             exit 1
           fi
 
+      - uses: ./.github/actions/setup-xcode
+
+      # Any master job can write the caches, so a release build starts cold.
       - uses: ./.github/actions/setup-node
+        with:
+          cache: false
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: aarch64-apple-ios
+          cache: false
 
       - name: Resolve build number
         id: build_number
         run: |
-          build_number="$(date -u +%Y%m%d%H%M)"
+          build_number="$(git rev-list --count HEAD)"
           echo "BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
           echo "value=$build_number" >> "$GITHUB_OUTPUT"
           echo "Using TestFlight CFBundleVersion $build_number"
 
-      - name: Build and upload to TestFlight
+      - name: Build
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: pnpm release:ios --build-number="$BUILD_NUMBER"
+          TAURI_REFLECT_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          FLAVOR: ${{ inputs.flavor }}
+        run: pnpm build:ios --build-number="$BUILD_NUMBER" --flavor="$FLAVOR"
+
+      - name: Upload to TestFlight
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: pnpm upload:testflight
 
       # Xcode Organizer symbolicates a TestFlight crash report from the local
       # archive, which a CI runner throws away. Keep it so an Apple `.ips` that
@@ -113,5 +136,5 @@ jobs:
           name: reflect-ios-xcarchive-${{ steps.build_number.outputs.value }}
           path: ${{ runner.temp }}/reflect-ios-xcarchive-${{ steps.build_number.outputs.value }}.zip
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: 90
           compression-level: 0

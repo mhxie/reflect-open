@@ -1,13 +1,6 @@
 import { page } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  createRef,
-  useLayoutEffect,
-  useState,
-  type ReactElement,
-  type ReactNode,
-  type RefObject,
-} from 'react'
+import { createRef, useLayoutEffect, useState, type ReactElement, type RefObject } from 'react'
 import {
   aiKeySecretName,
   HISTORY_WITHHELD_NOTICE,
@@ -20,19 +13,19 @@ import {
   createTestSecretStoreService,
   type TestChatEngineService,
 } from '@reflect/core/testing'
-import type { Route } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import type { Route } from '@reflect/app'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileChat } from './chat.tsx'
 
 /**
- * The Chat tab over a faked engine (the desktop chat-screen harness, mobile
+ * The Chat screen over a faked engine (the desktop chat-screen harness, mobile
  * shell): the no-provider call-to-action into Settings, a full send through
- * the mobile composer, and the Plan 23 contract that the draft and turns
- * survive the screen unmounting — the session holds them, tab switches only
- * unmount the screen.
+ * the mobile composer, Back, and the Plan 23 contract that the draft and
+ * turns survive the screen unmounting — the session holds them, leaving the
+ * screen only unmounts it.
  */
 
 // The settings document each test starts from.
@@ -40,14 +33,6 @@ const settingsState = {
   models: [] as AiProviderConfig[],
   defaultId: null as string | null,
 }
-
-// Keep sheet content inline so this suite isolates the chat flow.
-vi.mock('@/components/ui/drawer.tsx', () => ({
-  Drawer: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  DrawerContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DrawerBody: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DrawerTitle: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
-}))
 
 const GRAPH = { root: '/graphs/test', name: 'test-graph', generation: 1 }
 
@@ -73,7 +58,7 @@ function scriptTurn(events: ChatStreamEvent[]) {
 const probedRouteRef: RefObject<Route | null> = createRef()
 
 function RouteProbe(): null {
-  const { route } = useRouter()
+  const { route } = useRouterState()
 
   useLayoutEffect(() => {
     probedRouteRef.current = route
@@ -86,7 +71,7 @@ function RouteProbe(): null {
 }
 
 function FocusChatProbe(): ReactElement {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   return (
     <button type="button" onClick={() => navigate({ kind: 'chat' }, { focusEditor: true })}>
       focus chat input
@@ -95,7 +80,7 @@ function FocusChatProbe(): ReactElement {
 }
 
 /**
- * The screen over the graph's chat session, unmountable like a tab switch.
+ * The screen over the graph's chat session, unmountable like leaving it.
  */
 function Harness(): ReactElement {
   const [showScreen, setShowScreen] = useState(true)
@@ -104,23 +89,24 @@ function Harness(): ReactElement {
       <RouteProbe />
       <FocusChatProbe />
       <button type="button" onClick={() => setShowScreen((shown) => !shown)}>
-        switch tab
+        leave screen
       </button>
       {showScreen ? <MobileChat /> : null}
     </>
   )
 }
 
-async function renderHarness() {
-  const app = createTestCoreServices({
+async function renderHarness(route: Route = { kind: 'today' }) {
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     secretStore: createTestSecretStoreService({ [aiKeySecretName(MODEL.id)]: 'sk-test' }),
     chatEngine,
   })
   // The index is not open, so the history drawer reads nothing.
   return await renderInApp(<Harness />, {
-    app,
+    core,
     graph: { ...GRAPH, indexGeneration: null },
+    route,
     settings: { aiProviders: settingsState.models, defaultAiProviderId: settingsState.defaultId },
   })
 }
@@ -132,6 +118,16 @@ describe('MobileChat', () => {
     await page.getByRole('button', { name: 'Add an AI provider' }).click()
 
     expect(probedRouteRef.current).toEqual({ kind: 'settings' })
+  })
+
+  it('Back from a cold entry lands on today, as the back-swipe does', async () => {
+    // Chat is the first and only history entry: there is nothing to pop.
+    await renderHarness({ kind: 'chat' })
+    expect(probedRouteRef.current).toEqual({ kind: 'chat' })
+
+    await page.getByRole('button', { name: 'Back' }).click()
+
+    expect(probedRouteRef.current).toEqual({ kind: 'today' })
   })
 
   it('sends the draft from the composer and renders the streamed turn', async () => {
@@ -168,7 +164,7 @@ describe('MobileChat', () => {
     await expect.element(page.getByText(HISTORY_WITHHELD_NOTICE)).toBeVisible()
   })
 
-  it('keeps the draft and the conversation across a screen unmount (tab switch)', async () => {
+  it('keeps the draft and the conversation across a screen unmount (leaving it)', async () => {
     configureModel()
     scriptTurn([
       { type: 'text-delta', text: 'Kept.' },
@@ -186,15 +182,15 @@ describe('MobileChat', () => {
       target: { value: 'half-typed follow-up' },
     })
 
-    await page.getByRole('button', { name: 'switch tab' }).click()
+    await page.getByRole('button', { name: 'leave screen' }).click()
     await expect.element(page.getByLabelText('Chat message')).not.toBeInTheDocument()
-    await page.getByRole('button', { name: 'switch tab' }).click()
+    await page.getByRole('button', { name: 'leave screen' }).click()
 
     await expect.element(page.getByLabelText('Chat message')).toHaveValue('half-typed follow-up')
     await expect.element(page.getByText('sent question')).toBeVisible()
   })
 
-  it('focuses the composer when a chat tab capture arrival requests it', async () => {
+  it('focuses the composer when a focus arrival requests it', async () => {
     configureModel()
     await renderHarness()
 

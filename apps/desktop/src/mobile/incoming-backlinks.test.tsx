@@ -3,14 +3,14 @@ import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { BacklinkContext, BacklinkService } from '@reflect/core'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import type { ReactNode } from 'react'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { IncomingBacklinks } from './incoming-backlinks.tsx'
 
-let app: TestCoreServices
+let core: TestCoreServices
 let getBacklinksWithContext: MockInstance<BacklinkService['getBacklinksWithContext']>
 
 /**
@@ -25,7 +25,7 @@ function answerBacklinks(contexts: BacklinkContext[]): void {
 }
 
 function RouteProbe(): ReactNode {
-  const { route, arrivalFocusEditor } = useRouter()
+  const { route, arrivalFocusEditor } = useRouterState()
   return (
     <output data-testid="route" data-focus={String(arrivalFocusEditor)}>
       {JSON.stringify(route)}
@@ -37,7 +37,7 @@ function RouteProbe(): ReactNode {
  * Render `ui` over the app of the running test, so a second render shares its session storage.
  */
 function renderInGraph(ui: ReactNode) {
-  return renderInApp(ui, { app, graph: { root: '/g', name: 'g', generation: 1 } })
+  return renderInApp(ui, { core, graph: { root: '/g', name: 'g', generation: 1 } })
 }
 
 function renderSection(path: string) {
@@ -51,8 +51,8 @@ function renderSection(path: string) {
 
 beforeEach(async () => {
   await page.viewport(375, 700)
-  app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-  getBacklinksWithContext = vi.spyOn(app.backlinks, 'getBacklinksWithContext')
+  core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  getBacklinksWithContext = vi.spyOn(core.backlinks, 'getBacklinksWithContext')
 })
 
 describe('IncomingBacklinks', () => {

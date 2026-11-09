@@ -10,6 +10,7 @@ import {
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
+import { useStore } from '@/lib/use-store.ts'
 import { useV1Import, V1ImportProvider } from './v1-import-provider.tsx'
 
 const GRAPH: GraphInfo = {
@@ -34,7 +35,8 @@ function summary(overrides: Partial<GraphImportSummary> = {}): GraphImportSummar
 }
 
 function Probe(): ReactElement {
-  const { state, startImport } = useV1Import()
+  const { service, startImport } = useV1Import()
+  const state = useStore(service)
   return (
     <button type="button" onClick={() => startImport('/tmp/reflect-v1.zip')}>
       start ({state.phase})
@@ -61,7 +63,7 @@ async function renderProvider(result?: GraphImportSummary | Error) {
   })
   const session = createTestGraphSessionService({ state: { status: 'ready', graph: GRAPH } })
   const refreshIndex = vi.spyOn(session, 'refreshIndex').mockImplementation(() => {})
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     ipc,
     graphSession: session,
@@ -70,7 +72,7 @@ async function renderProvider(result?: GraphImportSummary | Error) {
     <V1ImportProvider>
       <Probe />
     </V1ImportProvider>,
-    { app, servicesOnly: true },
+    { core, servicesOnly: true },
   )
   return {
     view,
@@ -78,7 +80,7 @@ async function renderProvider(result?: GraphImportSummary | Error) {
     session,
     refreshIndex,
     pendingImport,
-    ownWrites: () => app.fileChanges.ownWrites(),
+    ownWrites: () => core.fileChanges.ownWrites(),
     commands: () => ipc.calls().map((call) => call.command),
     emitProgress: (progress: GraphImportProgress) => ipc.emit('import:progress', progress),
   }

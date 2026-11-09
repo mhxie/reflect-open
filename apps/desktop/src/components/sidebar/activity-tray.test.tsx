@@ -19,8 +19,8 @@ describe('ActivityTray', () => {
     await act(() => {
       const handle = view.appServices.operations.start('Describing assets', { background: true })
       handle.progress(1, 4)
-      view.app.semanticSearch.setIndexProgress({ done: 30, total: 120 })
-      view.app.indexLifecycle.setFileProgress({ done: 500, total: 2000, worked: 400 })
+      view.core.semanticSearch.setIndexProgress({ done: 30, total: 120 })
+      view.core.indexLifecycle.setFileProgress({ done: 500, total: 2000, worked: 400 })
     })
 
     await expect.element(page.getByRole('button', { name: 'Activity: 3 running' })).toBeVisible()
@@ -37,7 +37,7 @@ describe('ActivityTray', () => {
     const view = await renderInApp(<ActivityTray />)
     await act(() => {
       view.appServices.operations.start('Copying the reply')
-      view.app.indexLifecycle.setFileProgress({ done: 50, total: 2000, worked: 0 })
+      view.core.indexLifecycle.setFileProgress({ done: 50, total: 2000, worked: 0 })
     })
 
     await new Promise((resolve) => setTimeout(resolve, 50))

@@ -13,8 +13,8 @@ import {
   type Settings,
 } from '@reflect/core'
 import { queryKeys } from '@/lib/query-client.ts'
-import type { AllNotesFilter } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import type { AllNotesFilter } from '@reflect/app'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { act } from '@/test-utils/act.ts'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { hover } from '@/test-utils/mouse.ts'
@@ -107,13 +107,13 @@ function noteMarkdown(note: SeedNote): string {
 }
 
 function RoutedScreen(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <AllNotesScreen filter={route.kind === 'allNotes' ? route.filter : null} />
 }
 
 /** Navigates to the already-active route — the sidebar-click-while-here case. */
 function ReArrive(): ReactElement {
-  const { navigate, back } = useRouter()
+  const { navigate, back } = useRouterActions()
   return (
     <>
       <button
@@ -161,7 +161,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
   if (options.knowledgeLevels !== undefined) {
     files[KNOWLEDGE_LEVELS_PATH] = options.knowledgeLevels
   }
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({
       files,
@@ -171,7 +171,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
   })
   for (const note of notes) {
     const source = noteMarkdown(note)
-    app.database.applyProjection({
+    core.database.applyProjection({
       ...buildIndexedNote(parseNote({ path: note.path, source }), {
         fileHash: `hash-${note.path}`,
         mtime: note.mtime,
@@ -186,11 +186,11 @@ async function renderScreen(options: RenderScreenOptions = {}) {
   }
   // The facet counts are scripted: the fixture pins `book` although no listed
   // note carries it, so the Custom menu has a pinned facet to mark.
-  vi.spyOn(app.noteList, 'listNoteTags').mockResolvedValue(facetRows)
-  deleteNote = vi.spyOn(app.noteFile, 'delete')
-  updateSettingsElsewhere = app.settings.update
-  settingsUpdates = vi.spyOn(app.settings, 'update')
-  settingsUpdatesWith = vi.spyOn(app.settings, 'updateWith')
+  vi.spyOn(core.noteList, 'listNoteTags').mockResolvedValue(facetRows)
+  deleteNote = vi.spyOn(core.noteFile, 'delete')
+  updateSettingsElsewhere = core.settings.update
+  settingsUpdates = vi.spyOn(core.settings, 'update')
+  settingsUpdatesWith = vi.spyOn(core.settings, 'updateWith')
   return await renderInApp(
     <>
       {/* The screen fills its container (`h-full`); hand it the viewport
@@ -201,7 +201,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
       <ReArrive />
     </>,
     {
-      app,
+      core,
       graph: { root: '/g', name: 'g', generation: 1 },
       route: { kind: 'allNotes', filter: options.filter ?? null },
       settings: {
@@ -218,7 +218,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
 type ScreenView = Awaited<ReturnType<typeof renderScreen>>
 
 function probedRoute(view: ScreenView): unknown {
-  return view.appServices.navigation.getState().route
+  return view.appServices.navigation.get().route
 }
 
 function openedNoteWindows(view: ScreenView): readonly string[] {
@@ -226,13 +226,13 @@ function openedNoteWindows(view: ScreenView): readonly string[] {
 }
 
 function pinnedTags(view: ScreenView): readonly string[] {
-  return view.app.settings.get().allNotesFilterTags
+  return view.core.settings.get().allNotesFilterTags
 }
 
 async function openPinnedFilters(view: ScreenView): Promise<void> {
   await view
     .getByRole('group', { name: 'Filter notes' })
-    .getByRole('button', { expanded: false })
+    .getByRole('combobox', { expanded: false })
     .click()
   await page.getByRole('button', { name: 'Manage pinned filters…' }).click()
   await expect.element(page.getByRole('list', { name: 'Pinned filters' })).toBeInTheDocument()
@@ -290,7 +290,7 @@ describe('AllNotesScreen', () => {
       notes: noteRows.map((row, index) => ({ ...row, isPrivate: privacy[index] ?? false })),
     })
     const setNotesPrivate = vi
-      .spyOn(view.app.noteActions, 'setNotesPrivate')
+      .spyOn(view.core.noteActions, 'setNotesPrivate')
       .mockResolvedValue({ changed: [], skipped: 0 })
     await expect.element(view.getByText('Tokyo Gâteau')).toBeVisible()
     expect(view.getByRole('button', { name: /private \(/ }).query()).toBeNull()
@@ -487,7 +487,7 @@ describe('AllNotesScreen', () => {
       knowledgeLevels: JSON.stringify(knowledgeLevelContract),
     })
     await expect.element(view.getByText('No L3 notes.')).toBeVisible()
-    view.app.noteFile.set(
+    view.core.noteFile.set(
       KNOWLEDGE_LEVELS_PATH,
       JSON.stringify({
         ...knowledgeLevelContract,
@@ -622,7 +622,7 @@ describe('AllNotesScreen', () => {
   it('offers pinned and unpinned tags in Custom and shows the chosen filter', async () => {
     const view = await renderScreen()
 
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     const listbox = page.getByRole('listbox')
     await expect.element(listbox).toMatchTextContent('#travel')
     await expect.element(listbox).toMatchTextContent('2')
@@ -640,7 +640,7 @@ describe('AllNotesScreen', () => {
     expect(view.getByText('Health Stacked').query()).toBeNull()
     // The trigger adopts the active custom tag.
     await expect
-      .element(view.getByRole('button', { name: /#travel/, expanded: false }))
+      .element(view.getByRole('combobox', { name: /#travel/, expanded: false }))
       .toBeInTheDocument()
     await view.getByRole('button', { name: 'Tue, June 9th, 2026' }).click()
     await expect.poll(() => probedRoute(view)).toEqual({ kind: 'daily', date: '2026-06-09' })
@@ -651,7 +651,7 @@ describe('AllNotesScreen', () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     const input = page.getByPlaceholder('Filter by any tag…')
 
     // An exact existing tag isn't duplicated as a "Filter by" item.
@@ -665,6 +665,10 @@ describe('AllNotesScreen', () => {
 
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'zettel' } })
     await expect.element(view.getByText('No notes tagged #zettel.')).toBeInTheDocument()
+
+    // Reopening starts from an empty search.
+    await view.getByRole('combobox', { name: '#zettel' }).click()
+    await expect.element(page.getByPlaceholder('Filter by any tag…')).toHaveValue('')
     await view.unmount()
   })
 
@@ -672,13 +676,13 @@ describe('AllNotesScreen', () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     const input = page.getByPlaceholder('Filter by any tag…')
     await input.fill('TRAVEL')
 
-    // cmdk's default filter (command-score) folds case like `foldTag` does,
-    // so a differently-cased query keeps the existing facet reachable instead
-    // of dead-ending with a hidden list and a suppressed "Filter by" offer.
+    // Base UI's default filter folds case like `foldTag` does, so a
+    // differently-cased query keeps the existing facet reachable instead of
+    // dead-ending with a hidden list and a suppressed "Filter by" offer.
     await expect.element(page.getByRole('option', { name: /#travel/ })).toBeInTheDocument()
     expect(page.getByRole('option', { name: /Filter by/ }).query()).toBeNull()
 
@@ -693,20 +697,20 @@ describe('AllNotesScreen — pinned tag management', () => {
     const view = await renderScreen({ filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: /#travel/, expanded: false }).click()
+    await view.getByRole('combobox', { name: /#travel/, expanded: false }).click()
     await page.getByRole('button', { name: 'Pin #travel', exact: true }).click()
 
     expect(pinnedTags(view)).toEqual(['book', 'person', 'travel'])
     expect(pinnedTabOrder(view)).toEqual(['#book', '#person', '#travel'])
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: { kind: 'tag', tag: 'travel' } })
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toBeInTheDocument()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toBeInTheDocument()
     await view.unmount()
   })
 
   it('searches configured pins even when a pin has no graph facet', async () => {
     const view = await renderScreen()
-    await view.getByRole('button', { name: 'Custom' }).click()
+    await view.getByRole('combobox', { name: 'Custom' }).click()
     await page.getByPlaceholder('Filter by any tag…').fill('#PERSON')
 
     await expect.element(page.getByRole('option', { name: /#person/ })).toMatchTextContent('Pinned')
@@ -780,13 +784,13 @@ describe('AllNotesScreen — pinned tag management', () => {
     await page.getByRole('button', { name: 'Done', exact: true }).click()
     expect(pinnedTabOrder(view)).toEqual([])
     await expect
-      .element(view.getByRole('button', { name: /#travel/, expanded: false }))
+      .element(view.getByRole('combobox', { name: /#travel/, expanded: false }))
       .toHaveFocus()
     await expect.element(view.getByRole('button', { name: 'All', exact: true })).toBeInTheDocument()
     await expect.element(view.getByRole('button', { name: 'PDF', exact: true })).toBeInTheDocument()
     await expect.element(view.getByText('Daily travel notes.')).toBeInTheDocument()
-    await view.app.settings.flush()
-    const saved = view.app.settings.saves().at(-1)
+    await view.core.settings.flush()
+    const saved = view.core.settings.saves().at(-1)
     expect(saved?.allNotesFilterTags).toEqual([])
     await view.unmount()
 
@@ -827,7 +831,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(page.getByRole('button', { name: 'Actions for #book' })).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     await view.unmount()
   })
 
@@ -854,7 +858,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       await expect
         .element(page.getByRole('list', { name: 'Pinned filters' }))
         .not.toBeInTheDocument()
-      await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+      await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     } finally {
       await view.unmount()
     }
@@ -893,7 +897,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .not.toHaveAttribute('aria-pressed', 'true')
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     await view.unmount()
   })
 
@@ -932,7 +936,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(handle).toHaveFocus()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('list', { name: 'Pinned filters' })).not.toBeInTheDocument()
-    await expect.element(view.getByRole('button', { name: 'Custom' })).toHaveFocus()
+    await expect.element(view.getByRole('combobox', { name: 'Custom' })).toHaveFocus()
     await view.unmount()
   })
 
@@ -1049,7 +1053,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .getByRole('button', { name: 'All', exact: true })
       .element()
       .getBoundingClientRect()
-    const custom = group.getByRole('button', { name: 'Custom' }).element().getBoundingClientRect()
+    const custom = group.getByRole('combobox', { name: 'Custom' }).element().getBoundingClientRect()
     const container = view.getByTestId('screen-container').element().getBoundingClientRect()
 
     expect(all.left).toBeGreaterThanOrEqual(container.left)
@@ -1072,7 +1076,7 @@ describe('AllNotesScreen — pinned tag management', () => {
     await expect.element(view.getByRole('button', { name: /Trash \(1\)/ })).toBeVisible()
     expect(strip?.clientWidth).toBeGreaterThan(0)
     const selectedCustom = group
-      .getByRole('button', { name: 'Custom' })
+      .getByRole('combobox', { name: 'Custom' })
       .element()
       .getBoundingClientRect()
     const newNote = view
@@ -1080,7 +1084,7 @@ describe('AllNotesScreen — pinned tag management', () => {
       .element()
       .getBoundingClientRect()
     expect(selectedCustom.right).toBeLessThanOrEqual(newNote.left)
-    await group.getByRole('button', { name: 'Custom' }).click()
+    await group.getByRole('combobox', { name: 'Custom' }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
     await vi.waitFor(() => {
       expect(probedRoute(view)).toEqual({
@@ -1155,7 +1159,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(1) // newest first: Health (Jan 15) above Tokyo (Jan 10)
 
     await view.getByRole('button', { name: 'Sort by subject' }).click()
-    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
+    expect(view.core.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     await expect
       .element(view.getByRole('button', { name: 'Subject, sorted A to Z' }))
       .toBeInTheDocument()
@@ -1168,7 +1172,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     expect(order()).toBe(-1)
 
     await view.getByRole('button', { name: 'Sort by updated' }).click()
-    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
+    expect(view.core.settings.get().allNotesSort).toEqual({ key: 'updated', direction: 'desc' })
     await view.getByRole('button', { name: 'Updated, sorted newest first' }).click()
     await expect
       .element(view.getByRole('button', { name: 'Updated, sorted oldest first' }))
@@ -1215,7 +1219,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     view.getByRole('button', { name: 'Sort by subject' }).element().focus()
     await userEvent.keyboard('{Enter}')
 
-    expect(view.app.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
+    expect(view.core.settings.get().allNotesSort).toEqual({ key: 'title', direction: 'asc' })
     expect(probedRoute(view)).toEqual({ kind: 'allNotes', filter: null })
     await view.unmount()
   })
@@ -1280,7 +1284,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
       expect(deleteNote).toHaveBeenCalledWith('notes/health.md', 1)
       expect(deleteNote).toHaveBeenCalledWith('notes/tokyo.md', 1)
     })
-    expect(view.app.noteFile.trashed()).toEqual(['notes/health.md', 'notes/tokyo.md'])
+    expect(view.core.noteFile.trashed()).toEqual(['notes/health.md', 'notes/tokyo.md'])
     // Optimistic removal: the rows leave at once — the test harness has no file
     // watcher to drive the reindex that would otherwise refresh the list.
     await expectLocatorToHaveCount(view.getByText('Health Stacked'), 0)
@@ -1303,7 +1307,7 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     const view = await renderScreen()
     await expect.element(view.getByText('Health Stacked')).toBeInTheDocument()
 
-    await view.getByRole('button', { name: /Custom/ }).click()
+    await view.getByRole('combobox', { name: /Custom/ }).click()
     await page.getByRole('option', { name: /#travel/ }).click()
     await expect.element(view.getByText('Tue, June 9th, 2026')).toBeInTheDocument()
 
@@ -1348,8 +1352,8 @@ describe('AllNotesScreen — selection and bulk trash', () => {
     await expectLocatorToHaveCount(page.getByText('Trash 1 note?'), 0)
     await vi.waitFor(() => {
       expect(
-        view.app.progress
-          .getAll()
+        view.core.progress
+          .get()
           .map((operation) => `${operation.status}:${operation.message ?? ''}`),
       ).toContain('failed:disk on fire')
     })

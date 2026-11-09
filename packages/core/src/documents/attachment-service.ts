@@ -26,7 +26,9 @@ import { isAttachmentPath, isSafeVisibleGraphPath } from '../graph/paths.ts'
 import { pdfPageWidthBucket } from '../graph/pdf-pages.ts'
 import type { FileMeta, PdfInfo } from '../graph/schemas.ts'
 import type { FileChangeService } from '../indexing/file-change-service.ts'
+import type { LoggerService } from '../ports/logger-service.ts'
 import type { Unlisten } from '../unlisten.ts'
+import { WritableStore, type Store } from '../store.ts'
 import { formatBytes } from '../lib/format-bytes.ts'
 
 /**
@@ -122,8 +124,7 @@ export interface AttachmentSaveScope {
   /**
    * The most recent failed save of this note session.
    */
-  error(): AssetSaveError | null
-  subscribe(listener: () => void): Unlisten
+  readonly error: Store<AssetSaveError | null>
   reset(): void
 }
 
@@ -161,9 +162,10 @@ export interface AttachFilesRequest {
  */
 export interface AttachmentService {
   /**
-   * The open graph's catalog, or null while its first listing loads or no graph is open.
+   * The catalog of the newest stored listing, or null until the first listing lands. It
+   * changes whenever a listing changes a catalog.
    */
-  peekCatalog(): AttachmentCatalog | null
+  readonly catalog: Store<AttachmentCatalog | null>
   /**
    * The open graph's catalog, waiting for its first listing. Rejects when no graph is open.
    */
@@ -173,10 +175,6 @@ export interface AttachmentService {
    * names an attachment path, or on a reconcile request.
    */
   watchCatalog(generation: number): Unlisten
-  /**
-   * Called whenever a listing changes a catalog.
-   */
-  onCatalogChanged(listener: () => void): Unlisten
   /**
    * Every attachment file of graph session `generation` with its size and
    * modification time, listed fresh: the file half of the Attachments library
@@ -373,9 +371,9 @@ export interface AttachmentSaveScopeDeps {
 
 class AttachmentSaveScopeImpl implements AttachmentSaveScope {
   readonly #deps: AttachmentSaveScopeDeps
-  readonly #listeners = new Set<() => void>()
+  readonly #error = new WritableStore<AssetSaveError | null>(null)
+  readonly error: Store<AssetSaveError | null> = this.#error
   #epoch = 0
-  #current: AssetSaveError | null = null
 
   constructor(deps: AttachmentSaveScopeDeps) {
     this.#deps = deps
@@ -388,38 +386,14 @@ class AttachmentSaveScopeImpl implements AttachmentSaveScope {
       return null
     }
     if (this.#epoch === started) {
-      this.#setError(result.ok ? null : result.error)
+      this.#error.set(result.ok ? null : result.error)
     }
     return result.ok ? result.destination : null
   }
 
-  error(): AssetSaveError | null {
-    return this.#current
-  }
-
-  subscribe(listener: () => void): Unlisten {
-    const deliver = (): void => {
-      listener()
-    }
-    this.#listeners.add(deliver)
-    return () => {
-      this.#listeners.delete(deliver)
-    }
-  }
-
   reset(): void {
     this.#epoch += 1
-    this.#setError(null)
-  }
-
-  #setError(next: AssetSaveError | null): void {
-    if (next === this.#current) {
-      return
-    }
-    this.#current = next
-    for (const listener of this.#listeners) {
-      listener()
-    }
+    this.#error.set(null)
   }
 }
 
@@ -462,11 +436,13 @@ export interface AttachmentServiceDeps {
   readonly clock: ClockService
   readonly platform: FileSrcSource
   readonly graphSession: GraphSessionSource
+  readonly logger: LoggerService
 }
 
 class AttachmentServiceImpl implements AttachmentService {
   readonly #deps: AttachmentServiceDeps
-  readonly #catalogListeners = new Set<() => void>()
+  readonly #catalog = new WritableStore<AttachmentCatalog | null>(null)
+  readonly catalog: Store<AttachmentCatalog | null> = this.#catalog
   #entry: CatalogEntry | null = null
   // Sizes of files saved this graph session, by generation and asset path:
   // the size is already in hand, while the catalog only lists the file once
@@ -475,11 +451,6 @@ class AttachmentServiceImpl implements AttachmentService {
 
   constructor(deps: AttachmentServiceDeps) {
     this.#deps = deps
-  }
-
-  peekCatalog(): AttachmentCatalog | null {
-    const generation = this.#openGeneration()
-    return generation === null ? null : this.#peekCatalog(generation)
   }
 
   async loadCatalog(): Promise<AttachmentCatalog> {
@@ -500,16 +471,6 @@ class AttachmentServiceImpl implements AttachmentService {
     return () => {
       stopChanges()
       stopReconcile()
-    }
-  }
-
-  onCatalogChanged(listener: () => void): Unlisten {
-    const deliver = (): void => {
-      listener()
-    }
-    this.#catalogListeners.add(deliver)
-    return () => {
-      this.#catalogListeners.delete(deliver)
     }
   }
 
@@ -609,7 +570,7 @@ class AttachmentServiceImpl implements AttachmentService {
     options?: SaveFileOptions,
   ): Promise<AssetSaveResult | null> {
     const { assetStore, progress, clock, graphSession } = this.#deps
-    const session = graphSession.getState().session
+    const session = graphSession.get().session
     if (session === null) {
       return null
     }
@@ -656,7 +617,7 @@ class AttachmentServiceImpl implements AttachmentService {
 
   async attachFilesToNote({ notePath, sources, findEditor }: AttachFilesRequest): Promise<void> {
     const { assetStore, progress, graphSession } = this.#deps
-    const session = graphSession.getState().session
+    const session = graphSession.get().session
     // A read-only local-only note takes no attachments, and its files must
     // never be copied into the synced `assets/`.
     if (session === null || isLocalOnlyReadOnlyPath(session.localOnly, notePath)) {
@@ -749,7 +710,7 @@ class AttachmentServiceImpl implements AttachmentService {
   }
 
   #openGeneration(): number | null {
-    return this.#deps.graphSession.getState().session?.generation ?? null
+    return this.#deps.graphSession.get().session?.generation ?? null
   }
 
   #entryFor(generation: number): CatalogEntry {
@@ -757,12 +718,6 @@ class AttachmentServiceImpl implements AttachmentService {
       this.#entry = { generation, catalog: null, key: null, listing: null, started: 0, stored: 0 }
     }
     return this.#entry
-  }
-
-  #notifyCatalogChanged(): void {
-    for (const listener of this.#catalogListeners) {
-      listener()
-    }
   }
 
   #list(target: CatalogEntry): Promise<AttachmentCatalog> {
@@ -788,10 +743,11 @@ class AttachmentServiceImpl implements AttachmentService {
         const catalog = createAttachmentCatalog(files)
         target.catalog = catalog
         target.key = key
-        this.#notifyCatalogChanged()
+        this.#catalog.set(catalog)
         return catalog
       },
       (error: unknown) => {
+        this.#deps.logger.warn('listing attachments failed:', error)
         if (target.listing === listing) {
           target.listing = null
         }
@@ -837,8 +793,7 @@ class AttachmentServiceImpl implements AttachmentService {
   ): MaybePromise<string | undefined> {
     if (/^https?:\/\//i.test(source)) {
       // A note in a local-only folder must not reach the network.
-      const localOnly =
-        this.#deps.graphSession.getState().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS
+      const localOnly = this.#deps.graphSession.get().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS
       return isLocalOnlyPath(localOnly, notePath) ? undefined : source
     }
     if (generation === null) {

@@ -74,7 +74,7 @@ describe('wiki-link hover card over a private target', () => {
       path,
     })
     const screen = await renderInApp(<HoverCard target="Target" />, {
-      app,
+      core: app,
       graph: { root: '/graph', name: 'g', generation: 7, localOnlyFolders: ['secure'] },
     })
 

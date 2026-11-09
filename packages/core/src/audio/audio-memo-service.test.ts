@@ -253,7 +253,7 @@ async function openSession(options?: SetupOptions) {
     surfaceHidden: options?.surfaceHidden ?? false,
   })
   await flush()
-  return { ...kit, surface, session, phase: () => session.getState().phase }
+  return { ...kit, surface, session, phase: () => session.get().phase }
 }
 
 /**
@@ -326,7 +326,7 @@ describe('AudioMemoService.openPipeline', () => {
 
     expect(assetStore.uploads()).toEqual([{ kind: 'path', path: FINAL_PATH, generation: 3 }])
     expect(passes()).toBe(0)
-    expect(pipeline.getState().transcribing).toBe(false)
+    expect(pipeline.get().transcribing).toBe(false)
   })
 
   it('a failing post-capture cleanup is logged, never parked', async () => {
@@ -345,7 +345,7 @@ describe('AudioMemoService.openPipeline', () => {
     })
     await flush()
 
-    expect(pipeline.getState()).toMatchObject({ pendingCount: 0, error: null, canRetry: false })
+    expect(pipeline.get()).toMatchObject({ pendingCount: 0, error: null, canRetry: false })
     expect(logger.getErrors()).toEqual([
       { message: 'audio memo post-capture cleanup failed:', cause },
     ])
@@ -365,20 +365,51 @@ describe('AudioMemoService.openPipeline', () => {
       onDiscarded,
     })
     await flush()
-    expect(pipeline.getState()).toMatchObject({ error: 'disk full', canRetry: true })
+    expect(pipeline.get()).toMatchObject({ error: 'disk full', canRetry: true })
 
     pipeline.discard()
     await flush()
 
     expect(onDiscarded).toHaveBeenCalledTimes(1)
-    expect(pipeline.getState()).toMatchObject({ error: null, canRetry: false })
+    expect(pipeline.get()).toMatchObject({ error: null, canRetry: false })
+  })
+
+  it('keeps one state object until a field changes, and notifies until unsubscribed', async () => {
+    const { service, settings, passes } = await setup()
+    const pipeline = service.openPipeline({ isErrorSurfaceVisible: () => true })
+    await flush()
+    const listener = vi.fn()
+    const unsubscribe = pipeline.subscribe(listener)
+    const before = pipeline.get()
+
+    // A provider change that keeps a transcription model neither notifies nor kicks a pass.
+    settings.update({ defaultAiProviderId: null })
+    settings.update({ semanticSearchEnabled: true })
+    await flush()
+    expect(pipeline.get()).toBe(before)
+    expect(listener).not.toHaveBeenCalled()
+    expect(passes()).toBe(1)
+
+    pipeline.reportError('microphone unplugged')
+    const failed = pipeline.get()
+    expect(failed).toMatchObject({ error: 'microphone unplugged' })
+    expect(listener).toHaveBeenCalledOnce()
+    pipeline.reportError('microphone unplugged')
+    expect(pipeline.get()).toBe(failed)
+    expect(listener).toHaveBeenCalledOnce()
+
+    unsubscribe()
+    pipeline.discard()
+    expect(pipeline.get().error).toBeNull()
+    expect(listener).toHaveBeenCalledOnce()
+    pipeline.dispose()
   })
 })
 
 describe('AudioMemoService.openSession', () => {
   it('toggle records, then stops and captures the recording', async () => {
     const { session, phase, assetStore } = await openSession()
-    expect(session.getState().available).toBe(true)
+    expect(session.get().available).toBe(true)
 
     session.toggle()
     await flush()
@@ -396,15 +427,15 @@ describe('AudioMemoService.openSession', () => {
     const { session } = await openSession()
     const listener = vi.fn()
     session.subscribe(listener)
-    const before = session.getState()
-    expect(session.getState()).toBe(before)
+    const before = session.get()
+    expect(session.get()).toBe(before)
 
     session.toggle()
     await flush()
 
     expect(listener).toHaveBeenCalled()
-    expect(session.getState()).not.toBe(before)
-    expect(session.getState().recorderState).toBe('recording')
+    expect(session.get()).not.toBe(before)
+    expect(session.get().recorderState).toBe('recording')
   })
 
   it('runs the launch pass when it opens, and stops following triggers when disposed', async () => {
@@ -434,7 +465,7 @@ describe('AudioMemoService.openSession', () => {
   it('adding the first transcription-capable model kicks the pass the gate was suppressing', async () => {
     const { session, settings, passes } = await openSession({ providers: ANTHROPIC_ONLY })
     expect(passes()).toBe(0)
-    expect(session.getState().available).toBe(false)
+    expect(session.get().available).toBe(false)
 
     settings.update({
       aiProviders: PROVIDERS.providers,
@@ -443,7 +474,7 @@ describe('AudioMemoService.openSession', () => {
     await flush()
 
     expect(passes()).toBe(1)
-    expect(session.getState().available).toBe(true)
+    expect(session.get().available).toBe(true)
   })
 
   it('a too-short recording is discarded without saving', async () => {
@@ -470,8 +501,8 @@ describe('AudioMemoService.openSession', () => {
     session.toggle()
     await flush()
     expect(phase()).toBe('error')
-    expect(session.getState().error).toBe('disk full')
-    expect(session.getState().canRetry).toBe(true)
+    expect(session.get().error).toBe('disk full')
+    expect(session.get().canRetry).toBe(true)
 
     session.retry()
     await flush()
@@ -527,12 +558,24 @@ describe('AudioMemoService.openSession', () => {
     session.toggle()
     await flush()
 
-    recorder.emitLevel({ level: 0.5, elapsedMs: 1200 })
-    expect(session.getState().elapsedMs).toBe(1200)
+    const state = session.get()
+    const listener = vi.fn()
+    const elapsedListener = vi.fn()
+    session.subscribe(listener)
+    const unsubscribeElapsed = session.elapsedMs.subscribe(elapsedListener)
 
+    recorder.emitLevel({ level: 0.5, elapsedMs: 1200 })
+    expect(session.elapsedMs.get()).toBe(1200)
+    expect(elapsedListener).toHaveBeenCalledOnce()
+    // A tick leaves the main state alone.
+    expect(session.get()).toBe(state)
+    expect(listener).not.toHaveBeenCalled()
+
+    unsubscribeElapsed()
     session.cancel()
     await flush()
-    expect(session.getState().elapsedMs).toBe(0)
+    expect(session.elapsedMs.get()).toBe(0)
+    expect(elapsedListener).toHaveBeenCalledOnce()
   })
 
   it('shows the still-recording reminder, and stopping takes it down', async () => {
@@ -629,14 +672,14 @@ describe('AudioMemoService.openSession', () => {
     session.toggle()
     await flush()
     expect(phase()).toBe('transcribing')
-    expect(session.getState().pendingCount).toBe(2)
+    expect(session.get().pendingCount).toBe(2)
     // Serial: the second memo waits — captures must land in recording order.
     expect(uploadMock).toHaveBeenCalledTimes(1)
 
     pendingFirst.resolve()
     await flush()
     expect(phase()).toBe('idle')
-    expect(session.getState().pendingCount).toBe(0)
+    expect(session.get().pendingCount).toBe(0)
     expect(uploadMock).toHaveBeenCalledTimes(2)
     expect(uploadMock.mock.calls[1]?.[1]).toBe(SECOND_BLOB)
   })
@@ -725,8 +768,8 @@ describe('AudioMemoService.openSession', () => {
     await flush()
 
     expect(phase()).toBe('error')
-    expect(session.getState().canRetry).toBe(false)
-    expect(session.getState().error).toBe(
+    expect(session.get().canRetry).toBe(false)
+    expect(session.get().error).toBe(
       'Microphone access was denied. Allow it in System Settings → Privacy & Security → Microphone.',
     )
   })
@@ -738,7 +781,7 @@ describe('AudioMemoService.openSession', () => {
     session.toggle()
     await flush()
 
-    expect(session.getState().error).toBe(
+    expect(session.get().error).toBe(
       'Microphone access was denied. Allow microphone access for Reflect in your system settings.',
     )
   })
@@ -750,7 +793,7 @@ describe('AudioMemoService.openSession', () => {
     session.toggle()
     await flush()
 
-    expect(session.getState().error).toBe('no input device')
+    expect(session.get().error).toBe('no input device')
   })
 
   it('hiding the recording UI during the permission prompt abandons the request', async () => {
@@ -793,7 +836,7 @@ describe('AudioMemoService.openSession', () => {
     await flush()
 
     expect(phase()).toBe('error')
-    expect(progress.getAll()).toEqual([])
+    expect(progress.get()).toEqual([])
   })
 
   it('a parked error never invisibly blocks recording: toggle surfaces, then clears it', async () => {
@@ -837,8 +880,8 @@ describe('AudioMemoService.openSession', () => {
   it('is unavailable without an OpenAI or Gemini model, and nothing runs', async () => {
     const { session, phase, recorder, passes } = await openSession({ providers: ANTHROPIC_ONLY })
 
-    expect(session.getState().available).toBe(false)
-    expect(session.getState().unavailableReason).toMatch(/OpenAI or Gemini/)
+    expect(session.get().available).toBe(false)
+    expect(session.get().unavailableReason).toMatch(/OpenAI or Gemini/)
 
     session.toggle()
     await flush()
@@ -852,8 +895,8 @@ describe('AudioMemoService.openSession', () => {
   it('is unavailable where the platform cannot record', async () => {
     const { session, recorder } = await openSession({ supported: false })
 
-    expect(session.getState().available).toBe(false)
-    expect(session.getState().unavailableReason).toBe(
+    expect(session.get().available).toBe(false)
+    expect(session.get().unavailableReason).toBe(
       'Audio recording is not supported on this platform',
     )
 
@@ -869,15 +912,15 @@ describe('AudioMemoService.openSession', () => {
       localModel: { status: 'missing' },
     })
 
-    expect(session.getState().available).toBe(false)
-    expect(session.getState().unavailableReason).toBe(
+    expect(session.get().available).toBe(false)
+    expect(session.get().unavailableReason).toBe(
       'Download the on-device transcription model in Settings to record audio memos',
     )
 
     localTranscription.setStatus('large-v3-turbo', { status: 'ready' })
     await flush()
 
-    expect(session.getState()).toMatchObject({ available: true, unavailableReason: null })
+    expect(session.get()).toMatchObject({ available: true, unavailableReason: null })
   })
 
   it('switching to the on-device engine asks for its model before calling it available', async () => {
@@ -885,13 +928,13 @@ describe('AudioMemoService.openSession', () => {
       providers: ANTHROPIC_ONLY,
     })
     const status = vi.spyOn(localTranscription, 'status')
-    expect(session.getState().unavailableReason).toMatch(/OpenAI or Gemini/)
+    expect(session.get().unavailableReason).toMatch(/OpenAI or Gemini/)
 
     settings.update({ transcriptionEngine: 'local' })
     await flush()
 
     expect(status).toHaveBeenCalledWith('large-v3-turbo')
-    expect(session.getState()).toMatchObject({ available: true, unavailableReason: null })
+    expect(session.get()).toMatchObject({ available: true, unavailableReason: null })
   })
 
   it('cancel discards the recording without saving', async () => {
@@ -963,20 +1006,20 @@ describe('AudioMemoService.openSession', () => {
     session.dispose()
 
     expect(recorder.calls()).toContainEqual({ method: 'cancel' })
-    expect(recorder.state()).toBe('idle')
+    expect(recorder.state.get()).toBe('idle')
   })
 })
 
 describe('AudioMemoService.openSession with the native recorder', () => {
   it('records through the native recorder, ticking the elapsed time, never the webview mic', async () => {
     const { session, phase, native, recorder, clock } = await openSession({ native: true })
-    expect(session.getState()).toMatchObject({ nativeRecorder: true, available: true })
+    expect(session.get()).toMatchObject({ nativeRecorder: true, available: true })
 
     session.toggle()
     await flush()
     expect(phase()).toBe('recording')
     await clock.advance(1000)
-    expect(session.getState().elapsedMs).toBe(1000)
+    expect(session.elapsedMs.get()).toBe(1000)
 
     session.toggle()
     await flush()
@@ -988,7 +1031,7 @@ describe('AudioMemoService.openSession with the native recorder', () => {
   it('records even without a transcription model: the recording pass says when it stops', async () => {
     const { session } = await openSession({ native: true, providers: ANTHROPIC_ONLY })
 
-    expect(session.getState()).toMatchObject({ available: true, unavailableReason: null })
+    expect(session.get()).toMatchObject({ available: true, unavailableReason: null })
   })
 
   it('cancel discards the native recording', async () => {
@@ -1000,7 +1043,7 @@ describe('AudioMemoService.openSession with the native recorder', () => {
     await flush()
 
     expect(native.commands()).toEqual(['recorder_start', 'recorder_cancel'])
-    expect(session.getState().phase).toBe('idle')
+    expect(session.get().phase).toBe('idle')
   })
 
   it('collapsing the sidebar ends a native recording that has no menu bar item, once', async () => {
@@ -1029,7 +1072,7 @@ describe('AudioMemoService.openSession with the native recorder', () => {
 
     expect(native.commands()).toEqual([])
     expect(surface.reveal).toHaveBeenCalledTimes(1)
-    expect(session.getState().phase).toBe('recording')
+    expect(session.get().phase).toBe('recording')
   })
 
   it('a native recording with a menu bar item survives the collapse', async () => {
@@ -1045,7 +1088,7 @@ describe('AudioMemoService.openSession with the native recorder', () => {
 
     expect(native.commands()).toEqual(['recorder_start'])
     expect(surface.reveal).not.toHaveBeenCalled()
-    expect(session.getState().phase).toBe('recording')
+    expect(session.get().phase).toBe('recording')
   })
 
   it('starting with the recording UI hidden reveals it first', async () => {

@@ -7,9 +7,9 @@ import type { AiProviderConfig } from '../settings/schema.ts'
  * where the chat model would be wasted spend.
  */
 
-const OPENAI_SMALL_MODEL = 'gpt-5.4-nano'
-const ANTHROPIC_SMALL_MODEL = 'claude-haiku-4-5'
-const GOOGLE_SMALL_MODEL = 'gemini-3.1-flash-lite'
+const OPENAI_SMALL_MODEL = 'gpt-6-luna'
+const ANTHROPIC_SMALL_MODEL = 'claude-haiku-5-5'
+const GOOGLE_SMALL_MODEL = 'gemini-3.5-flash-lite'
 
 /**
  * Replace a configured model with the provider's fixed small model. OpenRouter

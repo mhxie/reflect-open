@@ -9,7 +9,7 @@ import {
   unpinFilterTag,
   type PinnedTagMove,
 } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 
 /**
  * The shared pin list and its edits. Each edit returns true only when it
@@ -26,7 +26,8 @@ interface PinnedTagFilters {
 
 /** Share validated, ordered filter preferences across All Notes and Settings. */
 export function usePinnedTagFilters(): PinnedTagFilters {
-  const { settings, updateSettingsWith } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const tags = useMemo(
     () => normalizePinnedTags(settings.allNotesFilterTags),
     [settings.allNotesFilterTags],
@@ -34,7 +35,7 @@ export function usePinnedTagFilters(): PinnedTagFilters {
 
   const updateTags = (transform: (current: readonly string[]) => string[]): boolean => {
     let changed = false
-    updateSettingsWith((current) => {
+    settingsService.updateWith((current) => {
       const before = normalizePinnedTags(current.allNotesFilterTags)
       const after = transform(before)
       changed = !pinnedTagOrdersEqual(before, after)

@@ -1,7 +1,7 @@
 import { useMemo, type ReactElement, type ReactNode } from 'react'
 import { NotePane } from '@/components/note-pane.tsx'
 import type { NoteReveal } from '@/lib/note-reveal.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { ScrollRestored } from '@/routing/scroll-restore.tsx'
 
 interface SingleNoteViewProps {
@@ -31,7 +31,7 @@ interface SingleNoteViewProps {
  */
 export function SingleNoteView({ path, dailyDate, heading }: SingleNoteViewProps): ReactElement {
   // A followed link's `#fragment` scrolls the arriving note to that heading.
-  const { arrivalRevealHeading, arrivalSeq } = useRouter()
+  const { arrivalRevealHeading, arrivalSeq } = useRouterState()
   const reveal = useMemo((): NoteReveal | undefined => {
     return arrivalRevealHeading === null
       ? undefined

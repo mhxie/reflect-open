@@ -9,20 +9,15 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
-import type {
-  AudioMemoPhase,
-  AudioMemoSession,
-  AudioMemoSessionState,
-  GraphInfo,
-  Unlisten,
-} from '@reflect/core'
+import type { AudioMemoSession, AudioMemoSessionState, GraphInfo, Unlisten } from '@reflect/core'
 import {
   dismissRecordingReminder,
   showRecordingReminder,
 } from '@/components/audio-memo/recording-reminder.ts'
+import { useToastController } from '@/lib/use-toasts.ts'
 import { useSidebar } from '@/providers/sidebar-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useSelector } from '@/lib/use-store.ts'
 
 /**
  * The desktop React surface for audio memos: a thin shell over the
@@ -36,29 +31,36 @@ import { useServiceState } from '@/services/use-service-state.ts'
  * waveform instead of a media stream.
  */
 
-export type { AudioMemoPhase }
+/**
+ * The session's stores: the state, and the elapsed time apart from it.
+ */
+type AudioMemoSessionStores = Pick<AudioMemoSession, 'get' | 'subscribe' | 'elapsedMs'>
 
-export type AudioMemoContextValue = AudioMemoSessionState &
-  Pick<AudioMemoSession, 'cancel' | 'retry' | 'discard'> & {
-    /**
-     * Idle → start recording (expanding a collapsed sidebar); recording → stop & save.
-     */
-    toggle: () => void
-    /**
-     * The native recorder's live level, for the waveform when there's no
-     * stream; `null` when recordings go through the webview.
-     */
-    subscribeLevel: ((listener: (level: number) => void) => Unlisten) | null
-  }
+export interface AudioMemoContextValue extends Pick<
+  AudioMemoSession,
+  'cancel' | 'retry' | 'discard'
+> {
+  readonly session: AudioMemoSessionStores
+  /**
+   * Idle → start recording (expanding a collapsed sidebar); recording → stop & save.
+   */
+  toggle: () => void
+  /**
+   * The native recorder's live level, or null when recordings use the webview.
+   */
+  subscribeLevel: ((listener: (level: number) => void) => Unlisten) | null
+}
 
-const AudioMemoContext = createContext<AudioMemoContextValue | null>(null)
+/**
+ * The audio-memo session and its actions.
+ */
+export const AudioMemoContext = createContext<AudioMemoContextValue | null>(null)
 
 /**
  * What the surface shows before the session opens.
  */
 const CLOSED_STATE: AudioMemoSessionState = {
   phase: 'idle',
-  elapsedMs: 0,
   stream: null,
   nativeRecorder: false,
   pendingCount: 0,
@@ -69,9 +71,44 @@ const CLOSED_STATE: AudioMemoSessionState = {
   recorderState: 'idle',
 }
 
-const CLOSED_SESSION = {
+const CLOSED_SESSION: AudioMemoSessionStores = {
+  get: () => CLOSED_STATE,
   subscribe: () => () => {},
-  getState: () => CLOSED_STATE,
+  elapsedMs: { get: () => 0, subscribe: () => () => {} },
+}
+
+function selectRecorderState(state: AudioMemoSessionState): AudioMemoSessionState['recorderState'] {
+  return state.recorderState
+}
+
+function selectPhase(state: AudioMemoSessionState): AudioMemoSessionState['phase'] {
+  return state.phase
+}
+
+function selectAvailable(state: AudioMemoSessionState): AudioMemoSessionState['available'] {
+  return state.available
+}
+
+function selectUnavailableReason(
+  state: AudioMemoSessionState,
+): AudioMemoSessionState['unavailableReason'] {
+  return state.unavailableReason
+}
+
+function selectError(state: AudioMemoSessionState): AudioMemoSessionState['error'] {
+  return state.error
+}
+
+function selectCanRetry(state: AudioMemoSessionState): AudioMemoSessionState['canRetry'] {
+  return state.canRetry
+}
+
+function selectStream(state: AudioMemoSessionState): AudioMemoSessionState['stream'] {
+  return state.stream
+}
+
+function selectNativeRecorder(state: AudioMemoSessionState): boolean {
+  return state.nativeRecorder
 }
 
 interface AudioMemoProviderProps {
@@ -82,6 +119,7 @@ interface AudioMemoProviderProps {
 export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): ReactElement {
   const { audioMemo } = useCoreServices()
   const { collapsed, toggleSidebar } = useSidebar()
+  const toastController = useToastController()
 
   // Read at call time: the session outlives the renders that made these.
   const collapsedRef = useRef(collapsed)
@@ -100,8 +138,12 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
         reveal: () => {
           toggleSidebarRef.current()
         },
-        showReminder: showRecordingReminder,
-        dismissReminder: dismissRecordingReminder,
+        showReminder: (elapsedMs, stop) => {
+          showRecordingReminder(toastController, elapsedMs, stop)
+        },
+        dismissReminder: () => {
+          dismissRecordingReminder(toastController)
+        },
       },
     })
     setSession(next)
@@ -109,22 +151,22 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
       next.dispose()
       setSession((current) => (current === next ? null : current))
     }
-  }, [audioMemo, graph.generation])
+  }, [audioMemo, toastController, graph.generation])
 
   const store = session ?? CLOSED_SESSION
-  const state = useServiceState(store, store.getState)
 
   // The mic button (and its popover) unmount with the sidebar. The session
   // decides what a hidden surface means for a live recording or a pending
   // permission request; it needs the answer again after each recorder change.
-  const recorderState = state.recorderState
+  const recorderState = useSelector(store, selectRecorderState)
   useEffect(() => {
     session?.setSurfaceHidden(collapsed)
   }, [session, collapsed, recorderState])
 
-  const nativeRecorder = state.nativeRecorder
-  const controls = useMemo(
+  const nativeRecorder = useSelector(store, selectNativeRecorder)
+  const value = useMemo<AudioMemoContextValue>(
     () => ({
+      session: store,
       toggle: () => session?.toggle(),
       cancel: () => session?.cancel(),
       retry: () => session?.retry(),
@@ -134,15 +176,17 @@ export function AudioMemoProvider({ graph, children }: AudioMemoProviderProps): 
           ? (listener: (level: number) => void) => session.subscribeLevel(listener)
           : null,
     }),
-    [session, nativeRecorder],
+    [session, store, nativeRecorder],
   )
-  const value = useMemo<AudioMemoContextValue>(() => ({ ...state, ...controls }), [state, controls])
 
   return <AudioMemoContext value={value}>{children}</AudioMemoContext>
 }
 
 /**
- * Access the audio-memo surface. Use within an AudioMemoProvider.
+ * Access the audio-memo session and its actions. Use within an
+ * AudioMemoProvider. Reading the context does not subscribe to the state:
+ * read fields with the `useAudioMemo*` field hooks, and the elapsed time with
+ * `useStore(session.elapsedMs)`.
  */
 export function useAudioMemo(): AudioMemoContextValue {
   const context = use(AudioMemoContext)
@@ -150,4 +194,32 @@ export function useAudioMemo(): AudioMemoContextValue {
     throw new Error('useAudioMemo must be used within an AudioMemoProvider')
   }
   return context
+}
+
+function useAudioMemoSelector<T>(selector: (state: AudioMemoSessionState) => T): T {
+  return useSelector(useAudioMemo().session, selector)
+}
+
+export function useAudioMemoPhase(): AudioMemoSessionState['phase'] {
+  return useAudioMemoSelector(selectPhase)
+}
+
+export function useAudioMemoAvailable(): AudioMemoSessionState['available'] {
+  return useAudioMemoSelector(selectAvailable)
+}
+
+export function useAudioMemoUnavailableReason(): AudioMemoSessionState['unavailableReason'] {
+  return useAudioMemoSelector(selectUnavailableReason)
+}
+
+export function useAudioMemoError(): AudioMemoSessionState['error'] {
+  return useAudioMemoSelector(selectError)
+}
+
+export function useAudioMemoCanRetry(): AudioMemoSessionState['canRetry'] {
+  return useAudioMemoSelector(selectCanRetry)
+}
+
+export function useAudioMemoStream(): AudioMemoSessionState['stream'] {
+  return useAudioMemoSelector(selectStream)
 }

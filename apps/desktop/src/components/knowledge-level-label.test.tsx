@@ -36,7 +36,7 @@ async function renderLabels(ui: ReactNode, source: string | null = JSON.stringif
   })
   const app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
   onTestFinished(() => app.database.close())
-  const view = await renderInApp(ui, { app, graph: { root: '/g', name: 'g', generation: 7 } })
+  const view = await renderInApp(ui, { core: app, graph: { root: '/g', name: 'g', generation: 7 } })
   return Object.assign(view, { noteFile, contractReads: () => contractReads(noteFile) })
 }
 

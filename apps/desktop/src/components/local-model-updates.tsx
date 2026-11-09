@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useLocalModelStatus } from '@/lib/use-local-model-status.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -17,7 +17,7 @@ const RECHECK_MS = 6 * 60 * 60 * 1000
  * don't repeat the check or its offer.
  */
 export function LocalModelUpdates(): null {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const { clock, platform } = useCoreServices()
   const { localModelUpdates, window: appWindow } = useAppServices()
   const model = settings.localTranscriptionModel

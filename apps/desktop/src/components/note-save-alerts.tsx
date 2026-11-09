@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
-import type { AssetSaveError } from '@/editor/use-asset-persistence.ts'
+import type { AssetSaveError } from '@reflect/core'
 import type { NoteDocument } from '@/editor/use-note-document.ts'
 
 interface NoteSaveAlertsProps {

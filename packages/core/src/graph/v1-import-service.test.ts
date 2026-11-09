@@ -35,12 +35,12 @@ function summary(overrides: Partial<GraphImportSummary> = {}): GraphImportSummar
 /**
  * A service whose native import stays pending until `pendingImport` settles.
  */
-function setup(options?: { graph?: GraphInfo | null }) {
+function setup(options?: { graph?: GraphInfo | null; cancel?: () => Promise<null> }) {
   const pendingImport = Promise.withResolvers<GraphImportSummary>()
   const ipc = createTestIpcBridgeService({
     commands: {
       graph_import_reflect_v1_zip: () => pendingImport.promise,
-      graph_import_cancel: () => null,
+      graph_import_cancel: options?.cancel ?? (() => null),
     },
   })
   const fileChanges = createTestFileChangeService()
@@ -62,7 +62,7 @@ function setup(options?: { graph?: GraphInfo | null }) {
   })
   const states: V1ImportState[] = []
   service.subscribe(() => {
-    states.push(service.getState())
+    states.push(service.get())
   })
   return {
     service,
@@ -89,11 +89,11 @@ async function settle(): Promise<void> {
 describe('V1ImportService', () => {
   it('imports through the generation-pinned native command and applies the result', async () => {
     const context = setup()
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
 
     context.service.start('/tmp/reflect-v1.zip')
 
-    expect(context.service.getState()).toEqual({
+    expect(context.service.get()).toEqual({
       phase: 'running',
       progress: null,
       cancelling: false,
@@ -109,13 +109,24 @@ describe('V1ImportService', () => {
     context.pendingImport.resolve(result)
     await settle()
 
-    expect(context.service.getState()).toEqual({ phase: 'done', summary: result })
+    expect(context.service.get()).toEqual({ phase: 'done', summary: result })
     // The imported files are this device's own writes, one report per path.
     expect(context.fileChanges.ownWrites()).toEqual([['notes/a.md'], ['daily/2026-07-04.md']])
     expect(context.refreshes()).toBe(1)
 
     context.service.dismiss()
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
+  })
+
+  it('stops notifying after unsubscribe', () => {
+    const context = setup()
+    const listener = vi.fn()
+    const unlisten = context.service.subscribe(listener)
+    unlisten()
+    context.service.start('/tmp/reflect-v1.zip')
+
+    expect(listener).not.toHaveBeenCalled()
+    expect(context.states).toHaveLength(1)
   })
 
   it('surfaces validated progress ticks and drops malformed ones', async () => {
@@ -126,7 +137,7 @@ describe('V1ImportService', () => {
     context.ipc.emit(IMPORT_PROGRESS_EVENT, { stage: 'downloading', done: 1, total: 4 })
     context.ipc.emit(IMPORT_PROGRESS_EVENT, { stage: 'launching', done: 1, total: 4 })
 
-    expect(context.service.getState()).toEqual({
+    expect(context.service.get()).toEqual({
       phase: 'running',
       progress: { stage: 'downloading', done: 1, total: 4 },
       cancelling: false,
@@ -147,7 +158,7 @@ describe('V1ImportService', () => {
     context.ipc.emit(IMPORT_PROGRESS_EVENT, { stage: 'writing', done: 1, total: 4 })
 
     expect(context.states).toHaveLength(settled)
-    expect(context.service.getState().phase).toBe('done')
+    expect(context.service.get().phase).toBe('done')
   })
 
   it('ignores a second start while one runs', () => {
@@ -162,7 +173,7 @@ describe('V1ImportService', () => {
     const context = setup({ graph: null })
     context.service.start('/tmp/reflect-v1.zip')
 
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
     expect(context.commands()).toEqual([])
   })
 
@@ -172,7 +183,7 @@ describe('V1ImportService', () => {
 
     context.service.dismiss()
 
-    expect(context.service.getState().phase).toBe('running')
+    expect(context.service.get().phase).toBe('running')
   })
 
   it('cancels the running import once and settles back to idle', async () => {
@@ -185,7 +196,7 @@ describe('V1ImportService', () => {
     context.service.cancel()
 
     expect(context.commands()).toEqual(['graph_import_reflect_v1_zip', 'graph_import_cancel'])
-    expect(context.service.getState()).toEqual({
+    expect(context.service.get()).toEqual({
       phase: 'running',
       progress: null,
       cancelling: true,
@@ -194,8 +205,20 @@ describe('V1ImportService', () => {
     context.pendingImport.reject(new Error('import cancelled'))
     await settle()
 
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
     expect(context.fileChanges.ownWrites()).toEqual([])
+  })
+
+  it('logs a cancel that the native side rejects', async () => {
+    const context = setup({ cancel: () => Promise.reject(new Error('bridge down')) })
+
+    context.service.start('/tmp/reflect-v1.zip')
+    context.service.cancel()
+    await settle()
+
+    expect(context.logger.getWarnings().map((entry) => entry.message)).toEqual([
+      'cancelling the import failed:',
+    ])
   })
 
   it('surfaces failures with the native message', async () => {
@@ -205,14 +228,14 @@ describe('V1ImportService', () => {
     context.pendingImport.reject(new Error('could not read the zip'))
     await settle()
 
-    expect(context.service.getState()).toEqual({
+    expect(context.service.get()).toEqual({
       phase: 'failed',
       message: 'could not read the zip',
     })
     expect(context.refreshes()).toBe(0)
 
     context.service.dismiss()
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
   })
 
   it('drops the result when the graph switched mid-import', async () => {
@@ -223,7 +246,7 @@ describe('V1ImportService', () => {
     context.pendingImport.resolve(summary())
     await settle()
 
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
     expect(context.fileChanges.ownWrites()).toEqual([])
     expect(context.refreshes()).toBe(0)
   })
@@ -236,7 +259,7 @@ describe('V1ImportService', () => {
     context.pendingImport.resolve(summary())
     await settle()
 
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
     expect(context.fileChanges.ownWrites()).toEqual([])
   })
 
@@ -251,7 +274,7 @@ describe('V1ImportService', () => {
     context.pendingImport.resolve(summary())
     await settle()
 
-    expect(context.service.getState()).toEqual({ phase: 'idle' })
+    expect(context.service.get()).toEqual({ phase: 'idle' })
     expect(context.fileChanges.ownWrites()).toEqual([])
     expect(context.refreshes()).toBe(0)
   })

@@ -18,6 +18,7 @@ import {
   seedNotes,
   type TestNote,
 } from '../testing/index.ts'
+import { WritableStore } from '../store.ts'
 import type {
   EmbeddingBackfillOptions,
   EmbeddingBackfillResult,
@@ -89,7 +90,7 @@ async function setup(options?: {
   const indexLifecycle = createTestIndexLifecycleService({
     logger,
     progress,
-    graphSession: { getState: () => ({ session }), subscribe: () => () => {} },
+    graphSession: new WritableStore({ session }),
     indexStore: createTestIndexStoreService({
       fail: (call) => {
         return options?.failClear === true && call.method === 'clear'
@@ -123,8 +124,10 @@ async function setup(options?: {
       indexGeneration: 7,
       localOnlyFolders: options?.localOnlyFolders ?? [],
     },
-    ...(options?.indexing === true ? { state: { indexing: true } } : {}),
   })
+  if (options?.indexing === true) {
+    indexLifecycle.setProgress('reconciling')
+  }
   const activity: ActivityEvent[] = []
   const record = (event: ActivityEvent['event'], reason: string): void => {
     activity.push({
@@ -290,31 +293,31 @@ describe('start', () => {
   })
 
   it('waits for the index pass to settle before backfilling', async () => {
-    const { semanticSearch, runtime, embeddingIndex, graphSession } = await setup({
+    const { semanticSearch, runtime, embeddingIndex, indexLifecycle } = await setup({
       indexing: true,
     })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
     expect(embeddingIndex.follows()).toEqual([])
 
-    graphSession.setState({ indexing: false })
+    indexLifecycle.setProgress('live')
     expect(embeddingIndex.follows()).toEqual([{ generation: 7, modelId: MODEL }])
     stop()
   })
 
   it('stops following while a later index pass runs, and follows anew after it', async () => {
-    const { semanticSearch, embeddingIndex, graphSession, indexLifecycle } = await setup()
+    const { semanticSearch, embeddingIndex, indexLifecycle } = await setup()
     const stop = semanticSearch.start()
     await vi.waitFor(() => expect(embeddingIndex.follows()).toHaveLength(1))
 
-    graphSession.setState({ indexing: true })
+    indexLifecycle.setProgress('reconciling')
     indexLifecycle.emitApplied([{ kind: 'remove', path: 'notes/a.md' }], 7)
     await flush()
     expect(embeddingIndex.removed()).toEqual([])
 
-    graphSession.setState({ indexing: false })
+    indexLifecycle.setProgress('live')
     expect(embeddingIndex.follows()).toEqual([
       { generation: 7, modelId: MODEL },
       { generation: 7, modelId: MODEL },
@@ -368,7 +371,7 @@ describe('start', () => {
     const { semanticSearch, runtime, embeddingIndex } = await setup({ model: GEMMA })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
 
     // Only ever the configured model is asked for; the loaded one writes nothing.
@@ -406,7 +409,7 @@ describe('start', () => {
     })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus().status).toBe('failed'))
+    await vi.waitFor(() => expect(runtime.get().status).toBe('failed'))
     await flush()
 
     // The one load an untouched runtime gets; `failed` starts no second one.
@@ -419,7 +422,7 @@ describe('start', () => {
     const { semanticSearch, runtime, embeddingIndex } = await setup({ role: 'note-window' })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
 
     expect(runtime.ensureCalls()).toBe(0)
@@ -450,7 +453,7 @@ describe('start', () => {
     graphSession.setState({ indexGeneration: null })
 
     const stop = semanticSearch.start()
-    await vi.waitFor(() => expect(runtime.lastStatus()).toEqual(READY))
+    await vi.waitFor(() => expect(runtime.get()).toEqual(READY))
     await flush()
 
     expect(embeddingIndex.follows()).toEqual([])

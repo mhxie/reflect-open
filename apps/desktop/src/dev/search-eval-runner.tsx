@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { errorMessage } from '@reflect/core'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphStatus, useIndexGeneration } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -12,7 +12,8 @@ import { useCoreServices } from '@/services/services-provider.tsx'
 const POLL_MS = 2000
 
 export function SearchEvalRunner(): null {
-  const { status, indexGeneration } = useGraph()
+  const status = useGraphStatus()
+  const indexGeneration = useIndexGeneration()
   const { searchEval, logger } = useCoreServices()
 
   useEffect(() => {

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, type MouseEvent, type ReactElement } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import type { DateFormat, NoteListEntry, NoteListSort, NoteListSortKey } from '@reflect/core'
-import { formatShortDate } from '@/lib/dates.ts'
+import { formatShortDate } from '@reflect/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import type { AllNotesFilter } from '@/routing/route.ts'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
+import type { AllNotesFilter } from '@reflect/app'
 import { ALL_NOTES_GRID, AllNotesRow } from './all-notes-row.tsx'
 import { ATTACHMENT_FILTER_NOUNS } from './attachment-filter-labels.ts'
 import { SortHeader } from './sort-header.tsx'
@@ -51,7 +51,7 @@ export function AllNotesTable({
   onOpen,
   registerScrollToIndex,
 }: AllNotesTableProps): ReactElement | null {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const rows = notes ?? []
   const { clickSelect, isSelected } = selection
   const virtualizerRef = useRef<VirtualizerHandle>(null)
@@ -83,7 +83,7 @@ export function AllNotesTable({
       <div
         className={cn(
           ALL_NOTES_GRID,
-          'sticky top-0 z-10 border-b border-border bg-surface py-3 text-[13px] font-medium leading-none text-text-secondary shadow-sm',
+          'sticky top-0 z-10 border-b border-border bg-surface-canvas py-3 text-[13px] font-medium leading-none text-text-secondary shadow-sm',
         )}
       >
         <SortHeader

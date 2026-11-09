@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { isICloudRoot } from '@reflect/core'
+import { isICloudRoot, type GitSyncState } from '@reflect/core'
 import { SettingsField } from '@/components/settings/field.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
@@ -13,35 +13,24 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog.tsx'
+import { InlineAlert } from '@/components/inline-alert.tsx'
+import { useAsyncAction } from '@/hooks/use-async-action.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import { createDuplicateNoteIdsQueryOptions } from '@/lib/query-options.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSync } from '@/providers/sync-provider.tsx'
+import { useSelector } from '@/lib/use-store.ts'
+import { useGraphActions, useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useGitSyncActions, useGitSyncStore } from '@/providers/sync-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 const PENDING_NOTES_REFETCH_MS = 5_000
 
-function graphCountLine(count: number): string {
-  if (count === 0) {
-    return 'No graphs in iCloud Drive yet.'
-  }
-  return count === 1 ? '1 graph in iCloud Drive.' : `${count} graphs in iCloud Drive.`
+function selectGitSyncConnected(state: GitSyncState): boolean {
+  return state.phase === 'connected'
 }
 
 function pendingNotesLine(count: number): string {
-  if (count === 0) {
-    return 'All note files are downloaded.'
-  }
   return count === 1
     ? '1 note is still downloading from iCloud.'
     : `${count} notes are still downloading from iCloud.`
-}
-
-function forkLine(forkCount: number): string {
-  if (forkCount === 0) {
-    return 'No sync forks.'
-  }
-  return forkCount === 1 ? '1 sync fork' : `${forkCount} sync forks`
 }
 
 /**
@@ -57,11 +46,14 @@ function forkLine(forkCount: number): string {
  * storage in onboarding.
  */
 export function IcloudSettingsField(): ReactElement | null {
-  const { graph, openRecent } = useGraph()
-  const { backup, disconnectGraph } = useSync()
-  const { icloudMigration: migration, icloudNative, indexQuery, platform } = useCoreServices()
+  const graph = useGraphInfo()
+  const { openRecent } = useGraphActions()
+  const gitSyncConnected = useSelector(useGitSyncStore(), selectGitSyncConnected)
+  const { disconnectGraph } = useGitSyncActions()
+  const { icloudMigration: migration, icloudNative, platform } = useCoreServices()
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const move = useAsyncAction()
+  // The move's own failure text: a return value, set mid-action by `onCopied`.
   const [error, setError] = useState<string | null>(null)
   const hosted = graph !== null && isICloudRoot(graph.root)
   const { data: status } = useQuery({
@@ -81,36 +73,28 @@ export function IcloudSettingsField(): ReactElement | null {
       return typeof count === 'number' && count > 0 ? PENDING_NOTES_REFETCH_MS : false
     },
   })
-  const duplicateIds = useQuery({
-    ...createDuplicateNoteIdsQueryOptions(indexQuery, graph?.root),
-    enabled: hosted,
-  })
 
   // The navigator hides the entry off macOS through the same gate — the two
   // must agree (see use-visible-settings-sections).
   if (!platform.isMacosDesktop || graph === null) {
     return null
   }
-  const backupConnected = backup.phase === 'connected'
-  const forkCount = duplicateIds.data?.length
 
   async function moveToICloud(): Promise<void> {
-    setBusy(true)
     setError(null)
-    try {
-      const failure = await migration.moveGraph({
-        disconnectBackup: backupConnected ? disconnectGraph : null,
-        openGraph: openRecent,
-        onCopied: (failureSoFar) => {
-          setError(failureSoFar)
-          setConfirmOpen(false)
-        },
-      })
-      setError(failure)
-    } finally {
-      setBusy(false)
-    }
+    // Never rejects: the result is the user-facing failure text.
+    const failure = await migration.moveGraph({
+      disconnectGitSync: gitSyncConnected ? disconnectGraph : null,
+      openGraph: openRecent,
+      onCopied: (failureSoFar) => {
+        setError(failureSoFar)
+        setConfirmOpen(false)
+      },
+    })
+    setError(failure)
   }
+
+  const shownError = error ?? move.error
 
   return (
     <>
@@ -124,24 +108,15 @@ export function IcloudSettingsField(): ReactElement | null {
               : 'iCloud Drive isn’t reachable from this app — sign in to iCloud, or use a build with iCloud enabled.'
         }
       >
-        {hosted ? (
-          <div className="mt-3 flex flex-col gap-1 text-xs text-text-muted">
-            {pendingNotes.isPending ? <p>Checking downloaded notes...</p> : null}
-            {pendingNotes.data !== undefined ? <p>{pendingNotesLine(pendingNotes.data)}</p> : null}
-            {forkCount !== undefined ? (
-              <p className={forkCount > 0 ? 'text-amber-700 dark:text-amber-300' : undefined}>
-                {forkLine(forkCount)}
-              </p>
-            ) : null}
-          </div>
-        ) : status?.available === true ? (
-          <p className="mt-3 text-xs text-text-muted">
-            {graphCountLine(status.existingGraphRoots.length)}
-          </p>
+        {hosted && pendingNotes.data !== undefined && pendingNotes.data > 0 ? (
+          <p className="mt-3 text-xs text-text-muted">{pendingNotesLine(pendingNotes.data)}</p>
         ) : null}
         {hosted ? null : (
           <div className="mt-2">
-            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <Dialog
+              open={confirmOpen}
+              onOpenChange={(open) => !move.pending && setConfirmOpen(open)}
+            >
               <DialogTrigger
                 render={
                   <Button size="xs" variant="outline" disabled={status?.available !== true}>
@@ -155,28 +130,30 @@ export function IcloudSettingsField(): ReactElement | null {
                   <DialogDescription>
                     Your notes are copied into iCloud Drive and the graph reopens there. The current
                     folder stays on disk, untouched, as a recovery copy.
-                    {backupConnected
+                    {gitSyncConnected
                       ? ' GitHub sync is disconnected from the recovery copy; you can reconnect GitHub sync after the iCloud graph opens.'
                       : ''}
                   </DialogDescription>
                 </DialogHeader>
+                {/* A failure before the copy lands keeps the dialog open; show it here too. */}
+                {shownError !== null ? <InlineAlert tone="error">{shownError}</InlineAlert> : null}
                 <DialogFooter>
                   <DialogClose
                     render={
-                      <Button variant="ghost" disabled={busy}>
+                      <Button variant="ghost" disabled={move.pending}>
                         Cancel
                       </Button>
                     }
                   />
-                  <Button disabled={busy} onClick={() => void moveToICloud()}>
-                    {busy ? 'Moving…' : 'Move to iCloud'}
+                  <Button disabled={move.pending} onClick={() => void move.run(moveToICloud)}>
+                    {move.pending ? 'Moving…' : 'Move to iCloud'}
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
           </div>
         )}
-        {error !== null ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+        {shownError !== null ? <p className="mt-2 text-xs text-destructive">{shownError}</p> : null}
       </SettingsField>
     </>
   )

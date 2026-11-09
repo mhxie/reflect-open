@@ -1,4 +1,4 @@
-import type { BackupState, NoteState } from '@reflect/core'
+import type { GitSyncState, NoteState } from '@reflect/core'
 import type { NoteGitVersion } from '@/hooks/use-note-git-version.ts'
 
 interface NoteDetailRow<Name extends string, Status extends string> {
@@ -28,7 +28,7 @@ export type NoteDetail = PrivacyDetail | EditingDetail | BackupDetail | VersionD
 
 interface NoteDetailsInput {
   readonly state: NoteState
-  readonly backup: BackupState | undefined
+  readonly backup: GitSyncState | undefined
   readonly version: NoteGitVersion
 }
 
@@ -69,12 +69,20 @@ function privacyDetail(state: NoteState): PrivacyDetail {
   return { name: 'Privacy', status: 'standard', value: 'Standard', hint: null }
 }
 
-function backupDetail(state: NoteState, backup: BackupState | undefined): BackupDetail {
+function backupDetail(state: NoteState, backup: GitSyncState | undefined): BackupDetail {
   if (state.isLocalOnly) {
     return { name: 'Backup', status: 'never', value: 'Never backed up', hint: null }
   }
   if (backup?.phase === 'loading') {
     return { name: 'Backup', status: 'checking', value: 'Checking', hint: null }
+  }
+  if (backup?.phase === 'needsCredential') {
+    return {
+      name: 'Backup',
+      status: 'failed',
+      value: 'Sign-in needed',
+      hint: 'Backup resumes once this device can sign in to the remote.',
+    }
   }
   if (backup?.phase !== 'connected') {
     return { name: 'Backup', status: 'off', value: 'Backup off', hint: null }

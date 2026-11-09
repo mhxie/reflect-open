@@ -1,5 +1,5 @@
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
-import { useRouter, type RouterNavigate } from '@/routing/router.tsx'
+import { type RouterNavigate, useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import {
   createTestAppServices,
@@ -31,7 +31,7 @@ const navigateRef: RefObject<RouterNavigate | null> = createRef()
 
 function Host({ readOnly = false }: { readOnly?: boolean }): ReactNode {
   const lastHandler = useWikiLinkNavigation({ readOnly })
-  const navigate = useRouter().navigate
+  const navigate = useRouterActions().navigate
 
   useLayoutEffect(() => {
     lastHandlerRef.current = lastHandler
@@ -51,7 +51,7 @@ function Host({ readOnly = false }: { readOnly?: boolean }): ReactNode {
 }
 
 function RouteProbe(): ReactNode {
-  const { route, arrivalFocusEditor, arrivalRevealHeading } = useRouter()
+  const { route, arrivalFocusEditor, arrivalRevealHeading } = useRouterState()
   return (
     <output
       data-testid="route"
@@ -74,7 +74,7 @@ function PeekProbe(): ReactNode {
 function renderWithLinkNavigation(ui: ReactNode, graph?: TestOpenGraph | null) {
   const base = createTestCoreServices({ database: createWasmTestDatabaseService() })
   const graphSession = createTestGraphSessionService()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     progress: operations,
     graphSession,
@@ -95,7 +95,7 @@ function renderWithLinkNavigation(ui: ReactNode, graph?: TestOpenGraph | null) {
     { window: createTestWindowService({ openNoteWindow }) },
   ).linkNavigation
   return renderInApp(ui, {
-    app,
+    core,
     appServices: { linkNavigation },
     graph,
   })

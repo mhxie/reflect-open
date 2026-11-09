@@ -31,12 +31,12 @@ function setup() {
     },
     progress: operations,
   })
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     templates,
     progress: operations,
   })
-  return { app, operations }
+  return { core, operations }
 }
 
 function fakeEditor(): NoteEditorHandle & { inserted: string[] } {
@@ -64,9 +64,9 @@ function fakeEditor(): NoteEditorHandle & { inserted: string[] } {
 
 describe('useTemplateSlashItems', () => {
   it('maps templates to slash rows whose select inserts through the shared flow', async () => {
-    const { app } = setup()
+    const { core } = setup()
     const editor = fakeEditor()
-    const { result } = await renderHookInApp(() => useTemplateSlashItems(() => editor), { app })
+    const { result } = await renderHookInApp(() => useTemplateSlashItems(() => editor), { core })
 
     const items = await result.current('jour')
     expect(
@@ -88,8 +88,8 @@ describe('useTemplateSlashItems', () => {
   it('resolves the editor at select time, not capture time', async () => {
     // The pane unmounted between the menu opening and the select — the shared
     // flow receives null and surfaces the failure, never a stale editor.
-    const { app, operations } = setup()
-    const { result } = await renderHookInApp(() => useTemplateSlashItems(() => null), { app })
+    const { core, operations } = setup()
+    const { result } = await renderHookInApp(() => useTemplateSlashItems(() => null), { core })
     const items = await result.current('')
     items[0]!.onSelect()
     await vi.waitFor(() => {
@@ -100,9 +100,9 @@ describe('useTemplateSlashItems', () => {
   })
 
   it('returns nothing without an open graph', async () => {
-    const { app } = setup()
+    const { core } = setup()
     const { result } = await renderHookInApp(() => useTemplateSlashItems(() => fakeEditor()), {
-      app,
+      core,
       graph: null,
     })
     await expect(result.current('')).resolves.toEqual([])

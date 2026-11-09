@@ -59,16 +59,29 @@ jobs:
       - name: Build
         run: pnpm build
 
+  test-node:
+    needs: classify
+    if: needs.classify.outputs.stack-middle == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-node
+
+      - name: Test
+        run: pnpm run test:node
+
   test-chromium:
     needs: classify
     if: needs.classify.outputs.stack-middle == 'false'
-    # The fork's suite is too large for one browser session; shard it.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        shard: ['1/3', '2/3', '3/3']
-    name: test-chromium ${{ matrix.shard }}
-    runs-on: ubuntu-24.04
+        shard: [1, 2, 3]
+    name: test-chromium (${{ matrix.shard }}/3)
     env:
       REFLECT_TEST_BROWSER: chromium
       # Chromium on Linux does not promptly free the iframe of a finished
@@ -91,27 +104,13 @@ jobs:
         run: pnpm --filter @reflect/desktop test:install:chromium
 
       - name: Test
-        run: pnpm run test:browser --shard=${{ matrix.shard }}
-
-  test-node:
-    needs: classify
-    if: needs.classify.outputs.stack-middle == 'false'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-node
-
-      - name: Test
-        run: pnpm run test:node
+        run: pnpm run test:browser --shard=${{ matrix.shard }}/3
 
   # Not part of `all-green`: a WebKit failure does not block merging.
   test-webkit:
     needs: classify
     if: needs.classify.outputs.draft == 'false' && needs.classify.outputs.stack-middle == 'false'
-    runs-on: macos-26
+    runs-on: xcode-27
     env:
       REFLECT_TEST_BROWSER: webkit
       # Suspected workaround, root cause unknown: WebContent sometimes
@@ -124,6 +123,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - uses: ./.github/actions/setup-xcode
 
       - uses: ./.github/actions/setup-node
 
@@ -156,6 +157,8 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-apt
+
       - uses: ./.github/actions/setup-rust
 
       - name: Format check
@@ -174,6 +177,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets
 
+      - name: Swift format and lint
+        run: |
+          swift format --version
+          git ls-files -z '*.swift' | xargs -0 swift format format --parallel --in-place
+          git ls-files -z '*.swift' | xargs -0 swift format lint --strict --parallel
+          git diff --exit-code '*.swift'
+
   test-rust:
     needs: classify
     if: needs.classify.outputs.stack-middle == 'false'
@@ -189,6 +199,8 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-apt
+
       - uses: ./.github/actions/setup-rust
 
       - name: Test
@@ -198,7 +210,7 @@ jobs:
   apple-lint:
     needs: classify
     if: needs.classify.outputs.stack-middle == 'false'
-    runs-on: macos-26
+    runs-on: xcode-27
     # No sidecars, as in lint-rust and test-rust.
     env:
       TAURI_CONFIG: '{"bundle":{"externalBin":null}}'
@@ -207,9 +219,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-xcode
+
       - uses: ./.github/actions/setup-rust
-        with:
-          targets: aarch64-apple-ios
 
       - name: Check desktop library
         run: cargo check -p reflect-open --lib
@@ -233,17 +245,14 @@ jobs:
     timeout-minutes: 10
 
     if: always()
-    needs: [classify, lint-node, test-chromium, test-node, lint-rust, test-rust, apple-lint]
+    needs: [classify, lint-node, test-node, test-chromium, lint-rust, test-rust, apple-lint]
 
     steps:
-      - name: Fail because this PR is in the middle of a stack
-        if: needs.classify.outputs.stack-middle == 'true'
-        run: |
-          echo '::error title=Expected failure::This PR is in the middle of a stack, so some jobs were skipped. This failure is expected. They run when the PR becomes the lowest unmerged PR or the top PR of the stack.'
-          exit 1
-
+      # A PR in the middle of a stack skips its jobs on purpose: the top PR of
+      # the stack runs them on the same code. Passing here lets the whole
+      # stack merge at once.
       - name: Verify that all jobs succeeded
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || (needs.classify.outputs.stack-middle != 'true' && contains(needs.*.result, 'skipped')) }}
         run: |
           echo 'Some jobs did not succeed: ${{ toJSON(needs) }}'
           exit 1

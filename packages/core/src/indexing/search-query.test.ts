@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildFtsAnyMatch,
   buildFtsMatch,
+  buildFtsTitlePrefixMatch,
   cjkSnippetNeedle,
   containsUnsegmentedScript,
   isSentenceLike,
@@ -86,6 +87,21 @@ describe('buildFtsMatch', () => {
     expect(buildFtsMatch('hello \u{24B6}')).toBe(
       '(title : "hello"* OR body : "hello"* OR cjk : "hello"*)',
     )
+  })
+})
+
+describe('buildFtsTitlePrefixMatch', () => {
+  it('prefix-matches the whole query as a title phrase', () => {
+    expect(buildFtsTitlePrefixMatch('eliska nov')).toBe('title : "eliska nov"*')
+    expect(buildFtsTitlePrefixMatch('ab"cd')).toBe('title : "ab""cd"*')
+  })
+
+  it('returns null when the last token has under two letters or digits', () => {
+    // Every combining mark splits a token here, even those `unicode61` keeps.
+    for (const text of ['', 'e', 'c++', 'ab c', 'i\u{307}s', 'the\u{336}b', 'राम', '𝐀']) {
+      expect(buildFtsTitlePrefixMatch(text)).toBeNull()
+    }
+    expect(buildFtsTitlePrefixMatch('i\u{307}st')).toBe('title : "i\u{307}st"*')
   })
 })
 

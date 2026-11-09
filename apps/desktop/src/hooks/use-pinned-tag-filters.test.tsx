@@ -9,7 +9,7 @@ const PINS = { allNotesFilterTags: ['book', 'person'] }
 
 describe('usePinnedTagFilters', () => {
   it('reports an edit that changed the loaded pin list', async () => {
-    const { result, app } = await renderHookInApp(() => usePinnedTagFilters(), {
+    const { result, core: app } = await renderHookInApp(() => usePinnedTagFilters(), {
       settings: PINS,
     })
 
@@ -20,7 +20,7 @@ describe('usePinnedTagFilters', () => {
   })
 
   it('reports no change for an edit that leaves the list as it is', async () => {
-    const { result, app } = await renderHookInApp(() => usePinnedTagFilters(), {
+    const { result, core: app } = await renderHookInApp(() => usePinnedTagFilters(), {
       settings: PINS,
     })
 
@@ -41,7 +41,7 @@ describe('usePinnedTagFilters', () => {
       return { ...DEFAULT_SETTINGS, ...PINS }
     })
     const { result } = await renderHookInApp(() => usePinnedTagFilters(), {
-      app,
+      core: app,
       servicesOnly: true,
     })
 

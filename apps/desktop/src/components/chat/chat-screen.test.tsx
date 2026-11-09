@@ -21,13 +21,12 @@ import {
   type TestChatGraphContextService,
   type TestOpenGraph,
 } from '@reflect/core/testing'
-import { useChatSession, type ChatContextValue } from '@/providers/chat-provider.tsx'
-import type { Route } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useChatActions, type ChatActions } from '@/providers/chat-provider.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ChatScreen } from './chat-screen.tsx'
-import { deepLinkForRoute } from '@reflect/app'
+import { deepLinkForRoute, type Route } from '@reflect/app'
 
 /**
  * The chat view over a faked engine: the provider stack, the chat session and
@@ -98,12 +97,12 @@ function dropFiles(target: Element, files: File[]): boolean {
   )
 }
 
-const probedSendRef: RefObject<ChatContextValue['send'] | null> = createRef()
-const probedNewChatRef: RefObject<ChatContextValue['newChat'] | null> = createRef()
+const probedSendRef: RefObject<ChatActions['send'] | null> = createRef()
+const probedNewChatRef: RefObject<ChatActions['newChat'] | null> = createRef()
 const probedRouteRef: RefObject<Route | null> = createRef()
 
 function SendProbe(): ReactElement | null {
-  const { send, newChat } = useChatSession()
+  const { send, newChat } = useChatActions()
 
   useLayoutEffect(() => {
     probedSendRef.current = send
@@ -123,7 +122,7 @@ function SendProbe(): ReactElement | null {
 }
 
 function RouteProbe(): ReactElement | null {
-  const { route } = useRouter()
+  const { route } = useRouterState()
 
   useLayoutEffect(() => {
     probedRouteRef.current = route
@@ -138,7 +137,7 @@ function RouteProbe(): ReactElement | null {
 async function renderChat() {
   probedSendRef.current = null
   probedRouteRef.current = null
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     secretStore: createTestSecretStoreService(
       settingsState.apiKey === null ? {} : { [aiKeySecretName(MODEL.id)]: settingsState.apiKey },
@@ -147,7 +146,7 @@ async function renderChat() {
     chatGraphContext,
   })
   // The cited `[[Atlas]]` links resolve through the index.
-  seedNotes(app.database, [{ path: 'notes/atlas.md', markdown: '# Atlas\n' }])
+  seedNotes(core.database, [{ path: 'notes/atlas.md', markdown: '# Atlas\n' }])
   noteWindows = createTestWindowService()
   return await renderInApp(
     <>
@@ -156,7 +155,7 @@ async function renderChat() {
       <RouteProbe />
     </>,
     {
-      app,
+      core,
       appServices: { window: noteWindows },
       graph: GRAPH,
       settings: {
@@ -675,7 +674,7 @@ describe('ChatScreen', () => {
     expect(signal?.aborted).toBe(false)
 
     // The dead conversation must not keep reading whichever graph is open now.
-    view.app.graphSession.setGraph({ root: '/graphs/other' })
+    view.core.graphSession.setGraph({ root: '/graphs/other' })
     expect(signal?.aborted).toBe(true)
   })
 

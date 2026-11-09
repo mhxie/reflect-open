@@ -14,6 +14,7 @@ import {
   createTestAudioRecorderService,
   createTestPlatformService,
 } from '@reflect/core/testing'
+import { useStore } from '@/lib/use-store.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileAudioMemoProvider, useMobileAudioMemo } from './audio-memo-provider.tsx'
@@ -56,19 +57,32 @@ const RECORDING: AudioRecorderFinalSegment = {
   durationMs: 4000,
 }
 
+/**
+ * The context's actions, with the state and the per-tick values it renders.
+ */
+function useMobileAudioMemoView() {
+  const memo = useMobileAudioMemo()
+  return {
+    ...memo,
+    ...useStore(memo.session),
+    elapsedMs: useStore(memo.session.elapsedMs),
+    level: useStore(memo.session.level),
+  }
+}
+
 async function setup(provider: AiProviderConfig = OPENAI) {
   const audioRecorder = createTestAudioRecorderService({ sessionStartedMs: SESSION_STARTED_MS })
   audioRecorder.setStopResult(RECORDING)
   const assetStore = createTestAssetStoreService({ sources: { [STAGED]: 'audio' } })
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     audioRecorder,
     assetStore,
     platform: createTestPlatformService({ appPlatform: 'ios' }),
   })
 
-  const hook = await renderHookInApp(() => useMobileAudioMemo(), {
-    app,
+  const hook = await renderHookInApp(() => useMobileAudioMemoView(), {
+    core,
     graph: GRAPH,
     settings: { aiProviders: [provider], defaultAiProviderId: provider.id },
     wrapper: (children) => (
@@ -211,7 +225,7 @@ describe('MobileAudioMemoProvider', () => {
   })
 
   it('unmounting closes the session and leaves a live recording running', async () => {
-    const { result, app, audioRecorder, assetStore, unmount } = await setup()
+    const { result, core, audioRecorder, assetStore, unmount } = await setup()
     await act(() => {
       result.current.toggle()
     })
@@ -219,7 +233,7 @@ describe('MobileAudioMemoProvider', () => {
     await unmount()
     audioRecorder.emitStopped({ segment: RECORDING, reason: 'interruption' })
 
-    expect(app.fileChanges.listenerCount().changes).toBe(0)
+    expect(core.fileChanges.listenerCount().changes).toBe(0)
     expect(assetStore.uploads()).toEqual([])
   })
 })

@@ -68,7 +68,7 @@ const CLOUD: AiProviderConfig = {
 /**
  * The cloud choice a confirmed go-ahead pinned: the provider's small model.
  */
-const CLOUD_HAIKU = { configId: CLOUD.id, modelId: 'claude-haiku-4-5' }
+const CLOUD_HAIKU = { configId: CLOUD.id, modelId: 'claude-haiku-5-5' }
 
 const NOW = 2_000_000_000_000
 const SETTLED_MTIME = NOW - 2 * SUMMARY_QUIET_MS
@@ -451,7 +451,7 @@ describe('NoteSummaryService.reconcile', () => {
     // The configured on-device model is `local` mode's: cloud mode never probes it.
     expect(onDeviceModels.verifyCalls()).toEqual([])
     expect(configs()).toEqual([
-      expect.objectContaining({ provider: 'anthropic', model: 'claude-haiku-4-5' }),
+      expect.objectContaining({ provider: 'anthropic', model: 'claude-haiku-5-5' }),
     ])
   })
 

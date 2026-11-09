@@ -2,29 +2,43 @@ import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { createTestCoreServices } from '@reflect/core/testing'
-import { useGraph, useMaybeGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import { useSyncContext } from '@/providers/sync-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import {
+  useGraphIndexing,
+  useGraphInfo,
+  useGraphRecents,
+  useGraphStatus,
+  useIndexGeneration,
+} from '@/providers/graph-provider.tsx'
+import { useMobileStorageKind } from '@/providers/use-mobile-graph-boot.ts'
+import { useDateFormat, useSettingsService } from '@/providers/settings-provider.tsx'
+import { useGitSyncState } from '@/providers/sync-provider.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { useGraphServices } from '@/services/services-provider.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MOBILE_PLATFORM, renderHookInApp, renderInApp } from './render-in-app.tsx'
 
 function Probe(): ReactElement {
-  const { status, graph, indexGeneration, indexing, recents, mobileStorageKind } = useGraph()
-  const { settings, updateSettings } = useSettings()
-  const { route, navigate } = useRouter()
-  const sync = useSyncContext()
+  const status = useGraphStatus()
+  const graph = useGraphInfo()
+  const indexGeneration = useIndexGeneration()
+  const indexing = useGraphIndexing()
+  const recents = useGraphRecents()
+  const mobileStorageKind = useMobileStorageKind()
+  const dateFormat = useDateFormat()
+  const settingsService = useSettingsService()
+  const { route } = useRouterState()
+  const { navigate } = useRouterActions()
+  const sync = useGitSyncState()
   return (
     <div>
       <output data-testid="graph">
         {status} {graph?.root ?? 'none'} {graph?.generation ?? '-'} {indexGeneration ?? '-'}{' '}
         {indexing ? 'indexing' : 'idle'} {recents.length} {mobileStorageKind ?? '-'}
       </output>
-      <output data-testid="settings">{settings.dateFormat}</output>
+      <output data-testid="settings">{dateFormat}</output>
       <output data-testid="route">{JSON.stringify(route)}</output>
-      <output data-testid="backup">{sync?.backup.phase ?? 'no sync'}</output>
-      <button type="button" onClick={() => updateSettings({ dateFormat: 'iso' })}>
+      <output data-testid="git-sync">{sync.phase}</output>
+      <button type="button" onClick={() => settingsService.update({ dateFormat: 'iso' })}>
         iso
       </button>
       <button type="button" onClick={() => navigate({ kind: 'tasks' })}>
@@ -52,28 +66,30 @@ describe('renderInApp', () => {
       .toHaveTextContent('ready /graphs/test 1 1 idle 0 -')
     await expect.element(page.getByTestId('session')).toHaveTextContent('/graphs/test')
     await expect.element(page.getByTestId('route')).toHaveTextContent('{"kind":"today"}')
-    await expect.element(page.getByTestId('backup')).toHaveTextContent('disconnected')
+    await expect.element(page.getByTestId('git-sync')).toHaveTextContent('disconnected')
   })
 
   it('reports the graph, the graph state and a later graph switch', async () => {
-    const { app } = await renderInApp(<Probe />, {
+    const { core } = await renderInApp(<Probe />, {
       graph: { root: '/g', generation: 3, indexGeneration: 7 },
-      graphState: { indexing: true, recents: [{ root: '/g', name: 'g', openedMs: 1 }] },
+      graphState: { recents: [{ root: '/g', name: 'g', openedMs: 1 }] },
+      indexing: true,
     })
     await expect.element(page.getByTestId('graph')).toHaveTextContent('ready /g 3 7 indexing 1 -')
 
-    app.graphSession.setGraph(null)
+    core.graphSession.setGraph(null)
+    core.indexLifecycle.setProgress(null)
     await expect.element(page.getByTestId('graph')).toHaveTextContent('choosing none - - idle 1 -')
   })
 
   it('shows the stored settings on the first render and saves updates', async () => {
-    const { app } = await renderInApp(<Probe />, { settings: { dateFormat: 'dmy' } })
+    const { core } = await renderInApp(<Probe />, { settings: { dateFormat: 'dmy' } })
     expect(page.getByTestId('settings').element().textContent).toBe('dmy')
 
     await page.getByRole('button', { name: 'iso' }).click()
 
     await expect.element(page.getByTestId('settings')).toHaveTextContent('iso')
-    await vi.waitFor(() => expect(app.settings.saves().at(-1)?.dateFormat).toBe('iso'))
+    await vi.waitFor(() => expect(core.settings.saves().at(-1)?.dateFormat).toBe('iso'))
   })
 
   it('starts on the given route and records navigation in the navigation service', async () => {
@@ -89,15 +105,15 @@ describe('renderInApp', () => {
   })
 
   it('runs a scripted backup for the open graph', async () => {
-    const { backup } = await renderInApp(<Probe />, { sync: { phase: 'disconnected' } })
-    await expect.element(page.getByTestId('backup')).toHaveTextContent('disconnected')
+    const { gitSync } = await renderInApp(<Probe />, { sync: { phase: 'disconnected' } })
+    await expect.element(page.getByTestId('git-sync')).toHaveTextContent('disconnected')
 
-    backup?.setState({ phase: 'loading' })
-    await expect.element(page.getByTestId('backup')).toHaveTextContent('loading')
+    gitSync?.setState({ phase: 'loading' })
+    await expect.element(page.getByTestId('git-sync')).toHaveTextContent('loading')
   })
 
   it('renders the mobile surface with the mobile onboarding state', async () => {
-    const { app } = await renderInApp(<Probe />, {
+    const { core } = await renderInApp(<Probe />, {
       platform: MOBILE_PLATFORM,
       mobile: { kind: 'icloud' },
     })
@@ -105,21 +121,21 @@ describe('renderInApp', () => {
     await expect
       .element(page.getByTestId('graph'))
       .toHaveTextContent('ready /graphs/test 1 1 idle 0 icloud')
-    expect(app.platform.surface.mobileApp).toBe(true)
+    expect(core.platform.surface.mobileApp).toBe(true)
   })
 
-  it('uses the given app, so a test can spy on a service before the first render', async () => {
-    const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-    const view = await renderInApp(<Probe />, { app })
+  it('uses the given core services, so a test can spy on a service before the first render', async () => {
+    const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    const view = await renderInApp(<Probe />, { core })
 
-    expect(view.app).toBe(app)
-    await expect(renderInApp(<Probe />, { app, platform: MOBILE_PLATFORM })).rejects.toThrow(
-      /with your own `app`/,
+    expect(view.core).toBe(core)
+    await expect(renderInApp(<Probe />, { core, platform: MOBILE_PLATFORM })).rejects.toThrow(
+      /with your own `core`/,
     )
   })
 
   it('mounts only the services with `servicesOnly`, and registers the app commands', async () => {
-    const { result, appServices: appLayer } = await renderHookInApp(() => useMaybeGraph(), {
+    const { result, appServices: appLayer } = await renderHookInApp(() => useGraphInfo(), {
       servicesOnly: true,
     })
 
@@ -130,12 +146,12 @@ describe('renderInApp', () => {
 
 describe('renderHookInApp', () => {
   it('runs the hook inside the same providers', async () => {
-    const { result, app } = await renderHookInApp(() => useGraph().graph?.root ?? null, {
+    const { result, core } = await renderHookInApp(() => useGraphInfo()?.root ?? null, {
       graph: { root: '/g' },
     })
     expect(result.current).toBe('/g')
 
-    app.graphSession.setGraph({ root: '/other' })
+    core.graphSession.setGraph({ root: '/other' })
     await vi.waitFor(() => expect(result.current).toBe('/other'))
   })
 })

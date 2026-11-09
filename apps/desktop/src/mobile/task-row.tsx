@@ -1,16 +1,22 @@
 import type { ReactElement } from 'react'
 import { ArrowRight, Circle, CircleCheck, Trash2 } from 'lucide-react'
-import { getTaskKey, isLocalOnlyReadOnlyPath, type OpenTask } from '@reflect/core'
 import { getIsComposing } from '@meowdown/core'
 import { TaskText } from '@/components/tasks/task-text.tsx'
+import {
+  getTaskKey,
+  isLocalOnlyReadOnlyPath,
+  type OpenTask,
+  formatShortDate,
+  type WritableStore,
+} from '@reflect/core'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
-import { formatShortDate } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
-import { useMobileAppServices } from '@/mobile/mobile-services.ts'
+import { useMobileServices } from '@/mobile/mobile-services.ts'
 import { SWIPE_ACTION_WIDTH, SwipeActionButton } from '@/mobile/swipe-action-button.tsx'
-import { useRowSwipe } from '@/mobile/use-row-swipe.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useRevealedRow } from '@/mobile/revealed-row.ts'
+import { SwipeRow } from '@/mobile/swipe-row.tsx'
+import { useDateFormat } from '@/providers/settings-provider.tsx'
 
 /**
  * Total width of the two actions (open note, delete) under every task row.
@@ -37,10 +43,10 @@ interface MobileTaskRowProps {
    * Open the quick-edit sheet for this task (V1 mobile: tap edits in place).
    */
   onEdit: (task: OpenTask) => void
-  revealed: boolean
-  onReveal: () => void
-  onClose: () => void
-  onBeginInteraction: () => void
+  /**
+   * The list's one revealed row, keyed by `getTaskKey`.
+   */
+  revealedRow: WritableStore<string | null>
   /**
    * Navigate to the task's source note (the revealed Note action).
    */
@@ -59,7 +65,7 @@ interface MobileTaskRowProps {
  * Tapping the row body gives the same light confirmation and opens the
  * quick-edit sheet instead of desktop's multi-select; there is no inline editor
  * on touch. Swiping the row left reveals the note list's gesture on tasks: an
- * open-note action and a delete action ({@link useRowSwipe} owns the physics).
+ * open-note action and a delete action on a native-scroll {@link SwipeRow}.
  *
  * A task in a read-only local-only note can't be written: its checkbox stays
  * inert, a tap opens the note instead of the quick-edit sheet, and the swipe
@@ -71,141 +77,132 @@ export function MobileTaskRow({
   onToggle,
   togglePending,
   onEdit,
-  revealed,
-  onReveal,
-  onClose,
-  onBeginInteraction,
+  revealedRow,
   onOpenNote,
   onDelete,
 }: MobileTaskRowProps): ReactElement {
-  const { haptics } = useMobileAppServices()
-  const { settings } = useSettings()
+  const { haptics } = useMobileServices()
+  const dateFormat = useDateFormat()
+  const key = getTaskKey(task)
+  const { revealed, reveal, close, beginInteraction } = useRevealedRow(revealedRow, key)
   const label = task.text || 'Empty task'
   const localOnly = useLocalOnlyFolders()
   const readOnly = isLocalOnlyReadOnlyPath(localOnly, task.notePath)
   const actionWidth = readOnly ? READ_ONLY_ACTION_WIDTH : ACTION_WIDTH
   const edit = (): void => (readOnly ? onOpenNote() : onEdit(task))
-  const swipe = useRowSwipe({
-    actionWidth,
-    revealed,
-    onReveal,
-    onClose,
-    onBeginInteraction,
-  })
 
   return (
-    <li
-      data-task-key={getTaskKey(task)}
-      className="relative overflow-hidden border-b border-border"
-    >
-      <div
-        className="absolute inset-y-0 right-0 flex"
-        style={{ width: actionWidth }}
-        aria-hidden={!revealed || undefined}
-        inert={!revealed}
+    <li data-task-key={key} className="border-b border-border">
+      <SwipeRow
+        actionWidth={actionWidth}
+        revealed={revealed}
+        onReveal={reveal}
+        onClose={close}
+        onBeginInteraction={beginInteraction}
+        surfaceClassName="bg-surface-canvas"
+        overscrollColor="var(--color-destructive)"
+        actions={
+          <>
+            <SwipeActionButton
+              icon={<ArrowRight className="size-4" />}
+              label="Note"
+              ariaLabel={`Open note: ${label}`}
+              className="bg-accent"
+              onClick={() => {
+                hapticImpactLight(haptics)
+                close()
+                onOpenNote()
+              }}
+            />
+            {readOnly ? null : (
+              <SwipeActionButton
+                icon={<Trash2 className="size-4" />}
+                label="Delete"
+                ariaLabel={`Delete: ${label}`}
+                className="bg-destructive"
+                onClick={() => {
+                  hapticImpactLight(haptics)
+                  close()
+                  onDelete()
+                }}
+              />
+            )}
+          </>
+        }
       >
-        <SwipeActionButton
-          icon={<ArrowRight className="size-4" />}
-          label="Note"
-          ariaLabel={`Open note: ${label}`}
-          revealed={revealed}
-          className="bg-accent"
-          onClick={() => {
-            hapticImpactLight(haptics)
-            onClose()
-            onOpenNote()
+        <div
+          // One capture handler covers both interactive children: a tap on a
+          // revealed row only closes it (iOS list behavior).
+          onClickCapture={(event) => {
+            if (revealed) {
+              event.preventDefault()
+              event.stopPropagation()
+              close()
+            }
           }}
-        />
-        {readOnly ? null : (
-          <SwipeActionButton
-            icon={<Trash2 className="size-4" />}
-            label="Delete"
-            ariaLabel={`Delete: ${label}`}
-            revealed={revealed}
-            className="bg-destructive"
+          className="flex min-h-12 items-start"
+        >
+          <button
+            type="button"
+            aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
+            disabled={togglePending || readOnly}
             onClick={() => {
               hapticImpactLight(haptics)
-              onClose()
-              onDelete()
+              onToggle()
             }}
-          />
-        )}
-      </div>
-      <div
-        ref={swipe.ref}
-        {...swipe.handlers}
-        // One capture handler covers both interactive children: swallow the
-        // synthetic click a completed drag leaves behind, and turn a tap on a
-        // revealed row into a plain close (iOS list behavior).
-        onClickCapture={(event) => {
-          if (swipe.consumeDragClick()) {
-            event.preventDefault()
-            event.stopPropagation()
-            return
-          }
-          if (revealed) {
-            event.preventDefault()
-            event.stopPropagation()
-            onClose()
-          }
-        }}
-        className="relative flex min-h-12 items-start bg-surface"
-      >
-        <button
-          type="button"
-          aria-label={task.checked ? `Reopen: ${label}` : `Complete: ${label}`}
-          disabled={togglePending || readOnly}
-          onClick={() => {
-            hapticImpactLight(haptics)
-            onToggle()
-          }}
-          // A generous touch target around the small glyph; self-stretch keeps
-          // the circle vertically centered in the row as task text wraps.
-          className="flex shrink-0 self-stretch items-center pl-4 pr-3 text-text-muted disabled:opacity-50"
-        >
-          {task.checked ? (
-            <CircleCheck aria-hidden className="size-5 text-accent" strokeWidth={2} />
-          ) : (
-            <Circle aria-hidden className="size-5" strokeWidth={2} />
-          )}
-        </button>
-        {/* A div with the button role, not a real <button>: the markdown inside
+            // A generous touch target around the small glyph; self-stretch keeps
+            // the circle vertically centered in the row as task text wraps.
+            className="flex shrink-0 self-stretch items-center pl-4 pr-3 text-text-muted disabled:opacity-50"
+          >
+            {task.checked ? (
+              <CircleCheck aria-hidden className="size-5 text-accent" strokeWidth={2} />
+            ) : (
+              <Circle aria-hidden className="size-5" strokeWidth={2} />
+            )}
+          </button>
+          {/* A div with the button role, not a real <button>: the markdown inside
             can contain links, and interactive content can't nest in a button
             (desktop's row body makes the same trade). TaskText itself is
             pointer-events-none, so taps land here. */}
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={readOnly ? `View note: ${label}` : `Edit: ${label}`}
-          onClick={edit}
-          onKeyDown={(event) => {
-            if (getIsComposing()) {
-              return
-            }
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault()
-              edit()
-            }
-          }}
-          className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 py-3 pr-4 text-left focus-visible:outline-none"
-        >
-          <span
-            className={cn(
-              'min-w-0 flex-1 break-words text-sm leading-6 text-text',
-              task.checked && 'text-text-muted line-through',
-            )}
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={readOnly ? `View note: ${label}` : `Edit: ${label}`}
+            onClick={edit}
+            onKeyDown={(event) => {
+              if (getIsComposing()) {
+                return
+              }
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                // Like a tap, a key press on a revealed row only closes it.
+                if (revealed) {
+                  close()
+                } else {
+                  edit()
+                }
+              }
+            }}
+            className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 py-3 pr-4 text-left focus-visible:outline-none"
           >
-            <TaskText task={task} />
-          </span>
-          {showSource && task.dailyDate !== null ? (
-            // The compact date, not desktop's long day label — a phone row can't
-            // spare "Mon, June 1st, 2026" (V1 mobile's small gray source label).
-            <span className="mt-0.5 shrink-0 whitespace-nowrap text-xs text-text-muted">
-              {formatShortDate(task.dailyDate, settings.dateFormat)}
+            <span
+              className={cn(
+                'min-w-0 flex-1 break-words text-sm leading-6 text-text',
+                task.checked && 'text-text-muted line-through',
+              )}
+            >
+              <TaskText task={task} />
             </span>
-          ) : null}
+            {showSource && task.dailyDate !== null ? (
+              // The compact date, not desktop's long day label — a phone row can't
+              // spare "Mon, June 1st, 2026" (V1 mobile's small gray source label).
+              <span className="mt-0.5 shrink-0 whitespace-nowrap text-xs text-text-muted">
+                {formatShortDate(task.dailyDate, dateFormat)}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </SwipeRow>
     </li>
   )
 }

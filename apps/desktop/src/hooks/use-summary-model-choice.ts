@@ -5,7 +5,7 @@ import {
   type AiSummariesModel,
   type OnDeviceServerKind,
 } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsService } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** The writes behind the AI summaries model picker (Settings → All Notes). */
@@ -37,16 +37,16 @@ export function cloudGoAhead(choice: AiSummariesModel): {
  * update built from the settings as they are when it applies.
  */
 export function useSummaryModelChoice(): SummaryModelChoice {
-  const { updateSettings, updateSettingsWith } = useSettings()
+  const settingsService = useSettingsService()
   const { id: ids } = useCoreServices()
   return {
     chooseLocal: (config) => {
-      updateSettings({
+      settingsService.update({
         aiSummariesLocalModel: { configId: config.id, modelId: config.model },
       })
     },
     chooseOllamaModel: (model, server) => {
-      updateSettingsWith((current) => {
+      settingsService.updateWith((current) => {
         const { state, id } = withOnDeviceModel(
           { providers: current.aiProviders, defaultProviderId: current.defaultAiProviderId },
           OLLAMA_BASE_URL,
@@ -61,7 +61,7 @@ export function useSummaryModelChoice(): SummaryModelChoice {
         }
       })
     },
-    chooseCloud: (choice) => updateSettings({ aiSummariesCloudModel: choice }),
-    startCloud: (choice) => updateSettings(cloudGoAhead(choice)),
+    chooseCloud: (choice) => settingsService.update({ aiSummariesCloudModel: choice }),
+    startCloud: (choice) => settingsService.update(cloudGoAhead(choice)),
   }
 }

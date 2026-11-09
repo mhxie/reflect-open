@@ -47,7 +47,7 @@ async function renderNote(path: string, content: string) {
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
       settings: {
         editorMarkdownSyntax: 'hide',

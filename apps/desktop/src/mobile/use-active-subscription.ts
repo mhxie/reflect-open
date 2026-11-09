@@ -1,8 +1,24 @@
 import { useEffect } from 'react'
 import { focusManager } from '@tanstack/react-query'
 import type { ActiveSubscription } from '@reflect/core'
-import { useMobileAppServices } from '@/mobile/mobile-services.ts'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useMobileServices } from '@/mobile/mobile-services.ts'
+import { useStore } from '@/lib/use-store.ts'
+
+/**
+ * Looks the subscription up on mount unless a live answer is fresh, and again
+ * on every window focus.
+ */
+export function useSubscriptionLookups(): void {
+  const { subscription } = useMobileServices()
+  useEffect(() => {
+    void subscription.activeSubscription()
+    return focusManager.subscribe((focused) => {
+      if (focused) {
+        void subscription.refetch()
+      }
+    })
+  }, [subscription])
+}
 
 /**
  * The live or startup-seeded active subscription. Mounting looks it up unless
@@ -15,17 +31,9 @@ export function useActiveSubscription(): {
   invalidate: VoidFunction
   refetch: () => Promise<ActiveSubscription>
 } {
-  const { subscription } = useMobileAppServices()
-  const state = useServiceState(subscription, subscription.getState)
-
-  useEffect(() => {
-    void subscription.activeSubscription()
-    return focusManager.subscribe((focused) => {
-      if (focused) {
-        void subscription.refetch()
-      }
-    })
-  }, [subscription])
+  const { subscription } = useMobileServices()
+  const state = useStore(subscription)
+  useSubscriptionLookups()
 
   return {
     value: state.value,

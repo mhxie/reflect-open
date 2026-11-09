@@ -30,7 +30,7 @@ let contacts: TestContactsService
  */
 async function renderCard(contactsEnabled = true): Promise<void> {
   await renderInApp(<SuggestedContactCard path={PATH} />, {
-    app: createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile, contacts }),
+    core: createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile, contacts }),
     // The card writes with the generation of the open graph.
     graph: { root: '/g', generation: 3 },
     settings: { contactsEnabled },
@@ -97,7 +97,7 @@ describe('SuggestedContactCard', () => {
   })
 
   it('renders nothing while contacts access is denied', async () => {
-    contacts.setStatus('denied')
+    await contacts.setStatus('denied')
     await renderCard()
     await vi.waitFor(() => expect(contacts.lookups()).toEqual([]))
     expect(page.getByText('Ada Lovelace').query()).toBeNull()

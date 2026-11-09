@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { ExternalLink } from 'lucide-react'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { PEEK_HEADER_BUTTON } from './peek-header-button.ts'
 import { PeekFrame } from './peek-frame.tsx'
@@ -18,7 +18,7 @@ export interface PdfPeekProps {
  * would otherwise keep receiving keystrokes under the peek.
  */
 export function PdfPeek({ path, onClose }: PdfPeekProps): ReactElement {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { attachments } = useCoreServices()
   const generation = graph?.generation ?? null
   return (

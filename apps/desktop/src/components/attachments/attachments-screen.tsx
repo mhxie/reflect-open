@@ -21,9 +21,9 @@ import { MediaLightbox } from '@/editor/media-lightbox.tsx'
 import { useElementWidth } from '@/hooks/use-element-width.ts'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { routeForPath } from '@reflect/app'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { AttachmentFlow } from './attachment-flow.tsx'
 import {
@@ -72,10 +72,10 @@ interface LightboxFile {
  * stays put; the router's per-entry scroll memory is wired by hand.
  */
 export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactElement {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const generation = graph?.generation ?? null
   const { attachments } = useCoreServices()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const navigateNoteLink = useNoteLinkNavigation()
   const openPeek = usePeek()?.openPeek
   const library = useAttachmentLibrary()
@@ -84,6 +84,7 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
   const [lightboxFile, setLightboxFile] = useState<LightboxFile | null>(null)
   // State, not a ref, so scroll restoration re-runs once the element attaches.
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const scrollRef = useMemo(() => ({ current: scrollElement }), [scrollElement])
   const [setFlowElement, flowWidth] = useElementWidth()
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -105,7 +106,7 @@ export function AttachmentsScreen({ type, tag }: AttachmentsScreenProps): ReactE
   }, [library, type])
 
   const ready = entries !== undefined && (entries.length === 0 || flowWidth > 0)
-  const { onScroll } = useScrollRestoration(scrollElement, ready)
+  const { onScroll } = useScrollRestoration(scrollRef, ready)
 
   // Move focus into the surface on mount so the arrow keys work at once.
   useEffect(() => {

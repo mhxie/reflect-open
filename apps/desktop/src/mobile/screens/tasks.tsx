@@ -4,6 +4,7 @@ import {
   composeVisibleTaskGroups,
   getTaskKey,
   todaysDailyTarget,
+  WritableStore,
   type InsertTaskTarget,
   type OpenTask,
 } from '@reflect/core'
@@ -14,17 +15,18 @@ import { useTaskFilters } from '@/lib/tasks/task-filters.ts'
 import { useTaskActions } from '@/lib/tasks/use-task-actions.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
-import { useMobileAppServices } from '@/mobile/mobile-services.ts'
+import { useMobileServices } from '@/mobile/mobile-services.ts'
 import { SearchInput } from '@/mobile/search-input.tsx'
 import { MobileTaskEditSheet } from '@/mobile/task-edit-sheet.tsx'
 import { TaskFiltersDrawer } from '@/mobile/task-filters-drawer.tsx'
 import { MobileTaskGroup } from '@/mobile/task-group.tsx'
 import { MobileTopBar, MobileTopBarIconButton, MobileTopBarRow } from '@/mobile/top-bar.tsx'
 import { useArrivalFocus } from '@/mobile/use-arrival-focus.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { routeForPath } from '@reflect/app'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
+import { useCoreServices } from '@/services/services-provider.tsx'
+import { useStore } from '@/lib/use-store.ts'
 
 /**
  * The Tasks tab (V1 mobile's third tab over Plan 18's shipped data layer): every
@@ -42,16 +44,18 @@ import { useServiceState } from '@/services/use-service-state.ts'
  * completed tasks.
  */
 export function MobileTasks(): ReactElement {
-  const { haptics, tasks: taskService } = useMobileAppServices()
-  const { graph } = useGraph()
-  const { navigate, arrivalSeq, arrivalFocusEditor } = useRouter()
+  const { haptics } = useMobileServices()
+  const { tasks: taskService } = useCoreServices()
+  const graph = useGraphInfo()
+  const { arrivalSeq, arrivalFocusEditor } = useRouterState()
+  const { navigate } = useRouterActions()
   const today = useToday()
   const { filters, toggle } = useTaskFilters()
   const [query, setQuery] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   // The one row whose swipe actions are showing (its getTaskKey), across all groups.
-  const [revealedTaskKey, setRevealedTaskKey] = useState<string | null>(null)
+  const [revealedRow] = useState(() => new WritableStore<string | null>(null))
   // The sheet's task sticks around after close so the exit animation has
   // content; `sheetOpen` alone drives visibility.
   const [editingTask, setEditingTask] = useState<OpenTask | null>(null)
@@ -70,10 +74,7 @@ export function MobileTasks(): ReactElement {
     selectText: true,
   })
 
-  const { open, completed, openFailed, completedFailed } = useServiceState(
-    taskService,
-    taskService.getState,
-  )
+  const { open, completed, openFailed, completedFailed } = useStore(taskService)
   useEffect(
     () => (filters.archived ? taskService.includeCompleted() : undefined),
     [taskService, filters.archived],
@@ -139,10 +140,7 @@ export function MobileTasks(): ReactElement {
   }
 
   return (
-    <div
-      className="flex h-full w-screen flex-col"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
-    >
+    <div className="flex h-full w-screen flex-col pt-safe">
       <MobileTopBar>
         <MobileTopBarRow>
           <SearchInput
@@ -195,8 +193,10 @@ export function MobileTasks(): ReactElement {
         </div>
       ) : (
         <div
-          className="min-h-0 flex-1 overflow-y-auto pb-24"
-          onScroll={() => setRevealedTaskKey(null)}
+          // A stacking context, so WebKit composites the sticky headers and row
+          // surfaces inside this scroller, below the iOS scroll indicator.
+          className="isolate min-h-0 flex-1 overflow-y-auto px-safe pb-24"
+          onScroll={() => revealedRow.set(null)}
         >
           {groups.map((group) => (
             <MobileTaskGroup
@@ -209,8 +209,7 @@ export function MobileTasks(): ReactElement {
               togglePending={actions.isPending}
               onOpen={(path) => navigate(routeForPath(path))}
               onDelete={(task) => actions.remove([task])}
-              revealedTaskKey={revealedTaskKey}
-              setRevealedTaskKey={setRevealedTaskKey}
+              revealedRow={revealedRow}
             />
           ))}
         </div>
@@ -218,10 +217,7 @@ export function MobileTasks(): ReactElement {
       <Button
         size="icon"
         aria-label="New task"
-        className="fixed right-4 z-40 size-12 rounded-full shadow-lg"
-        style={{
-          bottom: 'calc(max(env(safe-area-inset-bottom), var(--keyboard-height, 0px)) + 4.25rem)',
-        }}
+        className="fixed right-safe-offset-4 bottom-above-keyboard-offset-17 z-40 size-12 rounded-full shadow-lg"
         onClick={() => onAdd(todaysDailyTarget(today))}
       >
         <Plus className="size-6" />

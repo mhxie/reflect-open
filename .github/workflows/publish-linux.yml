@@ -28,7 +28,7 @@ defaults:
 
 jobs:
   linux:
-    name: Build Linux ${{ matrix.name }}
+    name: Linux ${{ matrix.name }}
     if: github.repository == 'team-reflect/reflect-open'
     environment: release_app
     runs-on: ${{ matrix.runner }}
@@ -53,16 +53,23 @@ jobs:
           ref: ${{ inputs.commit }}
           persist-credentials: false
 
+      # Any master job can write the caches, so a release build starts cold.
+      - uses: ./.github/actions/setup-apt
+        with:
+          cache: false
+
       - uses: ./.github/actions/setup-node
+        with:
+          cache: false
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: ${{ matrix.target }}
+          cache: false
 
       - name: Build Linux packages
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: pnpm release:linux --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/linux-artifacts"
+        run: pnpm build:linux --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/linux-artifacts"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -75,11 +82,17 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-      # Uploads clobber, so a failed run can be retried.
+      # Uploads clobber, so a failed upload can be retried.
       - name: Upload the assets to the draft release
         working-directory: ${{ runner.temp }}/linux-artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" ./* --clobber
+        run: |
+          for attempt in 1 2 3; do
+            gh release upload "$TAG" ./* --clobber && exit 0
+            echo "::warning::gh release upload failed (attempt $attempt)"
+            sleep $((attempt * 10))
+          done
+          exit 1

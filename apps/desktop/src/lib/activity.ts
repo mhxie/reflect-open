@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react'
+import { useMemo } from 'react'
 import { isIndexProgressWorthShowing, type FinishedOperation, type Operation } from '@reflect/core'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useStore } from '@/lib/use-store.ts'
 
 /** One piece of work in progress, as the activity tray lists it. */
 export interface ActivityItem {
@@ -27,19 +27,20 @@ export interface Activity {
 export function useActivity(): Activity {
   const { indexLifecycle, semanticSearch } = useCoreServices()
   const { operations } = useAppServices()
-  const current = useServiceState(
-    operations,
-    useCallback(() => operations.getAll(), [operations]),
+  const current = useStore(operations)
+  const history = useStore(
+    useMemo(
+      () => ({ get: () => operations.getHistory(), subscribe: operations.subscribe }),
+      [operations],
+    ),
   )
-  const history = useServiceState(
-    operations,
-    useCallback(() => operations.getHistory(), [operations]),
+  const index = useStore(indexLifecycle.fileProgress)
+  const semantic = useStore(
+    useMemo(
+      () => ({ get: semanticSearch.getIndexProgress, subscribe: semanticSearch.subscribe }),
+      [semanticSearch],
+    ),
   )
-  const index = useSyncExternalStore(
-    indexLifecycle.subscribeFileProgress,
-    indexLifecycle.fileProgress,
-  )
-  const semantic = useServiceState(semanticSearch, semanticSearch.getIndexProgress)
   return useMemo(() => {
     const running: ActivityItem[] = []
     if (index !== null && isIndexProgressWorthShowing(index)) {

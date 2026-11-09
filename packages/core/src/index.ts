@@ -16,6 +16,7 @@ export {
   type IpcBridgeService,
 } from './ipc/ipc-service.ts'
 export type { Unlisten } from './unlisten.ts'
+export { combineStores, deriveStore, type Store, WritableStore } from './store.ts'
 
 export { type HapticsService } from './ipc/haptics-service.ts'
 export { type AudioRecorderFinalSegment } from './audio/audio-recorder-service.ts'
@@ -25,28 +26,46 @@ export {
   type MobileStorageKind,
   type MobileStorageService,
 } from './ipc/mobile-storage-service.ts'
-export { githubAppInstallUrl, type GithubAuthService } from './sync/github-auth-service.ts'
-export { newRepoUrl, parseRepoInput, type GithubRepoRef } from './sync/github-repo-service.ts'
 export {
-  type BackupService,
-  type BackupState,
+  githubAppInstallUrl,
+  type GithubAuthService,
+  type GithubAuthState,
+} from './sync/github-auth-service.ts'
+export { newRepoUrl, parseRepoInput } from './sync/github-repo-service.ts'
+export type { GithubRepoRef } from './sync/types.ts'
+export { type GitSyncService, type GitSyncState } from './sync/git-sync-service.ts'
+export {
+  type ConnectExistingRepoOptions,
   type ConnectExistingResult,
-} from './sync/backup-service.ts'
+  type ConnectNewRepoOptions,
+  type GithubConnector,
+} from './sync/github-connector.ts'
+export {
+  type ConnectGitHostInput,
+  type GitHostConnector,
+  type GitHostSignIn,
+} from './sync/git-host-connector.ts'
 export {
   type DisplacedFile,
   type GitNoteVersion,
   type GitRepositoryService,
 } from './sync/git-repository-service.ts'
+export {
+  classifyRemote,
+  githubRemoteUrl,
+  githubRepoOf,
+  redactRemoteUrl,
+  type GitRemote,
+} from './sync/remote-url.ts'
+export { type GitHostCredentialService } from './sync/git-host-credential-service.ts'
 export { isICloudRoot } from './sync/icloud-sync-service.ts'
 export { type GistPublishService } from './sync/gist-publish-service.ts'
 export { isMobilePlatform, type AppPlatform } from './ports/platform-facts.ts'
 export { createSystemClock, type ClockService, type TimerHandle } from './ports/clock-service.ts'
 export { type IdService } from './ports/id-service.ts'
-export { localIsoDate, parseIsoDate, todayIso } from './lib/dates.ts'
-export { formatDayLabel, formatMonthDay, formatShortDate } from './lib/date-labels.ts'
 export { formatModelSize } from './lib/format-model-size.ts'
 export { type BuildPlatform, type PlatformFacts } from './ports/platform-facts.ts'
-export { type FileSrcConverter } from './ports/file-src.ts'
+export { appleFileSrc, type FileSrcConverter, type FileSrcSource } from './ports/file-src.ts'
 
 export {
   createPathService,
@@ -91,15 +110,26 @@ export {
 } from './documents/attachment-service.ts'
 export {
   INITIAL_NOTE_SNAPSHOT,
-  frontmatterPatchToYaml,
-  type FrontmatterPatch,
   type NoteContentOrigin,
   type NoteSession,
   type NoteSessionOptions,
   type NoteSessionService,
   type NoteSessionSnapshot,
   type NoteSessionStatus,
-} from './documents/note-session-service.ts'
+} from './documents/note-session-types.ts'
+export {
+  frontmatterPatchToYaml,
+  type FrontmatterPatch,
+} from './documents/note-session-frontmatter.ts'
+export { type ChatModelSelection } from './settings/schema.ts'
+export { type CloudGraphContext, notePrivate } from './privacy/privacy-service.ts'
+export { type CloudSafe } from './privacy/cloud-safe.ts'
+export {
+  calendarEventSchema,
+  type CalendarAuthorizationStatus,
+  type CalendarInfo,
+  type CalendarEvent,
+} from './calendar/calendar-service.ts'
 export {
   UPDATED_PRESETS,
   updatedPresetFilter,
@@ -107,6 +137,7 @@ export {
   type UpdatedPreset,
 } from './search/all-notes-filters.ts'
 export { createDailyNoteService, type DailyNoteService } from './daily/daily-note-service.ts'
+export { createTodayService, type TodayService } from './daily/today-service.ts'
 export { type TemplateService } from './documents/template-service.ts'
 export {
   isOstensiblyEmptyNoteSource,
@@ -136,7 +167,7 @@ export { type OpenDocumentsService } from './documents/open-documents-service.ts
 export { type RenameCoordinator } from './documents/title-rename-service.ts'
 export { createDocumentBinding, type DocumentBinding } from './documents/document-binding.ts'
 export { type ResolvedArchivedPost } from './embeds/x-archive-service.ts'
-export { marketingVersion } from './ports/app-info-service.ts'
+export { marketingVersion } from './ports/app-version.ts'
 export { reachWebStorage, type StorageService } from './ports/storage-service.ts'
 export {
   type FinishedOperation,
@@ -213,6 +244,7 @@ export { createSearchService, type SearchService } from './indexing/search-servi
 export { createSuggestionService, type SuggestionService } from './indexing/suggestion-service.ts'
 export {
   type IndexFileProgress,
+  type IndexLifecycleProgress,
   type IndexLifecycleService,
 } from './indexing/index-lifecycle-service.ts'
 export { type AiPromptDraft, type AiPromptService } from './ai/ai-prompt-service.ts'
@@ -237,11 +269,11 @@ export {
   dailyPath,
   notePath,
   assetPath,
+  pickFreeAssetPath,
   isDaily,
   isNotePath,
   dateFromDailyPath,
   foldGraphPath,
-  isCalendarDate,
   isAttachmentPath,
 } from './graph/paths.ts'
 export { isImageAttachmentPath, isPdfAttachmentPath } from './graph/attachment-resolution.ts'
@@ -290,9 +322,11 @@ export {
   TRANSCRIPTION_PROMPT_MAX_LENGTH,
   normalizeTranscriptionPrompt,
   timeFormatSchema,
+  DATE_FORMATS,
   dateFormatSchema,
   weekStartDaySchema,
-  weekStartDow,
+  getWeekStartWeekday,
+  getUserWeekStart,
   GRAPH_COLOR_IDS,
   aiProviderIdSchema,
   CHAT_SYSTEM_PROMPT_MAX_LENGTH,
@@ -336,6 +370,18 @@ export {
   unpinFilterTag,
   type PinnedTagMove,
 } from './settings/pinned-tag-filters.ts'
+export {
+  formatCompactDate,
+  formatDayLabel,
+  formatDayRecencyLabel,
+  formatEditedLabel,
+  formatFullDate,
+  formatMonthDay,
+  formatRecencyLabel,
+  formatShortDate,
+  formatTimeOfDay,
+  type DateTimePrefs,
+} from './lib/date-labels.ts'
 export { type ContactsAuthorization, type ContactMatch } from './contacts/commands.ts'
 export {
   contactsCanLookup,
@@ -364,7 +410,20 @@ export {
   createAppStoreEnvironmentService,
   type AppStoreEnvironment,
 } from './monetization/app-store-environment-service.ts'
-export { createPaywallService, type PaywallGate } from './monetization/paywall-service.ts'
+export { createPaywallService } from './monetization/paywall-service.ts'
+export {
+  PAYWALL_HIDDEN_DAYS,
+  PAYWALL_SKIPPABLE_DAYS,
+  getPaywallDaysLeft,
+  getPaywallPhase,
+  getPaywallRequiredAt,
+  type PaywallPhase,
+} from './monetization/paywall-phase.ts'
+export {
+  createInstallClockService,
+  type InstallClockService,
+  type InstallClockState,
+} from './monetization/install-clock-service.ts'
 export {
   IAP_PRODUCT_IDS,
   createIapService,
@@ -372,6 +431,7 @@ export {
   type IapService,
 } from './ipc/iap-service.ts'
 export { createAppStoreService, type AppStoreService } from './ipc/app-store-service.ts'
+export { createAssetStoreService } from './graph/asset-store-service.ts'
 export {
   AI_PROVIDERS,
   aiProvider,
@@ -392,7 +452,7 @@ export { isOnDeviceOption, resolveOnDeviceTarget, withOnDeviceModel } from './pr
 export { type OnDeviceModelService } from './ai/on-device-model-service.ts'
 export { OLLAMA_BASE_URL, type OllamaModel, type OllamaModels } from './ai/ollama-models.ts'
 export { smallModelConfig } from './ai/small-model.ts'
-export { type AiProviderCapabilities, type AiProvidersState } from './ai/provider-config.ts'
+export { type AiProviderCapabilities } from './ai/provider-config.ts'
 // Fork: on-device transcription (docs/fork-features.md, Mac audio).
 export { type LocalModelStatus, type LocalModelUpdateReport } from './ai/local-transcription.ts'
 export { type LocalTranscriptionService } from './ai/local-transcription-service.ts'
@@ -402,13 +462,12 @@ export {
   type LocalTranscriptionModelId,
 } from './ai/local-transcription-models.ts'
 
-export { TRANSCRIPTION_PROVIDERS } from './ai/provider-config.ts'
 export {
-  chatModelOptions,
-  type ChatModelOption,
-  type ChatModelSelection,
-} from './ai/chat/model-options.ts'
-export { type CloudGraphContext, type CloudSafe } from './privacy/checkers.ts'
+  defaultAiProvider,
+  TRANSCRIPTION_PROVIDERS,
+  type AiProvidersState,
+} from './ai/provider-config.ts'
+export { chatModelOptions, type ChatModelOption } from './ai/chat/model-options.ts'
 export { type NoteHitSummary } from './ai/chat/note-tools-service.ts'
 export { chatSystemPrompt } from './ai/chat/system-prompt.ts'
 export type { ChatStreamEvent } from './ai/chat/chat-engine-service.ts'
@@ -452,23 +511,16 @@ export {
   captureWireMessageSchema,
   type CaptureWireMessage,
 } from './capture/capture-envelope.ts'
-export {
-  canReadCalendars,
-  calendarEventSchema,
-  type CalendarAuthorizationStatus,
-  type CalendarInfo,
-  type CalendarEvent,
-} from './calendar/commands.ts'
+export { canReadCalendars } from './calendar/commands.ts'
 export { dayRange, displayEvents, defaultAttendees } from './calendar/events.ts'
 export { type MeetingAttendee } from './contacts/meeting-service.ts'
 export {
   createLinkPreviewService,
   type LinkPreviewResolver,
   type LinkPreviewService,
-  type LinkPreviewSession,
 } from './link-preview/link-preview-service.ts'
 export { parseLinkPreviewMeta } from './link-preview/metadata.ts'
-export { cloudSafeLinkHref, notePrivate } from './privacy/checkers.ts'
+
 export { suggestRepoName, type GithubAuth, type GithubUser } from './sync/index.ts'
 export {
   isPinned,
@@ -540,6 +592,7 @@ export { previousTaskKey, todaysDailyTarget } from './tasks/task-navigation.ts'
 export { withDraftDueDate } from './tasks/task-schedule-content.ts'
 export {
   withoutReopenedTasks,
+  type RecentlyCompleted,
   type TaskAction,
   type TaskService,
   type TaskWriteResult,

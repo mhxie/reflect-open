@@ -5,17 +5,17 @@ import { useNoteGitVersion } from '@/hooks/use-note-git-version.ts'
 import { useNoteMtime } from '@/hooks/use-note-mtime.ts'
 import { useNow } from '@/hooks/use-now.ts'
 import { useTyping } from '@/hooks/use-typing.ts'
-import { formatEditedLabel } from '@/lib/dates.ts'
+import { formatEditedLabel } from '@reflect/core'
 import { noteDetails } from '@/lib/note-details.ts'
 import { activeNoteStateKinds, noteStatePresentation } from '@/lib/note-state-presentation.ts'
 import { cn } from '@/lib/utils.ts'
 import { useToday } from '@/lib/use-today.ts'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import { useSyncContext } from '@/providers/sync-provider.tsx'
-import { focusedNotePathForRoute } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
+import { useGitSyncState } from '@/providers/sync-provider.tsx'
+import { focusedNotePathForRoute } from '@reflect/app'
+import { useRouterState } from '@/routing/router.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { NoteProtectionDetails } from '@/components/note-protection-details.tsx'
 import { NoteStatusMenu } from '@/components/note-status-menu.tsx'
@@ -52,12 +52,12 @@ export function NoteStatusBar({
   placement = 'overlay',
   path: explicitPath,
 }: NoteStatusBarProps): ReactElement | null {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   const today = useToday()
   const focusedDailyDate = useFocusedDailyDate()
-  const { settings } = useSettings()
-  const { graph } = useGraph()
-  const sync = useSyncContext()
+  const settings = useSettingsStore()
+  const graph = useGraphInfo()
+  const sync = useGitSyncState()
   const peekedPath = usePeekedNotePath()
   const path = explicitPath ?? peekedPath ?? focusedNotePathForRoute(route, today, focusedDailyDate)
   const generation = graph?.generation ?? null
@@ -113,7 +113,7 @@ export function NoteStatusBar({
   const { state } = status
   const kinds = activeNoteStateKinds(state)
   const labels = kinds.map((kind) => noteStatePresentation(kind).label)
-  const sections = noteDetails({ state, backup: sync?.backup, version })
+  const sections = noteDetails({ state, backup: sync, version })
   const canTogglePrivacy = scope !== null && !state.isLocalOnly && !state.isProtected
   const editedAt = Math.max(mtime ?? 0, status.editedAt ?? 0)
   const characters = numberFormat.format(status.characters)

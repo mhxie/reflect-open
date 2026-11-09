@@ -49,21 +49,21 @@ async function renderNote(
   resolveArchive: (postId: string) => Promise<ResolvedArchive>,
   getNote: IndexQueryService['getNote'] = (notePath) => Promise.resolve(noteRow(notePath, false)),
 ) {
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { [path]: source } }),
   })
   const resolve = vi
-    .spyOn(app.xArchive, 'resolve')
+    .spyOn(core.xArchive, 'resolve')
     .mockImplementation(async (_generation, postId) => await resolveArchive(postId))
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
+  vi.spyOn(core.indexQuery, 'getNote').mockImplementation(getNote)
   // The X post resolver and its preload read the app's shared query client.
   const view = await renderInApp(
     <PaletteProvider>
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core,
       queryClient,
       graph: { root: '/g', name: 'g', generation: 1 },
       settings: {
@@ -75,7 +75,7 @@ async function renderNote(
   )
   return Object.assign(view, {
     resolve,
-    commands: () => app.ipc.calls().map((call) => call.command),
+    commands: () => core.ipc.calls().map((call) => call.command),
   })
 }
 

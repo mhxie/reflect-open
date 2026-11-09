@@ -5,7 +5,7 @@ import {
   ATTACHMENT_FILTER_NOUNS,
 } from '@/components/all-notes/attachment-filter-labels.ts'
 import { Switch } from '@/components/ui/switch.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 
 /**
@@ -14,11 +14,12 @@ import { SettingsField } from './field.tsx'
  * never the notes.
  */
 export function AllNotesAttachmentFiltersField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const enabled = settings.allNotesFilterAttachments
 
   const setEnabled = (type: NoteAttachmentType, checked: boolean): void => {
-    updateSettings({
+    settingsService.update({
       allNotesFilterAttachments: NOTE_ATTACHMENT_TYPES.filter((candidate) => {
         return candidate === type ? checked : enabled.includes(candidate)
       }),

@@ -19,6 +19,7 @@ import type { Unlisten } from '../unlisten.ts'
 import { AppError } from '../errors.ts'
 import type { FileMeta, PdfInfo } from '../graph/schemas.ts'
 import { assetFileName, assetLinkDestination } from '../graph/asset-names.ts'
+import { WritableStore, type Store } from '../store.ts'
 import {
   createAttachmentCatalog,
   isPdfAttachmentPath,
@@ -72,13 +73,9 @@ export interface AttachmentSave {
 
 export interface TestAttachmentService extends AttachmentService {
   /**
-   * Replace the listing without notifying `onCatalogChanged` listeners.
+   * Replace the listing.
    */
   setCatalog(entries: readonly TestAttachmentEntry[]): void
-  /**
-   * Notify every `onCatalogChanged` listener.
-   */
-  emitCatalogChanged(): void
   /**
    * Make later saves fail with `error`; `null` makes them succeed again.
    */
@@ -107,40 +104,37 @@ export interface TestAttachmentService extends AttachmentService {
 
 class TestAttachmentServiceImpl implements TestAttachmentService {
   readonly #options: TestAttachmentServiceOptions | undefined
-  readonly #listeners = new Set<() => void>()
   readonly #saveLog: AttachmentSave[] = []
   readonly #openLog: string[] = []
   readonly #revealLog: string[] = []
   readonly #attachLog: AttachFilesRequest[] = []
   readonly #graphSession: GraphSessionSource
   #files: readonly TestAttachmentEntry[]
-  #catalog: AttachmentCatalog
+  readonly #catalog: WritableStore<AttachmentCatalog>
+  readonly catalog: Store<AttachmentCatalog | null>
   #saveFailure: AssetSaveError | null = null
   #watching = 0
 
   constructor(options?: TestAttachmentServiceOptions) {
     this.#options = options
     this.#files = options?.catalog ?? []
-    this.#catalog = createAttachmentCatalog(this.#files)
-    const defaultSession = createGraphSession({
-      root: '/graphs/test',
-      name: 'test',
-      generation: 1,
-      indexGeneration: 1,
-    })
-    this.#graphSession = options?.graphSession ?? {
-      getState: () => ({ session: defaultSession }),
+    this.#catalog = new WritableStore(createAttachmentCatalog(this.#files))
+    this.catalog = this.#catalog
+    const defaultGraphSession = {
+      session: createGraphSession({
+        root: '/graphs/test',
+        name: 'test',
+        generation: 1,
+        indexGeneration: 1,
+      }),
     }
-  }
-
-  peekCatalog(): AttachmentCatalog | null {
-    return this.#openGeneration() === null ? null : this.#catalog
+    this.#graphSession = options?.graphSession ?? { get: () => defaultGraphSession }
   }
 
   loadCatalog(): Promise<AttachmentCatalog> {
     return Promise.try(() => {
       requireGraphSession(this.#graphSession)
-      return this.#catalog
+      return this.#catalog.get()
     })
   }
 
@@ -148,16 +142,6 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     this.#watching += 1
     return () => {
       this.#watching -= 1
-    }
-  }
-
-  onCatalogChanged(listener: () => void): Unlisten {
-    const deliver = (): void => {
-      listener()
-    }
-    this.#listeners.add(deliver)
-    return () => {
-      this.#listeners.delete(deliver)
     }
   }
 
@@ -239,7 +223,7 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
   resolveFileInfo(notePath: string, href: string): Promise<{ size: number } | undefined> {
     return Promise.try(() => {
       const path = this.#resolveAttachmentPath(notePath, href, this.#openGeneration())
-      const size = path === null ? undefined : this.#catalog.size(path)
+      const size = path === null ? undefined : this.#catalog.get().size(path)
       return size === undefined ? undefined : { size }
     })
   }
@@ -303,13 +287,7 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
 
   setCatalog(entries: readonly TestAttachmentEntry[]): void {
     this.#files = entries
-    this.#catalog = createAttachmentCatalog(entries)
-  }
-
-  emitCatalogChanged(): void {
-    for (const listener of this.#listeners) {
-      listener()
-    }
+    this.#catalog.set(createAttachmentCatalog(entries))
   }
 
   failSaves(error: AssetSaveError | null): void {
@@ -337,7 +315,7 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
   }
 
   #openGeneration(): number | null {
-    return this.#graphSession.getState().session?.generation ?? null
+    return this.#graphSession.get().session?.generation ?? null
   }
 
   #resolveAttachmentPath(
@@ -345,7 +323,9 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     destination: string,
     generation: number | null,
   ): string | null {
-    return generation === null ? null : resolveAttachmentLink(notePath, destination, this.#catalog)
+    return generation === null
+      ? null
+      : resolveAttachmentLink(notePath, destination, this.#catalog.get())
   }
 
   #resolveImageUrl(
@@ -354,7 +334,7 @@ class TestAttachmentServiceImpl implements TestAttachmentService {
     generation: number | null,
   ): string | undefined {
     if (/^https?:\/\//i.test(source)) {
-      const localOnly = this.#graphSession.getState().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS
+      const localOnly = this.#graphSession.get().session?.localOnly ?? NO_LOCAL_ONLY_FOLDERS
       return isLocalOnlyPath(localOnly, notePath) ? undefined : source
     }
     const path = this.#resolveAttachmentPath(notePath, source, generation)

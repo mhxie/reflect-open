@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { CloudSummaryModelPicker } from './cloud-summary-model-picker.tsx'
 import { SettingsField } from './field.tsx'
 import { LocalSummaryModelPicker } from './local-summary-model-picker.tsx'
@@ -35,7 +35,8 @@ const MODE_OPTIONS = AI_SUMMARY_MODES.map((value) => ({ value, label: MODE_LABEL
  * agrees to the model it names.
  */
 export function AiSummariesField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const mode = settings.aiSummaries
 
   return (
@@ -44,7 +45,9 @@ export function AiSummariesField(): ReactElement {
         <Select
           value={mode}
           items={MODE_OPTIONS}
-          onValueChange={(value) => updateSettings({ aiSummaries: aiSummariesSchema.parse(value) })}
+          onValueChange={(value) => {
+            settingsService.update({ aiSummaries: aiSummariesSchema.parse(value) })
+          }}
         >
           <SelectTrigger aria-label="AI summaries">
             <SelectValue />

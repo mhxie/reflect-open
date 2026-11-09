@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Priority } from '@meowdown/core'
 import { useExtension, useKeymap } from '@meowdown/react'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { useAppServices } from '@/services/services-provider.tsx'
 import { defineWikiAnchorChips, WIKI_ANCHORS_KEYMAP } from './wiki-anchor-chips.ts'
 import type { WikiEvidenceOptions } from './wiki-evidence.ts'
@@ -17,6 +17,8 @@ interface WikiAnchorsBridgeProps {
  * whose arrows would skip a folded block and Delete/Backspace would join it.
  */
 export function WikiAnchorsBridge({ onWikiLinkClick }: WikiAnchorsBridgeProps): null {
+  'use no memo' // Extension factories capture ref-backed callbacks for use after render.
+
   const { opener } = useAppServices()
   const navigateRef = useRef(onWikiLinkClick)
   useEffect(() => {
@@ -24,7 +26,7 @@ export function WikiAnchorsBridge({ onWikiLinkClick }: WikiAnchorsBridgeProps): 
   })
   const [extension] = useState(() => {
     return defineWikiAnchorChips({
-      asOf: todayIso,
+      asOf: getIsoToday,
       openUrl: (url) => opener.openUrlSync(url),
       openWikiLink: (options) => navigateRef.current(options),
     })

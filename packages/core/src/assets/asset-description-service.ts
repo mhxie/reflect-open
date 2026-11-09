@@ -367,7 +367,7 @@ class AssetDescriptionSessionImpl implements AssetDescriptionSession {
     const localOcrProviderId = this.#deps.settings.get().localOcrProviderId
     return {
       localOcrProviderId,
-      key: JSON.stringify([localOcrProviderId, this.#deps.aiProviderConfig.state()]),
+      key: JSON.stringify([localOcrProviderId, this.#deps.aiProviderConfig.get()]),
     }
   }
 
@@ -686,7 +686,7 @@ class AssetDescriptionServiceImpl implements AssetDescriptionService {
   }
 
   backfillVisibly(): Promise<ReconcileAssetDescriptionsOutcome> {
-    const { session } = this.#deps.graphSession.getState()
+    const { session } = this.#deps.graphSession.get()
     if (session === null) {
       return Promise.resolve({
         pending: 0,

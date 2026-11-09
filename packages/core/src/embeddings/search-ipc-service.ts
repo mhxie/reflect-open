@@ -61,7 +61,7 @@ const PRIVATE_OVERFETCH = 2
  * The open graph as {@link SearchIpcService} reads it; a `GraphSessionService` is one.
  */
 export interface SearchIpcGraphSource {
-  getState: () => { readonly session: GraphSession | null }
+  get: () => { readonly session: GraphSession | null }
   subscribe: (listener: () => void) => Unlisten
 }
 
@@ -117,7 +117,7 @@ class SearchIpcServiceImpl implements SearchIpcService {
     let served: string | null = null
     let stopServing: Unlisten | null = null
     const react = (): void => {
-      const root = graphSession.getState().session?.root ?? null
+      const root = graphSession.get().session?.root ?? null
       if (root === served) {
         return
       }
@@ -137,7 +137,7 @@ class SearchIpcServiceImpl implements SearchIpcService {
 
   async answer(request: SearchIpcRequest): Promise<SearchIpcAnswer> {
     const { retrieval, embeddingRuntime, settings, graphSession } = this.#deps
-    const localOnly = graphSession.getState().session?.localOnly ?? null
+    const localOnly = graphSession.get().session?.localOnly ?? null
     try {
       const semanticReady =
         settings.get().semanticSearchEnabled && (await embeddingRuntime.status()).status === 'ready'

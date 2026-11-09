@@ -87,7 +87,7 @@ async function setup(options?: SetupOptions) {
     },
   }
   const graphSession = createTestGraphSessionService()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     graphSession,
     suggestions: {
@@ -110,7 +110,7 @@ async function setup(options?: SetupOptions) {
   })
   const sourcePath = options?.sourcePath === undefined ? SOURCE : options.sourcePath
   const { result } = await renderHookInApp(() => useEditorAutocomplete(sourcePath), {
-    app,
+    core,
     graph: options?.graph === null ? null : { generation: 7, localOnlyFolders: ['secure'] },
   })
   return { result, operations, created }
@@ -125,7 +125,7 @@ describe('useEditorAutocomplete', () => {
     items[0]!.onSelect?.()
 
     await vi.waitFor(() => expect(created).toEqual([{ title: 'Business ideas', generation: 7 }]))
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 
   it('reports an ambiguous background create instead of silently doing nothing', async () => {

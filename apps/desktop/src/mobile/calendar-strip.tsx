@@ -1,25 +1,25 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 import { ChevronDown, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
-import { addDaysIso } from '@/lib/dates.ts'
-import { monthOf } from '@/lib/month-grid.ts'
+import { addDaysToIsoDate, getYearMonth } from '@reflect/utils'
+import { getUserWeekStart } from '@reflect/core'
+import { monthPickTarget, weekAtIndex } from '@reflect/app'
 import { cn } from '@/lib/utils.ts'
-import { monthPickTarget, weekAtIndex, weekStartOf } from '@/mobile/calendar.ts'
 import { hapticImpactLight } from '@/mobile/haptics.ts'
-import { useMobileAppServices } from '@/mobile/mobile-services.ts'
-import { MonthPickerDrawer } from '@/mobile/month-picker-drawer.tsx'
+import { useMobileServices } from '@/mobile/mobile-services.ts'
+import { MonthPicker } from '@/mobile/month-picker.tsx'
 import { MonthTitle } from '@/mobile/month-title.tsx'
 import { useDailyNoteDates } from '@/mobile/use-daily-note-dates.ts'
 import { useWeekStrip } from '@/mobile/use-week-strip.ts'
 import { WeekRow } from '@/mobile/week-row.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useWeekStartDay } from '@/providers/settings-provider.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 
 interface CalendarStripProps {
   /**
    * The day the strip should highlight — the route's selected day, or the
    * destination of an in-flight carousel swipe (the parent hands the swipe
-   * target over at pointer-up so the strip and month title lead the route).
+   * target over mid-swipe so the strip and month title lead the route).
    */
   date: string
   /** Today's live ISO date — owned by the parent so the strip and the
@@ -42,8 +42,8 @@ interface CalendarStripProps {
  * the visible week; the strip snaps back to the selection's week whenever the
  * selection itself changes, so strip and carousel stay in lockstep through
  * the parent's `date`. Month changes roll through {@link MonthTitle} rather
- * than swapping. The tappable month title opens {@link MonthPickerDrawer} to
- * jump across months, and a **Today** affordance appears in the header when
+ * than swapping. The month title is a {@link MonthPicker} to jump across
+ * months, and a **Today** affordance appears in the header when
  * the selection has wandered off today.
  */
 export function CalendarStrip({
@@ -52,23 +52,23 @@ export function CalendarStrip({
   resetSeq,
   onSelect,
 }: CalendarStripProps): ReactElement {
-  const { haptics } = useMobileAppServices()
-  const { settings } = useSettings()
-  const { navigate } = useRouter()
-  const { emblaRef, weekWindow, displayedWeekStart, showWeekOf } = useWeekStrip(
+  const { haptics } = useMobileServices()
+  const weekStartDay = useWeekStartDay()
+  const { navigate } = useRouterActions()
+  const { scrollerRef, weekWindow, displayedWeekStart, showWeekOf } = useWeekStrip(
     date,
-    settings.weekStartDay,
+    weekStartDay,
   )
   const dailyNoteDates = useDailyNoteDates(
     weekWindow.start,
-    addDaysIso(weekAtIndex(weekWindow, weekWindow.count - 1), 6),
+    addDaysToIsoDate(weekAtIndex(weekWindow, weekWindow.count - 1), 6),
   )
 
   // Header month: the selection's own month while its week is on screen;
   // while browsing, the visible week's dominant (middle-day) month.
-  const selectionWeekStart = weekStartOf(date, settings.weekStartDay)
+  const selectionWeekStart = getUserWeekStart(date, weekStartDay)
   const headerDate =
-    displayedWeekStart === selectionWeekStart ? date : addDaysIso(displayedWeekStart, 3)
+    displayedWeekStart === selectionWeekStart ? date : addDaysToIsoDate(displayedWeekStart, 3)
   const showToday = date !== today
 
   const jumpToToday = (): void => {
@@ -84,13 +84,7 @@ export function CalendarStrip({
     navigate({ kind: 'settings' })
   }
 
-  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
-  const openMonthPicker = (): void => {
-    hapticImpactLight(haptics)
-    setMonthPickerOpen(true)
-  }
   const pickMonth = (picked: string): void => {
-    setMonthPickerOpen(false)
     const target = monthPickTarget(picked, date, today)
     onSelect(target)
     // Selecting the target only moves the strip when `date` changes — picking
@@ -110,10 +104,7 @@ export function CalendarStrip({
   }, [resetSeq, date, showWeekOf])
 
   return (
-    <header
-      className="shrink-0 border-b border-border px-2 pb-1"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
-    >
+    <header className="shrink-0 border-b border-border px-safe-offset-2 pt-safe pb-1">
       {/* Three equal-flanked columns so the month sits at the screen's center
           regardless of the gear (left) and the fading Today button (right). */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1 py-1">
@@ -129,15 +120,15 @@ export function CalendarStrip({
           </Button>
         </div>
         <h1 className="min-w-0 text-center text-base font-semibold">
-          <button
-            type="button"
-            aria-label="Change month"
-            className="flex min-w-0 items-center gap-1"
-            onClick={openMonthPicker}
+          <MonthPicker
+            month={getYearMonth(headerDate)}
+            selected={getYearMonth(date)}
+            today={getYearMonth(today)}
+            onPick={pickMonth}
           >
-            <MonthTitle month={monthOf(headerDate)} />
+            <MonthTitle month={getYearMonth(headerDate)} />
             <ChevronDown aria-hidden className="size-4 shrink-0 text-text-muted" />
-          </button>
+          </MonthPicker>
         </h1>
         <div className="justify-self-end">
           <Button
@@ -155,35 +146,23 @@ export function CalendarStrip({
           </Button>
         </div>
       </div>
-      {/* `overflow: clip` with the class as pre-iOS-16 fallback: see the day
-          carousel's viewport. */}
-      <div className="overflow-hidden" style={{ overflow: 'clip' }} ref={emblaRef}>
-        <div className="flex">
-          {Array.from({ length: weekWindow.count }, (_, index) => {
-            const weekStart = weekAtIndex(weekWindow, index)
-            const weekEnd = addDaysIso(weekStart, 6)
-            const contains = (day: string): boolean => day >= weekStart && day <= weekEnd
-            return (
-              <WeekRow
-                key={weekStart}
-                weekStart={weekStart}
-                selectedDay={contains(date) ? date : null}
-                todayDay={contains(today) ? today : null}
-                dailyNoteDates={dailyNoteDates}
-                onSelect={onSelect}
-              />
-            )
-          })}
-        </div>
+      <div ref={scrollerRef} data-scroll-x className="pager-x flex overflow-x-auto">
+        {Array.from({ length: weekWindow.count }, (_, index) => {
+          const weekStart = weekAtIndex(weekWindow, index)
+          const weekEnd = addDaysToIsoDate(weekStart, 6)
+          const contains = (day: string): boolean => day >= weekStart && day <= weekEnd
+          return (
+            <WeekRow
+              key={weekStart}
+              weekStart={weekStart}
+              selectedDay={contains(date) ? date : null}
+              todayDay={contains(today) ? today : null}
+              dailyNoteDates={dailyNoteDates}
+              onSelect={onSelect}
+            />
+          )
+        })}
       </div>
-      <MonthPickerDrawer
-        open={monthPickerOpen}
-        onOpenChange={setMonthPickerOpen}
-        month={monthOf(headerDate)}
-        selected={monthOf(date)}
-        today={monthOf(today)}
-        onPick={pickMonth}
-      />
     </header>
   )
 }

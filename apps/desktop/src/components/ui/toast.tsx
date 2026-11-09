@@ -24,9 +24,9 @@ type ToasterPosition = 'bottom-right' | 'top-center'
 
 const VIEWPORT_POSITION_CLASSES: Record<ToasterPosition, string> = {
   'bottom-right': 'inset-x-4 bottom-4 sm:right-4 sm:left-auto sm:mx-0 sm:w-full',
-  // max(env(safe-area-inset-top), 1rem) keeps the stack below the iOS camera
-  // pill: viewport-fit=cover (index.html) extends the webview underneath it.
-  'top-center': 'inset-x-4 top-[max(env(safe-area-inset-top),1rem)]',
+  // `top-safe-or-4` keeps the stack below the iOS camera pill:
+  // viewport-fit=cover (index.html) extends the webview underneath it.
+  'top-center': 'inset-x-safe-offset-4 top-safe-or-4',
 }
 
 // The structural y terms of the stacking transforms, per anchor edge. The
@@ -140,9 +140,12 @@ function ToastDescription({ className, ...props }: ToastPrimitive.Description.Pr
   )
 }
 
+// Module-level so React Compiler can optimize the component: it skips JSX default parameters.
+const toastActionRender = <Button variant="outline" size="sm" />
+
 function ToastAction({
   className,
-  render = <Button variant="outline" size="sm" />,
+  render = toastActionRender,
   ...props
 }: ToastPrimitive.Action.Props): ReactElement {
   return (
@@ -155,10 +158,13 @@ function ToastAction({
   )
 }
 
+// Module-level so React Compiler can optimize the component: it skips JSX default parameters.
+const toastCloseRender = <Button variant="ghost" size="icon-sm" />
+
 function ToastClose({
   className,
   children,
-  render = <Button variant="ghost" size="icon-sm" />,
+  render = toastCloseRender,
   ...props
 }: ToastPrimitive.Close.Props): ReactElement {
   return (

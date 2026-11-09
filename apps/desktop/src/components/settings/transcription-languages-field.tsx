@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 
 interface LanguageOption {
@@ -33,7 +33,8 @@ const LANGUAGE_OPTIONS: LanguageOption[] = [
 
 /** The spoken languages, shared by the cloud and on-device engines. */
 export function TranscriptionLanguagesField(): ReactElement {
-  const { settings, updateSettingsWith } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const selected = settings.transcriptionLanguages
   // A code stored by hand (or by a newer app) stays selectable as itself.
   const items = [
@@ -49,7 +50,7 @@ export function TranscriptionLanguagesField(): ReactElement {
     const removed = selected.filter((code) => !next.includes(code))
     // Applied to the loaded settings, not this render's: a pick made while
     // they still load must not replace the saved list.
-    updateSettingsWith((current) => ({
+    settingsService.updateWith((current) => ({
       transcriptionLanguages: transcriptionLanguagesSchema.parse([
         ...current.transcriptionLanguages.filter((code) => !removed.includes(code)),
         ...added,

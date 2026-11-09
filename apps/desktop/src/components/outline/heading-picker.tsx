@@ -1,14 +1,14 @@
 import { useRef, type ReactElement } from 'react'
-import { defaultFilter } from 'cmdk'
+import { Autocomplete } from '@base-ui/react/autocomplete'
+import { SearchIcon } from 'lucide-react'
 import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command.tsx'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog.tsx'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group.tsx'
 import { noteEditorHandleFor } from '@/editor/editor-handle-registry.ts'
 import { outlineDepths, outlineHeadingKey } from '@/editor/outline/outline-headings.ts'
 import { useNoteOutline } from '@/editor/outline/outline-store.ts'
@@ -24,13 +24,10 @@ interface HeadingPickerProps {
 /** Left margin per indent depth; index = depth. */
 const DEPTH_MARGIN = ['ml-0', 'ml-3', 'ml-6', 'ml-9'] as const
 
-/**
- * Rows match on the heading text alone (their keywords). Values carry the
- * heading's editor position only to keep duplicate headings distinct rows,
- * and must not make a digit query match every row.
- */
-function matchHeadingText(_value: string, search: string, keywords?: string[]): number {
-  return defaultFilter(keywords?.join(' ') ?? '', search)
+interface HeadingItem {
+  value: string
+  label: string
+  index: number
 }
 
 /**
@@ -44,6 +41,12 @@ export function HeadingPicker({ context }: HeadingPickerProps): ReactElement {
   const jumpedRef = useRef(false)
   const headings = outline?.headings ?? []
   const depths = outlineDepths(headings)
+  // Match only the heading text; positions keep duplicate headings distinct.
+  const items: HeadingItem[] = headings.map((heading, index) => ({
+    value: outlineHeadingKey(heading),
+    label: heading.text,
+    index,
+  }))
 
   const jump = (index: number): void => {
     jumpedRef.current = true
@@ -52,58 +55,81 @@ export function HeadingPicker({ context }: HeadingPickerProps): ReactElement {
   }
 
   return (
-    <CommandDialog
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (!next) {
           closeHeadingPicker()
         }
       }}
-      finalFocus={() => {
-        // A jump already focused the editor at the heading; the default return
-        // to the previously focused element would take focus back off it.
-        if (jumpedRef.current) {
-          jumpedRef.current = false
-          return false
-        }
-        // Dismissed: back to the note's editor, caret where it was. The picker
-        // opens from the palette, whose input is gone by now, so the default
-        // return target would leave focus on <body>.
-        const target = context.notePath()
-        const editor = target === null ? null : noteEditorHandleFor(target)
-        if (editor === null) {
-          return true
-        }
-        editor.focus()
-        return false
-      }}
-      title="Jump to heading"
-      description="Choose a heading to bring to the top of the note"
     >
-      <Command filter={matchHeadingText}>
-        <CommandInput placeholder="Jump to heading…" />
-        <CommandList>
-          <CommandEmpty>
-            {headings.length === 0 ? 'No headings' : 'No matching headings'}
-          </CommandEmpty>
-          {headings.length > 0 ? (
-            <CommandGroup>
-              {headings.map((heading, index) => (
-                <CommandItem
-                  key={outlineHeadingKey(heading)}
-                  value={`heading-${outlineHeadingKey(heading)}`}
-                  keywords={[heading.text]}
-                  onSelect={() => jump(index)}
+      <DialogContent
+        className="top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0"
+        showCloseButton={false}
+        finalFocus={() => {
+          // A jump already focused the editor at the heading; the default return
+          // to the previously focused element would take focus back off it.
+          if (jumpedRef.current) {
+            jumpedRef.current = false
+            return false
+          }
+          // Dismissed: back to the note's editor, caret where it was. The picker
+          // opens from the palette, whose input is gone by now, so the default
+          // return target would leave focus on <body>.
+          const target = context.notePath()
+          const editor = target === null ? null : noteEditorHandleFor(target)
+          if (editor === null) {
+            return true
+          }
+          editor.focus()
+          return false
+        }}
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>Jump to heading</DialogTitle>
+          <DialogDescription>Choose a heading to bring to the top of the note</DialogDescription>
+        </DialogHeader>
+        <Autocomplete.Root
+          inline
+          open
+          items={items}
+          itemToStringValue={(item: HeadingItem) => item.label}
+          autoHighlight="always"
+          keepHighlight
+        >
+          <div className="flex flex-col bg-popover p-1 text-popover-foreground">
+            <div className="p-1 pb-0">
+              <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
+                <Autocomplete.Input
+                  aria-label="Jump to heading"
+                  placeholder="Jump to heading…"
+                  render={<InputGroupInput />}
+                />
+                <InputGroupAddon>
+                  <SearchIcon className="size-4 shrink-0 opacity-50" />
+                </InputGroupAddon>
+              </InputGroup>
+            </div>
+            <Autocomplete.Empty className="py-6 text-center text-sm">
+              {headings.length === 0 ? 'No headings' : 'No matching headings'}
+            </Autocomplete.Empty>
+            <Autocomplete.List className="max-h-72 scroll-py-1 overflow-y-auto p-1 scrollbar-none">
+              {(item: HeadingItem) => (
+                <Autocomplete.Item
+                  key={item.value}
+                  value={item}
+                  onClick={() => jump(item.index)}
+                  className="relative flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-hidden select-none data-highlighted:bg-surface-hover data-highlighted:text-foreground"
                 >
-                  <span className={cn('truncate', DEPTH_MARGIN[depths[index] ?? 0])}>
-                    {heading.text}
+                  <span className={cn('truncate', DEPTH_MARGIN[depths[item.index] ?? 0])}>
+                    {item.label}
                   </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ) : null}
-        </CommandList>
-      </Command>
-    </CommandDialog>
+                </Autocomplete.Item>
+              )}
+            </Autocomplete.List>
+          </div>
+        </Autocomplete.Root>
+      </DialogContent>
+    </Dialog>
   )
 }

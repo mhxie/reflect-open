@@ -62,12 +62,12 @@ describe('createSettingsService', () => {
     const { disk, settings, releaseLoad } = setup({ editorMarkdownSyntax: 'show' })
     disk.gateLoad = true
     expect(settings.get()).toEqual(DEFAULT_SETTINGS)
-    expect(settings.status()).toBe('loading')
+    expect(settings.status.get()).toBe('loading')
 
     await releaseLoad()
     await expect(settings.whenLoaded()).resolves.toBe('loaded')
     expect(settings.get().editorMarkdownSyntax).toBe('show')
-    expect(settings.status()).toBe('loaded')
+    expect(settings.status.get()).toBe('loaded')
     await settings.flush()
     expect(disk.saved).toEqual([])
   })
@@ -285,7 +285,7 @@ describe('createSettingsService', () => {
     expect(settings.get().aiProviders).toEqual([])
   })
 
-  it('merges disk, preload patches, and queued updaters in order', async () => {
+  it('replays updates racing the initial load over the loaded document in order', async () => {
     const persisted: AiProviderConfig = {
       id: 'a',
       provider: 'openai',
@@ -307,7 +307,7 @@ describe('createSettingsService', () => {
       aiProviders: current.aiProviders.filter((provider) => provider.id !== persisted.id),
     }))
     expect(settings.get().editorMarkdownSyntax).toBe('show')
-    expect(settings.get().aiProviders).toEqual([])
+    expect(settings.get().aiProviders).toEqual([added])
 
     await releaseLoad()
     await settings.whenLoaded()
@@ -339,7 +339,7 @@ describe('createSettingsService', () => {
     disk.gateLoad = true
 
     settings.updateWith((current) => ({ aiProviders: [...current.aiProviders, added] }))
-    expect(settings.get().aiProviders).toEqual([])
+    expect(settings.get().aiProviders).toEqual([added])
     expect(disk.attempts).toEqual([])
 
     await releaseLoad()
@@ -370,7 +370,7 @@ describe('createSettingsService', () => {
     const { disk, progress, settings } = setup()
     disk.failLoad = true
     await expect(settings.whenLoaded()).resolves.toBe('failed')
-    expect(settings.status()).toBe('failed')
+    expect(settings.status.get()).toBe('failed')
     expect(progress.snapshot()).toMatchObject([
       { label: 'Loading settings', status: 'failed', message: 'corrupt store' },
     ])
@@ -395,7 +395,7 @@ describe('createSettingsService', () => {
     disk.failLoad = false
     await expect(settings.reload()).resolves.toBe('loaded')
 
-    expect(settings.status()).toBe('loaded')
+    expect(settings.status.get()).toBe('loaded')
     expect(settings.get().editorMarkdownSyntax).toBe('show')
     expect(listener).toHaveBeenCalledOnce()
     await expect(settings.whenLoaded()).resolves.toBe('loaded')
@@ -411,7 +411,7 @@ describe('createSettingsService', () => {
 
     await expect(settings.reload()).resolves.toBe('failed')
 
-    expect(settings.status()).toBe('failed')
+    expect(settings.status.get()).toBe('failed')
     expect(disk.loadCalls).toBe(2)
     expect(progress.snapshot()).toHaveLength(2)
   })
@@ -444,7 +444,7 @@ describe('createSettingsService', () => {
     disk.failSaves = true
 
     settings.update({ editorMarkdownSyntax: 'show' })
-    await vi.waitFor(() => expect(progress.getAll()).toHaveLength(1))
+    await vi.waitFor(() => expect(progress.get()).toHaveLength(1))
     expect(disk.saved).toEqual([])
 
     disk.failSaves = false
@@ -483,7 +483,7 @@ describe('createSettingsService', () => {
     disk.failSaves = true
 
     settings.update({ editorMarkdownSyntax: 'show' })
-    await vi.waitFor(() => expect(progress.getAll()).toHaveLength(1))
+    await vi.waitFor(() => expect(progress.get()).toHaveLength(1))
     expect(disk.saved).toEqual([])
 
     disk.failSaves = false
@@ -552,7 +552,7 @@ describe('createTestSettingsService', () => {
     settings.update({ editorMarkdownSyntax: 'show' })
     await settings.flush()
     expect(settings.saves()).toHaveLength(1)
-    expect(progress.getAll()).toMatchObject([{ label: 'Saving settings', status: 'failed' }])
+    expect(progress.get()).toMatchObject([{ label: 'Saving settings', status: 'failed' }])
   })
 
   it('fails the load', async () => {

@@ -64,12 +64,6 @@ const TOKENIZER_FILES: [&str; 4] = [
     "tokenizer_config.json",
 ];
 
-/// Texts per model run. A long note's chunks arrive in one call, and fastembed
-/// would otherwise run them as one batch padded to the longest: ONNX Runtime's
-/// arena then grows to that peak and keeps it (13 GB seen on a real graph), while
-/// small batches are no slower on CPU since they pad less.
-const MODEL_BATCH_SIZE: usize = 8;
-
 /// Whether a text is a search query or a stored passage; the models that were
 /// trained with prefixes embed the two differently.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -83,6 +77,10 @@ pub enum TextRole {
 /// workers spin-wait between ops. A call embeds one note (two or three
 /// chunks), so a large pool mostly spins.
 const INTRA_OP_THREADS: usize = 2;
+/// Texts per ONNX Runtime run. Peak memory grows with the batch (fastembed's
+/// default of 256 needs about 17 GB for a 300 KB note), and the freed memory
+/// stays in the process. One text keeps the peak near the model's own size.
+const EMBED_BATCH_SIZE: usize = 1;
 
 /// Byte counts for an active model download. Absent until the download
 /// starts (cache probing, or a cached model that skips downloading); after
@@ -115,6 +113,8 @@ pub enum EmbedStatus {
     Ready { model: String, dims: usize },
     /// Load failed; semantic search is unavailable (lexical still works).
     Failed { message: String },
+    /// This CPU cannot run ONNX Runtime (see `cpu_supported`).
+    Unsupported,
 }
 
 /// A loaded model and what callers need to know about it.
@@ -140,6 +140,19 @@ enum Runtime {
 /// Process-wide embedding runtime state.
 #[derive(Default)]
 pub struct EmbedState(Mutex<Runtime>);
+
+/// ort's prebuilt x86_64 ONNX Runtime requires AVX2. Without it, runtime init
+/// dies with SIGILL, which no error path can catch, so check before any ort
+/// call and report `unsupported` instead.
+#[cfg(target_arch = "x86_64")]
+fn cpu_supported() -> bool {
+    std::is_x86_feature_detected!("avx2")
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn cpu_supported() -> bool {
+    true
+}
 
 fn lock_state<'a>(state: &'a EmbedState) -> AppResult<std::sync::MutexGuard<'a, Runtime>> {
     state.0.lock().map_err(|err| {
@@ -313,6 +326,9 @@ fn download_model_files(
 /// `embed:status` events).
 #[tauri::command]
 pub fn embed_status(state: State<EmbedState>) -> AppResult<EmbedStatus> {
+    if !cpu_supported() {
+        return Ok(EmbedStatus::Unsupported);
+    }
     Ok(status_of(&*lock_state(&state)?))
 }
 
@@ -327,6 +343,9 @@ pub async fn embed_ensure(
     app: AppHandle,
     state: State<'_, EmbedState>,
 ) -> AppResult<EmbedStatus> {
+    if !cpu_supported() {
+        return Ok(EmbedStatus::Unsupported);
+    }
     let spec = model_spec(model.as_deref())?;
     // Resolve the cache dir BEFORE flipping to Loading: it's the only step
     // here that may fail without a guaranteed state transition afterwards.
@@ -437,7 +456,7 @@ pub async fn embed_texts(
             .lock()
             .map_err(|_| AppError::io("embedding model lock poisoned"))?;
         model
-            .embed(texts, Some(MODEL_BATCH_SIZE))
+            .embed(texts, Some(EMBED_BATCH_SIZE))
             .map_err(|err| AppError::io(format!("embedding failed: {err}")))
     })
     .await

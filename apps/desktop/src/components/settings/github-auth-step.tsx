@@ -17,7 +17,7 @@ interface GithubAuthStepProps {
   /**
    * The backup repository the token should be scoped to, when the wizard
    * already knows it — the instructions name it instead of speaking
-   * abstractly about "your backup repository".
+   * abstractly about "your repository".
    */
   repoName?: string | undefined
 }
@@ -124,13 +124,13 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
 
   async function savePat(): Promise<void> {
     const token = patValue.trim()
-    if (token.length === 0) {
-      pat.setError('Paste a token first.')
-      return
-    }
     // Keychain writes can fail (locked keychain, denied access) and GitHub
-    // can reject the token — the action envelope surfaces both inline.
+    // can reject the token — the action envelope surfaces both inline, and
+    // the empty-token check goes through the same envelope.
     await pat.run(async () => {
+      if (token.length === 0) {
+        throw new Error('Paste a token first.')
+      }
       await githubAuth.save({ kind: 'pat', token })
       await verifyAndFinish()
     })
@@ -169,7 +169,7 @@ export function GithubAuthStep({ onAuthed, repoName }: GithubAuthStepProps): Rea
                   the <strong>{repoName}</strong> repository
                 </>
               ) : (
-                'your backup repository'
+                'your repository'
               )}{' '}
               (GitHub → Settings → Developer settings → Fine-grained tokens). It is stored in your
               OS keychain, never in your graph.

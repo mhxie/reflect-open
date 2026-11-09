@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
-import { toast } from '@/components/ui/toast.tsx'
+import { useToastController } from '@/lib/use-toasts.ts'
 import type {
   PendingReplacementResolveHandler,
   SelectionMenuContext,
@@ -26,7 +26,7 @@ import { AiPreviewActions } from '@/editor/ai-menu/ai-preview-actions.tsx'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { useAiPrompts } from '@/hooks/use-ai-prompts.ts'
 import { useAiProviders } from '@/hooks/use-ai-providers.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -77,26 +77,42 @@ interface ActiveRun {
   context: SelectionMenuContext
 }
 
+/**
+ * Runs `callback` for each value of `iterable` and stops when it returns
+ * `false`. React Compiler cannot compile a `for await` loop and skips any
+ * component or hook that contains one, so the loop lives in this module-level
+ * function, which the compiler does not touch.
+ */
+async function forEachAsync<T>(
+  iterable: AsyncIterable<T>,
+  callback: (value: T) => boolean | void,
+): Promise<void> {
+  for await (const value of iterable) {
+    if (callback(value) === false) return
+  }
+}
+
 export function useEditorAiMenu({
   path,
   privateNote,
   sessionEpoch,
   editorRef,
 }: EditorAiMenuOptions): EditorAiMenuValue {
+  const toastController = useToastController()
   const { providers } = useAiProviders()
   const { selectionTransform } = useCoreServices()
   const { prompts } = useAiPrompts()
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
 
   const runRef = useRef<ActiveRun | null>(null)
   const privateNoteRef = useRef(privateNote)
-  // A keychain continuation can run before effects observe a Lock toggle.
-  privateNoteRef.current = privateNote
   // The staged placement of the current run — state (not just the ref) so the
   // preview's alternate-placement button can label itself.
   const [runMode, setRunMode] = useState<AiPromptMode | null>(null)
 
   useLayoutEffect(() => {
+    // Publish a Lock toggle before asynchronous provider work can resume.
+    privateNoteRef.current = privateNote
     if (!privateNote || runRef.current === null) return
     runRef.current.controller.abort()
     runRef.current = null
@@ -138,7 +154,7 @@ export function useEditorAiMenu({
           setRunMode(null)
         }
         editorRef.current?.discardPendingReplacement()
-        toast.add({ type: 'error', title: message })
+        toastController.add({ type: 'error', title: message })
       }
 
       // The service picks the provider, gates the selection against the
@@ -152,19 +168,19 @@ export function useEditorAiMenu({
         model: modelOverride,
         signal: run.controller.signal,
       })
-      for await (const event of events) {
-        if (runRef.current !== run) return
+      await forEachAsync(events, (event) => {
+        if (runRef.current !== run) return false
         if (event.type === 'text-delta') {
           editorRef.current?.appendPendingReplacementText(event.text)
         } else if (event.type === 'error') {
           fail(event.message)
-          return
+          return false
         }
         // 'complete' and 'aborted' need no action: the preview holds the text
         // and the user decides with Accept/Discard.
-      }
+      })
     },
-    [selectionTransform, path, editorRef],
+    [selectionTransform, path, editorRef, toastController],
   )
 
   const runPrompt = useCallback(
@@ -268,7 +284,7 @@ export function useEditorAiMenu({
     // A private note has no AI entry at all, so asking for one explicitly
     // says why rather than doing nothing.
     if (privateNote) {
-      toast.add({
+      toastController.add({
         title: 'AI is off for this note',
         description: 'It’s private, so its content is never sent to an AI provider.',
       })
@@ -276,7 +292,7 @@ export function useEditorAiMenu({
     }
     editor.openSelectionMenu()
     return true
-  }, [privateNote, editorRef])
+  }, [privateNote, editorRef, toastController])
 
   return { onSelectionMenuSearch, pendingReplacementActions, onPendingReplacementResolve, openMenu }
 }

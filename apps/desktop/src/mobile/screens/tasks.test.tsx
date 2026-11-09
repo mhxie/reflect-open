@@ -3,17 +3,19 @@ import { page, userEvent, type Locator } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import {
   createTestCoreServices,
-  createTestPlatformService,
   makeOpenTask as task,
   type TestCoreServices,
   type TestHapticsService,
   type TestStorageService,
 } from '@reflect/core/testing'
 import type { OpenTask, TaskAction, TaskService, TaskWriteResult } from '@reflect/core'
-import { useRouter } from '@/routing/router.tsx'
+import { createTestSystemPreferencesService } from '@reflect/app/testing'
+import { useRouterState } from '@/routing/router.tsx'
+import { swipeDrawerClosed } from '@/test-utils/drawer.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { swipe, translateX } from '@/test-utils/swipe.ts'
+import { act } from '@/test-utils/act.ts'
+import { scrollElement } from '@/test-utils/scroll.ts'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileTasks } from './tasks.tsx'
 
@@ -125,32 +127,6 @@ function writesOf(...kinds: TaskActionKind[]): unknown[][] {
   return writeTask.mock.calls.filter((call) => isWrite(call[1], kinds))
 }
 
-// Vaul's drag/animation is verified on-device. This passthrough honours `open` and
-// exposes the dismissal path as a button, so commit-on-dismiss is testable.
-vi.mock('@/components/ui/drawer.tsx', () => ({
-  Drawer: ({
-    open,
-    onOpenChange,
-    children,
-  }: {
-    open?: boolean
-    onOpenChange?: (open: boolean) => void
-    children?: ReactNode
-  }) => {
-    return open ? (
-      <div data-testid="drawer">
-        {children}
-        <button type="button" onClick={() => onOpenChange?.(false)}>
-          dismiss-drawer
-        </button>
-      </div>
-    ) : null
-  },
-  DrawerContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DrawerBody: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DrawerTitle: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
-}))
-
 /**
  * Narrow a queried element to the editor stub's textarea so `.value` typechecks.
  */
@@ -162,7 +138,7 @@ function asTextArea(element: Element): HTMLTextAreaElement {
 }
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
@@ -173,7 +149,10 @@ function renderScreen() {
       <RouteProbe />
     </>,
     {
-      app,
+      core,
+      appServices: {
+        systemPreferences: createTestSystemPreferencesService({ reducedMotion: true }),
+      },
       // `vault/` is a read-only local-only folder.
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['vault'] },
       settings: {
@@ -211,36 +190,29 @@ function renderScreen() {
 const waitFor = vi.waitFor
 
 /**
- * Swipe a row far enough left that its release settles open, and return its moving surface.
+ * Swipe a row open the way a finger leaves it, and return its scroller.
  */
 async function revealSwipeActions(
   view: Awaited<ReturnType<typeof renderScreen>>,
   label: string,
 ): Promise<HTMLElement> {
   const body = await view.findByRole('button', { name: `Edit: ${label}` })
-  const surface = body.parentElement!
-  const rect = surface.getBoundingClientRect()
-  await swipe(
-    surface,
-    { x: rect.right - 20, y: rect.top + 16 },
-    { x: rect.right - 160, y: rect.top + 16 },
-  )
-  return surface
+  const scroller = body.closest<HTMLElement>('[data-slot="swipe-row"]')!
+  await scrollElement({ element: scroller, left: 136, touch: true })
+  return scroller
 }
 
 let storage: TestStorageService
 
-let app: Omit<TestCoreServices, 'tasks'> & { tasks: TaskService }
+let core: Omit<TestCoreServices, 'tasks'> & { tasks: TaskService }
 
 beforeEach(async () => {
   await page.viewport(375, 700)
   // A fresh service per test, so its recently-completed set starts empty.
-  app = createTestCoreServices({
+  core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
-    // Reduced motion: an instant settle, so row transforms can be asserted synchronously.
-    platform: createTestPlatformService({ reducedMotion: true }),
   })
-  const { tasks } = app
+  const { tasks } = core
   getOpenTasks = vi.spyOn(tasks, 'getOpenTasks').mockResolvedValue([])
   getCompletedTasks = vi.spyOn(tasks, 'getCompletedTasks').mockResolvedValue([])
   writeTask = vi.spyOn(tasks, 'writeTask').mockResolvedValue(WRITTEN)
@@ -255,12 +227,12 @@ beforeEach(async () => {
     moved: [],
     updatedAt: 0,
   })
-  storage = app.storage
-  haptics = app.mobile.haptics
+  storage = core.storage
+  haptics = core.mobile.haptics
   // Today is 2026-06-14.
-  app.clock.setNow(new Date(2026, 5, 14, 12).getTime())
+  core.clock.setNow(new Date(2026, 5, 14, 12).getTime())
   // A wiki-link tap resolves to this note.
-  vi.spyOn(app.noteCreation, 'resolveOrCreateNoteWithTitle').mockResolvedValue({
+  vi.spyOn(core.noteCreation, 'resolveOrCreateNoteWithTitle').mockResolvedValue({
     kind: 'resolved',
     path: 'notes/other.md',
   })
@@ -377,14 +349,14 @@ describe('MobileTasks', () => {
     await user.click(await view.findByRole('button', { name: 'Edit: buy milk' }))
     expect(haptics.impacts()).toBe(1)
 
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
     await user.click(view.getByRole('button', { name: 'Task filters' }))
     expect(haptics.impacts()).toBe(2)
 
     await user.click(view.getByRole('checkbox', { name: 'Current' }))
     expect(haptics.impacts()).toBe(3)
 
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
     await user.click(view.getByRole('button', { name: 'New task' }))
     expect(haptics.impacts()).toBe(4)
     await view.unmount()
@@ -401,7 +373,7 @@ describe('MobileTasks', () => {
 
     await user.clear(input)
     await user.type(input, 'buy oat milk')
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
 
     expect(writesOf('setMarkdown')).toHaveLength(1)
     expect(writeTask).toHaveBeenCalledWith(expect.anything(), [
@@ -416,7 +388,7 @@ describe('MobileTasks', () => {
     const view = await renderScreen()
 
     await user.click(await view.findByRole('button', { name: 'Edit: buy milk' }))
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
 
     expect(writesOf('setMarkdown')).toHaveLength(0)
     expect(writesOf('remove')).toHaveLength(0)
@@ -430,7 +402,7 @@ describe('MobileTasks', () => {
 
     await user.click(await view.findByRole('button', { name: 'Edit: buy milk' }))
     await user.clear(view.getByRole('textbox', { name: 'Task text' }))
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
 
     expect(writesOf('remove')).toHaveLength(1)
     expect(writesOf('setMarkdown')).toHaveLength(0)
@@ -448,11 +420,26 @@ describe('MobileTasks', () => {
       'buy milk [[2026-06-15]]',
     )
 
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
     expect(writesOf('setMarkdown')).toHaveLength(1)
     expect(writeTask).toHaveBeenCalledWith(expect.anything(), [
       { kind: 'setMarkdown', markdown: 'buy milk [[2026-06-15]]' },
     ])
+    await view.unmount()
+  })
+
+  it('schedules a date picked from the native date input', async () => {
+    getOpenTasks.mockResolvedValue([task({ text: 'buy milk' })])
+    const user = userEvent
+    const view = await renderScreen()
+
+    await user.click(await view.findByRole('button', { name: 'Edit: buy milk' }))
+    const picker = view.getByLabelText('Pick date')
+    await expect.element(picker).toHaveValue('2026-06-14')
+    await user.fill(picker, '2026-06-20')
+    expect(asTextArea(view.getByRole('textbox', { name: 'Task text' }).element()).value).toBe(
+      'buy milk [[2026-06-20]]',
+    )
     await view.unmount()
   })
 
@@ -464,17 +451,14 @@ describe('MobileTasks', () => {
     await user.click(await view.findByRole('button', { name: 'Edit: buy milk' }))
     haptics.reset()
 
-    await user.click(view.getByRole('button', { name: 'Pick date' }))
+    await user.click(view.getByRole('button', { name: 'Tomorrow' }))
     expect(haptics.impacts()).toBe(1)
 
-    await user.click(view.getByRole('button', { name: 'Tomorrow' }))
+    await user.click(view.getByRole('button', { name: 'Clear' }))
     expect(haptics.impacts()).toBe(2)
 
-    await user.click(view.getByRole('button', { name: 'Clear' }))
-    expect(haptics.impacts()).toBe(3)
-
     await user.click(view.getByRole('button', { name: 'Convert to bullet' }))
-    expect(haptics.impacts()).toBe(4)
+    expect(haptics.impacts()).toBe(3)
     await waitFor(() => expect(writesOf('toBullet')).toHaveLength(1))
     await view.unmount()
   })
@@ -533,7 +517,7 @@ describe('MobileTasks', () => {
     const input = asTextArea(view.getByRole('textbox', { name: 'Task text' }).element())
     await user.clear(input)
     await user.type(input, 'buy oat milk')
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
 
     expect(writesOf('setMarkdown')).toHaveLength(1)
     expect(writeTask).toHaveBeenCalledWith(expect.anything(), [
@@ -667,7 +651,7 @@ describe('MobileTasks', () => {
     expect(input.value).toBe('')
 
     await user.type(input, 'new thing')
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
     expect(writesOf('setMarkdown')).toHaveLength(1)
     expect(writeTask).toHaveBeenCalledWith(expect.anything(), [
       { kind: 'setMarkdown', markdown: 'new thing' },
@@ -749,7 +733,7 @@ describe('MobileTasks', () => {
 
     await user.click(await view.findByRole('button', { name: 'Add a task to today' }))
     await view.findByRole('textbox', { name: 'Task text' })
-    await user.click(view.getByRole('button', { name: 'dismiss-drawer' }))
+    await swipeDrawerClosed()
 
     await waitFor(() => expect(writesOf('remove')).toHaveLength(1))
     expect(writesOf('setMarkdown')).toHaveLength(0)
@@ -872,15 +856,14 @@ describe('MobileTasks', () => {
     getOpenTasks.mockResolvedValue([task({ text: 'buy milk' })])
     const view = await renderScreen()
 
-    const surface = await revealSwipeActions(view, 'buy milk')
+    const scroller = await revealSwipeActions(view, 'buy milk')
 
     await expect
       .element(view.getByRole('button', { name: 'Open note: buy milk' }))
       .toBeInTheDocument()
     await expect.element(view.getByRole('button', { name: 'Delete: buy milk' })).toBeInTheDocument()
-    expect(translateX(surface)).toBe(-136)
-    // The drag's synthetic click was swallowed; the sheet did not open.
-    expect(view.queryByText('dismiss-drawer')).toBeNull()
+    expect(scroller.scrollLeft).toBe(136)
+    expect(page.getByRole('dialog').query()).toBeNull()
     await view.unmount()
   })
 
@@ -894,7 +877,7 @@ describe('MobileTasks', () => {
     await waitFor(() => expect(writesOf('remove')).toHaveLength(1))
     // Optimistic removal: the row leaves the list before the reindex.
     await waitFor(() => expect(view.queryByRole('button', { name: 'Edit: buy milk' })).toBeNull())
-    expect(view.queryByText('dismiss-drawer')).toBeNull()
+    expect(page.getByRole('dialog').query()).toBeNull()
     await view.unmount()
   })
 
@@ -908,7 +891,7 @@ describe('MobileTasks', () => {
     await waitFor(() => {
       expect(view.getByTestId('route').element().textContent).toContain('notes/n.md')
     })
-    expect(view.queryByText('dismiss-drawer')).toBeNull()
+    expect(page.getByRole('dialog').query()).toBeNull()
     await view.unmount()
   })
 
@@ -916,11 +899,14 @@ describe('MobileTasks', () => {
     getOpenTasks.mockResolvedValue([task({ text: 'buy milk' })])
     const view = await renderScreen()
 
-    await revealSwipeActions(view, 'buy milk')
-    await view.getByRole('button', { name: 'Edit: buy milk' }).click()
+    const scroller = await revealSwipeActions(view, 'buy milk')
+    // A tap leaves the row where it is; a locator click would scroll it into view first.
+    const body = view.getByRole('button', { name: 'Edit: buy milk' }).element() as HTMLElement
+    await act(() => body.click())
 
     await waitFor(() => expect(view.queryByRole('button', { name: 'Delete: buy milk' })).toBeNull())
-    expect(view.queryByText('dismiss-drawer')).toBeNull()
+    expect(scroller.scrollLeft).toBe(0)
+    expect(page.getByRole('dialog').query()).toBeNull()
     await view.unmount()
   })
 

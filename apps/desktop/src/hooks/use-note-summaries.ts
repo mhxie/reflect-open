@@ -9,7 +9,7 @@ import {
 } from '@reflect/core'
 import { cloudGoAhead } from '@/hooks/use-summary-model-choice.ts'
 import { createNoteSummaryOffer } from '@/lib/note-summary-offer.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import {
   useAppServices,
   useCoreServices,
@@ -28,8 +28,9 @@ import {
 export function useNoteSummaries(graph: GraphInfo): void {
   const { noteSummaries } = useCoreServices()
   const { operations, window } = useAppServices()
-  const { settings, updateSettings } = useSettings()
-  const backup = useMaybeGraphServices()?.backup ?? null
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
+  const backup = useMaybeGraphServices()?.gitSync ?? null
   const offer = useMemo(() => createNoteSummaryOffer(operations), [operations])
   const providers: AiProvidersState = {
     providers: settings.aiProviders,
@@ -44,13 +45,13 @@ export function useNoteSummaries(graph: GraphInfo): void {
   // model changed in Settings meanwhile must be seen.
   const providersRef = useRef<AiProvidersState>(providers)
   const cloudModelRef = useRef<AiSummariesModel | null>(settings.aiSummariesCloudModel)
-  const updateSettingsRef = useRef(updateSettings)
+  const updateSettingsRef = useRef(settingsService.update)
   // Read at each pass, so the session catches up with the graph's current backup.
   const backupRef = useRef(backup)
   useEffect(() => {
     providersRef.current = providers
     cloudModelRef.current = settings.aiSummariesCloudModel
-    updateSettingsRef.current = updateSettings
+    updateSettingsRef.current = settingsService.update
     backupRef.current = backup
   })
 

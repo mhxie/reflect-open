@@ -50,7 +50,7 @@ function pinnedTitles(): string | null {
  */
 async function renderSection(path: string, showTrash = false, copies = 1, width?: number) {
   operations = createTestOperationsService()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     progress: operations,
     noteDocuments: {
@@ -67,9 +67,9 @@ async function renderSection(path: string, showTrash = false, copies = 1, width?
       hasMacosTitleBarOverlay: false,
     }),
   })
-  vi.spyOn(app.indexQuery, 'getPinnedNotes').mockImplementation(getPinnedNotes)
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
-  trash = vi.spyOn(app.noteActions, 'trashOne').mockResolvedValue({ trashed: 'system' })
+  vi.spyOn(core.indexQuery, 'getPinnedNotes').mockImplementation(getPinnedNotes)
+  vi.spyOn(core.indexQuery, 'getNote').mockImplementation(getNote)
+  trash = vi.spyOn(core.noteActions, 'trashOne').mockResolvedValue({ trashed: 'system' })
   const view = await renderInApp(
     <>
       {Array.from({ length: copies }, (_, copy) => (
@@ -84,7 +84,7 @@ async function renderSection(path: string, showTrash = false, copies = 1, width?
       <PinnedTitles />
     </>,
     {
-      app,
+      core,
       graph: {
         root: '/g',
         name: 'g',
@@ -365,6 +365,21 @@ describe('NoteActionsSection trash action', () => {
     expect(operations.findByLabel('Trashing note')?.status).toBe('running')
     await operations.clock.advance(MIN_VISIBLE_MS)
     expect(operations.findByLabel('Trashing note')).toBeUndefined()
+  })
+
+  it('starts a reopened trash confirmation without the last failure', async () => {
+    const view = await renderSection('notes/a.md', true)
+    trash.mockRejectedValueOnce(new Error('Disk is full'))
+    await userEvent.click(view.getByRole('button', { name: 'Trash note' }))
+    await userEvent.click(page.getByRole('dialog').getByRole('button', { name: 'Trash note' }))
+    await expect.element(page.getByRole('dialog').getByText('Disk is full')).toBeVisible()
+
+    await userEvent.click(page.getByRole('dialog').getByRole('button', { name: 'Cancel' }))
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+    await userEvent.click(view.getByRole('button', { name: 'Trash note' }))
+
+    await expect.element(page.getByRole('dialog')).toBeVisible()
+    expect(page.getByText('Disk is full').query()).toBeNull()
   })
 
   it('does not offer trash for daily notes even if enabled', async () => {

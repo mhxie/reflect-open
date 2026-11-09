@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { NoteListEntry } from '@reflect/core'
 import { createAllNotesQueryOptions } from '@/lib/query-options.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /** A hovered day loads only after the pointer rests this long, so a sweep fetches nothing. */
@@ -14,7 +14,7 @@ const DWELL_MS = 150
  * list afterwards is instant.
  */
 export function useNotesEditedOn(date: string | null): readonly NoteListEntry[] | undefined {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { noteList } = useCoreServices()
   const [settled, setSettled] = useState<string | null>(null)
   useEffect(() => {

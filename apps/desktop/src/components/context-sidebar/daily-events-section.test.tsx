@@ -48,12 +48,12 @@ let stored: Partial<Settings>
 let calendar: TestCalendarService
 let contacts: TestContactsService
 let database: TestDatabaseService
-let app: TestCoreServices
+let core: TestCoreServices
 
 // The meeting service writes into the open graph.
 async function renderSection(): Promise<HTMLElement> {
   const { container } = await renderInApp(<DailyEventsSection date={DATE} />, {
-    app,
+    core,
     graph: { root: '/graph', generation: 3 },
     settings: stored,
   })
@@ -65,8 +65,8 @@ beforeEach(() => {
   calendar = createTestCalendarService()
   contacts = createTestContactsService({ status: 'unavailable' })
   database = createWasmTestDatabaseService()
-  app = createTestCoreServices({ calendar, contacts, database })
-  addMeetingToDaily = vi.spyOn(app.meetings, 'addMeetingToDaily')
+  core = createTestCoreServices({ calendar, contacts, database })
+  addMeetingToDaily = vi.spyOn(core.meetings, 'addMeetingToDaily')
   return () => database.close()
 })
 
@@ -156,9 +156,25 @@ describe('DailyEventsSection', () => {
     await expectLocatorToHaveCount(page.getByLabelText('Meeting name'), 0)
   })
 
+  it('the Enter that confirms an IME composition does not submit the form', async () => {
+    calendar.setEvents([eventAt(9, { title: 'Standup' })])
+    await renderSection()
+    await page.getByRole('button', { name: /standup/i }).click()
+
+    const attendee = page.getByLabelText('Attendees')
+    await attendee.fill('李雷')
+    // WebKit fires compositionend before the confirming Enter's keydown.
+    attendee.element().dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+    await userEvent.keyboard('{Enter}')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(addMeetingToDaily).not.toHaveBeenCalled()
+    await expect.element(page.getByLabelText('Meeting name')).toBeInTheDocument()
+  })
+
   it('passes invite emails and the contacts gate through to the action', async () => {
     stored = { calendarEnabled: true, calendarIds: ['cal-work'], contactsEnabled: true }
-    contacts.setStatus('authorized')
+    await contacts.setStatus('authorized')
     calendar.setEvents([
       eventAt(9, {
         title: 'Standup',
@@ -252,9 +268,27 @@ describe('DailyEventsSection', () => {
     await renderSection()
     await page.getByRole('button', { name: /standup/i }).click()
 
+    await page.getByLabelText('Meeting name').fill('Standup notes')
     await page.getByRole('button', { name: /add to daily note/i }).click()
 
     await expect.element(page.getByText(/disk full/i)).toBeInTheDocument()
-    await expect.element(page.getByLabelText('Meeting name')).toBeInTheDocument()
+    // The form action's automatic reset must not clear the controlled fields.
+    await expect.element(page.getByLabelText('Meeting name')).toHaveValue('Standup notes')
+  })
+
+  it('Cancel is disabled while the submit is in flight', async () => {
+    const { promise, resolve } =
+      Promise.withResolvers<Awaited<ReturnType<MeetingService['addMeetingToDaily']>>>()
+    addMeetingToDaily.mockReturnValueOnce(promise)
+    calendar.setEvents([eventAt(9, { title: 'Standup' })])
+    await renderSection()
+    await page.getByRole('button', { name: /standup/i }).click()
+
+    await page.getByRole('button', { name: /add to daily note/i }).click()
+
+    await vi.waitFor(() => expect(addMeetingToDaily).toHaveBeenCalled())
+    await expect.element(page.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    resolve({ appended: true, createdNotes: [] })
+    await expectLocatorToHaveCount(page.getByLabelText('Meeting name'), 0)
   })
 })

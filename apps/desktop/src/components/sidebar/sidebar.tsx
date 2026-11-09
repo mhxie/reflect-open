@@ -13,8 +13,8 @@ import { createNoteFromFiles } from '@/lib/create-note-from-files.ts'
 import { useToday } from '@/lib/use-today.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { cn } from '@/lib/utils.ts'
-import { notePathForRoute } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { notePathForRoute } from '@reflect/app'
+import { useRouterState } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { GraphFooter } from './graph-footer.tsx'
 import { NavigateArrows } from './navigate-arrows.tsx'
@@ -39,7 +39,7 @@ interface SidebarProps {
  */
 export function Sidebar({ graph, context }: SidebarProps): ReactElement {
   const { platform } = useCoreServices()
-  const { route } = useRouter()
+  const { route } = useRouterState()
   const today = useToday()
   const pinned = usePinnedNotes()
   const currentNotePath = notePathForRoute(route, today)

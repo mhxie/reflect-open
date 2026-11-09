@@ -1,69 +1,74 @@
 import { useMemo } from 'react'
-import { AppError, type BackupService, type BackupState } from '@reflect/core'
+import {
+  AppError,
+  type GithubConnector,
+  type GitSyncService,
+  type GitSyncState,
+  type GitHostConnector,
+  type Store,
+} from '@reflect/core'
+import { useStore } from '@/lib/use-store.ts'
 import { useMaybeGraphServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
-
-export type { BackupState, ConnectExistingResult } from '@reflect/core'
 
 /**
- * The backup surface. Unlike the actions, `fileChanged` never throws: where
- * the graph runs no backup it does nothing.
+ * The git sync actions. `fileChanged` does nothing where no sync service runs.
  */
-type SyncContextValue = { backup: BackupState } & Pick<
-  BackupService,
-  | 'connectNewRepo'
-  | 'connectExistingRepo'
-  | 'disconnectGraph'
-  | 'signOut'
-  | 'backUpNow'
-  | 'fileChanged'
->
+type GitSyncActions = Pick<GitSyncService, 'disconnectGraph' | 'syncNow' | 'fileChanged'> &
+  Pick<GithubConnector, 'connectNewRepo' | 'connectExistingRepo'> &
+  Pick<GitHostConnector, 'connectGitHost' | 'updateGitHostSignIn'>
 
-const LOADING: BackupState = { phase: 'loading' }
+const LOADING: GitSyncState = { phase: 'loading' }
 
 /**
- * What the surface reads where the graph runs no backup service.
+ * What the surface reads where the graph runs no git sync service.
  */
-const NO_BACKUP = {
+const NO_GIT_SYNC: Store<GitSyncState> = {
   subscribe: () => () => {},
-  getState: (): BackupState => LOADING,
+  get: () => LOADING,
 }
 
 /**
- * Backup state + actions of the open graph's `BackupService`. A note window
- * runs none: its state stays 'loading' (the note window edits, main syncs).
+ * The git sync state of the open graph's `GitSyncService`. A note window runs
+ * none: its state stays 'loading' (the note window edits, main syncs).
  */
-export function useSync(): SyncContextValue {
-  const controller = useMaybeGraphServices()?.backup ?? null
-  const store = controller ?? NO_BACKUP
-  const backup = useServiceState(store, store.getState)
+export function useGitSyncStore(): Store<GitSyncState> {
+  return useMaybeGraphServices()?.gitSync ?? NO_GIT_SYNC
+}
 
-  return useMemo<SyncContextValue>(() => {
-    const require = (): BackupService => {
-      if (controller === null) {
-        throw new AppError('io', 'backup is still initializing')
+/**
+ * The whole value of {@link useGitSyncStore}.
+ */
+export function useGitSyncState(): GitSyncState {
+  return useStore(useGitSyncStore())
+}
+
+/**
+ * The actions of the open graph's `GitSyncService` and its connectors. They
+ * throw where the graph runs no git sync service.
+ */
+export function useGitSyncActions(): GitSyncActions {
+  const graph = useMaybeGraphServices()
+  const controller = graph?.gitSync ?? null
+  const githubConnector = graph?.githubConnector ?? null
+  const gitHostConnector = graph?.gitHostConnector ?? null
+
+  return useMemo<GitSyncActions>(() => {
+    const require = <Service,>(service: Service | null): Service => {
+      if (service === null) {
+        throw new AppError('io', 'git sync is still initializing')
       }
-      return controller
+      return service
     }
     return {
-      backup,
-      connectNewRepo: (name) => require().connectNewRepo(name),
-      connectExistingRepo: (ref, options) => require().connectExistingRepo(ref, options),
-      disconnectGraph: () => require().disconnectGraph(),
-      signOut: () => require().signOut(),
-      backUpNow: () => require().backUpNow(),
+      connectNewRepo: (name) => require(githubConnector).connectNewRepo(name),
+      connectExistingRepo: (ref, options) => {
+        return require(githubConnector).connectExistingRepo(ref, options)
+      },
+      connectGitHost: (input) => require(gitHostConnector).connectGitHost(input),
+      updateGitHostSignIn: (input) => require(gitHostConnector).updateGitHostSignIn(input),
+      disconnectGraph: () => require(controller).disconnectGraph(),
+      syncNow: () => require(controller).syncNow(),
       fileChanged: () => controller?.fileChanged(),
     }
-  }, [controller, backup])
-}
-
-/**
- * Like {@link useSync}, but `null` where the graph runs no backup service:
- * no graph session is open (the mobile settings sheet in the plain-browser
- * dev harness and in screen tests), and those surfaces hide their sync rows.
- */
-export function useSyncContext(): SyncContextValue | null {
-  const sync = useSync()
-  const backup = useMaybeGraphServices()?.backup ?? null
-  return backup === null ? null : sync
+  }, [controller, githubConnector, gitHostConnector])
 }

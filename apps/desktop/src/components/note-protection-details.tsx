@@ -26,9 +26,8 @@ export function NoteProtectionDetails({
       await attachments.reveal(scope.path, scope.generation)
     } catch (cause) {
       setRevealError(errorMessage(cause))
-    } finally {
-      setRevealing(false)
     }
+    setRevealing(false)
   }
 
   return (

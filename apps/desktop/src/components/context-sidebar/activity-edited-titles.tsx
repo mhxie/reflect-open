@@ -1,8 +1,7 @@
 import type { ReactElement } from 'react'
-import { dateFromDailyPath, displayNoteTitle } from '@reflect/core'
+import { dateFromDailyPath, displayNoteTitle, formatShortDate } from '@reflect/core'
 import { useNotesEditedOn } from '@/hooks/use-notes-edited-on.ts'
-import { formatShortDate } from '@/lib/dates.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 
 /** Titles shown in the day tooltip before "+N more". */
 const TOOLTIP_TITLES = 3
@@ -14,7 +13,7 @@ export interface ActivityEditedTitlesProps {
 
 /** The day's most recently edited notes, as a preview of its All Notes list. */
 export function ActivityEditedTitles({ date }: ActivityEditedTitlesProps): ReactElement | null {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const notes = useNotesEditedOn(date)
   if (notes === undefined || notes.length === 0) {
     return null

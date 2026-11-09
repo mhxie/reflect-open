@@ -1,13 +1,13 @@
-import type {
-  AiProviderCapabilities,
-  AiProviderConfig,
-  NewAiProvider,
-  OnDeviceServerKind,
+import {
+  defaultAiProvider,
+  type AiProviderCapabilities,
+  type AiProviderConfig,
+  type AiProvidersState,
+  type NewAiProvider,
+  type OnDeviceServerKind,
 } from '@reflect/core'
+import { useSelector } from '@/lib/use-store.ts'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
-
-export type { NewAiProvider } from '@reflect/core'
 
 interface UseAiProvidersValue {
   providers: AiProviderConfig[]
@@ -48,13 +48,17 @@ interface UseAiProvidersValue {
   setCapabilities: (id: string, capabilities: AiProviderCapabilities) => void
 }
 
+function selectProviders(state: AiProvidersState): AiProviderConfig[] {
+  return state.providers
+}
+
 /**
  * The configured-AI-providers surface (Plan 10), over the `AiProviderConfigService`.
  */
 export function useAiProviders(): UseAiProvidersValue {
   const { aiProviderConfig: service } = useCoreServices()
-  const providers = useServiceState(service, service.list)
-  const defaultProvider = useServiceState(service, service.defaultProvider)
+  const providers = useSelector(service, selectProviders)
+  const defaultProvider = useSelector(service, defaultAiProvider)
   return {
     providers,
     defaultProvider,

@@ -1,9 +1,17 @@
-import type { ReactElement, ReactNode } from 'react'
+import { Profiler, type ReactElement, type ReactNode } from 'react'
 import { act } from '@/test-utils/act.ts'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AppServices } from '@reflect/app'
 import { createTestDialogService } from '@reflect/app/testing'
-import type { AppPlatform, CoreServices, RecentGraph } from '@reflect/core'
+import type {
+  AppPlatform,
+  CoreServices,
+  GraphInfo,
+  GraphStatus,
+  MobileStorageInfo,
+  MobileStorageKind,
+  RecentGraph,
+} from '@reflect/core'
 import {
   createTestCoreServices,
   createTestGraphSessionService,
@@ -14,7 +22,21 @@ import {
 import { useGraphServices } from '@/services/services-provider.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
-import { GraphProvider, useGraph } from './graph-provider.tsx'
+import {
+  GraphProvider,
+  useGraphActions,
+  useGraphIndexing,
+  useGraphInfo,
+  useGraphRecents,
+  useGraphStatus,
+  useIndexGeneration,
+} from './graph-provider.tsx'
+import {
+  useMobileStorageInfo,
+  useMobileStorageKind,
+  useMobileStorageResolving,
+  useNeedsOnboarding,
+} from './use-mobile-graph-boot.ts'
 
 /**
  * The graph session, its boot flows and the mobile onboarding are covered in
@@ -29,30 +51,54 @@ import { GraphProvider, useGraph } from './graph-provider.tsx'
 const MOBILE_ROOT = '/Documents'
 const ICLOUD_ROOT = '/iCloud/Documents'
 
+/**
+ * Every slice of the graph context, as one object.
+ */
+interface GraphProbe extends ReturnType<typeof useGraphActions> {
+  needsOnboarding: boolean
+  mobileStorageInfo: MobileStorageInfo | null
+  mobileStorageResolving: boolean
+  mobileStorageKind: MobileStorageKind | null
+  status: GraphStatus
+  graph: GraphInfo | null
+  indexGeneration: number | null
+  recents: RecentGraph[]
+}
+
 function tree(children: ReactNode, platform?: AppPlatform): ReactElement {
   return <GraphProvider {...(platform === undefined ? {} : { platform })}>{children}</GraphProvider>
 }
 
 /**
- * Mount the provider over `app` and read its context.
+ * Mount the provider over `core` and read its context.
  */
-async function renderGraph<App extends CoreServices>(
-  app: App,
+async function renderGraph<Core extends CoreServices>(
+  core: Core,
   platform?: AppPlatform,
   appServices?: Partial<AppServices>,
 ) {
-  const result = {} as { current: ReturnType<typeof useGraph> }
+  const result = {} as { current: GraphProbe }
   function Probe(): null {
-    result.current = useGraph()
+    result.current = {
+      ...useGraphActions(),
+      needsOnboarding: useNeedsOnboarding(),
+      mobileStorageInfo: useMobileStorageInfo(),
+      mobileStorageResolving: useMobileStorageResolving(),
+      mobileStorageKind: useMobileStorageKind(),
+      status: useGraphStatus(),
+      graph: useGraphInfo(),
+      indexGeneration: useIndexGeneration(),
+      recents: useGraphRecents(),
+    }
     return null
   }
   const view = await renderInApp(tree(<Probe />, platform), {
-    app,
+    core,
     servicesOnly: true,
     ...(appServices === undefined ? {} : { appServices }),
   })
   return {
-    app,
+    core,
     appServices: view.appServices,
     result,
   }
@@ -122,7 +168,7 @@ describe('GraphProvider', () => {
   })
 
   it('opens a picked folder and seeds the empty graph', async () => {
-    const { app, appServices, result } = await renderGraph(
+    const { core, appServices, result } = await renderGraph(
       createTestCoreServices({ database: createWasmTestDatabaseService() }),
     )
     appServices.dialog.setFolder('/fresh')
@@ -135,12 +181,12 @@ describe('GraphProvider', () => {
     expect(result.current.status).toBe('ready')
     expect(result.current.graph?.root).toBe('/fresh')
     // The welcome note is written, and the graph is marked as seeded.
-    expect(app.noteFile.writes()).toHaveLength(1)
-    await expect(app.indexStore.getMeta('welcomeSeeded')).resolves.toBe('true')
+    expect(core.noteFile.writes()).toHaveLength(1)
+    await expect(core.indexStore.getMeta('welcomeSeeded')).resolves.toBe('true')
   })
 
   it('boots the app’s graph session and passes its actions through', async () => {
-    const { app, result } = await renderGraph(
+    const { core, result } = await renderGraph(
       createTestCoreServices({ database: createWasmTestDatabaseService() }),
     )
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
@@ -158,7 +204,7 @@ describe('GraphProvider', () => {
       localOnlyEditableFolders: [],
     })
     expect(result.current.indexGeneration).toBe(1)
-    expect(app.graphSession.getState().graph?.root).toBe('/a')
+    expect(core.graphSession.get().graph?.root).toBe('/a')
   })
 
   it('provides the open session’s graph services', async () => {
@@ -171,7 +217,8 @@ describe('GraphProvider', () => {
       )
     }
     function Probe() {
-      const { status, openRecent } = useGraph()
+      const status = useGraphStatus()
+      const { openRecent } = useGraphActions()
       if (status === 'ready') {
         return <SessionRoot />
       }
@@ -185,13 +232,51 @@ describe('GraphProvider', () => {
         </button>
       )
     }
-    const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-    const screen = await renderInApp(tree(<Probe />), { app, servicesOnly: true })
+    const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    const screen = await renderInApp(tree(<Probe />), { core, servicesOnly: true })
 
     await screen.getByRole('button', { name: 'Open' }).click()
 
     await expect.element(screen.getByText('main /a')).toBeVisible()
-    expect(app.graphSession.getState().session?.signal.aborted).toBe(false)
+    expect(core.graphSession.get().session?.signal.aborted).toBe(false)
+  })
+
+  it('re-renders a slice reader only when its field changes', async () => {
+    const renders = { graph: 0, indexing: 0 }
+    function GraphProbe() {
+      return <p>{useGraphInfo()?.root ?? 'none'}</p>
+    }
+    function IndexingProbe() {
+      return <p>{useGraphIndexing() ? 'indexing' : 'idle'}</p>
+    }
+    const core = createTestCoreServices({
+      database: createWasmTestDatabaseService(),
+      graphSession: createTestGraphSessionService({ graph: { root: '/a' } }),
+    })
+    const screen = await renderInApp(
+      tree(
+        <>
+          <Profiler id="graph" onRender={() => (renders.graph += 1)}>
+            <GraphProbe />
+          </Profiler>
+          <Profiler id="indexing" onRender={() => (renders.indexing += 1)}>
+            <IndexingProbe />
+          </Profiler>
+        </>,
+      ),
+      { core, servicesOnly: true },
+    )
+    await expect.element(screen.getByText('/a')).toBeVisible()
+    await expect.element(screen.getByText('idle')).toBeVisible()
+    const before = { ...renders }
+
+    await act(() => {
+      core.indexLifecycle.setProgress('reconciling')
+    })
+
+    await expect.element(screen.getByText('indexing')).toBeVisible()
+    expect(renders.graph).toBe(before.graph)
+    expect(renders.indexing).toBeGreaterThan(before.indexing)
   })
 
   it('shows a graph’s local-only configuration problems when it opens', async () => {
@@ -204,7 +289,7 @@ describe('GraphProvider', () => {
     const { appServices, result } = await renderGraph(app)
     const localOnlyOperations = () => {
       return appServices.operations
-        .getAll()
+        .get()
         .filter((operation) => operation.label === 'Local-only folders')
     }
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
@@ -237,7 +322,7 @@ describe('GraphProvider', () => {
     const { appServices, result } = await renderGraph(app)
     const backupOperations = () => {
       return appServices.operations
-        .getAll()
+        .get()
         .filter((operation) => operation.label === 'Backup settings')
     }
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
@@ -267,7 +352,7 @@ describe('GraphProvider mobile onboarding (Plans 19/21)', () => {
       icloudDocumentsRoot: ICLOUD_ROOT,
       icloudGraphRoots: [],
     }
-    const { app, result } = await renderGraph(
+    const { core, result } = await renderGraph(
       createTestCoreServices({
         database: createWasmTestDatabaseService(),
         platform: createTestPlatformService({ appPlatform: 'ios' }),
@@ -281,11 +366,11 @@ describe('GraphProvider mobile onboarding (Plans 19/21)', () => {
     expect(result.current.graph).toBeNull()
     await vi.waitFor(() => expect(result.current.mobileStorageInfo).toEqual(storage))
     expect(result.current.mobileStorageResolving).toBe(false)
-    expect(app.graphSession.getState().graph).toBeNull()
+    expect(core.graphSession.get().graph).toBeNull()
   })
 
-  it('publishes the app’s mobile onboarding and passes completeOnboarding through', async () => {
-    const { app, appServices, result } = await renderGraph(
+  it('publishes the app’s mobile onboarding after completeOnboarding', async () => {
+    const { core, appServices, result } = await renderGraph(
       createTestCoreServices({
         database: createWasmTestDatabaseService(),
         platform: createTestPlatformService({ appPlatform: 'ios' }),
@@ -296,14 +381,14 @@ describe('GraphProvider mobile onboarding (Plans 19/21)', () => {
     await vi.waitFor(() => expect(result.current.mobileStorageResolving).toBe(false))
 
     await act(async () => {
-      await result.current.completeOnboarding('local')
+      await appServices.mobileOnboarding.completeOnboarding('local')
     })
 
     expect(result.current.status).toBe('ready')
     expect(result.current.needsOnboarding).toBe(false)
     expect(result.current.graph?.root).toBe('/local/Documents')
     expect(result.current.mobileStorageKind).toBe('local')
-    expect(appServices.mobileOnboarding.getState().kind).toBe('local')
-    await vi.waitFor(() => expect(app.settings.saves().at(-1)?.mobileOnboarded).toBe(true))
+    expect(appServices.mobileOnboarding.get().kind).toBe('local')
+    await vi.waitFor(() => expect(core.settings.saves().at(-1)?.mobileOnboarded).toBe(true))
   })
 })

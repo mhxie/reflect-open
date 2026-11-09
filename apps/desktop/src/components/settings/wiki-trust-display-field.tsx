@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import type { WikiTrustDisplay } from '@reflect/core'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { cn } from '@/lib/utils.ts'
 import { SettingsField } from './field.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
@@ -24,7 +24,8 @@ const OPTIONS: readonly DisplayOption[] = [
  * reading, as radio cards. The three styles show the same report.
  */
 export function WikiTrustDisplayField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   return (
     <SettingsField
       legend="Claim trust"
@@ -47,7 +48,7 @@ export function WikiTrustDisplayField(): ReactElement {
                 name="wiki-trust-display"
                 value={value}
                 checked={selected}
-                onChange={() => updateSettings({ wikiTrustDisplay: value })}
+                onChange={() => settingsService.update({ wikiTrustDisplay: value })}
                 className="sr-only"
               />
               <WikiTrustDisplayPreview value={value} />

@@ -3,10 +3,12 @@ import type { IpcBridgeService } from '../ipc/ipc-service.ts'
 
 /**
  * An HTTPS sign-in for one remote operation: basic auth, presented once by
- * the Rust layer and never written anywhere. GitHub's shape is
+ * the Rust layer and never written anywhere, and only to `origin` (scheme,
+ * host and port, as `URL.origin` writes them). GitHub's shape is
  * `githubCredential(token)` in `./github-auth`.
  */
 export interface GitCredential {
+  origin: string
   username: string
   secret: string
 }
@@ -87,6 +89,8 @@ export type RemoteDelta = z.infer<typeof remoteDeltaSchema>
 export const remoteTipSchema = z.object({
   remoteOid: z.string().nullable(),
   trackingOid: z.string().nullable(),
+  /** The branch the remote's HEAD points at; `null` for an empty remote. */
+  defaultBranch: z.string().nullable(),
 })
 export type RemoteTip = z.infer<typeof remoteTipSchema>
 
@@ -193,9 +197,11 @@ export interface GitRepositoryService {
    */
   fetch(credential: GitCredential | null, generation: number): Promise<RemoteDelta>
   /**
-   * Ask `origin` for the current branch tip without fetching.
+   * Ask `origin` (or `url`, a remote that is not configured yet) for the
+   * current branch tip without fetching. `trackingOid` always describes
+   * `origin`'s tracking ref, so it is `null` for a probe from a fresh repo.
    */
-  remoteHead(credential: GitCredential | null, generation: number): Promise<RemoteTip>
+  remoteHead(credential: GitCredential | null, generation: number, url?: string): Promise<RemoteTip>
   /**
    * Push to `origin`; rejections come back as data, not thrown errors.
    */
@@ -251,8 +257,16 @@ class GitRepositoryServiceImpl implements GitRepositoryService {
     return this.#deps.ipc.call('git_fetch', { credential, generation }, remoteDeltaSchema)
   }
 
-  remoteHead(credential: GitCredential | null, generation: number): Promise<RemoteTip> {
-    return this.#deps.ipc.call('git_remote_head', { credential, generation }, remoteTipSchema)
+  remoteHead(
+    credential: GitCredential | null,
+    generation: number,
+    url?: string,
+  ): Promise<RemoteTip> {
+    return this.#deps.ipc.call(
+      'git_remote_head',
+      { url: url ?? null, credential, generation },
+      remoteTipSchema,
+    )
   }
 
   push(credential: GitCredential | null, generation: number): Promise<PushOutcome> {

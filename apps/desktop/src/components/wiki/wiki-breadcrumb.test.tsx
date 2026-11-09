@@ -23,7 +23,7 @@ async function renderBreadcrumb(path: string) {
       <WikiBreadcrumb path={path} />
     </div>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 1 },
       settings: { wikiLanguages: LANGUAGES },
     },
@@ -33,7 +33,7 @@ async function renderBreadcrumb(path: string) {
 type BreadcrumbView = Awaited<ReturnType<typeof renderBreadcrumb>>
 
 function probedRoute(view: BreadcrumbView): unknown {
-  return view.appServices.navigation.getState().route
+  return view.appServices.navigation.get().route
 }
 
 beforeEach(() => {

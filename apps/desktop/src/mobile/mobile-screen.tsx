@@ -2,8 +2,7 @@ import { lazy, type ReactElement } from 'react'
 import { useToday } from '@/lib/use-today.ts'
 import { MobileDaily } from '@/mobile/screens/daily.tsx'
 import { MobileNote } from '@/mobile/screens/note.tsx'
-import type { AllNotesFilters } from '@/mobile/search-filters/filter-state.ts'
-import { allNotesFilterTag, type Route } from '@/routing/route.ts'
+import { allNotesFilterTag, type AllNotesFilters, type Route } from '@reflect/app'
 
 const MobileAllNotes = lazy(async () => {
   const { MobileAllNotes } = await import('@/mobile/screens/all-notes.tsx')
@@ -32,7 +31,7 @@ const MobileTasks = lazy(async () => {
 
 interface MobileScreenProps {
   /**
-   * The route this screen renders. A prop rather than `useRouter()` because
+   * The route this screen renders. A prop rather than `useRouterState()` because
    * the stack ({@link MobileStack}) keeps more than one screen mounted at a
    * time — the current route plus the screen a back-swipe would reveal.
    */
@@ -48,8 +47,8 @@ interface MobileScreenProps {
 /**
  * The mobile route switch (Plan 19): the same typed `Route` history desktop
  * uses, one screen per route — the daily spine, notes, the All
- * tab (which also hosts `search` entries), the Tasks and Chat tabs, and the
- * pushed Settings / Graphs cards. Today is `useToday()`'s **live** date, so
+ * tab (which also hosts `search` entries), the Tasks tab, and the pushed
+ * Chat / Settings / Graphs cards. Today is `useToday()`'s **live** date, so
  * an app left open overnight rolls to the new day's note at midnight instead
  * of editing yesterday's.
  */

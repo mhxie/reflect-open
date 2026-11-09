@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { useRecorder } from '@/providers/recorder-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { LocalModelField } from './local-model-field.tsx'
 import { RecordingsFolderField } from './recordings-folder-field.tsx'
@@ -16,7 +16,8 @@ import { SettingsSwitchField } from './switch-field.tsx'
  * transcription uses the on-device model from Audio memos.
  */
 export function RecordingSection(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const { supported, defaultRecordingsFolder } = useRecorder()
 
   if (!supported) {
@@ -38,17 +39,17 @@ export function RecordingSection(): ReactElement {
         legend="Show in menu bar"
         description="Start and stop recording from the menu bar, for example while you're in a call."
         checked={settings.recordingMenuBar}
-        onCheckedChange={(recordingMenuBar) => updateSettings({ recordingMenuBar })}
+        onCheckedChange={(recordingMenuBar) => settingsService.update({ recordingMenuBar })}
       />
       <RecordingShortcutField
         key={settings.recordingShortcut}
         value={settings.recordingShortcut}
-        onSave={(recordingShortcut) => updateSettings({ recordingShortcut })}
+        onSave={(recordingShortcut) => settingsService.update({ recordingShortcut })}
       />
       <RecordingsFolderField
         folder={settings.recordingsFolder}
         defaultFolder={defaultRecordingsFolder}
-        onChange={(recordingsFolder) => updateSettings({ recordingsFolder })}
+        onChange={(recordingsFolder) => settingsService.update({ recordingsFolder })}
       />
       {settings.transcriptionEngine === 'local' ? null : <LocalModelField />}
     </SettingsSection>

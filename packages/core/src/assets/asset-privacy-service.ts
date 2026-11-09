@@ -68,7 +68,7 @@ class AssetPrivacyServiceImpl implements AssetPrivacyService {
 
   async classifyAsset(assetPath: string, generation: number): Promise<AssetVerdict> {
     const { noteFile, xArchive, assetReferences, graphSession } = this.#deps
-    const { session } = graphSession.getState()
+    const { session } = graphSession.get()
     if (session === null || session.generation !== generation) {
       return 'skip-private'
     }
@@ -90,7 +90,7 @@ class AssetPrivacyServiceImpl implements AssetPrivacyService {
     readSource: (notePath: string) => Promise<string>,
     knownOwners?: readonly string[],
   ): Promise<AssetVerdict> {
-    const { session } = this.#deps.graphSession.getState()
+    const { session } = this.#deps.graphSession.get()
     if (session === null) {
       return 'skip-private'
     }

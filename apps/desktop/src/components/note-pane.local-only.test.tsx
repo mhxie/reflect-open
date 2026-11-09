@@ -25,7 +25,7 @@ async function renderNote(path: string, files: Record<string, string>) {
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
       settings: {
         editorMarkdownSyntax: 'hide',
@@ -73,7 +73,7 @@ it('a link from a local-only note navigates but never creates a note', async () 
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
       settings: {
         editorMarkdownSyntax: 'hide',

@@ -9,7 +9,7 @@ import { useEditor, useExtension } from '@meowdown/react'
 import { TextSelection } from '@prosekit/pm/state'
 import { planWikiClaim, planWikiClaimBoundary, type WikiArticleIndex } from '@reflect/core'
 import { toast } from '@/components/ui/toast.tsx'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { whenEditorMounted } from '@/editor/when-editor-mounted.ts'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 import { clearNoteArticle, publishNoteArticle, useNoteArticle } from './wiki-article-store.ts'
@@ -27,6 +27,8 @@ interface WikiArticleBridgeProps {
 
 /** Hosts the note's shared claim projection and its local authoring action. */
 export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgeProps): ReactElement {
+  'use no memo' // Extension factories capture ref-backed callbacks for use after render.
+
   const editor = useEditor<EditorExtension>()
   const { logger } = useCoreServices()
   const { opener } = useAppServices()
@@ -45,7 +47,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
   }, [onWikiLinkClick])
   const [extension] = useState(() => {
     return defineWikiArticle({
-      asOf: todayIso,
+      asOf: getIsoToday,
       evidence: {
         interactive: true,
         openUrl: (url) => opener.openUrlSync(url),
@@ -82,8 +84,8 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
       }
       const plan =
         id === undefined
-          ? planWikiClaim(value.index.source, sourceFrom, sourceTo, todayIso())
-          : planWikiClaimBoundary(value.index.source, id, sourceFrom, sourceTo, todayIso())
+          ? planWikiClaim(value.index.source, sourceFrom, sourceTo, getIsoToday())
+          : planWikiClaimBoundary(value.index.source, id, sourceFrom, sourceTo, getIsoToday())
       if (!plan.ok) {
         toast.add({ type: 'error', title: plan.message })
         return

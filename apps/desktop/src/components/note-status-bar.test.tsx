@@ -3,17 +3,17 @@ import { page, userEvent } from 'vitest/browser'
 import { afterEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type {
   AttachmentService,
-  BackupState,
+  GitSyncState,
   NoteActionsService,
   NoteState,
   NoteStateKind,
 } from '@reflect/core'
 import {
-  createTestBackupService,
+  createTestGitSyncService,
   createTestCoreServices,
   createTestNoteFileService,
   createTestPlatformService,
-  type TestBackupService,
+  type TestGitSyncService,
   type TestCoreServices,
 } from '@reflect/core/testing'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
@@ -23,7 +23,7 @@ import {
   type NoteStatus,
   type NoteStatusScope,
 } from '@/editor/status/note-status-store.ts'
-import type { Route } from '@/routing/route.ts'
+import type { Route } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { toast } from '@/components/ui/toast.tsx'
@@ -67,10 +67,11 @@ const states: Record<NoteStateKind, NoteState> = {
 const owner = Symbol('test')
 const publishedScopes: NoteStatusScope[] = []
 
-const CONNECTED: BackupState = {
+const CONNECTED: GitSyncState = {
   phase: 'connected',
   remoteUrl: 'https://github.com/test/notes',
-  repo: null,
+  remote: { kind: 'github', repo: { owner: 'test', name: 'notes' } },
+  isPrimaryChannel: true,
   status: { state: 'idle' },
 }
 
@@ -112,7 +113,7 @@ interface BarOptions {
   readonly generation?: number
   readonly root?: string
   /** The open graph's backup state; disconnected by default. */
-  readonly backup?: BackupState
+  readonly backup?: GitSyncState
   readonly statusBarEnabled?: boolean
   readonly mobile?: boolean
   /** The indexed mtime of every note (epoch ms). */
@@ -125,20 +126,20 @@ interface BarOptions {
 
 // The services of the rendered bar; set by `renderBar`.
 let app: TestCoreServices
-let backup: TestBackupService
+let backup: TestGitSyncService
 let reveal: MockInstance<AttachmentService['reveal']>
 let togglePrivate: MockInstance<NoteActionsService['togglePrivate']>
 
 async function renderBar(initialRoute: Route, options: BarOptions = {}) {
-  backup = createTestBackupService({ state: options.backup ?? { phase: 'disconnected' } })
+  backup = createTestGitSyncService({ state: options.backup ?? { phase: 'disconnected' } })
   app = createTestCoreServices({
     database: createWasmTestDatabaseService(),
-    backup,
+    gitSync: backup,
     noteFile: createTestNoteFileService({ files: { ...options.files } }),
     ...(options.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),
   })
   onTestFinished(() => app.database.close())
-  app.clock.setToday('2026-10-03')
+  app.clock.setNow(new Date('2026-10-03T12:00:00').getTime())
   app.gitRepository.onNoteVersion(() => 'abc123def4')
   const mtime = options.mtime ?? null
   vi.spyOn(app.indexQuery, 'getNoteMtime').mockImplementation(() => {
@@ -155,7 +156,7 @@ async function renderBar(initialRoute: Route, options: BarOptions = {}) {
     />
   )
   return await renderInApp(options.around === undefined ? bar : options.around(bar), {
-    app,
+    core: app,
     graph: {
       root: options.root ?? '/g',
       name: 'g',

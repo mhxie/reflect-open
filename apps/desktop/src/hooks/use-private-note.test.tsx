@@ -30,7 +30,7 @@ let getNote: MockInstance<TestCoreServices['indexQuery']['getNote']>
 
 async function settledState(path: string, options: PrivateNoteOptions) {
   const hook = await renderHookInApp(() => usePrivateNoteState(path, options), {
-    app,
+    core: app,
     graph: GRAPH,
   })
   await vi.waitFor(() => expect(getNote).toHaveBeenCalledWith(path))
@@ -83,7 +83,7 @@ describe('usePrivateNoteState', () => {
     getNote.mockImplementation(() => new Promise(() => {}))
     const { result } = await renderHookInApp(
       () => usePrivateNoteState('notes/plan.md', noSession),
-      { app, graph: GRAPH },
+      { core: app, graph: GRAPH },
     )
     await vi.waitFor(() => expect(getNote).toHaveBeenCalled())
     expect(result.current).toEqual({ privateNote: true, pending: true })
@@ -123,7 +123,7 @@ describe('usePrivateNoteState', () => {
     const session = { sessionEpoch: 3, privateHeader: false }
     const hook = await renderHookInApp(
       ({ path }: { path: string } = { path: 'notes/old.md' }) => usePrivateNoteState(path, session),
-      { app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
+      { core: app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
     )
     await vi.waitFor(() => expect(hook.result.current.privateNote).toBe(false))
 
@@ -143,7 +143,7 @@ describe('usePrivateNoteState', () => {
       ({ path }: { path: string } = { path: 'notes/old.md' }) => {
         return usePrivateNoteState(path, noSession)
       },
-      { app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
+      { core: app, graph: GRAPH, initialProps: { path: 'notes/old.md' } },
     )
     await vi.waitFor(() => expect(hook.result.current.privateNote).toBe(false))
 

@@ -1,12 +1,11 @@
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
 import type { ReactElement } from 'react'
-import type { Route } from '@reflect/app'
-import type { GraphInfo } from '@reflect/core'
 import { createTestCoreServices, seedNotes } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { PeekProvider } from '@/components/peek/peek-provider.tsx'
-import { formatDayLabel } from '@/lib/dates.ts'
+import { type GraphInfo, formatDayLabel } from '@reflect/core'
+import type { Route } from '@reflect/app'
 import { AudioMemoProvider } from '@/providers/audio-memo-provider.tsx'
 import { DeepLinkProvider } from '@/providers/deep-link-provider.tsx'
 import { FocusedDailyProvider } from '@/providers/focused-daily-provider.tsx'
@@ -43,10 +42,10 @@ function SidebarToggle(): ReactElement {
 }
 
 function renderWorkspace(route: Route) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-  onTestFinished(() => app.database.close())
+  const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  onTestFinished(() => core.database.close())
   // Pinned, so the sidebar of this note (and only this note) offers "Un-pin this note".
-  seedNotes(app.database, [
+  seedNotes(core.database, [
     { path: 'notes/project.md', markdown: '---\npinned: true\n---\n# Project\n' },
   ])
   // The providers of `GraphWorkspace`, inside the router of `renderInApp`.
@@ -78,7 +77,7 @@ function renderWorkspace(route: Route) {
       </ShortcutsProvider>
     </PaletteProvider>,
     {
-      app,
+      core,
       graph: GRAPH,
       route,
       // The AppShell asides mount resize handles, which read the persisted widths.

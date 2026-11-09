@@ -17,9 +17,9 @@ import {
   isPrivateNoteError,
   notePrivate,
   type CloudAssetDescription,
-  type CloudSafe,
   type PrivacyService,
 } from '../../privacy/privacy-service.ts'
+import type { CloudSafe } from '../../privacy/cloud-safe.ts'
 
 /**
  * The read_assets tool's executor (Plan 20 meets Plan 10): resolve an

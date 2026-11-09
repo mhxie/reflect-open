@@ -10,7 +10,7 @@ import {
 } from '@reflect/core/testing'
 import type { ReactNode } from 'react'
 import { deepLinkForRoute } from '@reflect/app'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SimilarNotesSection } from './similar-notes-section.tsx'
@@ -20,12 +20,12 @@ const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 let semanticSearchEnabled: boolean
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
 async function renderSimilar(path: string, probe: boolean = true) {
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { 'daily/2026-06-09.md': '- daily entry\n' } }),
     retrieval: createTestRetrievalService({ relatedNotes }),
@@ -36,7 +36,7 @@ async function renderSimilar(path: string, probe: boolean = true) {
       {probe ? <RouteProbe /> : null}
     </>,
     {
-      app,
+      core,
       appServices: { window: createTestWindowService({ openNoteWindow }) },
       graph: { root: '/g', name: 'g' },
       settings: { semanticSearchEnabled },

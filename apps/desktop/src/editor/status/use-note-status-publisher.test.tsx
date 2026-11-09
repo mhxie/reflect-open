@@ -45,7 +45,7 @@ beforeEach(() => {
  * Render `hook` in the app of the running test.
  */
 function renderHook<Result>(hook: () => Result) {
-  return renderHookInApp(hook, { app })
+  return renderHookInApp(hook, { core: app })
 }
 
 describe('useNoteStatusPublisher', () => {

@@ -1,15 +1,17 @@
-import type { MaybePromise } from '@reflect/utils'
+import { type MaybePromise, getYearMonth } from '@reflect/utils'
+import {
+  type DailyNoteService,
+  type NoteRow,
+  type RetrievalService,
+  formatDayLabel,
+  type DailyActivityService,
+} from '@reflect/core'
+import { deepLinkForRoute, formatMonthLabel } from '@reflect/app'
 import { createTestWindowService } from '@reflect/app/testing'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { act } from '@/test-utils/act.ts'
-import type {
-  DailyActivityService,
-  DailyNoteService,
-  NoteRow,
-  RetrievalService,
-} from '@reflect/core'
 import {
   createTestCoreServices,
   createTestNoteFileService,
@@ -18,10 +20,7 @@ import {
   type TestNoteFileService,
   type TestStorageService,
 } from '@reflect/core/testing'
-import { formatDayLabel } from '@/lib/dates.ts'
-import { deepLinkForRoute } from '@reflect/app'
-import { monthLabel, monthOf } from '@/lib/month-grid.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
@@ -38,11 +37,11 @@ const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 let noteRowAnswer: NoteRow | null
 let dailySource: string
 
-// The note files of the rendered app; set by `createApp`.
+// The note files of the rendered app; set by `createCore`.
 let noteFile: TestNoteFileService
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
@@ -60,27 +59,27 @@ function sidebar(date: string, height?: number): ReactNode {
   )
 }
 
-function createApp(storage: TestStorageService = createTestStorageService()) {
+function createCore(storage: TestStorageService = createTestStorageService()) {
   noteFile = createTestNoteFileService({ files: { 'daily/2026-06-09.md': dailySource } })
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteFile,
     storage,
     retrieval: createTestRetrievalService({ relatedNotes }),
   })
-  vi.spyOn(app.dailyNotes, 'dailyDatesInRange').mockImplementation(dailyDatesInRange)
-  vi.spyOn(app.dailyActivity, 'listDailyActivity').mockImplementation(listDailyActivity)
-  vi.spyOn(app.dailyActivity, 'listDailyEditCounts').mockImplementation(listDailyEditCounts)
-  vi.spyOn(app.tasks, 'getOpenTasks').mockResolvedValue([])
-  vi.spyOn(app.indexQuery, 'getNote').mockImplementation(() => {
+  vi.spyOn(core.dailyNotes, 'dailyDatesInRange').mockImplementation(dailyDatesInRange)
+  vi.spyOn(core.dailyActivity, 'listDailyActivity').mockImplementation(listDailyActivity)
+  vi.spyOn(core.dailyActivity, 'listDailyEditCounts').mockImplementation(listDailyEditCounts)
+  vi.spyOn(core.tasks, 'getOpenTasks').mockResolvedValue([])
+  vi.spyOn(core.indexQuery, 'getNote').mockImplementation(() => {
     return Promise.resolve(noteRowAnswer ?? undefined)
   })
-  return app
+  return core
 }
 
-async function renderSidebar(date: string, app = createApp(), height?: number) {
+async function renderSidebar(date: string, core = createCore(), height?: number) {
   return await renderInApp(sidebar(date, height), {
-    app,
+    core,
     appServices: { window: createTestWindowService({ openNoteWindow }) },
     graph: { root: '/g', name: 'g' },
     settings: {
@@ -176,19 +175,19 @@ describe('DailyContextSidebar calendar', () => {
 
   it('pages between months across year boundaries', async () => {
     await renderSidebar('2026-01-15')
-    await expect.element(page.getByText(monthLabel('2026-01'))).toBeVisible()
+    await expect.element(page.getByText(formatMonthLabel('2026-01'))).toBeVisible()
     await userEvent.click(page.getByRole('button', { name: 'Previous month' }))
-    await expect.element(page.getByText(monthLabel('2025-12'))).toBeVisible()
+    await expect.element(page.getByText(formatMonthLabel('2025-12'))).toBeVisible()
     await userEvent.click(page.getByRole('button', { name: 'Next month' }))
     await userEvent.click(page.getByRole('button', { name: 'Next month' }))
-    await expect.element(page.getByText(monthLabel('2026-02'))).toBeVisible()
+    await expect.element(page.getByText(formatMonthLabel('2026-02'))).toBeVisible()
   })
 
   it('re-anchors the visible month when the selected day changes', async () => {
     const view = await renderSidebar('2026-06-09')
-    await expect.element(page.getByText(monthLabel('2026-06'))).toBeVisible()
+    await expect.element(page.getByText(formatMonthLabel('2026-06'))).toBeVisible()
     await view.rerender(sidebar('2026-09-01'))
-    await expect.element(page.getByText(monthLabel('2026-09'))).toBeVisible()
+    await expect.element(page.getByText(formatMonthLabel('2026-09'))).toBeVisible()
   })
 })
 
@@ -235,7 +234,7 @@ describe('DailyContextSidebar sections', () => {
   it('collapses a section and persists the state for the session', async () => {
     // One session: both mounts read the same storage.
     const storage = createTestStorageService()
-    const view = await renderSidebar('2026-06-09', createApp(storage))
+    const view = await renderSidebar('2026-06-09', createCore(storage))
     const header = page.getByRole('button', { name: /Note actions/ })
     await expect.element(header).toHaveAttribute('aria-expanded', 'true')
     await expect.element(page.getByText('Pin this note')).toBeVisible()
@@ -245,7 +244,7 @@ describe('DailyContextSidebar sections', () => {
     await expect.element(page.getByText('Pin this note')).not.toBeInTheDocument()
     await view.unmount()
 
-    await renderSidebar('2026-06-09', createApp(storage))
+    await renderSidebar('2026-06-09', createCore(storage))
     await expect
       .element(page.getByRole('button', { name: /Note actions/ }))
       .toHaveAttribute('aria-expanded', 'false')
@@ -268,7 +267,7 @@ describe('DailyContextSidebar sections', () => {
 
   it('keeps the activity heatmap at the bottom of a sidebar taller than its sections', async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
-    const view = await renderSidebar('2026-06-09', createApp(), 1000)
+    const view = await renderSidebar('2026-06-09', createCore(), 1000)
     const tasks = page.getByText('No tasks for this day')
     await expect.element(tasks).toBeVisible()
     const heatmap = page.getByRole('grid', { name: 'Daily note activity' })
@@ -297,7 +296,7 @@ describe('DailyContextSidebar sections', () => {
       })),
     )
     // Room for the pinned parts and a few lines of sections.
-    await renderSidebar('2026-06-09', createApp(), 720)
+    await renderSidebar('2026-06-09', createCore(), 720)
     const tasks = page.getByText('No tasks for this day')
     await expect.element(tasks).toBeVisible()
     await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
@@ -305,7 +304,7 @@ describe('DailyContextSidebar sections', () => {
     await expect.element(heatmap).toBeVisible()
     await expect.element(page.getByText('Published URL')).toBeVisible()
     const pinned = [
-      page.getByText(monthLabel(monthOf('2026-06-09'))).element(),
+      page.getByText(formatMonthLabel(getYearMonth('2026-06-09'))).element(),
       page.getByText('Pin this note').element(),
       page.getByText('Published URL').element(),
       heatmap.element(),
@@ -326,7 +325,7 @@ describe('DailyContextSidebar sections', () => {
   it('keeps the parts pinned in a default-size window, even for a six-row month', async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-08-08', characters: 120 }])
     // The app's default window is 650px tall; August 2026 takes six calendar rows.
-    await renderSidebar('2026-08-09', createApp(), 650)
+    await renderSidebar('2026-08-09', createCore(), 650)
     const tasks = page.getByText('No tasks for this day')
     await expect.element(tasks).toBeVisible()
     await expect.element(page.getByRole('grid', { name: 'Daily note activity' })).toBeVisible()
@@ -347,9 +346,9 @@ describe('DailyContextSidebar sections', () => {
         isPrivate: false,
       })),
     )
-    const app = createApp()
+    const core = createCore()
     noteFile.set('daily/2026-06-10.md', '- another entry\n')
-    const view = await renderSidebar('2026-06-10', app, 720)
+    const view = await renderSidebar('2026-06-10', core, 720)
     await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
     await view.rerender(sidebar('2026-06-09', 720))
     await expect.element(page.getByText('Neighbor 5')).toBeInTheDocument()
@@ -367,7 +366,7 @@ describe('DailyContextSidebar sections', () => {
   it('scrolls the whole sidebar when the window is too short for the pinned parts', async () => {
     listDailyActivity.mockResolvedValue([{ date: '2026-06-08', characters: 120 }])
     // Tauri's minimum window height.
-    const view = await renderSidebar('2026-06-09', createApp(), 200)
+    const view = await renderSidebar('2026-06-09', createCore(), 200)
     const tasks = page.getByText('No tasks for this day')
     await expect.element(tasks).toBeInTheDocument()
     const heatmap = page.getByRole('grid', { name: 'Daily note activity' })
@@ -391,7 +390,7 @@ describe('DailyContextSidebar sections', () => {
 
   it('the calendar is not collapsible', async () => {
     await renderSidebar('2026-06-09')
-    await expect.element(page.getByText(monthLabel(monthOf('2026-06-09')))).toBeVisible()
+    await expect.element(page.getByText(formatMonthLabel(getYearMonth('2026-06-09')))).toBeVisible()
     await expect.element(page.getByRole('button', { name: /^Calendar$/ })).not.toBeInTheDocument()
   })
 })

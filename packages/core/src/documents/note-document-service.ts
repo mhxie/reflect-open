@@ -213,7 +213,7 @@ class NoteDocumentServiceImpl implements NoteDocumentService {
     // inside a read-only local-only folder refuses them all. An editable
     // folder's notes take them: Rust keeps those writes inside the folder,
     // checked against the text they were computed from.
-    const graph = graphSession.getState().session
+    const graph = graphSession.get().session
     if (graph !== null && isLocalOnlyReadOnlyPath(graph.localOnly, path)) {
       return Promise.reject(
         new AppError(

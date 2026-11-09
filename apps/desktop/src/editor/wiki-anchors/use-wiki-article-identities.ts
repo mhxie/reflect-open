@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { readWikiArticle, splitWikiLinkTarget } from '@reflect/core'
-import { todayIso } from '@/lib/dates.ts'
-import { useMaybeGraph } from '@/providers/graph-provider.tsx'
+import { getIsoToday } from '@reflect/utils'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -9,14 +9,14 @@ import { useCoreServices } from '@/services/services-provider.tsx'
  */
 export function useWikiArticleIdentities(source: string): (title: string) => string | null {
   const { noteLinkResolver } = useCoreServices()
-  const graph = useMaybeGraph()?.graph ?? null
+  const graph = useGraphInfo()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const namesKey = useMemo(() => {
     return JSON.stringify(
       [
         ...new Set(
-          readWikiArticle(source, todayIso())
+          readWikiArticle(source, getIsoToday())
             .references.filter((reference) => reference.kind === 'note')
             .map((reference) => splitWikiLinkTarget(reference.target).name),
         ),

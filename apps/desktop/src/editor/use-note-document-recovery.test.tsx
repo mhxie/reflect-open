@@ -86,7 +86,7 @@ it('pins recovery ownership to the hook session and offers each closed window’
   }
 
   for (const contents of ['# A\n', '# B\n']) {
-    const window = await renderHookInApp(() => useNoteDocument(NOTE), { app, graph })
+    const window = await renderHookInApp(() => useNoteDocument(NOTE), { core: app, graph })
     await vi.waitFor(() => expect(window.result.current.status).toBe('ready'))
     window.result.current.onEditorChange(contents)
     await app.openDocuments.flushAll()
@@ -100,7 +100,7 @@ it('pins recovery ownership to the hook session and offers each closed window’
   expect(second?.sourceRevision).toBe('# Hello\n')
 
   blocked = false
-  const reopened = await renderHookInApp(() => useNoteDocument(NOTE), { app, graph })
+  const reopened = await renderHookInApp(() => useNoteDocument(NOTE), { core: app, graph })
   await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(second))
   reopened.result.current.restoreRecovery()
   await app.openDocuments.flushAll()

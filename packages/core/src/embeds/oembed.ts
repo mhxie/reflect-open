@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeParseJson } from '@reflect/utils'
 
 /**
  * oEmbed policy for link capture: which capture URLs have an oEmbed answer
@@ -91,13 +92,7 @@ export interface OEmbedAnswer {
 
 /** Parse one oEmbed answer's JSON text, or `null` when it is not one. */
 export function parseOEmbedAnswer(json: string): OEmbedAnswer | null {
-  let raw: unknown
-  try {
-    raw = JSON.parse(json)
-  } catch {
-    return null
-  }
-  const parsed = oembedAnswerSchema.safeParse(raw)
+  const parsed = oembedAnswerSchema.safeParse(safeParseJson(json))
   if (!parsed.success) {
     return null
   }

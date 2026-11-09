@@ -1,11 +1,15 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useMemo, type ReactElement, type ReactNode } from 'react'
 import { Sparkles } from 'lucide-react'
 import { formatModelSize, semanticModel } from '@reflect/core'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { useEmbedStatus } from '@/lib/use-embed-status.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import {
+  useSemanticSearchEnabled,
+  useSettingsService,
+  useSettingsStore,
+} from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
-import { useServiceState } from '@/services/use-service-state.ts'
+import { useStore } from '@/lib/use-store.ts'
 import { DescribeAssetsField } from './describe-assets-field.tsx'
 import { SettingsField } from './field.tsx'
 import { ModelDownloadProgress } from './model-download-progress.tsx'
@@ -23,24 +27,31 @@ import { SemanticModelField } from './semantic-model-field.tsx'
  * that follows a model switch.
  */
 export function SearchSection(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const semanticSearchEnabled = useSemanticSearchEnabled()
+  const settingsService = useSettingsService()
   const status = useEmbedStatus()
   const { semanticSearch } = useCoreServices()
-  const indexProgress = useServiceState(semanticSearch, semanticSearch.getIndexProgress)
+  const indexProgress = useStore(
+    useMemo(
+      () => ({ get: semanticSearch.getIndexProgress, subscribe: semanticSearch.subscribe }),
+      [semanticSearch],
+    ),
+  )
 
   let control: ReactNode
   if (status.status === 'unsupported') {
     control = (
       <p className="text-xs text-text-muted">Semantic search is not available on this device.</p>
     )
-  } else if (!settings.semanticSearchEnabled) {
+  } else if (!semanticSearchEnabled) {
     // Disabling takes effect immediately — every semantic consumer gates on
     // the setting, so the still-loaded model just idles. No caveat needed.
     control = (
       <button
         type="button"
         onClick={() => {
-          updateSettings({ semanticSearchEnabled: true })
+          settingsService.update({ semanticSearchEnabled: true })
           // EmbeddingsSync loads an untouched runtime; a `failed` one only
           // retries on an explicit action like this.
           void semanticSearch.retryFailedModel()
@@ -61,7 +72,7 @@ export function SearchSection(): ReactElement {
           </span>
           <button
             type="button"
-            onClick={() => updateSettings({ semanticSearchEnabled: false })}
+            onClick={() => settingsService.update({ semanticSearchEnabled: false })}
             className="shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-100 hover:bg-surface-hover"
           >
             Disable
@@ -84,7 +95,7 @@ export function SearchSection(): ReactElement {
           </button>
           <button
             type="button"
-            onClick={() => updateSettings({ semanticSearchEnabled: false })}
+            onClick={() => settingsService.update({ semanticSearchEnabled: false })}
             className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-100 hover:bg-surface-hover"
           >
             Disable

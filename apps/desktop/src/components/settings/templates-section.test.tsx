@@ -6,7 +6,7 @@ import { createTestWindowService } from '@reflect/app/testing'
 import { createTestCoreServices } from '@reflect/core/testing'
 import { deepLinkForRoute } from '@reflect/app'
 import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { TemplatesSection } from './templates-section.tsx'
@@ -14,7 +14,7 @@ import { TemplatesSection } from './templates-section.tsx'
 const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return (
     <output data-testid="route">
       {route.kind === 'note' ? `${route.kind}:${route.path}` : route.kind}
@@ -22,9 +22,9 @@ function RouteProbe(): ReactElement {
   )
 }
 
-async function renderSection(): Promise<void> {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
-  vi.spyOn(app.indexQuery, 'listTemplates').mockResolvedValue([
+async function renderSection(): Promise<ReturnType<typeof createTestCoreServices>> {
+  const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  vi.spyOn(core.indexQuery, 'listTemplates').mockResolvedValue([
     { path: 'templates/weekly-review.md', title: 'Weekly review', mtime: 1 },
   ])
   await renderInApp(
@@ -33,13 +33,14 @@ async function renderSection(): Promise<void> {
       <RouteProbe />
     </>,
     {
-      app,
+      core,
       appServices: { window: createTestWindowService({ openNoteWindow }) },
       graph: { root: '/g', name: 'g' },
       route: { kind: 'settings' },
       wrapper: (children) => <NoteTemplatesProvider>{children}</NoteTemplatesProvider>,
     },
   )
+  return core
 }
 
 beforeEach(() => {
@@ -72,5 +73,47 @@ describe('TemplatesSection note links', () => {
       )
     })
     expect(page.getByTestId('route').element().textContent).toBe('settings')
+  })
+})
+
+describe('TemplatesSection dialogs', () => {
+  it('ignores a second delete click while the first is still trashing', async () => {
+    const core = await renderSection()
+    const { promise, resolve } =
+      Promise.withResolvers<Awaited<ReturnType<typeof core.noteActions.trashOne>>>()
+    const trashOne = vi.spyOn(core.noteActions, 'trashOne').mockReturnValue(promise)
+
+    await userEvent.click(page.getByRole('button', { name: 'Delete Weekly review' }))
+    await userEvent.click(page.getByRole('button', { name: 'Delete', exact: true }))
+
+    const pendingButton = page.getByRole('button', { name: 'Deleting…' })
+    await expect.element(pendingButton).toBeDisabled()
+    pendingButton.element().dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(trashOne).toHaveBeenCalledTimes(1)
+
+    resolve({ trashed: 'system' })
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+    expect(trashOne).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables Rename while the rename is in flight', async () => {
+    const core = await renderSection()
+    const { promise, resolve } = Promise.withResolvers<string>()
+    const renameTemplate = vi.spyOn(core.templates, 'renameTemplate').mockReturnValue(promise)
+
+    await userEvent.click(page.getByRole('button', { name: 'Rename Weekly review' }))
+    await userEvent.fill(page.getByRole('textbox', { name: 'Template name' }), 'Daily review')
+    await userEvent.click(page.getByRole('button', { name: 'Rename', exact: true }))
+
+    await expect.element(page.getByRole('button', { name: 'Rename', exact: true })).toBeDisabled()
+    await expect.element(page.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('dialog')).toBeInTheDocument()
+    // Enter in the field is an implicit submit; a disabled submit button blocks it.
+    await userEvent.type(page.getByRole('textbox', { name: 'Template name' }), '{Enter}')
+    expect(renameTemplate).toHaveBeenCalledTimes(1)
+
+    resolve('templates/daily-review.md')
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   })
 })

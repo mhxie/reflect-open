@@ -13,6 +13,7 @@ import {
   findWikiClaim,
   readWikiClaimIndex,
   wikiClaimId,
+  formatRecencyLabel,
 } from '@reflect/core'
 import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
 import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
@@ -54,17 +55,25 @@ import { noteProtection } from '@/editor/status/note-protection.ts'
 import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
 import { useTemplateSlashItems } from '@/editor/use-template-slash-items.ts'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
-import { useLinkPreview } from '@/editor/use-link-preview.ts'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
-import { formatRecencyLabel, todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { cn } from '@/lib/utils.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useNoteSearchQuery, useNoteSearchReport } from '@/providers/note-find-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import {
+  useDateFormat,
+  useEditorBulletAfterHeading,
+  useEditorDefaultBullet,
+  useEditorMarkdownSyntax,
+  useEditorSmoothCaretAnimation,
+  useEditorSpellCheck,
+  useTimeFormat,
+  useSettingsStore,
+} from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NotePaneProps {
@@ -143,7 +152,7 @@ interface NotePaneProps {
 /** Reveal an exact claim range, or an ordinary heading for non-claim fragments. */
 function revealFragment(editor: NoteEditorHandle, fragment: string): boolean {
   if (wikiClaimId(fragment) !== null) {
-    const claim = findWikiClaim(readWikiClaimIndex(editor.getMarkdown(), todayIso()), fragment)
+    const claim = findWikiClaim(readWikiClaimIndex(editor.getMarkdown(), getIsoToday()), fragment)
     if (claim?.kind === 'range') return editor.revealSourceRange?.(claim.from, claim.to) ?? false
     else if (claim?.heading !== null && claim?.heading !== undefined)
       return editor.revealHeading(claim.heading)
@@ -189,9 +198,16 @@ export function NotePaneComponent({
   reveal,
   onRevealed,
 }: NotePaneProps): ReactElement {
-  const { graph } = useGraph()
-  const { settings } = useSettings()
-  const { noteCreation, platform } = useCoreServices()
+  const graph = useGraphInfo()
+  const settings = useSettingsStore()
+  const dateFormat = useDateFormat()
+  const timeFormat = useTimeFormat()
+  const editorMarkdownSyntax = useEditorMarkdownSyntax()
+  const editorSpellCheck = useEditorSpellCheck()
+  const editorSmoothCaretAnimation = useEditorSmoothCaretAnimation()
+  const editorDefaultBullet = useEditorDefaultBullet()
+  const editorBulletAfterHeading = useEditorBulletAfterHeading()
+  const { noteCreation, platform, linkPreview } = useCoreServices()
   const generation = graph?.generation ?? null
   const graphKey = graph?.root ?? null
   const dailyNote = isDaily(path)
@@ -245,7 +261,7 @@ export function NotePaneComponent({
     saveError,
   } = useAssetPersistence(path, openPdf)
   const renderWikilinkHoverCard = useWikiLinkHoverPreview({
-    dateFormat: settings.dateFormat,
+    dateFormat,
   })
   // Read-only navigation only resolves: a link from a local-only note must
   // never create a note.
@@ -253,12 +269,10 @@ export function NotePaneComponent({
   const onLinkClick = useMarkdownLinkClick(path)
   const onTagClick = useTagNavigation()
   const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
-  const linkPreviewSession = useMemo(() => {
-    return graphKey === null || localOnly
-      ? null
-      : { path, graphKey, sessionEpoch: document.sessionEpoch }
-  }, [path, graphKey, localOnly, document.sessionEpoch])
-  const resolveLinkPreview = useLinkPreview(linkPreviewSession)
+  const resolveLinkPreview = useMemo(
+    () => (graph !== null && !localOnly ? linkPreview.createResolver(path) : undefined),
+    [graph, localOnly, linkPreview, path],
+  )
 
   const bindEditor = document.bindEditor
   const aiEditorRef = useRef<NoteEditorHandle | null>(null)
@@ -550,10 +564,7 @@ export function NotePaneComponent({
   // setting is on (old Reflect's every-note default). The seed only changes what
   // the editor shows; persistence is untouched, so a not-yet-created daily
   // placeholder stays uncreated until the user types — see `default-bullet.ts`.
-  const editorSeed = editorBodyWithDefaultBullet(
-    document.initialContent,
-    settings.editorDefaultBullet,
-  )
+  const editorSeed = editorBodyWithDefaultBullet(document.initialContent, editorDefaultBullet)
 
   return (
     <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
@@ -593,13 +604,13 @@ export function NotePaneComponent({
         // input, in place: the session (and its buffer) never changes.
         readOnly={document.saveBlocked}
         onChange={handleEditorChange}
-        markMode={markModeFromSyntax(settings.editorMarkdownSyntax)}
-        spellCheck={settings.editorSpellCheck}
+        markMode={markModeFromSyntax(editorMarkdownSyntax)}
+        spellCheck={editorSpellCheck}
         searchQuery={searchQuery}
         onSearchChange={handleSearchChange}
-        smoothCaretAnimation={settings.editorSmoothCaretAnimation}
-        timeFormat={settings.timeFormat}
-        bulletAfterHeading={settings.editorBulletAfterHeading}
+        smoothCaretAnimation={editorSmoothCaretAnimation}
+        timeFormat={timeFormat}
+        bulletAfterHeading={editorBulletAfterHeading}
         backspaceDeletesEmptyFirstBlock={dailyNote}
         // The grip drag-reorders blocks and the "+" inserts a paragraph below.
         blockHandle={true}
@@ -641,9 +652,7 @@ export function NotePaneComponent({
         <EditorAiKeymap onTrigger={aiMenu.openMenu} />
         <NoteTitlePresentationBridge
           metadata={
-            markModeFromSyntax(settings.editorMarkdownSyntax) === 'show'
-              ? undefined
-              : document.titleMetadata
+            markModeFromSyntax(editorMarkdownSyntax) === 'show' ? undefined : document.titleMetadata
           }
         />
         {outline ? <OutlineBridge path={path} /> : null}

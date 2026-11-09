@@ -143,7 +143,7 @@ class NoteDisplacementServiceImpl implements NoteDisplacementService {
    * pairs when it changed. False when no graph is open.
    */
   #followSession(): boolean {
-    const generation = this.#deps.graphSession.getState().session?.generation ?? null
+    const generation = this.#deps.graphSession.get().session?.generation ?? null
     if (generation !== this.#generation) {
       this.#recorded.clear()
       this.#generation = generation

@@ -37,7 +37,7 @@ function Host({ options }: { options: NoteEmbedSourceOptions }): ReactElement {
 }
 
 function render(ui: ReactElement) {
-  return renderInApp(ui, { app })
+  return renderInApp(ui, { core: app })
 }
 
 type View = Awaited<ReturnType<typeof render>>

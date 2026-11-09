@@ -1,10 +1,9 @@
 import { memo, type MouseEvent, type ReactElement } from 'react'
-import type { NoteListEntry } from '@reflect/core'
+import { type NoteListEntry, formatRecencyLabel } from '@reflect/core'
 import { Pin } from 'lucide-react'
-import { formatRecencyLabel } from '@/lib/dates.ts'
 import { cn } from '@/lib/utils.ts'
 import type { ModClickEvent } from '@/hooks/use-note-link-navigation.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useDateFormat, useTimeFormat } from '@/providers/settings-provider.tsx'
 import { NoteStateIndicator } from '@/components/note-state-indicator.tsx'
 import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
 import { NoteTitle } from '@/components/note-title.tsx'
@@ -47,7 +46,8 @@ export const AllNotesRow = memo(function AllNotesRow({
   onToggle,
   onOpen,
 }: AllNotesRowProps): ReactElement {
-  const { settings } = useSettings()
+  const dateFormat = useDateFormat()
+  const timeFormat = useTimeFormat()
   const noteLabel = useNoteLabel()
   return (
     <ListRow
@@ -93,7 +93,7 @@ export const AllNotesRow = memo(function AllNotesRow({
         ) : null}
       </span>
       <span className="whitespace-nowrap text-right text-[13px] tabular-nums text-text-secondary">
-        {note.mtime > 0 ? formatRecencyLabel(note.mtime, settings) : '—'}
+        {note.mtime > 0 ? formatRecencyLabel(note.mtime, { dateFormat, timeFormat }) : '—'}
       </span>
     </ListRow>
   )

@@ -30,17 +30,6 @@ import type {
 } from './note-session-types.ts'
 import { isSaveBlockingError } from './save-blocking-error.ts'
 
-export { frontmatterPatchToYaml, type FrontmatterPatch } from './note-session-frontmatter.ts'
-export {
-  INITIAL_NOTE_SNAPSHOT,
-  type NoteContentOrigin,
-  type NoteSession,
-  type NoteSessionOptions,
-  type NoteSessionService,
-  type NoteSessionSnapshot,
-  type NoteSessionStatus,
-} from './note-session-types.ts'
-
 /**
  * Where a session keeps its unsaved text when a save can't land: one copy per
  * note and session in the graph's `.reflect/recovery/`, each call pinned to
@@ -300,7 +289,7 @@ class NoteSessionImpl implements NoteSession {
     this.#applyContent = options.applyContent
     this.#onContent = options.onContent
     this.#reconcilePendingEditorInput = options.reconcilePendingEditorInput
-    this.#graph = deps.graphSession.getState().session
+    this.#graph = deps.graphSession.get().session
     this.#io = sessionIo(deps, this.#graph, options)
     this.path = options.path
     this.#createIfMissing = options.createIfMissing ?? false

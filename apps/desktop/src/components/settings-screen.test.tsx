@@ -1,30 +1,30 @@
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import type { Locator } from 'vitest/browser'
+import { page, userEvent, type Locator } from 'vitest/browser'
 import {
   DEFAULT_SETTINGS,
   type CoreServices,
   type GraphSessionService,
   type OllamaModels,
   type Settings,
+  formatFullDate,
 } from '@reflect/core'
 import {
   createTestCoreServices,
   createTestEmbeddingRuntimeService,
   createTestPlatformService,
-  createTestBackupService,
+  createTestGitSyncService,
   type TestEmbeddingRuntimeService,
   type TestOpenGraph,
 } from '@reflect/core/testing'
-import { formatFullDate } from '@/lib/dates.ts'
 import { NoteTemplatesProvider } from '@/providers/note-templates-provider.tsx'
 import { ShortcutsProvider } from '@/providers/shortcuts-provider.tsx'
 import { UpdateProvider } from '@/providers/update-provider.tsx'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { act } from '@/test-utils/act.ts'
-import { renderInApp } from '@/test-utils/render-in-app.tsx'
+import { renderInApp, renderHookInApp } from '@/test-utils/render-in-app.tsx'
+import { usePinnedTagFilters } from '@/hooks/use-pinned-tag-filters.ts'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ShortcutsDialog } from './shortcuts-dialog.tsx'
 import { SettingsScreen } from './settings-screen.tsx'
@@ -37,7 +37,7 @@ let embedRuntime: TestEmbeddingRuntimeService
 let ollamaModels: OllamaModels
 
 // The services of the rendered app; set by `renderScreen`.
-let app: ReturnType<typeof createApp>
+let core: ReturnType<typeof createCore>
 let forget: MockInstance<GraphSessionService['forgetRecent']>
 let deleteGraph: MockInstance<GraphSessionService['deleteGraph']>
 let listOllamaModels: MockInstance<CoreServices['onDeviceModels']['listOllamaModels']>
@@ -46,36 +46,36 @@ let listOllamaModels: MockInstance<CoreServices['onDeviceModels']['listOllamaMod
  * Every settings document the app persisted, oldest first.
  */
 function saved(): Settings[] {
-  return app.settings.saves()
+  return core.settings.saves()
 }
 
 // The screen runs off macOS desktop (no Agents, iCloud or Calendar rows), with
-// a graph open and its backup disconnected.
-function createApp() {
+// a graph open and its git sync disconnected.
+function createCore() {
   return createTestCoreServices({
     database: createWasmTestDatabaseService(),
     embeddingRuntime: embedRuntime,
     platform: createTestPlatformService({ isMacosDesktop: false, hasMacosTitleBarOverlay: false }),
-    backup: createTestBackupService({ state: { phase: 'disconnected' } }),
+    gitSync: createTestGitSyncService({ state: { phase: 'disconnected' } }),
   })
 }
 
 async function renderScreen() {
-  app = createApp()
-  forget = vi.spyOn(app.graphSession, 'forgetRecent').mockResolvedValue()
-  deleteGraph = vi.spyOn(app.graphSession, 'deleteGraph').mockResolvedValue()
+  core = createCore()
+  forget = vi.spyOn(core.graphSession, 'forgetRecent').mockResolvedValue()
+  deleteGraph = vi.spyOn(core.graphSession, 'deleteGraph').mockResolvedValue()
   listOllamaModels = vi
-    .spyOn(app.onDeviceModels, 'listOllamaModels')
+    .spyOn(core.onDeviceModels, 'listOllamaModels')
     .mockImplementation(() => Promise.resolve(ollamaModels))
   // The Wiki section's trust report row: no report written yet.
-  app.ipc.onCommand('wiki_trust_report_read', () => null)
+  core.ipc.onCommand('wiki_trust_report_read', () => null)
   return await renderInApp(
     <>
       <SettingsScreen />
       <ShortcutsDialog />
     </>,
     {
-      app,
+      core,
       graph: openGraph,
       settings: stored,
       queryClient: new QueryClient({
@@ -894,6 +894,24 @@ describe('SettingsScreen', () => {
     })
   })
 
+  it('removes two pinned filters before a re-render', async () => {
+    const { result, core: services } = await renderHookInApp(() => usePinnedTagFilters(), {
+      settings: { allNotesFilterTags: ['book', 'person'] },
+    })
+
+    await act(() => {
+      result.current.unpinTag('book')
+      result.current.unpinTag('person')
+    })
+
+    await vi.waitFor(() => {
+      expect(services.settings.saves().at(-1)).toEqual({
+        ...DEFAULT_SETTINGS,
+        allNotesFilterTags: [],
+      })
+    })
+  })
+
   it('orders pinned filters through their menus and retains the moved row focus', async () => {
     await renderScreen()
     await expect
@@ -1101,7 +1119,7 @@ describe('SettingsScreen', () => {
     stored = { semanticSearchEnabled: true }
     embedRuntime.setStatus({ status: 'ready', model: 'embeddinggemma-300m', dims: 768 })
     await renderScreen()
-    await act(() => app.semanticSearch.setIndexProgress({ done: 1200, total: 6000 }))
+    await act(() => core.semanticSearch.setIndexProgress({ done: 1200, total: 6000 }))
 
     await expect
       .element(page.getByRole('progressbar', { name: /semantic index/i }))
@@ -1143,7 +1161,7 @@ describe('SettingsScreen', () => {
     // The whole chain: button → the index lifecycle's visible rebuild → wipe,
     // then the projection-version stamp that marks a completed rebuild. (The
     // graph is empty here, so there is no apply batch in between.)
-    const indexCalls = (): string[] => app.indexStore.calls().map((call) => call.method)
+    const indexCalls = (): string[] => core.indexStore.calls().map((call) => call.method)
     await vi.waitFor(() => expect(indexCalls()).toContain('clear'))
     await vi.waitFor(() => expect(indexCalls()).toContain('setMeta'))
   })

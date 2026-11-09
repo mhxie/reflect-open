@@ -51,7 +51,7 @@ async function renderFor(notePath: string): Promise<void> {
   vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
   const view = await renderInApp(
     <TaskText task={makeOpenTask({ notePath, text: 'watch the talk' })} />,
-    { app, graph: GRAPH },
+    { core: app, graph: GRAPH },
   )
   await expect.element(view.getByTestId('markdown-preview')).toBeVisible()
 }

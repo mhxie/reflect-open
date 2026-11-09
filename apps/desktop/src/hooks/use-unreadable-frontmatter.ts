@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { hasUnreadableLock, isLocalOnlyPath, parseNote } from '@reflect/core'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { queryKeys } from '@/lib/query-client.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 /**
@@ -14,7 +14,7 @@ import { useCoreServices } from '@/services/services-provider.tsx'
  * change refreshes it.
  */
 export function useUnreadableFrontmatter(path: string, isPrivate: boolean): boolean {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { noteDocuments } = useCoreServices()
   const localOnly = useLocalOnlyFolders()
   const { data } = useQuery({

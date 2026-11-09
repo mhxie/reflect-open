@@ -33,7 +33,7 @@ async function renderPreview(ui: ReactNode) {
   )
   vi.spyOn(app.attachments, 'imageThumbnailUrl').mockReturnValue(`${BROKEN}#thumb`)
   vi.spyOn(app.attachments, 'pdfPageUrl').mockReturnValue(`${BROKEN}#page`)
-  return await renderInApp(ui, { app, servicesOnly: true })
+  return await renderInApp(ui, { core: app, servicesOnly: true })
 }
 
 describe('AttachmentPreviewImage', () => {

@@ -37,7 +37,7 @@ describe('UpdateProvider', () => {
       <UpdateProvider autoCheck>
         <Supported />
       </UpdateProvider>,
-      { app, appServices: { update }, route: null },
+      { core: app, appServices: { update }, route: null },
     )
 
     await expect.element(page.getByText('updates off')).toBeVisible()

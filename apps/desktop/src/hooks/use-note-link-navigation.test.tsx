@@ -4,7 +4,7 @@ import type { ReactElement } from 'react'
 import { isModEvent } from '@meowdown/core'
 import { createTestWindowService } from '@reflect/app/testing'
 import { createTestCoreServices } from '@reflect/core/testing'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteLinkNavigation } from './use-note-link-navigation.ts'
@@ -50,7 +50,7 @@ function Links({ scopeKey }: { readonly scopeKey: string | undefined }): ReactEl
 
 function HeadingLink(): ReactElement {
   const openNoteLink = useNoteLinkNavigation()
-  const { arrivalRevealHeading } = useRouter()
+  const { arrivalRevealHeading } = useRouterState()
   return (
     <>
       <button
@@ -71,12 +71,12 @@ function HeadingLink(): ReactElement {
 }
 
 function RouteProbe(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
 function ReopenCurrentRoute(): ReactElement {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   return (
     <button type="button" onClick={() => navigate({ kind: 'allNotes', filter: null })}>
       Reopen current route
@@ -103,9 +103,9 @@ function Harness({ scopeKey, visible = true }: HarnessProps): ReactElement {
  * Render `ui` on the All Notes route of an app whose note windows go to `openNoteWindow`.
  */
 async function mount(ui: ReactElement) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
   return await renderInApp(ui, {
-    app,
+    core,
     appServices: { window: createTestWindowService({ openNoteWindow }) },
     route: { kind: 'allNotes', filter: null },
   })

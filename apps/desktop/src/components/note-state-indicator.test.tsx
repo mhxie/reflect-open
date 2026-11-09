@@ -102,7 +102,7 @@ describe('NoteStateIndicator', () => {
     })
     await expect.element(page.getByRole('img', { name: 'Private' })).toBeInTheDocument()
 
-    await act(() => view.app.graphSession.setGraph({ generation: 2 }))
+    await act(() => view.core.graphSession.setGraph({ generation: 2 }))
     await expect.element(page.getByRole('img', { name: 'Private' })).not.toBeInTheDocument()
     expect(view.container.querySelector('[role="img"]')).toBeNull()
   })

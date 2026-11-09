@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CalendarAttendee, CalendarEvent } from '../calendar/commands.ts'
+import type { CalendarAttendee, CalendarEvent } from '../calendar/calendar-service.ts'
 import { MEETING_EVENT_LEAD_MS, pickMeetingEvent } from './event-match.ts'
 
 const MINUTE = 60_000

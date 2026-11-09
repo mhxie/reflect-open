@@ -11,8 +11,8 @@ import {
   type ContextSidebarTarget,
 } from '@/components/context-sidebar/sidebar-route.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { effectiveDailyDate } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { effectiveDailyDate } from '@reflect/app'
+import { useRouterState } from '@/routing/router.tsx'
 
 /**
  * Which day in the daily stream currently holds the user's focus, so the
@@ -71,7 +71,7 @@ export function useSetFocusedDailyDate(): (date: string | null) => void {
  * the target; with nothing focused it is just the routed subject.
  */
 export function useDailyContextTarget(): ContextSidebarTarget | null {
-  const { route, arrivalSeq, entryId } = useRouter()
+  const { route, arrivalSeq, entryId } = useRouterState()
   const today = useToday()
   const focusedDailyDate = useFocusedDailyDate()
   const setFocusedDailyDate = useSetFocusedDailyDate()

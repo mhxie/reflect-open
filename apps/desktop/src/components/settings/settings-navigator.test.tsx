@@ -35,7 +35,7 @@ function sectionTop(index: number): number {
 }
 
 async function renderNavigatorPage(): Promise<HTMLElement> {
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     platform: createTestPlatformService({ isMacosDesktop: false }),
     contacts: createTestContactsService({ status: 'unavailable' }),
@@ -55,7 +55,7 @@ async function renderNavigatorPage(): Promise<HTMLElement> {
         ))}
       </div>
     </div>,
-    { app },
+    { core },
   )
   return view.getByTestId('scroller').element() as HTMLElement
 }
@@ -105,11 +105,9 @@ describe('SettingsNavigator', () => {
 
     await page.getByRole('button', { name: 'Editor' }).click()
 
-    // The browser project runs with `reducedMotion: 'reduce'`, so the jump
-    // asks for an instant scroll instead of a smooth one.
     expect(scrollTo).toHaveBeenCalledWith({
       top: sectionTop(1) - PAGE_PADDING_PX,
-      behavior: 'auto',
+      behavior: 'smooth',
     })
   })
 })

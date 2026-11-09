@@ -64,7 +64,7 @@ describe('LocalModelUpdateService.check', () => {
     await updates.check('large-v3-turbo', false)
 
     expect(updates.getPending()).toBeNull()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 })
 
@@ -91,7 +91,7 @@ describe('LocalModelUpdateService.install', () => {
     // The offer went with the pending update; the download leaves the list once shown.
     expect(operations.findByLabel('Transcription model update')).toBeUndefined()
     await operations.clock.advance(MIN_VISIBLE_MS)
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
     expect(operations.getHistory()).toMatchObject([{ label: 'Updating the transcription model' }])
   })
 
@@ -139,7 +139,7 @@ describe('LocalModelUpdateService.install', () => {
     await updates.install()
 
     expect(download).not.toHaveBeenCalled()
-    expect(operations.getAll()).toEqual([])
+    expect(operations.get()).toEqual([])
   })
 })
 

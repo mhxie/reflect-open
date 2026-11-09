@@ -1,5 +1,6 @@
 import type { MaybePromise } from '@reflect/utils'
 import { AppError } from '../errors.ts'
+import { WritableStore } from '../store.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type {
   ICloudNativeService,
@@ -10,7 +11,18 @@ import type {
 } from '../ipc/icloud-native-service.ts'
 import type { ClockService } from '../ports/clock-service.ts'
 import type { HttpService } from '../ports/http-service.ts'
-import type { BackupService, BackupState, ConnectExistingResult } from '../sync/backup-service.ts'
+import { sameState, type GitSyncService, type GitSyncState } from '../sync/git-sync-service.ts'
+import type {
+  ConnectExistingRepoOptions,
+  ConnectExistingResult,
+  ConnectNewRepoOptions,
+  GithubConnector,
+} from '../sync/github-connector.ts'
+import type {
+  ConnectGitHostInput,
+  GitHostConnector,
+  GitHostSignIn,
+} from '../sync/git-host-connector.ts'
 import type { ICloudSyncService } from '../sync/icloud-sync-service.ts'
 import type { SecretStoreService } from '../secrets/secret-store-service.ts'
 import type {
@@ -35,7 +47,7 @@ import {
   type GithubUser,
   type RunDeviceFlowOptions,
 } from '../sync/github-auth-service.ts'
-import type { GithubRepoRef } from '../sync/github-repo-service.ts'
+import type { GithubRepoRef } from '../sync/types.ts'
 import { createTestClockService } from './clock.ts'
 import { createTestHttpService } from './http.ts'
 import { createTestSecretStoreService } from './secrets.ts'
@@ -102,7 +114,7 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
       skippedLargeFiles: [],
     }),
     fetch: (): RemoteDelta => ({ ahead: 0, behind: 0 }),
-    remoteHead: (): RemoteTip => ({ remoteOid: null, trackingOid: null }),
+    remoteHead: (): RemoteTip => ({ remoteOid: null, trackingOid: null, defaultBranch: null }),
     push: (): PushOutcome => ({ pushed: true, nonFastForward: false, rejectionMessage: null }),
     pull: (): PullOutcome => ({
       committed: false,
@@ -161,9 +173,16 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
     return await this.#handlers.fetch(credential, generation)
   }
 
-  async remoteHead(credential: GitCredential | null, generation: number): Promise<RemoteTip> {
-    this.#log.push({ method: 'remoteHead', args: [credential, generation] })
-    return await this.#handlers.remoteHead(credential, generation)
+  async remoteHead(
+    credential: GitCredential | null,
+    generation: number,
+    url?: string,
+  ): Promise<RemoteTip> {
+    this.#log.push({
+      method: 'remoteHead',
+      args: url === undefined ? [credential, generation] : [credential, generation, url],
+    })
+    return await this.#handlers.remoteHead(credential, generation, url)
   }
 
   async push(credential: GitCredential | null, generation: number): Promise<PushOutcome> {
@@ -419,7 +438,7 @@ class TestGithubAuthServiceImpl implements TestGithubAuthService {
     })
   }
 
-  readonly getState = (): GithubAuthState => this.#inner.getState()
+  readonly get = (): GithubAuthState => this.#inner.get()
 
   load(): Promise<GithubAuth | null> {
     return this.#inner.load()
@@ -471,107 +490,63 @@ export function createTestGithubAuthService(
 }
 
 /**
- * One recorded {@link TestBackupService} action.
+ * One recorded {@link TestGitSyncService} action.
  */
-export type BackupCall =
+export type GitSyncCall =
   | {
       readonly method:
         | 'start'
         | 'disconnectGraph'
-        | 'signOut'
-        | 'backUpNow'
+        | 'syncNow'
         | 'catchUp'
         | 'fileChanged'
         | 'dispose'
     }
-  | { readonly method: 'connectNewRepo'; readonly name: string }
-  | {
-      readonly method: 'connectExistingRepo'
-      readonly ref: GithubRepoRef
-      readonly allowPublic: boolean
-    }
+  | { readonly method: 'connectRemote'; readonly remoteUrl: string; readonly branch: string | null }
 
-export interface TestBackupService extends BackupService {
+export interface TestGitSyncService extends GitSyncService {
   /**
-   * Publish `state` as the backup state and notify subscribers.
+   * Publish `state` and notify subscribers.
    */
-  setState(state: BackupState): void
+  setState(state: GitSyncState): void
   /**
    * Every action called, in order.
    */
-  calls(): readonly BackupCall[]
-  /**
-   * Answer `connectNewRepo`; it resolves `connected` by default.
-   */
-  onConnectNewRepo(handler: BackupService['connectNewRepo']): void
-  /**
-   * Answer `connectExistingRepo`; it resolves `connected` by default.
-   */
-  onConnectExistingRepo(handler: BackupService['connectExistingRepo']): void
+  calls(): readonly GitSyncCall[]
 }
 
 /**
- * A scripted {@link BackupService}: it runs no engine and touches no
+ * A scripted {@link GitSyncService}: it runs no engine and touches no
  * repository. The state starts at `state` (`loading` by default) and moves
  * only through `setState`; every action is recorded.
  */
-class TestBackupServiceImpl implements TestBackupService {
-  #state: BackupState
-  readonly #listeners = new Set<() => void>()
-  readonly #log: BackupCall[] = []
-  #connectNew: BackupService['connectNewRepo'] = () => Promise.resolve('connected')
-  #connectExisting: BackupService['connectExistingRepo'] = (): Promise<ConnectExistingResult> => {
-    return Promise.resolve('connected')
-  }
+class TestGitSyncServiceImpl implements TestGitSyncService {
+  readonly #state: WritableStore<GitSyncState>
+  readonly #log: GitSyncCall[] = []
 
-  constructor(options?: { state?: BackupState }) {
-    this.#state = options?.state ?? { phase: 'loading' }
+  constructor(options?: { state?: GitSyncState }) {
+    this.#state = new WritableStore<GitSyncState>(options?.state ?? { phase: 'loading' }, sameState)
   }
 
   start(): void {
     this.#log.push({ method: 'start' })
   }
 
-  readonly getState = (): BackupState => this.#state
+  readonly get = (): GitSyncState => this.#state.get()
 
-  readonly subscribe = (listener: () => void): Unlisten => {
-    // Wrapped for identity, so one function added twice detaches independently.
-    const deliver = (): void => {
-      listener()
-    }
-    this.#listeners.add(deliver)
-    return () => {
-      this.#listeners.delete(deliver)
-    }
-  }
+  readonly subscribe = (listener: () => void): Unlisten => this.#state.subscribe(listener)
 
-  async connectNewRepo(name: string): Promise<'connected' | 'manualCreateNeeded'> {
-    this.#log.push({ method: 'connectNewRepo', name })
-    return await this.#connectNew(name)
-  }
-
-  async connectExistingRepo(
-    ref: GithubRepoRef,
-    connectOptions?: { allowPublic?: boolean },
-  ): Promise<ConnectExistingResult> {
-    this.#log.push({
-      method: 'connectExistingRepo',
-      ref,
-      allowPublic: connectOptions?.allowPublic ?? false,
-    })
-    return await this.#connectExisting(ref, connectOptions)
+  connectRemote(remoteUrl: string, branch: string | null): Promise<void> {
+    this.#log.push({ method: 'connectRemote', remoteUrl, branch })
+    return Promise.resolve()
   }
 
   disconnectGraph(): void {
     this.#log.push({ method: 'disconnectGraph' })
   }
 
-  signOut(): void {
-    this.#log.push({ method: 'signOut' })
-  }
-
-  backUpNow(): void {
-    this.#log.push({ method: 'backUpNow' })
+  syncNow(): void {
+    this.#log.push({ method: 'syncNow' })
   }
 
   catchUp(): void {
@@ -586,28 +561,147 @@ class TestBackupServiceImpl implements TestBackupService {
     this.#log.push({ method: 'dispose' })
   }
 
-  setState(next: BackupState): void {
-    this.#state = next
-    for (const listener of this.#listeners) {
-      listener()
-    }
+  setState(next: GitSyncState): void {
+    this.#state.set(next)
   }
 
-  calls(): readonly BackupCall[] {
+  calls(): readonly GitSyncCall[] {
+    return [...this.#log]
+  }
+}
+
+export function createTestGitSyncService(options?: { state?: GitSyncState }): TestGitSyncService {
+  return new TestGitSyncServiceImpl(options)
+}
+
+/**
+ * One recorded {@link TestGithubConnector} action.
+ */
+export type GithubConnectorCall =
+  | { readonly method: 'connectNewRepo'; readonly name: string }
+  | {
+      readonly method: 'connectExistingRepo'
+      readonly ref: GithubRepoRef
+      readonly allowPublic: boolean
+    }
+
+export interface TestGithubConnector extends GithubConnector {
+  /**
+   * Every action called, in order.
+   */
+  calls(): readonly GithubConnectorCall[]
+  /**
+   * Answer `connectNewRepo`; it resolves `connected` by default.
+   */
+  onConnectNewRepo(handler: GithubConnector['connectNewRepo']): void
+  /**
+   * Answer `connectExistingRepo`; it resolves `connected` by default.
+   */
+  onConnectExistingRepo(handler: GithubConnector['connectExistingRepo']): void
+}
+
+/**
+ * A scripted {@link GithubConnector}: it calls no API and records every action.
+ */
+class TestGithubConnectorImpl implements TestGithubConnector {
+  readonly #log: GithubConnectorCall[] = []
+  #connectNew: GithubConnector['connectNewRepo'] = () => Promise.resolve('connected')
+  #connectExisting: GithubConnector['connectExistingRepo'] = (): Promise<ConnectExistingResult> => {
+    return Promise.resolve('connected')
+  }
+
+  async connectNewRepo(
+    name: string,
+    options?: ConnectNewRepoOptions,
+  ): Promise<'connected' | 'manualCreateNeeded'> {
+    this.#log.push({ method: 'connectNewRepo', name })
+    return await this.#connectNew(name, options)
+  }
+
+  async connectExistingRepo(
+    ref: GithubRepoRef,
+    connectOptions?: ConnectExistingRepoOptions,
+  ): Promise<ConnectExistingResult> {
+    this.#log.push({
+      method: 'connectExistingRepo',
+      ref,
+      allowPublic: connectOptions?.allowPublic ?? false,
+    })
+    return await this.#connectExisting(ref, connectOptions)
+  }
+
+  calls(): readonly GithubConnectorCall[] {
     return [...this.#log]
   }
 
-  onConnectNewRepo(handler: BackupService['connectNewRepo']): void {
+  onConnectNewRepo(handler: GithubConnector['connectNewRepo']): void {
     this.#connectNew = handler
   }
 
-  onConnectExistingRepo(handler: BackupService['connectExistingRepo']): void {
+  onConnectExistingRepo(handler: GithubConnector['connectExistingRepo']): void {
     this.#connectExisting = handler
   }
 }
 
-export function createTestBackupService(options?: { state?: BackupState }): TestBackupService {
-  return new TestBackupServiceImpl(options)
+export function createTestGithubConnector(): TestGithubConnector {
+  return new TestGithubConnectorImpl()
+}
+
+/**
+ * One recorded {@link TestGitHostConnector} action.
+ */
+export type GitHostConnectorCall =
+  | ({ readonly method: 'connectGitHost' } & ConnectGitHostInput)
+  | ({ readonly method: 'updateGitHostSignIn' } & GitHostSignIn)
+
+export interface TestGitHostConnector extends GitHostConnector {
+  /**
+   * Every action called, in order.
+   */
+  calls(): readonly GitHostConnectorCall[]
+  /**
+   * Answer `connectGitHost`; it resolves by default.
+   */
+  onConnectGitHost(handler: GitHostConnector['connectGitHost']): void
+  /**
+   * Answer `updateGitHostSignIn`; it resolves by default.
+   */
+  onUpdateGitHostSignIn(handler: GitHostConnector['updateGitHostSignIn']): void
+}
+
+/**
+ * A scripted {@link GitHostConnector}: it probes nothing and records every input.
+ */
+class TestGitHostConnectorImpl implements TestGitHostConnector {
+  readonly #log: GitHostConnectorCall[] = []
+  #connect: GitHostConnector['connectGitHost'] = () => Promise.resolve()
+  #update: GitHostConnector['updateGitHostSignIn'] = () => Promise.resolve()
+
+  async connectGitHost(input: ConnectGitHostInput): Promise<void> {
+    this.#log.push({ method: 'connectGitHost', ...input })
+    await this.#connect(input)
+  }
+
+  async updateGitHostSignIn(signIn: GitHostSignIn): Promise<void> {
+    this.#log.push({ method: 'updateGitHostSignIn', ...signIn })
+    await this.#update(signIn)
+  }
+
+  calls(): readonly GitHostConnectorCall[] {
+    return [...this.#log]
+  }
+
+  onConnectGitHost(handler: GitHostConnector['connectGitHost']): void {
+    this.#connect = handler
+  }
+
+  onUpdateGitHostSignIn(handler: GitHostConnector['updateGitHostSignIn']): void {
+    this.#update = handler
+  }
+}
+
+export function createTestGitHostConnector(): TestGitHostConnector {
+  return new TestGitHostConnectorImpl()
 }
 
 export interface TestICloudSyncService extends ICloudSyncService {

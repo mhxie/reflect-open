@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
+    "build:safari": "wxt build -b safari --mv3",
     "zip": "WXT_STORE_BUILD=true wxt zip",
     "zip:unpacked": "wxt zip",
     "typecheck": "wxt prepare && tsc -b",
@@ -17,8 +18,8 @@
     "@post-embed/schema": "^0.5.2",
     "@reflect/core": "workspace:*",
     "@reflect/design-system": "workspace:*",
-    "defuddle": "^0.19.5",
-    "lucide-react": "^1.59.0",
+    "defuddle": "^0.19.6",
+    "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zod": "^4.6.7"
@@ -30,8 +31,8 @@
     "@wxt-dev/module-react": "^1.2.2",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.5",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0",
     "vitest-fail-on-console": "^0.10.1",
     "wxt": "^0.21.4"
   }

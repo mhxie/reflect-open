@@ -4,7 +4,7 @@ import { page, userEvent } from 'vitest/browser'
 import type { ReactElement } from 'react'
 import type { AttachmentService, FileMeta } from '@reflect/core'
 import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -95,7 +95,7 @@ function PeekProbe(): ReactElement {
 }
 
 function RoutedScreen(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return route.kind === 'attachments' ? (
     <AttachmentsScreen type={route.type} tag={route.tag} />
   ) : (
@@ -122,7 +122,7 @@ async function renderScreen() {
       <PeekProbe />
     </PeekProvider>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 7 },
       route: { kind: 'attachments', type: null, tag: null },
       settings: { dateFormat: 'iso', timeFormat: '24h' },
@@ -133,7 +133,7 @@ async function renderScreen() {
 type ScreenView = Awaited<ReturnType<typeof renderScreen>>
 
 function probedRoute(view: ScreenView): unknown {
-  return view.appServices.navigation.getState().route
+  return view.appServices.navigation.get().route
 }
 
 /** The card preview buttons, in DOM (reading) order. */
@@ -211,7 +211,7 @@ describe('AttachmentsScreen', () => {
   it('narrows to files linked from notes with a tag, combined with the type', async () => {
     const view = await renderScreen()
     const tagFilter = page.getByRole('group', { name: 'Filter attachments by tag' })
-    await tagFilter.getByRole('button', { name: 'Tag' }).click()
+    await tagFilter.getByRole('combobox', { name: 'Tag' }).click()
     // Facets fold casing and count files: photo (via Trip) and report.
     await expect.element(page.getByRole('option', { name: '#travel 2' })).toBeVisible()
     await page.getByRole('option', { name: '#work 1' }).click()

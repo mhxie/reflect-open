@@ -26,7 +26,9 @@ describe('useXPostPreload', () => {
     'is ready at once for a note without X posts (%s)',
     async (privacy) => {
       const { app, loadXPost } = appWithStuckArchive()
-      const hook = await renderHookInApp(() => useXPostPreload('Plain note\n', privacy), { app })
+      const hook = await renderHookInApp(() => useXPostPreload('Plain note\n', privacy), {
+        core: app,
+      })
       expect(hook.result.current).toBe(true)
       expect(loadXPost).not.toHaveBeenCalled()
     },
@@ -38,7 +40,7 @@ describe('useXPostPreload', () => {
       ({ privacy }: { privacy: XPostPreloadPrivacy } = { privacy: 'pending' }) => {
         return useXPostPreload('![](https://x.com/jack/status/101)\n', privacy)
       },
-      { app, initialProps: { privacy: 'pending' } },
+      { core: app, initialProps: { privacy: 'pending' } },
     )
     expect(hook.result.current).toBe(false)
     expect(loadXPost).not.toHaveBeenCalled()
@@ -52,7 +54,7 @@ describe('useXPostPreload', () => {
     const { app, loadXPost } = appWithStuckArchive()
     const hook = await renderHookInApp(
       () => useXPostPreload('![](https://x.com/jack/status/101)\n', 'public'),
-      { app },
+      { core: app },
     )
     expect(hook.result.current).toBe(false)
     await vi.waitFor(() => expect(loadXPost).toHaveBeenCalledWith('101'))

@@ -13,7 +13,7 @@ import { PaletteProvider } from '@/components/command-palette/palette-provider.t
 import { useNoteMenuRequest } from '@/editor/status/note-menu-request.ts'
 import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { queryClient } from '@/lib/query-client.ts'
-import { useRouter, type RouterNavigate } from '@/routing/router.tsx'
+import { type RouterNavigate, useRouterActions } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -93,7 +93,7 @@ beforeEach(() => {
 
 /** Exposes the router's navigate, so a test can move one pane between notes. */
 function Navigator(): null {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
 
   useLayoutEffect(() => {
     navigateRef.current = navigate
@@ -131,7 +131,7 @@ async function renderNote(path: string, files: Record<string, string>) {
       <RouteContent />
     </PaletteProvider>,
     {
-      app,
+      core: app,
       queryClient,
       graph: { root: '/g', name: 'g', generation: 1, localOnlyFolders: ['secure'] },
       settings: {

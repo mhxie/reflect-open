@@ -20,14 +20,14 @@ async function renderSection({ captureEdits = false } = {}) {
   if (captureEdits) {
     updateWith.mockImplementation(() => {})
   }
-  const view = await renderInApp(<WikiSection />, { app })
+  const view = await renderInApp(<WikiSection />, { core: app })
   return Object.assign(view, { updateWith })
 }
 
 type SectionView = Awaited<ReturnType<typeof renderSection>>
 
 function languages(view: SectionView): readonly WikiLanguage[] {
-  return view.app.settings.get().wikiLanguages
+  return view.core.settings.get().wikiLanguages
 }
 
 /**
@@ -117,8 +117,8 @@ describe('WikiSection', () => {
 
     await addLanguage('Chinese', 'wiki-cn')
     await expect.element(view.getByText(/is already a wiki folder/)).toBeInTheDocument()
-    await view.app.settings.flush()
-    expect(view.app.settings.saves()).toEqual([])
+    await view.core.settings.flush()
+    expect(view.core.settings.saves()).toEqual([])
     expect(languages(view)).toEqual(DEFAULT_SETTINGS.wikiLanguages)
   })
 })

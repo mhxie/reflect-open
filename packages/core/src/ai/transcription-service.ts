@@ -1,12 +1,11 @@
 import { z } from 'zod'
 import type { HttpService } from '../ports/http-service.ts'
-import { bytesToBase64 } from '@reflect/utils'
+import { bytesToBase64, safeParseJson } from '@reflect/utils'
 import { AppError } from '../errors.ts'
 import { APP_REVIEW_STUB_KEY, stubTranscriptBody } from './app-review-demo.ts'
 import type { TranscriptionProvider } from './provider-config.ts'
 import {
   httpError,
-  safeJson,
   send,
   TranscriptionOversizeError,
   TranscriptionRejectedError,
@@ -24,22 +23,25 @@ import {
  * (stale gate, timeouts, error ladder) is `ai/transcribe-http`.
  */
 
-export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe'
+export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-transcribe'
 
 /**
- * Retried once when the primary model is missing on the key — project-scoped
- * OpenAI keys can expose `whisper-1` but not the 4o transcription models.
+ * Retried in order while the model is missing on the key — project-scoped
+ * OpenAI keys may expose only the models this app used before
+ * `gpt-transcribe`, and some expose `whisper-1` but not the 4o transcription
+ * models. Both shut down on 2027-02-26.
  */
-export const OPENAI_TRANSCRIPTION_FALLBACK_MODEL = 'whisper-1'
+export const OPENAI_TRANSCRIPTION_FALLBACK_MODELS = ['gpt-4o-mini-transcribe', 'whisper-1'] as const
 
-export const GOOGLE_TRANSCRIPTION_MODEL = 'gemini-3.5-flash'
+export const GOOGLE_TRANSCRIPTION_MODEL = 'gemini-3.6-flash'
 
 /**
  * Retried once when the primary model 404s. Google retires models on a short
  * clock (the spike caught `gemini-3-pro-preview` dying within months of
  * release), and a retired transcription model must degrade, not hard-fail.
+ * An alias rather than a pinned id, so the fallback itself never retires.
  */
-export const GOOGLE_TRANSCRIPTION_FALLBACK_MODEL = 'gemini-2.5-flash'
+export const GOOGLE_TRANSCRIPTION_FALLBACK_MODEL = 'gemini-flash-latest'
 
 export interface TranscriptionRequest {
   provider: TranscriptionProvider
@@ -153,8 +155,32 @@ const openAiResponseSchema = z.object({ text: z.string() })
 function isModelNotFound(body: string): boolean {
   const parsed = z
     .object({ error: z.object({ code: z.string().nullable() }) })
-    .safeParse(safeJson(body))
+    .safeParse(safeParseJson(body))
   return parsed.success && parsed.data.error.code === 'model_not_found'
+}
+
+interface ModelReply {
+  readonly response: Response
+  readonly body: string
+}
+
+/**
+ * Send to each model in turn, moving on only while `isMissing` says the model
+ * is not available on the key. The last model's reply is final.
+ */
+async function attemptInOrder(
+  models: readonly [string, ...string[]],
+  attempt: (model: string) => Promise<Response>,
+  isMissing: (reply: ModelReply) => boolean,
+): Promise<ModelReply> {
+  const [model, ...fallbacks] = models
+  const response = await attempt(model)
+  const reply = { response, body: await response.text() }
+  const [next, ...rest] = fallbacks
+  if (next !== undefined && isMissing(reply)) {
+    return await attemptInOrder([next, ...rest], attempt, isMissing)
+  }
+  return reply
 }
 
 async function transcribeWithOpenAi(
@@ -184,17 +210,16 @@ async function transcribeWithOpenAi(
     )
   }
 
-  let response = await attempt(OPENAI_TRANSCRIPTION_MODEL)
-  let body = await response.text()
-  if (!response.ok && isModelNotFound(body)) {
-    response = await attempt(OPENAI_TRANSCRIPTION_FALLBACK_MODEL)
-    body = await response.text()
-  }
+  const { response, body } = await attemptInOrder(
+    [OPENAI_TRANSCRIPTION_MODEL, ...OPENAI_TRANSCRIPTION_FALLBACK_MODELS],
+    attempt,
+    (reply) => !reply.response.ok && isModelNotFound(reply.body),
+  )
   if (!response.ok) {
     throw httpError('openai', response.status, body)
   }
 
-  const parsed = openAiResponseSchema.safeParse(safeJson(body))
+  const parsed = openAiResponseSchema.safeParse(safeParseJson(body))
   if (!parsed.success) {
     throw new AppError('parse', `unrecognized openai transcription response: ${body.slice(0, 200)}`)
   }
@@ -282,18 +307,17 @@ async function transcribeWithGemini(
     )
   }
 
-  let response = await attempt(GOOGLE_TRANSCRIPTION_MODEL)
-  let body = await response.text()
-  // A 404 on the model path means Google retired the model.
-  if (response.status === 404) {
-    response = await attempt(GOOGLE_TRANSCRIPTION_FALLBACK_MODEL)
-    body = await response.text()
-  }
+  const { response, body } = await attemptInOrder(
+    [GOOGLE_TRANSCRIPTION_MODEL, GOOGLE_TRANSCRIPTION_FALLBACK_MODEL],
+    attempt,
+    // A 404 on the model path means Google retired the model.
+    (reply) => reply.response.status === 404,
+  )
   if (!response.ok) {
     throw httpError('google', response.status, body)
   }
 
-  const parsed = geminiResponseSchema.safeParse(safeJson(body))
+  const parsed = geminiResponseSchema.safeParse(safeParseJson(body))
   if (!parsed.success) {
     throw new AppError('parse', `unrecognized gemini response: ${body.slice(0, 200)}`)
   }

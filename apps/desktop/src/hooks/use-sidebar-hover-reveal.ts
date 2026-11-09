@@ -73,10 +73,12 @@ export function useSidebarHoverReveal(): SidebarHoverRevealState {
         cancelHide()
         return
       }
-      hideTimer ??= window.setTimeout(() => {
-        hideTimer = null
-        setRevealed(false)
-      }, SIDEBAR_HIDE_DELAY_MS)
+      if (hideTimer === null) {
+        hideTimer = window.setTimeout(() => {
+          hideTimer = null
+          setRevealed(false)
+        }, SIDEBAR_HIDE_DELAY_MS)
+      }
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape' && !event.defaultPrevented && !holdsOpen()) {

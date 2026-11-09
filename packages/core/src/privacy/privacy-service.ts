@@ -18,8 +18,6 @@ import type { CloudSafe } from './cloud-safe.ts'
  * integration means minting its content here or it won't typecheck.
  */
 
-export type { CloudSafe } from './cloud-safe.ts'
-
 /**
  * The one place a `CloudSafe` is born. Private by design.
  */
@@ -494,7 +492,7 @@ class PrivacyServiceImpl implements PrivacyService {
   }
 
   #session(): GateSession | null {
-    return this.#deps.graphSession.getState().session
+    return this.#deps.graphSession.get().session
   }
 
   /**

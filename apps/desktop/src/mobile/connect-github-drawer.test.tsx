@@ -6,9 +6,10 @@ import {
   createTestCoreServices,
   createTestHttpService,
   createTestPlatformService,
-  createTestBackupService,
+  createTestGitSyncService,
+  createTestGithubConnector,
   createTestSecretStoreService,
-  type TestBackupService,
+  type TestGithubConnector,
 } from '@reflect/core/testing'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import { renderInApp, type InAppRenderResult } from '@/test-utils/render-in-app.tsx'
@@ -23,25 +24,18 @@ import { ConnectGithubDrawer } from './connect-github-drawer.tsx'
  * open/close lifecycle, and a fresh wizard per open.
  */
 
-// Keep the sheet content inline so this suite can focus on the wizard state.
-vi.mock('@/components/ui/drawer.tsx', () => ({
-  Drawer: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  DrawerContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DrawerBody: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DrawerTitle: ({ children }: { children?: ReactNode }) => <h2>{children}</h2>,
-}))
-
 /**
  * Render the sheet over a scripted backup, which connects every repository
  * unless `script` says otherwise.
  */
 async function mount(
   ui: ReactNode,
-  script?: (backup: TestBackupService) => void,
-): Promise<InAppRenderResult<CoreServices> & { backup: TestBackupService }> {
-  const backup = createTestBackupService({ state: { phase: 'disconnected' } })
-  script?.(backup)
-  const app = createTestCoreServices({
+  script?: (connector: TestGithubConnector) => void,
+): Promise<InAppRenderResult<CoreServices> & { connector: TestGithubConnector }> {
+  const gitSync = createTestGitSyncService({ state: { phase: 'disconnected' } })
+  const connector = createTestGithubConnector()
+  script?.(connector)
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     platform: createTestPlatformService({ isMacosDesktop: false, hasMacosTitleBarOverlay: false }),
     // A stored PAT + GitHub accepting it ("alex") makes the auth step skip
@@ -56,16 +50,17 @@ async function mount(
         reply: { status: 200, json: { login: 'alex' } },
       },
     ]),
-    backup,
+    gitSync,
+    githubConnector: connector,
   })
-  const view = await renderInApp(ui, { app })
-  return Object.assign(view, { backup })
+  const view = await renderInApp(ui, { core })
+  return Object.assign(view, { connector })
 }
 
 describe('ConnectGithubDrawer', () => {
   it('suggests reflect-backup — never the local graph name — and connects', async () => {
     const onOpenChange = vi.fn()
-    const { backup } = await mount(
+    const { connector } = await mount(
       <ConnectGithubDrawer open onOpenChange={onOpenChange} pollIntervalMs={15} />,
       (scripted) => scripted.onConnectExistingRepo(() => Promise.resolve('notFound')),
     )
@@ -76,14 +71,14 @@ describe('ConnectGithubDrawer', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await vi.waitFor(() => {
-      expect(backup.calls()).toContainEqual({
+      expect(connector.calls()).toContainEqual({
         method: 'connectExistingRepo',
         ref: { owner: 'alex', name: 'reflect-backup' },
         allowPublic: false,
       })
     })
     await vi.waitFor(() => {
-      expect(backup.calls()).toContainEqual({
+      expect(connector.calls()).toContainEqual({
         method: 'connectNewRepo',
         name: 'reflect-backup',
       })
@@ -93,7 +88,7 @@ describe('ConnectGithubDrawer', () => {
 
   it('connects an existing repository and closes the sheet', async () => {
     const onOpenChange = vi.fn()
-    const { backup } = await mount(
+    const { connector } = await mount(
       <ConnectGithubDrawer open onOpenChange={onOpenChange} pollIntervalMs={15} />,
     )
 
@@ -104,7 +99,7 @@ describe('ConnectGithubDrawer', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await vi.waitFor(() => {
-      expect(backup.calls()).toContainEqual({
+      expect(connector.calls()).toContainEqual({
         method: 'connectExistingRepo',
         ref: { owner: 'alex', name: 'notes' },
         allowPublic: false,

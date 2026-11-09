@@ -12,11 +12,11 @@ import {
 } from '@reflect/core'
 import { useWikiLanguages } from '@/hooks/use-wiki-languages.ts'
 import { shownWikiTrustReport, useWikiTrustReport } from '@/hooks/use-wiki-trust-report.ts'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 import { queryKeys } from '@/lib/query-client.ts'
 import { useToday } from '@/lib/use-today.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import type { WikiClaimTrust } from './wiki-claim-trust-card.tsx'
 import type { WikiReaderStatus } from './wiki-reader-record.ts'
@@ -134,9 +134,9 @@ export function useWikiTrustView(
   record: ((claimId: string, status: WikiReaderStatus) => boolean) | undefined,
   asEditor: (markdown: string) => string,
 ): TrustViewResult {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { wiki, icloudNative, fileChanges } = useCoreServices()
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const languages = useWikiLanguages()
   const report = shownWikiTrustReport(useWikiTrustReport())
   const today = useToday()
@@ -163,7 +163,7 @@ export function useWikiTrustView(
     // source share the key, and an idle observer must not strip the other's.
     queryFn: async () => {
       if (graph === null) throw new Error('No graph is open.')
-      const saved = await wiki.readSavedClaims(sourcePath, todayIso())
+      const saved = await wiki.readSavedClaims(sourcePath, getIsoToday())
       // Materializing an unchanged file reindexes nothing, so poll for it.
       if (saved === 'evicted') await icloudNative.requestDownloads([sourcePath])
       return saved
@@ -214,7 +214,7 @@ export function useWikiTrustView(
   const texts = useMemo(() => claimTexts(index), [index])
   const content = translation ? null : (file?.content ?? null)
   const savedTexts = useMemo(
-    () => (content === null ? null : claimTexts(readWikiArticle(asEditor(content), todayIso()))),
+    () => (content === null ? null : claimTexts(readWikiArticle(asEditor(content), getIsoToday()))),
     [content, asEditor],
   )
 

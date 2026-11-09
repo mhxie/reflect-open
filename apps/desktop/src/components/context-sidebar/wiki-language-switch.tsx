@@ -4,7 +4,7 @@ import { Languages } from 'lucide-react'
 import { useNoteLinkNavigation } from '@/hooks/use-note-link-navigation.ts'
 import { useWikiCopies } from '@/hooks/use-wiki-copies.ts'
 import { cn } from '@/lib/utils.ts'
-import { routeForPath } from '@/routing/route.ts'
+import { routeForPath } from '@reflect/app'
 
 interface WikiLanguageSwitchProps {
   /** Graph-relative path of the open note. */

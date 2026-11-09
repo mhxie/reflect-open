@@ -10,8 +10,8 @@ import {
   parseNote,
   type Settings,
 } from '@reflect/core'
-import { wikiRoute, type Route } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { wikiRoute, type Route } from '@reflect/app'
+import { useRouterState } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -176,12 +176,12 @@ beforeEach(() => {
 
 /** The route on screen: a navigation whose destination suspends commits once it is ready. */
 function RouteProbe(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
 function RoutedScreen(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   if (route.kind === 'note' && pendingNoteLoad !== undefined) {
     use(pendingNoteLoad)
   }
@@ -235,7 +235,7 @@ async function renderScreen(language: string | null = null) {
       <RouteProbe />
     </Suspense>,
     {
-      app,
+      core: app,
       graph: { root: '/g', name: 'g', generation: 1 },
       route: wikiRoute({ language }),
       settings: { dateFormat: 'iso', ...initialSettings },
@@ -568,7 +568,7 @@ describe('WikiScreen', () => {
       'Zeigarnik Effect',
       'Wiki Index',
     ])
-    expect(view.app.settings.get().wikiSort).toEqual({ key: 'claims', direction: 'desc' })
+    expect(view.core.settings.get().wikiSort).toEqual({ key: 'claims', direction: 'desc' })
     await view.unmount()
   })
 
@@ -587,7 +587,7 @@ describe('WikiScreen', () => {
       'Retrieval Practice',
       'Zeigarnik Effect',
     ])
-    expect(view.app.settings.get().wikiGroupByTopic).toBe(true)
+    expect(view.core.settings.get().wikiGroupByTopic).toBe(true)
     await view.unmount()
   })
 
@@ -602,7 +602,7 @@ describe('WikiScreen', () => {
       .element(view.getByRole('button', { name: /^memory/ }))
       .toHaveAttribute('aria-expanded', 'false')
     expect(rowTitles(view)).toEqual(['Wiki Index', 'Zeigarnik Effect'])
-    expect(view.app.settings.get().wikiFoldedTopics).toEqual(['memory'])
+    expect(view.core.settings.get().wikiFoldedTopics).toEqual(['memory'])
 
     view.container.querySelector<HTMLElement>('[aria-label="Wiki"]')?.focus()
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}')
@@ -646,7 +646,7 @@ describe('WikiScreen', () => {
       expect(rowTitles(view)).toEqual(['Retrieval Practice', 'Wiki Index', 'Zeigarnik Effect'])
     })
 
-    view.app.settings.update({
+    view.core.settings.update({
       wikiLanguages: normalizeWikiLanguages([{ label: 'English', folder: 'wiki' }]),
     })
 

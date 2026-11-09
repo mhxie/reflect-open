@@ -2,7 +2,7 @@ import type { ReactElement } from 'react'
 import { formatModelSize, LOCAL_TRANSCRIPTION_MODELS } from '@reflect/core'
 import { useLocalModelStatus } from '@/lib/use-local-model-status.ts'
 import { cn } from '@/lib/utils.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
 import { SettingsField } from './field.tsx'
 import { LocalModelActions } from './local-model-actions.tsx'
 import { SettingsOptionCard } from './option-card.tsx'
@@ -10,7 +10,8 @@ import { SettingsSwitchField } from './switch-field.tsx'
 
 /** The on-device engine's model choice, its download, and update checks. */
 export function LocalModelField(): ReactElement {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const model = settings.localTranscriptionModel
   const status = useLocalModelStatus(model, true)
 
@@ -48,7 +49,7 @@ export function LocalModelField(): ReactElement {
                     name="local-transcription-model"
                     value={option.id}
                     checked={selected}
-                    onChange={() => updateSettings({ localTranscriptionModel: option.id })}
+                    onChange={() => settingsService.update({ localTranscriptionModel: option.id })}
                     className="mt-0.5 shrink-0 accent-accent"
                   />
                 </SettingsOptionCard>
@@ -65,7 +66,7 @@ export function LocalModelField(): ReactElement {
         description="Look for newer weights once a day. Updates are offered, never installed on their own."
         checked={settings.localTranscriptionUpdateChecks}
         onCheckedChange={(localTranscriptionUpdateChecks) => {
-          updateSettings({ localTranscriptionUpdateChecks })
+          settingsService.update({ localTranscriptionUpdateChecks })
         }}
       />
     </>

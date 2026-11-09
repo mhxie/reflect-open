@@ -6,10 +6,10 @@ import {
   type NoteSessionSnapshot,
   type RenameCoordinator,
 } from '@reflect/core'
-import { useMaybeGraph } from '@/providers/graph-provider.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import type { NoteEditorHandle } from './note-editor.tsx'
-import { checkRoundTrip } from './roundtrip.ts'
+import { checkRoundTrip } from '@meowdown/markdown'
 
 /**
  * React adapter over the `@reflect/core` document state machine
@@ -104,7 +104,7 @@ export function useNoteDocument(path: string | null, options?: NoteDocumentOptio
   // The session is keyed on whether a graph is open, not on its generation:
   // reopening the *same* graph bumps the generation without remounting the
   // pane, and the session's writes follow that reopen on their own.
-  const canWrite = useMaybeGraph()?.graph != null && !readOnly
+  const canWrite = useGraphInfo() !== null && !readOnly
 
   useEffect(() => {
     if (!path) {

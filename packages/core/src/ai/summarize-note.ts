@@ -1,6 +1,7 @@
 import { AppError } from '../errors.ts'
 import { AI_SUMMARY_MAX_CHARS } from '../markdown/ai-summary.ts'
-import type { CloudNoteContent, CloudSafe } from '../privacy/privacy-service.ts'
+import type { CloudNoteContent } from '../privacy/privacy-service.ts'
+import type { CloudSafe } from '../privacy/cloud-safe.ts'
 import type { CloudTarget, VerifiedOnDeviceTarget } from '../privacy/on-device.ts'
 import type { TargetModel } from './language-model-service.ts'
 import { skipsReasoning } from './reasoning.ts'

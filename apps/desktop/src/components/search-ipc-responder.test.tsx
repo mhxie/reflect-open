@@ -36,7 +36,7 @@ function setup() {
 describe('SearchIpcResponder', () => {
   it('serves the open graph and answers each request', async () => {
     const { app, ipc, answer, socketCalls } = setup()
-    await renderInApp(<SearchIpcResponder />, { app })
+    await renderInApp(<SearchIpcResponder />, { core: app })
     await vi.waitFor(() => expect(socketCalls()).toEqual(['search_ipc_start']))
 
     ipc.emit('search-ipc:request', REQUEST)
@@ -51,7 +51,7 @@ describe('SearchIpcResponder', () => {
 
   it('stops serving when the workspace goes away', async () => {
     const { app, ipc, answer, socketCalls } = setup()
-    const view = await renderInApp(<SearchIpcResponder />, { app })
+    const view = await renderInApp(<SearchIpcResponder />, { core: app })
     await vi.waitFor(() => expect(socketCalls()).toEqual(['search_ipc_start']))
 
     await view.unmount()
@@ -64,7 +64,7 @@ describe('SearchIpcResponder', () => {
 
   it('serves nothing without an open graph', async () => {
     const { app, ipc, answer, socketCalls } = setup()
-    await renderInApp(<SearchIpcResponder />, { app, graph: null })
+    await renderInApp(<SearchIpcResponder />, { core: app, graph: null })
 
     ipc.emit('search-ipc:request', REQUEST)
     expect(socketCalls()).toEqual([])

@@ -8,8 +8,8 @@ import {
   type TestCoreServices,
 } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
-import { useRouter } from '@/routing/router.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { useRouterState } from '@/routing/router.tsx'
+import { routeForPath } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
@@ -55,14 +55,14 @@ function PdfOpener(): ReactElement {
 }
 
 function RouteProbe(): ReactElement {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
 async function renderPeek(): Promise<TestCoreServices> {
   const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
-  app.clock.setToday('2026-10-03')
+  app.clock.setNow(new Date('2026-10-03T12:00:00').getTime())
   vi.spyOn(app.openDocuments, 'sessionFor').mockImplementation((path) => {
     return openPaths.has(path) ? createTestNoteSession({ path }) : null
   })
@@ -76,7 +76,7 @@ async function renderPeek(): Promise<TestCoreServices> {
       <RouteProbe />
     </PeekProvider>,
     {
-      app,
+      core: app,
       appServices: { window: createTestWindowService({ openNoteWindow }) },
       graph: { root: '/g', name: 'g', generation: 3 },
       settings: { dateFormat: 'mdy' },

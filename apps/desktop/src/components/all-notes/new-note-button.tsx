@@ -2,7 +2,7 @@ import type { ReactElement } from 'react'
 import { FilePlus2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx'
 import { keybindingFor, newNoteRoute } from '@/lib/commands/app-commands.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 const NEW_NOTE_BINDING = keybindingFor('note.new')
@@ -12,7 +12,7 @@ const NEW_NOTE_BINDING = keybindingFor('note.new')
  * (created lazily on the first keystroke), with a compact icon in narrow panes.
  */
 export function NewNoteButton(): ReactElement {
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const { noteCreation } = useCoreServices()
   const { keymap } = useAppServices()
   const button = (

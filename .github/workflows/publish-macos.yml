@@ -44,7 +44,7 @@ defaults:
 
 jobs:
   macos:
-    name: Build macOS ${{ matrix.name }}
+    name: macOS ${{ matrix.name }}
     if: github.repository == 'team-reflect/reflect-open'
     environment: release_app
     runs-on: ${{ matrix.runner }}
@@ -54,10 +54,10 @@ jobs:
       matrix:
         include:
           - name: arm64
-            runner: macos-26
+            runner: xcode-27
             target: aarch64-apple-darwin
           - name: universal
-            runner: macos-26
+            runner: xcode-27
             target: universal-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,7 +69,7 @@ jobs:
 
       # Without the certificate, signing only fails at codesign time — after
       # the whole Rust build. Check every required secret up front instead.
-      # docs/macos-distribution.md describes how to produce each one.
+      # docs/distribution.md describes how to produce each one.
       - name: Verify release secrets are configured
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -87,24 +87,26 @@ jobs:
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::missing release secret(s): ${missing[*]} — see docs/macos-distribution.md"
+            echo "::error::missing release secret(s): ${missing[*]} — see docs/distribution.md"
             exit 1
           fi
 
+      - uses: ./.github/actions/setup-xcode
+
+      # Any master job can write the caches, so a release build starts cold.
       - uses: ./.github/actions/setup-node
+        with:
+          cache: false
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: ${{ matrix.target }}
+          cache: false
 
       # The universal build also compiles the x86_64 slice on this arm64 runner.
       - name: Add the x86_64 macOS target
         if: matrix.target == 'universal-apple-darwin'
         run: rustup target add x86_64-apple-darwin
 
-      # Tauri signs the .app; the script then repairs sidecar signatures,
-      # notarizes + staples the app and DMG, signs the updater archive, and
-      # runs the Gatekeeper checks.
       - name: Build, sign and notarize
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -116,7 +118,7 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: pnpm release:macos --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/macos-artifacts"
+        run: pnpm build:macos --target=${{ matrix.target }} --artifact-dir="$RUNNER_TEMP/macos-artifacts"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -127,13 +129,21 @@ jobs:
           # The DMG and the updater archive are already compressed; zipping
           # them again wastes minutes for nothing.
           compression-level: 0
-          retention-days: 30
+          # The dSYMs symbolicate crash reports. 90 days is the most a public
+          # repository allows; the release keeps another copy.
+          retention-days: 90
 
-      # Uploads clobber, so a failed run can be retried.
+      # Uploads clobber, so a failed upload can be retried.
       - name: Upload the assets to the draft release
         working-directory: ${{ runner.temp }}/macos-artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" ./* --clobber
+        run: |
+          for attempt in 1 2 3; do
+            gh release upload "$TAG" ./* --clobber && exit 0
+            echo "::warning::gh release upload failed (attempt $attempt)"
+            sleep $((attempt * 10))
+          done
+          exit 1

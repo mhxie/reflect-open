@@ -403,7 +403,7 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
     if (input.mode === 'off') {
       return outcome
     }
-    const { session } = this.#deps.graphSession.getState()
+    const { session } = this.#deps.graphSession.get()
     if (session === null || session.generation !== input.generation) {
       // The local-only folders are the open graph's: another graph's pass
       // could not tell which of its notes stay on the device.
@@ -831,7 +831,7 @@ class NoteSummarySessionImpl implements NoteSummarySession {
     const current = this.#deps.settings.get()
     return JSON.stringify([
       current.aiSummaries,
-      this.#deps.aiProviderConfig.state(),
+      this.#deps.aiProviderConfig.get(),
       current.aiSummariesLocalModel,
       current.aiSummariesCloudModel,
       current.aiSummariesCloudConsent,
@@ -920,7 +920,7 @@ class NoteSummarySessionImpl implements NoteSummarySession {
     const { generation } = this.#session
     const catchUp = continuing ? undefined : this.#options.catchUp
     const outcome = await reconcile({
-      providers: aiProviderConfig.state(),
+      providers: aiProviderConfig.get(),
       mode,
       localModel: current.aiSummariesLocalModel,
       cloudModel: current.aiSummariesCloudModel,

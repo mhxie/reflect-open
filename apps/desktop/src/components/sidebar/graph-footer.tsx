@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactElement } from 'react'
-import type { GraphInfo } from '@reflect/core'
+import type { GraphInfo, GitSyncState } from '@reflect/core'
 import { FolderOpen, GraduationCap, LocateFixed, PanelsTopLeft, Settings } from 'lucide-react'
 import { CountdownText } from '@/components/countdown-text.tsx'
 import { GraphSwatch } from '@/components/graph-swatch.tsx'
@@ -19,26 +19,33 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useGraphColors } from '@/hooks/use-graph-colors.ts'
 import { keybindingFor } from '@/lib/commands/app-commands.ts'
 import type { CommandContext } from '@/lib/commands/types.ts'
+import { useSelector } from '@/lib/use-store.ts'
 import { cn } from '@/lib/utils.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSync, type BackupState } from '@/providers/sync-provider.tsx'
-import { useRouter } from '@/routing/router.tsx'
+import { useGraphActions, useGraphIndexing, useGraphRecents } from '@/providers/graph-provider.tsx'
+import { useGitSyncStore } from '@/providers/sync-provider.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 
 const MENU_ITEM_CLASS = 'h-8 gap-2 px-2 py-0 text-[13px] text-text-secondary'
 const SETTINGS_BINDING = keybindingFor('settings.open')
 
-/** The quiet backup indicator: a dot and a screen-reader label, nothing when idle. */
-function BackupDot({ backup }: { backup: BackupState }): ReactElement | null {
-  if (backup.phase !== 'connected' || backup.status.state === 'idle') {
+type SyncStatus = Extract<GitSyncState, { phase: 'connected' }>['status']
+
+function selectConnectedStatus(state: GitSyncState): SyncStatus | null {
+  return state.phase === 'connected' ? state.status : null
+}
+
+/** The quiet git sync indicator: a dot and a screen-reader label, nothing when idle. */
+function GitSyncDot(): ReactElement | null {
+  const status = useSelector(useGitSyncStore(), selectConnectedStatus)
+  if (status === null || status.state === 'idle') {
     return null
   }
-  const status = backup.status
   const { className, label } = {
-    syncing: { className: 'bg-accent motion-safe:animate-pulse', label: 'Backing up' },
-    waiting: { className: 'bg-text-muted', label: 'Backup scheduled' },
-    offline: { className: 'bg-amber-500', label: 'Backup waiting for a connection' },
-    error: { className: 'bg-red-500', label: 'Backup failed — see Settings' },
+    syncing: { className: 'bg-accent motion-safe:animate-pulse', label: 'Syncing' },
+    waiting: { className: 'bg-text-muted', label: 'Sync scheduled' },
+    offline: { className: 'bg-amber-500', label: 'Sync waiting for a connection' },
+    error: { className: 'bg-red-500', label: 'Sync failed — see Settings' },
   }[status.state]
   return (
     <>
@@ -48,7 +55,7 @@ function BackupDot({ backup }: { backup: BackupState }): ReactElement | null {
       </span>
       {status.state === 'waiting' ? (
         <span className="sr-only">
-          Backs up in <CountdownText until={status.until} />
+          Syncs in <CountdownText until={status.until} />
         </span>
       ) : null}
     </>
@@ -72,10 +79,11 @@ export function GraphFooter({ graph, context }: GraphFooterProps): ReactElement 
   const graphTriggerRef = useRef<HTMLButtonElement>(null)
   const { logger } = useCoreServices()
   const { opener, window: appWindow } = useAppServices()
-  const { recents, indexing, openRecent, chooseGraph } = useGraph()
+  const recents = useGraphRecents()
+  const indexing = useGraphIndexing()
+  const { openRecent, chooseGraph } = useGraphActions()
   const { colorFor } = useGraphColors()
-  const { backup } = useSync()
-  const { route } = useRouter()
+  const { route } = useRouterState()
   const settingsActive = route.kind === 'settings'
 
   return (
@@ -100,7 +108,7 @@ export function GraphFooter({ graph, context }: GraphFooterProps): ReactElement 
                     <span className="min-w-0 truncate text-xs font-medium text-text-secondary transition-colors duration-100 group-hover:text-text">
                       {graph.name}
                     </span>
-                    <BackupDot backup={backup} />
+                    <GitSyncDot />
                     {indexing ? (
                       <span role="status" className="sr-only">
                         Indexing

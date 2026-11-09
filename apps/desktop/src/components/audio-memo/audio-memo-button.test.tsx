@@ -2,51 +2,51 @@ import type { RenderResult } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import type { AudioMemoContextValue } from '@/providers/audio-memo-provider.tsx'
-import type { Mutable } from '@reflect/utils'
+import { WritableStore, type AudioMemoSessionState } from '@reflect/core'
+import { AudioMemoContext } from '@/providers/audio-memo-provider.tsx'
+import { AudioMemoButton } from './audio-memo-button.tsx'
 
-const memo = vi.hoisted((): Mutable<AudioMemoContextValue> => ({
+const IDLE: AudioMemoSessionState = {
   phase: 'idle',
-  elapsedMs: 0,
   stream: null,
   nativeRecorder: false,
-  subscribeLevel: null,
   available: true,
   unavailableReason: null,
   error: null,
   canRetry: false,
-  toggle: vi.fn(),
-  cancel: vi.fn(),
-  retry: vi.fn(),
-  discard: vi.fn(),
   pendingCount: 0,
   recorderState: 'idle',
-}))
+}
 
-vi.mock('@/providers/audio-memo-provider.tsx', () => ({
-  useAudioMemo: () => ({ ...memo }),
-}))
+const state = new WritableStore(IDLE)
+const elapsedMs = new WritableStore(0)
+const actions = { toggle: vi.fn(), cancel: vi.fn(), retry: vi.fn(), discard: vi.fn() }
+const session = { get: state.get, subscribe: state.subscribe, elapsedMs }
 
-const { AudioMemoButton } = await import('./audio-memo-button.tsx')
+function setMemo(patch: Partial<AudioMemoSessionState>): void {
+  state.set({ ...state.get(), ...patch })
+}
 
 function renderButton(): Promise<RenderResult> {
-  return renderInApp(<AudioMemoButton />)
+  return renderInApp(
+    <AudioMemoContext value={{ session, ...actions, subscribeLevel: null }}>
+      <AudioMemoButton />
+    </AudioMemoContext>,
+  )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  memo.phase = 'idle'
-  memo.elapsedMs = 0
-  memo.available = true
-  memo.unavailableReason = null
-  memo.error = null
-  memo.canRetry = false
+  state.set(IDLE)
+  elapsedMs.set(0)
 })
 
 describe('AudioMemoButton', () => {
   it('unavailable renders aria-disabled — never natively disabled — and ignores clicks', async () => {
-    memo.available = false
-    memo.unavailableReason = 'Add an OpenAI or Gemini model in Settings to record audio memos'
+    setMemo({
+      available: false,
+      unavailableReason: 'Add an OpenAI or Gemini model in Settings to record audio memos',
+    })
     const view = await renderButton()
 
     // aria-disabled (not `disabled`) keeps pointer events alive so the
@@ -58,41 +58,41 @@ describe('AudioMemoButton', () => {
 
     // force: playwright refuses to click aria-disabled controls on its own.
     await userEvent.click(micButton, { force: true })
-    expect(memo.toggle).not.toHaveBeenCalled()
+    expect(actions.toggle).not.toHaveBeenCalled()
   })
 
   it('recording turns the mic into the stop control', async () => {
-    memo.phase = 'recording'
+    setMemo({ phase: 'recording' })
     const view = await renderButton()
 
     await userEvent.click(view.getByRole('button', { name: 'Stop recording' }))
-    expect(memo.toggle).toHaveBeenCalled()
+    expect(actions.toggle).toHaveBeenCalled()
   })
 
   it('escape cancels a recording without transcribing', async () => {
-    memo.phase = 'recording'
+    setMemo({ phase: 'recording' })
     const view = await renderButton()
 
     view.getByRole('button', { name: 'Stop recording' }).element().focus()
     await userEvent.keyboard('{Escape}')
-    expect(memo.cancel).toHaveBeenCalled()
-    expect(memo.toggle).not.toHaveBeenCalled()
+    expect(actions.cancel).toHaveBeenCalled()
+    expect(actions.toggle).not.toHaveBeenCalled()
   })
 
   it('escape is inert while transcribing — stopping committed the save', async () => {
-    memo.phase = 'transcribing'
+    setMemo({ phase: 'transcribing' })
     await renderButton()
 
     await userEvent.keyboard('{Escape}')
-    expect(memo.cancel).not.toHaveBeenCalled()
-    expect(memo.discard).not.toHaveBeenCalled()
+    expect(actions.cancel).not.toHaveBeenCalled()
+    expect(actions.discard).not.toHaveBeenCalled()
   })
 
   it('the mic stays live while earlier memos transcribe', async () => {
-    memo.phase = 'transcribing'
+    setMemo({ phase: 'transcribing' })
     const view = await renderButton()
 
     await userEvent.click(view.getByRole('button', { name: 'Record audio memo' }))
-    expect(memo.toggle).toHaveBeenCalled()
+    expect(actions.toggle).toHaveBeenCalled()
   })
 })

@@ -3,25 +3,30 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { exec } from 'tinyexec'
-import { z } from 'zod'
+import packageJson from '../package.json' with { type: 'json' }
 
 export const APP_DIR = join(import.meta.dirname, '..')
 const ROOT_DIR = join(APP_DIR, '..', '..')
 export const TAURI_SRC_DIR = join(APP_DIR, 'src-tauri')
 export const TARGET_DIR = join(ROOT_DIR, 'target')
 
+const IOS_BUILD_DIR = join(TAURI_SRC_DIR, 'gen', 'apple', 'build')
+export const IOS_ARCHIVE_PATH = join(IOS_BUILD_DIR, 'reflect-open_iOS.xcarchive')
+export const IOS_IPA_PATH = join(IOS_BUILD_DIR, 'arm64', 'Reflect.ipa')
+
 /** `tinyexec` options for a command that prints straight to the terminal. */
 export const INHERIT = { throwOnError: true, nodeOptions: { stdio: 'inherit' } } as const
 
 const BETA_OVERLAY = 'tauri.beta.conf.json'
-const PackageJsonSchema = z.object({ version: z.string().min(1) })
+const SENTRY_DSN_PATTERN =
+  /^https:\/\/[0-9a-f]{32}@o463484\.ingest\.us\.sentry\.io\/4511705649971200$/
 
 export function log(message: string): void {
   console.log(`[release] ${message}`)
@@ -61,10 +66,13 @@ export function exportArtifacts(paths: readonly string[], artifactDir: string): 
   }
 }
 
-/** The app version from `apps/desktop/package.json`, the single version source. */
-export function readAppVersion(): string {
-  const packageJson: unknown = JSON.parse(readFileSync(join(APP_DIR, 'package.json'), 'utf8'))
-  return PackageJsonSchema.parse(packageJson).version
+/** Official builds must report to the production Sentry project or not at all. */
+export function assertSentryDsn(): void {
+  // The app trims the value before it parses it.
+  const dsn = (process.env.VITE_SENTRY_DSN ?? '').trim()
+  if (dsn && !SENTRY_DSN_PATTERN.test(dsn)) {
+    throw new Error('VITE_SENTRY_DSN is not the production Reflect Sentry project')
+  }
 }
 
 /**
@@ -73,7 +81,7 @@ export function readAppVersion(): string {
  * build always matches its updater feed.
  */
 export function getFlavorOverlay(): string | null {
-  return readAppVersion().includes('-') ? BETA_OVERLAY : null
+  return packageJson.version.includes('-') ? BETA_OVERLAY : null
 }
 
 /** The `--config` arguments that select the flavor. */
@@ -89,6 +97,46 @@ export function getFlavorConfigArgs(): string[] {
 export async function getHostTriple(): Promise<string> {
   const { stdout } = await exec('rustc', ['--print', 'host-tuple'], { throwOnError: true })
   return stdout.trim()
+}
+
+/** The Mach-O UUIDs of binaries or dSYMs, sorted and joined. */
+async function readUuids(paths: readonly string[]): Promise<string> {
+  const { stdout } = await exec('xcrun', ['dwarfdump', '--uuid', ...paths], { throwOnError: true })
+  return [...stdout.matchAll(/^UUID: ([0-9A-F-]{36})/gim)]
+    .map((match) => match[1])
+    .toSorted()
+    .join(',')
+}
+
+async function readSymbols(path: string): Promise<string> {
+  return (await exec('xcrun', ['nm', '-j', path], { throwOnError: true })).stdout
+}
+
+/**
+ * A crash report can only be symbolicated with the dSYMs of the exact shipped
+ * executable. Checks that `binary` and `dsyms` have the same UUIDs, and that
+ * every dSYM has `symbol` while `binary` no longer does.
+ */
+export async function assertDsyms(
+  binary: string,
+  dsyms: readonly string[],
+  symbol: string,
+): Promise<void> {
+  const uuids = await readUuids([binary])
+  if (!uuids || uuids !== (await readUuids(dsyms))) {
+    throw new Error(`${basename(binary)} and its dSYMs do not have the same UUIDs`)
+  }
+  for (const dsym of dsyms) {
+    const dwarfDir = join(dsym, 'Contents', 'Resources', 'DWARF')
+    for (const name of readdirSync(dwarfDir)) {
+      if (!(await readSymbols(join(dwarfDir, name))).includes(symbol)) {
+        throw new Error(`${basename(dsym)} does not contain ${symbol}`)
+      }
+    }
+  }
+  if ((await readSymbols(binary)).includes(symbol)) {
+    throw new Error(`${basename(binary)} still contains ${symbol}`)
+  }
 }
 
 export interface ApiKey {

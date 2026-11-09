@@ -29,12 +29,12 @@ import {
   notePrivate,
   PrivateNoteError,
   type CloudNoteListing,
-  type CloudSafe,
   type CloudSearchHit,
   type CloudSendable,
   type PrivacyService,
 } from '../../privacy/privacy-service.ts'
 import type { ChatPrivacyService } from './chat-privacy-service.ts'
+import type { CloudSafe } from '../../privacy/cloud-safe.ts'
 import { buildReadOneAsset, readAssetsInput, type ReadAssetsOutput } from './read-assets.ts'
 import { buildReadOneNote, readNotesInput, type ReadNotesOutput } from './read-notes.ts'
 import type { SearchSnapshot } from './tool-result-sources.ts'
@@ -153,7 +153,7 @@ export const listRecentNotesInput = z.object({
     ),
 })
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'an ISO date, YYYY-MM-DD')
+const isoDate = z.iso.date()
 
 export const listDailyNotesInput = z.object({
   start: isoDate.describe('First day of the range, inclusive (YYYY-MM-DD)'),

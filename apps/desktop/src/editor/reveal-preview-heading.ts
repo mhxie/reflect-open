@@ -7,7 +7,7 @@ import {
   wikiClaimHeadingText,
 } from '@reflect/core'
 import GithubSlugger from 'github-slugger'
-import { todayIso } from '@/lib/dates.ts'
+import { getIsoToday } from '@reflect/utils'
 
 function lookupKey(text: string): string {
   return text.normalize('NFKC').trim().replaceAll(/\s+/g, ' ').toLowerCase()
@@ -17,7 +17,7 @@ function lookupKey(text: string): string {
 export function revealPreviewHeading(root: HTMLElement, source: string, fragment: string): boolean {
   const claimId = wikiClaimId(fragment)
   if (claimId !== null) {
-    const claim = findWikiClaim(readWikiClaimIndex(source, todayIso()), fragment)
+    const claim = findWikiClaim(readWikiClaimIndex(source, getIsoToday()), fragment)
     if (claim === null) return false
     if (claim.kind === 'range') {
       const elements = [

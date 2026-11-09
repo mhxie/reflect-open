@@ -19,7 +19,9 @@ import type { PlatformFacts } from '../ports/platform-facts.ts'
 import { isICloudRoot } from '../sync/icloud-sync-service.ts'
 import type { ActivityPort } from '../ports/activity-port.ts'
 import type { ProgressPort } from '../ports/progress-port.ts'
-import type { BackupService } from '../sync/backup-service.ts'
+import type { GitSyncService } from '../sync/git-sync-service.ts'
+import type { GithubConnector } from '../sync/github-connector.ts'
+import type { GitHostConnector } from '../sync/git-host-connector.ts'
 import {
   createTestAiKeyValidationService,
   createTestAssetDescriberService,
@@ -75,6 +77,7 @@ import { createTestMobileStorageService } from './mobile-storage.ts'
 import {
   createTestAppStoreEnvironmentService,
   createTestClassicAccessService,
+  createTestInstallClockService,
   createTestSubscriptionService,
 } from './monetization.ts'
 import { createTestPersistenceFlushService } from './persistence-flush.ts'
@@ -86,7 +89,7 @@ import {
   createTestIapService,
   createTestWebAuthService,
 } from './plugins.ts'
-import { createTestAppInfoService, createTestSecretStoreService } from './secrets.ts'
+import { createTestSecretStoreService } from './secrets.ts'
 import { createTestSettingsService } from './settings.ts'
 import { createTestActivityPort } from './shell.ts'
 import { createTestStorageService } from './storage.ts'
@@ -101,9 +104,17 @@ import {
  */
 export type TestCoreServiceOverrides = Partial<CoreServices & CoreInternalServices> & {
   /**
-   * The backup service of every main-window graph session.
+   * The git sync service of every main-window graph session.
    */
-  readonly backup?: BackupService
+  readonly gitSync?: GitSyncService
+  /**
+   * The GitHub connector of every main-window graph session.
+   */
+  readonly githubConnector?: GithubConnector
+  /**
+   * The host connector of every main-window graph session.
+   */
+  readonly gitHostConnector?: GitHostConnector
   /**
    * The activity signals the services follow.
    */
@@ -138,7 +149,7 @@ function testGraphLifecycles(session: GraphSession, platform: PlatformFacts): Gr
   const main = session.role === 'main'
   const mobile = isMobilePlatform(platform.appPlatform) || platform.surface.mobileApp
   return {
-    backup: main,
+    gitSync: main,
     icloudSync: main && isICloudRoot(session.root),
     capture: main,
     assetDescription: main && !mobile,
@@ -182,6 +193,7 @@ function createTestServiceFactories(overrides: TestCoreServiceOverrides) {
     subscription: () => createTestSubscriptionService(),
     // A sandbox install keeps the paywall hidden until a test asks for it.
     appStoreEnvironment: () => createTestAppStoreEnvironmentService('Sandbox'),
+    installClock: () => createTestInstallClockService(),
     haptics: () => createTestHapticsService(),
     noteFile: () => createTestNoteFileService(),
     assetStore: () => createTestAssetStoreService(),
@@ -223,7 +235,6 @@ function createTestServiceFactories(overrides: TestCoreServiceOverrides) {
     chatHistory: () => createTestChatHistoryService(),
     chatEngine: () => createTestChatEngineService(),
     chatGraphContext: () => createTestChatGraphContextService(),
-    appInfo: () => createTestAppInfoService(),
     semanticSearch: (deps) => createTestSemanticSearchService(deps),
     capture: () => createTestCaptureService(),
   } satisfies Partial<ServiceFactories>
@@ -250,7 +261,10 @@ type Override<Base, Narrow> = Omit<Base, keyof Narrow> & Narrow
  */
 export type TestMobileServices = Override<
   MobileServices,
-  Pick<Built<TestServiceFactories>, 'haptics' | 'subscription' | 'appStoreEnvironment'>
+  Pick<
+    Built<TestServiceFactories>,
+    'haptics' | 'subscription' | 'appStoreEnvironment' | 'installClock'
+  >
 >
 
 /**
@@ -272,7 +286,14 @@ export type TestCoreServices = Override<
 /**
  * The overrides that go to the adapters rather than in place of a service.
  */
-const TEST_ADAPTER_KEYS = new Set(['backup', 'progress', 'role', 'createGraphServices'])
+const TEST_ADAPTER_KEYS = new Set([
+  'gitSync',
+  'githubConnector',
+  'gitHostConnector',
+  'progress',
+  'role',
+  'createGraphServices',
+])
 
 /**
  * {@link createCoreServices} over test adapters, with the test double of each
@@ -284,7 +305,9 @@ export function createTestCoreServices<
   const defaults = createTestEdgeServices()
   const edge = { ...defaults, ...overrides }
   const platform = edge.platform ?? createTestPlatformService()
-  const backup = overrides.backup
+  const gitSync = overrides.gitSync
+  const githubConnector = overrides.githubConnector
+  const gitHostConnector = overrides.gitHostConnector
   const adapters: CoreAdapters = {
     ipc: edge.ipc ?? createTestIpcBridgeService({ logger: edge.logger }),
     platform,
@@ -301,12 +324,11 @@ export function createTestCoreServices<
     createGraphServices:
       edge.createGraphServices ??
       ((session, deps) => {
-        return createGraphServices(
-          session,
-          deps,
-          testGraphLifecycles(session, platform),
-          backup === undefined ? {} : { backup: () => backup },
-        )
+        return createGraphServices(session, deps, testGraphLifecycles(session, platform), {
+          ...(gitSync === undefined ? {} : { gitSync: () => gitSync }),
+          ...(githubConnector === undefined ? {} : { githubConnector: () => githubConnector }),
+          ...(gitHostConnector === undefined ? {} : { gitHostConnector: () => gitHostConnector }),
+        })
       }),
   }
   const fixed: Record<string, () => unknown> = {}

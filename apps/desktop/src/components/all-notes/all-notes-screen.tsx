@@ -17,10 +17,10 @@ import { createAllNotesQueryOptions } from '@/lib/query-options.ts'
 import { useListSelection } from '@/lib/selection/use-list-selection.ts'
 import { useScrollRestoration } from '@/lib/use-scroll-restoration.ts'
 import { useScrollToIndexBridge } from '@/lib/use-scroll-to-index-bridge.ts'
-import { useGraph } from '@/providers/graph-provider.tsx'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import { routeForPath, type AllNotesFilter } from '@/routing/route.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useGraphInfo } from '@/providers/graph-provider.tsx'
+import { routeForPath, type AllNotesFilter } from '@reflect/app'
+import { useSettingsStore, useSettingsService } from '@/providers/settings-provider.tsx'
+import { useRouterActions } from '@/routing/router.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
 import { AllNotesFilters } from './all-notes-filters.tsx'
 import { AllNotesPrivacyButton } from './all-notes-privacy-button.tsx'
@@ -55,19 +55,15 @@ interface AllNotesScreenProps {
  * wired to the router's per-entry scroll memory by hand.
  */
 export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
-  const { graph } = useGraph()
+  const graph = useGraphInfo()
   const { noteList } = useCoreServices()
-  const { settings, updateSettingsWith } = useSettings()
+  const settings = useSettingsStore()
+  const settingsService = useSettingsService()
   const knowledgeLevels = useKnowledgeLevels()
   const sort = settings.allNotesSort
-  const { navigate } = useRouter()
+  const { navigate } = useRouterActions()
   const navigateNoteLink = useNoteLinkNavigation()
-  // The scroll container lives in state, not a ref, so scroll restoration
-  // re-runs its restore once the element attaches (a callback ref re-renders;
-  // a plain ref would still be null during the restore effect on the first,
-  // warm-cache-only mount). The table virtualizes against this container as its
-  // parent, so it no longer needs the element handed down.
-  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   // The surface, so the keyboard shortcuts can scope to it (and focus it on mount).
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -109,15 +105,15 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
     filter?.kind === 'level' && knowledgeLevels !== undefined && knowledgeLevels.kind !== 'ready'
   const handleSort = useCallback(
     (key: NoteListSortKey) => {
-      updateSettingsWith((current) => ({
+      settingsService.updateWith((current) => ({
         allNotesSort: chooseNoteListSort(current.allNotesSort, key),
       }))
     },
-    [updateSettingsWith],
+    [settingsService],
   )
 
   const ready = sortedNotes !== undefined
-  const { onScroll } = useScrollRestoration(scrollElement, ready)
+  const { onScroll } = useScrollRestoration(scrollRef, ready)
 
   // The flat, render-order paths the selection and its shortcuts act on.
   const orderedPaths = useMemo(() => (sortedNotes ?? []).map((note) => note.path), [sortedNotes])
@@ -220,7 +216,7 @@ export function AllNotesScreen({ filter }: AllNotesScreenProps): ReactElement {
         </div>
       </header>
       <div
-        ref={setScrollElement}
+        ref={scrollRef}
         data-testid="all-notes-scroll"
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-auto"

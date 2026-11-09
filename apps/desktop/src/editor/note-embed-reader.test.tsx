@@ -103,7 +103,7 @@ beforeEach(() => {
 })
 
 function render(ui: ReactNode) {
-  return renderInApp(ui, { app, appServices: appLayer, graph: GRAPH })
+  return renderInApp(ui, { core: app, appServices: appLayer, graph: GRAPH })
 }
 
 function reader(options: Partial<NoteEmbedReaderOptions> = {}, target = 'Original') {

@@ -17,7 +17,7 @@ import {
   type TestAttachmentService,
 } from '@reflect/core/testing'
 import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
-import { useRouter } from '@/routing/router.tsx'
+import { useRouterState } from '@/routing/router.tsx'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 
@@ -27,7 +27,7 @@ const resolveMarkdownHref = vi.fn()
 const openNoteWindow = vi.fn<(deepLink: string) => MaybePromise<boolean>>()
 
 function RouteProbe(): ReactNode {
-  const { route } = useRouter()
+  const { route } = useRouterState()
   return <output data-testid="route">{JSON.stringify(route)}</output>
 }
 
@@ -37,7 +37,7 @@ let onLinkClick: LinkClickHandler
 
 async function mount(sourcePath: string | null): Promise<void> {
   const graphSession = createTestGraphSessionService()
-  const app = createTestCoreServices({
+  const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     attachments,
     graphSession,
@@ -62,7 +62,7 @@ async function mount(sourcePath: string | null): Promise<void> {
     },
   ).linkNavigation
   const { result } = await renderHookInApp(() => useMarkdownLinkClick(sourcePath), {
-    app,
+    core,
     appServices: { linkNavigation },
     graph: { generation: 7 },
     wrapper: (children) => (

@@ -1,18 +1,25 @@
 import type { ReactElement } from 'react'
-import { getMobileSyncStatus } from '@reflect/app'
+import { getMobileSyncStatus, type MobileSyncStatus } from '@reflect/app'
+import { useSelector } from '@/lib/use-store.ts'
 import { cn } from '@/lib/utils.ts'
-import { useSyncContext } from '@/providers/sync-provider.tsx'
+import { useGitSyncStore } from '@/providers/sync-provider.tsx'
+
+/**
+ * Whether two statuses render the same pill: it shows only the label and the tone.
+ */
+function isSamePill(a: MobileSyncStatus | null, b: MobileSyncStatus | null): boolean {
+  return a === b || (a !== null && b !== null && a.label === b.label && a.tone === b.tone)
+}
 
 /**
  * The sync-status pill (Plan 19, step 10): a small chip that appears only
  * while sync has something to say: `Syncing` during a cycle, `Offline`/`Needs attention` after
- * a failed cycle. The quiet `Backed up` state renders nothing (detail lives
+ * a failed cycle. The quiet `Up to date` state renders nothing (detail lives
  * in the settings sheet) and it never intercepts touches. Positioning above
  * the tab bar belongs to {@link MobileStatusLayer}.
  */
 export function SyncStatusPill(): ReactElement | null {
-  const sync = useSyncContext()
-  const status = getMobileSyncStatus(sync?.backup ?? null)
+  const status = useSelector(useGitSyncStore(), getMobileSyncStatus, isSamePill)
 
   if (status === null || status.tone === 'ok') {
     return null

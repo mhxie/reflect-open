@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react'
 import { isModEvent } from '@meowdown/core'
 import { useOnThisDay } from '@/hooks/use-on-this-day.ts'
-import { formatDayLabel } from '@/lib/dates.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
-import { routeForPath } from '@/routing/route.ts'
+import { formatDayLabel } from '@reflect/core'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
+import { routeForPath } from '@reflect/app'
 import { usePeekNavigation } from '@/components/peek/peek-provider.tsx'
 import { SidebarSection } from './sidebar-section.tsx'
 
@@ -22,7 +22,7 @@ function yearsAgoLabel(yearsAgo: number): string {
  * opens that day. Renders nothing when there are none.
  */
 export function OnThisDaySection({ date }: OnThisDaySectionProps): ReactElement | null {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const navigateNoteLink = usePeekNavigation(date)
   const entries = useOnThisDay(date)
   if (entries.length === 0) {

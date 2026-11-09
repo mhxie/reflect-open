@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createGraphSession, type GraphRole, type GraphServicesDeps } from '@reflect/core'
+import {
+  createGraphSession,
+  WritableStore,
+  type GraphRole,
+  type GraphServicesDeps,
+} from '@reflect/core'
 import {
   createNodeTestDatabaseService,
   createTestCoreServices,
@@ -20,11 +25,12 @@ const ICLOUD_ROOT = '/Users/me/Library/Mobile Documents/iCloud~reflect/Documents
 function graphDeps(core: TestCoreServices): GraphServicesDeps {
   const { icloudNative, fileChanges, indexLifecycle, activity, clock, logger } = core
   return {
-    backup: {
+    gitSync: {
       git: core.gitRepository,
       syncEngines: core.syncEngines,
+      credentials: core.credentials,
       githubAuth: core.githubAuth,
-      githubRepos: core.githubRepos,
+      gitHostCredentials: core.gitHostCredentials,
       fileChanges,
       indexLifecycle,
       progress: core.progress,
@@ -36,6 +42,8 @@ function graphDeps(core: TestCoreServices): GraphServicesDeps {
       icloudNative,
       logger,
     },
+    githubConnector: { githubAuth: core.githubAuth, githubRepos: core.githubRepos },
+    gitHostConnector: { git: core.gitRepository, gitHostCredentials: core.gitHostCredentials },
     icloudSync: {
       icloudNative,
       fileChanges,
@@ -87,14 +95,14 @@ describe('createAppGraphServices', () => {
   it('runs every lifecycle of a desktop main window', () => {
     const context = setup()
     expect(context.graph).toMatchObject({ session: context.session, role: 'main' })
-    expect(context.graph.backup).not.toBeNull()
+    expect(context.graph.gitSync).not.toBeNull()
     expect(context.core.capture.sessions()).toHaveLength(1)
     expect(context.sessions()).toHaveLength(1)
   })
 
   it('runs only the chat session and the catalog watch in a note window', () => {
     const context = setup({ role: 'note-window', root: ICLOUD_ROOT })
-    expect(context.graph.backup).toBeNull()
+    expect(context.graph.gitSync).toBeNull()
     expect(context.core.capture.sessions()).toEqual([])
     expect(context.sessions()).toEqual([])
     expect(context.core.attachments.watchers()).toBe(1)
@@ -177,36 +185,22 @@ describe('createAppGraphServices', () => {
 
 describe('whileActive', () => {
   it('opens while active and closes on the change and on stop', () => {
-    let active = false
-    const listeners = new Set<() => void>()
+    const active = new WritableStore(false)
     const events: string[] = []
-    const stop = whileActive(
-      () => active,
-      (listener) => {
-        listeners.add(listener)
-        return () => {
-          listeners.delete(listener)
-        }
-      },
-      () => {
-        events.push('open')
-        return () => {
-          events.push('close')
-        }
-      },
-    )
-    const notify = () => {
-      for (const listener of listeners) {
-        listener()
+    const stop = whileActive(active, () => {
+      events.push('open')
+      return () => {
+        events.push('close')
       }
-    }
+    })
     expect(events).toEqual([])
-    active = true
-    notify()
-    notify()
+    active.set(true)
     expect(events).toEqual(['open'])
-    stop()
+    active.set(false)
     expect(events).toEqual(['open', 'close'])
-    expect(listeners.size).toBe(0)
+    active.set(true)
+    stop()
+    expect(events).toEqual(['open', 'close', 'open', 'close'])
+    expect(active.subscribed()).toBe(false)
   })
 })

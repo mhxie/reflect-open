@@ -123,16 +123,22 @@ export {
   type TestDeepLinkSource,
 } from './deep-link.ts'
 export {
-  createTestBackupService,
+  createTestGitSyncService,
+  createTestGithubConnector,
+  createTestGitHostConnector,
   createTestGitRepositoryService,
   createTestGithubAuthService,
   createTestICloudNativeService,
   createTestICloudSyncService,
-  type BackupCall,
+  type GitSyncCall,
+  type GithubConnectorCall,
+  type GitHostConnectorCall,
+  type TestGithubConnector,
+  type TestGitHostConnector,
   type GitRepositoryCall,
   type GitRepositoryHandler,
   type ICloudNativeCall,
-  type TestBackupService,
+  type TestGitSyncService,
   type TestGitRepositoryService,
   type TestGithubAuthOptions,
   type TestGithubAuthService,
@@ -167,11 +173,7 @@ export {
   type TestLocalTranscriptionService,
   type TestLocalTranscriptionServiceOptions,
 } from './ai.ts'
-export {
-  createTestAppInfoService,
-  createTestSecretStoreService,
-  type TestSecretStoreService,
-} from './secrets.ts'
+export { createTestSecretStoreService, type TestSecretStoreService } from './secrets.ts'
 export {
   createTestIndexStoreService,
   type IndexStoreCall,
@@ -265,11 +267,13 @@ export {
 export {
   createTestAppStoreEnvironmentService,
   createTestClassicAccessService,
+  createTestInstallClockService,
   createTestSubscriptionService,
   type AppStoreEnvironmentCall,
   type ClassicAccessCall,
   type SubscriptionCall,
   type TestAppStoreEnvironmentService,
   type TestClassicAccessService,
+  type TestInstallClockService,
   type TestSubscriptionService,
 } from './monetization.ts'

@@ -39,9 +39,10 @@ import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
 import { MOD_KEY, NON_MOD_KEY } from '@/test-utils/mod-key.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
-import type { MockToastAddOptions } from '@/test-utils/toast.ts'
+import type { ToastController } from '@/lib/use-toasts.ts'
+import { toast } from '@/components/ui/toast.tsx'
 import { useAppShortcuts } from './app-shortcuts.ts'
-import { useRouter } from './router.tsx'
+import { useRouterActions, useRouterHandlers, useRouterState } from './router.tsx'
 
 const GRAPH = {
   root: '/g',
@@ -51,9 +52,7 @@ const GRAPH = {
   localOnlyEditableFolders: [],
 } satisfies TestOpenGraph
 
-const toast = vi.hoisted(() => ({ add: vi.fn<(options: MockToastAddOptions) => string>() }))
-
-vi.mock('@/components/ui/toast.tsx', () => ({ toast }))
+let addToast: MockInstance<ToastController['add']>
 
 // `newChat` of the chat session the open graph created; set by `shortcutsHook`.
 let newChat: MockInstance<ChatSession['newChat']>
@@ -86,7 +85,7 @@ const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 // The platform of the next `shortcutsHook`; each `describe` sets it.
 let platform: TestPlatformOptions
 // The services of the rendered app; set by `shortcutsHook`.
-let app: TestCoreServices
+let core: TestCoreServices
 let appLayer: AppServices
 let openRecent: MockInstance<GraphSessionService['openRecent']>
 let openRouteInNewWindow: MockInstance<LinkNavigationService['openRouteInNewWindow']>
@@ -101,7 +100,7 @@ beforeEach(() => {
     hasMacosTitleBarOverlay: false,
   }
   commitNoteFrontmatter.mockReset().mockResolvedValue(undefined)
-  toast.add.mockClear()
+  addToast = vi.spyOn(toast, 'add').mockReturnValue('privacy-toast')
 })
 
 interface ShortcutsHookOptions {
@@ -124,7 +123,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
       isOstensiblyEmpty: isOstensiblyEmptyNoteSource,
     },
   })
-  app = services
+  core = services
   appLayer = createTestAppServices(services)
   openRecent = vi.spyOn(services.graphSession, 'openRecent').mockResolvedValue(true)
   openRouteInNewWindow = vi
@@ -133,7 +132,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
   isNativeMenuInstalled = vi.spyOn(appLayer.nativeMenu, 'isInstalled').mockReturnValue(false)
   getPinnedNotes = vi.spyOn(services.indexQuery, 'getPinnedNotes').mockImplementation(() => {
     return Promise.resolve([
-      ...(options?.pinned?.[services.graphSession.getState().session?.root ?? ''] ?? []),
+      ...(options?.pinned?.[services.graphSession.get().session?.root ?? ''] ?? []),
     ])
   })
   const createChatSession = services.chatSessions.create.bind(services.chatSessions)
@@ -148,7 +147,9 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
       return {
         context,
         setFocusedDailyDate: useSetFocusedDailyDate(),
-        router: useRouter(),
+        routerState: useRouterState(),
+        routerHandlers: useRouterHandlers(),
+        routerActions: useRouterActions(),
         palette: usePalette(),
         noteFind: useNoteFind(),
         shortcuts: useShortcuts(),
@@ -158,7 +159,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
       }
     },
     {
-      app: services,
+      core: services,
       appServices: appLayer,
       graph: GRAPH,
       graphState: {
@@ -243,12 +244,12 @@ describe('app shortcuts', () => {
     const write = Promise.withResolvers<void>()
     commitNoteFrontmatter.mockReturnValueOnce(write.promise)
     const { result } = await shortcutsHook()
-    await act(() => result.current.router.navigate({ kind: 'note', path: 'notes/a.md' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'note', path: 'notes/a.md' }))
     await act(() => press('o'))
     await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/a.md', { pinned: 1024 }, 1)
     })
-    expect(app.noteRows.getOverlay('notes/a.md')).toEqual({ isPinned: true, pinnedOrder: 1024 })
+    expect(core.noteRows.get().get('notes/a.md')).toEqual({ isPinned: true, pinnedOrder: 1024 })
     await act(() => press('o'))
     expect(commitNoteFrontmatter).toHaveBeenCalledTimes(1)
     write.resolve()
@@ -259,18 +260,18 @@ describe('app shortcuts', () => {
 
   it('palette pin targets the focused daily note through the same context', async () => {
     const { result } = await shortcutsHook()
-    await act(() => result.current.router.navigate({ kind: 'daily', date: '2026-09-08' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'daily', date: '2026-09-08' }))
     await act(() => result.current.setFocusedDailyDate('2026-09-07'))
     await act(() => result.current.context.togglePin())
     expect(commitNoteFrontmatter).toHaveBeenCalledWith('daily/2026-09-07.md', { pinned: 1024 }, 1)
-    expect(app.noteRows.getOverlay('daily/2026-09-07.md')).toMatchObject({ isPinned: true })
+    expect(core.noteRows.get().get('daily/2026-09-07.md')).toMatchObject({ isPinned: true })
   })
 
   it('palette privacy updates the focused daily note row before the write resolves', async () => {
     const write = Promise.withResolvers<void>()
     commitNoteFrontmatter.mockReturnValueOnce(write.promise)
     const { result } = await shortcutsHook()
-    await act(() => result.current.router.navigate({ kind: 'daily', date: '2026-09-08' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'daily', date: '2026-09-08' }))
     await act(() => result.current.setFocusedDailyDate('2026-09-07'))
     const action = result.current.context.togglePrivate()
     await vi.waitFor(() => {
@@ -280,22 +281,22 @@ describe('app shortcuts', () => {
         1,
       )
     })
-    expect(app.noteRows.getOverlay('daily/2026-09-07.md')).toEqual({ isPrivate: true })
+    expect(core.noteRows.get().get('daily/2026-09-07.md')).toEqual({ isPrivate: true })
     write.resolve()
     await action
     // The toggle confirms itself with an Undo, as from every other privacy control.
-    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Marked private' }))
-    const options = toast.add.mock.lastCall?.[0]
+    expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Marked private' }))
+    const options = addToast.mock.lastCall?.[0]
     expect(options?.actionProps?.children).toBe('Undo')
   })
 
   it('pin and privacy no-op on note-less routes and without a graph', async () => {
     const { result } = await shortcutsHook()
-    await act(() => result.current.router.navigate({ kind: 'settings' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'settings' }))
     await act(() => press('o'))
     await act(() => result.current.context.togglePrivate())
-    await act(() => app.graphSession.setGraph(null))
-    await act(() => result.current.router.navigate({ kind: 'note', path: 'notes/a.md' }))
+    await act(() => core.graphSession.setGraph(null))
+    await act(() => result.current.routerActions.navigate({ kind: 'note', path: 'notes/a.md' }))
     await act(() => press('o'))
     await act(() => result.current.context.togglePrivate())
     expect(commitNoteFrontmatter).not.toHaveBeenCalled()
@@ -332,49 +333,49 @@ describe('app shortcuts', () => {
     const { result } = await shortcutsHook()
 
     await act(() => press('n'))
-    expect(result.current.router.route.kind).toBe('note')
-    const opened = result.current.router.route as { kind: 'note'; path: string }
+    expect(result.current.routerState.route.kind).toBe('note')
+    const opened = result.current.routerState.route as { kind: 'note'; path: string }
     expect(opened.path).toMatch(/^notes\/[0-9a-z]+\.md$/)
 
     await act(() => press('d'))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
 
     await act(() => press('['))
-    expect(result.current.router.route.kind).toBe('note')
+    expect(result.current.routerState.route.kind).toBe('note')
 
     await act(() => press(']'))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
   })
 
   it('⌘N from today makes back re-anchor Daily instead of restoring stale scroll', async () => {
     const { result } = await shortcutsHook()
-    await act(() => result.current.router.saveScrollState(735))
-    expect(result.current.router.savedScroll()).toBe(735)
+    await act(() => result.current.routerHandlers.saveScrollState(735))
+    expect(result.current.routerHandlers.savedScroll()).toBe(735)
 
     await act(() => press('n'))
-    expect(result.current.router.route.kind).toBe('note')
+    expect(result.current.routerState.route.kind).toBe('note')
 
     await act(() => press('['))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
-    expect(result.current.router.savedScroll()).toBeNull()
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
+    expect(result.current.routerHandlers.savedScroll()).toBeNull()
   })
 
   it('⌘⇧O opens the current note in a new window', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
 
     await act(() => press('o', { shiftKey: true }))
 
     expect(openRouteInNewWindow).toHaveBeenCalledWith(opened)
-    expect(result.current.router.route).toEqual(opened)
+    expect(result.current.routerState.route).toEqual(opened)
   })
 
   it('⌘[ and ⌘] still traverse when the focused editor consumes the keydown', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
     await act(() => press('d'))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
 
     const editor = document.createElement('div')
     document.body.append(editor)
@@ -382,10 +383,10 @@ describe('app shortcuts', () => {
 
     try {
       await act(() => pressFrom(editor, 'Unidentified', { code: 'BracketLeft' }))
-      expect(result.current.router.route.kind).toBe('note')
+      expect(result.current.routerState.route.kind).toBe('note')
 
       await act(() => pressFrom(editor, 'Unidentified', { code: 'BracketRight' }))
-      expect(result.current.router.route).toEqual({ kind: 'today' })
+      expect(result.current.routerState.route).toEqual({ kind: 'today' })
     } finally {
       editor.remove()
     }
@@ -394,44 +395,44 @@ describe('app shortcuts', () => {
   it('matches bracket history shortcuts by produced key on non-US layouts', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
     await act(() => press('d'))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
 
     // On JIS keyboards the key labeled `[` can report a physical BracketRight
     // code. The user-facing shortcut is character-based, so event.key wins.
     await act(() => press('[', { code: 'BracketRight' }))
-    expect(result.current.router.route).toEqual(opened)
+    expect(result.current.routerState.route).toEqual(opened)
 
     await act(() => press(']', { code: 'BracketLeft' }))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
-    expect(result.current.router.canForward).toBe(false)
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.canForward).toBe(false)
   })
 
   it('mouse back and forward buttons traverse history', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
     await act(() => press('d'))
 
     let cancelled = false
     await act(() => {
       cancelled = releaseMouseButton(3)
     })
-    expect(result.current.router.route).toEqual(opened)
+    expect(result.current.routerState.route).toEqual(opened)
     expect(cancelled).toBe(true)
 
     await act(() => {
       cancelled = releaseMouseButton(4)
     })
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
     expect(cancelled).toBe(true)
   })
 
   it('mouse history buttons still traverse when the surface under the pointer swallows them', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
     await act(() => press('d'))
 
     const editor = document.createElement('div')
@@ -440,7 +441,7 @@ describe('app shortcuts', () => {
 
     try {
       await act(() => releaseMouseButton(3, editor))
-      expect(result.current.router.route).toEqual(opened)
+      expect(result.current.routerState.route).toEqual(opened)
     } finally {
       editor.remove()
     }
@@ -449,7 +450,7 @@ describe('app shortcuts', () => {
   it('ignores other mouse buttons and mutes history buttons behind the palette', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
     await act(() => press('d'))
 
     let cancelled = true
@@ -457,18 +458,18 @@ describe('app shortcuts', () => {
       cancelled = releaseMouseButton(0) || releaseMouseButton(1) || releaseMouseButton(2)
     })
     expect(cancelled).toBe(false)
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
 
     await act(() => result.current.palette.openPalette())
     await act(() => {
       cancelled = releaseMouseButton(3)
     })
     expect(cancelled).toBe(false)
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
 
     await act(() => result.current.palette.closePalette())
     await act(() => releaseMouseButton(3))
-    expect(result.current.router.route).toEqual(opened)
+    expect(result.current.routerState.route).toEqual(opened)
   })
 
   it('⌘K opens the palette', async () => {
@@ -481,7 +482,7 @@ describe('app shortcuts', () => {
   it('⌘F targets the current note and ⌘G traverses its matches', async () => {
     const { result } = await shortcutsHook()
     await act(() => press('n'))
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
     if (opened.kind !== 'note') {
       throw new Error('expected the new-note route')
     }
@@ -551,24 +552,24 @@ describe('app shortcuts', () => {
     const { result } = await shortcutsHook()
 
     await act(() => press('a', { shiftKey: true }))
-    expect(result.current.router.route).toEqual({ kind: 'allNotes', filter: null })
+    expect(result.current.routerState.route).toEqual({ kind: 'allNotes', filter: null })
   })
 
   it('⌘⇧W opens Wiki and ⌘⇧M opens Attachments', async () => {
     const { result } = await shortcutsHook()
 
     await act(() => press('W', { shiftKey: true }))
-    expect(result.current.router.route).toEqual({ kind: 'wiki', filter: null, language: null })
+    expect(result.current.routerState.route).toEqual({ kind: 'wiki', filter: null, language: null })
 
     await act(() => press('M', { shiftKey: true }))
-    expect(result.current.router.route).toEqual({ kind: 'attachments', type: null, tag: null })
+    expect(result.current.routerState.route).toEqual({ kind: 'attachments', type: null, tag: null })
   })
 
   it('⌘⇧N starts a fresh chat when the chat route is active', async () => {
     const { result } = await shortcutsHook()
 
     await act(() => press('j'))
-    expect(result.current.router.route).toEqual({ kind: 'chat' })
+    expect(result.current.routerState.route).toEqual({ kind: 'chat' })
 
     await act(() => press('n', { shiftKey: true }))
     expect(newChat).toHaveBeenCalledTimes(1)
@@ -578,7 +579,7 @@ describe('app shortcuts', () => {
     const { result } = await shortcutsHook()
 
     await act(() => press('n', { shiftKey: true }))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
     expect(newChat).not.toHaveBeenCalled()
   })
 
@@ -588,7 +589,7 @@ describe('app shortcuts', () => {
 
     for (const [index, digit] of digits.entries()) {
       await act(() => press(digit))
-      expect(result.current.router.route).toEqual({
+      expect(result.current.routerState.route).toEqual({
         kind: 'note',
         path: `notes/pin-${index + 1}.md`,
       })
@@ -612,11 +613,11 @@ describe('app shortcuts', () => {
 
     try {
       await act(() => pressFrom(editor, '2', { code: 'Digit2' }))
-      expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
+      expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
       expect(toggleHeading).not.toHaveBeenCalled()
 
       await act(() => pressFrom(editor, '™', { code: 'Digit2', altKey: true }))
-      expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
+      expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
       expect(toggleHeading).toHaveBeenCalledTimes(1)
     } finally {
       editor.remove()
@@ -628,7 +629,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('@', { code: 'Digit2' }))
 
-    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
+    expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
   })
 
   it('strips Shift from physical digit fallback on layouts where digits require Shift', async () => {
@@ -636,7 +637,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('2', { code: 'Digit2', shiftKey: true }))
 
-    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
+    expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
   })
 
   it('does not turn produced symbols with Shift into pinned-number shortcuts', async () => {
@@ -644,7 +645,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('@', { code: 'Digit2', shiftKey: true }))
 
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
   })
 
   it('opens pins only on the Mod key, not the other command key', async () => {
@@ -652,7 +653,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('2', NON_MOD_KEY))
 
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
   })
 
   it('loads pinned shortcuts with no sidebar mounted and while the sidebar is collapsed', async () => {
@@ -662,7 +663,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('0'))
 
-    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-10.md' })
+    expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/pin-10.md' })
     expect(getPinnedNotes).toHaveBeenCalledTimes(1)
   })
 
@@ -670,7 +671,7 @@ describe('app shortcuts', () => {
     const { result } = await pinnedShortcutsHook(pinnedNotes(2))
     // A reorder lands in the note-row overlay before the file write does.
     await act(() => {
-      app.noteRows.setOverlay('notes/pin-2.md', GRAPH.generation, {
+      core.noteRows.setOverlay('notes/pin-2.md', GRAPH.generation, {
         isPinned: true,
         pinnedOrder: 0,
       })
@@ -678,20 +679,20 @@ describe('app shortcuts', () => {
 
     await act(() => press('1'))
 
-    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
+    expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/pin-2.md' })
   })
 
   it('missing and removed pinned slots leave the current route in place', async () => {
     const { result } = await pinnedShortcutsHook(pinnedNotes(1))
     await act(() => press('0'))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
 
     // An unpin lands in the overlay first: the slot it frees opens nothing.
     await act(() => {
-      app.noteRows.setOverlay('notes/pin-1.md', GRAPH.generation, { isPinned: false })
+      core.noteRows.setOverlay('notes/pin-1.md', GRAPH.generation, { isPinned: false })
     })
     await act(() => press('1'))
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
   })
 
   it('opens a pinned daily note at its date', async () => {
@@ -701,7 +702,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('1'))
 
-    expect(result.current.router.route).toEqual({ kind: 'daily', date: '2025-05-02' })
+    expect(result.current.routerState.route).toEqual({ kind: 'daily', date: '2025-05-02' })
   })
 
   it('a saved command context reads pins from the current graph', async () => {
@@ -713,19 +714,19 @@ describe('app shortcuts', () => {
     })
     await vi.waitFor(() => expect(result.current.pinned).toHaveLength(1))
     const context = result.current.context
-    await act(() => app.graphSession.setGraph({ root: '/other', name: 'Other', generation: 2 }))
+    await act(() => core.graphSession.setGraph({ root: '/other', name: 'Other', generation: 2 }))
     await vi.waitFor(() => {
       expect(result.current.pinned).toMatchObject([{ path: 'notes/other.md' }])
     })
-    await act(() => result.current.router.navigate({ kind: 'settings' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'settings' }))
 
     await act(() => context.openPinnedNote(0))
 
-    expect(result.current.router.route).toEqual({ kind: 'note', path: 'notes/other.md' })
-    await act(() => app.graphSession.setGraph(null))
-    await act(() => result.current.router.navigate({ kind: 'settings' }))
+    expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/other.md' })
+    await act(() => core.graphSession.setGraph(null))
+    await act(() => result.current.routerActions.navigate({ kind: 'settings' }))
     await act(() => context.openPinnedNote(0))
-    expect(result.current.router.route).toEqual({ kind: 'settings' })
+    expect(result.current.routerState.route).toEqual({ kind: 'settings' })
   })
 
   it('pinned shortcuts do not navigate behind the palette', async () => {
@@ -734,7 +735,7 @@ describe('app shortcuts', () => {
 
     await act(() => press('1'))
 
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
   })
 
   it('graph switching keeps its palette commands but no number shortcut', async () => {
@@ -752,23 +753,23 @@ describe('app shortcuts', () => {
     await act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'N', ...MOD_KEY }))
     })
-    expect(result.current.router.route.kind).toBe('note') // caps lock still triggers
+    expect(result.current.routerState.route.kind).toBe('note') // caps lock still triggers
 
-    const opened = result.current.router.route
+    const opened = result.current.routerState.route
     await act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ...MOD_KEY, repeat: true }))
     })
-    expect(result.current.router.route).toEqual(opened) // held key doesn't spam notes
+    expect(result.current.routerState.route).toEqual(opened) // held key doesn't spam notes
   })
 
   it('is inert while the palette is open (modal owns the keyboard)', async () => {
     const { result } = await shortcutsHook()
     await act(() => result.current.palette.openPalette())
     await act(() => press('n'))
-    expect(result.current.router.route).toEqual({ kind: 'today' }) // nothing behind the overlay
+    expect(result.current.routerState.route).toEqual({ kind: 'today' }) // nothing behind the overlay
     await act(() => result.current.palette.closePalette())
     await act(() => press('n'))
-    expect(result.current.router.route.kind).toBe('note') // resumes after close
+    expect(result.current.routerState.route.kind).toBe('note') // resumes after close
   })
 
   it('⌘/ opens the cheat-sheet, closes it again, and mutes other shortcuts meanwhile', async () => {
@@ -777,13 +778,13 @@ describe('app shortcuts', () => {
     expect(result.current.shortcuts.open).toBe(true)
 
     await act(() => press('n'))
-    expect(result.current.router.route).toEqual({ kind: 'today' }) // modal mutes navigation
+    expect(result.current.routerState.route).toEqual({ kind: 'today' }) // modal mutes navigation
 
     await act(() => press('/'))
     expect(result.current.shortcuts.open).toBe(false)
 
     await act(() => press('n'))
-    expect(result.current.router.route.kind).toBe('note') // resumes after close
+    expect(result.current.routerState.route.kind).toBe('note') // resumes after close
   })
 
   it('ignores chords with extra modifiers', async () => {
@@ -791,7 +792,7 @@ describe('app shortcuts', () => {
     await act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ...MOD_KEY, altKey: true }))
     })
-    expect(result.current.router.route).toEqual({ kind: 'today' })
+    expect(result.current.routerState.route).toEqual({ kind: 'today' })
   })
 })
 

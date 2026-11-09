@@ -13,6 +13,7 @@ import {
   createTestAttachmentService,
   createTestClockService,
   createTestFileChangeService,
+  createTestLoggerService,
   createTestNoteFileService,
   createTestProgressPort,
   createTestPlatformService,
@@ -25,8 +26,8 @@ import { useAssetPersistence, type AssetPersistence } from './use-asset-persiste
 
 let persistence: AssetPersistence | null = null
 // The app of the latest `renderPersistence`; the attachment services read its graph.
-let app: ReturnType<typeof createTestCoreServices<{ attachments: AttachmentService }>>
-const graphSession = { getState: () => app.graphSession.getState() }
+let core: ReturnType<typeof createTestCoreServices<{ attachments: AttachmentService }>>
+const graphSession = { get: () => core.graphSession.get() }
 // The attachment service of the next `renderPersistence`.
 let attachmentService: AttachmentService = createTestAttachmentService({ graphSession })
 
@@ -44,7 +45,7 @@ function renderPersistence({
   path?: string
   localOnly?: boolean
 }) {
-  app = createTestCoreServices({
+  core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     attachments: attachmentService,
   })
@@ -54,7 +55,7 @@ function renderPersistence({
     },
     {
       initialProps: { path },
-      app,
+      core,
       graph:
         generation === null
           ? null
@@ -96,6 +97,7 @@ function installRoutingAttachments() {
     clock: createTestClockService({ now: 1_700_000_000_000 }),
     platform: createTestPlatformService(),
     graphSession,
+    logger: createTestLoggerService(),
   })
   return {
     progress,
@@ -197,6 +199,7 @@ describe('useAssetPersistence', () => {
       clock,
       platform: createTestPlatformService(),
       graphSession,
+      logger: createTestLoggerService(),
     })
     const view = await renderPersistence({ generation: 3, path: 'notes/a.md' })
 
@@ -236,7 +239,7 @@ describe('useAssetPersistence saveFile for local-only notes', () => {
     expect(uploadedFor()).toEqual(['My Finance/secure/bank.md'])
     expect(saved).toBe('/My%20Finance/secure/assets/huge-scan.mov')
     // It never enters the Git backup, so the backup's size limits don't apply.
-    expect(progress.getAll().filter((operation) => operation.status === 'warning')).toEqual([])
+    expect(progress.get().filter((operation) => operation.status === 'warning')).toEqual([])
     // The pill sizes it from the save itself, by the link it inserted.
     await expect(persistence!.resolveFileInfo(saved!)).resolves.toEqual({
       size: LARGE_FILE_BYTES + 1,

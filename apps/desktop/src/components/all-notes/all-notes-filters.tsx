@@ -4,12 +4,12 @@ import {
   NOTE_ATTACHMENT_TYPES,
   type KnowledgeClassification,
   type NoteTagFacet,
+  formatShortDate,
 } from '@reflect/core'
-import { formatShortDate } from '@/lib/dates.ts'
-import { useSettings } from '@/providers/settings-provider.tsx'
+import { useSettingsStore } from '@/providers/settings-provider.tsx'
 import { usePinnedTagFilters } from '@/hooks/use-pinned-tag-filters.ts'
 import { PinnedTagFiltersEditor } from '@/components/tag-filters/pinned-tag-filters-editor.tsx'
-import type { AllNotesFilter } from '@/routing/route.ts'
+import type { AllNotesFilter } from '@reflect/app'
 import { ATTACHMENT_FILTER_LABELS } from './attachment-filter-labels.ts'
 import { CustomFilterMenu } from './custom-filter-menu.tsx'
 import { FilterTab } from './filter-tab.tsx'
@@ -38,7 +38,7 @@ export function AllNotesFilters({
   levels,
   onSelect,
 }: AllNotesFiltersProps): ReactElement {
-  const { settings } = useSettings()
+  const settings = useSettingsStore()
   const { tags: pinned, pinTag } = usePinnedTagFilters()
   const stripRef = useRef<HTMLDivElement>(null)
   const tag = filter?.kind === 'tag' ? filter.tag : null

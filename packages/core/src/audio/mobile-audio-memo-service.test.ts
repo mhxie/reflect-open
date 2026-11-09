@@ -33,11 +33,8 @@ import {
   createTestSettingsService,
   createTestTranscriptionService,
 } from '../testing/index.ts'
-import type {
-  AudioRecorderFinalSegment,
-  AudioRecorderSegment,
-  StagedRecordingFile,
-} from './audio-recorder-service.ts'
+import type { AudioRecorderFinalSegment, AudioRecorderSegment } from './audio-recorder-service.ts'
+import type { StagedRecordingFile } from '../ipc/recording-plugin.ts'
 
 const PROVIDERS: AiProvidersState = {
   providers: [{ id: 'cfg-openai', provider: 'openai', model: 'gpt-5.1', keyHint: 'wxyz1' }],
@@ -228,7 +225,7 @@ describe('MobileAudioMemoService.openSession', () => {
   it('toggle records with the drawer open, then stops, captures, and deletes the staged file', async () => {
     const kit = await setup()
     const session = await kit.open()
-    expect(session.getState().available).toBe(true)
+    expect(session.get().available).toBe(true)
     const passesAtOpen = kit.passes()
 
     session.toggle()
@@ -237,11 +234,11 @@ describe('MobileAudioMemoService.openSession', () => {
       method: 'start',
       options: { segmentMs: 20 * 60_000, reminderMs: 30 * 60_000 },
     })
-    expect(session.getState()).toMatchObject({ phase: 'recording', drawerOpen: true })
+    expect(session.get()).toMatchObject({ phase: 'recording', drawerOpen: true })
 
     session.toggle()
     await flush()
-    expect(session.getState()).toMatchObject({ phase: 'idle', drawerOpen: false })
+    expect(session.get()).toMatchObject({ phase: 'idle', drawerOpen: false })
 
     // The memo's identity timestamp is the session's start, not wall clock.
     expect(kit.assetStore.uploads()).toEqual([
@@ -260,14 +257,20 @@ describe('MobileAudioMemoService.openSession', () => {
     const session = await kit.open()
     const listener = vi.fn()
     session.subscribe(listener)
-    const before = session.getState()
-    expect(session.getState()).toBe(before)
+    const before = session.get()
+    expect(session.get()).toBe(before)
 
     session.toggle()
     await flush()
 
     expect(listener).toHaveBeenCalled()
-    expect(session.getState()).not.toBe(before)
+    expect(session.get()).not.toBe(before)
+
+    listener.mockClear()
+    const after = session.get()
+    session.setDrawerOpen(true)
+    expect(session.get()).toBe(after)
+    expect(listener).not.toHaveBeenCalled()
   })
 
   it('a rotated segment lands in the graph while the session keeps recording', async () => {
@@ -281,7 +284,7 @@ describe('MobileAudioMemoService.openSession', () => {
 
     expect(kit.captured()).toEqual([audioMemoPartPath(MEMO, 1, false)])
     expect(kit.deleted()).toEqual([ROTATED_STAGED])
-    expect(session.getState().phase).toBe('recording')
+    expect(session.get().phase).toBe('recording')
   })
 
   it('discarding a session deletes the segments it already wrote to the graph', async () => {
@@ -302,6 +305,28 @@ describe('MobileAudioMemoService.openSession', () => {
 
     expect(deleteMock).toHaveBeenCalledWith(landed, 3)
     expect(kit.assetStore.assets().size).toBe(0)
+  })
+
+  it('logs a segment that a discard fails to delete', async () => {
+    const kit = await setup()
+    const landed = audioMemoPartPath(MEMO, 1, false)
+    kit.noteFile.set(landed, 'x')
+    const cause = new Error('disk busy')
+    vi.spyOn(kit.assetStore, 'deleteAudioMemo').mockRejectedValue(cause)
+    const session = await kit.open()
+
+    session.toggle()
+    await flush()
+    kit.recorder.emitSegment(ROTATED)
+    await flush()
+
+    await session.cancelRecording()
+    await flush()
+
+    expect(kit.logger.getWarnings()).toContainEqual({
+      message: 'deleting an audio memo segment failed:',
+      cause,
+    })
   })
 
   it('a straggler segment from a discarded session is dropped, not resurrected', async () => {
@@ -334,7 +359,7 @@ describe('MobileAudioMemoService.openSession', () => {
     await flush()
     session.toggle()
     await flush()
-    expect(session.getState()).toMatchObject({ phase: 'error', canRetry: true })
+    expect(session.get()).toMatchObject({ phase: 'error', canRetry: true })
     expect(kit.deleted()).toEqual([])
     // The drawer closed on stop — the failure also surfaces as an operation.
     expect(kit.progress.findByLabel('Saving audio memo')).toMatchObject({
@@ -358,11 +383,11 @@ describe('MobileAudioMemoService.openSession', () => {
     await flush()
     session.toggle()
     await flush()
-    expect(session.getState().phase).toBe('error')
+    expect(session.get().phase).toBe('error')
 
     session.retry()
     await flush()
-    expect(session.getState().phase).toBe('idle')
+    expect(session.get().phase).toBe('idle')
     expect(importMock).toHaveBeenCalledTimes(2)
     expect(kit.deleted()).toEqual([FINAL_STAGED])
   })
@@ -373,16 +398,16 @@ describe('MobileAudioMemoService.openSession', () => {
 
     session.toggle()
     await flush()
-    expect(session.getState().drawerOpen).toBe(true)
+    expect(session.get().drawerOpen).toBe(true)
 
     kit.recorder.emitStopped({ segment: RECORDING, reason: 'interruption' })
-    expect(session.getState().drawerOpen).toBe(false)
+    expect(session.get().drawerOpen).toBe(false)
     await flush()
 
     expect(kit.assetStore.uploads()).toEqual([
       { kind: 'audio-memo', path: audioMemoPartPath(MEMO, 1, true), generation: 3 },
     ])
-    expect(session.getState().phase).toBe('idle')
+    expect(session.get().phase).toBe('idle')
   })
 
   it('a too-short native stop closes the drawer and captures nothing', async () => {
@@ -394,7 +419,7 @@ describe('MobileAudioMemoService.openSession', () => {
     kit.recorder.emitStopped({ segment: null, reason: 'interruption' })
     await flush()
 
-    expect(session.getState().drawerOpen).toBe(false)
+    expect(session.get().drawerOpen).toBe(false)
     expect(kit.captured()).toEqual([])
   })
 
@@ -408,7 +433,7 @@ describe('MobileAudioMemoService.openSession', () => {
     session.stopAndSave()
     await flush()
 
-    expect(session.getState()).toMatchObject({ phase: 'idle', drawerOpen: false })
+    expect(session.get()).toMatchObject({ phase: 'idle', drawerOpen: false })
     expect(kit.captured()).toEqual([])
   })
 
@@ -420,7 +445,7 @@ describe('MobileAudioMemoService.openSession', () => {
     await flush()
 
     expect(kit.count('stop')).toBe(0)
-    expect(session.getState().phase).toBe('idle')
+    expect(session.get().phase).toBe('idle')
   })
 
   it('level events feed the waveform and reset when the session ends', async () => {
@@ -429,12 +454,22 @@ describe('MobileAudioMemoService.openSession', () => {
     session.toggle()
     await flush()
 
+    const state = session.get()
+    const listener = vi.fn()
+    session.subscribe(listener)
+
     kit.recorder.emitLevel({ level: 0.5, elapsedMs: 1200 })
-    expect(session.getState()).toMatchObject({ level: 0.5, elapsedMs: 1200 })
+    expect(session.level.get()).toBe(0.5)
+    expect(session.elapsedMs.get()).toBe(1200)
+    // A tick leaves the main state alone.
+    expect(session.get()).toBe(state)
+    expect(listener).not.toHaveBeenCalled()
 
     await session.cancelRecording()
     await flush()
-    expect(session.getState()).toMatchObject({ phase: 'idle', level: 0, elapsedMs: 0 })
+    expect(session.get().phase).toBe('idle')
+    expect(session.level.get()).toBe(0)
+    expect(session.elapsedMs.get()).toBe(0)
   })
 
   it('dismissing the drawer mid-recording stops and saves, never drops', async () => {
@@ -457,13 +492,13 @@ describe('MobileAudioMemoService.openSession', () => {
 
     session.toggle()
     await flush()
-    expect(session.getState().phase).toBe('requesting')
+    expect(session.get().phase).toBe('requesting')
 
     session.setDrawerOpen(false)
     await flush()
 
     expect(kit.count('cancel')).toBe(1)
-    expect(session.getState()).toMatchObject({ phase: 'idle', drawerOpen: false })
+    expect(session.get()).toMatchObject({ phase: 'idle', drawerOpen: false })
   })
 
   it('a second toggle during the permission prompt aborts the request and closes the drawer', async () => {
@@ -477,7 +512,7 @@ describe('MobileAudioMemoService.openSession', () => {
     await flush()
 
     expect(kit.count('cancel')).toBe(1)
-    expect(session.getState()).toMatchObject({ phase: 'idle', drawerOpen: false })
+    expect(session.get()).toMatchObject({ phase: 'idle', drawerOpen: false })
   })
 
   it('the drawer Cancel discards the live recording without saving', async () => {
@@ -489,7 +524,7 @@ describe('MobileAudioMemoService.openSession', () => {
     await session.cancelRecording()
     await flush()
 
-    expect(session.getState().drawerOpen).toBe(false)
+    expect(session.get().drawerOpen).toBe(false)
     expect(kit.count('cancel')).toBe(1)
     expect(kit.captured()).toEqual([])
   })
@@ -502,7 +537,7 @@ describe('MobileAudioMemoService.openSession', () => {
     session.toggle()
     await flush()
 
-    expect(session.getState()).toMatchObject({
+    expect(session.get()).toMatchObject({
       phase: 'error',
       drawerOpen: true,
       error: 'Microphone access was denied. Allow it for Reflect in the Settings app.',
@@ -519,11 +554,11 @@ describe('MobileAudioMemoService.openSession', () => {
     await flush()
     session.toggle()
     await flush()
-    expect(session.getState()).toMatchObject({ phase: 'error', drawerOpen: false })
+    expect(session.get()).toMatchObject({ phase: 'error', drawerOpen: false })
 
     session.toggle()
     await flush()
-    expect(session.getState()).toMatchObject({ phase: 'error', drawerOpen: true })
+    expect(session.get()).toMatchObject({ phase: 'error', drawerOpen: true })
   })
 
   it('the orphan scan ingests unclaimed staged segments under their session, then deletes them', async () => {
@@ -598,7 +633,7 @@ describe('MobileAudioMemoService.openSession', () => {
     kit.recorder.emitNativeAction({ action: 'recordAudio' })
     await flush()
     expect(kit.count('start')).toBe(1)
-    expect(session.getState().drawerOpen).toBe(true)
+    expect(session.get().drawerOpen).toBe(true)
 
     // Confirmation waits until the recording UI has survived presentation —
     // a crash in that window must leave the action queued for next launch.
@@ -613,24 +648,24 @@ describe('MobileAudioMemoService.openSession', () => {
 
     // The audio action stays available so the feature is discoverable; only
     // the recording itself waits for a key.
-    expect(session.getState()).toMatchObject({ available: true, hasTranscriptionConfig: false })
+    expect(session.get()).toMatchObject({ available: true, hasTranscriptionConfig: false })
 
     session.toggle()
     await flush()
-    expect(session.getState()).toMatchObject({ drawerOpen: true, phase: 'idle' })
+    expect(session.get()).toMatchObject({ drawerOpen: true, phase: 'idle' })
     expect(kit.count('start')).toBe(0)
   })
 
   it('is unavailable outside the native shell, and nothing reaches the recorder', async () => {
     const kit = await setup({ isNativeShell: false })
     const session = await kit.open()
-    expect(session.getState().available).toBe(false)
+    expect(session.get().available).toBe(false)
 
     session.toggle()
     await flush()
 
     expect(kit.recorder.calls()).toEqual([])
-    expect(session.getState().drawerOpen).toBe(false)
+    expect(session.get().drawerOpen).toBe(false)
   })
 
   it('dispose detaches from the recorder and leaves a live recording running', async () => {
