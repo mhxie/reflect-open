@@ -87,6 +87,10 @@ function selectTranscriptionPrompt(settings: Settings): Settings['transcriptionP
   return settings.transcriptionPrompt
 }
 
+function selectQuickNoteParent(settings: Settings): Settings['quickNoteParent'] {
+  return settings.quickNoteParent
+}
+
 function selectTranscriptionFormat(settings: Settings): Settings['transcriptionFormat'] {
   return settings.transcriptionFormat
 }
@@ -181,6 +185,10 @@ export function useCalendarEnabled(): Settings['calendarEnabled'] {
 
 export function useTranscriptionPrompt(): Settings['transcriptionPrompt'] {
   return useSettingsSelector(selectTranscriptionPrompt)
+}
+
+export function useQuickNoteParent(): Settings['quickNoteParent'] {
+  return useSettingsSelector(selectQuickNoteParent)
 }
 
 export function useTranscriptionFormat(): Settings['transcriptionFormat'] {

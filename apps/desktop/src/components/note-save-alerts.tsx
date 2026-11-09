@@ -2,10 +2,14 @@ import type { ReactElement } from 'react'
 import { InlineAlert } from '@/components/inline-alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import type { AssetSaveError } from '@reflect/core'
-import type { NoteDocument } from '@/editor/use-note-document.ts'
 
 interface NoteSaveAlertsProps {
-  document: NoteDocument
+  /** The session's save error, if its last write failed. */
+  saveError: string | null
+  /** Whether editing is paused until the session can save again. */
+  saveBlocked?: boolean | undefined
+  /** Retry the session's blocked save. */
+  retrySave?: (() => void) | undefined
   /** A pasted image or dropped file that could not be saved. */
   assetSaveError?: AssetSaveError | null | undefined
 }
@@ -16,25 +20,27 @@ interface NoteSaveAlertsProps {
  * again.
  */
 export function NoteSaveAlerts({
-  document,
+  saveError,
+  saveBlocked = false,
+  retrySave,
   assetSaveError = null,
 }: NoteSaveAlertsProps): ReactElement {
   return (
     <>
-      {document.error !== null && document.saveBlocked ? (
+      {saveError !== null && saveBlocked ? (
         <InlineAlert tone="error" className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="min-w-0 flex-1">
-            Saving failed: {document.error}. Editing is paused until a save works; your unsaved text
+            Saving failed: {saveError}. Editing is paused until a save works; your unsaved text
             stays in the editor and is kept for the next time this note opens.
           </span>
-          <Button size="xs" variant="outline" onClick={document.retrySave}>
+          <Button size="xs" variant="outline" onClick={retrySave}>
             Try again
           </Button>
         </InlineAlert>
-      ) : document.error !== null ? (
+      ) : saveError !== null ? (
         <InlineAlert tone="error" className="mb-4">
-          Saving failed: {document.error}. Your edits are kept in the editor and the next successful
-          save will persist them.
+          Saving failed: {saveError}. Your edits are kept in the editor and the next successful save
+          will persist them.
         </InlineAlert>
       ) : null}
       {assetSaveError !== null ? (

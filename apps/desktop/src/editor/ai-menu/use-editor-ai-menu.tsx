@@ -40,17 +40,8 @@ import { useCoreServices } from '@/services/services-provider.tsx'
 interface EditorAiMenuOptions {
   /** Graph-relative path of the note being edited (the privacy subject). */
   path: string
-  /**
-   * The note's privacy verdict (`usePrivateNote`), the same one the editor's
-   * network policy follows. A private note gets no cloud AI entry.
-   */
-  privateNote: boolean
-  /**
-   * The editor-session identity (`useNoteDocument().sessionEpoch`) — bumps
-   * when a new session is created, not when a rename retargets one, so a
-   * title-driven rename never tears down a run under its live preview.
-   */
-  sessionEpoch: number
+  /** The note's `private: true` flag, as its session holds it. */
+  isPrivate: boolean
   /** The mounted editor's handle (staging, streaming, and accept live there). */
   editorRef: RefObject<NoteEditorHandle | null>
 }
@@ -94,8 +85,7 @@ async function forEachAsync<T>(
 
 export function useEditorAiMenu({
   path,
-  privateNote,
-  sessionEpoch,
+  isPrivate,
   editorRef,
 }: EditorAiMenuOptions): EditorAiMenuValue {
   const toastController = useToastController()
@@ -105,34 +95,31 @@ export function useEditorAiMenu({
   const { navigate } = useRouterActions()
 
   const runRef = useRef<ActiveRun | null>(null)
-  const privateNoteRef = useRef(privateNote)
+  const isPrivateRef = useRef(isPrivate)
   // The staged placement of the current run — state (not just the ref) so the
   // preview's alternate-placement button can label itself.
   const [runMode, setRunMode] = useState<AiPromptMode | null>(null)
 
   useLayoutEffect(() => {
     // Publish a Lock toggle before asynchronous provider work can resume.
-    privateNoteRef.current = privateNote
-    if (!privateNote || runRef.current === null) return
+    isPrivateRef.current = isPrivate
+    if (!isPrivate || runRef.current === null) return
     runRef.current.controller.abort()
     runRef.current = null
     setRunMode(null)
     editorRef.current?.discardPendingReplacement()
-  }, [privateNote, editorRef])
+  }, [isPrivate, editorRef])
 
-  // A run belongs to one editor session: switching notes (or unmounting)
-  // mid-stream aborts the provider call and drops the run, so a stale stream
-  // can never append into — or Retry restage ranges against — a different
-  // document. Keyed on the session, not the path: a title-driven rename
-  // retargets the live session (Plan 17) and must keep the run alive under
-  // its still-visible preview.
+  // A run belongs to one editor: unmounting mid-stream (the pane mounts one
+  // editor per session) aborts the provider call and drops the run, so a stale
+  // stream can never append into — or Retry restage ranges against — a
+  // different document.
   useEffect(() => {
     return () => {
       runRef.current?.controller.abort()
       runRef.current = null
-      setRunMode(null)
     }
-  }, [sessionEpoch])
+  }, [])
 
   const streamRun = useCallback(
     async (
@@ -162,7 +149,7 @@ export function useEditorAiMenu({
       // `error` event before any provider call. A Lock toggle mid-run aborts
       // the run (the layout effect above), so its stream never starts.
       const events = selectionTransform.transform({
-        note: { path, isPrivate: privateNoteRef.current },
+        note: { path, isPrivate: isPrivateRef.current },
         selectedText: context.selectedText,
         promptBody: prompt.body,
         model: modelOverride,
@@ -200,7 +187,7 @@ export function useEditorAiMenu({
   )
 
   const onSelectionMenuSearch = useMemo<SelectionMenuSearchHandler | undefined>(() => {
-    if (privateNote) return
+    if (isPrivate) return
     return (query: string): SelectionMenuItem[] => {
       if (providers.length === 0) {
         return [
@@ -231,7 +218,7 @@ export function useEditorAiMenu({
       }
       return items
     }
-  }, [privateNote, providers.length, prompts, navigate, runPrompt])
+  }, [isPrivate, providers.length, prompts, navigate, runPrompt])
 
   const retry = useCallback(
     (option: ChatModelOption | null): void => {
@@ -283,7 +270,7 @@ export function useEditorAiMenu({
     if (!editor || editor.getSelectedText() === '') return false
     // A private note has no AI entry at all, so asking for one explicitly
     // says why rather than doing nothing.
-    if (privateNote) {
+    if (isPrivate) {
       toastController.add({
         title: 'AI is off for this note',
         description: 'It’s private, so its content is never sent to an AI provider.',
@@ -292,7 +279,7 @@ export function useEditorAiMenu({
     }
     editor.openSelectionMenu()
     return true
-  }, [privateNote, editorRef, toastController])
+  }, [isPrivate, editorRef, toastController])
 
   return { onSelectionMenuSearch, pendingReplacementActions, onPendingReplacementResolve, openMenu }
 }

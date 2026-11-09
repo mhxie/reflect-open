@@ -269,7 +269,6 @@ describe('followDisplacedNote', () => {
       path: FROM,
       classify: () => 'exact',
       onSnapshot: () => {},
-      applyContent: () => {},
     })
     const { noteMove, openDocuments, moves } = setup({ sessions: [session], noteFile })
     try {

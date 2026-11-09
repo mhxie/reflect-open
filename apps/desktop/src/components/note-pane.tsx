@@ -1,6 +1,4 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import type { ExitBoundaryHandler, SearchStatus } from '@meowdown/core'
-import type { SelectionMenuSearchHandler } from '@meowdown/react'
 import {
   deferredCreationPolicy,
   deriveNoteState,
@@ -9,71 +7,33 @@ import {
   isLocalOnlyReadOnlyPath,
   splitFrontmatter,
   splitWikiLinkTarget,
-  wikiClaimHeadingText,
-  findWikiClaim,
-  readWikiClaimIndex,
   wikiClaimId,
-  formatRecencyLabel,
 } from '@reflect/core'
-import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
-import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
-import { PrivateNoteNotice } from '@/components/private-note-notice.tsx'
-import { NoteLoading } from '@/components/note-loading.tsx'
-import { NoteOpenError } from '@/components/note-open-error.tsx'
-import { NoteRecoveryBanner } from '@/components/note-recovery-banner.tsx'
-import { NoteSaveAlerts } from '@/components/note-save-alerts.tsx'
-import { usePeek } from '@/components/peek/peek-provider.tsx'
-import { ProtectedNoteView } from '@/components/protected-note-view.tsx'
-import { SuggestedContactCard } from '@/components/suggested-contact-card.tsx'
-import { EditorAiKeymap } from '@/editor/ai-menu/editor-ai-keymap.tsx'
-import { useEditorAiMenu } from '@/editor/ai-menu/use-editor-ai-menu.tsx'
-import { editorBodyWithDefaultBullet } from '@/editor/default-bullet.ts'
-import {
-  registerNoteEditorHandle,
-  unregisterNoteEditorHandle,
-} from '@/editor/editor-handle-registry.ts'
-import { markModeFromSyntax } from '@/editor/mark-mode.ts'
-import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
-import { NoteTitlePresentationBridge } from '@/editor/note-title-presentation.tsx'
-import { NoteEditor, type NoteEditorHandle } from '@/editor/note-editor.tsx'
-import { useNoteEmbedRenderer } from '@/editor/note-embed-reader.tsx'
-import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
-import { toast } from '@/components/ui/toast.tsx'
-import type { NoteReveal } from '@/lib/note-reveal.ts'
-import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
-import { OutlineBridge } from '@/editor/outline/outline-bridge.tsx'
-import { WikiAnchorsBridge } from '@/editor/wiki-anchors/wiki-anchors-bridge.tsx'
-import { WikiArticleBridge } from '@/editor/wiki-anchors/wiki-article-bridge.tsx'
-import { noteArticleFor } from '@/editor/wiki-anchors/wiki-article-store.ts'
 import { KnowledgeLevelLabel } from '@/components/knowledge-level-label.tsx'
+import { LocalOnlyNotice } from '@/components/local-only-notice.tsx'
 import { WikiBreadcrumb } from '@/components/wiki/wiki-breadcrumb.tsx'
-import { useAssetPersistence } from '@/editor/use-asset-persistence.ts'
-import { useEditorAutocomplete } from '@/editor/use-editor-autocomplete.ts'
-import { useNoteDocument } from '@/editor/use-note-document.ts'
-import { useNoteStatusPublisher } from '@/editor/status/use-note-status-publisher.ts'
+import { toast } from '@/components/ui/toast.tsx'
+import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
+import { revealPreviewHeading } from '@/editor/reveal-preview-heading.ts'
 import { noteProtection } from '@/editor/status/note-protection.ts'
-import { useTagNavigation } from '@/editor/use-tag-navigation.ts'
-import { useTemplateSlashItems } from '@/editor/use-template-slash-items.ts'
-import { useMarkdownLinkClick } from '@/editor/use-markdown-link-click.ts'
+import { useNoteStatusPublisher } from '@/editor/status/use-note-status-publisher.ts'
+import { useNoteAttachments } from '@/editor/use-note-attachments.ts'
+import { useNoteEmbedRenderer } from '@/editor/note-embed-reader.tsx'
 import { useWikiLinkNavigation } from '@/editor/use-wiki-link-navigation.ts'
-import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
-import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
 import { useLocalOnlyFolders } from '@/hooks/use-local-only-folders.ts'
 import { usePrivateNoteState } from '@/hooks/use-private-note.ts'
-import { getIsoToday } from '@reflect/utils'
-import { cn } from '@/lib/utils.ts'
+import type { NoteReveal } from '@/lib/note-reveal.ts'
+import { useLinkIntentGuard } from '@/lib/windows/use-link-intent-guard.ts'
 import { useGraphInfo } from '@/providers/graph-provider.tsx'
-import { useNoteSearchQuery, useNoteSearchReport } from '@/providers/note-find-provider.tsx'
-import {
-  useDateFormat,
-  useEditorBulletAfterHeading,
-  useEditorDefaultBullet,
-  useEditorMarkdownSyntax,
-  useEditorSmoothCaretAnimation,
-  useEditorSpellCheck,
-  useTimeFormat,
-  useSettingsStore,
-} from '@/providers/settings-provider.tsx'
+import { BacklinksPanel } from '@/components/backlinks-panel.tsx'
+import { NoteLoading } from '@/components/note-loading.tsx'
+import { NoteOpenError } from '@/components/note-open-error.tsx'
+import { ProtectedNoteView } from '@/components/protected-note-view.tsx'
+import { SessionEditorView } from '@/components/session-editor-view.tsx'
+import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
+import { useNoteDocument } from '@/editor/use-note-document.ts'
+import { useXPostPreload } from '@/editor/use-x-post-preload.ts'
+import { cn } from '@/lib/utils.ts'
 import { useCoreServices } from '@/services/services-provider.tsx'
 
 interface NotePaneProps {
@@ -123,7 +83,7 @@ interface NotePaneProps {
    * `IncomingBacklinks` section over the same data layer.
    */
   showBacklinks?: boolean | undefined
-  /** Publish the note's outline for the sidebar and "Jump to heading…". */
+  /** Publish the note’s outline for the sidebar and "Jump to heading…". */
   outline?: boolean | undefined
   /**
    * The daily stream's day key for this pane (omitted by non-daily callers).
@@ -143,22 +103,10 @@ interface NotePaneProps {
    * did, so the editor consumes the key.
    */
   onExitBoundary?: ((date: string, direction: 'up' | 'down') => boolean) | undefined
-  /** Scroll to a followed link's heading once the editor shows the note; once per `key`. */
+  /** Scroll to a followed link's heading once the note is shown; once per key. */
   reveal?: NoteReveal | undefined
-  /** The pane scrolled to {@link reveal}, so a host can stop asking (a remount would ask again). */
+  /** The pane scrolled to the reveal, so a host can stop asking. */
   onRevealed?: ((key: number) => void) | undefined
-}
-
-/** Reveal an exact claim range, or an ordinary heading for non-claim fragments. */
-function revealFragment(editor: NoteEditorHandle, fragment: string): boolean {
-  if (wikiClaimId(fragment) !== null) {
-    const claim = findWikiClaim(readWikiClaimIndex(editor.getMarkdown(), getIsoToday()), fragment)
-    if (claim?.kind === 'range') return editor.revealSourceRange?.(claim.from, claim.to) ?? false
-    else if (claim?.heading !== null && claim?.heading !== undefined)
-      return editor.revealHeading(claim.heading)
-    return false
-  }
-  return editor.revealHeading(wikiClaimHeadingText(editor.getMarkdown(), fragment) ?? fragment)
 }
 
 /**
@@ -166,20 +114,12 @@ function revealFragment(editor: NoteEditorHandle, fragment: string): boolean {
  * pipeline (debounced atomic writes, and watcher-driven external reload that
  * merges an external change into unsaved edits on the next write).
  * Notes the editor can't faithfully round-trip open **protected** (read-only)
- * so a converter gap can never silently rewrite a file. A note inside a
- * read-only local-only folder opens as a rendered, never-writing view instead
- * of the editor: no save path, no attachment intake, link clicks that only
- * navigate (never create), and nothing that reaches the network. A note in an
- * editable local-only folder gets the editor, under the same leak guards: it
- * stays off the network and out of every cloud AI (the editor follows the
- * note's privacy), link clicks and `[[` rows never create a note, its
- * attachments stay in its folder, and unsaved text a save couldn't land is
- * kept and offered back. Plan 06 mounts one of these per day in the daily
- * stream.
+ * so a converter gap can never silently rewrite a file. Plan 06 mounts one of
+ * these per day in the daily stream.
  *
  * The pane is composition only: document semantics live in
- * `useNoteDocument`/`note-session.ts`, link-click behavior in
- * `useWikiLinkNavigation`, and the banners are shared components.
+ * `useNoteDocument`/`note-session.ts`, and the editor of one session, with
+ * everything addressed by its path, is `SessionEditorView`.
  */
 export function NotePaneComponent({
   path,
@@ -198,21 +138,7 @@ export function NotePaneComponent({
   reveal,
   onRevealed,
 }: NotePaneProps): ReactElement {
-  const graph = useGraphInfo()
-  const settings = useSettingsStore()
-  const dateFormat = useDateFormat()
-  const timeFormat = useTimeFormat()
-  const editorMarkdownSyntax = useEditorMarkdownSyntax()
-  const editorSpellCheck = useEditorSpellCheck()
-  const editorSmoothCaretAnimation = useEditorSmoothCaretAnimation()
-  const editorDefaultBullet = useEditorDefaultBullet()
-  const editorBulletAfterHeading = useEditorBulletAfterHeading()
-  const { noteCreation, platform, linkPreview } = useCoreServices()
-  const generation = graph?.generation ?? null
-  const graphKey = graph?.root ?? null
-  const dailyNote = isDaily(path)
-  // Every leak guard follows `localOnly`; only the edit gates relax for an
-  // editable folder (`readOnlyLocal` is false there).
+  const { noteCreation } = useCoreServices()
   const localOnlyFolders = useLocalOnlyFolders()
   const localOnly = isLocalOnlyPath(localOnlyFolders, path)
   const readOnlyLocal = isLocalOnlyReadOnlyPath(localOnlyFolders, path)
@@ -242,291 +168,140 @@ export function NotePaneComponent({
     // notes stay unseeded — the date is their identity.
     missingSeed: needsSeed ? seed.seed : undefined,
   })
-  // A double-clicked PDF reads in Peek where the workspace offers it.
-  const openPeek = usePeek()?.openPeek
-  const openPdf = useMemo(() => {
-    return openPeek === undefined
-      ? undefined
-      : (pdfPath: string) => openPeek({ kind: 'pdf', path: pdfPath })
-  }, [openPeek])
-  const {
-    resolveImageUrl,
-    resolveEmbed,
-    resolveWikiEmbed,
-    resolveAssetOpenPath,
-    resolveFileLink,
-    openAsset,
-    saveFile,
-    resolveFileInfo,
-    saveError,
-  } = useAssetPersistence(path, openPdf)
-  const renderWikilinkHoverCard = useWikiLinkHoverPreview({
-    dateFormat,
+  const { snapshot, session, epoch } = document
+
+  // Path-addressed features always follow the session, including the render
+  // before a route change rebinds the pane.
+  const shownPath = snapshot.path ?? path
+  const shownLocalOnly = isLocalOnlyPath(localOnlyFolders, shownPath)
+  const shownReadOnly = isLocalOnlyReadOnlyPath(localOnlyFolders, shownPath)
+  const previewOnly = shownReadOnly || (shownLocalOnly && snapshot.protected)
+  const { privateNote, pending: privacyPending } = usePrivateNoteState(shownPath, {
+    sessionEpoch: session === null ? null : epoch,
+    privateHeader: snapshot.privateHeader || snapshot.isPrivate,
   })
-  // Read-only navigation only resolves: a link from a local-only note must
-  // never create a note.
-  const followWikiLink = useWikiLinkNavigation({ readOnly: localOnly })
-  const onLinkClick = useMarkdownLinkClick(path)
-  const onTagClick = useTagNavigation()
-  const { onWikilinkSearch, onTagSearch } = useEditorAutocomplete(path)
-  const resolveLinkPreview = useMemo(
-    () => (graph !== null && !localOnly ? linkPreview.createResolver(path) : undefined),
-    [graph, localOnly, linkPreview, path],
-  )
-
-  const bindEditor = document.bindEditor
-  const aiEditorRef = useRef<NoteEditorHandle | null>(null)
-  // Find is one session per window: only the targeted note gets a query, and
-  // only its status reaches the Find bar.
-  const searchQuery = useNoteSearchQuery(path)
-  const reportSearchStatus = useNoteSearchReport()
-  const handleSearchChange = useCallback(
-    (status: SearchStatus) => reportSearchStatus(path, status),
-    [path, reportSearchStatus],
-  )
-  // The registry entry this pane made, so unmount removes exactly it (a
-  // remount of the same path may already have re-registered).
-  const registeredHandleRef = useRef<{ path: string; handle: NoteEditorHandle } | null>(null)
-  // The `/` menu's template rows insert into this pane's own editor, read
-  // through the registry ref at select time (a late resolve after the pane
-  // unmounted must insert nowhere rather than somewhere stale).
-  const onSlashMenuSearch = useTemplateSlashItems(
-    useCallback(() => registeredHandleRef.current?.handle ?? null, []),
-  )
-  // The mounted editor as state, so a reveal request can wait for it.
-  const [revealEditor, setRevealEditor] = useState<NoteEditorHandle | null>(null)
-  const paneRef = useRef<HTMLDivElement>(null)
-  const previewOnly = readOnlyLocal || (localOnly && document.protected)
-  const revealInPane = useCallback(
-    (fragment: string): void => {
-      let found = true
-      if (revealEditor !== null) {
-        found = revealFragment(revealEditor, fragment)
-      } else if (previewOnly && document.status === 'ready' && paneRef.current !== null) {
-        found = revealPreviewHeading(paneRef.current, document.initialContent, fragment)
-      }
-      if (!found && wikiClaimId(fragment) !== null)
-        toast.add({
-          type: 'error',
-          title: `Claim ${wikiClaimId(fragment)?.toUpperCase()} is missing or has invalid boundaries.`,
-        })
-    },
-    [revealEditor, previewOnly, document.status, document.initialContent],
-  )
-  const handleRef = useCallback(
-    (handle: NoteEditorHandle | null) => {
-      bindEditor(handle)
-      aiEditorRef.current = handle
-      setRevealEditor(handle)
-      if (handle === null) {
-        if (registeredHandleRef.current !== null) {
-          unregisterNoteEditorHandle(
-            registeredHandleRef.current.path,
-            registeredHandleRef.current.handle,
-          )
-          registeredHandleRef.current = null
-        }
-      } else {
-        registerNoteEditorHandle(path, handle, generation)
-        registeredHandleRef.current = { path, handle }
-      }
-      if (dailyDate !== undefined) {
-        registerHandle?.(dailyDate, handle)
-      }
-      if (handle && autoFocus) {
-        // By default the caret lands at the document start — for a seeded
-        // new note that is the empty H1, so typing names the note. An `end`
-        // selection moves it (and the scroll) to the note's content end.
-        handle.focus()
-        if (autoFocusSelection === 'end') {
-          handle.setSelection('end')
-        }
-        onAutoFocused?.()
-      }
-    },
-    [
-      bindEditor,
-      path,
-      generation,
-      dailyDate,
-      registerHandle,
-      autoFocus,
-      autoFocusSelection,
-      onAutoFocused,
-    ],
-  )
-
-  const revealedKeyRef = useRef<number | null>(null)
-  useEffect(() => {
-    if (
-      reveal === undefined ||
-      (revealEditor === null && !(previewOnly && document.status === 'ready')) ||
-      revealedKeyRef.current === reveal.key
-    ) {
-      return
-    }
-    // A frame later, so the host's own arrival scroll (a parent's effect)
-    // doesn't land on top of the reveal.
-    const frame = requestAnimationFrame(() => {
-      revealedKeyRef.current = reveal.key
-      revealInPane(reveal.fragment)
-      onRevealed?.(reveal.key)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [reveal, revealEditor, previewOnly, document.status, revealInPane, onRevealed])
-
-  // A link to a heading in this same note, `[[#Heading]]`, scrolls here —
-  // as a link intent of its own, so a slower link still resolving can't
-  // navigate away afterwards.
-  const beginLinkIntent = useLinkIntentGuard()
-  const onWikiLinkClick = useCallback(
-    (options: { target: string; openInNewWindow: boolean; peek?: boolean }) => {
-      const { name, fragment } = splitWikiLinkTarget(options.target)
-      if (name.trim() === '' && fragment !== null) {
-        beginLinkIntent()
-        revealInPane(fragment)
-        return
-      }
-      followWikiLink(options)
-    },
-    [beginLinkIntent, followWikiLink, revealInPane],
-  )
-
-  // One verdict for the editor's network policy and the AI menu; it follows
-  // Privacy changes live, without remounting the editor.
-  const { privateNote, pending: privacyPending } = usePrivateNoteState(path, {
-    sessionEpoch: document.sessionEpoch,
-    privateHeader: document.privateHeader,
-  })
-  const renderNoteEmbed = useNoteEmbedRenderer({
-    sourcePath: path,
-    generation,
-    graphKey,
-    remoteEmbeds: !privateNote && !privacyPending,
-  })
-  const aiMenu = useEditorAiMenu({
-    path,
-    privateNote,
-    sessionEpoch: document.sessionEpoch,
-    editorRef: aiEditorRef,
-  })
-  const aiSelectionMenuSearch = aiMenu.onSelectionMenuSearch
-  const onSelectionMenuSearch = useCallback<SelectionMenuSearchHandler>(
-    async (query, context) => {
-      const existing = (await aiSelectionMenuSearch?.(query, context)) ?? []
-      if (dailyNote) return existing
-      const article = noteArticleFor(path)
-      const claims = article?.selectionClaims(context.from, context.to) ?? []
-      const local: Awaited<ReturnType<SelectionMenuSearchHandler>> = [
-        {
-          id: 'mark-claim',
-          label: 'Mark as claim',
-          onSelect: (selection) => article?.markSelection(selection.from, selection.to),
-        },
-        ...claims.map((id) => ({
-          id: `adjust-${id}`,
-          label: `Set ${id.toUpperCase()} boundaries to selection`,
-          onSelect: (selection: { from: number; to: number }) => {
-            return article?.adjustSelection(id, selection.from, selection.to)
-          },
-        })),
-        {
-          id: 'copy-source',
-          label: 'Copy Markdown source',
-          onSelect: async (selection) => await article?.copySource(selection.from, selection.to),
-        },
-      ]
-      return [
-        ...local.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase())),
-        ...existing,
-      ]
-    },
-    [aiSelectionMenuSearch, dailyNote, path],
-  )
-
-  const handleExitBoundary: ExitBoundaryHandler | undefined = useMemo(() => {
-    if (!dailyDate || !onExitBoundary) {
-      return
-    }
-    return ({ direction }) => {
-      return onExitBoundary(dailyDate, direction)
-    }
-  }, [dailyDate, onExitBoundary])
-
   const editorContent =
-    document.status === 'ready' && !document.protected && !readOnlyLocal
-      ? document.initialContent
+    snapshot.status === 'ready' && !snapshot.protected && !shownReadOnly
+      ? snapshot.initialContent
       : null
-  // The X preload only shapes the editor's first frame, so it runs before a
-  // session's first mount only, and never for a private note (it would fetch
-  // the posts and write their archive). Once a session's editor has shown,
-  // the pane never returns to loading: a privacy change must not remount it.
+  // A privacy change must never remount a session's already-visible editor.
   const [shownEpoch, setShownEpoch] = useState<number | null>(null)
-  const editorShown = shownEpoch === document.sessionEpoch
+  const editorShown = shownEpoch === epoch
   const xPostsReady = useXPostPreload(
     editorContent === null || editorShown ? null : editorContent,
     privacyPending ? 'pending' : privateNote ? 'private' : 'public',
   )
   const awaitingFirstFrame = editorContent !== null && !editorShown && !xPostsReady
   if (editorContent !== null && !editorShown && !awaitingFirstFrame) {
-    setShownEpoch(document.sessionEpoch)
+    setShownEpoch(epoch)
   }
-  // Read-only views (protected, local-only) are counted too, from the file they show.
-  const getSelectedText = useCallback(() => aiEditorRef.current?.getSelectedText() ?? '', [])
-  const protection = useMemo(() => {
-    return noteProtection({
-      protected: document.protected,
-      saveBlocked: document.saveBlocked,
-      error: document.error,
-      retrySave: document.retrySave,
-    })
-  }, [document.protected, document.saveBlocked, document.error, document.retrySave])
-  const publishStatus = useNoteStatusPublisher(
-    generation === null ? null : { generation, path },
-    document.status === 'ready' ? document.initialContent : null,
-    deriveNoteState(localOnlyFolders, {
-      path,
-      isPrivate: privateNote,
-      readOnly: readOnlyLocal,
-      protected: document.protected || document.saveBlocked,
-    }),
-    { selection: { pane: paneRef, getSelectedText }, protection },
+
+  const paneRef = useRef<HTMLDivElement>(null)
+  const graph = useGraphInfo()
+  const generation = graph?.generation ?? null
+  const { resolveImageUrl, resolveWikiEmbed } = useNoteAttachments(shownPath)
+  const renderNoteEmbed = useNoteEmbedRenderer({
+    sourcePath: shownPath,
+    generation,
+    graphKey: graph?.root ?? null,
+    remoteEmbeds: false,
+  })
+  const retrySave = useCallback(() => {
+    void session?.flush()
+  }, [session])
+  const protection = useMemo(
+    () => noteProtection({ ...snapshot, retrySave }),
+    [snapshot, retrySave],
   )
-  const { onEditorChange } = document
-  const handleEditorChange = useCallback(
-    (markdown: string) => {
-      onEditorChange(markdown)
-      publishStatus(markdown)
+  useNoteStatusPublisher(
+    generation !== null && (previewOnly || snapshot.protected)
+      ? { generation, path: shownPath }
+      : null,
+    snapshot.status === 'ready' ? snapshot.initialContent : null,
+    deriveNoteState(localOnlyFolders, {
+      path: shownPath,
+      isPrivate: privateNote,
+      readOnly: shownReadOnly,
+      protected: snapshot.protected || snapshot.saveBlocked,
+    }),
+    { protection },
+  )
+  const revealInPreview = useCallback(
+    (fragment: string): void => {
+      if (paneRef.current === null) return
+      const found = revealPreviewHeading(paneRef.current, snapshot.initialContent, fragment)
+      if (!found && wikiClaimId(fragment) !== null) {
+        toast.add({
+          type: 'error',
+          title: `Claim ${wikiClaimId(fragment)?.toUpperCase()} is missing or has invalid boundaries.`,
+        })
+      }
     },
-    [onEditorChange, publishStatus],
+    [snapshot.initialContent],
+  )
+  const revealedKeyRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (
+      !previewOnly ||
+      snapshot.status !== 'ready' ||
+      reveal === undefined ||
+      revealedKeyRef.current === reveal.key
+    ) {
+      return
+    }
+    const frame = requestAnimationFrame(() => {
+      revealedKeyRef.current = reveal.key
+      revealInPreview(reveal.fragment)
+      onRevealed?.(reveal.key)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [previewOnly, snapshot.status, reveal, revealInPreview, onRevealed])
+  const beginLinkIntent = useLinkIntentGuard()
+  const followWikiLink = useWikiLinkNavigation({ readOnly: true })
+  const onWikiLinkClick = useCallback(
+    (options: { target: string; openInNewWindow: boolean; peek?: boolean }) => {
+      const { name, fragment } = splitWikiLinkTarget(options.target)
+      if (name.trim() === '' && fragment !== null) {
+        beginLinkIntent()
+        revealInPreview(fragment)
+        return
+      }
+      followWikiLink(options)
+    },
+    [beginLinkIntent, followWikiLink, revealInPreview],
   )
 
-  if (document.status === 'loading' || awaitingFirstFrame) {
+  if (
+    session === null ||
+    snapshot.path === null ||
+    snapshot.status === 'loading' ||
+    awaitingFirstFrame
+  ) {
     return <NoteLoading className={cn(gutterClassName, editorClassName, className)} />
   }
 
-  if (document.status === 'error') {
+  if (snapshot.status === 'error') {
     return (
       <NoteOpenError
-        path={path}
-        message={document.error}
+        path={shownPath}
+        message={snapshot.error}
         className={cn(gutterClassName, editorClassName, className)}
       />
     )
   }
 
   if (previewOnly) {
-    // A protected note's initial content is the whole file; otherwise it is
-    // the body the editor would show. A protected note stays on the read-only
-    // sheet even in an editable folder.
-    const body = document.protected
-      ? splitFrontmatter(document.initialContent).body
-      : document.initialContent
+    const body = snapshot.protected
+      ? splitFrontmatter(snapshot.initialContent).body
+      : snapshot.initialContent
     return (
-      <div ref={paneRef} className={cn(gutterClassName, className)} aria-label={`Reading ${path}`}>
-        <WikiBreadcrumb path={path} className="mb-1" />
-        <KnowledgeLevelLabel path={path} className="mb-2 block" />
-        {/* A dashed sheet sets the read-only, device-bound note apart at a glance. */}
+      <div
+        ref={paneRef}
+        className={cn(gutterClassName, className)}
+        aria-label={`Reading ${shownPath}`}
+      >
+        <WikiBreadcrumb path={shownPath} className="mb-1" />
+        <KnowledgeLevelLabel path={shownPath} className="mb-2 block" />
         <div
           data-testid="local-only-sheet"
           className="rounded-xl border border-dashed border-border bg-surface-sunken/40 px-5 py-4"
@@ -534,8 +309,8 @@ export function NotePaneComponent({
           <LocalOnlyNotice className="mb-3" />
           <MarkdownPreview
             content={body}
-            sourcePath={path}
-            titleMetadata={document.titleMetadata}
+            sourcePath={shownPath}
+            titleMetadata={snapshot.titleMetadata}
             resolveImageUrl={resolveImageUrl}
             resolveWikiEmbed={resolveWikiEmbed}
             renderNoteEmbed={renderNoteEmbed}
@@ -544,125 +319,51 @@ export function NotePaneComponent({
             className={cn('reflect-note-surface', editorClassName)}
           />
         </div>
-        {showBacklinks ? <BacklinksPanel path={path} /> : null}
+        {showBacklinks ? <BacklinksPanel path={shownPath} /> : null}
       </div>
     )
   }
 
-  if (document.protected) {
+  if (snapshot.protected) {
     return (
-      <div className={cn(gutterClassName, className)}>
-        <WikiBreadcrumb path={path} className="mb-1" />
-        <KnowledgeLevelLabel path={path} className="mb-2 block" />
-        <ProtectedNoteView content={document.initialContent} />
-        {showBacklinks ? <BacklinksPanel path={path} /> : null}
+      <div ref={paneRef} className={cn(gutterClassName, className)}>
+        <WikiBreadcrumb path={shownPath} className="mb-1" />
+        <KnowledgeLevelLabel path={shownPath} className="mb-2 block" />
+        <ProtectedNoteView content={snapshot.initialContent} />
+        {showBacklinks ? <BacklinksPanel path={shownPath} /> : null}
       </div>
     )
   }
-
-  // A note that opens with an empty body starts on an empty bullet when the
-  // setting is on (old Reflect's every-note default). The seed only changes what
-  // the editor shows; persistence is untouched, so a not-yet-created daily
-  // placeholder stays uncreated until the user types — see `default-bullet.ts`.
-  const editorSeed = editorBodyWithDefaultBullet(document.initialContent, editorDefaultBullet)
 
   return (
-    <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${path}`}>
-      <div className={gutterClassName}>
-        <WikiBreadcrumb path={path} className="mb-1" />
-        <KnowledgeLevelLabel path={path} className="mb-2 block" />
-        {localOnly ? <LocalOnlyNotice editable className="mb-3" /> : null}
-        {privateNote && !localOnly ? (
-          <PrivateNoteNotice path={path} interactive={settings.statusBarEnabled} className="mb-3" />
-        ) : null}
-
-        {document.recovery !== null ? (
-          <NoteRecoveryBanner
-            keptAt={formatRecencyLabel(document.recovery.savedAtMs, settings)}
-            onRestore={document.restoreRecovery}
-            onDiscard={document.discardRecovery}
-          />
-        ) : null}
-
-        <NoteSaveAlerts document={document} assetSaveError={saveError} />
-
-        {/* Daily notes are date-titled, so a contact can never match one —
-            the hook gates on it, and skipping the mount keeps the stream lean.
-            Keyed by path: a note switch must not carry one card's busy/error
-            state into the next note's card. */}
-        {!dailyNote ? <SuggestedContactCard key={path} path={path} /> : null}
-      </div>
-
-      <NoteEditor
+    <div ref={paneRef} className={cn('relative', className)} aria-label={`Editing ${shownPath}`}>
+      <SessionEditorView
         // Keyed on the session, not the path: a rename retargets the live
         // session under a new filename (Plan 17), and remounting the editor
         // for that would throw away the cursor mid-thought.
-        key={document.sessionEpoch}
-        initialContent={editorSeed}
-        privateNote={privateNote}
-        // While a local-only note's saves are blocked the editor stops taking
-        // input, in place: the session (and its buffer) never changes.
-        readOnly={document.saveBlocked}
-        onChange={handleEditorChange}
-        markMode={markModeFromSyntax(editorMarkdownSyntax)}
-        spellCheck={editorSpellCheck}
-        searchQuery={searchQuery}
-        onSearchChange={handleSearchChange}
-        smoothCaretAnimation={editorSmoothCaretAnimation}
-        timeFormat={timeFormat}
-        bulletAfterHeading={editorBulletAfterHeading}
-        backspaceDeletesEmptyFirstBlock={dailyNote}
-        // The grip drag-reorders blocks and the "+" inserts a paragraph below.
-        blockHandle={true}
-        resolveImageUrl={resolveImageUrl}
-        resolveEmbed={resolveEmbed}
-        resolveWikiEmbed={resolveWikiEmbed}
-        renderNoteEmbed={renderNoteEmbed}
-        resolveAssetOpenPath={resolveAssetOpenPath}
-        openAsset={openAsset}
-        saveFile={saveFile}
-        // Claims links to local attachments (what saveFile inserts for a
-        // dropped non-image file, or a vault's own attachment links) so they
-        // render as file pills, sized by resolveFileInfo.
-        resolveFileLink={resolveFileLink}
-        resolveFileInfo={resolveFileInfo}
-        onWikiLinkClick={onWikiLinkClick}
-        onLinkClick={onLinkClick}
-        resolveLinkPreview={resolveLinkPreview}
-        renderWikilinkHoverCard={
-          graph !== null && !platform.surface.touchEditor ? renderWikilinkHoverCard : undefined
-        }
-        onTagClick={onTagClick}
-        onWikilinkSearch={onWikilinkSearch}
-        onTagSearch={onTagSearch}
-        onSelectionMenuSearch={onSelectionMenuSearch}
-        pendingReplacementActions={aiMenu.pendingReplacementActions}
-        onPendingReplacementResolve={aiMenu.onPendingReplacementResolve}
-        onSlashMenuSearch={onSlashMenuSearch}
-        // Daily notes carry no title semantics (the date is their subject),
-        // so an empty leading H1 there is just an empty heading.
-        {...(dailyNote ? {} : { titlePlaceholder: 'Untitled' })}
-        // `reflect-note-surface` opts this primary editor into the reading
-        // text size (Settings → Editor); compact MarkdownView previews that
-        // also carry `reflect-editor` keep their own context size.
-        className={cn('reflect-note-surface', gutterClassName, editorClassName)}
-        handleRef={handleRef}
-        onExitBoundary={handleExitBoundary}
-      >
-        <EditorAiKeymap onTrigger={aiMenu.openMenu} />
-        <NoteTitlePresentationBridge
-          metadata={
-            markModeFromSyntax(editorMarkdownSyntax) === 'show' ? undefined : document.titleMetadata
-          }
-        />
-        {outline ? <OutlineBridge path={path} /> : null}
-        <WikiAnchorsBridge onWikiLinkClick={onWikiLinkClick} />
-        <WikiArticleBridge path={path} onWikiLinkClick={onWikiLinkClick} />
-      </NoteEditor>
+        key={epoch}
+        path={snapshot.path}
+        session={session}
+        snapshot={snapshot}
+        isPrivate={privateNote}
+        paneRef={paneRef}
+        outline={outline}
+        reveal={reveal}
+        onRevealed={onRevealed}
+        dailyNote={isDaily(shownPath)}
+        autoFocus={autoFocus}
+        autoFocusSelection={autoFocusSelection}
+        onAutoFocused={onAutoFocused}
+        gutterClassName={gutterClassName}
+        editorClassName={editorClassName}
+        dailyDate={dailyDate}
+        registerHandle={registerHandle}
+        onExitBoundary={onExitBoundary}
+      />
 
       {showBacklinks ? (
         <div className={gutterClassName}>
-          <BacklinksPanel path={path} />
+          <BacklinksPanel path={shownPath} />
         </div>
       ) : null}
     </div>

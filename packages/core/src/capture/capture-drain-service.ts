@@ -397,6 +397,7 @@ class CaptureDrainServiceImpl implements CaptureDrainService {
           : appendListItem(dailySource, {
               kind: envelope.kind === 'append' ? 'bullet' : 'checkbox',
               markdown: envelope.text,
+              parent: envelope.parent,
             })
       },
       generation,

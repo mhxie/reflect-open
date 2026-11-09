@@ -12,6 +12,11 @@ export interface NoteSessionSnapshot {
    * it sets neither. It never changes the note's canonical title.
    */
   titleMetadata?: NoteTitleMetadata
+  /**
+   * The session's path; a rename that retargets the session reports its new
+   * one. Null before a session exists.
+   */
+  path: string | null
   status: NoteSessionStatus
   /**
    * Markdown to seed the editor with once `status` is `ready` — the body
@@ -28,6 +33,13 @@ export interface NoteSessionSnapshot {
   protected: boolean
   /** True while the buffer has changes not yet written to disk. */
   dirty: boolean
+  /**
+   * The document's `private: true` frontmatter flag, as the session holds it:
+   * the loaded header, followed by frontmatter commits and external reloads.
+   * True while loading, so nothing leaves the device before the header is
+   * known.
+   */
+  isPrivate: boolean
   /**
    * True when the initial load found no file (the lazy-create contract): the
    * note exists only as this buffer until the first save lands.
@@ -60,15 +72,35 @@ export interface NoteSessionSnapshot {
 
 /** The snapshot before a session has loaded anything. */
 export const INITIAL_NOTE_SNAPSHOT: NoteSessionSnapshot = {
+  path: null,
   status: 'loading',
   initialContent: '',
   protected: false,
   dirty: false,
+  isPrivate: true,
   missing: false,
   error: null,
   privateHeader: true,
   recovery: null,
   saveBlocked: false,
+}
+
+/**
+ * What a session needs from the editor that shows it.
+ */
+export interface NoteSessionEditor {
+  /**
+   * Returns the document as Markdown, after reconciling pending native input.
+   * When that reconciliation changes the document, the editor reports it
+   * through {@link NoteSession.editorChanged} synchronously before returning.
+   */
+  getMarkdown(this: void): string
+  /**
+   * Replaces the document without reporting a change. The editor's change
+   * handler may still fire synchronously during this call; the session
+   * recognizes the re-entry and does not treat it as a user edit.
+   */
+  setMarkdown(markdown: string): void
 }
 
 /** Why {@link NoteSessionOptions.onContent} fired. */
@@ -101,20 +133,6 @@ export interface NoteSessionOptions {
    * (Plan 07b) keys off it.
    */
   onContent?: ((content: string, origin: NoteContentOrigin) => void) | undefined
-  /**
-   * Push content into the live editor (external reload or merged save). The
-   * editor's change handler may fire synchronously during this call; the
-   * session recognizes the re-entry and won't treat it as a user edit.
-   */
-  applyContent: (markdown: string) => void
-  /**
-   * Ask the live editor to reconcile pending native input immediately before
-   * persistence. When reconciliation changes the document, the implementation
-   * must deliver that change to {@link NoteSession.editorChanged} synchronously
-   * before returning. A normalized but unchanged snapshot must not be emitted
-   * as an edit.
-   */
-  reconcilePendingEditorInput?: (() => void) | undefined
   /**
    * Treat a missing file as an empty note on load instead of an error; the
    * file is then created by the first save — Plan 06's lazy daily-note
@@ -176,6 +194,13 @@ export interface NoteSession {
   load(): void
   /** Every editor document change enters the pipeline here. */
   editorChanged(markdown: string): void
+  /**
+   * Attach the editor that shows this session, or detach it with `null`. One
+   * editor at a time: a second attach replaces the first. A detach reconciles
+   * the editor's pending input into the session first, so its last keystrokes
+   * reach disk.
+   */
+  attachEditor(editor: NoteSessionEditor | null): void
   /** The watcher reported an on-disk change to this note; reconcile. */
   externalChanged(): void
   /**

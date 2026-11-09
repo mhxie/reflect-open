@@ -31,6 +31,7 @@ describe('settingsSchema', () => {
       recordingMenuBar: true,
       recordingShortcut: 'Control+Option+Command+M',
       recordingsFolder: '',
+      quickNoteParent: '',
       contactsEnabled: false,
       mobileOnboarded: false,
       mobileStorage: 'local',
@@ -75,6 +76,7 @@ describe('settingsSchema', () => {
     expect(DEFAULT_SETTINGS.describeAssets).toBe(true)
     expect(DEFAULT_SETTINGS.transcriptionFormat).toBe(true)
     expect(DEFAULT_SETTINGS.transcriptionPrompt).toBe('')
+    expect(DEFAULT_SETTINGS.quickNoteParent).toBe('')
     expect(DEFAULT_SETTINGS.contactsEnabled).toBe(false)
     expect(DEFAULT_SETTINGS.mobileOnboarded).toBe(false)
     expect(DEFAULT_SETTINGS.mobileStorage).toBe('local')
@@ -210,6 +212,15 @@ describe('settingsSchema', () => {
     expect(
       settingsSchema.parse({ transcriptionPrompt: 'x'.repeat(600) }).transcriptionPrompt,
     ).toHaveLength(500)
+    expect(settingsSchema.parse({ quickNoteParent: ' [[Inbox]] ' }).quickNoteParent).toBe(
+      '[[Inbox]]',
+    )
+    expect(settingsSchema.parse({ quickNoteParent: 'My\n  inbox' }).quickNoteParent).toBe(
+      'My inbox',
+    )
+    expect(settingsSchema.parse({ quickNoteParent: 'x'.repeat(300) }).quickNoteParent).toHaveLength(
+      200,
+    )
     expect(settingsSchema.parse({ contactsEnabled: true }).contactsEnabled).toBe(true)
     expect(settingsSchema.parse({ contactsEnabled: false }).contactsEnabled).toBe(false)
     expect(settingsSchema.parse({ allNotesFilterTags: ['meeting'] }).allNotesFilterTags).toEqual([
@@ -360,6 +371,7 @@ describe('settingsSchema', () => {
     expect(settingsSchema.parse({ transcriptionFormat: 0 }).transcriptionFormat).toBe(true)
     expect(settingsSchema.parse({ transcriptionPrompt: 42 }).transcriptionPrompt).toBe('')
     expect(settingsSchema.parse({ transcriptionPrompt: null }).transcriptionPrompt).toBe('')
+    expect(settingsSchema.parse({ quickNoteParent: 42 }).quickNoteParent).toBe('')
     expect(settingsSchema.parse({ contactsEnabled: 'yes' }).contactsEnabled).toBe(false)
     expect(settingsSchema.parse({ contactsEnabled: 1 }).contactsEnabled).toBe(false)
     expect(settingsSchema.parse({ allNotesFilterTags: 'book' }).allNotesFilterTags).toEqual([
@@ -465,6 +477,7 @@ describe('settingsSchema', () => {
       recordingMenuBar: true,
       recordingShortcut: 'Control+Option+Command+M',
       recordingsFolder: '',
+      quickNoteParent: '',
       contactsEnabled: false,
       mobileOnboarded: false,
       mobileStorage: 'local',

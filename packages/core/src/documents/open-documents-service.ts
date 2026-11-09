@@ -88,6 +88,11 @@ export interface OpenDocumentsService {
    * absorbed, never re-thrown.
    */
   flushAll(): Promise<void>
+  /**
+   * Flush every open buffer now and fire each document's settle-time work once
+   * its flush has landed. The window-blur settle point: it does not wait.
+   */
+  settleAll(): void
 }
 
 export interface OpenDocumentsServiceDeps {
@@ -162,6 +167,12 @@ class OpenDocumentsServiceImpl implements OpenDocumentsService {
         await document.settled?.()
       }),
     )
+  }
+
+  settleAll(): void {
+    for (const document of this.#documents.values()) {
+      void document.session.flush().then(() => document.settle?.())
+    }
   }
 
   #onFileChanges(changes: readonly FileChange[]): void {

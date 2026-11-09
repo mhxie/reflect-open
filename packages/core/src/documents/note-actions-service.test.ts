@@ -907,7 +907,6 @@ function lazySession(
     onSnapshot: (snapshot) => {
       snapshots.push(snapshot)
     },
-    applyContent: () => {},
     createIfMissing: true,
     missingSeed: '#\n',
     saveDebounceMs: 10,

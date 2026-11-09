@@ -1,5 +1,10 @@
 import type { MaybePromise } from '@reflect/utils'
-import type { NoteSession } from './note-session-types.ts'
+import { WritableStore, type Store } from '../store.ts'
+import {
+  INITIAL_NOTE_SNAPSHOT,
+  type NoteSession,
+  type NoteSessionSnapshot,
+} from './note-session-types.ts'
 import type { OpenDocumentsService } from './open-documents-service.ts'
 
 /**
@@ -29,13 +34,14 @@ import type { OpenDocumentsService } from './open-documents-service.ts'
  * useEffect(() => {
  *   const { session, created } = binding.bind(path, {
  *     coordinator: () => titleRename.createCoordinator({ ... }),
- *     session: (coordinator) => noteSessions.create({ ... }),
+ *     session: (coordinator, onSnapshot) => noteSessions.create({ onSnapshot, ... }),
  *   })
  *   if (created) session.load()            // adopted sessions are already live
  *   return () => binding.unbind(path)
  * }, [path, ...])
- * // …and the editor is keyed on binding.epoch(), not the path, so a rename
- * // that retargets the session never remounts it — the cursor survives.
+ * const view = useStore(binding.view)
+ * // …and the editor is keyed on `view.epoch`, not the path, so a rename that
+ * // retargets the session never remounts it — the cursor survives.
  * ```
  *
  * Why a rename leads here: `docs/readable-filenames.md`.
@@ -58,11 +64,32 @@ export interface DocumentCoordinator {
   dispose(): void
 }
 
+/**
+ * The live session, its latest snapshot, and its epoch: a count of session
+ * creations on this binding (an adoption keeps the adopted session's). The
+ * three change together, in one `set`.
+ */
+export interface DocumentView {
+  readonly epoch: number
+  readonly session: NoteSession | null
+  readonly snapshot: NoteSessionSnapshot
+}
+
+export const INITIAL_DOCUMENT_VIEW: DocumentView = {
+  epoch: 0,
+  session: null,
+  snapshot: INITIAL_NOTE_SNAPSHOT,
+}
+
 export interface BindFactories<Coordinator extends DocumentCoordinator = DocumentCoordinator> {
   /**
-   * Build the session; receives the coordinator its `onContent` feeds.
+   * Build the session; receives the coordinator its `onContent` feeds, and the
+   * `onSnapshot` that carries its snapshots into {@link DocumentBinding.view}.
    */
-  session: (coordinator: Coordinator | null) => NoteSession
+  session: (
+    coordinator: Coordinator | null,
+    onSnapshot: (snapshot: NoteSessionSnapshot) => void,
+  ) => NoteSession
   coordinator: () => Coordinator | null
 }
 
@@ -85,23 +112,9 @@ export interface DocumentBinding<Coordinator extends DocumentCoordinator = Docum
    */
   unbind(path: string): void
   /**
-   * The live session, if any — callbacks read this, never a stale ref.
+   * The live session with its snapshot and epoch, as one value.
    */
-  session(): NoteSession | null
-  coordinator(): Coordinator | null
-  /**
-   * Counts session *creations* (not adoptions) — the editor's remount key.
-   */
-  epoch(): number
-  /**
-   * Whether the live session holds the note a render for `path` shows: the
-   * last bind was for `path` (a rename may have retargeted the session since,
-   * while the route catches up), or a rename retargeted the session to `path`
-   * and the next bind adopts it. False with no session, and for a pane that
-   * navigated to another note but has not rebound yet: its session is still
-   * the previous note's.
-   */
-  holds(path: string): boolean
+  readonly view: Store<DocumentView>
 }
 
 export interface DocumentBindingDeps {
@@ -112,6 +125,8 @@ class DocumentBindingImpl<
   Coordinator extends DocumentCoordinator = DocumentCoordinator,
 > implements DocumentBinding<Coordinator> {
   readonly #deps: DocumentBindingDeps
+  readonly #store = new WritableStore<DocumentView>(INITIAL_DOCUMENT_VIEW)
+  readonly view: Store<DocumentView> = this.#store
   #session: NoteSession | null = null
   #coordinator: Coordinator | null = null
   /**
@@ -142,8 +157,17 @@ class DocumentBindingImpl<
       owner = this.#coordinator
     } else {
       owner = create.coordinator()
-      bound = create.session(owner)
       this.#epoch += 1
+      const epoch = this.#epoch
+      let session: NoteSession | null = null
+      session = create.session(owner, (snapshot) => {
+        // A snapshot from a session this binding has torn down since must not
+        // replace the live view.
+        if (this.#session === session) {
+          this.#store.set({ epoch, session, snapshot })
+        }
+      })
+      bound = session
     }
     this.#session = bound
     this.#coordinator = owner
@@ -184,22 +208,6 @@ class DocumentBindingImpl<
     this.#teardown(target, owner)
   }
 
-  session(): NoteSession | null {
-    return this.#session
-  }
-
-  coordinator(): Coordinator | null {
-    return this.#coordinator
-  }
-
-  epoch(): number {
-    return this.#epoch
-  }
-
-  holds(path: string): boolean {
-    return this.#session !== null && (this.#lastPath === path || this.#session.path === path)
-  }
-
   #teardown(target: NoteSession, owner: Coordinator | null): void {
     // Disposal flushes pending edits to the session's own (current) path —
     // the note-switch "final flush". The flush's landed save reaches the
@@ -213,6 +221,7 @@ class DocumentBindingImpl<
     if (this.#session === target) {
       this.#session = null
       this.#coordinator = null
+      this.#store.set(INITIAL_DOCUMENT_VIEW)
     }
     target.dispose()
     if (owner) {

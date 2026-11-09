@@ -182,9 +182,12 @@ function harness(options?: {
   disk?: string | null
   createIfMissing?: boolean
   missingSeed?: string
+  /**
+   * The attached editor's `getMarkdown`: how it reports pending native input.
+   */
   reconcilePendingEditorInput?: () => void
   /**
-   * Runs inside `applyContent`, the way an editor reports its serialization while it loads content.
+   * Runs inside the attached editor's `setMarkdown`, the way an editor reports its serialization while it loads content.
    */
   onApply?: (markdown: string) => void
   /**
@@ -266,17 +269,22 @@ function harness(options?: {
     onSnapshot: (snapshot) => {
       snapshots.push(snapshot)
     },
-    applyContent: (markdown) => {
-      applied.push(markdown)
-      options?.onApply?.(markdown)
-    },
-    reconcilePendingEditorInput: options?.reconcilePendingEditorInput,
     onContent: (content, origin) => {
       contents.push({ content, origin })
     },
     createIfMissing: options?.createIfMissing,
     missingSeed: options?.missingSeed,
     saveDebounceMs: 10,
+  })
+  session.attachEditor({
+    getMarkdown: () => {
+      options?.reconcilePendingEditorInput?.()
+      return ''
+    },
+    setMarkdown: (markdown) => {
+      applied.push(markdown)
+      options?.onApply?.(markdown)
+    },
   })
   return {
     snapshots,
@@ -337,6 +345,23 @@ describe('createNoteSession', () => {
 
     expect(writes).toEqual([{ path: 'notes/a.md', contents: '# Final\n' }])
     expect(snapshots.length).toBe(emittedBeforeDispose)
+  })
+
+  it('reports the private flag from the loaded header, then follows every header change', async () => {
+    const h = harness({ disk: '---\nprivate: true\n---\n# Secret\n' })
+    expect(h.snapshots.at(-1)?.isPrivate ?? true).toBe(true) // fail closed while loading
+    h.session.load()
+    await settled()
+    expect(h.snapshots.at(-1)?.isPrivate).toBe(true)
+
+    expect(await h.session.commitFrontmatter({ private: false })).toBe(true)
+    await settled()
+    expect(h.snapshots.at(-1)?.isPrivate).toBe(false)
+
+    h.setDisk('---\nprivate: true\n---\n# Secret\n')
+    h.session.externalChanged()
+    await settled()
+    expect(h.snapshots.at(-1)?.isPrivate).toBe(true)
   })
 
   it('reconciles pending editor input before a flush snapshots the buffer', async () => {
@@ -722,7 +747,7 @@ describe('external changes and saves', () => {
   it('an external reload never dirties the buffer, even when the editor reports a normalized serialization', async () => {
     let target: NoteSession | null = null
     const h = harness({
-      // The editor's change handler fires synchronously inside applyContent
+      // The editor’s change handler fires synchronously inside setMarkdown
       // and reports a normalized serialization (an extra trailing newline).
       onApply: (markdown) => target?.editorChanged(`${markdown}\n`),
     })
@@ -814,7 +839,7 @@ describe('frontmatter ownership (Plan 07b)', () => {
       logger,
       id,
       graphSession: createTestGraphSessionService({ graph: null }),
-    }).create({ path: PATH, classify: () => 'exact', onSnapshot: () => {}, applyContent: () => {} })
+    }).create({ path: PATH, classify: () => 'exact', onSnapshot: () => {} })
     expect(session.generation()).toBeNull()
     await expect(session.commitFrontmatter({ pinned: true })).resolves.toBe(false)
   })
@@ -1298,6 +1323,8 @@ describe('retarget (Plan 17)', () => {
 
     h.session.retarget('notes/hello.md')
     expect(h.session.path).toBe('notes/hello.md')
+    // Reported at once: observers that gate on the note's path (privacy) follow it.
+    expect(h.snapshots.at(-1)?.path).toBe('notes/hello.md')
     // The buffer carried over: not dirty, nothing rewritten on retarget alone.
     expect(h.snapshots.at(-1)?.dirty).toBe(false)
 
@@ -1410,7 +1437,7 @@ describe('commitSourceEdit', () => {
     expect(h.writes.at(-1)?.contents).toBe('# Todo\n\n+ [ ] buy oat milk\n')
     expect(h.applied.at(-1)).toBe('# Todo\n\n+ [ ] buy oat milk\n')
     // The pane mounts its editor from `initialContent` only after the ready
-    // snapshot renders, so `applyContent` above reached no editor yet: the seed
+    // snapshot renders, so `setMarkdown` above reached no editor yet: the seed
     // must already carry the edit or the editor opens on the pre-edit body.
     expect(h.snapshots.at(-1)?.initialContent).toBe('# Todo\n\n+ [ ] buy oat milk\n')
   })
@@ -1628,10 +1655,13 @@ describe('followDisplacement', () => {
       onSnapshot: (snapshot) => {
         snapshots.push(snapshot)
       },
-      applyContent: (markdown) => {
+      saveDebounceMs: 10,
+    })
+    session.attachEditor({
+      getMarkdown: () => '',
+      setMarkdown: (markdown) => {
         applied.push(markdown)
       },
-      saveDebounceMs: 10,
     })
     /** What the pull does: the bytes at FROM move to TO; the phone's take FROM. */
     function pull(): void {

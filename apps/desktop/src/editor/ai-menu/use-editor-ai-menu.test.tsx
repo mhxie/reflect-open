@@ -64,8 +64,7 @@ describe('useEditorAiMenu', () => {
       () => {
         return useEditorAiMenu({
           path: 'notes/plan.md',
-          privateNote: true,
-          sessionEpoch: 1,
+          isPrivate: true,
           editorRef,
         })
       },
@@ -84,8 +83,7 @@ describe('useEditorAiMenu', () => {
       () => {
         return useEditorAiMenu({
           path: 'notes/plan.md',
-          privateNote: false,
-          sessionEpoch: 1,
+          isPrivate: false,
           editorRef,
         })
       },
@@ -99,13 +97,13 @@ describe('useEditorAiMenu', () => {
   it('closes the menu as soon as the note turns private', async () => {
     const { editorRef } = editorWithSelection()
     const hook = await renderHookInApp(
-      ({ privateNote }: { privateNote: boolean } = { privateNote: false }) => {
-        return useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef })
+      ({ isPrivate }: { isPrivate: boolean } = { isPrivate: false }) => {
+        return useEditorAiMenu({ path: 'notes/plan.md', isPrivate, editorRef })
       },
-      { settings: { aiProviders: [PROVIDER] }, initialProps: { privateNote: false } },
+      { settings: { aiProviders: [PROVIDER] }, initialProps: { isPrivate: false } },
     )
     expect(hook.result.current.onSelectionMenuSearch).toBeDefined()
-    await hook.rerender({ privateNote: true })
+    await hook.rerender({ isPrivate: true })
     expect(hook.result.current.onSelectionMenuSearch).toBeUndefined()
   })
 
@@ -114,10 +112,10 @@ describe('useEditorAiMenu', () => {
     const key = Promise.withResolvers<string | null>()
     const { app, read, create } = appWithKey(key.promise)
     const hook = await renderHookInApp(
-      ({ privateNote }: { privateNote: boolean } = { privateNote: false }) => {
-        return useEditorAiMenu({ path: 'notes/plan.md', privateNote, sessionEpoch: 1, editorRef })
+      ({ isPrivate }: { isPrivate: boolean } = { isPrivate: false }) => {
+        return useEditorAiMenu({ path: 'notes/plan.md', isPrivate, editorRef })
       },
-      { core: app, settings: { aiProviders: [PROVIDER] }, initialProps: { privateNote: false } },
+      { core: app, settings: { aiProviders: [PROVIDER] }, initialProps: { isPrivate: false } },
     )
     const items = await hook.result.current.onSelectionMenuSearch?.('Rewrite', {
       selectedText: 'private selection',
@@ -130,14 +128,14 @@ describe('useEditorAiMenu', () => {
     await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
     expect(create).not.toHaveBeenCalled()
 
-    await hook.rerender({ privateNote: true })
+    await hook.rerender({ isPrivate: true })
     expect(discardPendingReplacement).toHaveBeenCalledOnce()
     key.resolve('test-key')
     await key.promise
     await Promise.resolve()
     expect(create).not.toHaveBeenCalled()
 
-    await hook.rerender({ privateNote: false })
+    await hook.rerender({ isPrivate: false })
     expect(create).not.toHaveBeenCalled()
   })
 
@@ -149,8 +147,7 @@ describe('useEditorAiMenu', () => {
       () => {
         return useEditorAiMenu({
           path: 'notes/plan.md',
-          privateNote: false,
-          sessionEpoch: 1,
+          isPrivate: false,
           editorRef,
         })
       },

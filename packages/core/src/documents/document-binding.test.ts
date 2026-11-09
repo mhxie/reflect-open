@@ -8,12 +8,17 @@ import { createTestIdService } from '../testing/id.ts'
 import { createTestLoggerService } from '../testing/logger.ts'
 import {
   createDocumentBinding,
+  INITIAL_DOCUMENT_VIEW,
   type BindFactories,
   type DocumentBinding,
   type DocumentCoordinator,
 } from './document-binding.ts'
 import { createNoteSessionService } from './note-session-service.ts'
-import type { NoteSession, NoteSessionSnapshot } from './note-session-types.ts'
+import {
+  INITIAL_NOTE_SNAPSHOT,
+  type NoteSession,
+  type NoteSessionSnapshot,
+} from './note-session-types.ts'
 import { createOpenDocumentsService, type OpenDocumentsService } from './open-documents-service.ts'
 
 /**
@@ -41,8 +46,25 @@ function fakeCoordinator() {
   return { coordinator, settle, dispose }
 }
 
-function factories(session: NoteSession, coordinator: DocumentCoordinator | null): BindFactories {
-  return { session: () => session, coordinator: () => coordinator }
+/**
+ * Factories that build `session`, recording the `onSnapshot` it is created with in `emitters`.
+ */
+function factories(
+  session: NoteSession,
+  coordinator: DocumentCoordinator | null,
+  emitters: Array<(snapshot: NoteSessionSnapshot) => void> = [],
+): BindFactories {
+  return {
+    session: (_coordinator, onSnapshot) => {
+      emitters.push(onSnapshot)
+      return session
+    },
+    coordinator: () => coordinator,
+  }
+}
+
+function readySnapshot(path: string, initialContent = ''): NoteSessionSnapshot {
+  return { ...INITIAL_NOTE_SNAPSHOT, path, status: 'ready', initialContent }
 }
 
 let openDocuments: OpenDocumentsService
@@ -61,28 +83,62 @@ describe('createDocumentBinding', () => {
   it('creates on first bind, registers, and counts the epoch', () => {
     const binding = createBinding()
     const { session } = fakeSession('notes/a.md')
-    const bound = binding.bind('notes/a.md', factories(session, null))
+    const emitters: Array<(snapshot: NoteSessionSnapshot) => void> = []
+    const bound = binding.bind('notes/a.md', factories(session, null, emitters))
 
     expect(bound.created).toBe(true)
-    expect(binding.session()).toBe(session)
-    expect(binding.epoch()).toBe(1)
+    expect(binding.view.get()).toBe(INITIAL_DOCUMENT_VIEW) // nothing until the session reports
+    emitters[0]?.(readySnapshot('notes/a.md', '# A\n'))
+    expect(binding.view.get()).toEqual({
+      epoch: 1,
+      session,
+      snapshot: readySnapshot('notes/a.md', '# A\n'),
+    })
     expect(openDocuments.sessionFor('notes/a.md')).toBe(session)
     binding.unbind('notes/a.md')
     expect(openDocuments.sessionFor('notes/a.md')).toBeNull()
+    expect(binding.view.get()).toBe(INITIAL_DOCUMENT_VIEW)
+  })
+
+  it('the view changes as one value, and only through the live session', () => {
+    const binding = createBinding()
+    const first = fakeSession('notes/a.md')
+    const emitters: Array<(snapshot: NoteSessionSnapshot) => void> = []
+    binding.bind('notes/a.md', factories(first.session, null, emitters))
+    emitters[0]?.(readySnapshot('notes/a.md'))
+    const seen: Array<ReturnType<typeof binding.view.get>> = []
+    const unsubscribe = binding.view.subscribe(() => {
+      seen.push(binding.view.get())
+    })
+
+    binding.unbind('notes/a.md')
+    const second = fakeSession('notes/b.md')
+    binding.bind('notes/b.md', factories(second.session, null, emitters))
+    emitters[0]?.(readySnapshot('notes/a.md', '# late\n')) // the torn-down session reports
+    emitters[1]?.(readySnapshot('notes/b.md', '# B\n'))
+
+    expect(seen).toEqual([
+      INITIAL_DOCUMENT_VIEW,
+      { epoch: 2, session: second.session, snapshot: readySnapshot('notes/b.md', '# B\n') },
+    ])
+    unsubscribe()
+    binding.unbind('notes/b.md')
   })
 
   it('a same-path rebind recreates (io bindings are taken at construction)', () => {
     const binding = createBinding()
     const first = fakeSession('notes/a.md')
-    binding.bind('notes/a.md', factories(first.session, null))
+    const emitters: Array<(snapshot: NoteSessionSnapshot) => void> = []
+    binding.bind('notes/a.md', factories(first.session, null, emitters))
     binding.unbind('notes/a.md')
     expect(first.dispose).toHaveBeenCalled()
 
     const second = fakeSession('notes/a.md')
-    const rebound = binding.bind('notes/a.md', factories(second.session, null))
+    const rebound = binding.bind('notes/a.md', factories(second.session, null, emitters))
     expect(rebound.created).toBe(true)
     expect(rebound.session).toBe(second.session)
-    expect(binding.epoch()).toBe(2)
+    emitters[1]?.(readySnapshot('notes/a.md'))
+    expect(binding.view.get().epoch).toBe(2)
     binding.unbind('notes/a.md')
   })
 
@@ -90,17 +146,26 @@ describe('createDocumentBinding', () => {
     const binding = createBinding()
     const moved = fakeSession('notes/a.md')
     const { coordinator } = fakeCoordinator()
-    binding.bind('notes/a.md', factories(moved.session, coordinator))
+    const emitters: Array<(snapshot: NoteSessionSnapshot) => void> = []
+    binding.bind('notes/a.md', factories(moved.session, coordinator, emitters))
+    emitters[0]?.(readySnapshot('notes/a.md'))
 
     moved.session.retarget('notes/renamed.md') // what moveNoteCarryingSession does
+    emitters[0]?.(readySnapshot('notes/renamed.md'))
     binding.unbind('notes/a.md') // route follows → React cleanup for the old path
     const spare = fakeSession('notes/renamed.md')
-    const adopted = binding.bind('notes/renamed.md', factories(spare.session, null))
+    const adopted = binding.bind('notes/renamed.md', factories(spare.session, null, emitters))
 
     expect(adopted.created).toBe(false)
     expect(adopted.session).toBe(moved.session)
     expect(adopted.coordinator).toBe(coordinator)
-    expect(binding.epoch()).toBe(1) // no remount: the editor keeps its cursor
+    expect(emitters).toHaveLength(1) // no new session
+    // No new epoch: the editor keeps its cursor.
+    expect(binding.view.get()).toEqual({
+      epoch: 1,
+      session: moved.session,
+      snapshot: readySnapshot('notes/renamed.md'),
+    })
     await microtasks()
     expect(moved.dispose).not.toHaveBeenCalled() // the hand-off cancelled teardown
 
@@ -122,33 +187,6 @@ describe('createDocumentBinding', () => {
     expect(moved.dispose).toHaveBeenCalled()
     expect(moved.flush).toHaveBeenCalled()
     expect(settle).toHaveBeenCalled() // a pending rename still settles
-  })
-
-  it('holds the note a render shows: its bound path, or a rename target being followed', () => {
-    const binding = createBinding()
-    expect(binding.holds('notes/a.md')).toBe(false) // nothing bound yet
-
-    const moved = fakeSession('notes/a.md')
-    binding.bind('notes/a.md', factories(moved.session, null))
-    expect(binding.holds('notes/a.md')).toBe(true)
-    // A pane that navigated renders once before its effect rebinds: the live
-    // session is still the previous note's.
-    expect(binding.holds('notes/b.md')).toBe(false)
-
-    // A rename retargets the session before the route follows: both the old
-    // route path and the new one show this same note.
-    moved.session.retarget('notes/renamed.md')
-    expect(binding.holds('notes/a.md')).toBe(true)
-    expect(binding.holds('notes/renamed.md')).toBe(true)
-    expect(binding.holds('notes/b.md')).toBe(false)
-
-    binding.unbind('notes/a.md')
-    binding.bind('notes/renamed.md', factories(fakeSession('notes/renamed.md').session, null))
-    expect(binding.holds('notes/renamed.md')).toBe(true)
-    expect(binding.holds('notes/a.md')).toBe(false)
-
-    binding.unbind('notes/renamed.md')
-    expect(binding.holds('notes/renamed.md')).toBe(false) // torn down
   })
 
   it('a normal unbind settles the coordinator after the final flush', async () => {
@@ -181,7 +219,6 @@ describe('createDocumentBinding', () => {
       onSnapshot: (snapshot) => {
         snapshots.push(snapshot)
       },
-      applyContent: () => {},
     })
     const binding = createBinding()
     binding.bind(from, factories(session, null))
@@ -193,6 +230,7 @@ describe('createDocumentBinding', () => {
     noteFile.set(to, '# Today\n')
     noteFile.set(from, '# From the phone\n')
     expect(session.followDisplacement(to, '# From the phone\n', false)).toBe(true)
+    expect(snapshots.at(-1)?.path).toBe(to)
     binding.unbind(from) // the pane unmounts before any adopting bind
 
     await vi.waitFor(() => expect(noteFile.writes().map((write) => write.path)).toEqual([to]))

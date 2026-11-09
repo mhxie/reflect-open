@@ -67,11 +67,13 @@ vi.mock('@/editor/note-editor.tsx', async () => {
     }: {
       initialContent: string
       onWikiLinkClick?: (options: { target: string; openInNewWindow: boolean }) => void
-      handleRef?: (handle: import('@/editor/note-editor.tsx').NoteEditorHandle | null) => void
+      handleRef?: (
+        handle: import('@/editor/note-editor.tsx').NoteEditorHandle | null,
+      ) => void | (() => void)
     }) => {
       const markdownRef = useRef(initialContent)
       useEffect(() => {
-        handleRef?.({
+        const cleanup = handleRef?.({
           setMarkdown: (markdown) => {
             markdownRef.current = markdown
           },
@@ -93,7 +95,13 @@ vi.mock('@/editor/note-editor.tsx', async () => {
           findPrevious: () => {},
           revealHeading: () => false,
         })
-        return () => handleRef?.(null)
+        return () => {
+          if (typeof cleanup === 'function') {
+            cleanup()
+          } else {
+            handleRef?.(null)
+          }
+        }
       }, [handleRef])
       return (
         <div data-testid="fake-editor">

@@ -19,10 +19,12 @@ import {
   upsertFrontmatter,
 } from '../markdown/frontmatter.ts'
 import type { NoteTitleMetadata } from '../markdown/note-title.ts'
+import { notePrivate } from '../privacy/privacy-service.ts'
 import { splitDoc } from './note-session-doc.ts'
 import { frontmatterPatchToYaml, type FrontmatterPatch } from './note-session-frontmatter.ts'
 import type {
   NoteSession,
+  NoteSessionEditor,
   NoteSessionOptions,
   NoteSessionService,
   NoteSessionSnapshot,
@@ -180,9 +182,8 @@ class NoteSessionImpl implements NoteSession {
   readonly #io: NoteSessionIo
   readonly #classify: NoteSessionOptions['classify']
   readonly #onSnapshot: NoteSessionOptions['onSnapshot']
-  readonly #applyContent: NoteSessionOptions['applyContent']
   readonly #onContent: NoteSessionOptions['onContent']
-  readonly #reconcilePendingEditorInput: NoteSessionOptions['reconcilePendingEditorInput']
+  #editor: NoteSessionEditor | null = null
   readonly #createIfMissing: boolean
   readonly #missingSeed: NoteSessionOptions['missingSeed']
   readonly #saveDebounceMs: number
@@ -286,9 +287,7 @@ class NoteSessionImpl implements NoteSession {
     this.#deps = deps
     this.#classify = options.classify
     this.#onSnapshot = options.onSnapshot
-    this.#applyContent = options.applyContent
     this.#onContent = options.onContent
-    this.#reconcilePendingEditorInput = options.reconcilePendingEditorInput
     this.#graph = deps.graphSession.get().session
     this.#io = sessionIo(deps, this.#graph, options)
     this.path = options.path
@@ -299,6 +298,14 @@ class NoteSessionImpl implements NoteSession {
 
   retarget(to: string): void {
     this.path = to
+    this.#emit()
+  }
+
+  attachEditor(editor: NoteSessionEditor | null): void {
+    if (editor === null) {
+      this.#reconcilePendingEditorInput()
+    }
+    this.#editor = editor
   }
 
   generation(): number | null {
@@ -326,10 +333,12 @@ class NoteSessionImpl implements NoteSession {
       return
     }
     const next: NoteSessionSnapshot = {
+      path: this.path,
       status: this.#status,
       initialContent: this.#initialContent,
       protected: this.#isProtected,
       dirty: this.#dirty,
+      isPrivate: this.#status === 'ready' ? notePrivate(this.#header) : true,
       missing: this.#missing,
       error: this.#error,
       privateHeader: this.#privateHeader,
@@ -340,6 +349,8 @@ class NoteSessionImpl implements NoteSession {
     const last = this.#lastEmitted
     if (
       last !== null &&
+      last.path === next.path &&
+      last.isPrivate === next.isPrivate &&
       last.status === next.status &&
       last.initialContent === next.initialContent &&
       last.protected === next.protected &&
@@ -566,7 +577,7 @@ class NoteSessionImpl implements NoteSession {
   }
 
   async flush(): Promise<void> {
-    this.#reconcilePendingEditorInput?.()
+    this.#reconcilePendingEditorInput()
     this.#cancelScheduledSave()
     this.#save()
     await this.#settleSaves()
@@ -623,10 +634,18 @@ class NoteSessionImpl implements NoteSession {
     try {
       // The editor dispatches synchronously, so its change handler runs (and is
       // suppressed) within this call.
-      this.#applyContent(content)
+      this.#editor?.setMarkdown(content)
     } finally {
       this.#applyingContent = false
     }
+  }
+
+  /**
+   * Let the editor report native input it has not reported yet. The returned
+   * Markdown is discarded: a normalized but unchanged document is not an edit.
+   */
+  #reconcilePendingEditorInput(): void {
+    this.#editor?.getMarkdown()
   }
 
   /**
@@ -825,7 +844,7 @@ class NoteSessionImpl implements NoteSession {
       this.externalChanged()
       return false
     }
-    this.path = to
+    this.retarget(to)
     this.externalChanged()
     if (this.#dirty) {
       // Saves resume at the new path, checked against the base the buffer
@@ -982,7 +1001,7 @@ class NoteSessionImpl implements NoteSession {
     if (this.#disposed || this.#isProtected || this.#status !== 'ready') {
       return false
     }
-    this.#reconcilePendingEditorInput?.()
+    this.#reconcilePendingEditorInput()
     const previousHeader = this.#header
     const previousBuffer = this.#buffer
     const previousInitialContent = this.#initialContent

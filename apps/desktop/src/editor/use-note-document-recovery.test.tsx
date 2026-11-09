@@ -87,10 +87,10 @@ it('pins recovery ownership to the hook session and offers each closed window’
 
   for (const contents of ['# A\n', '# B\n']) {
     const window = await renderHookInApp(() => useNoteDocument(NOTE), { core: app, graph })
-    await vi.waitFor(() => expect(window.result.current.status).toBe('ready'))
-    window.result.current.onEditorChange(contents)
+    await vi.waitFor(() => expect(window.result.current.snapshot.status).toBe('ready'))
+    window.result.current.session?.editorChanged(contents)
     await app.openDocuments.flushAll()
-    await vi.waitFor(() => expect(window.result.current.saveBlocked).toBe(true))
+    await vi.waitFor(() => expect(window.result.current.snapshot.saveBlocked).toBe(true))
     await window.unmount()
   }
   expect(store.copies.size).toBe(2)
@@ -101,21 +101,21 @@ it('pins recovery ownership to the hook session and offers each closed window’
 
   blocked = false
   const reopened = await renderHookInApp(() => useNoteDocument(NOTE), { core: app, graph })
-  await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(second))
-  reopened.result.current.restoreRecovery()
+  await vi.waitFor(() => expect(reopened.result.current.snapshot.recovery).toEqual(second))
+  reopened.result.current.session?.restoreRecovery()
   await app.openDocuments.flushAll()
-  await vi.waitFor(() => expect(reopened.result.current.recovery).toEqual(first))
+  await vi.waitFor(() => expect(reopened.result.current.snapshot.recovery).toEqual(first))
   expect(store.disk()).toBe('# B\n')
   // A was kept against the note B has since replaced, so restoring it names
   // that older revision as the write's base: the file merges A into B
   // instead of silently overwriting it.
   store.mergeNextWrite('# A\n\n# B\n')
-  reopened.result.current.restoreRecovery()
+  reopened.result.current.session?.restoreRecovery()
   await app.openDocuments.flushAll()
   await vi.waitFor(() => expect(store.disk()).toBe('# A\n\n# B\n'))
   expect(store.bases.at(-1)).toBe('# Hello\n')
   await vi.waitFor(() => expect(store.copies.size).toBe(0))
-  await vi.waitFor(() => expect(reopened.result.current.recovery).toBeNull())
+  await vi.waitFor(() => expect(reopened.result.current.snapshot.recovery).toBeNull())
   expect(store.cleared[0]).toBe(second?.token)
   expect(store.cleared.at(-1)).toBe(first?.token)
 })
