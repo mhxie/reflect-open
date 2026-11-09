@@ -171,7 +171,7 @@ pub(super) fn displace(
     _root: &std::path::Path,
     _writes: &[super::merge::ChangedFile],
     _incoming: &Tree<'_>,
-    _max_file_bytes: u64,
+    _policy: &super::merge::PullPolicy<'_>,
     _stranded: &mut Vec<DisplacedFile>,
 ) -> reflect_types::AppResult<Displacement> {
     Ok(Displacement::Ready(Moves))
@@ -205,10 +205,10 @@ mod walk {
         open_dir_beneath, read_beneath, read_link_beneath, remove_beneath, rename_beneath,
         subdir_beneath,
     };
-    use reflect_graph_paths::is_safe_visible;
+    use reflect_graph_paths::{ExternalLinks, is_safe_visible};
     use reflect_types::{AppError, AppResult};
 
-    use super::super::merge::{ChangeKind, ChangedFile};
+    use super::super::merge::{ChangeKind, ChangedFile, PullPolicy};
     use super::{
         DisplacedFile, Displacement, MAX_NAME_PROBES, THIS_DEVICE, copy_name, fold, taken_paths,
     };
@@ -219,15 +219,16 @@ mod walk {
 
     /// Scan the write set and move this device's uncommitted entries out of
     /// its way (see the module docs). `incoming` is the tree whose files land
-    /// at the write set, `max_file_bytes` the backup size limit. On a failure
-    /// partway, what moved is put back, and what could not be is appended to
-    /// `stranded` for the caller to announce.
+    /// at the write set; `policy` gives the backup size limit and the
+    /// external storage. On a failure partway, what moved is put back, and
+    /// what could not be is appended to `stranded` for the caller to
+    /// announce.
     pub(in super::super) fn displace(
         repo: &Repository,
         root: &Path,
         writes: &[ChangedFile],
         incoming: &Tree<'_>,
-        max_file_bytes: u64,
+        policy: &PullPolicy<'_>,
         stranded: &mut Vec<DisplacedFile>,
     ) -> AppResult<Displacement> {
         if writes.is_empty() {
@@ -238,7 +239,8 @@ mod walk {
             index: repo.index()?,
             root: root.canonicalize()?,
             incoming,
-            max_file_bytes,
+            max_file_bytes: policy.max_file_bytes,
+            external: policy.external,
             listings: HashMap::new(),
         };
         let Some(candidates) = walk.plan(writes)? else {
@@ -434,6 +436,9 @@ mod walk {
         root: PathBuf,
         incoming: &'a Tree<'repo>,
         max_file_bytes: u64,
+        /// The folders the graph's external storage has used, whose links
+        /// stand for files kept there.
+        external: Option<&'a ExternalLinks>,
         /// Directory listings by their on-disk graph-relative path, read
         /// once each: how an entry another spelling reached is spelled.
         listings: HashMap<String, Vec<(std::ffi::OsString, i128)>>,
@@ -569,6 +574,19 @@ mod walk {
                 EntryKind::Symlink => Some(read_link_beneath(parent, name)?),
                 EntryKind::Directory | EntryKind::Other => None,
             };
+            // A link into external storage holds no bytes of its own: the
+            // folder keeps the file, so the link is parked whatever the
+            // index says, and the incoming file takes its path.
+            if stat.kind == EntryKind::Symlink
+                && let (Some(store), Some(target)) = (self.external, &contents)
+                && self.points_into_store(store, path, target)
+            {
+                return Ok(Verdict::Move {
+                    park: true,
+                    kept_out: false,
+                    different_note: false,
+                });
+            }
             if let (Some(version), Some(bytes)) = (tracked, &contents)
                 && self.holds_index_version(version, stat.kind, bytes)?
             {
@@ -838,6 +856,21 @@ mod walk {
                 Err(err) if err.code() == git2::ErrorCode::NotFound => Ok(None),
                 Err(err) => Err(err.into()),
             }
+        }
+
+        /// Whether the link at graph path `path` (spelled as on disk), whose
+        /// target reads `target`, points into the external storage folder.
+        fn points_into_store(&self, store: &ExternalLinks, path: &str, target: &[u8]) -> bool {
+            use std::os::unix::ffi::OsStrExt;
+            let link_dir = match path.rsplit_once('/') {
+                Some((dir, _)) => self.root.join(dir),
+                None => self.root.clone(),
+            };
+            store.points_into(
+                Path::new(std::ffi::OsStr::from_bytes(target)),
+                &link_dir,
+                &self.root,
+            )
         }
 
         /// Whether `bytes`, read at an entry of `kind`, are what the index

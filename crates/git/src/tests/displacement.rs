@@ -35,6 +35,7 @@ fn pull(
         local_only: folders,
         accepted_roots: &[],
         max_file_bytes,
+        external: None,
     };
     merge_remote_displacing(root, &policy)
 }

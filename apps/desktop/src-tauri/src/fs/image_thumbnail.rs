@@ -163,11 +163,7 @@ impl ThumbnailError {
         match self {
             Self::TooLarge(_) | Self::OverBudget(_) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Invalid(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            Self::Io(err) => match err.kind() {
-                std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
-                std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            },
+            Self::Io(err) => super::asset_protocol::io_status(err),
         }
     }
 }

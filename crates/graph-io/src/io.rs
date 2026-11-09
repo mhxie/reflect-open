@@ -15,13 +15,14 @@ use std::time::UNIX_EPOCH;
 
 use reflect_frontmatter::normalize_line_endings_keeping_privacy;
 use reflect_graph_paths::{
-    LocalOnlyFolders, evicted_logical_path, eviction_placeholder, is_dataless, to_slash_lossy,
+    CatalogScope, LocalOnlyFolders, evicted_logical_path, eviction_placeholder, is_dataless,
+    to_slash_lossy,
 };
 
 use crate::graph_gitignore;
 use reflect_types::{AppError, AppResult};
 
-use reflect_types::FileMeta;
+use reflect_types::{ExternalAvailability, FileMeta};
 
 /// One walk's worth of notes and attachments, in desktop `FileMeta` form.
 #[derive(Clone, Default)]
@@ -529,6 +530,7 @@ pub fn collect_files(
                 // stub (detected by name above) and the modern dataless file
                 // (kernel flag on the real path).
                 placeholder: placeholder || is_dataless(&meta),
+                external: None,
             });
         }
     }
@@ -545,10 +547,20 @@ pub fn collect_note_files(root: &Path) -> Vec<FileMeta> {
 /// Build one snapshot of every eligible note and supported attachment,
 /// following the graph's local-only links when it has any.
 pub fn collect_file_catalog(root: &Path, local_only: Option<&LocalOnlyFolders>) -> FileCatalog {
-    let catalog = match local_only {
-        Some(folders) => reflect_graph_paths::walk_catalog_with(root, folders),
-        None => reflect_graph_paths::walk_catalog(root),
-    };
+    collect_file_catalog_in(
+        root,
+        CatalogScope {
+            local_only,
+            external: None,
+        },
+    )
+}
+
+/// [`collect_file_catalog`] over `scope`: the local-only links it follows and
+/// the external storage whose attachments it lists
+/// (`reflect_graph_paths::walk_catalog_in`).
+pub fn collect_file_catalog_in(root: &Path, scope: CatalogScope<'_>) -> FileCatalog {
+    let catalog = reflect_graph_paths::walk_catalog_in(root, scope);
     FileCatalog {
         notes: catalog.notes.into_iter().map(file_meta_from).collect(),
         attachments: catalog
@@ -566,6 +578,9 @@ fn file_meta_from(entry: reflect_graph_paths::FileEntry) -> FileMeta {
         size: entry.size,
         modified_ms: entry.modified_ms,
         placeholder: entry.placeholder,
+        external: entry
+            .external
+            .then(|| ExternalAvailability::of(entry.placeholder)),
     }
 }
 

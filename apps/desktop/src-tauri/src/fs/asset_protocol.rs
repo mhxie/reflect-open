@@ -16,7 +16,9 @@
 //! commands — a request racing a graph switch is refused, never resolved
 //! against the new graph. The path must be a supported attachment and passes
 //! the shared symlink-aware read guard before any IO (which grants the one
-//! local-only hop, `resolve_read`).
+//! local-only hop and reaches the graph's external storage,
+//! `resolve_attachment_read`). An external file whose bytes are not on this
+//! device answers `503` (never a download as a side effect of a read).
 //! Passive previews append `?reflect-preview=raster`; those responses are
 //! served only when byte sniffing identifies PNG, JPEG, GIF, or WebP content,
 //! so an SVG renamed with a raster extension cannot load subresources there.
@@ -172,27 +174,29 @@ struct Located {
 }
 
 /// The shared front half of every request: the generation pin, then the
-/// symlink-aware read guard (which grants the one local-only hop). File IO,
-/// so it runs on the blocking pool.
+/// symlink-aware read guard (which grants the one local-only hop and reaches
+/// the external storage). File IO, so it runs on the blocking pool.
 fn locate<R: Runtime>(app: &AppHandle<R>, request_path: &str) -> Result<Located, StatusCode> {
     let (generation, rel) = parse_request_path(request_path)?;
     let state = app.state::<GraphState>();
-    let (root, local_only) =
-        super::graph_for(&state, Some(generation)).map_err(|_| StatusCode::FORBIDDEN)?;
-    let target = super::resolve_read(&root, rel, local_only.as_deref())
+    let scope = super::graph_for_attachments(&state, Some(generation))
         .map_err(|_| StatusCode::FORBIDDEN)?;
+    let target = scope.resolve(rel).map_err(|_| StatusCode::FORBIDDEN)?;
     Ok(Located {
-        root,
-        local_only,
+        root: scope.root,
+        local_only: scope.local_only,
         rel: rel.to_owned(),
         target,
     })
 }
 
-fn io_status(err: &std::io::Error) -> StatusCode {
+pub(super) fn io_status(err: &std::io::Error) -> StatusCode {
     match err.kind() {
         std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
         std::io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
+        // An external file whose bytes its folder's provider holds
+        // (`ReadTarget::open`): there, but not on this device.
+        std::io::ErrorKind::Deadlock => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -474,6 +478,64 @@ mod tests {
     /// type, lands in the page cache, and a repeat is served from there;
     /// a local-only PDF renders through its link; failures map to statuses.
     #[cfg(target_os = "macos")]
+    #[cfg(unix)]
+    #[test]
+    fn serves_external_attachments_through_a_link_and_the_overlay() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let (root, external) = (base.join("graph"), base.join("ext"));
+        std::fs::create_dir_all(root.join("research")).unwrap();
+        std::fs::create_dir_all(external.join("research")).unwrap();
+        std::fs::write(external.join(reflect_graph_paths::MARKER_FILE_NAME), "").unwrap();
+        std::fs::write(
+            external.join("research/linked.png"),
+            b"\x89PNG\r\n\x1a\nlinked",
+        )
+        .unwrap();
+        std::fs::write(
+            external.join("research/overlay.png"),
+            b"\x89PNG\r\n\x1a\nover",
+        )
+        .unwrap();
+        symlink(
+            external.join("research/linked.png"),
+            root.join("research/linked.png"),
+        )
+        .unwrap();
+
+        for configured in [true, false] {
+            let app = tauri::test::mock_builder()
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .expect("mock app");
+            app.manage(GraphState::default());
+            {
+                let state = app.state::<GraphState>();
+                let mut inner = state.0.lock().unwrap();
+                inner.generation = 4;
+                inner.root = Some(root.clone());
+                inner.set_external(configured.then(|| {
+                    reflect_graph_paths::ExternalStore::new(&external, None, None).unwrap()
+                }));
+            }
+            let linked = serve(app.handle(), "4/research/linked.png");
+            let overlay = serve(app.handle(), "4/research/overlay.png");
+            if configured {
+                assert_eq!(linked.unwrap().1, b"\x89PNG\r\n\x1a\nlinked");
+                assert_eq!(overlay.unwrap().1, b"\x89PNG\r\n\x1a\nover");
+            } else {
+                assert_eq!(linked.unwrap_err(), StatusCode::FORBIDDEN);
+                assert_eq!(overlay.unwrap_err(), StatusCode::NOT_FOUND);
+            }
+        }
+    }
+
+    #[test]
+    fn a_file_not_on_this_device_answers_service_unavailable() {
+        let offline = std::io::Error::new(std::io::ErrorKind::Deadlock, "not on this device");
+        assert_eq!(io_status(&offline), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
     #[test]
     fn serves_rendered_pdf_pages_as_png_and_repeats_from_the_pdf_page_cache() {
         use super::super::pdf_render::fixtures::{decode, request, sample};

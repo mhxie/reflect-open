@@ -10,20 +10,24 @@
 
 use std::path::{Component, Path, PathBuf};
 
+mod external;
 mod graph_settings;
 mod local_only;
 mod trust_report;
 mod walk;
 
-pub use graph_settings::{LOCAL_ONLY_SETTINGS_KEY, graph_settings_key, same_folder};
+pub use external::{ExternalCopy, ExternalLinks, ExternalStore, MARKER_FILE_NAME};
+pub use graph_settings::{
+    EXTERNAL_STORAGE_SETTINGS_KEY, LOCAL_ONLY_SETTINGS_KEY, graph_settings_key, same_folder,
+};
 pub use local_only::{LocalOnlyFolders, LocalOnlyLink, folder_name_problem};
 pub use trust_report::{
     DEFAULT_WIKI_TRUST_REPORT_PATH, WIKI_TRUST_REPORT_PATH_KEY, is_wiki_trust_report_path,
     normalize_wiki_trust_report_path,
 };
 pub use walk::{
-    FileCatalog, FileEntry, REFLECT_IGNORE_FILE, has_pruned_component, is_pruned_dir_name,
-    local_only_links, walk_catalog, walk_catalog_with,
+    CatalogScope, FileCatalog, FileEntry, REFLECT_IGNORE_FILE, has_pruned_component,
+    is_pruned_dir_name, local_only_links, walk_catalog, walk_catalog_in, walk_catalog_with,
 };
 
 /// Root trees reserved for Reflect-managed attachments and recordings.

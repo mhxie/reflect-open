@@ -13,4 +13,4 @@ mod wire_tests;
 
 pub use change::{ChangeKind, FileChange};
 pub use error::{AppError, AppResult};
-pub use file_meta::FileMeta;
+pub use file_meta::{ExternalAvailability, FileMeta};

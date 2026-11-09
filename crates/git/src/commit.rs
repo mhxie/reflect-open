@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use git2::{Index, IndexAddOption, IndexEntry};
-use reflect_graph_paths::{LocalOnlyFolders, to_slash_lossy};
+use reflect_graph_paths::{ExternalLinks, LocalOnlyFolders, to_slash_lossy};
 use serde::Serialize;
 
 use reflect_types::AppResult;
@@ -34,6 +34,29 @@ pub struct CommitOutcome {
     pub skipped_large_files: Vec<SkippedFile>,
 }
 
+/// What a commit may stage in one graph.
+#[derive(Clone, Copy, Debug)]
+pub struct CommitPolicy<'a> {
+    /// The backup size limit: changes to files at or above it are withheld
+    /// and reported.
+    pub max_file_bytes: u64,
+    /// The graph's local-only folders, never staged.
+    pub local_only: Option<&'a LocalOnlyFolders>,
+    /// The folders the graph's external storage has used: a link into one
+    /// is never staged, and one an earlier commit took leaves the next.
+    pub external: Option<&'a ExternalLinks>,
+}
+
+impl Default for CommitPolicy<'_> {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: super::MAX_FILE_BYTES,
+            local_only: None,
+            external: None,
+        }
+    }
+}
+
 /// Stage every change under the graph and commit. Returns `committed: false`
 /// when the staged tree already matches HEAD — the sync engine uses that
 /// (with `ahead`) to skip the network entirely, which is what makes the loop
@@ -41,26 +64,28 @@ pub struct CommitOutcome {
 ///
 /// Local-only folders are never staged: neither the folder entry (Git
 /// stores a symlinked folder as a link blob whose content is the target
-/// path) nor anything inside one.
+/// path) nor anything inside one. Neither is a link into the graph's
+/// external storage, which stands for a file kept in that folder.
 pub(super) fn commit_all(
     root: &Path,
     fallback_message: &str,
-    max_file_bytes: u64,
-    local_only: Option<&LocalOnlyFolders>,
+    policy: &CommitPolicy<'_>,
 ) -> AppResult<CommitOutcome> {
     #[cfg(test)]
     super::fault::trip(super::fault::FaultPoint::BeforeCommit)?;
-    reflect_graph_io::with_graph_lock(root, || {
-        commit_locked(root, fallback_message, max_file_bytes, local_only)
-    })
+    reflect_graph_io::with_graph_lock(root, || commit_locked(root, fallback_message, policy))
 }
 
 pub(super) fn commit_locked(
     root: &Path,
     fallback_message: &str,
-    max_file_bytes: u64,
-    local_only: Option<&LocalOnlyFolders>,
+    policy: &CommitPolicy<'_>,
 ) -> AppResult<CommitOutcome> {
+    let CommitPolicy {
+        max_file_bytes,
+        local_only,
+        external,
+    } = *policy;
     let repo = open_existing(root)?;
     clear_foreign_state(&repo)?;
     reattach_head(&repo)?;
@@ -74,11 +99,15 @@ pub(super) fn commit_locked(
     }
 
     let mut index = repo.index()?;
-    let mut skipped = add_all_with_size_guard(&mut index, root, max_file_bytes, local_only)?;
+    let mut skipped =
+        add_all_with_size_guard(&mut index, root, max_file_bytes, local_only, external)?;
     // A repository adopted from elsewhere may already track `.reflect/`;
     // the ignore rule above only keeps *new* paths out. Drop the tracked
     // entries so the next commit records their removal.
     index.remove_dir(Path::new(".reflect"), 0)?;
+    if let Some(links) = external {
+        drop_committed_links(&mut index, root, links, local_only)?;
+    }
     withhold_oversized_entries(&repo, &mut index, root, max_file_bytes, &mut skipped)?;
     keep_head_entries_of_skipped(&repo, &mut index, &skipped)?;
     index.write()?;
@@ -126,6 +155,7 @@ fn add_all_with_size_guard(
     root: &Path,
     max_file_bytes: u64,
     local_only: Option<&LocalOnlyFolders>,
+    external: Option<&ExternalLinks>,
 ) -> AppResult<Vec<SkippedFile>> {
     // Size and mtime (nanoseconds when the index has them) tell an unchanged
     // oversized file, skipped silently, from a withheld change, reported.
@@ -163,6 +193,15 @@ fn add_all_with_size_guard(
             // Deleted file: let the staging proceed so the removal is recorded.
             return 0;
         };
+        // A link into external storage stands for a file kept in that
+        // folder: its absolute target means nothing on another device, so
+        // it is never added or updated, whatever it points at now and while
+        // the folder is unmounted. The file itself is never reported.
+        if meta.file_type().is_symlink()
+            && external.is_some_and(|links| links.is_link_into(root, &root.join(path)))
+        {
+            return 1;
+        }
         if !meta.is_file() || meta.len() < max_file_bytes {
             return 0;
         }
@@ -197,6 +236,36 @@ fn add_all_with_size_guard(
     index.update_all(["*"], Some(&mut size_guard))?;
     index.write()?;
     Ok(skipped.into_inner())
+}
+
+/// Drop every index entry that holds a link, where the graph now has a link
+/// into the external folder: one an earlier commit took (made before the
+/// folder was configured, say) leaves, so the next commit records its
+/// removal and other devices lose a dead link where the folder's copy would
+/// show. A tracked file's own bytes stay committed, and so does anything in
+/// a local-only folder, which a commit never records as deleted.
+fn drop_committed_links(
+    index: &mut Index,
+    root: &Path,
+    links: &ExternalLinks,
+    local_only: Option<&LocalOnlyFolders>,
+) -> AppResult<()> {
+    const MODE_TYPE_MASK: u32 = 0o170_000;
+    const MODE_LINK: u32 = 0o120_000;
+    let linked: Vec<String> = index
+        .iter()
+        .filter(|entry| entry.mode & MODE_TYPE_MASK == MODE_LINK)
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .filter(|rel| {
+            !local_only
+                .is_some_and(|folders| reflect_graph_io::entry_is_local_only(root, rel, folders))
+        })
+        .filter(|rel| links.is_link_into(root, &root.join(rel)))
+        .collect();
+    for rel in linked {
+        index.remove_path(Path::new(&rel))?;
+    }
+    Ok(())
 }
 
 /// Withhold index entries with oversized content the add-time guard never

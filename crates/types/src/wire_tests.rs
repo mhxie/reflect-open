@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::{AppError, FileChange, FileMeta};
+use crate::{AppError, ExternalAvailability, FileChange, FileMeta};
 
 #[test]
 fn app_error_serializes_as_kind_and_message() {
@@ -39,9 +39,31 @@ fn file_meta_omits_a_false_placeholder() {
         size: 3,
         modified_ms: 9,
         placeholder: false,
+        external: None,
     };
     assert_eq!(
         serde_json::to_value(&meta).unwrap(),
         json!({ "path": "notes/a.md", "size": 3, "modifiedMs": 9 })
+    );
+}
+
+#[test]
+fn file_meta_names_an_external_files_availability() {
+    let meta = FileMeta {
+        path: "research/big.pdf".into(),
+        size: 3,
+        modified_ms: 9,
+        placeholder: true,
+        external: Some(ExternalAvailability::of(true)),
+    };
+    assert_eq!(
+        serde_json::to_value(&meta).unwrap(),
+        json!({
+            "path": "research/big.pdf",
+            "size": 3,
+            "modifiedMs": 9,
+            "placeholder": true,
+            "external": "offline"
+        })
     );
 }

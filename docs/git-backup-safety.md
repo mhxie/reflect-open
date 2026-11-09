@@ -141,3 +141,20 @@ Markers already in a file are plain text.
   `conflict::ladder::tests::overlapping_edits_reconcile_without_markers`,
   `note-session-service.test.ts` "a dirty buffer saves at once when an
   external change arrives".
+
+## S10. A link into the external folder never enters a commit
+
+A graph's external folder holds files at their graph paths, and a link at
+such a path stands for the copy there. Its target is an absolute path that
+means nothing on another device, so the size-guard callback refuses to add
+or update a link whose target lies under any spelling the folder has had
+(`ExternalLinks`: as configured, canonical, and earlier roots recorded in
+`.reflect/external-storage.json`), matched lexically so it holds while the
+folder is unmounted. A link an earlier commit took leaves the index, so the
+next commit records its removal. A pull that brings a file to a linked path
+parks the link instead of keeping it as `(this device)`: the folder keeps
+its copy, and the incoming file takes the path.
+
+- Test: `git::tests::external::links_into_external_storage_are_never_committed`,
+  `git::tests::external::a_link_an_earlier_commit_took_leaves_the_next_one`,
+  `git::tests::external::a_pull_writing_a_linked_path_parks_the_link`.

@@ -12,6 +12,7 @@
 pub mod asset_protocol;
 pub mod assets;
 pub mod device;
+mod external_storage;
 mod image_thumbnail;
 mod local_only;
 pub mod pdf_render;
@@ -188,7 +189,8 @@ fn sweep_preview_caches(root: &Path) {
 }
 
 /// Load the graph's configuration from the user's settings (its local-only
-/// folders, backup size limit, and accepted history roots), activate `root`
+/// folders, backup size limit, accepted history roots, and external
+/// storage), activate `root`
 /// with it, and record it in recents. Recents is a convenience cache: a
 /// failure to persist it must not fail the open (which would leave Rust
 /// treating the graph as open while the command returns an error, out of sync
@@ -210,7 +212,14 @@ fn load_config(root: &Path) -> GraphConfig {
         tracing::warn!(root = %root.display(), "local-only folders: {warning}");
     }
     let backup = crate::git::load_backup_settings(root);
-    for warning in &backup.warnings {
+    let raw_root = loaded
+        .folders
+        .as_deref()
+        .and_then(|folders| folders.raw_root());
+    let external = external_storage::load_for_root(root, raw_root);
+    let mut backup_warnings = backup.warnings;
+    backup_warnings.extend(external.warnings);
+    for warning in &backup_warnings {
         tracing::warn!(root = %root.display(), "backup settings: {warning}");
     }
     GraphConfig {
@@ -220,7 +229,9 @@ fn load_config(root: &Path) -> GraphConfig {
         local_only_grow_record: !loaded.record,
         backup_max_file_bytes: Some(backup.max_file_bytes),
         accepted_history_roots: backup.accepted_roots,
-        backup_warnings: backup.warnings,
+        backup_warnings,
+        external: external.store.map(std::sync::Arc::new),
+        external_links: external.links.map(std::sync::Arc::new),
     }
 }
 
@@ -552,9 +563,9 @@ pub fn asset_read_binary(
     generation: u64,
     state: State<GraphState>,
 ) -> AppResult<tauri::ipc::Response> {
-    let (root, local_only) = graph_for_sharing(&state, Some(generation))?;
-    let abs = resolve_shareable(&root, &path, local_only.as_deref())?;
-    Ok(tauri::ipc::Response::new(fs::read(abs)?))
+    let target =
+        graph_for_sharing_attachments(&state, Some(generation))?.resolve_shareable(&path)?;
+    Ok(tauri::ipc::Response::new(read_target(&target)?))
 }
 
 /// Read a binary asset's bytes, base64-encoded for the JSON IPC (e.g. audio
@@ -569,9 +580,18 @@ pub fn asset_read_binary(
 pub fn asset_read(path: String, generation: u64, state: State<GraphState>) -> AppResult<String> {
     use base64::Engine;
     ensure_readable_attachment_path(&path)?;
-    let (root, local_only) = graph_for_sharing(&state, Some(generation))?;
-    let bytes = fs::read(resolve_shareable(&root, &path, local_only.as_deref())?)?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    let target =
+        graph_for_sharing_attachments(&state, Some(generation))?.resolve_shareable(&path)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(read_target(&target)?))
+}
+
+/// The whole file a read target names. An external file whose bytes are not
+/// on this device fails instead of downloading (`ReadTarget::open`).
+fn read_target(target: &ReadTarget) -> AppResult<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    target.open()?.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// Open a graph asset in the OS default application. The frontend supplies the
@@ -586,8 +606,9 @@ pub fn asset_open(
     state: State<GraphState>,
 ) -> AppResult<()> {
     ensure_openable_path(&path)?;
-    let (root, local_only) = graph_for(&state, Some(generation))?;
-    let abs = resolve_read(&root, &path, local_only.as_deref())?.path();
+    let abs = graph_for_attachments(&state, Some(generation))?
+        .resolve(&path)?
+        .path();
     if !abs.is_file() {
         return Err(AppError::not_found(format!("asset not found: {path}")));
     }
@@ -621,8 +642,9 @@ pub fn asset_reveal(
     state: State<GraphState>,
 ) -> AppResult<()> {
     ensure_revealable_path(&path)?;
-    let (root, local_only) = graph_for(&state, Some(generation))?;
-    let abs = resolve_read(&root, &path, local_only.as_deref())?.path();
+    let abs = graph_for_attachments(&state, Some(generation))?
+        .resolve(&path)?
+        .path();
     if !abs.is_file() {
         return Err(AppError::not_found(format!("asset not found: {path}")));
     }

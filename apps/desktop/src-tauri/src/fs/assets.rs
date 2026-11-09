@@ -118,16 +118,18 @@ fn no_free_name(desired: &str) -> AppError {
 }
 
 /// Persist `temp` under `assets_dir` as `desired`, probing `-2`, `-3`, …
-/// suffixes until a name is free. `persist_noclobber` is the collision check
-/// *and* the claim (`O_EXCL` semantics), so two concurrent intakes of the
-/// same name can never clobber each other. Returns the winning filename.
+/// suffixes until a name is free and not `taken`. `persist_noclobber` is the
+/// collision check *and* the claim (`O_EXCL` semantics), so two concurrent
+/// intakes of the same name can never clobber each other. Returns the
+/// winning filename.
 fn persist_unique(
     mut temp: tempfile::NamedTempFile,
     assets_dir: &Path,
     desired: &str,
+    taken: impl Fn(&str) -> bool,
 ) -> AppResult<String> {
     temp.as_file().sync_all()?;
-    for candidate in candidate_names(desired) {
+    for candidate in candidate_names(desired).filter(|candidate| !taken(candidate)) {
         match temp.persist_noclobber(assets_dir.join(&candidate)) {
             Ok(_) => return Ok(candidate),
             Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -234,7 +236,20 @@ fn land(
     with_graph_lock(root, || {
         match attachment_destination(state, generation, note_path, desired)? {
             Destination::Graph(dir) => {
-                Ok(format!("assets/{}", persist_unique(temp, &dir, desired)?))
+                // A name the external storage shows in `assets/` is taken: a
+                // file landing there would replace that one in every note.
+                let external = super::graph_for_attachments(state, Some(generation))?.external;
+                let shown = |name: &str| {
+                    external.as_deref().is_some_and(|store| {
+                        store
+                            .overlay_copy(root, &format!("assets/{name}"))
+                            .is_some()
+                    })
+                };
+                Ok(format!(
+                    "assets/{}",
+                    persist_unique(temp, &dir, desired, shown)?
+                ))
             }
             Destination::LocalOnly(note) => persist_unique_beneath(temp, &note, desired),
         }
@@ -543,7 +558,7 @@ mod tests {
         bootstrap(graph.path()).unwrap();
         let assets = graph.path().join("assets");
         let temp = temp_in(graph.path(), b"pdf bytes");
-        let name = persist_unique(temp, &assets, "report.pdf").unwrap();
+        let name = persist_unique(temp, &assets, "report.pdf", |_| false).unwrap();
         assert_eq!(name, "report.pdf");
         assert_eq!(fs::read(assets.join("report.pdf")).unwrap(), b"pdf bytes");
     }
@@ -556,11 +571,22 @@ mod tests {
         fs::write(assets.join("report.pdf"), b"first").unwrap();
         fs::write(assets.join("report-2.pdf"), b"second").unwrap();
         let temp = temp_in(graph.path(), b"third");
-        let name = persist_unique(temp, &assets, "report.pdf").unwrap();
+        let name = persist_unique(temp, &assets, "report.pdf", |_| false).unwrap();
         assert_eq!(name, "report-3.pdf");
         // Nothing existing was touched.
         assert_eq!(fs::read(assets.join("report.pdf")).unwrap(), b"first");
         assert_eq!(fs::read(assets.join("report-2.pdf")).unwrap(), b"second");
+    }
+
+    #[test]
+    fn persist_skips_names_another_folder_shows() {
+        let graph = tempdir().unwrap();
+        bootstrap(graph.path()).unwrap();
+        let assets = graph.path().join("assets");
+        let temp = temp_in(graph.path(), b"new");
+        let name =
+            persist_unique(temp, &assets, "report.pdf", |name| name == "report.pdf").unwrap();
+        assert_eq!(name, "report-2.pdf");
     }
 
     #[test]
@@ -570,7 +596,10 @@ mod tests {
         let assets = graph.path().join("assets");
         fs::write(assets.join("README"), b"first").unwrap();
         let temp = temp_in(graph.path(), b"second");
-        assert_eq!(persist_unique(temp, &assets, "README").unwrap(), "README-2");
+        assert_eq!(
+            persist_unique(temp, &assets, "README", |_| false).unwrap(),
+            "README-2"
+        );
     }
 
     #[test]
