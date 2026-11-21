@@ -10,14 +10,19 @@ publish.workspace = true
 [features]
 default = ["native"]
 native = ["reflect-index-schema/vec"]
+# A raw SQL write for seeding rows. Only `reflect-index-wasm` turns it on, for
+# the tests and the browser dev bridge: the native app never compiles it.
+raw-write = []
 
 [dependencies]
 # `hooks` adds the authorizer API that locks the read-only `db_query` bridge
 # down to pure reads (deny ATTACH/DETACH/PRAGMA); see `query.rs`.
 rusqlite = { workspace = true, features = ["hooks"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 sha2 = { workspace = true }
+unicode-normalization = { workspace = true }
 reflect-types = { workspace = true, features = ["rusqlite"] }
 # Local-only rows are private whatever their projection says.
 reflect-graph-paths = { workspace = true }

@@ -1,7 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Metadata for a file inside the graph.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "codegen", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct FileMeta {
@@ -21,12 +21,12 @@ pub struct FileMeta {
     pub placeholder: bool,
     /// Set when the file lives in the graph's external storage folder rather
     /// than the graph itself; absent for every graph file.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalAvailability>,
 }
 
 /// Where an external file's bytes are.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ExternalAvailability {

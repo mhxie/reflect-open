@@ -11,13 +11,14 @@
 
 use std::collections::HashSet;
 
+use unicode_normalization::char::is_combining_mark;
+
 use reflect_index_schema::cjk::{is_unsegmented, letter_segments, run_bigrams, unsegmented_runs};
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
-use unicode_normalization::char::is_combining_mark;
 
 use crate::error::CliError;
-use crate::keys::{contains_unsegmented_script, fold_key};
+use reflect_index::text::keys::{contains_unsegmented_script, fold_key};
 
 const HIGHLIGHT_START: char = '\u{1}';
 const HIGHLIGHT_END: char = '\u{2}';

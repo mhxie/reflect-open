@@ -117,3 +117,27 @@ fn read_rows(
     }
     Ok(out)
 }
+
+/// Run one statement that may write, and return the rows it yields. Compiled
+/// only into the wasm index, where tests seed rows the writer would never
+/// produce.
+#[cfg(feature = "raw-write")]
+pub(super) fn run_statement(
+    conn: &Connection,
+    sql: &str,
+    params: &[Value],
+) -> AppResult<Vec<Map<String, Value>>> {
+    let mut stmt = conn.prepare(sql)?;
+    let columns: Vec<String> = stmt.column_names().map(str::to_owned).collect();
+    let bound: Vec<rusqlite::types::Value> = params.iter().map(json_to_sql).collect();
+    let mut rows = stmt.query(params_from_iter(bound))?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let mut object = Map::with_capacity(columns.len());
+        for (index, name) in columns.iter().enumerate() {
+            object.insert(name.clone(), column_to_json(row, index)?);
+        }
+        out.push(object);
+    }
+    Ok(out)
+}

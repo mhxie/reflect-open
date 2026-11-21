@@ -45,35 +45,26 @@ function setup() {
   const logger = createTestLoggerService()
   const history = createChatHistoryService({ ipc, database, logger })
 
-  async function insertConversation(row: typeof conversation): Promise<void> {
-    await database.runQuery(
-      'INSERT INTO chat_conversations(id, title, created_ms, updated_ms) VALUES (?, ?, ?, ?)',
-      [row.id, row.title, row.createdMs, row.updatedMs],
-    )
-  }
-
-  async function insertMessage(
-    seq: number,
+  function insertMessage(
     overrides: Partial<Record<'id' | 'parts', string>> = {},
-  ): Promise<void> {
-    await database.runQuery(
-      `INSERT INTO chat_messages(
-        id, conversation_id, seq, user_text, attachments, parts, response_messages, created_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        overrides.id ?? turn.id,
-        conversation.id,
-        seq,
-        turn.userText,
-        JSON.stringify(turn.attachments),
-        overrides.parts ?? JSON.stringify(turn.parts),
-        JSON.stringify(turn.responseMessages),
-        2_000,
-      ],
-    )
+    row: typeof conversation = conversation,
+  ): void {
+    database.invoke('chat_message_save', {
+      conversation: row,
+      message: {
+        id: overrides.id ?? turn.id,
+        conversationId: row.id,
+        userText: turn.userText,
+        attachments: JSON.stringify(turn.attachments),
+        parts: overrides.parts ?? JSON.stringify(turn.parts),
+        responseMessages: JSON.stringify(turn.responseMessages),
+        createdMs: 2_000,
+      },
+      generation: database.generation(),
+    })
   }
 
-  return { ipc, database, logger, history, insertConversation, insertMessage }
+  return { ipc, database, logger, history, insertMessage }
 }
 
 describe('createChatHistoryService', () => {
@@ -113,10 +104,10 @@ describe('createChatHistoryService', () => {
   })
 
   it('lists the most recently active conversations first', async () => {
-    const { history, insertConversation } = setup()
-    await insertConversation(conversation)
-    await insertConversation({ ...conversation, id: 'conv-2', updatedMs: 3_000 })
-    await insertConversation({ ...conversation, id: 'conv-3', updatedMs: 1_500 })
+    const { history, insertMessage } = setup()
+    insertMessage({ id: 'turn-1' }, conversation)
+    insertMessage({ id: 'turn-2' }, { ...conversation, id: 'conv-2', updatedMs: 3_000 })
+    insertMessage({ id: 'turn-3' }, { ...conversation, id: 'conv-3', updatedMs: 1_500 })
 
     const recent = await history.listRecent()
     expect(recent.map((row) => row.id)).toEqual(['conv-2', 'conv-1', 'conv-3'])
@@ -125,20 +116,18 @@ describe('createChatHistoryService', () => {
   })
 
   it('round-trips a persisted turn in order, restored as done', async () => {
-    const { history, insertConversation, insertMessage } = setup()
-    await insertConversation(conversation)
-    await insertMessage(1, { id: 'turn-2' })
-    await insertMessage(0)
+    const { history, insertMessage } = setup()
+    insertMessage()
+    insertMessage({ id: 'turn-2' })
 
     const turns = await history.loadConversation('conv-1')
     expect(turns).toEqual([turn, { ...turn, id: 'turn-2' }])
   })
 
   it('drops an unreadable row but keeps the rest', async () => {
-    const { logger, history, insertConversation, insertMessage } = setup()
-    await insertConversation(conversation)
-    await insertMessage(0, { id: 'turn-bad', parts: '{not json' })
-    await insertMessage(1)
+    const { logger, history, insertMessage } = setup()
+    insertMessage({ id: 'turn-bad', parts: '{not json' })
+    insertMessage()
 
     expect(await history.loadConversation('conv-1')).toEqual([turn])
     expect(logger.getErrors()).toEqual([
@@ -147,14 +136,13 @@ describe('createChatHistoryService', () => {
   })
 
   it('drops a row whose parts fail validation', async () => {
-    const { history, insertConversation, insertMessage } = setup()
-    await insertConversation(conversation)
-    await insertMessage(0, { parts: JSON.stringify([{ kind: 'mystery' }]) })
+    const { history, insertMessage } = setup()
+    insertMessage({ parts: JSON.stringify([{ kind: 'mystery' }]) })
     expect(await history.loadConversation('conv-1')).toEqual([])
   })
 
   it('saves read_assets calls and results and loads them back intact', async () => {
-    const { ipc, history, insertConversation, insertMessage } = setup()
+    const { ipc, history, insertMessage } = setup()
     const parts: AssistantPart[] = [
       {
         kind: 'tool',
@@ -186,13 +174,12 @@ describe('createChatHistoryService', () => {
     })
     expect(ipc.calls()[0]?.args).toMatchObject({ message: { parts: JSON.stringify(parts) } })
 
-    await insertConversation(conversation)
-    await insertMessage(0, { parts: JSON.stringify(parts) })
+    insertMessage({ parts: JSON.stringify(parts) })
     expect(await history.loadConversation('conv-1')).toEqual([{ ...turn, parts }])
   })
 
   it('saves the withheld-history marker and loads it back', async () => {
-    const { ipc, history, insertConversation, insertMessage } = setup()
+    const { ipc, history, insertMessage } = setup()
     const parts: AssistantPart[] = [
       { kind: 'history-withheld' },
       { kind: 'text', text: 'A cat, per [[Cats]].' },
@@ -206,13 +193,12 @@ describe('createChatHistoryService', () => {
     })
     expect(ipc.calls()[0]?.args).toMatchObject({ message: { parts: JSON.stringify(parts) } })
 
-    await insertConversation(conversation)
-    await insertMessage(0, { parts: JSON.stringify(parts) })
+    insertMessage({ parts: JSON.stringify(parts) })
     expect(await history.loadConversation('conv-1')).toEqual([{ ...turn, parts }])
   })
 
   it('loads a row saved before read_assets existed unchanged', async () => {
-    const { history, insertConversation, insertMessage } = setup()
+    const { history, insertMessage } = setup()
     // Rows written before read_assets existed carry only the older tools;
     // widening the schema must not change how they load.
     const olderParts: AssistantPart[] = [
@@ -246,13 +232,12 @@ describe('createChatHistoryService', () => {
       },
       { kind: 'text', text: 'Cats, per [[Cats]].' },
     ]
-    await insertConversation(conversation)
-    await insertMessage(0, { parts: JSON.stringify(olderParts) })
+    insertMessage({ parts: JSON.stringify(olderParts) })
     expect(await history.loadConversation('conv-1')).toEqual([{ ...turn, parts: olderParts }])
   })
 
   it('upgrades a legacy single-note read part to the batch shape', async () => {
-    const { history, insertConversation, insertMessage } = setup()
+    const { history, insertMessage } = setup()
     // History persisted before read_notes stored read as a single note; it must
     // still load, rewritten to the current paths/notes shape rather than dropped.
     const legacyParts = [
@@ -269,8 +254,7 @@ describe('createChatHistoryService', () => {
         error: null,
       },
     ]
-    await insertConversation(conversation)
-    await insertMessage(0, { parts: JSON.stringify(legacyParts) })
+    insertMessage({ parts: JSON.stringify(legacyParts) })
 
     const [restored] = await history.loadConversation('conv-1')
     expect(restored?.parts).toEqual([

@@ -68,6 +68,7 @@ pub const LOCAL_ONLY_FOLDERS_KEY: &str = "local_only_folders";
 mod schema {
     use std::ffi::{c_char, c_int};
     use std::fmt;
+    #[cfg(not(target_family = "wasm"))]
     use std::path::Path;
     use std::sync::{LazyLock, OnceLock};
 
@@ -168,9 +169,7 @@ mod schema {
                 rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute::<
                     *const (),
                     AutoExtensionFn,
-                >(
-                    sqlite_vec::sqlite3_vec_init as *const (),
-                )))
+                >(vec_init())))
             };
             if rc == rusqlite::ffi::SQLITE_OK {
                 Ok(())
@@ -183,7 +182,17 @@ mod schema {
         result.clone().map_err(SchemaError::VecRegistration)
     }
 
-    /// Opens an in-memory connection with sqlite-vec available (used by tests).
+    #[cfg(not(target_family = "wasm"))]
+    fn vec_init() -> *const () {
+        sqlite_vec::sqlite3_vec_init as *const ()
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn vec_init() -> *const () {
+        sqlite_wasm_vec::sqlite3_vec_init as *const ()
+    }
+
+    /// Opens an in-memory connection with sqlite-vec available.
     pub fn open_in_memory() -> Result<Connection, SchemaError> {
         register_sqlite_vec()?;
         Ok(Connection::open_in_memory()?)
@@ -224,6 +233,7 @@ mod schema {
     }
 
     /// Open (creating if needed) and migrate `<root>/.reflect/index.sqlite`.
+    #[cfg(not(target_family = "wasm"))]
     pub fn open_index_at(root: &Path) -> Result<Connection, SchemaError> {
         register_sqlite_vec()?;
         let dir = root.join(super::REFLECT_DIR);
@@ -244,6 +254,7 @@ mod schema {
     /// holds the writer's lock. WAL readers see the last committed state, and
     /// the writer connection (opened first via [`open_index_at`]) owns the
     /// file's existence and schema.
+    #[cfg(not(target_family = "wasm"))]
     pub fn open_index_read_only_at(root: &Path) -> Result<Connection, SchemaError> {
         register_sqlite_vec()?;
         let path = root.join(super::REFLECT_DIR).join(super::INDEX_FILE);
@@ -417,7 +428,6 @@ mod schema {
 }
 
 #[cfg(feature = "vec")]
-pub use schema::{
-    SchemaError, migrate, migrate_to, open_in_memory, open_index_at, open_index_read_only_at,
-    register_sqlite_vec, validate,
-};
+pub use schema::{SchemaError, migrate, migrate_to, open_in_memory, register_sqlite_vec, validate};
+#[cfg(all(feature = "vec", not(target_family = "wasm")))]
+pub use schema::{open_index_at, open_index_read_only_at};

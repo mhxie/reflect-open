@@ -118,7 +118,7 @@ describe('createCoreServices', () => {
 
   it('builds the index reads over the composed database', async () => {
     const ipc = createTestIpcBridgeService({
-      commands: { db_query: () => [{ path: 'notes/a.md' }] },
+      commands: { index_random_note: () => 'notes/a.md' },
     })
     const services = createCoreServices({
       ...requiredAdapters(),
@@ -126,7 +126,7 @@ describe('createCoreServices', () => {
       logger: createTestLoggerService(),
     })
     await expect(services.indexQuery.randomNotePath()).resolves.toBe('notes/a.md')
-    expect(ipc.calls().map((call) => call.command)).toEqual(['db_query'])
+    expect(ipc.calls().map((call) => call.command)).toEqual(['index_random_note'])
   })
 
   it('builds each replaced service with its factory over the same dependencies', () => {

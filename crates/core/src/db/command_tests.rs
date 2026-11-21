@@ -87,7 +87,9 @@ fn index_open(app: &App) -> u64 {
 }
 
 fn apply(app: &App, generation: u64, note: IndexedNote) {
-    app.index_apply(note, generation).unwrap();
+    app.index
+        .apply(generation, std::slice::from_ref(&note))
+        .unwrap();
 }
 
 fn move_note(app: &App, from: &str, to: &str) -> reflect_types::AppResult<()> {
@@ -475,7 +477,7 @@ fn the_frontend_cannot_overwrite_the_local_only_record() {
     let root = dir.path().canonicalize().unwrap();
     let app = local_only_app(&root, LocalOnlyFolders::new(["secure"], None));
     let generation = index_open(&app);
-    let set = |key: &str| app.index_meta_set(key.to_string(), "[]".to_string(), generation);
+    let set = |key: &str| app.index.set_meta(generation, key, "[]").map(drop);
     assert!(set(reflect_index_schema::LOCAL_ONLY_FOLDERS_KEY).is_err());
     assert_eq!(recorded_names(&root), ["secure"]);
     set("projection_version").expect("an ordinary key");

@@ -15,7 +15,11 @@ function setup(notes: TestNote[]) {
  */
 function answering(rows: unknown[]): DatabaseService {
   const runQuery = (): Promise<unknown> => Promise.resolve(rows)
-  return { db: createDb(runQuery), runQuery }
+  return {
+    db: createDb(runQuery),
+    runQuery,
+    read: () => Promise.reject(new Error('this database answers SQL only')),
+  }
 }
 
 /**

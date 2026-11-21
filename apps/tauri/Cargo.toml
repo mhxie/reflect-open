@@ -37,7 +37,7 @@ serde_json = { workspace = true }
 reflect-index-schema = { workspace = true, features = ["default"] }
 reflect-graph-paths = { workspace = true }
 reflect-types = { workspace = true, features = ["git2", "rusqlite"] }
-reflect-index = { workspace = true }
+reflect-index = { workspace = true, features = ["native"] }
 reflect-graph-io = { workspace = true }
 reflect-core = { workspace = true }
 # The on-device transport carries response bodies as base64 (`on_device_http.rs`).

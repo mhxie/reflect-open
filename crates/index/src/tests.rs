@@ -6,6 +6,7 @@ use reflect_index_schema::LATEST_SCHEMA_VERSION;
 use reflect_types::{
     ChatConversation, ChatMessageRow, EmbeddedChunk, IndexedAlias, IndexedClaim, IndexedEmail,
     IndexedLink, IndexedNote, IndexedTag, IndexedTask, LinkKind, MovedNoteAddress, NoteKind,
+    TagFacet,
 };
 use rusqlite::Connection;
 use serde_json::Value;
@@ -15,12 +16,33 @@ use super::chat_write::{delete_conversation, save_message};
 use super::connections::{migrate, migrate_to, open_in_memory, open_index_at, validate_migrations};
 use super::embed_write::{apply_chunks, prepare_vectors, remove_chunks};
 use super::query::run_query;
+use super::read::assets::note_paths;
+use super::read::backlinks::{backlinks, page as backlink_page};
+use super::read::chat::{conversations, messages};
+use super::read::daily::{dates_in_range, notes_in_range};
+use super::read::embed::chunk_hashes;
+use super::read::embed::{related_chunks, semantic_chunks};
+use super::read::lists::{list_notes, note_tags, recent_notes};
+use super::read::meta::meta;
+use super::read::notes::privacy;
+use super::read::notes::{
+    embeddable_paths, file_facts, note as note_row, note_ids, path_taken, person_owners,
+    pinned_notes, random_note, resolve_target, templates,
+};
+use super::read::search::{ranked_query_plan, search};
+use super::read::stats::graph_stats;
+use super::read::suggest::{key_winners, tags as suggest_tags, wiki_candidates, winning_aliases};
+use super::read::tasks::tasks;
+use super::read::wiki::{
+    address_note, claim_match, link_sources, notes_by_path_key, path_link_sources, resolve,
+};
 use super::scan::scan_reconcile;
 use super::write::{
     apply_note, claim_tier, clear_index, move_note, prune_orphan_embeddings, touch_note,
 };
 use super::{Applied, FileIndexConnections, IndexConnections, IndexSession, LocalOnlyScope};
 use reflect_types::AppError;
+use reflect_types::SearchRequest;
 
 fn migrated() -> Connection {
     // Registers sqlite-vec before migrating — the 0002 migration creates a
@@ -2801,4 +2823,852 @@ fn switching_embedding_models_refits_the_vector_table() {
 
     assert!(!prepare_vectors(&conn, "embeddinggemma-300m", 768).unwrap());
     assert_eq!(vector_count(&conn), 1);
+}
+
+fn tagged_note(path: &str, title: &str, tags: &[&str]) -> IndexedNote {
+    let mut tagged = note(path, title, vec![]);
+    tagged.tags = tags
+        .iter()
+        .map(|tag| IndexedTag {
+            tag: tag.to_string(),
+            tag_key: tag.to_lowercase(),
+        })
+        .collect();
+    tagged
+}
+
+#[test]
+fn meta_reads_one_key() {
+    let conn = migrated();
+    conn.execute("INSERT INTO index_meta(key, value) VALUES('k', 'v')", [])
+        .unwrap();
+
+    assert_eq!(meta(&conn, "k").unwrap(), Some("v".to_string()));
+    assert_eq!(meta(&conn, "missing").unwrap(), None);
+}
+
+#[test]
+fn graph_stats_skip_private_notes_and_cap_the_tags() {
+    let conn = migrated();
+    apply_note(
+        &conn,
+        &tagged_note("notes/a.md", "A", &["Book", "idea"]),
+        None,
+    )
+    .unwrap();
+    apply_note(&conn, &tagged_note("notes/b.md", "B", &["book"]), None).unwrap();
+    let mut secret = tagged_note("notes/secret.md", "Secret", &["hidden"]);
+    secret.is_private = true;
+    apply_note(&conn, &secret, None).unwrap();
+    apply_note(
+        &conn,
+        &daily_note("daily/2026-01-02.md", "2026-01-02"),
+        None,
+    )
+    .unwrap();
+    apply_note(
+        &conn,
+        &daily_note("daily/2026-03-04.md", "2026-03-04"),
+        None,
+    )
+    .unwrap();
+
+    let stats = graph_stats(&conn, 1).unwrap();
+    assert_eq!(stats.note_count, 2);
+    assert_eq!(stats.daily_note_count, 2);
+    assert_eq!(stats.earliest_daily_date.as_deref(), Some("2026-01-02"));
+    assert_eq!(stats.latest_daily_date.as_deref(), Some("2026-03-04"));
+    assert_eq!(
+        stats.tags,
+        [TagFacet {
+            tag: "Book".to_string(),
+            count: 2
+        }]
+    );
+    assert!(stats.tags_truncated);
+
+    let all = graph_stats(&conn, 2).unwrap();
+    assert_eq!(all.tags.len(), 2);
+    assert!(!all.tags_truncated);
+}
+
+#[test]
+fn read_runs_on_the_single_connection_of_a_host_without_a_reader() {
+    struct OneConnection;
+
+    impl IndexConnections for OneConnection {
+        fn open_writer(&self, _root: &std::path::Path) -> reflect_types::AppResult<Connection> {
+            Ok(migrated())
+        }
+
+        fn open_reader(
+            &self,
+            _root: &std::path::Path,
+        ) -> reflect_types::AppResult<Option<Connection>> {
+            Ok(None)
+        }
+    }
+
+    let session = IndexSession::new();
+    let generation = session
+        .open(
+            std::path::Path::new("/memory"),
+            LocalOnlyScope::default(),
+            &OneConnection,
+        )
+        .unwrap();
+    session.set_meta(generation, "k", "v").unwrap();
+
+    let value = session.read(generation, |conn| meta(conn, "k")).unwrap();
+    assert_eq!(value, Some("v".to_string()));
+    let stale = session.read(generation + 1, |conn| meta(conn, "k"));
+    assert_eq!(stale.unwrap_err().message(), "index reopened during query");
+}
+
+#[test]
+fn daily_reads_keep_the_range_and_skip_empty_and_private_days() {
+    let conn = migrated();
+    let mut empty = daily_note("daily/2026-06-02.md", "2026-06-02");
+    empty.has_content = false;
+    let mut secret = daily_note("daily/2026-06-03.md", "2026-06-03");
+    secret.is_private = true;
+    for daily in [
+        daily_note("daily/2026-05-31.md", "2026-05-31"),
+        daily_note("daily/2026-06-01.md", "2026-06-01"),
+        empty,
+        secret,
+        daily_note("daily/2026-06-30.md", "2026-06-30"),
+    ] {
+        apply_note(&conn, &daily, None).unwrap();
+    }
+
+    assert_eq!(
+        dates_in_range(&conn, "2026-06-01", "2026-06-30").unwrap(),
+        ["2026-06-01", "2026-06-03", "2026-06-30"]
+    );
+    let dates = |limit| -> Vec<String> {
+        notes_in_range(&conn, "2026-06-01", "2026-06-30", limit)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.daily_date)
+            .collect()
+    };
+    assert_eq!(dates(10), ["2026-06-30", "2026-06-02", "2026-06-01"]);
+    assert_eq!(dates(1), ["2026-06-30"]);
+}
+
+#[test]
+fn chat_reads_order_conversations_by_activity_and_messages_by_seq() {
+    let conn = migrated();
+    let mut newer = conversation("c2");
+    newer.updated_ms = 3_000;
+    save_message(&conn, &conversation("c1"), &chat_message("m1", "c1")).unwrap();
+    save_message(&conn, &newer, &chat_message("m2", "c2")).unwrap();
+    save_message(&conn, &conversation("c1"), &chat_message("m0", "c1")).unwrap();
+
+    let ids = |limit| -> Vec<String> {
+        conversations(&conn, limit)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect()
+    };
+    assert_eq!(ids(10), ["c2", "c1"]);
+    assert_eq!(ids(1), ["c2"]);
+    assert_eq!(
+        messages(&conn, "c1").unwrap(),
+        [chat_message("m1", "c1"), chat_message("m0", "c1")]
+    );
+    assert_eq!(messages(&conn, "missing").unwrap(), []);
+}
+
+#[test]
+fn note_reads_map_flags_and_order_pins_and_templates() {
+    let conn = migrated();
+    let mut secret = note("notes/secret.md", "Secret", vec![]);
+    secret.is_private = true;
+    secret.gist_url = Some("https://gist.example/1".to_string());
+    secret.gist_stale = true;
+    let mut first = note("notes/first.md", "Zebra", vec![]);
+    first.is_pinned = true;
+    first.pinned_order = Some(1.0);
+    let mut unordered_b = note("notes/b.md", "Beta", vec![]);
+    unordered_b.is_pinned = true;
+    let mut unordered_a = note("notes/a.md", "Alpha", vec![]);
+    unordered_a.is_pinned = true;
+    let mut template_b = note("templates/b.md", "Weekly", vec![]);
+    template_b.kind = NoteKind::Template;
+    template_b.is_pinned = true;
+    let mut template_a = note("templates/a.md", "Daily", vec![]);
+    template_a.kind = NoteKind::Template;
+    for indexed in [
+        &secret,
+        &first,
+        &unordered_b,
+        &unordered_a,
+        &template_b,
+        &template_a,
+    ] {
+        apply_note(&conn, indexed, None).unwrap();
+    }
+
+    let row = note_row(&conn, "notes/secret.md").unwrap().unwrap();
+    assert!(row.is_private && row.gist_stale);
+    assert_eq!(row.gist_url.as_deref(), Some("https://gist.example/1"));
+    assert_eq!(note_row(&conn, "notes/missing.md").unwrap(), None);
+
+    let pinned: Vec<String> = pinned_notes(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|pinned| pinned.path)
+        .collect();
+    assert_eq!(pinned, ["notes/first.md", "notes/a.md", "notes/b.md"]);
+    let listed: Vec<String> = templates(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|template| template.path)
+        .collect();
+    assert_eq!(listed, ["templates/a.md", "templates/b.md"]);
+}
+
+#[test]
+fn list_reads_take_any_number_of_paths() {
+    let conn = migrated();
+    let mut with_id = note("notes/a.md", "A", vec![]);
+    with_id.id = Some("one".to_string());
+    apply_note(&conn, &with_id, None).unwrap();
+    apply_note(&conn, &note("notes/b.md", "B", vec![]), None).unwrap();
+    let mut paths: Vec<String> = (0..2_000)
+        .map(|at| format!("notes/missing-{at}.md"))
+        .collect();
+    paths.push("notes/a.md".to_string());
+    paths.push("notes/b.md".to_string());
+
+    let mut ids = note_ids(&conn, &paths).unwrap();
+    ids.sort_by(|left, right| left.path.cmp(&right.path));
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids[0].id.as_deref(), Some("one"));
+    assert_eq!(ids[1].id, None);
+    assert_eq!(file_facts(&conn, &paths).unwrap().len(), 2);
+    assert_eq!(file_facts(&conn, &[]).unwrap(), []);
+}
+
+#[test]
+fn resolve_target_tries_id_then_daily_then_path_title_alias() {
+    let conn = migrated();
+    assert_eq!(random_note(&conn).unwrap(), None);
+    let mut with_id = note("notes/renamed.md", "Renamed", vec![]);
+    with_id.id = Some("notes/plain.md".to_string());
+    apply_note(&conn, &with_id, None).unwrap();
+    apply_note(&conn, &note("notes/plain.md", "Plain", vec![]), None).unwrap();
+    apply_note(&conn, &aliased_note("notes/c.md", "Cee", "Nickname"), None).unwrap();
+    let resolve = |target: &str, daily: Option<&str>| {
+        resolve_target(
+            &conn,
+            target,
+            daily.map(String::from),
+            &target.to_lowercase(),
+        )
+        .unwrap()
+    };
+
+    // An id wins over the path of the same text.
+    assert_eq!(
+        resolve("notes/plain.md", None).as_deref(),
+        Some("notes/renamed.md")
+    );
+    assert_eq!(
+        resolve("2026-01-02", Some("daily/2026-01-02.md")).as_deref(),
+        Some("daily/2026-01-02.md")
+    );
+    assert_eq!(resolve("notes/c.md", None).as_deref(), Some("notes/c.md"));
+    assert_eq!(resolve("Plain", None).as_deref(), Some("notes/plain.md"));
+    assert_eq!(resolve("Nickname", None).as_deref(), Some("notes/c.md"));
+    assert_eq!(resolve("nothing", None), None);
+    assert!(random_note(&conn).unwrap().is_some());
+}
+
+#[test]
+fn owner_reads_find_notes_by_asset_and_by_person_email() {
+    let conn = migrated();
+    let mut person = tagged_note("notes/ada.md", "Ada", &["person"]);
+    person.emails = vec![IndexedEmail {
+        email: "Ada@Example.com".to_string(),
+        email_key: "ada@example.com".to_string(),
+    }];
+    person.assets = vec!["assets/photo.png".to_string()];
+    let mut untagged = note("notes/other.md", "Other", vec![]);
+    untagged.emails = vec![IndexedEmail {
+        email: "ada@example.com".to_string(),
+        email_key: "ada@example.com".to_string(),
+    }];
+    untagged.assets = vec!["photo.png".to_string()];
+    let mut template = note("templates/t.md", "T", vec![]);
+    template.kind = NoteKind::Template;
+    for indexed in [&person, &untagged, &template] {
+        apply_note(&conn, indexed, None).unwrap();
+    }
+    let keys = [
+        "ada@example.com".to_string(),
+        "nobody@example.com".to_string(),
+    ];
+
+    assert_eq!(
+        person_owners(&conn, &keys, "person").unwrap(),
+        ["notes/ada.md"]
+    );
+    assert_eq!(
+        person_owners(&conn, &[], "person").unwrap(),
+        Vec::<String>::new()
+    );
+    let mut owners = note_paths(
+        &conn,
+        &["assets/photo.png".to_string(), "photo.png".to_string()],
+    )
+    .unwrap();
+    owners.sort();
+    assert_eq!(owners, ["notes/ada.md", "notes/other.md"]);
+    assert!(path_taken(&conn, "notes/ada.md").unwrap());
+    assert!(!path_taken(&conn, "notes/free.md").unwrap());
+    assert_eq!(
+        embeddable_paths(&conn).unwrap(),
+        ["notes/ada.md", "notes/other.md"]
+    );
+    assert_eq!(chunk_hashes(&conn, "notes/ada.md").unwrap(), []);
+}
+
+#[test]
+fn note_lists_order_pins_first_and_attach_tags() {
+    let conn = migrated();
+    let mut old_pinned = tagged_note("notes/pinned.md", "Pinned", &["Zeta", "alpha"]);
+    old_pinned.is_pinned = true;
+    old_pinned.mtime = 1;
+    let mut newer = tagged_note("notes/newer.md", "Newer", &["alpha"]);
+    newer.mtime = 30;
+    let mut older = note("notes/older.md", "Older", vec![]);
+    older.mtime = 20;
+    let mut secret = tagged_note("notes/secret.md", "Secret", &["alpha"]);
+    secret.is_private = true;
+    secret.mtime = 40;
+    let mut daily = daily_note("daily/2026-01-02.md", "2026-01-02");
+    daily.tags = vec![IndexedTag {
+        tag: "Alpha".to_string(),
+        tag_key: "alpha".to_string(),
+    }];
+    daily.mtime = 10;
+    for indexed in [&old_pinned, &newer, &older, &secret, &daily] {
+        apply_note(&conn, indexed, None).unwrap();
+    }
+    let paths = |tag: Option<&str>| -> Vec<String> {
+        list_notes(&conn, tag)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect()
+    };
+
+    assert_eq!(
+        paths(None),
+        [
+            "notes/pinned.md",
+            "notes/secret.md",
+            "notes/newer.md",
+            "notes/older.md"
+        ]
+    );
+    // A tag also lists the daily notes that carry it.
+    assert_eq!(
+        paths(Some("alpha")),
+        [
+            "notes/pinned.md",
+            "notes/secret.md",
+            "notes/newer.md",
+            "daily/2026-01-02.md"
+        ]
+    );
+    assert_eq!(paths(Some("nothing")), Vec::<String>::new());
+    let all = list_notes(&conn, None).unwrap();
+    assert!(all[0].is_pinned);
+    assert_eq!(all[0].tags, ["alpha", "Zeta"]);
+    assert_eq!(all[3].tags, Vec::<String>::new());
+
+    let recent = |limit, tag: Option<&str>| -> Vec<String> {
+        recent_notes(&conn, limit, tag)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.path)
+            .collect()
+    };
+    assert_eq!(recent(2, None), ["notes/newer.md", "notes/older.md"]);
+    assert_eq!(
+        recent(5, Some("alpha")),
+        ["notes/newer.md", "notes/pinned.md"]
+    );
+
+    let facets: Vec<(String, u32)> = note_tags(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|facet| (facet.tag, facet.count))
+        .collect();
+    assert_eq!(facets, [("alpha".to_string(), 3), ("Zeta".to_string(), 1)]);
+}
+
+#[test]
+fn tasks_split_by_checked_and_skip_templates() {
+    let conn = migrated();
+    let mut with_tasks = note("notes/a.md", "A", vec![]);
+    with_tasks.is_pinned = true;
+    with_tasks.tasks = vec![task(0, "open one", false), task(1, "done one", true)];
+    let mut template = note("templates/t.md", "T", vec![]);
+    template.kind = NoteKind::Template;
+    template.tasks = vec![task(0, "template task", false)];
+    apply_note(&conn, &with_tasks, None).unwrap();
+    apply_note(&conn, &template, None).unwrap();
+
+    let open = tasks(&conn, false).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].markdown, "open one");
+    assert_eq!(open[0].note_title, "A");
+    assert!(open[0].is_pinned && !open[0].checked);
+    let done = tasks(&conn, true).unwrap();
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].markdown, "done one");
+}
+
+#[test]
+fn wiki_reads_resolve_keys_claims_and_link_sources() {
+    let conn = migrated();
+    apply_note(&conn, &note("notes/rust.md", "Rust", vec![]), None).unwrap();
+    apply_note(
+        &conn,
+        &aliased_note("notes/other.md", "Other", "Rust"),
+        None,
+    )
+    .unwrap();
+    apply_note(&conn, &note("notes/a.md", "A", vec![wiki("Rust")]), None).unwrap();
+    apply_note(
+        &conn,
+        &note(
+            "notes/b.md",
+            "B",
+            vec![
+                wiki("Rust"),
+                path_link(LinkKind::Wiki, "notes/rust", "notes/rust.md"),
+            ],
+        ),
+        None,
+    )
+    .unwrap();
+    let mut template = note("templates/t.md", "T", vec![]);
+    template.kind = NoteKind::Template;
+    apply_note(&conn, &template, None).unwrap();
+
+    // The title claims the key in a stronger tier than the alias.
+    assert_eq!(
+        resolve(&conn, "rust").unwrap().as_deref(),
+        Some("notes/rust.md")
+    );
+    assert_eq!(resolve(&conn, "missing").unwrap(), None);
+    let matched = claim_match(&conn, "rust").unwrap().unwrap();
+    assert_eq!(matched.tier, claim_tier::TITLE);
+    assert_eq!(matched.paths, ["notes/rust.md"]);
+    assert_eq!(claim_match(&conn, "missing").unwrap(), None);
+    assert_eq!(
+        notes_by_path_key(&conn, "notes/rust.md").unwrap(),
+        ["notes/rust.md"]
+    );
+    assert_eq!(
+        link_sources(&conn, "rust").unwrap(),
+        ["notes/a.md", "notes/b.md"]
+    );
+    assert_eq!(
+        path_link_sources(&conn, "notes/rust.md").unwrap(),
+        ["notes/b.md"]
+    );
+    let candidate = address_note(&conn, "notes/rust.md").unwrap().unwrap();
+    assert_eq!(
+        (candidate.title_key.as_str(), candidate.link_count),
+        ("rust", 0)
+    );
+    assert_eq!(address_note(&conn, "templates/t.md").unwrap(), None);
+}
+
+#[test]
+fn backlink_pages_run_newest_source_first_and_resume_after_a_cursor() {
+    let conn = migrated();
+    apply_note(&conn, &note("notes/target.md", "Target", vec![]), None).unwrap();
+    let mut daily = daily_note("daily/2026-03-01.md", "2026-03-01");
+    daily.links = vec![wiki("Target")];
+    apply_note(&conn, &daily, None).unwrap();
+    let mut twice = note(
+        "notes/twice.md",
+        "Twice",
+        vec![wiki("Target"), wiki("Target")],
+    );
+    twice.links[1].pos_from = 40;
+    twice.links[1].pos_to = 50;
+    apply_note(&conn, &twice, None).unwrap();
+    apply_note(
+        &conn,
+        &note("notes/once.md", "Once", vec![wiki("Target")]),
+        None,
+    )
+    .unwrap();
+    // The two notes share one recency; the path breaks the tie.
+    conn.execute("UPDATE notes SET updated_at = 5000 WHERE kind = 'note'", [])
+        .unwrap();
+
+    let all = backlinks(&conn, "notes/target.md").unwrap();
+    assert_eq!(all.len(), 4);
+    assert_eq!(all[0].source_path, "daily/2026-03-01.md");
+
+    let first = backlink_page(&conn, "notes/target.md", 2, None).unwrap();
+    let paths: Vec<&str> = first
+        .sources
+        .iter()
+        .map(|source| source.source_path.as_str())
+        .collect();
+    assert_eq!(paths, ["daily/2026-03-01.md", "notes/once.md"]);
+    assert_eq!(first.indexed_link_count, 4);
+    assert!(first.target_keys.contains(&"target".to_string()));
+    let cursor = first.next_cursor.unwrap();
+    assert_eq!(
+        (cursor.recency_ms, cursor.source_path.as_str()),
+        (5000, "notes/once.md")
+    );
+
+    let second = backlink_page(&conn, "notes/target.md", 2, Some(&cursor)).unwrap();
+    assert_eq!(second.sources.len(), 1);
+    assert_eq!(second.sources[0].source_path, "notes/twice.md");
+    assert_eq!(second.sources[0].positions.len(), 2);
+    assert_eq!(second.sources[0].positions[1], 40);
+    assert_eq!(second.next_cursor, None);
+
+    let unlimited = backlink_page(&conn, "notes/target.md", i64::MAX, None).unwrap();
+    assert_eq!(unlimited.sources.len(), 3);
+    assert_eq!(unlimited.next_cursor, None);
+    let none = backlink_page(&conn, "notes/missing.md", 5, None).unwrap();
+    assert_eq!((none.sources.len(), none.indexed_link_count), (0, 0));
+    // A page with no source still names the keys of its target.
+    apply_note(&conn, &note("notes/lonely.md", "Lonely", vec![]), None).unwrap();
+    let lonely = backlink_page(&conn, "notes/lonely.md", 5, None).unwrap();
+    assert!(lonely.sources.is_empty());
+    assert!(lonely.target_keys.contains(&"lonely".to_string()));
+    assert!(backlink_page(&conn, "notes/target.md", 0, None).is_err());
+}
+
+#[test]
+fn suggestions_rank_exact_titles_first_and_escape_like_wildcards() {
+    let conn = migrated();
+    apply_note(
+        &conn,
+        &tagged_note("notes/rust.md", "Rust", &["Lang", "100%"]),
+        None,
+    )
+    .unwrap();
+    apply_note(
+        &conn,
+        &tagged_note("notes/rusty.md", "Rusty nail", &["lang"]),
+        None,
+    )
+    .unwrap();
+    apply_note(
+        &conn,
+        &aliased_note("notes/crab.md", "Crab", "Rustacean"),
+        None,
+    )
+    .unwrap();
+    apply_note(
+        &conn,
+        &note("notes/linker.md", "Linker", vec![wiki("Rusty nail")]),
+        None,
+    )
+    .unwrap();
+    apply_note(
+        &conn,
+        &daily_note("daily/2026-01-02.md", "2026-01-02"),
+        None,
+    )
+    .unwrap();
+    let mut template = note("templates/rust.md", "Rust template", vec![]);
+    template.kind = NoteKind::Template;
+    apply_note(&conn, &template, None).unwrap();
+
+    let found = wiki_candidates(&conn, "rust").unwrap();
+    let titles: Vec<&str> = found.titles.iter().map(|row| row.path.as_str()).collect();
+    // The exact title leads, though the other note has a link.
+    assert_eq!(titles, ["notes/rust.md", "notes/rusty.md"]);
+    assert_eq!(found.titles[1].link_count, 1);
+    assert_eq!(found.aliases.len(), 1);
+    assert_eq!(found.aliases[0].alias, "Rustacean");
+
+    // An empty key lists notes, without days and without aliases.
+    let unqueried = wiki_candidates(&conn, "").unwrap();
+    assert!(unqueried.titles.iter().all(|row| row.daily_date.is_none()));
+    assert_eq!(unqueried.titles.len(), 4);
+    assert_eq!(unqueried.aliases, []);
+    // `%` is a literal, not a wildcard.
+    assert_eq!(wiki_candidates(&conn, "%").unwrap().titles, []);
+
+    let names = |key: &str, limit| -> Vec<(String, u32)> {
+        suggest_tags(&conn, key, limit)
+            .unwrap()
+            .into_iter()
+            .map(|facet| (facet.tag, facet.count))
+            .collect()
+    };
+    assert_eq!(names("", 1), [("Lang".to_string(), 2)]);
+    assert_eq!(names("0%", 5), [("100%".to_string(), 1)]);
+    assert_eq!(names("_", 5), []);
+
+    let keys = [
+        "rust".to_string(),
+        "rustacean".to_string(),
+        "none".to_string(),
+    ];
+    let mut winners = key_winners(&conn, &keys).unwrap();
+    winners.sort_by(|left, right| left.key.cmp(&right.key));
+    let won: Vec<(&str, &str, i64)> = winners
+        .iter()
+        .map(|winner| {
+            (
+                winner.key.as_str(),
+                winner.path.as_str(),
+                winner.claim_count,
+            )
+        })
+        .collect();
+    assert_eq!(
+        won,
+        [
+            ("rust", "notes/rust.md", 1),
+            ("rustacean", "notes/crab.md", 1)
+        ]
+    );
+    let aliases = winning_aliases(&conn, &["notes/crab.md".to_string()]).unwrap();
+    assert_eq!(aliases.len(), 1);
+    assert_eq!(aliases[0].alias, "Rustacean");
+}
+
+#[test]
+fn vector_reads_find_the_nearest_chunks_and_keep_private_notes_out_of_related() {
+    let conn = migrated();
+    index_note(&conn, "notes/self.md");
+    index_note(&conn, "notes/near.md");
+    let mut secret = note("notes/secret.md", "Secret", vec![]);
+    secret.is_private = true;
+    apply_note(&conn, &secret, None).unwrap();
+    let mut far = vec384(0.0);
+    far[0] = 1.0;
+    // The note has two chunks that point in different directions; each one
+    // seeds its own neighbour list.
+    let mut second = vec384(0.0);
+    second[1] = 1.0;
+    let mut second_chunk = chunk("s2", Some(second.clone()));
+    second_chunk.pos_from = 20;
+    apply_chunks(
+        &conn,
+        "notes/self.md",
+        &[chunk("s1", Some(vec384(0.5))), second_chunk],
+    )
+    .unwrap();
+    index_note(&conn, "notes/other.md");
+    second[2] = 0.1;
+    apply_chunks(&conn, "notes/other.md", &[chunk("o1", Some(second))]).unwrap();
+    let mut near = vec384(0.5);
+    near[0] = 0.1;
+    apply_chunks(&conn, "notes/near.md", &[chunk("n1", Some(near))]).unwrap();
+    apply_chunks(&conn, "notes/secret.md", &[chunk("x1", Some(far.clone()))]).unwrap();
+
+    let related = related_chunks(&conn, "notes/self.md", 16, 24).unwrap();
+    let nearest_two = |list: &[reflect_types::ChunkHit]| -> Vec<String> {
+        list.iter().take(2).map(|hit| hit.path.clone()).collect()
+    };
+    assert_eq!(related.len(), 2);
+    assert_eq!(nearest_two(&related[0]), ["notes/self.md", "notes/near.md"]);
+    assert_eq!(
+        nearest_two(&related[1]),
+        ["notes/self.md", "notes/other.md"]
+    );
+    assert!(related[0][0].distance.abs() < 1e-6);
+    assert!(related.iter().flatten().all(|hit| !hit.is_private));
+    assert_eq!(
+        related_chunks(&conn, "notes/self.md", 1, 24).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        related_chunks(&conn, "notes/missing.md", 16, 24)
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let nearest = semantic_chunks(&conn, &far, 1).unwrap();
+    assert_eq!(nearest.len(), 1);
+    assert_eq!(nearest[0].path, "notes/secret.md");
+    assert!(nearest[0].is_private);
+
+    let mut flags = privacy(
+        &conn,
+        &["notes/secret.md".to_string(), "notes/near.md".to_string()],
+    )
+    .unwrap();
+    flags.sort_by(|left, right| left.path.cmp(&right.path));
+    let flags: Vec<(&str, bool)> = flags
+        .iter()
+        .map(|flag| (flag.path.as_str(), flag.is_private))
+        .collect();
+    assert_eq!(flags, [("notes/near.md", false), ("notes/secret.md", true)]);
+}
+
+fn search_paths(conn: &Connection, request: &SearchRequest) -> Vec<String> {
+    search(conn, request)
+        .unwrap()
+        .into_iter()
+        .map(|hit| hit.path)
+        .collect()
+}
+
+fn text_search(text: &str) -> SearchRequest {
+    SearchRequest {
+        text: text.to_string(),
+        title_key: text.to_lowercase(),
+        ..SearchRequest::default()
+    }
+}
+
+#[test]
+fn search_ranks_title_matches_before_body_hits() {
+    let conn = migrated();
+    let mut exact = note("notes/car.md", "Car", vec![]);
+    exact.mtime = 1;
+    let mut prefix = note("notes/car-log.md", "Car log", vec![]);
+    prefix.mtime = 2;
+    let mut word = note("notes/red-car.md", "Red car", vec![]);
+    word.mtime = 3;
+    let mut body = note("notes/trip.md", "Trip", vec![]);
+    body.text = "we took the car".to_string();
+    body.mtime = 4;
+    // `car` never matches inside a word.
+    let mut inside = note("notes/oscar.md", "Oscar party", vec![]);
+    inside.mtime = 5;
+    let mut template = note("templates/car.md", "Car", vec![]);
+    template.kind = NoteKind::Template;
+    for indexed in [&exact, &prefix, &word, &body, &inside, &template] {
+        apply_note(&conn, indexed, None).unwrap();
+    }
+
+    assert_eq!(
+        search_paths(&conn, &text_search("car")),
+        [
+            "notes/car.md",
+            "notes/car-log.md",
+            "notes/red-car.md",
+            "notes/trip.md"
+        ]
+    );
+    let hits = search(&conn, &text_search("car")).unwrap();
+    // A body hit carries a marked snippet; the marker frames the match.
+    let snippet = hits[3].snippet.as_deref().unwrap();
+    assert!(snippet.contains("\u{1}car\u{2}"), "{snippet:?}");
+    let limited = SearchRequest {
+        limit: Some(2),
+        ..text_search("car")
+    };
+    assert_eq!(search_paths(&conn, &limited).len(), 2);
+    // The FTS pass runs once, not once per note.
+    let plan = ranked_query_plan(&conn, &text_search("car")).unwrap();
+    assert!(
+        plan.iter().any(|step| step.contains("MATERIALIZE lexical")),
+        "{plan:?}"
+    );
+    // User text is a literal: FTS operators and quotes are not syntax.
+    assert_eq!(
+        search_paths(&conn, &text_search("\"car AND NOT (")),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn search_without_text_is_a_filtered_recall_feed() {
+    let conn = migrated();
+    let mut pinned = tagged_note("notes/pinned.md", "Pinned", &["a"]);
+    pinned.is_pinned = true;
+    pinned.mtime = 10;
+    let mut both = tagged_note("notes/both.md", "Both", &["a", "b"]);
+    both.mtime = 30;
+    both.links = vec![wiki("Pinned")];
+    let mut only_b = tagged_note("notes/only-b.md", "Only b", &["b"]);
+    only_b.mtime = 20;
+    let mut daily = daily_note("daily/2026-01-02.md", "2026-01-02");
+    daily.tags = vec![IndexedTag {
+        tag: "a".to_string(),
+        tag_key: "a".to_string(),
+    }];
+    daily.mtime = 40;
+    for indexed in [&pinned, &both, &only_b, &daily] {
+        apply_note(&conn, indexed, None).unwrap();
+    }
+    let tags = |keys: &[&str]| keys.iter().map(|key| key.to_string()).collect::<Vec<_>>();
+
+    assert_eq!(
+        search_paths(&conn, &SearchRequest::default()),
+        [
+            "daily/2026-01-02.md",
+            "notes/both.md",
+            "notes/only-b.md",
+            "notes/pinned.md"
+        ]
+    );
+    let pinned_first = SearchRequest {
+        pinned_first: true,
+        notes_only: true,
+        ..SearchRequest::default()
+    };
+    assert_eq!(
+        search_paths(&conn, &pinned_first),
+        ["notes/pinned.md", "notes/both.md", "notes/only-b.md"]
+    );
+    // Tags are ANDed.
+    let tagged = |keys: &[&str]| SearchRequest {
+        tag_keys: tags(keys),
+        ..SearchRequest::default()
+    };
+    assert_eq!(
+        search_paths(&conn, &tagged(&["a"])),
+        ["daily/2026-01-02.md", "notes/both.md", "notes/pinned.md"]
+    );
+    assert_eq!(search_paths(&conn, &tagged(&["a", "b"])), ["notes/both.md"]);
+    // The daily filter wins over the notes-only population.
+    let dailies = SearchRequest {
+        daily_only: true,
+        notes_only: true,
+        ..SearchRequest::default()
+    };
+    assert_eq!(search_paths(&conn, &dailies), ["daily/2026-01-02.md"]);
+    let links_to = SearchRequest {
+        links_to_path: Some("notes/pinned.md".to_string()),
+        ..SearchRequest::default()
+    };
+    assert_eq!(search_paths(&conn, &links_to), ["notes/both.md"]);
+    let linked_from = SearchRequest {
+        linked_from_path: Some("notes/both.md".to_string()),
+        ..SearchRequest::default()
+    };
+    assert_eq!(search_paths(&conn, &linked_from), ["notes/pinned.md"]);
+    let window = SearchRequest {
+        updated_after_ms: Some(20.0),
+        updated_before_ms: Some(40.0),
+        pinned_only: false,
+        ..SearchRequest::default()
+    };
+    assert_eq!(
+        search_paths(&conn, &window),
+        ["notes/both.md", "notes/only-b.md"]
+    );
+    let only_pinned = SearchRequest {
+        pinned_only: true,
+        ..tagged(&["a"])
+    };
+    assert_eq!(search_paths(&conn, &only_pinned), ["notes/pinned.md"]);
 }

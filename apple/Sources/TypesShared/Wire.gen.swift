@@ -387,6 +387,148 @@ public enum BackSwipePhase: String, Codable, Sendable, Equatable, CaseIterable {
     case cancel = "cancel"
 }
 
+/// One link that points at a note.
+public struct Backlink: Codable, Sendable, Equatable {
+    public let sourcePath: String
+    public let targetRaw: String
+    public let alias: String?
+    public let posFrom: Int64
+    public let posTo: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case sourcePath = "sourcePath"
+        case targetRaw = "targetRaw"
+        case alias = "alias"
+        case posFrom = "posFrom"
+        case posTo = "posTo"
+    }
+
+    public init(sourcePath: String, targetRaw: String, alias: String?, posFrom: Int64, posTo: Int64) {
+        self.sourcePath = sourcePath
+        self.targetRaw = targetRaw
+        self.alias = alias
+        self.posFrom = posFrom
+        self.posTo = posTo
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sourcePath = try container.decode(String.self, forKey: .sourcePath)
+        self.targetRaw = try container.decode(String.self, forKey: .targetRaw)
+        self.alias = try container.decodeIfPresent(String.self, forKey: .alias)
+        self.posFrom = try container.decode(Int64.self, forKey: .posFrom)
+        self.posTo = try container.decode(Int64.self, forKey: .posTo)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourcePath, forKey: .sourcePath)
+        try container.encode(targetRaw, forKey: .targetRaw)
+        try container.encode(alias, forKey: .alias)
+        try container.encode(posFrom, forKey: .posFrom)
+        try container.encode(posTo, forKey: .posTo)
+    }
+}
+
+/// One page of the sources that link to a note, most recent first.
+public struct BacklinkPage: Codable, Sendable, Equatable {
+    public let sources: [BacklinkSource]
+    public let nextCursor: BacklinkSourceCursor?
+    public let indexedLinkCount: UInt32
+    public let targetKeys: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case sources = "sources"
+        case nextCursor = "nextCursor"
+        case indexedLinkCount = "indexedLinkCount"
+        case targetKeys = "targetKeys"
+    }
+
+    public init(sources: [BacklinkSource], nextCursor: BacklinkSourceCursor?, indexedLinkCount: UInt32, targetKeys: [String]) {
+        self.sources = sources
+        self.nextCursor = nextCursor
+        self.indexedLinkCount = indexedLinkCount
+        self.targetKeys = targetKeys
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sources = try container.decode([BacklinkSource].self, forKey: .sources)
+        self.nextCursor = try container.decodeIfPresent(BacklinkSourceCursor.self, forKey: .nextCursor)
+        self.indexedLinkCount = try container.decode(UInt32.self, forKey: .indexedLinkCount)
+        self.targetKeys = try container.decode([String].self, forKey: .targetKeys)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(nextCursor, forKey: .nextCursor)
+        try container.encode(indexedLinkCount, forKey: .indexedLinkCount)
+        try container.encode(targetKeys, forKey: .targetKeys)
+    }
+}
+
+/// One source note of a backlink page.
+public struct BacklinkSource: Codable, Sendable, Equatable {
+    public let sourcePath: String
+    public let sourceTitle: String
+    public let positions: [Int64]
+
+    private enum CodingKeys: String, CodingKey {
+        case sourcePath = "sourcePath"
+        case sourceTitle = "sourceTitle"
+        case positions = "positions"
+    }
+
+    public init(sourcePath: String, sourceTitle: String, positions: [Int64]) {
+        self.sourcePath = sourcePath
+        self.sourceTitle = sourceTitle
+        self.positions = positions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sourcePath = try container.decode(String.self, forKey: .sourcePath)
+        self.sourceTitle = try container.decode(String.self, forKey: .sourceTitle)
+        self.positions = try container.decode([Int64].self, forKey: .positions)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourcePath, forKey: .sourcePath)
+        try container.encode(sourceTitle, forKey: .sourceTitle)
+        try container.encode(positions, forKey: .positions)
+    }
+}
+
+/// The position after one source in a backlink listing.
+public struct BacklinkSourceCursor: Codable, Sendable, Equatable {
+    public let recencyMs: Int64
+    public let sourcePath: String
+
+    private enum CodingKeys: String, CodingKey {
+        case recencyMs = "recencyMs"
+        case sourcePath = "sourcePath"
+    }
+
+    public init(recencyMs: Int64, sourcePath: String) {
+        self.recencyMs = recencyMs
+        self.sourcePath = sourcePath
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.recencyMs = try container.decode(Int64.self, forKey: .recencyMs)
+        self.sourcePath = try container.decode(String.self, forKey: .sourcePath)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(recencyMs, forKey: .recencyMs)
+        try container.encode(sourcePath, forKey: .sourcePath)
+    }
+}
+
 /// A button of the native top bar. A tap opens
 /// `menu` when it has one, and sends an `action` intent with `id` otherwise.
 public struct BarButton: Codable, Sendable, Equatable {
@@ -1371,6 +1513,82 @@ extension ChromeTitle: Codable {
 }
 
 
+/// The content hash and model of one stored embedding chunk.
+public struct ChunkHash: Codable, Sendable, Equatable {
+    public let contentHash: String
+    public let modelId: String
+
+    private enum CodingKeys: String, CodingKey {
+        case contentHash = "contentHash"
+        case modelId = "modelId"
+    }
+
+    public init(contentHash: String, modelId: String) {
+        self.contentHash = contentHash
+        self.modelId = modelId
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.contentHash = try container.decode(String.self, forKey: .contentHash)
+        self.modelId = try container.decode(String.self, forKey: .modelId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(contentHash, forKey: .contentHash)
+        try container.encode(modelId, forKey: .modelId)
+    }
+}
+
+/// One embedding chunk near a query vector.
+public struct ChunkHit: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let heading: String?
+    public let text: String
+    public let isPrivate: Bool
+    public let distance: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case heading = "heading"
+        case text = "text"
+        case isPrivate = "isPrivate"
+        case distance = "distance"
+    }
+
+    public init(path: String, title: String, heading: String?, text: String, isPrivate: Bool, distance: Double) {
+        self.path = path
+        self.title = title
+        self.heading = heading
+        self.text = text
+        self.isPrivate = isPrivate
+        self.distance = distance
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.heading = try container.decodeIfPresent(String.self, forKey: .heading)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.isPrivate = try container.decode(Bool.self, forKey: .isPrivate)
+        self.distance = try container.decode(Double.self, forKey: .distance)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(heading, forKey: .heading)
+        try container.encode(text, forKey: .text)
+        try container.encode(isPrivate, forKey: .isPrivate)
+        try container.encode(distance, forKey: .distance)
+    }
+}
+
 /// Result of a commit attempt. `committed: false` means the tree was clean.
 public struct CommitOutcome: Codable, Sendable, Equatable {
     public let committed: Bool
@@ -1493,6 +1711,54 @@ public struct CoreStartConfig: Codable, Sendable, Equatable {
         try container.encode(appDataDir, forKey: .appDataDir)
         try container.encode(documentDir, forKey: .documentDir)
         try container.encode(userAgent, forKey: .userAgent)
+    }
+}
+
+/// One daily note, as a listing shows it.
+public struct DailyNoteRow: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let dailyDate: String
+    public let preview: String
+    public let mtime: Int64
+    public let isPrivate: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case dailyDate = "dailyDate"
+        case preview = "preview"
+        case mtime = "mtime"
+        case isPrivate = "isPrivate"
+    }
+
+    public init(path: String, title: String, dailyDate: String, preview: String, mtime: Int64, isPrivate: Bool) {
+        self.path = path
+        self.title = title
+        self.dailyDate = dailyDate
+        self.preview = preview
+        self.mtime = mtime
+        self.isPrivate = isPrivate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.dailyDate = try container.decode(String.self, forKey: .dailyDate)
+        self.preview = try container.decode(String.self, forKey: .preview)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+        self.isPrivate = try container.decode(Bool.self, forKey: .isPrivate)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(preview, forKey: .preview)
+        try container.encode(mtime, forKey: .mtime)
+        try container.encode(isPrivate, forKey: .isPrivate)
     }
 }
 
@@ -2065,6 +2331,54 @@ public struct GraphInfo: Codable, Sendable, Equatable {
         try container.encode(localOnlyEditableFolders, forKey: .localOnlyEditableFolders)
         try container.encode(localOnlyWarnings, forKey: .localOnlyWarnings)
         try container.encode(backupWarnings, forKey: .backupWarnings)
+    }
+}
+
+/// The aggregates of one graph, private notes excluded throughout.
+public struct GraphStats: Codable, Sendable, Equatable {
+    public let noteCount: UInt32
+    public let dailyNoteCount: UInt32
+    public let earliestDailyDate: String?
+    public let latestDailyDate: String?
+    public let tags: [TagFacet]
+    public let tagsTruncated: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case noteCount = "noteCount"
+        case dailyNoteCount = "dailyNoteCount"
+        case earliestDailyDate = "earliestDailyDate"
+        case latestDailyDate = "latestDailyDate"
+        case tags = "tags"
+        case tagsTruncated = "tagsTruncated"
+    }
+
+    public init(noteCount: UInt32, dailyNoteCount: UInt32, earliestDailyDate: String?, latestDailyDate: String?, tags: [TagFacet], tagsTruncated: Bool) {
+        self.noteCount = noteCount
+        self.dailyNoteCount = dailyNoteCount
+        self.earliestDailyDate = earliestDailyDate
+        self.latestDailyDate = latestDailyDate
+        self.tags = tags
+        self.tagsTruncated = tagsTruncated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.noteCount = try container.decode(UInt32.self, forKey: .noteCount)
+        self.dailyNoteCount = try container.decode(UInt32.self, forKey: .dailyNoteCount)
+        self.earliestDailyDate = try container.decodeIfPresent(String.self, forKey: .earliestDailyDate)
+        self.latestDailyDate = try container.decodeIfPresent(String.self, forKey: .latestDailyDate)
+        self.tags = try container.decode([TagFacet].self, forKey: .tags)
+        self.tagsTruncated = try container.decode(Bool.self, forKey: .tagsTruncated)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(noteCount, forKey: .noteCount)
+        try container.encode(dailyNoteCount, forKey: .dailyNoteCount)
+        try container.encode(earliestDailyDate, forKey: .earliestDailyDate)
+        try container.encode(latestDailyDate, forKey: .latestDailyDate)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(tagsTruncated, forKey: .tagsTruncated)
     }
 }
 
@@ -3310,11 +3624,120 @@ public struct NoteDeleteOutcome: Codable, Sendable, Equatable {
     }
 }
 
+/// The stored hash and modification time of one indexed note.
+public struct NoteFileFacts: Codable, Sendable, Equatable {
+    public let path: String
+    public let fileHash: String
+    public let mtime: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case fileHash = "fileHash"
+        case mtime = "mtime"
+    }
+
+    public init(path: String, fileHash: String, mtime: Int64) {
+        self.path = path
+        self.fileHash = fileHash
+        self.mtime = mtime
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.fileHash = try container.decode(String.self, forKey: .fileHash)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(fileHash, forKey: .fileHash)
+        try container.encode(mtime, forKey: .mtime)
+    }
+}
+
+/// The frontmatter `id` of one indexed note.
+public struct NoteId: Codable, Sendable, Equatable {
+    public let path: String
+    public let id: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case id = "id"
+    }
+
+    public init(path: String, id: String?) {
+        self.path = path
+        self.id = id
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(id, forKey: .id)
+    }
+}
+
 /// What a note file is, from its path.
 public enum NoteKind: String, Codable, Sendable, Equatable, CaseIterable {
     case daily = "daily"
     case note = "note"
     case template = "template"
+}
+
+/// One row of the All Notes list.
+public struct NoteListEntry: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let snippet: String
+    public let tags: [String]
+    public let mtime: Int64
+    public let isPinned: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case snippet = "snippet"
+        case tags = "tags"
+        case mtime = "mtime"
+        case isPinned = "isPinned"
+    }
+
+    public init(path: String, title: String, snippet: String, tags: [String], mtime: Int64, isPinned: Bool) {
+        self.path = path
+        self.title = title
+        self.snippet = snippet
+        self.tags = tags
+        self.mtime = mtime
+        self.isPinned = isPinned
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.snippet = try container.decode(String.self, forKey: .snippet)
+        self.tags = try container.decode([String].self, forKey: .tags)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+        self.isPinned = try container.decode(Bool.self, forKey: .isPinned)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(snippet, forKey: .snippet)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(mtime, forKey: .mtime)
+        try container.encode(isPinned, forKey: .isPinned)
+    }
 }
 
 /// One user-initiated move, with the folded addressing for both directions:
@@ -3354,6 +3777,82 @@ public struct NoteMoveRequest: Codable, Sendable, Equatable {
         try container.encode(to, forKey: .to)
         try container.encode(toAddress, forKey: .toAddress)
         try container.encode(fromAddress, forKey: .fromAddress)
+    }
+}
+
+/// The `private` flag of one indexed note.
+public struct NotePrivacy: Codable, Sendable, Equatable {
+    public let path: String
+    public let isPrivate: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case isPrivate = "isPrivate"
+    }
+
+    public init(path: String, isPrivate: Bool) {
+        self.path = path
+        self.isPrivate = isPrivate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.isPrivate = try container.decode(Bool.self, forKey: .isPrivate)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(isPrivate, forKey: .isPrivate)
+    }
+}
+
+/// The core fields of one note row.
+public struct NoteRow: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let dailyDate: String?
+    public let isPrivate: Bool
+    public let gistUrl: String?
+    public let gistStale: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case dailyDate = "dailyDate"
+        case isPrivate = "isPrivate"
+        case gistUrl = "gistUrl"
+        case gistStale = "gistStale"
+    }
+
+    public init(path: String, title: String, dailyDate: String?, isPrivate: Bool, gistUrl: String?, gistStale: Bool) {
+        self.path = path
+        self.title = title
+        self.dailyDate = dailyDate
+        self.isPrivate = isPrivate
+        self.gistUrl = gistUrl
+        self.gistStale = gistStale
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.isPrivate = try container.decode(Bool.self, forKey: .isPrivate)
+        self.gistUrl = try container.decodeIfPresent(String.self, forKey: .gistUrl)
+        self.gistStale = try container.decode(Bool.self, forKey: .gistStale)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(isPrivate, forKey: .isPrivate)
+        try container.encode(gistUrl, forKey: .gistUrl)
+        try container.encode(gistStale, forKey: .gistStale)
     }
 }
 
@@ -3410,6 +3909,44 @@ public struct PinnedNote: Codable, Sendable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(path, forKey: .path)
         try container.encode(title, forKey: .title)
+    }
+}
+
+/// One pinned note.
+public struct PinnedNoteRow: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let dailyDate: String?
+    public let pinnedOrder: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case dailyDate = "dailyDate"
+        case pinnedOrder = "pinnedOrder"
+    }
+
+    public init(path: String, title: String, dailyDate: String?, pinnedOrder: Double?) {
+        self.path = path
+        self.title = title
+        self.dailyDate = dailyDate
+        self.pinnedOrder = pinnedOrder
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.pinnedOrder = try container.decodeIfPresent(Double.self, forKey: .pinnedOrder)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(pinnedOrder, forKey: .pinnedOrder)
     }
 }
 
@@ -3634,6 +4171,49 @@ public struct RecentGraph: Codable, Sendable, Equatable {
         try container.encode(root, forKey: .root)
         try container.encode(name, forKey: .name)
         try container.encode(openedMs, forKey: .openedMs)
+    }
+}
+
+/// One recently changed note.
+public struct RecentNoteRow: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let preview: String
+    public let mtime: Int64
+    public let isPrivate: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case preview = "preview"
+        case mtime = "mtime"
+        case isPrivate = "isPrivate"
+    }
+
+    public init(path: String, title: String, preview: String, mtime: Int64, isPrivate: Bool) {
+        self.path = path
+        self.title = title
+        self.preview = preview
+        self.mtime = mtime
+        self.isPrivate = isPrivate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.preview = try container.decode(String.self, forKey: .preview)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+        self.isPrivate = try container.decode(Bool.self, forKey: .isPrivate)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(preview, forKey: .preview)
+        try container.encode(mtime, forKey: .mtime)
+        try container.encode(isPrivate, forKey: .isPrivate)
     }
 }
 
@@ -4082,6 +4662,142 @@ public struct ScanOrphan: Codable, Sendable, Equatable {
     }
 }
 
+/// One search hit, before the frontend derives its display fields.
+public struct SearchHitRow: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let dailyDate: String?
+    public let preview: String
+    public let mtime: Int64
+    public let isPinned: Bool
+    public let ftsHighlightedTitle: String?
+    public let snippet: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case dailyDate = "dailyDate"
+        case preview = "preview"
+        case mtime = "mtime"
+        case isPinned = "isPinned"
+        case ftsHighlightedTitle = "ftsHighlightedTitle"
+        case snippet = "snippet"
+    }
+
+    public init(path: String, title: String, dailyDate: String?, preview: String, mtime: Int64, isPinned: Bool, ftsHighlightedTitle: String?, snippet: String?) {
+        self.path = path
+        self.title = title
+        self.dailyDate = dailyDate
+        self.preview = preview
+        self.mtime = mtime
+        self.isPinned = isPinned
+        self.ftsHighlightedTitle = ftsHighlightedTitle
+        self.snippet = snippet
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.preview = try container.decode(String.self, forKey: .preview)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+        self.isPinned = try container.decode(Bool.self, forKey: .isPinned)
+        self.ftsHighlightedTitle = try container.decodeIfPresent(String.self, forKey: .ftsHighlightedTitle)
+        self.snippet = try container.decodeIfPresent(String.self, forKey: .snippet)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(preview, forKey: .preview)
+        try container.encode(mtime, forKey: .mtime)
+        try container.encode(isPinned, forKey: .isPinned)
+        try container.encode(ftsHighlightedTitle, forKey: .ftsHighlightedTitle)
+        try container.encode(snippet, forKey: .snippet)
+    }
+}
+
+/// One search over the notes: free text plus filters.
+public struct SearchRequest: Codable, Sendable, Equatable {
+    public let text: String
+    public let titleKey: String
+    public let tagKeys: [String]
+    public let dailyOnly: Bool
+    public let notesOnly: Bool
+    public let pinnedOnly: Bool
+    public let linksToPath: String?
+    public let linkedFromPath: String?
+    public let updatedAfterMs: Double?
+    public let updatedBeforeMs: Double?
+    public let pinnedFirst: Bool
+    public let limit: UInt32?
+
+    private enum CodingKeys: String, CodingKey {
+        case text = "text"
+        case titleKey = "titleKey"
+        case tagKeys = "tagKeys"
+        case dailyOnly = "dailyOnly"
+        case notesOnly = "notesOnly"
+        case pinnedOnly = "pinnedOnly"
+        case linksToPath = "linksToPath"
+        case linkedFromPath = "linkedFromPath"
+        case updatedAfterMs = "updatedAfterMs"
+        case updatedBeforeMs = "updatedBeforeMs"
+        case pinnedFirst = "pinnedFirst"
+        case limit = "limit"
+    }
+
+    public init(text: String, titleKey: String, tagKeys: [String], dailyOnly: Bool, notesOnly: Bool, pinnedOnly: Bool, linksToPath: String?, linkedFromPath: String?, updatedAfterMs: Double?, updatedBeforeMs: Double?, pinnedFirst: Bool, limit: UInt32?) {
+        self.text = text
+        self.titleKey = titleKey
+        self.tagKeys = tagKeys
+        self.dailyOnly = dailyOnly
+        self.notesOnly = notesOnly
+        self.pinnedOnly = pinnedOnly
+        self.linksToPath = linksToPath
+        self.linkedFromPath = linkedFromPath
+        self.updatedAfterMs = updatedAfterMs
+        self.updatedBeforeMs = updatedBeforeMs
+        self.pinnedFirst = pinnedFirst
+        self.limit = limit
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.titleKey = try container.decode(String.self, forKey: .titleKey)
+        self.tagKeys = try container.decode([String].self, forKey: .tagKeys)
+        self.dailyOnly = try container.decode(Bool.self, forKey: .dailyOnly)
+        self.notesOnly = try container.decode(Bool.self, forKey: .notesOnly)
+        self.pinnedOnly = try container.decode(Bool.self, forKey: .pinnedOnly)
+        self.linksToPath = try container.decodeIfPresent(String.self, forKey: .linksToPath)
+        self.linkedFromPath = try container.decodeIfPresent(String.self, forKey: .linkedFromPath)
+        self.updatedAfterMs = try container.decodeIfPresent(Double.self, forKey: .updatedAfterMs)
+        self.updatedBeforeMs = try container.decodeIfPresent(Double.self, forKey: .updatedBeforeMs)
+        self.pinnedFirst = try container.decode(Bool.self, forKey: .pinnedFirst)
+        self.limit = try container.decodeIfPresent(UInt32.self, forKey: .limit)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(titleKey, forKey: .titleKey)
+        try container.encode(tagKeys, forKey: .tagKeys)
+        try container.encode(dailyOnly, forKey: .dailyOnly)
+        try container.encode(notesOnly, forKey: .notesOnly)
+        try container.encode(pinnedOnly, forKey: .pinnedOnly)
+        try container.encode(linksToPath, forKey: .linksToPath)
+        try container.encode(linkedFromPath, forKey: .linkedFromPath)
+        try container.encode(updatedAfterMs, forKey: .updatedAfterMs)
+        try container.encode(updatedBeforeMs, forKey: .updatedBeforeMs)
+        try container.encode(pinnedFirst, forKey: .pinnedFirst)
+        try container.encode(limit, forKey: .limit)
+    }
+}
+
 /// The search field of the top bar.
 public struct SearchState: Codable, Sendable, Equatable {
     public let placeholder: String
@@ -4472,6 +5188,135 @@ public enum SweepScope: String, Codable, Sendable, Equatable, CaseIterable {
     case ingested = "ingested"
 }
 
+/// One tag with the number of notes that carry it.
+public struct TagFacet: Codable, Sendable, Equatable {
+    public let tag: String
+    public let count: UInt32
+
+    private enum CodingKeys: String, CodingKey {
+        case tag = "tag"
+        case count = "count"
+    }
+
+    public init(tag: String, count: UInt32) {
+        self.tag = tag
+        self.count = count
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.tag = try container.decode(String.self, forKey: .tag)
+        self.count = try container.decode(UInt32.self, forKey: .count)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tag, forKey: .tag)
+        try container.encode(count, forKey: .count)
+    }
+}
+
+/// One task row with the fields of its note that the task list shows.
+public struct TaskRow: Codable, Sendable, Equatable {
+    public let notePath: String
+    public let astPath: String
+    public let markdown: String
+    public let breadcrumbs: String
+    public let checked: Bool
+    public let noteTitle: String
+    public let dailyDate: String?
+    public let isPinned: Bool
+    public let pinnedOrder: Double?
+    public let updatedAt: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case notePath = "notePath"
+        case astPath = "astPath"
+        case markdown = "markdown"
+        case breadcrumbs = "breadcrumbs"
+        case checked = "checked"
+        case noteTitle = "noteTitle"
+        case dailyDate = "dailyDate"
+        case isPinned = "isPinned"
+        case pinnedOrder = "pinnedOrder"
+        case updatedAt = "updatedAt"
+    }
+
+    public init(notePath: String, astPath: String, markdown: String, breadcrumbs: String, checked: Bool, noteTitle: String, dailyDate: String?, isPinned: Bool, pinnedOrder: Double?, updatedAt: Int64) {
+        self.notePath = notePath
+        self.astPath = astPath
+        self.markdown = markdown
+        self.breadcrumbs = breadcrumbs
+        self.checked = checked
+        self.noteTitle = noteTitle
+        self.dailyDate = dailyDate
+        self.isPinned = isPinned
+        self.pinnedOrder = pinnedOrder
+        self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.notePath = try container.decode(String.self, forKey: .notePath)
+        self.astPath = try container.decode(String.self, forKey: .astPath)
+        self.markdown = try container.decode(String.self, forKey: .markdown)
+        self.breadcrumbs = try container.decode(String.self, forKey: .breadcrumbs)
+        self.checked = try container.decode(Bool.self, forKey: .checked)
+        self.noteTitle = try container.decode(String.self, forKey: .noteTitle)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.isPinned = try container.decode(Bool.self, forKey: .isPinned)
+        self.pinnedOrder = try container.decodeIfPresent(Double.self, forKey: .pinnedOrder)
+        self.updatedAt = try container.decode(Int64.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notePath, forKey: .notePath)
+        try container.encode(astPath, forKey: .astPath)
+        try container.encode(markdown, forKey: .markdown)
+        try container.encode(breadcrumbs, forKey: .breadcrumbs)
+        try container.encode(checked, forKey: .checked)
+        try container.encode(noteTitle, forKey: .noteTitle)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(isPinned, forKey: .isPinned)
+        try container.encode(pinnedOrder, forKey: .pinnedOrder)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+/// One template.
+public struct TemplateEntry: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let mtime: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case mtime = "mtime"
+    }
+
+    public init(path: String, title: String, mtime: Int64) {
+        self.path = path
+        self.title = title
+        self.mtime = mtime
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(mtime, forKey: .mtime)
+    }
+}
+
 /// Captured text: one folded line the drain writes into the capture day's
 /// daily note.
 public struct TextCaptureEnvelope: Codable, Sendable, Equatable {
@@ -4712,6 +5557,234 @@ public struct WebAuthStartArgs: Codable, Sendable, Equatable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(payload, forKey: .payload)
+    }
+}
+
+/// One note as a wiki link suggestion candidate, found by an alias.
+public struct WikiAliasCandidate: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let titleKey: String
+    public let dailyDate: String?
+    public let mtime: Int64
+    public let alias: String
+    public let aliasKey: String
+    public let linkCount: UInt32
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case titleKey = "titleKey"
+        case dailyDate = "dailyDate"
+        case mtime = "mtime"
+        case alias = "alias"
+        case aliasKey = "aliasKey"
+        case linkCount = "linkCount"
+    }
+
+    public init(path: String, title: String, titleKey: String, dailyDate: String?, mtime: Int64, alias: String, aliasKey: String, linkCount: UInt32) {
+        self.path = path
+        self.title = title
+        self.titleKey = titleKey
+        self.dailyDate = dailyDate
+        self.mtime = mtime
+        self.alias = alias
+        self.aliasKey = aliasKey
+        self.linkCount = linkCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.titleKey = try container.decode(String.self, forKey: .titleKey)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+        self.alias = try container.decode(String.self, forKey: .alias)
+        self.aliasKey = try container.decode(String.self, forKey: .aliasKey)
+        self.linkCount = try container.decode(UInt32.self, forKey: .linkCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(titleKey, forKey: .titleKey)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(mtime, forKey: .mtime)
+        try container.encode(alias, forKey: .alias)
+        try container.encode(aliasKey, forKey: .aliasKey)
+        try container.encode(linkCount, forKey: .linkCount)
+    }
+}
+
+/// The notes that a wiki link query can suggest, before ranking.
+public struct WikiCandidates: Codable, Sendable, Equatable {
+    public let titles: [WikiTitleCandidate]
+    public let aliases: [WikiAliasCandidate]
+
+    private enum CodingKeys: String, CodingKey {
+        case titles = "titles"
+        case aliases = "aliases"
+    }
+
+    public init(titles: [WikiTitleCandidate], aliases: [WikiAliasCandidate]) {
+        self.titles = titles
+        self.aliases = aliases
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.titles = try container.decode([WikiTitleCandidate].self, forKey: .titles)
+        self.aliases = try container.decode([WikiAliasCandidate].self, forKey: .aliases)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(titles, forKey: .titles)
+        try container.encode(aliases, forKey: .aliases)
+    }
+}
+
+/// The notes that claim a wiki key in its strongest tier.
+public struct WikiClaimMatch: Codable, Sendable, Equatable {
+    public let tier: Int64
+    public let paths: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case tier = "tier"
+        case paths = "paths"
+    }
+
+    public init(tier: Int64, paths: [String]) {
+        self.tier = tier
+        self.paths = paths
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.tier = try container.decode(Int64.self, forKey: .tier)
+        self.paths = try container.decode([String].self, forKey: .paths)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tier, forKey: .tier)
+        try container.encode(paths, forKey: .paths)
+    }
+}
+
+/// The note that wins one wiki key.
+public struct WikiKeyWinner: Codable, Sendable, Equatable {
+    public let key: String
+    public let path: String
+    public let dailyDate: String?
+    public let claimCount: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case key = "key"
+        case path = "path"
+        case dailyDate = "dailyDate"
+        case claimCount = "claimCount"
+    }
+
+    public init(key: String, path: String, dailyDate: String?, claimCount: Int64) {
+        self.key = key
+        self.path = path
+        self.dailyDate = dailyDate
+        self.claimCount = claimCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.key = try container.decode(String.self, forKey: .key)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.claimCount = try container.decode(Int64.self, forKey: .claimCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(key, forKey: .key)
+        try container.encode(path, forKey: .path)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(claimCount, forKey: .claimCount)
+    }
+}
+
+/// One note as a wiki link suggestion candidate, found by its title.
+public struct WikiTitleCandidate: Codable, Sendable, Equatable {
+    public let path: String
+    public let title: String
+    public let titleKey: String
+    public let dailyDate: String?
+    public let mtime: Int64
+    public let linkCount: UInt32
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case title = "title"
+        case titleKey = "titleKey"
+        case dailyDate = "dailyDate"
+        case mtime = "mtime"
+        case linkCount = "linkCount"
+    }
+
+    public init(path: String, title: String, titleKey: String, dailyDate: String?, mtime: Int64, linkCount: UInt32) {
+        self.path = path
+        self.title = title
+        self.titleKey = titleKey
+        self.dailyDate = dailyDate
+        self.mtime = mtime
+        self.linkCount = linkCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.path = try container.decode(String.self, forKey: .path)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.titleKey = try container.decode(String.self, forKey: .titleKey)
+        self.dailyDate = try container.decodeIfPresent(String.self, forKey: .dailyDate)
+        self.mtime = try container.decode(Int64.self, forKey: .mtime)
+        self.linkCount = try container.decode(UInt32.self, forKey: .linkCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(title, forKey: .title)
+        try container.encode(titleKey, forKey: .titleKey)
+        try container.encode(dailyDate, forKey: .dailyDate)
+        try container.encode(mtime, forKey: .mtime)
+        try container.encode(linkCount, forKey: .linkCount)
+    }
+}
+
+/// One alias that resolves to its own note and to no other.
+public struct WikiWinningAlias: Codable, Sendable, Equatable {
+    public let notePath: String
+    public let alias: String
+
+    private enum CodingKeys: String, CodingKey {
+        case notePath = "notePath"
+        case alias = "alias"
+    }
+
+    public init(notePath: String, alias: String) {
+        self.notePath = notePath
+        self.alias = alias
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.notePath = try container.decode(String.self, forKey: .notePath)
+        self.alias = try container.decode(String.self, forKey: .alias)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notePath, forKey: .notePath)
+        try container.encode(alias, forKey: .alias)
     }
 }
 

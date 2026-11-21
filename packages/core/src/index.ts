@@ -572,7 +572,6 @@ export {
   type BacklinkContextPage,
   type BacklinkSourceCursor,
   type SnippetTask,
-  type DuplicateIdGroup,
   type NoteRow,
   type NoteListEntry,
   type NoteTagFacet,

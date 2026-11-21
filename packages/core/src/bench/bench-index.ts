@@ -82,7 +82,11 @@ function openGraphDatabase(path: string): DatabaseService {
       }
     })
   }
-  return { db: createDb(runQuery), runQuery }
+  return {
+    db: createDb(runQuery),
+    runQuery,
+    read: () => Promise.reject(new Error('the bench database answers SQL only')),
+  }
 }
 
 /**

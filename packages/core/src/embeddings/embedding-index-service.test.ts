@@ -463,11 +463,15 @@ describe('passageText', () => {
   })
 })
 
-const NOTES = [
-  { path: 'notes/a.md', markdown: '# A\n\nAlpha text.\n' },
-  { path: 'notes/b.md', markdown: '# B\n\nBeta text.\n' },
-  { path: 'templates/journal.md', markdown: '# Journal\n\nMood:\n' },
-]
+// Each note is indexed under the hash of its content: the index keeps only
+// chunks embedded from the note as it is indexed now.
+const NOTES = await Promise.all(
+  [
+    { path: 'notes/a.md', markdown: '# A\n\nAlpha text.\n' },
+    { path: 'notes/b.md', markdown: '# B\n\nBeta text.\n' },
+    { path: 'templates/journal.md', markdown: '# Journal\n\nMood:\n' },
+  ].map(async (note) => ({ ...note, fileHash: await sha256Hex(note.markdown) })),
+)
 
 /**
  * An embedding index whose chunk writes land in a database indexed with {@link NOTES}.

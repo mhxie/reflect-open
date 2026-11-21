@@ -23,6 +23,7 @@ mod graph;
 mod icloud;
 mod import;
 mod index;
+mod index_read;
 mod link_preview;
 mod settings;
 #[cfg(feature = "codegen")]
@@ -63,6 +64,13 @@ pub use index::{
     ChatConversation, ChatMessageRow, EmbeddedChunk, IndexTouch, IndexedAlias, IndexedClaim,
     IndexedEmail, IndexedLink, IndexedNote, IndexedTag, IndexedTask, LinkKind, MovedNoteAddress,
     NoteKind, NoteMoveRequest, ReconcileScan, ScanCandidate, ScanOrphan,
+};
+pub use index_read::{
+    Backlink, BacklinkPage, BacklinkSource, BacklinkSourceCursor, ChunkHash, ChunkHit,
+    DailyNoteRow, GraphStats, NoteFileFacts, NoteId, NoteListEntry, NotePrivacy, NoteRow,
+    PinnedNoteRow, RecentNoteRow, SearchHitRow, SearchRequest, TagFacet, TaskRow, TemplateEntry,
+    WikiAliasCandidate, WikiCandidates, WikiClaimMatch, WikiKeyWinner, WikiTitleCandidate,
+    WikiWinningAlias,
 };
 pub use link_preview::LinkPreviewHtml;
 pub use settings::SettingsDoc;

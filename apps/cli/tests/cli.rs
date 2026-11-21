@@ -12,9 +12,9 @@ use rusqlite::params;
 use tempfile::TempDir;
 
 use reflect_cli::hash::hash_content;
-use reflect_cli::keys::fold_key;
 use reflect_cli::note_file::parse_note_meta;
 use reflect_cli::paths::{daily_path, today_date};
+use reflect_index::text::keys::fold_key;
 use reflect_index_schema::cjk::cjk_column_text;
 
 /// `note_claims.tier` values (the desktop's `claim_tier`): lower wins.

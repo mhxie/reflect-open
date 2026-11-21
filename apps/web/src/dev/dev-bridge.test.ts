@@ -13,13 +13,6 @@ import {
 import { createDevAssetStore } from '@/dev/dev-asset-store.ts'
 import { createDevBridge } from '@/dev/dev-bridge.ts'
 import { createDevFileStore } from '@/dev/dev-file-store.ts'
-import { createDevIndexDb } from '@/dev/dev-index-db.ts'
-
-/**
- * The dev bridge's `index_reconcile_scan` mirrors the native scan in
- * `crates/index/src/scan.rs`; the mobile boot path calls it on every open,
- * so a drifted stand-in would rot the `?platform=ios` harness loudly.
- */
 
 function projection(path: string, mtime: number, fileHash: string): IndexedNote {
   return {
@@ -60,19 +53,20 @@ function projection(path: string, mtime: number, fileHash: string): IndexedNote 
 describe('dev bridge index_reconcile_scan', () => {
   it('classifies candidates and orphans like the native scan', async () => {
     const files = createDevFileStore({ 'notes/settled.md': '# Settled' })
-    const index = await createDevIndexDb()
-    const bridge = createDevBridge({ files, index, assets: createDevAssetStore() })
+    const bridge = createDevBridge({ files, assets: createDevAssetStore() })
+    const generation = await bridge.invoke('index_open', {})
+    const apply = (note: IndexedNote) => bridge.invoke('index_apply', { note, generation })
 
     // The seeded file's row matches its listed mtime and has settled.
     const settledMtime = files.list()[0]!.modifiedMs
-    index.applyNote(projection('notes/settled.md', settledMtime, 'settled-hash'))
+    await apply(projection('notes/settled.md', settledMtime, 'settled-hash'))
     // A row whose file is gone is an orphan.
-    index.applyNote(projection('notes/gone.md', 1_000, 'gone-hash'))
+    await apply(projection('notes/gone.md', 1_000, 'gone-hash'))
     // A file with no row is an arrival candidate (fresh mtime, so it would be
     // a candidate on both grounds).
     files.write('notes/new.md', '# New')
 
-    const scan = (await bridge.invoke('index_reconcile_scan', { generation: 1 })) as {
+    const scan = (await bridge.invoke('index_reconcile_scan', { generation })) as {
       total: number
       candidates: Array<{ path: string; storedHash: string | null }>
       orphans: Array<{ path: string; storedHash: string }>
@@ -95,7 +89,6 @@ describe('dev bridge desktop boot surface', () => {
     })
     const bridge = createDevBridge({
       files,
-      index: await createDevIndexDb(),
       assets: createDevAssetStore(),
     })
 
@@ -123,7 +116,6 @@ describe('dev bridge background task parity', () => {
   it('reports native background assertions as unavailable and accepts cleanup', async () => {
     const bridge = createDevBridge({
       files: createDevFileStore({}),
-      index: await createDevIndexDb(),
       assets: createDevAssetStore(),
     })
 
@@ -138,7 +130,6 @@ describe('dev bridge on-device transport', () => {
   it('says model servers on this Mac need the desktop app instead of reaching them', async () => {
     const bridge = createDevBridge({
       files: createDevFileStore({}),
-      index: await createDevIndexDb(),
       assets: createDevAssetStore(),
     })
 
@@ -161,7 +152,6 @@ describe('dev bridge note_create parity', () => {
       const files = createDevFileStore({})
       const bridge = createDevBridge({
         files,
-        index: await createDevIndexDb(),
         assets: createDevAssetStore(),
       })
 
@@ -183,7 +173,6 @@ describe('dev bridge note_create parity', () => {
     const files = createDevFileStore({ 'notes/a.md': '# Disk\n' })
     const bridge = createDevBridge({
       files,
-      index: await createDevIndexDb(),
       assets: createDevAssetStore(),
     })
 
@@ -213,7 +202,6 @@ describe('dev bridge note_create parity', () => {
     const originalModifiedMs = files.list()[0]!.modifiedMs
     const bridge = createDevBridge({
       files,
-      index: await createDevIndexDb(),
       assets: createDevAssetStore(),
     })
 
@@ -234,7 +222,6 @@ describe('dev bridge note_create parity', () => {
     })
     const bridge = createDevBridge({
       files,
-      index: await createDevIndexDb(),
       assets: createDevAssetStore(),
     })
 
@@ -254,20 +241,19 @@ describe('dev bridge note_create parity', () => {
 })
 
 describe('dev bridge note_write parity', () => {
-  async function bridgeOver(initial: Record<string, string>) {
+  function bridgeOver(initial: Record<string, string>) {
     const files = createDevFileStore(initial)
     return {
       files,
       bridge: createDevBridge({
         files,
-        index: await createDevIndexDb(),
         assets: createDevAssetStore(),
       }),
     }
   }
 
   it('refuses a write that names no contents to replace', async () => {
-    const { files, bridge } = await bridgeOver({ 'notes/plan.md': '# Plan\n' })
+    const { files, bridge } = bridgeOver({ 'notes/plan.md': '# Plan\n' })
 
     for (const check of [{}, { checkContents: false, expectedContents: '# Plan\n' }]) {
       await expect(
@@ -278,7 +264,7 @@ describe('dev bridge note_write parity', () => {
   })
 
   it('writes only over the contents the caller names', async () => {
-    const { files, bridge } = await bridgeOver({ 'notes/plan.md': '# Plan\n' })
+    const { files, bridge } = bridgeOver({ 'notes/plan.md': '# Plan\n' })
     const write = (path: string, expectedContents: string | null) => {
       return bridge.invoke('note_write', {
         path,
@@ -307,7 +293,6 @@ describe('dev bridge assets', () => {
     const assets = createDevAssetStore()
     const bridge = createDevBridge({
       files: createDevFileStore({}),
-      index: await createDevIndexDb(),
       assets,
     })
     const assetStore = createAssetStoreService({

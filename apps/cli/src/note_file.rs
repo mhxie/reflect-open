@@ -14,8 +14,8 @@ use reflect_frontmatter::{
 use reflect_graph_paths::{LocalOnlyFolders, eviction_placeholder};
 
 use crate::error::CliError;
-use crate::keys::fold_key;
 use crate::paths::date_from_daily_path;
+use reflect_index::text::keys::fold_key;
 
 /// A note's derived metadata, as the TS indexer would compute it.
 #[derive(Debug)]

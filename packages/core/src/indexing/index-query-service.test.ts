@@ -30,7 +30,7 @@ describe('getPinnedNotes', () => {
       { path: 'notes/c.md', title: 'aardvark', dailyDate: null, pinnedOrder: null },
       { path: 'notes/b.md', title: 'Beta', dailyDate: null, pinnedOrder: null },
     ])
-    expect(database.getQueries()).toHaveLength(1)
+    expect(database.getReads()).toHaveLength(1)
   })
 })
 
@@ -66,43 +66,16 @@ describe('getNote', () => {
   })
 })
 
-describe('getDuplicateNoteIds', () => {
-  it('returns empty without a second query when no id is duplicated', async () => {
-    const database = seeded([
-      { path: 'notes/a.md', markdown: '---\nid: one\n---\n# A\n' },
-      { path: 'notes/b.md', markdown: '---\nid: two\n---\n# B\n' },
-      { path: 'notes/c.md', markdown: '# C\n' },
-    ])
-
-    await expect(createIndexQueryService({ database }).getDuplicateNoteIds()).resolves.toEqual([])
-    expect(database.getQueries()).toHaveLength(1)
-  })
-
-  it('groups every path claiming a duplicated id, ordered', async () => {
-    const database = seeded([
-      { path: 'notes/b.md', markdown: '---\nid: dup-1\n---\n# B\n' },
-      { path: 'notes/a.md', markdown: '---\nid: dup-1\n---\n# A\n' },
-      { path: 'notes/c.md', markdown: '---\nid: unique\n---\n# C\n' },
-    ])
-
-    await expect(createIndexQueryService({ database }).getDuplicateNoteIds()).resolves.toEqual([
-      { id: 'dup-1', paths: ['notes/a.md', 'notes/b.md'] },
-    ])
-  })
-})
-
 describe('getNoteIdsByPath', () => {
-  it('asks nothing for no paths', async () => {
+  it('returns no ids for no paths', async () => {
     const database = createNodeTestDatabaseService()
     await expect(createIndexQueryService({ database }).getNoteIdsByPath([])).resolves.toEqual(
       new Map(),
     )
-    expect(database.getQueries()).toEqual([])
   })
 
-  it('chunks the IN clause under SQLite variable limits and merges the results', async () => {
-    // A mass external move can orphan thousands of paths in one reconcile —
-    // a single statement would blow the bound-variable budget.
+  it('reads the ids of more paths than SQLite has bound variables', async () => {
+    // A mass external move can orphan thousands of paths in one reconcile.
     const database = seeded([
       { path: 'notes/0.md', markdown: '---\nid: id-0\n---\n# Zero\n' },
       { path: 'notes/500.md', markdown: '---\nid: id-500\n---\n# Five hundred\n' },
@@ -112,7 +85,6 @@ describe('getNoteIdsByPath', () => {
 
     const ids = await createIndexQueryService({ database }).getNoteIdsByPath(paths)
 
-    expect(database.getQueries().map((query) => query.params.length)).toEqual([500, 500, 200])
     expect(ids).toEqual(
       new Map([
         ['notes/0.md', 'id-0'],
