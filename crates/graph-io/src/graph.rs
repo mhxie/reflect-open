@@ -13,12 +13,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
-
 use reflect_graph_paths::{
     CatalogScope, ExternalLinks, ExternalStore, LocalOnlyFolders, eviction_placeholder,
 };
 use reflect_types::{AppError, AppResult, FileMeta};
+pub use reflect_types::{
+    GraphInfo, LocalNoteRead, NoteCreateOutcome, NoteWriteOutcome, ShareableNoteRead,
+    VaultScanStats,
+};
 
 use crate::graph_lock::with_graph_lock;
 use crate::io::{self, AtomicCreateOutcome, atomic_write, modified_ms};
@@ -145,48 +147,6 @@ impl GraphInner {
 /// Tauri-managed state holding the currently open graph (root + generation).
 #[derive(Default)]
 pub struct GraphState(pub Mutex<GraphInner>);
-
-/// Identity of an open graph, returned to the frontend.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphInfo {
-    /// Absolute path of the graph root.
-    pub root: String,
-    /// Display name (the root folder name).
-    pub name: String,
-    /// Open-session generation; mutating file commands must echo it back.
-    pub generation: u64,
-    /// The local-only folder names configured for this graph (empty when
-    /// none): notes inside them are private everywhere, and read-only unless
-    /// every one of these names on their path is also editable.
-    pub local_only_folders: Vec<String>,
-    /// The local-only folder names this graph edits in place (a subset of
-    /// `local_only_folders`; empty when every local-only folder is
-    /// read-only, which is all a phone, an unknown configuration, or a too
-    /// broad rawRoot ever gets).
-    pub local_only_editable_folders: Vec<String>,
-    /// Problems with that configuration the user must see (dropped names,
-    /// an unusable rawRoot, an unreadable settings file); empty when none.
-    pub local_only_warnings: Vec<String>,
-    /// Problems with the graph's backup settings the user must see (a size
-    /// limit out of range, a malformed accepted history root, a key naming a
-    /// missing folder); empty when none.
-    pub backup_warnings: Vec<String>,
-}
-
-/// Result of claiming a note path without overwriting an existing file.
-#[derive(Debug, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "kind"
-)]
-pub enum NoteCreateOutcome {
-    /// The path was free and now contains the supplied bytes.
-    Created { modified_ms: Option<u64> },
-    /// A file or iCloud eviction placeholder already owns the path.
-    Collision,
-}
 
 // ---- state accessors --------------------------------------------------------
 
@@ -467,53 +427,6 @@ pub fn ensure_shareable_note_path(path: &str) -> AppResult<()> {
     Err(AppError::traversal(format!(
         "not a shareable note path: {path}"
     )))
-}
-
-/// How a local note read (the desktop `note_read_local` command) found the
-/// note on disk.
-#[derive(Debug, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "kind"
-)]
-pub enum LocalNoteRead {
-    /// The bytes are local; here they are. `local_only` reports whether the
-    /// note lies in a local-only folder, decided by the entry the path
-    /// resolves to: bulk passes fold text across notes (asset descriptions
-    /// into the notes that embed them) and must not carry it out of one.
-    Content { content: String, local_only: bool },
-    /// The note is iCloud-evicted (a dataless file, or an `.icloud` stub in
-    /// the logical path's place). Reading it would block on an on-demand
-    /// download — this command refuses instead.
-    Evicted,
-}
-
-/// How a shareable note read (the desktop `note_read_shareable` command)
-/// found the note.
-#[derive(Debug, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "kind"
-)]
-pub enum ShareableNoteRead {
-    /// The note may leave this machine; here are its bytes.
-    Content { content: String },
-    /// The note lies in a local-only folder, by its requested path or by the
-    /// entry the filesystem resolves it to. Nothing was read.
-    LocalOnly,
-}
-
-/// What a note write left on disk.
-#[derive(Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NoteWriteOutcome {
-    /// The note's on-disk mtime (epoch ms) after the call.
-    pub modified_ms: Option<u64>,
-    /// The full note text now on disk, when the note had moved past the
-    /// expected revision and the file holds something other than `contents`.
-    pub merged: Option<String>,
 }
 
 /// A checked write: the note at `rel` must still hold `expected` (`None`: no
@@ -929,17 +842,6 @@ pub fn move_to_graph_trash(root: &Path, abs: &Path) -> AppResult<()> {
     }
     fs::rename(abs, target)?;
     Ok(())
-}
-
-/// Counts from the vault catalog. `skipped` is what the walk refused or
-/// failed to list (unreadable directories, symlinks, default-pruned trees) —
-/// the number that keeps "why isn't my file showing up" diagnosable.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultScanStats {
-    pub notes: u32,
-    pub attachments: u32,
-    pub skipped: u32,
 }
 
 /// The same note listing as the desktop `list_files` command, callable with a

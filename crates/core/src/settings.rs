@@ -11,16 +11,12 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tempfile::NamedTempFile;
 
-use reflect_types::{AppError, AppResult};
+use reflect_types::{AppError, AppResult, SettingsDoc};
 
 use crate::Core;
-
-/// The settings document: a JSON object keyed by setting name. `Map` (not
-/// `Value`) so a non-object payload is rejected at deserialization.
-pub type SettingsDoc = Map<String, Value>;
 
 #[cfg(test)]
 thread_local! {
@@ -168,7 +164,7 @@ mod tests {
     use super::*;
     use crate::Reply;
     use crate::test_support::core;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use tempfile::tempdir;
 
     /// The command itself goes through the key-preserving save: an app copy

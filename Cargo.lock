@@ -5339,7 +5339,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "dirs 7.0.0",
- "serde",
+ "reflect-types",
  "serde_json",
  "tempfile",
 ]
@@ -5416,7 +5416,6 @@ dependencies = [
  "reflect-core",
  "reflect-graph-io",
  "reflect-types",
- "serde",
  "serde_json",
  "tempfile",
 ]
@@ -5496,7 +5495,6 @@ dependencies = [
  "reflect-index-schema",
  "reflect-types",
  "rusqlite",
- "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
@@ -6481,6 +6479,7 @@ checksum = "3fa60a95f1bed059a9e9b1f4052dfa8fee47813c429223c8590b338f719ac12e"
 dependencies = [
  "chrono",
  "rustc_version",
+ "serde_json",
  "specta-macros",
  "uuid",
 ]

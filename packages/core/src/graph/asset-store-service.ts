@@ -236,11 +236,7 @@ class AssetStoreServiceImpl implements AssetStoreService {
     if (!ipc.hasBinaryTransport) {
       return base64ToBytes(await this.readBase64(path, generation))
     }
-    const buffer = await ipc.call(
-      'asset_read_binary',
-      { path, generation },
-      z.instanceof(ArrayBuffer),
-    )
+    const buffer = await ipc.callBytes('asset_read_binary', { path, generation })
     return new Uint8Array(buffer)
   }
 
@@ -341,12 +337,9 @@ class AssetStoreServiceImpl implements AssetStoreService {
     const id = await ipc.call('asset_upload_begin', { generation }, z.string())
     try {
       for (const chunk of blobChunks(contents, CHUNK_BYTES)) {
-        await ipc.callBinary(
-          'asset_upload_append',
-          new Uint8Array(await chunk.arrayBuffer()),
-          { [UPLOAD_ID_HEADER]: id },
-          voidSchema,
-        )
+        await ipc.callBinary('asset_upload_append', new Uint8Array(await chunk.arrayBuffer()), {
+          [UPLOAD_ID_HEADER]: id,
+        })
       }
       return await commit(id)
     } catch (error) {

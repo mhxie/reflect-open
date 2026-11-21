@@ -18,15 +18,15 @@ mod settings;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use reflect_git::{
-    CommitOutcome, CommitPolicy, DisplacedFile, GitCredential, GitStatus, MAX_FILE_BYTES,
-    PullOutcome, PullPolicy, PushOutcome, RemoteDelta, RemoteTip,
-};
+use reflect_git::{CommitPolicy, MAX_FILE_BYTES, PullPolicy};
 use reflect_graph_io::{
     GraphState, accepted_history_roots, backup_max_file_bytes, external_links, graph_for_sync,
     invalidate_file_catalog, root_for_generation, with_graph_lock,
 };
-use reflect_types::AppResult;
+use reflect_types::{
+    AppResult, CommitOutcome, DisplacedFile, GitCredential, GitStatus, PullOutcome, PushOutcome,
+    RemoteDelta, RemoteTip,
+};
 use serde::Serialize;
 
 use crate::Core;

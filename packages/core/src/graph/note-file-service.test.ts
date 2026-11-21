@@ -34,7 +34,10 @@ describe('createNoteFileService', () => {
     await expect(noteFile.exists('notes/a.md')).resolves.toBe(true)
     expect(ipc.calls()).toEqual([
       { command: 'note_read', args: { path: 'notes/a.md', generation: 4 } },
-      { command: 'note_read_local', args: { path: 'notes/a.md', generation: 4 } },
+      {
+        command: 'note_read_local',
+        args: { path: 'notes/a.md', generation: 4, sharing: null },
+      },
       { command: 'note_exists', args: { path: 'notes/a.md' } },
     ])
   })
@@ -149,7 +152,7 @@ describe('createNoteFileService', () => {
     expect(batches).toEqual([])
   })
 
-  it('validates the listings', async () => {
+  it('returns the listings', async () => {
     const entry = { path: 'notes/a.md', size: 2, modifiedMs: 5 }
     const { ipc, noteFile } = setup(
       createTestIpcBridgeService({
@@ -171,9 +174,6 @@ describe('createNoteFileService', () => {
       skipped: 2,
     })
     expect(ipc.calls()[2]).toEqual({ command: 'dir_list', args: { dir: 'notes', generation: 3 } })
-
-    ipc.onCommand('list_files', () => [{ path: 'notes/a.md' }])
-    await expect(noteFile.listNotes(3)).rejects.toMatchObject({ kind: 'parse' })
   })
 
   it('keeps where an external attachment is and refuses an unknown answer', async () => {

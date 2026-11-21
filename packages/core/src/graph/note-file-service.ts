@@ -228,7 +228,7 @@ class NoteFileServiceImpl implements NoteFileService {
   ): Promise<LocalNoteRead> {
     return await this.#deps.ipc.call(
       'note_read_local',
-      { path, generation, sharing: options.sharing },
+      { path, generation, sharing: options.sharing ?? null },
       localNoteReadSchema,
     )
   }

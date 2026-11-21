@@ -15,7 +15,6 @@ native = ["reflect-index-schema/vec"]
 # `hooks` adds the authorizer API that locks the read-only `db_query` bridge
 # down to pure reads (deny ATTACH/DETACH/PRAGMA); see `query.rs`.
 rusqlite = { workspace = true, features = ["hooks"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 sha2 = { workspace = true }

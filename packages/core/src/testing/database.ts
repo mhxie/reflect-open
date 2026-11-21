@@ -191,7 +191,7 @@ function insertProjection(database: DatabaseSync, indexed: IndexedNote): void {
       indexed.path,
       task.astPath,
       task.markdown,
-      JSON.stringify(task.breadcrumbs),
+      JSON.stringify(task.breadcrumbs ?? []),
       Number(task.checked),
       task.dueDate,
     )

@@ -12,8 +12,7 @@ use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use hf_hub::Cache;
 use hf_hub::api::Progress;
 use hf_hub::api::sync::ApiBuilder;
-use reflect_types::{AppError, AppResult};
-use serde::{Deserialize, Serialize};
+use reflect_types::{AppError, AppResult, EmbedProgress, EmbedStatus, TextRole};
 
 use crate::{Core, Host};
 
@@ -64,15 +63,6 @@ const TOKENIZER_FILES: [&str; 4] = [
     "tokenizer_config.json",
 ];
 
-/// Whether a text is a search query or a stored passage; the models that were
-/// trained with prefixes embed the two differently.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum TextRole {
-    Query,
-    #[default]
-    Passage,
-}
 /// ONNX Runtime intra-op threads. The default is one per logical CPU, and the
 /// workers spin-wait between ops. A call embeds one note (two or three
 /// chunks), so a large pool mostly spins.
@@ -81,41 +71,6 @@ const INTRA_OP_THREADS: usize = 2;
 /// default of 256 needs about 17 GB for a 300 KB note), and the freed memory
 /// stays in the process. One text keeps the peak near the model's own size.
 const EMBED_BATCH_SIZE: usize = 1;
-
-/// Byte counts for an active model download. Absent until the download
-/// starts (cache probing, or a cached model that skips downloading); after
-/// the last byte it stays at 100% through the model-load phase.
-#[derive(Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ByteProgress {
-    pub downloaded: u64,
-    pub total: u64,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "status"
-)]
-pub enum EmbedStatus {
-    /// No model loaded yet; `embed_ensure` will download/load it.
-    Uninitialized,
-    /// Download/load in progress (first run downloads ~90MB). The runtime
-    /// keeps the latest byte counts, so polls and `embed:status` events
-    /// report the same progress.
-    Loading {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        progress: Option<ByteProgress>,
-    },
-    /// `embed_texts` is ready; `model` is recorded per vector (rebuild key)
-    /// and `dims` is the width its vector table must have.
-    Ready { model: String, dims: usize },
-    /// Load failed; semantic search is unavailable (lexical still works).
-    Failed { message: String },
-    /// This CPU cannot run ONNX Runtime (see `cpu_supported`).
-    Unsupported,
-}
 
 /// A loaded model and what callers need to know about it.
 struct Loaded {
@@ -131,7 +86,7 @@ enum Runtime {
     #[default]
     Uninitialized,
     Loading {
-        progress: Option<ByteProgress>,
+        progress: Option<EmbedProgress>,
     },
     Ready(Arc<Loaded>),
     Failed(String),
@@ -187,7 +142,7 @@ fn emit_status(host: &dyn Host, status: &EmbedStatus) {
 /// (e.g. a UI surface mounted mid-download) reports the same bytes as the
 /// `embed:status` events. Only an in-flight load is updated — by the time a
 /// stale progress callback could land, the state owns a terminal status.
-fn store_progress(state: &Mutex<Runtime>, progress: ByteProgress) {
+fn store_progress(state: &Mutex<Runtime>, progress: EmbedProgress) {
     let Ok(mut runtime) = state.lock() else {
         return;
     };
@@ -214,7 +169,7 @@ struct DownloadState {
 impl DownloadState {
     fn emit(&mut self) {
         self.emitted = self.downloaded;
-        let progress = ByteProgress {
+        let progress = EmbedProgress {
             downloaded: self.downloaded,
             total: self.total,
         };

@@ -201,8 +201,6 @@ export interface EmbeddingIndexService {
   follow(options: EmbeddingFollowOptions): Unlisten
 }
 
-const voidSchema = z.null()
-
 export interface EmbeddingIndexServiceDeps {
   readonly ipc: IpcBridgeService
   readonly embeddingRuntime: EmbeddingRuntimeService
@@ -363,7 +361,7 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
   }
 
   async removeNote(path: string, generation: number): Promise<void> {
-    await this.#deps.ipc.call('embed_remove', { path, generation }, voidSchema)
+    await this.#deps.ipc.call('embed_remove', { path, generation })
   }
 
   async prepareIndex(model: string, dims: number, generation: number): Promise<boolean> {
@@ -484,7 +482,7 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
    * Rust drops a set whose source hashes no longer match the note's row.
    */
   async #applyChunks(path: string, chunks: EmbedChunkPayload[], generation: number): Promise<void> {
-    await this.#deps.ipc.call('embed_apply', { path, chunks, generation }, voidSchema)
+    await this.#deps.ipc.call('embed_apply', { path, chunks, generation })
   }
 
   async #backfillNotes(

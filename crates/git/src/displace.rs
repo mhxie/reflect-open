@@ -58,7 +58,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use git2::{Index, Tree};
-use serde::Serialize;
+use reflect_types::DisplacedFile;
 
 use super::paths::fold;
 
@@ -69,26 +69,6 @@ const THIS_DEVICE: &str = "this device";
 /// Names tried for one copy before the pull gives up.
 #[cfg_attr(not(unix), allow(dead_code))]
 const MAX_NAME_PROBES: u32 = 1000;
-
-/// One of this device's entries a pull moved out of a path it wrote.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DisplacedFile {
-    /// Where the entry was: the graph-relative path the pull wrote, spelled
-    /// as the entry was on disk (the spelling the index and open editors
-    /// know it by).
-    pub from: String,
-    /// Where the entry is now (`stem (this device).ext`).
-    pub to: String,
-    /// The moved bytes are a note whose frontmatter locks it or can't be
-    /// read: the backup keeps such a note out once withholding lands.
-    pub kept_out: bool,
-    /// The entry was tracked: its uncommitted bytes differed from the index.
-    pub tracked: bool,
-    /// The incoming note carries another frontmatter id than the moved one:
-    /// a different note took the path, rather than another version of it.
-    pub different_note: bool,
-}
 
 /// What a displacement scan decided.
 pub(super) enum Displacement {
@@ -208,10 +188,11 @@ mod walk {
     use reflect_graph_paths::{ExternalLinks, is_safe_visible};
     use reflect_types::{AppError, AppResult};
 
-    use super::super::merge::{ChangeKind, ChangedFile, PullPolicy};
+    use super::super::merge::PullPolicy;
     use super::{
         DisplacedFile, Displacement, MAX_NAME_PROBES, THIS_DEVICE, copy_name, fold, taken_paths,
     };
+    use reflect_types::{ChangeKind, ChangedFile};
 
     const MODE_TYPE_MASK: u32 = 0o170_000;
     const MODE_FILE: u32 = 0o100_000;

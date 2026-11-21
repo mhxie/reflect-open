@@ -33,7 +33,6 @@ const fileChangeSchema = z.object({
   reread: z.boolean().optional(),
 }) satisfies z.ZodType<WireFileChange>
 const fileChangesSchema = z.array(fileChangeSchema)
-const voidSchema = z.null()
 
 /**
  * A single tracked change: the watcher's wire shape, plus `reread`, which
@@ -187,11 +186,11 @@ class FileChangeServiceImpl implements FileChangeService {
   }
 
   async startWatcher(): Promise<void> {
-    await this.#deps.ipc.call('watch_start', {}, voidSchema)
+    await this.#deps.ipc.call('watch_start', {})
   }
 
   async stopWatcher(): Promise<void> {
-    await this.#deps.ipc.call('watch_stop', {}, voidSchema)
+    await this.#deps.ipc.call('watch_stop', {})
   }
 
   #listenNative(event: string, handler: (payload: unknown) => void): Unlisten {

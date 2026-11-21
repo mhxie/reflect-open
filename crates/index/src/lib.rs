@@ -25,14 +25,12 @@ mod session;
 mod tests;
 mod write;
 
-pub use chat_write::{ChatConversation, ChatMessageRow};
 #[cfg(any(feature = "native", test))]
 pub use connections::FileIndexConnections;
-pub use embed_write::EmbeddedChunk;
 #[cfg(any(feature = "native", test))]
 pub use local_only_record::{LocalOnlyRecord, recorded_local_only_folders};
-pub use scan::{ReconcileScan, ScanCandidate, ScanOrphan};
-pub use session::{
-    Applied, IndexConnections, IndexSession, IndexTouch, LocalOnlyScope, NoteMoveRequest,
+pub use reflect_types::{
+    ChatConversation, ChatMessageRow, EmbeddedChunk, IndexTouch, IndexedNote, MovedNoteAddress,
+    NoteMoveRequest, ReconcileScan, ScanCandidate, ScanOrphan,
 };
-pub use write::{IndexedNote, MovedNoteAddress};
+pub use session::{Applied, IndexConnections, IndexSession, LocalOnlyScope};

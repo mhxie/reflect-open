@@ -1,3 +1,4 @@
+import type { IndexTouch } from '@reflect/types'
 import { isIsoDate } from '@reflect/utils'
 import { AppError } from '../errors.ts'
 import { noteBasenameKey } from '../graph/note-reference.ts'
@@ -7,7 +8,6 @@ import {
   createIndexApplyBatchWriter,
   createMtimeTouchBatchWriter,
   type IndexApplyBatch,
-  type IndexedNoteTouch,
   type IndexStoreService,
   type MtimeTouchBatch,
   type SkippedIndexedNote,
@@ -42,7 +42,7 @@ export type IndexStoreCall =
   | { readonly method: 'reconcileScan'; readonly generation: number }
   | {
       readonly method: 'touch'
-      readonly entries: readonly IndexedNoteTouch[]
+      readonly entries: readonly IndexTouch[]
       readonly generation: number
     }
   | {
@@ -172,7 +172,7 @@ class TestIndexStoreServiceImpl implements TestIndexStoreService {
     })
   }
 
-  touch(entries: readonly IndexedNoteTouch[], writeGeneration: number): Promise<void> {
+  touch(entries: readonly IndexTouch[], writeGeneration: number): Promise<void> {
     return Promise.try(() => {
       this.#record({ method: 'touch', entries: [...entries], generation: writeGeneration })
     })

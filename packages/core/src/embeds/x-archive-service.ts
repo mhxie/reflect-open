@@ -121,7 +121,7 @@ class XArchiveServiceImpl implements XArchiveService {
     if (!isXArchiveAssetPath(assetPath)) return []
     return await this.#deps.ipc.call(
       'x_archive_owners',
-      { assetPath, generation },
+      { assetPath, generation: generation ?? null },
       z.array(z.string()),
     )
   }

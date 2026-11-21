@@ -8,11 +8,11 @@
 
 use std::sync::Arc;
 
-use reflect_index::{
-    Applied, ChatConversation, ChatMessageRow, EmbeddedChunk, FileIndexConnections, IndexTouch,
-    IndexedNote, LocalOnlyScope, MovedNoteAddress, NoteMoveRequest, ReconcileScan,
+use reflect_index::{Applied, FileIndexConnections, LocalOnlyScope};
+use reflect_types::{
+    AppResult, ChatConversation, ChatMessageRow, EmbeddedChunk, IndexTouch, IndexedNote,
+    MovedNoteAddress, NoteMoveRequest, ReconcileScan,
 };
-use reflect_types::AppResult;
 use serde_json::{Map, Value};
 
 use crate::{Core, background_task};
@@ -151,7 +151,7 @@ impl Core {
         self.spawn_blocking(move || {
             let started = std::time::Instant::now();
             let Some((root, local_only)) = core.index.root_for_generation(generation)? else {
-                return Ok(ReconcileScan::empty());
+                return Ok(ReconcileScan::default());
             };
             let walk_started = std::time::Instant::now();
             let files = reflect_graph_io::indexable_note_files(&root, local_only.as_deref());

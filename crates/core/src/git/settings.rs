@@ -25,7 +25,8 @@ use std::path::Path;
 use git2::Oid;
 use reflect_git::{ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY, MAX_FILE_BYTES};
 
-use crate::settings::{GraphSection, SettingsDoc, graph_section};
+use crate::settings::{GraphSection, graph_section};
+use reflect_types::SettingsDoc;
 
 /// The settings-document key holding every graph's backup size limit.
 pub(crate) const MAX_FILE_SIZE_SETTINGS_KEY: &str = "backupMaxFileMiB";

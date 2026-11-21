@@ -1,4 +1,5 @@
 import { returnNull } from '@ocavue/utils'
+import type { AssetReadBinaryArgs } from '@reflect/types'
 import type { LoggerService } from '../ports/logger-service.ts'
 import { createTestLoggerService } from './logger.ts'
 import { AppError } from '../errors.ts'
@@ -13,15 +14,6 @@ import type { Unlisten } from '../unlisten.ts'
 
 type CommandHandler = (args: Record<string, unknown>) => unknown
 type BinaryCommandHandler = (body: Uint8Array, headers: Record<string, string>) => unknown
-
-/**
- * Commands every test transport answers unless a test replaces them: the
- * CLI search socket the main window opens on mount (`SearchIpcService.start`).
- */
-const DEFAULT_COMMANDS: Readonly<Record<string, CommandHandler>> = {
-  search_ipc_start: returnNull,
-  search_ipc_stop: returnNull,
-}
 
 export interface TestIpcBridgeService extends IpcBridgeService {
   /**
@@ -49,6 +41,15 @@ export interface TestIpcBridgeServiceOptions {
    */
   pluginEvents?: boolean | undefined
   logger?: LoggerService | undefined
+}
+
+/**
+ * Commands every test transport answers unless a test replaces them: the
+ * CLI search socket the main window opens on mount (`SearchIpcService.start`).
+ */
+const DEFAULT_COMMANDS: Readonly<Record<string, CommandHandler>> = {
+  search_ipc_start: returnNull,
+  search_ipc_stop: returnNull,
 }
 
 class TestIpcTransport implements IpcBridge {
@@ -164,6 +165,7 @@ class TestIpcBridgeServiceImpl implements TestIpcBridgeService {
 
   readonly transport: IpcBridge
   readonly hasBinaryTransport: boolean
+  readonly call: IpcBridgeService['call']
 
   constructor(options: TestIpcBridgeServiceOptions | undefined) {
     this.#transport = new TestIpcTransport(options)
@@ -173,23 +175,19 @@ class TestIpcBridgeServiceImpl implements TestIpcBridgeService {
       logger: options?.logger ?? createTestLoggerService(),
     })
     this.hasBinaryTransport = this.#inner.hasBinaryTransport
+    this.call = this.#inner.call.bind(this.#inner)
   }
 
-  call<TOutput>(
-    command: string,
-    args: Record<string, unknown>,
-    schema: ZodType<TOutput, unknown>,
-  ): Promise<TOutput> {
-    return this.#inner.call(command, args, schema)
+  callBytes(command: 'asset_read_binary', args: AssetReadBinaryArgs): Promise<ArrayBuffer> {
+    return this.#inner.callBytes(command, args)
   }
 
-  callBinary<TOutput>(
-    command: string,
+  callBinary(
+    command: 'asset_upload_append',
     body: Uint8Array,
     headers: Record<string, string>,
-    schema: ZodType<TOutput, unknown>,
-  ): Promise<TOutput> {
-    return this.#inner.callBinary(command, body, headers, schema)
+  ): Promise<void> {
+    return this.#inner.callBinary(command, body, headers)
   }
 
   listen(event: string, handler: (payload: unknown) => void): Promise<Unlisten> {

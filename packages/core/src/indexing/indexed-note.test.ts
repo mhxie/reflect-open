@@ -5,12 +5,7 @@ import {
   NO_LOCAL_ONLY_FOLDERS,
 } from '../graph/local-only.ts'
 import { noteBodyHash, parseNote } from '../markdown/index.ts'
-import {
-  buildIndexedNote,
-  CLAIM_TIER,
-  indexedNoteSchema,
-  PROJECTION_VERSION,
-} from './indexed-note.ts'
+import { buildIndexedNote, CLAIM_TIER, PROJECTION_VERSION } from './indexed-note.ts'
 
 describe('buildIndexedNote', () => {
   it('carries the projection version that rebuilds heading-chain task breadcrumbs', () => {
@@ -455,19 +450,6 @@ describe('buildIndexedNote', () => {
       source,
     })
     expect(indexed.tasks[0]?.dueDate).toBe('2026-06-20')
-  })
-
-  it('produces a payload that satisfies the cross-language contract schema', () => {
-    // Guards the TS half of the TS↔Rust `IndexedNote` contract: if a field is
-    // dropped or mistyped here, the schema parse fails before it can desync from
-    // the serde struct in db.rs.
-    const source = '---\naliases: [Alt]\n---\n# Title\n\n[[Link]] #tag [x](http://x)'
-    const indexed = buildIndexedNote(parseNote({ path: 'notes/n.md', source }), {
-      fileHash: 'h',
-      mtime: 1,
-      source,
-    })
-    expect(() => indexedNoteSchema.parse(indexed)).not.toThrow()
   })
 })
 

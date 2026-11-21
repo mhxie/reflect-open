@@ -167,6 +167,59 @@ mod capability_tests {
     }
 }
 
+/// Builds the desktop command handler from the `desktop` rows of the command
+/// table in `reflect_types::commands`.
+macro_rules! desktop_handler {
+    (
+        core { $( $core:tt )* }
+        desktop { $( $module:ident :: $method:ident ( $( $arg:ident : $ty:ty ),* ) -> $ret:ty ),* $(,)? }
+        shell { $( $shell:tt )* }
+    ) => {
+        tauri::generate_handler![
+            $( $module::$method, )*
+            // This fork's desktop commands. Their arguments and results are
+            // typed in `packages/types/src/fork-commands.ts`, not in the table.
+            activity::activity_begin,
+            activity::activity_end,
+            search_ipc::search_ipc_start,
+            search_ipc::search_ipc_stop,
+            search_ipc::search_ipc_respond,
+            fs::device::note_read_for_device,
+            fs::device::asset_read_for_device,
+            fs::device::asset_ocr_cache_read,
+            fs::trust_report::wiki_trust_report_read,
+            fs::device::asset_ocr_cache_keys,
+            fs::device::asset_ocr_cache_write,
+            fs::pdf_render::pdf_page_read_for_device,
+            fs::pdf_render::pdf_info_for_device,
+            fs::device::asset_ocr_supported,
+            fs::pdf_render::pdf_info,
+            fs::recovery::note_recovery_write,
+            fs::recovery::note_recovery_read,
+            fs::recovery::note_recovery_clear,
+            local_transcription::local_transcription_status,
+            local_transcription::local_transcription_download,
+            local_transcription::local_transcription_delete,
+            local_transcription::local_transcription_transcribe,
+            local_transcription::local_transcription_check_updates,
+            local_transcription::local_transcription_skip_update,
+            recorder::recorder_status,
+            recorder::recorder_start,
+            recorder::recorder_stop,
+            recorder::recorder_cancel,
+            recorder::recorder_sessions,
+            recorder::recorder_transcribe,
+            recorder::recorder_archive,
+            recorder::recorder_configure,
+            on_device_http::on_device_http_send,
+            on_device_http::on_device_http_read,
+            on_device_http::on_device_http_cancel,
+            dev_harness::dev_search_eval_poll,
+            dev_harness::dev_search_eval_finish,
+        ]
+    };
+}
+
 pub fn run() {
     #[cfg(target_os = "macos")]
     local_transcription::prepare_process_environment();
@@ -299,58 +352,8 @@ pub fn run() {
         .manage(recorder::RecorderState::default())
         .manage(on_device_http::OnDeviceHttpState::default())
         .invoke_handler({
-            let desktop_commands: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
-                activity::activity_begin,
-                activity::activity_end,
-                search_ipc::search_ipc_start,
-                search_ipc::search_ipc_stop,
-                search_ipc::search_ipc_respond,
-                fs::device::note_read_for_device,
-                fs::device::asset_read_for_device,
-                fs::device::asset_ocr_cache_read,
-                fs::trust_report::wiki_trust_report_read,
-                fs::device::asset_ocr_cache_keys,
-                fs::device::asset_ocr_cache_write,
-                fs::pdf_render::pdf_page_read_for_device,
-                fs::pdf_render::pdf_info_for_device,
-                fs::device::asset_ocr_supported,
-                fs::pdf_render::pdf_info,
-                fs::recovery::note_recovery_write,
-                fs::recovery::note_recovery_read,
-                fs::recovery::note_recovery_clear,
-                skill::skill_status,
-                skill::skill_install,
-                skill::skill_uninstall,
-                local_transcription::local_transcription_status,
-                local_transcription::local_transcription_download,
-                local_transcription::local_transcription_delete,
-                local_transcription::local_transcription_transcribe,
-                local_transcription::local_transcription_check_updates,
-                local_transcription::local_transcription_skip_update,
-                recorder::recorder_status,
-                recorder::recorder_start,
-                recorder::recorder_stop,
-                recorder::recorder_cancel,
-                recorder::recorder_sessions,
-                recorder::recorder_transcribe,
-                recorder::recorder_archive,
-                recorder::recorder_configure,
-                menu::menu_install_paste_and_match_style,
-                calendar::calendar_authorization_status,
-                calendar::calendar_request_access,
-                calendar::calendar_list_calendars,
-                calendar::calendar_list_events,
-                on_device_http::on_device_http_send,
-                on_device_http::on_device_http_read,
-                on_device_http::on_device_http_cancel,
-                quit::quit_confirm,
-                windows::open_note_window,
-                windows::window_bootstrap,
-                windows::close_note_windows,
-                devtools::toggle_devtools,
-                dev_harness::dev_search_eval_poll,
-                dev_harness::dev_search_eval_finish,
-            ];
+            let desktop_commands: fn(tauri::ipc::Invoke) -> bool =
+                reflect_types::commands!(desktop_handler);
             move |invoke| {
                 if Core::has_command(invoke.message.command()) {
                     core_commands::handle(invoke);

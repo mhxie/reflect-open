@@ -1,6 +1,6 @@
 /**
  * `@reflect/core` sync domain (Plan 12) — GitHub backup & sync over the Rust
- * git primitives: the git schemas, the GitHub module (device flow, token
+ * git primitives: the git types, the GitHub module (device flow, token
  * refresh, repo API), and the debounced sync engine's types.
  */
 export {

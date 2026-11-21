@@ -18,52 +18,17 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use reflect_types::{AppError, AppResult};
-use serde::{Deserialize, Serialize};
-
 use crate::Core;
 use reflect_graph_io::conflict::copy::{free_conflict_copy_path, utc_stamp};
 use reflect_graph_io::conflict::ladder::{self, ConflictInput};
 use reflect_graph_io::conflict::shadow::{ShadowStore, blob_hash8_of_file, content_hash};
 use reflect_graph_io::conflict::{ConflictSide, Resolution};
 use reflect_graph_paths::LocalOnlyFolders;
-use reflect_types::{ChangeKind, FileChange};
+use reflect_types::{AppError, AppResult, ChangeKind, FileChange, IcloudSweepOutcome, SweepScope};
 
 use super::versions::{
     VersionRef, current_version_modified_ms, mark_resolved, unresolved_versions,
 };
-
-/// What one sweep did.
-#[derive(Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SweepOutcome {
-    /// Every file the sweep changed on disk — reindex these directly.
-    pub changed: Vec<FileChange>,
-    /// Graph-relative paths of the conflict copies the sweep wrote.
-    pub copies: Vec<String>,
-    /// Conflicts resolved without user interaction.
-    pub auto_resolved: u32,
-}
-
-/// How much of the graph a sweep checks for unresolved versions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SweepScope {
-    /// Check every note, and run the store-housekeeping passes. Used on
-    /// resume, adoption baseline, and any sweep without a live watch.
-    Full,
-    /// Restrict the per-note `NSFileVersion` checks to the paths the live
-    /// metadata query flags as conflicted
-    /// ([`crate::icloud::watch::conflicted_paths`]). Each check is a
-    /// synchronous round-trip to `fileproviderd`. Mobile's signal and arrival
-    /// sweeps. Degrades to `Full` whenever the watch cannot answer completely.
-    Candidates,
-    /// Restrict the version checks to this sweep's `ingested_paths`. Desktop's
-    /// arrival sweeps: no metadata watch runs there (see
-    /// [`crate::icloud::watch`]). A conflict version that never touches the
-    /// working file is the `Full` sweep's job.
-    Ingested,
-}
 
 /// The version-check candidate set for `scope` ([`run_sweep`]'s
 /// `conflict_candidates`): `None` checks every note.
@@ -91,7 +56,7 @@ impl Core {
         ingested_paths: Vec<String>,
         record_baseline: bool,
         scope: SweepScope,
-    ) -> AppResult<SweepOutcome> {
+    ) -> AppResult<IcloudSweepOutcome> {
         let started = std::time::Instant::now();
         // Paused while the local-only configuration is unknown: the sweep
         // writes, folds, and deletes, and could not tell what to leave alone.
@@ -155,10 +120,10 @@ fn run_sweep(
     ingested_paths: &[String],
     record_baseline: bool,
     conflict_candidates: Option<HashSet<String>>,
-) -> AppResult<SweepOutcome> {
+) -> AppResult<IcloudSweepOutcome> {
     let shadow = ShadowStore::new(root);
     let skip: BTreeSet<&str> = skip_paths.iter().map(String::as_str).collect();
-    let mut outcome = SweepOutcome::default();
+    let mut outcome = IcloudSweepOutcome::default();
     let excluded = |rel: &str| {
         local_only.is_some_and(|folders| reflect_graph_io::entry_is_local_only(root, rel, folders))
     };
@@ -442,7 +407,7 @@ fn apply_file_resolution(
     resolution: FileResolution,
     shadow: &ShadowStore,
     handled_versions: Option<&[PathBuf]>,
-    outcome: &mut SweepOutcome,
+    outcome: &mut IcloudSweepOutcome,
 ) -> bool {
     let abs = root.join(rel);
     if resolution.changed {
@@ -485,7 +450,7 @@ fn copy_conflict_versions(
     root: &Path,
     rel: &str,
     versions: Vec<VersionRef>,
-    outcome: &mut SweepOutcome,
+    outcome: &mut IcloudSweepOutcome,
 ) -> bool {
     let current_hash = match blob_hash8_of_file(&root.join(rel)) {
         Ok(hash) => hash,
@@ -552,7 +517,7 @@ fn fold_collision_duplicates(
     files: &[reflect_types::FileMeta],
     shadow: &ShadowStore,
     skip: &BTreeSet<&str>,
-    outcome: &mut SweepOutcome,
+    outcome: &mut IcloudSweepOutcome,
 ) {
     for file in files {
         if file.placeholder {
@@ -585,7 +550,7 @@ fn fold_duplicate(
     file: &reflect_types::FileMeta,
     canonical_rel: &str,
     shadow: &ShadowStore,
-    outcome: &mut SweepOutcome,
+    outcome: &mut IcloudSweepOutcome,
 ) {
     let dup_abs = root.join(&file.path);
     let canonical_abs = root.join(canonical_rel);
@@ -1264,7 +1229,7 @@ mod tests {
         let first = resolve_file(root.path(), "notes/a.md", 1_000, vec![version], &shadow).unwrap();
         // Nothing is recorded until the write lands.
         assert!(!shadow.is_repeated_merge("notes/a.md", &mac_hash, &phone_hash));
-        let mut outcome = SweepOutcome::default();
+        let mut outcome = IcloudSweepOutcome::default();
         apply_file_resolution(
             root.path(),
             "notes/a.md",
@@ -1307,7 +1272,7 @@ mod tests {
         let root = json_graph();
         let v = fake_version(root.path(), "v1", b"{\"a\":2}", VERSION_MS);
         let hash8 = blob_hash8_of_file(&v.store_path).unwrap();
-        let mut outcome = SweepOutcome::default();
+        let mut outcome = IcloudSweepOutcome::default();
 
         assert!(copy_conflict_versions(
             root.path(),
@@ -1340,7 +1305,7 @@ mod tests {
             store_path: root.path().join(".reflect/missing"),
             modified_ms: VERSION_MS + 1000,
         };
-        let mut outcome = SweepOutcome::default();
+        let mut outcome = IcloudSweepOutcome::default();
 
         let done = copy_conflict_versions(
             root.path(),
@@ -1357,7 +1322,7 @@ mod tests {
         );
 
         let ok = fake_version(root.path(), "v2", [0u8, 9, 9], VERSION_MS);
-        let mut again = SweepOutcome::default();
+        let mut again = IcloudSweepOutcome::default();
         assert!(copy_conflict_versions(
             root.path(),
             "notes/clip.bin",
@@ -1373,7 +1338,7 @@ mod tests {
             .map(|_| {
                 let root = json_graph();
                 let v = fake_version(root.path(), "v1", b"{\"a\":2}", VERSION_MS);
-                let mut outcome = SweepOutcome::default();
+                let mut outcome = IcloudSweepOutcome::default();
                 copy_conflict_versions(root.path(), "assets/data.json", vec![v], &mut outcome);
                 outcome.copies[0].clone()
             })
@@ -1385,7 +1350,7 @@ mod tests {
     fn a_version_equal_to_the_current_file_writes_no_copy() {
         let root = json_graph();
         let v = fake_version(root.path(), "v1", b"{\"a\":1}", VERSION_MS);
-        let mut outcome = SweepOutcome::default();
+        let mut outcome = IcloudSweepOutcome::default();
 
         assert!(copy_conflict_versions(
             root.path(),
@@ -1404,7 +1369,7 @@ mod tests {
         let mut total = 0;
         for _ in 0..2 {
             let v = fake_version(root.path(), "v1", b"{\"a\":2}", VERSION_MS);
-            let mut outcome = SweepOutcome::default();
+            let mut outcome = IcloudSweepOutcome::default();
             assert!(copy_conflict_versions(
                 root.path(),
                 "assets/data.json",
@@ -1426,7 +1391,7 @@ mod tests {
         let first = format!("assets/data (conflict 2026-10-16 03-04-05 {hash8}).json");
         let second = format!("assets/data (conflict 2026-10-16 03-04-05 {hash8} 2).json");
         write(root.path(), &first, "{\"a\":\"edited\"}");
-        let mut outcome = SweepOutcome::default();
+        let mut outcome = IcloudSweepOutcome::default();
 
         assert!(copy_conflict_versions(
             root.path(),
@@ -1465,7 +1430,7 @@ mod tests {
         let hash8 = blob_hash8_of_file(&v.store_path).unwrap();
         let first = format!("assets/data (conflict 2026-10-16 03-04-05 {hash8}).json");
         write(root.path(), &first, "{\"a\":2}");
-        let mut outcome = SweepOutcome::default();
+        let mut outcome = IcloudSweepOutcome::default();
 
         assert!(copy_conflict_versions(
             root.path(),
@@ -1596,7 +1561,7 @@ mod command_tests {
         core
     }
 
-    fn scan(core: &Core, ingested: &[&str]) -> AppResult<SweepOutcome> {
+    fn scan(core: &Core, ingested: &[&str]) -> AppResult<IcloudSweepOutcome> {
         core.runtime.block_on(core.icloud_conflicts_scan(
             1,
             Vec::new(),

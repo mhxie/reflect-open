@@ -3,8 +3,7 @@
 //! the status reports `unsupported` so the frontend can turn semantic search
 //! off. Search stays lexical (FTS5).
 
-use reflect_types::{AppError, AppResult};
-use serde::{Deserialize, Serialize};
+use reflect_types::{AppError, AppResult, EmbedStatus, TextRole};
 
 use crate::Core;
 
@@ -12,23 +11,6 @@ use crate::Core;
 /// on every platform.
 #[derive(Default)]
 pub struct EmbedState {}
-
-/// Whether a text is a search query or a stored passage (see the supported
-/// runtime's `TextRole`).
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum TextRole {
-    Query,
-    #[default]
-    Passage,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
-pub enum EmbedStatus {
-    /// This platform has no embedding runtime.
-    Unsupported,
-}
 
 impl Core {
     pub fn embed_status(&self) -> AppResult<EmbedStatus> {

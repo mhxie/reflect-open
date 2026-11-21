@@ -37,33 +37,19 @@ mod tests;
 
 use std::path::Path;
 
-use serde::Serialize;
-
 use reflect_types::AppResult;
 
-pub use self::commit::{CommitOutcome, CommitPolicy, SkippedFile};
-pub use self::displace::DisplacedFile;
+pub use self::commit::CommitPolicy;
 pub use self::history_roots::SETTINGS_KEY as ACCEPTED_HISTORY_ROOTS_SETTINGS_KEY;
-pub use self::merge::{ChangeKind, ChangedFile, MergeKind, PullPolicy};
-pub use self::remote::{GitCredential, PushOutcome, RemoteDelta, RemoteTip};
+pub use self::merge::PullPolicy;
+pub use reflect_types::{
+    ChangeKind, ChangedFile, CommitOutcome, DisplacedFile, GitCredential, GitStatus, MergeKind,
+    PullOutcome, PushOutcome, RemoteDelta, RemoteTip, SkippedFile,
+};
 
 /// GitHub rejects files over 100 MB, failing the whole push; stop just under.
 /// The default backup size limit, and the highest a graph may set.
 pub const MAX_FILE_BYTES: u64 = 95 * 1024 * 1024;
-
-/// Snapshot of the graph's backup repository for the UI and the sync engine.
-/// Deliberately cheap — refs and config only, no working-tree scan.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitStatus {
-    /// Whether the graph has a repository at all (backup set up).
-    pub initialized: bool,
-    pub branch: Option<String>,
-    pub remote_url: Option<String>,
-    /// Commits ahead/behind the last-fetched remote branch (no network).
-    pub ahead: usize,
-    pub behind: usize,
-}
 
 pub fn status(root: &Path) -> AppResult<GitStatus> {
     if !root.join(".git").exists() {
@@ -125,30 +111,6 @@ pub fn setup(
     }
     drop(repo);
     status(root)
-}
-
-/// What one pull did: the commit of local changes, then the merge of the
-/// fetched remote branch.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PullOutcome {
-    /// Whether local changes were committed before the merge.
-    pub committed: bool,
-    /// Commits the local branch is ahead of the last-fetched remote after the
-    /// merge (no network).
-    pub ahead: usize,
-    pub skipped_large_files: Vec<SkippedFile>,
-    pub kind: MergeKind,
-    /// Graph-relative paths of the conflict copies the merge wrote.
-    pub review_paths: Vec<String>,
-    /// Every file the merge changed on disk.
-    pub changed_files: Vec<ChangedFile>,
-    /// The other device's changes inside this graph's local-only folders:
-    /// recorded in history, never written here.
-    pub frozen_paths: Vec<String>,
-    /// This device's entries the merge moved out of the paths it wrote (the
-    /// bytes the commit withheld), and where each went.
-    pub displaced: Vec<DisplacedFile>,
 }
 
 /// Commit local changes and merge the fetched remote branch under one graph

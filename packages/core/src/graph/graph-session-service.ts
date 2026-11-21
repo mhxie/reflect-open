@@ -1,5 +1,4 @@
 import { isDeepEqual } from '@ocavue/utils'
-import { z } from 'zod'
 import { createGraphSession, type GraphRole, type GraphSession } from './graph-session.ts'
 import { createLocalOnlyFolders } from './local-only.ts'
 import type { IdService } from '../ports/id-service.ts'
@@ -18,7 +17,7 @@ import { WritableStore, type Store } from '../store.ts'
 import type { MobileStorageService } from '../ipc/mobile-storage-service.ts'
 import type { NoteFileService } from './note-file-service.ts'
 import { ensureWelcomeNote } from './onboarding.ts'
-import { graphInfoSchema, recentGraphSchema, type GraphInfo, type RecentGraph } from './schemas.ts'
+import type { GraphInfo, RecentGraph } from './schemas.ts'
 
 /**
 
@@ -156,13 +155,6 @@ export interface GraphSessionServiceDeps<Services = unknown> {
    */
   readonly createServices?: ((session: GraphSession) => Services) | undefined
 }
-
-/**
-
- * Commands that return `()` from Rust serialize as `null` over IPC.
-
- */
-const voidSchema = z.null()
 
 /**
  * Field-by-field equality of two {@link GraphSessionState}s. `recents` is
@@ -327,7 +319,7 @@ class GraphSessionServiceImpl<Services = unknown> implements GraphSessionService
 
   async loadRecents(options?: { surfaceErrors?: boolean }): Promise<RecentGraph[]> {
     try {
-      const list = await this.#deps.ipc.call('recent_graphs', {}, z.array(recentGraphSchema))
+      const list = await this.#deps.ipc.call('recent_graphs', {})
       this.#setState({ recents: list })
       return list
     } catch (err) {
@@ -354,7 +346,7 @@ class GraphSessionServiceImpl<Services = unknown> implements GraphSessionService
     const run = async (): Promise<boolean> => {
       let opened = false
       try {
-        const info = await this.#deps.ipc.call('graph_open', { path: root }, graphInfoSchema)
+        const info = await this.#deps.ipc.call('graph_open', { path: root })
         if (seq !== this.#openSeq) {
           return false // superseded by a newer open
         }
@@ -462,7 +454,7 @@ class GraphSessionServiceImpl<Services = unknown> implements GraphSessionService
   async forgetRecent(root: string): Promise<void> {
     const { graph } = this.#state.get()
     try {
-      await this.#deps.ipc.call('forget_recent', { root }, voidSchema)
+      await this.#deps.ipc.call('forget_recent', { root })
       await this.loadRecents()
       if (graph?.root === root) {
         await this.close()
@@ -488,7 +480,7 @@ class GraphSessionServiceImpl<Services = unknown> implements GraphSessionService
     try {
       // Pinned to `generation` so a delete can never race a graph switch and
       // trash the newly opened graph.
-      await this.#deps.ipc.call('graph_delete', { generation }, voidSchema)
+      await this.#deps.ipc.call('graph_delete', { generation })
     } catch (err) {
       // The command invalidates the Rust session before touching the
       // filesystem, so a failed trash leaves the directory intact but the

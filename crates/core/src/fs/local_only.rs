@@ -54,7 +54,8 @@ use serde_json::{Map, Value};
 
 use reflect_index::LocalOnlyRecord;
 
-use crate::settings::{GraphSection, SettingsDoc, graph_section};
+use crate::settings::{GraphSection, graph_section};
+use reflect_types::SettingsDoc;
 
 /// One graph's configuration as loaded at open.
 #[derive(Debug)]

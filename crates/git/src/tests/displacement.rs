@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use reflect_graph_paths::LocalOnlyFolders;
 
-use super::super::displace::DisplacedFile;
 use super::super::merge::{MergeOutcome, merge_remote_displacing, seam};
 use super::guards::{
     Device, FILE, assert_no_merge_state, commit_index_edits, commit_with, head_blob_bytes,
@@ -18,6 +17,7 @@ use super::guards::{
     remote_main, snapshot,
 };
 use super::*;
+use reflect_types::DisplacedFile;
 
 const DAILY: &str = "daily/2026-10-04.md";
 const DAILY_COPY: &str = "daily/2026-10-04 (this device).md";

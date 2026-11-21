@@ -42,52 +42,21 @@ use std::path::Path;
 use git2::build::CheckoutBuilder;
 use git2::{Index, IndexEntry, IndexTime, MergeOptions, Repository};
 use reflect_graph_paths::{ExternalLinks, LocalOnlyFolders, to_slash_lossy};
-use serde::Serialize;
 
 use reflect_graph_io::conflict::copy::{free_conflict_copy_path, utc_stamp};
 use reflect_graph_io::conflict::ladder::{self, ConflictInput};
 use reflect_graph_io::conflict::merge3;
 use reflect_graph_io::conflict::{ConflictSide, Resolution};
-use reflect_types::{AppError, AppResult};
+use reflect_types::{AppError, AppResult, ChangeKind, ChangedFile, DisplacedFile, MergeKind};
+use serde::Serialize;
 
-use super::displace::{DisplacedFile, Displacement, Moves, displace};
+use super::displace::{Displacement, Moves, displace};
 use super::history_roots::ensure_pull_accepted;
 use super::paths::ensure_writable_path;
 use super::repo::{
     branch_tip_ahead_of_detached_head, clear_foreign_state, current_branch, open_existing,
     reattach_head, signature, stage0_entry,
 };
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum MergeKind {
-    UpToDate,
-    FastForward,
-    Merged,
-    /// A save raced the cycle's commit: a tracked, public file changed at a
-    /// path the pull writes. Nothing was written; the engine commits and
-    /// pulls again.
-    Deferred,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChangeKind {
-    Upsert,
-    Remove,
-}
-
-/// One working-tree file a merge/fast-forward rewrote, in the same shape as
-/// the watcher's `FileChange` so the caller can reindex directly.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangedFile {
-    /// Graph-relative path, forward-slashed.
-    pub path: String,
-    pub kind: ChangeKind,
-    /// Last-modified time of the written file (epoch ms; upserts only).
-    pub modified_ms: Option<u64>,
-}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

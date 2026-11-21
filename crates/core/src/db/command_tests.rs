@@ -367,7 +367,7 @@ fn an_editable_local_only_note_never_leaves_its_folder_or_reaches_the_backup() {
     assert!(leaked.is_empty(), "{leaked:?}");
 
     let deleted = app.note_delete(moved.into(), 1).unwrap();
-    assert_eq!(deleted.trashed, crate::fs::Trashed::System);
+    assert_eq!(deleted.trashed, reflect_types::Trashed::System);
     assert!(!raw.join("finance/secure/2026/bank.md").exists());
 
     let committed =

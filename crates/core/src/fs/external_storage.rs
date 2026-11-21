@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use reflect_graph_paths::{EXTERNAL_STORAGE_SETTINGS_KEY, ExternalLinks, ExternalStore};
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{GraphSection, SettingsDoc, graph_section};
+use crate::settings::{GraphSection, graph_section};
+use reflect_types::SettingsDoc;
 
 /// The record of the folder's spellings, under the graph's `.reflect/`.
 const RECORD_FILE: &str = "external-storage.json";
