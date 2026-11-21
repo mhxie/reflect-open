@@ -2,7 +2,7 @@ import { returnFalse } from '@ocavue/utils'
 import { useEffect } from 'react'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { createTestAppServices } from '@reflect/app/testing'
+import { createWebTestAppServices } from '@/test-utils/app-services.ts'
 import { createTestCoreServices } from '@reflect/core/testing'
 import {
   registerNoteEditorHandle,
@@ -25,8 +25,9 @@ function commandContext(notePath: string | null): CommandContext {
   onTestFinished(() => services.database.close())
   return {
     services,
-    app: createTestAppServices(services),
+    app: createWebTestAppServices(services),
     navigate: vi.fn(),
+    selectSection: vi.fn(),
     route: () => ({ kind: 'note', path: PATH }),
     notePath: () => notePath,
     back: vi.fn(),

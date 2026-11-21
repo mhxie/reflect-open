@@ -6,8 +6,7 @@ import {
   type NoteDocumentService,
   type PinnedNote,
 } from '@reflect/core'
-import type { AppServices, LinkNavigationService, NativeMenuService } from '@reflect/app'
-import { createTestAppServices } from '@reflect/app/testing'
+import type { LinkNavigationService } from '@reflect/app'
 import {
   createTestCoreServices,
   createTestPlatformService,
@@ -44,6 +43,7 @@ import { toast } from '@/components/ui/toast.tsx'
 import { useAppShortcuts } from './app-shortcuts.ts'
 import { useRouterActions, useRouterHandlers, useRouterState } from './router.tsx'
 import { noop, returnFalse } from '@ocavue/utils'
+import { createWebTestAppServices, type WebTestAppServices } from '@/test-utils/app-services.ts'
 
 const GRAPH = {
   root: '/g',
@@ -87,10 +87,10 @@ const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 let platform: TestPlatformOptions
 // The services of the rendered app; set by `shortcutsHook`.
 let core: TestCoreServices
-let appLayer: AppServices
+let appLayer: WebTestAppServices
 let openRecent: MockInstance<GraphSessionService['openRecent']>
 let openRouteInNewWindow: MockInstance<LinkNavigationService['openRouteInNewWindow']>
-let isNativeMenuInstalled: MockInstance<NativeMenuService['isInstalled']>
+let isNativeMenuInstalled: MockInstance<WebTestAppServices['nativeMenu']['isInstalled']>
 let getPinnedNotes: MockInstance<TestCoreServices['indexQuery']['getPinnedNotes']>
 
 beforeEach(() => {
@@ -125,7 +125,7 @@ async function shortcutsHook(options?: ShortcutsHookOptions) {
     },
   })
   core = services
-  appLayer = createTestAppServices(services)
+  appLayer = createWebTestAppServices(services)
   openRecent = vi.spyOn(services.graphSession, 'openRecent').mockResolvedValue(true)
   openRouteInNewWindow = vi
     .spyOn(appLayer.linkNavigation, 'openRouteInNewWindow')
@@ -293,7 +293,7 @@ describe('app shortcuts', () => {
 
   it('pin and privacy no-op on note-less routes and without a graph', async () => {
     const { result } = await shortcutsHook()
-    await act(() => result.current.routerActions.navigate({ kind: 'settings' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'settings', page: 'main' }))
     await act(() => press('o'))
     await act(() => result.current.context.togglePrivate())
     await act(() => core.graphSession.setGraph(null))
@@ -304,7 +304,7 @@ describe('app shortcuts', () => {
   })
 
   it('registers the command keybindings in the central keymap registry', () => {
-    const { keymap } = createTestAppServices(
+    const { keymap } = createWebTestAppServices(
       createTestCoreServices({ database: createWasmTestDatabaseService() }),
     )
     registerAppKeymaps(keymap)
@@ -570,7 +570,7 @@ describe('app shortcuts', () => {
     const { result } = await shortcutsHook()
 
     await act(() => press('j'))
-    expect(result.current.routerState.route).toEqual({ kind: 'chat' })
+    expect(result.current.routerState.route).toEqual({ kind: 'chat', conversationId: null })
 
     await act(() => press('n', { shiftKey: true }))
     expect(newChat).toHaveBeenCalledTimes(1)
@@ -719,15 +719,15 @@ describe('app shortcuts', () => {
     await vi.waitFor(() => {
       expect(result.current.pinned).toMatchObject([{ path: 'notes/other.md' }])
     })
-    await act(() => result.current.routerActions.navigate({ kind: 'settings' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'settings', page: 'main' }))
 
     await act(() => context.openPinnedNote(0))
 
     expect(result.current.routerState.route).toEqual({ kind: 'note', path: 'notes/other.md' })
     await act(() => core.graphSession.setGraph(null))
-    await act(() => result.current.routerActions.navigate({ kind: 'settings' }))
+    await act(() => result.current.routerActions.navigate({ kind: 'settings', page: 'main' }))
     await act(() => context.openPinnedNote(0))
-    expect(result.current.routerState.route).toEqual({ kind: 'settings' })
+    expect(result.current.routerState.route).toEqual({ kind: 'settings', page: 'main' })
   })
 
   it('pinned shortcuts do not navigate behind the palette', async () => {

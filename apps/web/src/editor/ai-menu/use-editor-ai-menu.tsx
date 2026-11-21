@@ -194,7 +194,7 @@ export function useEditorAiMenu({
           {
             id: 'configure-provider',
             label: 'Add an AI provider in Settings…',
-            onSelect: () => navigate({ kind: 'settings' }),
+            onSelect: () => navigate({ kind: 'settings', page: 'main' }),
           },
         ]
       }

@@ -19,7 +19,6 @@ import {
   type Route,
 } from '@reflect/app'
 import {
-  createTestAppServices,
   createTestOperationsService,
   createTestWindowService,
   type TestClipboardService,
@@ -37,6 +36,7 @@ import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { Sidebar } from './sidebar.tsx'
 import { noop, returnNull } from '@ocavue/utils'
+import { createWebTestAppServices } from '@/test-utils/app-services.ts'
 
 /**
  * The native menu row the mocked menu "selects" when it opens.
@@ -155,7 +155,7 @@ async function renderSidebar(
     },
     gitSync: createTestGitSyncService({ state: { phase: 'disconnected' } }),
   })
-  const appLayer = createTestAppServices(core, {
+  const appLayer = createWebTestAppServices(core, {
     window: createTestWindowService({ openNoteWindow }),
   })
   const context: CommandContext = {
@@ -164,6 +164,7 @@ async function renderSidebar(
     navigate,
     route: () => ({ kind: 'today' }),
     notePath: returnNull,
+    selectSection: (section, options) => appLayer.navigation.selectSection(section, options),
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
@@ -236,41 +237,57 @@ async function renderSidebar(
       </div>
     ),
   })
-  return { view, navigate, openPalette, context, core }
+  return { view, navigate, openPalette, context, core, navigation: appLayer.navigation }
 }
 
 describe('Sidebar', () => {
-  it('nav rows navigate, with Daily notes always re-anchoring to today', async () => {
-    const { view, navigate } = await renderSidebar(undefined, { kind: 'settings' })
+  it('section rows return to where their section was left, and light for it', async () => {
+    const { view, navigate, navigation } = await renderSidebar(undefined, { kind: 'tasks' })
+    const tasks = view.getByRole('button', { name: /tasks/i })
 
-    // The Daily row shares the ⌘D capture command: omitting
-    // `restoreSurfaceScroll` makes even an off-surface return discard the
-    // stream's saved position and re-anchor on today.
+    navigation.navigate({ kind: 'note', path: 'notes/meeting.md' })
+    await expect.element(tasks).toHaveAttribute('aria-current', 'page')
+
+    // Off the stream, Daily notes returns to its last day without focus.
+    await view.getByRole('button', { name: /daily notes/i }).click()
+    await vi.waitFor(() => expect(navigation.get().route).toEqual({ kind: 'today' }))
+    expect(navigate).not.toHaveBeenCalled()
+
+    await tasks.click()
+    await vi.waitFor(() => {
+      expect(navigation.get().route).toEqual({ kind: 'note', path: 'notes/meeting.md' })
+    })
+    await expect.element(tasks).toHaveAttribute('aria-current', 'page')
+
+    await view.getByRole('button', { name: /all notes/i }).click()
+    await vi.waitFor(() => {
+      expect(navigation.get().route).toEqual({ kind: 'allNotes', filter: null })
+    })
+
+    await view.getByRole('button', { name: /settings/i }).click()
+    await vi.waitFor(() => {
+      return expect(navigate).toHaveBeenCalledWith({ kind: 'settings', page: 'main' })
+    })
+
+    await view.getByRole('button', { name: /chat/i }).click()
+    await vi.waitFor(() => {
+      return expect(navigate).toHaveBeenCalledWith({ kind: 'chat', conversationId: null })
+    })
+  })
+
+  it('Daily notes on the stream re-anchors to today with focus', async () => {
+    const { view, navigate } = await renderSidebar(undefined, { kind: 'daily', date: '2026-01-02' })
+
     await view.getByRole('button', { name: /daily notes/i }).click()
     await vi.waitFor(() => {
       expect(navigate).toHaveBeenCalledWith({ kind: 'today' }, { focusEditor: true })
     })
-
-    await view.getByRole('button', { name: /settings/i }).click()
-    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: 'settings' }))
-
-    await view.getByRole('button', { name: /chat/i }).click()
-    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: 'chat' }))
   })
 
-  it('New note runs its command and shows active while the placeholder note is open', async () => {
-    // The route a ⌘N/new-note click lands on: a fresh ULID placeholder path.
-    const { view, navigate } = await renderSidebar(undefined, {
-      kind: 'note',
-      path: untitledNotePath(),
-    })
-    const newNote = view.getByRole('button', { name: /new note/i })
+  it('the compose button runs the new-note command', async () => {
+    const { view, navigate } = await renderSidebar()
 
-    // Active like every other row whose route is current — until the birth
-    // rename moves the note onto a title slug.
-    await expect.element(newNote).toHaveAttribute('aria-current', 'page')
-
-    await newNote.click()
+    await view.getByRole('button', { name: 'New note' }).click()
     await vi.waitFor(() => {
       expect(navigate).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -281,15 +298,9 @@ describe('Sidebar', () => {
     })
   })
 
-  it('New note is inactive on slug-named note routes', async () => {
-    const { view } = await renderSidebar(undefined, { kind: 'note', path: 'notes/meeting.md' })
-    await expect
-      .element(view.getByRole('button', { name: /new note/i }))
-      .not.toHaveAttribute('aria-current')
-  })
-
-  it('All notes stays active while editing a slug-named note', async () => {
-    const { view } = await renderSidebar(undefined, { kind: 'note', path: 'notes/meeting.md' })
+  it('All notes stays active while editing a note opened from it', async () => {
+    const { view, navigation } = await renderSidebar(undefined, { kind: 'allNotes', filter: null })
+    navigation.navigate({ kind: 'note', path: 'notes/meeting.md' })
     await expect
       .element(view.getByRole('button', { name: /all notes/i }))
       .toHaveAttribute('aria-current', 'page')
@@ -314,26 +325,22 @@ describe('Sidebar', () => {
     })
   })
 
-  it('only "New note" — not "All notes" — lights for the untitled placeholder', async () => {
-    // A brand-new note is still an untitled placeholder, so the two rows must
-    // never light at once.
-    const { view } = await renderSidebar(undefined, { kind: 'note', path: untitledNotePath() })
+  it('a fresh untitled note lights the section it was created from', async () => {
+    const { view, navigation } = await renderSidebar(undefined, { kind: 'today' })
+    navigation.navigate({ kind: 'note', path: untitledNotePath() })
     await expect
-      .element(view.getByRole('button', { name: /new note/i }))
+      .element(view.getByRole('button', { name: /daily notes/i }))
       .toHaveAttribute('aria-current', 'page')
-    await expect
-      .element(view.getByRole('button', { name: /all notes/i }))
-      .not.toHaveAttribute('aria-current')
   })
 
   it('shows Wiki below All notes only for a graph with a wiki, opening the Wiki screen', async () => {
-    const without = await renderSidebar(undefined, { kind: 'settings' })
+    const without = await renderSidebar(undefined, { kind: 'settings', page: 'main' })
     await vi.waitFor(() => expect(hasWikiEntries).toHaveBeenCalled())
     expect(without.view.getByRole('button', { name: 'Wiki', exact: true }).query()).toBeNull()
     await without.view.unmount()
 
     hasWikiEntries.mockResolvedValue(true)
-    const { view, navigate } = await renderSidebar(undefined, { kind: 'settings' })
+    const { view, navigate } = await renderSidebar(undefined, { kind: 'settings', page: 'main' })
     const wiki = view.getByRole('button', { name: 'Wiki', exact: true })
     await expect.element(wiki).toBeInTheDocument()
 
@@ -653,7 +660,9 @@ describe('Sidebar', () => {
     await view.getByRole('button', { name: /Notes/ }).click()
     await page.getByRole('menuitem', { name: 'Preferences' }).click()
 
-    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ kind: 'settings' }))
+    await vi.waitFor(() => {
+      return expect(navigate).toHaveBeenCalledWith({ kind: 'settings', page: 'main' })
+    })
   })
 
   it('the graph menu offers the iOS app and browser extension in their stores', async () => {

@@ -1,7 +1,7 @@
 [package]
 name = "reflect-git"
 version = "0.0.0"
-description = "Git backup and sync primitives over libgit2: init and adopt, commit, fetch, merge, push, with the merge decision table, the stale-lock recovery, the local-only and history-root guards, and note versions. No Tauri in it."
+description = "Git backup and sync primitives over libgit2: init and adopt, commit, fetch, merge, push, repack, with the merge decision table, the stale-lock recovery, the local-only and history-root guards, and note versions. No Tauri in it."
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

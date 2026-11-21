@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import type { LinkNavigationService } from '@reflect/app'
-import { createTestAppServices, type TestAppServices } from '@reflect/app/testing'
+import { createWebTestAppServices, type WebTestAppServices } from '@/test-utils/app-services.ts'
 import type {
   AttachmentService,
   IndexQueryService,
@@ -44,7 +44,7 @@ const OPTIONS: NoteEmbedReaderOptions = {
 const resolveWikiEmbed = () => ({ kind: 'note' as const })
 
 let app: TestCoreServices
-let appLayer: TestAppServices
+let appLayer: WebTestAppServices
 /**
  * The note sources the readers read, by path.
  */
@@ -98,7 +98,7 @@ beforeEach(() => {
   resolveImageUrl = vi.spyOn(app.attachments, 'resolveImageUrl').mockReturnValue(IMAGE)
   loadCatalog = vi.spyOn(app.attachments, 'loadCatalog')
   openOrReveal = vi.spyOn(app.attachments, 'openOrReveal').mockResolvedValue(undefined)
-  appLayer = createTestAppServices(app)
+  appLayer = createWebTestAppServices(app)
   navigate = vi.spyOn(appLayer.linkNavigation, 'openNoteLink').mockImplementation(noop)
   external = vi.spyOn(appLayer.linkNavigation, 'followMarkdownLink').mockImplementation(noop)
 })

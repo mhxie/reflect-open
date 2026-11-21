@@ -1,7 +1,7 @@
 import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { OpenerService } from '@reflect/app'
-import { createTestAppServices, type TestAppServices } from '@reflect/app/testing'
+import { createWebTestAppServices, type WebTestAppServices } from '@/test-utils/app-services.ts'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
@@ -36,7 +36,7 @@ const ENTRY = [
 ].join('\n')
 let entrySource = ENTRY
 let app: TestCoreServices
-let appLayer: TestAppServices
+let appLayer: WebTestAppServices
 /**
  * Every URL the system browser was asked to open.
  */
@@ -47,7 +47,7 @@ beforeEach(() => {
   const database = createWasmTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
-  appLayer = createTestAppServices(app)
+  appLayer = createWebTestAppServices(app)
   openUrlSync = vi.spyOn(appLayer.opener, 'openUrlSync').mockImplementation(noop)
 })
 

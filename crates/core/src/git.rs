@@ -29,7 +29,7 @@ use reflect_types::{
 };
 use serde::Serialize;
 
-use crate::Core;
+use crate::{Core, background_task};
 
 /// The settings key holding every graph's backup size limit (Rust owns it:
 /// `settings_save` keeps the copy on disk).
@@ -248,7 +248,37 @@ impl Core {
                 }
             }
         }
+        if outcome.is_ok() {
+            self.git_maintain(root).await;
+        }
         outcome
+    }
+
+    /// Repack the repository when it crosses the `git gc --auto` thresholds,
+    /// after a pull: the cycle's fetch is done and its push has not started.
+    /// A failure only skips this repack.
+    ///
+    /// The first repack of a long-used repository can take a minute, and it
+    /// owns no file lock, so its assertion may expire: iOS then suspends the
+    /// repack, and it goes on when the app resumes.
+    async fn git_maintain(&self, root: PathBuf) {
+        let _background_task =
+            background_task::expiring(&self.background_tasks, "Reflect git maintenance");
+        let started = std::time::Instant::now();
+        match self
+            .spawn_blocking(move || reflect_git::maintain(&root))
+            .await
+        {
+            Ok(None) => {}
+            Ok(Some(repack)) => tracing::info!(
+                objects = repack.objects,
+                removed_packs = repack.removed_packs,
+                removed_loose_objects = repack.removed_loose_objects,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "git_maintain"
+            ),
+            Err(err) => tracing::warn!(error = err.message(), "git repack failed"),
+        }
     }
 
     /// Command: push the current branch to `origin`; rejections come back as

@@ -1,3 +1,4 @@
+import type { RefObject } from 'react'
 import type { AudioMemoPhase } from '@reflect/core'
 import type { MaybePromise } from '@reflect/utils'
 
@@ -15,6 +16,60 @@ export type ChromeIcon =
   | 'lock-open'
   | 'share'
   | 'trash'
+  | 'chat'
+  | 'chat-active'
+  | 'archive'
+  | 'filters'
+
+/**
+ * Something a screen can focus: an input, or the shell's search field.
+ */
+export interface Focusable {
+  focus(): void
+  /**
+   * Selects the text. The shell's search field selects it on focus.
+   */
+  select?(): void
+}
+
+/**
+ * The middle of a top bar: a heading, or a heading that picks a month.
+ */
+export type ChromeTitle =
+  | string
+  | {
+      kind: 'month'
+      /**
+       * The month the title shows, `YYYY-MM`.
+       */
+      month: string
+      /**
+       * The selected day's month, `YYYY-MM`.
+       */
+      selected: string
+      /**
+       * Today's month, `YYYY-MM`.
+       */
+      today: string
+      onPick: (month: string) => void
+    }
+
+/**
+ * The search field of a top bar.
+ */
+export interface ChromeSearch {
+  value: string
+  placeholder: string
+  /**
+   * The accessibility label.
+   */
+  label: string
+  onChange: (value: string) => void
+  /**
+   * Receives the field, so an arrival can focus it.
+   */
+  ref?: RefObject<Focusable | null> | undefined
+}
 
 /**
  * A confirmation shown before a menu item runs, with one destructive button
@@ -74,13 +129,17 @@ export interface ChromeButton {
 }
 
 /**
- * The corners of one screen's top bar.
+ * The top bar of one screen: its corners, title and search field.
  */
 export interface ScreenChrome {
   /**
    * Pops the screen. The bar shows a back button only with it.
    */
   back?: (() => void) | undefined
+  /**
+   * The screen shows no tab bar. The iPad sidebar and top tab bar stay.
+   */
+  hidesTabBar?: boolean | undefined
   leading?: ChromeButton[] | undefined
   trailing?: ChromeButton[] | undefined
   /**
@@ -92,6 +151,11 @@ export interface ScreenChrome {
    * The screen's `+`.
    */
   plus?: ChromePlus | undefined
+  /**
+   * The middle of the bar, when it has no search field.
+   */
+  title?: ChromeTitle | undefined
+  search?: ChromeSearch | undefined
 }
 
 /**

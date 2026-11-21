@@ -8,7 +8,8 @@ import {
   useSettingsService,
   useSettingsStore,
 } from '@/providers/settings-provider.tsx'
-import { useCoreServices } from '@/services/services-provider.tsx'
+import { keybindingFor } from '@/lib/commands/app-commands.ts'
+import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 import { useStore } from '@/lib/use-store.ts'
 import { DescribeAssetsField } from './describe-assets-field.tsx'
 import { SettingsField } from './field.tsx'
@@ -17,6 +18,8 @@ import { RebuildIndexField } from './rebuild-index-field.tsx'
 import { SettingsSection } from './section.tsx'
 import { SemanticIndexProgressBar } from './semantic-index-progress-bar.tsx'
 import { SemanticModelField } from './semantic-model-field.tsx'
+
+const PALETTE_BINDING = keybindingFor('palette.open')
 
 /**
  * The search settings: the semantic-search opt-in (Plan 09), its model, and
@@ -32,6 +35,7 @@ export function SearchSection(): ReactElement {
   const settingsService = useSettingsService()
   const status = useEmbedStatus()
   const { semanticSearch } = useCoreServices()
+  const { keymap } = useAppServices()
   const indexProgress = useStore(
     useMemo(
       () => ({ get: semanticSearch.getIndexProgress, subscribe: semanticSearch.subscribe }),
@@ -115,7 +119,7 @@ export function SearchSection(): ReactElement {
     <SettingsSection id="search">
       <SettingsField
         legend="Semantic search"
-        description={`Find notes by meaning, not just keywords — smarter ⌘K results and related notes. Runs entirely on this device; enabling downloads ${model.label} (${formatModelSize(model.sizeBytes)}) once.`}
+        description={`Find notes by meaning, not just keywords — smarter ${PALETTE_BINDING === null ? 'search' : keymap.formatLabel(PALETTE_BINDING)} results and related notes. Runs entirely on this device; enabling downloads ${model.label} (${formatModelSize(model.sizeBytes)}) once.`}
       >
         <div className="mt-3">{control}</div>
       </SettingsField>

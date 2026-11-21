@@ -20,12 +20,9 @@ export function contextSidebarTarget(route: Route, today: string): ContextSideba
     case 'allNotes':
     case 'attachments':
     case 'wiki':
-    case 'search':
     case 'tasks':
     case 'chat':
     case 'settings':
-    case 'graphs':
-    case 'licenses':
       return null
   }
 }

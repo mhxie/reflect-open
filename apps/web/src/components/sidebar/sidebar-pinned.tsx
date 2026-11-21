@@ -12,7 +12,8 @@ import {
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
 import { useReorderPinnedNotes } from '@/hooks/use-reorder-pinned-notes.ts'
-import { keybindingFor } from '@/lib/commands/app-commands.ts'
+import { isPinnedNotePosition, keybindingFor } from '@/lib/commands/app-commands.ts'
+import type { PinnedNotePosition } from '@/lib/commands/types.ts'
 import { routeForPath, routesEqual } from '@reflect/app'
 import { useRouterState } from '@/routing/router.tsx'
 import { SidebarPinnedRowPreview } from './sidebar-pinned-row-preview.tsx'
@@ -78,7 +79,11 @@ export function SidebarPinned(): ReactElement | null {
               <SidebarSortablePinnedRow
                 key={note.path}
                 note={note}
-                binding={keybindingFor(`pinned.open${index + 1}`) ?? undefined}
+                binding={
+                  (isPinnedNotePosition(index + 1)
+                    ? keybindingFor(`pinned.open${(index + 1) as PinnedNotePosition}`)
+                    : null) ?? undefined
+                }
               />
             ))}
           </ul>

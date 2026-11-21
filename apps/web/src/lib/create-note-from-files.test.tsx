@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { createTestAppServices, type TestAppServices } from '@reflect/app/testing'
+import { createWebTestAppServices, type WebTestAppServices } from '@/test-utils/app-services.ts'
 import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
 import {
   registerNoteEditorHandle,
@@ -21,14 +21,14 @@ const handle = { insertMarkdown: vi.fn() } as unknown as NoteEditorHandle & {
 }
 
 let app: TestCoreServices
-let appServices: TestAppServices
+let appServices: WebTestAppServices
 
 beforeEach(() => {
   const database = createWasmTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   app.graphSession.setGraph({ generation: 4 })
-  appServices = createTestAppServices(app)
+  appServices = createWebTestAppServices(app)
   vi.spyOn(app.noteCreation, 'untitledNotePath').mockReturnValue('notes/new.md')
   handle.insertMarkdown.mockReset()
 })

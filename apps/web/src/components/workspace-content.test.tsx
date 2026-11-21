@@ -1,3 +1,4 @@
+import { noop } from '@ocavue/utils'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
 import type { ReactElement } from 'react'
@@ -57,7 +58,7 @@ function renderWorkspace(route: Route) {
             <SidebarProvider>
               <RecorderProvider graph={GRAPH}>
                 <AudioMemoProvider graph={GRAPH}>
-                  <DeepLinkProvider>
+                  <DeepLinkProvider search={noop}>
                     <FocusedDailyProvider>
                       <PeekProvider>
                         <NoteFindProvider>

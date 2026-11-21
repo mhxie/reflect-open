@@ -1,6 +1,6 @@
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import type { GraphInfo } from '@reflect/core'
-import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
+import { PaletteProvider, usePalette } from '@/components/command-palette/palette-provider.tsx'
 import { NoteWindowContent } from '@/components/note-window-content.tsx'
 import { WhatsNewDialog } from '@/components/whats-new/whats-new-dialog.tsx'
 import { WorkspaceContent } from '@/components/workspace-content.tsx'
@@ -52,7 +52,7 @@ export function GraphWorkspace({ graph }: GraphWorkspaceProps): ReactElement {
                 <RecorderProvider graph={graph}>
                   <AudioMemoProvider graph={graph}>
                     {/* Inside the router: deep links navigate. */}
-                    <DeepLinkProvider>
+                    <PaletteDeepLinks>
                       {/* Tracks the focused day in the daily stream so the right
                           sidebar describes it, not just the routed day. */}
                       <FocusedDailyProvider>
@@ -77,7 +77,7 @@ export function GraphWorkspace({ graph }: GraphWorkspaceProps): ReactElement {
                           </NoteFindProvider>
                         </PeekProvider>
                       </FocusedDailyProvider>
-                    </DeepLinkProvider>
+                    </PaletteDeepLinks>
                   </AudioMemoProvider>
                 </RecorderProvider>
               </SidebarProvider>
@@ -87,4 +87,13 @@ export function GraphWorkspace({ graph }: GraphWorkspaceProps): ReactElement {
       </PaletteProvider>
     </RouterProvider>
   )
+}
+
+/**
+ * Routes deep links into the workspace. A search link opens the ⌘K palette
+ * with its query, over the screen on view.
+ */
+function PaletteDeepLinks({ children }: { children: ReactNode }): ReactElement {
+  const { openPalette } = usePalette()
+  return <DeepLinkProvider search={openPalette}>{children}</DeepLinkProvider>
 }

@@ -1,5 +1,5 @@
 import { createTestCoreServices } from '@reflect/core/testing'
-import { createTestAppServices } from '@reflect/app/testing'
+import { createWebTestAppServices } from '@/test-utils/app-services.ts'
 import { page } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { LocalModelStatus, LocalTranscriptionModelId } from '@reflect/core'
@@ -20,7 +20,7 @@ async function renderActions(
 ) {
   const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
   onTestFinished(() => app.database.close())
-  const appServices = createTestAppServices(app)
+  const appServices = createWebTestAppServices(app)
   const download = vi
     .spyOn(app.localTranscription, 'download')
     .mockResolvedValue({ status: 'downloading', progress: { downloaded: 0, total: 1 } })

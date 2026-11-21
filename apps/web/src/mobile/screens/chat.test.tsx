@@ -13,7 +13,8 @@ import {
   createTestSecretStoreService,
   type TestChatEngineService,
 } from '@reflect/core/testing'
-import type { Route } from '@reflect/app'
+import type { Route, Section } from '@reflect/app'
+import { createTestNavigationService } from '@reflect/app/testing'
 import { useRouterState, useRouterActions } from '@/routing/router.tsx'
 import { fireEvent } from '@/test-utils/fire-event.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
@@ -73,7 +74,10 @@ function RouteProbe(): null {
 function FocusChatProbe(): ReactElement {
   const { navigate } = useRouterActions()
   return (
-    <button type="button" onClick={() => navigate({ kind: 'chat' }, { focusEditor: true })}>
+    <button
+      type="button"
+      onClick={() => navigate({ kind: 'chat', conversationId: null }, { focusEditor: true })}
+    >
       focus chat input
     </button>
   )
@@ -96,7 +100,12 @@ function Harness(): ReactElement {
   )
 }
 
-async function renderHarness(route: Route = { kind: 'today' }) {
+/**
+ * @param chatSection The section Chat joins: All on iPhone, Chat on iPad.
+ */
+async function renderHarness(route: Route = { kind: 'today' }, chatSection: Section = 'all') {
+  const navigation = createTestNavigationService()
+  navigation.setChatSection(chatSection)
   const core = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     secretStore: createTestSecretStoreService({ [aiKeySecretName(MODEL.id)]: 'sk-test' }),
@@ -105,6 +114,7 @@ async function renderHarness(route: Route = { kind: 'today' }) {
   // The index is not open, so the history drawer reads nothing.
   return await renderInApp(<Harness />, {
     core,
+    appServices: { navigation },
     graph: { ...GRAPH, indexGeneration: null },
     route,
     settings: { aiProviders: settingsState.models, defaultAiProviderId: settingsState.defaultId },
@@ -117,17 +127,23 @@ describe('MobileChat', () => {
 
     await page.getByRole('button', { name: 'Add an AI provider' }).click()
 
-    expect(probedRouteRef.current).toEqual({ kind: 'settings' })
+    expect(probedRouteRef.current).toEqual({ kind: 'settings', page: 'main' })
   })
 
   it('Back from a cold entry lands on today, as the back-swipe does', async () => {
     // Chat is the first and only history entry: there is nothing to pop.
-    await renderHarness({ kind: 'chat' })
-    expect(probedRouteRef.current).toEqual({ kind: 'chat' })
+    await renderHarness({ kind: 'chat', conversationId: null })
+    expect(probedRouteRef.current).toMatchObject({ kind: 'chat', conversationId: null })
 
     await page.getByRole('button', { name: 'Back' }).click()
 
     expect(probedRouteRef.current).toEqual({ kind: 'today' })
+  })
+
+  it('is the root of its own section on iPad, with no Back', async () => {
+    await renderHarness({ kind: 'chat', conversationId: null }, 'chat')
+    await expect.element(page.getByRole('heading', { name: 'Chat' }).first()).toBeVisible()
+    expect(page.getByRole('button', { name: 'Back' }).query()).toBeNull()
   })
 
   it('sends the draft from the composer and renders the streamed turn', async () => {
@@ -162,6 +178,29 @@ describe('MobileChat', () => {
 
     await expect.element(page.getByText('Answered without them.')).toBeVisible()
     await expect.element(page.getByText(HISTORY_WITHHELD_NOTICE)).toBeVisible()
+  })
+
+  it('names the open conversation in its entry, and New chat renames it', async () => {
+    configureModel()
+    scriptTurn([
+      { type: 'text-delta', text: 'First answer.' },
+      { type: 'complete', messages: [{ role: 'assistant', content: 'First answer.' }] },
+    ])
+    await renderHarness({ kind: 'chat', conversationId: null })
+    await expect
+      .poll(() => probedRouteRef.current)
+      .toSatisfy((route: Route | null) => route?.kind === 'chat' && route.conversationId !== null)
+    const first = probedRouteRef.current
+
+    fireEvent.change(page.getByLabelText('Chat message'), { target: { value: 'question' } })
+    await page.getByRole('button', { name: 'Send' }).click()
+    await expect.element(page.getByText('First answer.')).toBeVisible()
+    await page.getByRole('button', { name: 'New chat' }).click()
+
+    await expect.poll(() => probedRouteRef.current).not.toEqual(first)
+    expect(probedRouteRef.current).toSatisfy(
+      (route: Route | null) => route?.kind === 'chat' && route.conversationId !== null,
+    )
   })
 
   it('keeps the draft and the conversation across a screen unmount (leaving it)', async () => {

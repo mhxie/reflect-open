@@ -387,7 +387,7 @@ public enum BackSwipePhase: String, Codable, Sendable, Equatable, CaseIterable {
     case cancel = "cancel"
 }
 
-/// A native button that floats in a top corner of the page. A tap opens
+/// A button of the native top bar. A tap opens
 /// `menu` when it has one, and sends an `action` intent with `id` otherwise.
 public struct BarButton: Codable, Sendable, Equatable {
     public let id: String
@@ -912,10 +912,12 @@ public enum ChromeIntent: Sendable, Equatable {
     case action(ChromeIntentActionData)
     case command(ChromeIntentCommandData)
     case files(ChromeIntentFilesData)
-    case layout(ChromeIntentLayoutData)
+    case windowControls(ChromeIntentWindowcontrolsData)
     case plus(ChromeIntentPlusData)
     case sidebarVisible(ChromeIntentSidebarvisibleData)
     case sidebar(ChromeIntentSidebarData)
+    case search(ChromeIntentSearchData)
+    case pickMonth(ChromeIntentPickmonthData)
 }
 public struct ChromeIntentBackData: Codable, Sendable, Equatable {
     public let entryId: Int
@@ -969,11 +971,11 @@ public struct ChromeIntentFilesData: Codable, Sendable, Equatable {
     }
 }
 
-public struct ChromeIntentLayoutData: Codable, Sendable, Equatable {
-    public let cornersInHeaderRow: Bool
+public struct ChromeIntentWindowcontrolsData: Codable, Sendable, Equatable {
+    public let width: Double
 
-    public init(cornersInHeaderRow: Bool) {
-        self.cornersInHeaderRow = cornersInHeaderRow
+    public init(width: Double) {
+        self.width = width
     }
 }
 
@@ -1000,6 +1002,26 @@ public struct ChromeIntentSidebarData: Codable, Sendable, Equatable {
 
     public init(command: SidebarIntent) {
         self.command = command
+    }
+}
+
+public struct ChromeIntentSearchData: Codable, Sendable, Equatable {
+    public let entryId: Int
+    public let text: String
+
+    public init(entryId: Int, text: String) {
+        self.entryId = entryId
+        self.text = text
+    }
+}
+
+public struct ChromeIntentPickmonthData: Codable, Sendable, Equatable {
+    public let entryId: Int
+    public let month: String
+
+    public init(entryId: Int, month: String) {
+        self.entryId = entryId
+        self.month = month
     }
 }
 
@@ -1037,9 +1059,9 @@ extension ChromeIntent: Codable {
         case "files":
             let filesValue = try container.decode([IntentFile].self, forKey: CodingKeys("files"))
             self = .files(ChromeIntentFilesData(files: filesValue))
-        case "layout":
-            let cornersInHeaderRowValue = try container.decode(Bool.self, forKey: CodingKeys("cornersInHeaderRow"))
-            self = .layout(ChromeIntentLayoutData(cornersInHeaderRow: cornersInHeaderRowValue))
+        case "windowControls":
+            let widthValue = try container.decode(Double.self, forKey: CodingKeys("width"))
+            self = .windowControls(ChromeIntentWindowcontrolsData(width: widthValue))
         case "plus":
             let entryIdValue = try container.decode(Int.self, forKey: CodingKeys("entryId"))
             let commandValue = try container.decode(PlusCommand.self, forKey: CodingKeys("command"))
@@ -1050,6 +1072,14 @@ extension ChromeIntent: Codable {
         case "sidebar":
             let commandValue = try container.decode(SidebarIntent.self, forKey: CodingKeys("command"))
             self = .sidebar(ChromeIntentSidebarData(command: commandValue))
+        case "search":
+            let entryIdValue = try container.decode(Int.self, forKey: CodingKeys("entryId"))
+            let textValue = try container.decode(String.self, forKey: CodingKeys("text"))
+            self = .search(ChromeIntentSearchData(entryId: entryIdValue, text: textValue))
+        case "pickMonth":
+            let entryIdValue = try container.decode(Int.self, forKey: CodingKeys("entryId"))
+            let monthValue = try container.decode(String.self, forKey: CodingKeys("month"))
+            self = .pickMonth(ChromeIntentPickmonthData(entryId: entryIdValue, month: monthValue))
         default:
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown variant \(tag)"))
         }
@@ -1078,9 +1108,9 @@ extension ChromeIntent: Codable {
         case .files(let data):
             try container.encode("files", forKey: CodingKeys("type"))
             try container.encode(data.files, forKey: CodingKeys("files"))
-        case .layout(let data):
-            try container.encode("layout", forKey: CodingKeys("type"))
-            try container.encode(data.cornersInHeaderRow, forKey: CodingKeys("cornersInHeaderRow"))
+        case .windowControls(let data):
+            try container.encode("windowControls", forKey: CodingKeys("type"))
+            try container.encode(data.width, forKey: CodingKeys("width"))
         case .plus(let data):
             try container.encode("plus", forKey: CodingKeys("type"))
             try container.encode(data.entryId, forKey: CodingKeys("entryId"))
@@ -1091,6 +1121,14 @@ extension ChromeIntent: Codable {
         case .sidebar(let data):
             try container.encode("sidebar", forKey: CodingKeys("type"))
             try container.encode(data.command, forKey: CodingKeys("command"))
+        case .search(let data):
+            try container.encode("search", forKey: CodingKeys("type"))
+            try container.encode(data.entryId, forKey: CodingKeys("entryId"))
+            try container.encode(data.text, forKey: CodingKeys("text"))
+        case .pickMonth(let data):
+            try container.encode("pickMonth", forKey: CodingKeys("type"))
+            try container.encode(data.entryId, forKey: CodingKeys("entryId"))
+            try container.encode(data.month, forKey: CodingKeys("month"))
         }
     }
 }
@@ -1106,9 +1144,9 @@ public enum ChromeKind: String, Codable, Sendable, Equatable, CaseIterable {
 /// A message the page posts to the shell.
 public enum ChromeMessage: Sendable, Equatable {
     case state(ChromeMessageStateData)
-    case transition(ChromeMessageTransitionData)
     case backSwipe(ChromeMessageBackswipeData)
     case chromeReady
+    case focusSearch(ChromeMessageFocussearchData)
 }
 public struct ChromeMessageStateData: Codable, Sendable, Equatable {
     public let generation: Int
@@ -1125,9 +1163,13 @@ public struct ChromeMessageStateData: Codable, Sendable, Equatable {
     public let plus: PlusState?
     public let sidebar: SidebarState?
     public let history: HistoryState?
+    public let title: ChromeTitle?
+    public let search: SearchState?
+    public let fullscreen: Bool
+    public let hidesTabBar: Bool
     public let theme: ChromeTheme
 
-    public init(generation: Int, entryId: Int, chrome: ChromeKind, routeKind: String?, tab: ChromeTab, canBack: Bool, leading: [BarButton], trailing: [BarButton], keyboardVisible: Bool, modal: Bool, toolbar: ToolbarState?, plus: PlusState?, sidebar: SidebarState?, history: HistoryState?, theme: ChromeTheme) {
+    public init(generation: Int, entryId: Int, chrome: ChromeKind, routeKind: String?, tab: ChromeTab, canBack: Bool, leading: [BarButton], trailing: [BarButton], keyboardVisible: Bool, modal: Bool, toolbar: ToolbarState?, plus: PlusState?, sidebar: SidebarState?, history: HistoryState?, title: ChromeTitle?, search: SearchState?, fullscreen: Bool, hidesTabBar: Bool, theme: ChromeTheme) {
         self.generation = generation
         self.entryId = entryId
         self.chrome = chrome
@@ -1142,15 +1184,11 @@ public struct ChromeMessageStateData: Codable, Sendable, Equatable {
         self.plus = plus
         self.sidebar = sidebar
         self.history = history
+        self.title = title
+        self.search = search
+        self.fullscreen = fullscreen
+        self.hidesTabBar = hidesTabBar
         self.theme = theme
-    }
-}
-
-public struct ChromeMessageTransitionData: Codable, Sendable, Equatable {
-    public let phase: TransitionPhase
-
-    public init(phase: TransitionPhase) {
-        self.phase = phase
     }
 }
 
@@ -1159,6 +1197,14 @@ public struct ChromeMessageBackswipeData: Codable, Sendable, Equatable {
 
     public init(phase: BackSwipePhase) {
         self.phase = phase
+    }
+}
+
+public struct ChromeMessageFocussearchData: Codable, Sendable, Equatable {
+    public let entryId: Int
+
+    public init(entryId: Int) {
+        self.entryId = entryId
     }
 }
 
@@ -1191,16 +1237,20 @@ extension ChromeMessage: Codable {
             let plusValue = try container.decodeIfPresent(PlusState.self, forKey: CodingKeys("plus"))
             let sidebarValue = try container.decodeIfPresent(SidebarState.self, forKey: CodingKeys("sidebar"))
             let historyValue = try container.decodeIfPresent(HistoryState.self, forKey: CodingKeys("history"))
+            let titleValue = try container.decodeIfPresent(ChromeTitle.self, forKey: CodingKeys("title"))
+            let searchValue = try container.decodeIfPresent(SearchState.self, forKey: CodingKeys("search"))
+            let fullscreenValue = try container.decode(Bool.self, forKey: CodingKeys("fullscreen"))
+            let hidesTabBarValue = try container.decode(Bool.self, forKey: CodingKeys("hidesTabBar"))
             let themeValue = try container.decode(ChromeTheme.self, forKey: CodingKeys("theme"))
-            self = .state(ChromeMessageStateData(generation: generationValue, entryId: entryIdValue, chrome: chromeValue, routeKind: routeKindValue, tab: tabValue, canBack: canBackValue, leading: leadingValue, trailing: trailingValue, keyboardVisible: keyboardVisibleValue, modal: modalValue, toolbar: toolbarValue, plus: plusValue, sidebar: sidebarValue, history: historyValue, theme: themeValue))
-        case "transition":
-            let phaseValue = try container.decode(TransitionPhase.self, forKey: CodingKeys("phase"))
-            self = .transition(ChromeMessageTransitionData(phase: phaseValue))
+            self = .state(ChromeMessageStateData(generation: generationValue, entryId: entryIdValue, chrome: chromeValue, routeKind: routeKindValue, tab: tabValue, canBack: canBackValue, leading: leadingValue, trailing: trailingValue, keyboardVisible: keyboardVisibleValue, modal: modalValue, toolbar: toolbarValue, plus: plusValue, sidebar: sidebarValue, history: historyValue, title: titleValue, search: searchValue, fullscreen: fullscreenValue, hidesTabBar: hidesTabBarValue, theme: themeValue))
         case "backSwipe":
             let phaseValue = try container.decode(BackSwipePhase.self, forKey: CodingKeys("phase"))
             self = .backSwipe(ChromeMessageBackswipeData(phase: phaseValue))
         case "chromeReady":
             self = .chromeReady
+        case "focusSearch":
+            let entryIdValue = try container.decode(Int.self, forKey: CodingKeys("entryId"))
+            self = .focusSearch(ChromeMessageFocussearchData(entryId: entryIdValue))
         default:
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown variant \(tag)"))
         }
@@ -1225,15 +1275,19 @@ extension ChromeMessage: Codable {
             try container.encode(data.plus, forKey: CodingKeys("plus"))
             try container.encode(data.sidebar, forKey: CodingKeys("sidebar"))
             try container.encode(data.history, forKey: CodingKeys("history"))
+            try container.encode(data.title, forKey: CodingKeys("title"))
+            try container.encode(data.search, forKey: CodingKeys("search"))
+            try container.encode(data.fullscreen, forKey: CodingKeys("fullscreen"))
+            try container.encode(data.hidesTabBar, forKey: CodingKeys("hidesTabBar"))
             try container.encode(data.theme, forKey: CodingKeys("theme"))
-        case .transition(let data):
-            try container.encode("transition", forKey: CodingKeys("type"))
-            try container.encode(data.phase, forKey: CodingKeys("phase"))
         case .backSwipe(let data):
             try container.encode("backSwipe", forKey: CodingKeys("type"))
             try container.encode(data.phase, forKey: CodingKeys("phase"))
         case .chromeReady:
             try container.encode("chromeReady", forKey: CodingKeys("type"))
+        case .focusSearch(let data):
+            try container.encode("focusSearch", forKey: CodingKeys("type"))
+            try container.encode(data.entryId, forKey: CodingKeys("entryId"))
         }
     }
 }
@@ -1252,6 +1306,70 @@ public enum ChromeTheme: String, Codable, Sendable, Equatable, CaseIterable {
     case light = "light"
     case dark = "dark"
 }
+
+/// The middle of the top bar.
+public enum ChromeTitle: Sendable, Equatable {
+    case text(ChromeTitleTextData)
+    case month(ChromeTitleMonthData)
+}
+public struct ChromeTitleTextData: Codable, Sendable, Equatable {
+    public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
+}
+
+public struct ChromeTitleMonthData: Codable, Sendable, Equatable {
+    public let text: String
+    public let month: String
+
+    public init(text: String, month: String) {
+        self.text = text
+        self.month = month
+    }
+}
+
+// MARK: - ChromeTitle Codable Implementation
+extension ChromeTitle: Codable {
+    private struct CodingKeys: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ stringValue: String) { self.stringValue = stringValue }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let tag = try container.decode(String.self, forKey: CodingKeys("kind"))
+        switch tag {
+        case "text":
+            let textValue = try container.decode(String.self, forKey: CodingKeys("text"))
+            self = .text(ChromeTitleTextData(text: textValue))
+        case "month":
+            let textValue = try container.decode(String.self, forKey: CodingKeys("text"))
+            let monthValue = try container.decode(String.self, forKey: CodingKeys("month"))
+            self = .month(ChromeTitleMonthData(text: textValue, month: monthValue))
+        default:
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown variant \(tag)"))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let data):
+            try container.encode("text", forKey: CodingKeys("kind"))
+            try container.encode(data.text, forKey: CodingKeys("text"))
+        case .month(let data):
+            try container.encode("month", forKey: CodingKeys("kind"))
+            try container.encode(data.text, forKey: CodingKeys("text"))
+            try container.encode(data.month, forKey: CodingKeys("month"))
+        }
+    }
+}
+
 
 /// Result of a commit attempt. `committed: false` means the tree was clean.
 public struct CommitOutcome: Codable, Sendable, Equatable {
@@ -3964,6 +4082,44 @@ public struct ScanOrphan: Codable, Sendable, Equatable {
     }
 }
 
+/// The search field of the top bar.
+public struct SearchState: Codable, Sendable, Equatable {
+    public let placeholder: String
+    public let label: String
+    public let text: String
+    public let revision: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case placeholder = "placeholder"
+        case label = "label"
+        case text = "text"
+        case revision = "revision"
+    }
+
+    public init(placeholder: String, label: String, text: String, revision: Int) {
+        self.placeholder = placeholder
+        self.label = label
+        self.text = text
+        self.revision = revision
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.placeholder = try container.decode(String.self, forKey: .placeholder)
+        self.label = try container.decode(String.self, forKey: .label)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.revision = try container.decode(Int.self, forKey: .revision)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(placeholder, forKey: .placeholder)
+        try container.encode(label, forKey: .label)
+        try container.encode(text, forKey: .text)
+        try container.encode(revision, forKey: .revision)
+    }
+}
+
 /// How a shareable note read (the `note_read_shareable` command) found the
 /// note.
 public enum ShareableNoteRead: Sendable, Equatable {
@@ -4434,12 +4590,6 @@ public struct ToolbarState: Codable, Sendable, Equatable {
         try container.encode(canMoveDown, forKey: .canMoveDown)
         try container.encode(canAttachFiles, forKey: .canAttachFiles)
     }
-}
-
-/// The phase of a web push or pop slide.
-public enum TransitionPhase: String, Codable, Sendable, Equatable, CaseIterable {
-    case start = "start"
-    case end = "end"
 }
 
 /// Which trash holds a deleted note.

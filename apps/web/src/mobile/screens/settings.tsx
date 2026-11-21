@@ -353,6 +353,7 @@ export function MobileSettings(): ReactElement {
         align="center"
         back={() => (canBack ? back() : navigate({ kind: 'today' }))}
         title="Settings"
+        hidesTabBar
       />
       <main className="min-h-0 flex-1 overflow-y-auto bg-surface-app px-safe pb-safe">
         <div className="flex flex-col gap-8 px-4 py-5">
@@ -361,7 +362,7 @@ export function MobileSettings(): ReactElement {
               title={graph?.name ?? '—'}
               subtitle={storageLabel}
               media={<img src={appIcon} alt="" className="size-full object-cover" />}
-              onPress={() => navigate({ kind: 'graphs' })}
+              onPress={() => navigate({ kind: 'settings', page: 'graphs' })}
             />
           </SettingsGroup>
 
@@ -655,7 +656,7 @@ export function MobileSettings(): ReactElement {
             />
             <SettingsNavRow
               label="Open Source Licenses"
-              onPress={() => navigate({ kind: 'licenses' })}
+              onPress={() => navigate({ kind: 'settings', page: 'licenses' })}
             />
             <SettingsActionRow
               label="Privacy Policy"

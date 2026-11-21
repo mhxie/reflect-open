@@ -4,7 +4,7 @@ import { usePalette } from '@/components/command-palette/palette-provider.tsx'
 import { usePeekedNotePath } from '@/components/peek/peek-provider.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { usePinnedNotes } from '@/hooks/use-pinned-notes.ts'
-import type { CommandContext } from '@/lib/commands/types.ts'
+import type { AppCommandId, CommandContext } from '@/lib/commands/types.ts'
 import { toggleNotePrivate } from '@/lib/note-privacy-toast.ts'
 import { useAudioMemo } from '@/providers/audio-memo-provider.tsx'
 import { useFocusedDailyDate } from '@/providers/focused-daily-provider.tsx'
@@ -31,20 +31,22 @@ import { useRouterActions, useRouterState, useRouterHandlers } from './router.ts
  * (`registerAppKeymaps`).
  */
 
-const HISTORY_COMMAND_IDS = new Set(['history.back', 'history.forward'])
+const HISTORY_COMMAND_IDS = new Set<AppCommandId>(['history.back', 'history.forward'])
 
 // A mouse's side buttons, as `MouseEvent.button` numbers them. On macOS, wry
 // re-dispatches them as synthetic `mouseup`s and, unless one is cancelled,
 // falls back to `window.history`, which this router never writes.
-const MOUSE_BUTTON_TO_HISTORY_ID: ReadonlyMap<number, string> = new Map([
-  [3, 'history.back'],
-  [4, 'history.forward'],
-])
+const MOUSE_BUTTON_TO_HISTORY_ID: ReadonlyMap<number, AppCommandId> = new Map<number, AppCommandId>(
+  [
+    [3, 'history.back'],
+    [4, 'history.forward'],
+  ],
+)
 
 // AppKit owns this key equivalent on macOS. Keep it in the registry for
 // display, collision detection, and the plain-browser/non-macOS fallback, but
 // do not consume its keydown in the webview before the native menu sees it.
-const NATIVE_MACOS_MENU_COMMAND_IDS = new Set([
+const NATIVE_MACOS_MENU_COMMAND_IDS = new Set<AppCommandId>([
   'sidebar.toggle',
   'note.find',
   'note.findNext',
@@ -63,7 +65,7 @@ export function useAppShortcuts(): CommandContext {
   const appServices = useAppServices()
   const { route } = useRouterState()
   const { clearScrollState } = useRouterHandlers()
-  const { navigate, back, forward } = useRouterActions()
+  const { navigate, selectSection, back, forward } = useRouterActions()
   const { platform, semanticSearch } = services
   const { commands, nativeMenu } = appServices
   const focusedDailyDate = useFocusedDailyDate()
@@ -169,6 +171,7 @@ export function useAppShortcuts(): CommandContext {
           requestNoteMenu(path)
         }
       },
+      selectSection,
       back,
       forward,
       clearScrollState,
@@ -218,6 +221,7 @@ export function useAppShortcuts(): CommandContext {
       appServices,
       navigate,
       workingNotePath,
+      selectSection,
       back,
       forward,
       clearScrollState,
@@ -238,11 +242,11 @@ export function useAppShortcuts(): CommandContext {
   )
 
   useEffect(() => {
-    function idForKeyDown(event: KeyboardEvent): string | null {
+    function idForKeyDown(event: KeyboardEvent): AppCommandId | null {
       return commands.commandForKeyDown(event)
     }
 
-    function isNativeMacosMenuCommand(commandId: string): boolean {
+    function isNativeMacosMenuCommand(commandId: AppCommandId): boolean {
       return (
         platform.isMacosDesktop &&
         nativeMenu.isInstalled() &&
@@ -252,7 +256,7 @@ export function useAppShortcuts(): CommandContext {
 
     // The one guarded entry point for app commands, shared by keystrokes and
     // native menu activations. Returns whether the command was handled.
-    function triggerCommand(id: string): boolean {
+    function triggerCommand(id: AppCommandId): boolean {
       if (paletteOpenRef.current) {
         return false // modal palette owns the screen; Esc closes, then commands resume
       }

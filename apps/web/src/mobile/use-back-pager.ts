@@ -67,6 +67,15 @@ function restLeft(scroller: HTMLElement): number {
 }
 
 /**
+ * Marks the release of a swipe, from the lift of the finger until the pager
+ * settles. The pager then takes no hits (mobile-stack.css): a touch on a
+ * decelerating scroller stops it, and WebKit does not snap again after that.
+ */
+function setReleasing(scroller: HTMLElement, releasing: boolean): void {
+  scroller.toggleAttribute('data-releasing', releasing)
+}
+
+/**
  * Lets the revealed page take taps before React re-renders it as current.
  */
 function revealBelow(scroller: HTMLElement): void {
@@ -82,7 +91,9 @@ function revealBelow(scroller: HTMLElement): void {
  * same way. Between gestures the scroller rests on the last page; a user
  * swipe that leaves the current page off screen commits the pop. A scroll
  * that stops between the two snap points (a touch that stops the snap does
- * not snap again in WebKit) scrolls on to the nearer one.
+ * not snap again in WebKit) scrolls on to the nearer one. From the release
+ * of a swipe until the pager settles, the pager takes no hits, so a touch
+ * then leaves the snap running.
  */
 export function useBackPager({
   scrollerRef,
@@ -99,9 +110,16 @@ export function useBackPager({
   // Before paint, so a changed page list never shows the lower page for a frame.
   useLayoutEffect(() => {
     const scroller = scrollerRef.current
-    if (scroller) {
-      pinToLastPage(scroller)
+    if (!scroller) {
+      return
     }
+    pinToLastPage(scroller)
+    if (scroller.style.overflowX !== 'hidden') {
+      return
+    }
+    // Restores scrolling a frame after the pop stopped it.
+    const frame = requestAnimationFrame(() => scroller.style.removeProperty('overflow-x'))
+    return () => cancelAnimationFrame(frame)
   }, [scrollerRef, pagesKey])
 
   useEffect(() => {
@@ -120,12 +138,18 @@ export function useBackPager({
     let gesturesAtRest = 0
     const watch = watchScrollSettle({
       element: scroller,
+      onRelease: () => {
+        if (!popped) {
+          setReleasing(scroller, true)
+        }
+      },
       onSettle: () => {
         if (popped) {
           return
         }
         const rest = restLeft(scroller)
         if (scroller.scrollLeft >= rest - TOLERANCE_PX) {
+          setReleasing(scroller, false)
           gesturesAtRest = watch.gestures()
           if (swiping) {
             swiping = false
@@ -142,10 +166,16 @@ export function useBackPager({
           return
         }
         if (watch.gestures() === gesturesAtRest) {
+          setReleasing(scroller, false)
           pinToLastPage(scroller)
           return
         }
         popped = true
+        // Stops the snap that still runs toward the lower page. It would
+        // otherwise move the next page list and snap it back.
+        scroller.style.overflowX = 'hidden'
+        // The revealed page takes taps at once.
+        setReleasing(scroller, false)
         revealBelow(scroller)
         pop()
       },
@@ -196,6 +226,7 @@ export function useBackPager({
     return () => {
       controller.abort()
       resize.disconnect()
+      setReleasing(scroller, false)
       if (swiping && !popped) {
         reportSwipe('cancel')
       }

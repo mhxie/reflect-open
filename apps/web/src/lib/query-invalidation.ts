@@ -1,4 +1,4 @@
-import type { AppServices } from '@reflect/app'
+import type { WebAppServices } from '@/lib/commands/types.ts'
 import {
   isAttachmentPath,
   isPdfAttachmentPath,
@@ -25,7 +25,7 @@ import {
  * the attachment listing and PDF page sizes after the watcher reports an
  * attachment change, and what the app holds per graph when graphs change.
  */
-export function installQueryInvalidation(core: CoreServices, { window }: AppServices): Unlisten {
+export function installQueryInvalidation(core: CoreServices, { window }: WebAppServices): Unlisten {
   const unlisteners = [
     // The Attachments library lists the files themselves (with their times),
     // so it re-lists on the same signals as the attachment catalog: a batch

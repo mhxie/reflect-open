@@ -48,6 +48,16 @@ Cascade layer order, low to high priority.
   );
 }
 
+/* The iOS shell's native chrome sets how far the iPadOS window controls reach
+   into the top row (`--window-controls-width`,
+   mobile/chrome/native/native-chrome-renderer.tsx). */
+@utility left-window-controls-offset-* {
+  left: calc(
+    var(--twsa-safe-area-inset-left) + var(--spacing) * --value(integer) +
+      var(--window-controls-width, 0px)
+  );
+}
+
 /* Horizontal snap pager without a visible scrollbar. Each pager sets its own
    `overflow-x`. */
 @utility pager-x {
@@ -712,11 +722,12 @@ html:root {
   height: var(--outline-tail-space, 0);
 }
 
-/* Mobile note-body gutter. This mirrors `.reflect-content-gutter`'s cascade
-   role with a fixed phone-sized inset: the class must be un-layered so it beats
-   `.reflect-editor { padding: 0; }` on the contenteditable itself. */
+/* Mobile note-body gutter: 1rem past the safe area, which on iPad also covers
+   an overlapping sidebar. This mirrors `.reflect-content-gutter`'s cascade
+   role: the class must be un-layered so it beats `.reflect-editor { padding: 0; }`
+   on the contenteditable itself. */
 .reflect-mobile-content-gutter {
-  @apply px-safe-or-4;
+  @apply px-safe-offset-4;
 }
 
 /* Heading weight and spacing override meowdown's `.ProseMirror h*` theme

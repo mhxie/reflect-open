@@ -33,7 +33,7 @@
     "check": "pnpm typecheck && pnpm lint",
     "gen:ios-csp": "node scripts/generate-ios-csp.ts",
     "gen:licenses": "pnpm --filter @reflect/web gen:licenses",
-    "gen:types": "cargo run --quiet --package reflect-types --features codegen --bin codegen",
+    "gen:types": "cargo run --quiet --package reflect-types --features codegen --bin codegen && pnpm run fix:oxfmt  ",
     "gen:wxt": "pnpm --filter @reflect/extension gen:wxt",
     "tauri": "pnpm --filter @reflect/tauri tauri",
     "upload:testflight": "pnpm --filter @reflect/ios upload:testflight",
@@ -54,7 +54,7 @@
     "oxfmt": "^0.76.0",
     "oxlint": "^1.91.0",
     "simple-git-hooks": "^2.14.0",
-    "turbo": "^2.11.9",
+    "turbo": "^2.11.11",
     "typescript": "~6.0.3",
     "vitest": "^5.1.0"
   },

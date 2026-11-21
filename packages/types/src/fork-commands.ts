@@ -1,4 +1,4 @@
-import type { Commands as SharedCommands } from './wire.gen.ts'
+import type { Commands as SharedCommands } from './wire-gen.ts'
 
 /**
  * This fork's desktop commands: Tauri commands in `apps/tauri` that the shared

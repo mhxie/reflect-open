@@ -16,7 +16,7 @@ import {
 } from './native-menu-service.ts'
 import { noop, returnNull } from '@ocavue/utils'
 
-const LAYOUT: AppSubmenuLayout[] = [
+const LAYOUT: AppSubmenuLayout<string>[] = [
   {
     text: 'View',
     entries: [
@@ -38,6 +38,8 @@ function setup(options?: { label?: string; platform?: TestPlatformOptions; failP
   commands.register([
     { id: 'sidebar.toggle', title: 'Toggle sidebar', keybinding: 'Mod-\\', run: noop },
     { id: 'theme.toggle', title: 'Toggle theme', run: noop },
+    { id: 'note.find', title: 'Find in note…', run: noop },
+    { id: 'note.findNext', title: 'Find next', run: noop },
   ])
   const windows = createTestWindowService(
     options?.label !== undefined ? { label: options.label } : {},
@@ -197,6 +199,9 @@ describe('focused note menu dispatch', () => {
     browser.menu.setCommandDispatch(dispatch)
     browser.menu.dispatchCommand('note.find')
     expect(dispatch).toHaveBeenLastCalledWith('note.find')
+
+    menu.dispatchCommand('no.such.command')
+    expect(dispatch).toHaveBeenCalledTimes(2)
 
     menu.setCommandDispatch(null)
     menu.dispatchCommand('sidebar.toggle')

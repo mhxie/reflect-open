@@ -17,36 +17,39 @@ final class ChromeCoordinator {
   /// The container of the pages: the root's only child.
   var container: UIViewController { tabs }
   private let menus = MenuPresenter()
+  private let bar: NavigationBarPresenter
+  private let monthPicker = MonthPickerPresenter()
   private let formatting: FormattingAccessory
-  /// Set during a web slide: the corner buttons keep the old page until the
-  /// slide ends.
-  private var barFrozen = false
-  /// Bumped on every slide start, so an old timeout never thaws a newer slide.
-  private var slide = 0
-  /// The tab of the last state, so corner buttons cross-fade only within one
-  /// page.
+  /// The tab of the last shell state: the bar animates only within one tab.
+  /// A state without chrome (the loading screen) shows no tab.
   private var shownTab: ChromeTab?
-  /// The page whose corner buttons a back swipe faded out, and the entry it
-  /// showed.
-  private var swipe: (page: WebPageController, entryId: Int)?
+  /// The entry a back swipe faded the bar for.
+  private var swipeEntryId: Int?
 
   init(host: AppHost) {
     self.host = host
     tabs = ChromeTabController(webView: host.webView)
+    bar = NavigationBarPresenter(navigation: tabs.navigation, menus: menus)
     formatting = FormattingAccessory(webView: host.webView)
 
     let bridge = host.chrome
     menus.send = { [weak self] intent in self?.send(intent) }
     tabs.send = { [weak self] intent in self?.send(intent) }
-    tabs.onCornersInHeaderRow = { [bridge] inHeaderRow in bridge.cornersInHeaderRow = inHeaderRow }
+    bar.send = { [weak self] intent in self?.send(intent) }
+    bar.sendKeepingFocus = { [bridge] intent in bridge.send(intent) }
+    bar.pickMonth = { [weak self] month, source in self?.presentMonthPicker(month, from: source) }
+    monthPicker.onPick = { [weak self] month, entryId in
+      self?.send(.pickMonth(.init(entryId: entryId, month: month)))
+    }
     tabs.onSidebarVisible = { [bridge] visible in bridge.sidebarVisible = visible }
+    tabs.onWindowControlsWidth = { [bridge] width in bridge.windowControlsWidth = width }
     menus.presenter = { [weak self] in self?.container }
     formatting.send = { [weak self] intent in self?.send(intent) }
     formatting.presenter = { [weak self] in self?.container }
     bridge.onState = { [weak self] state in self?.apply(state) }
     bridge.onReset = { [weak self] in self?.reset() }
-    bridge.onTransition = { [weak self] started in self?.transition(started: started) }
     bridge.onBackSwipe = { [weak self] started in self?.backSwipe(started: started) }
+    bridge.onFocusSearch = { [weak self] entryId in self?.bar.focusSearch(entryId: entryId) }
     bridge.onError = { message in Self.logger.error("\(message, privacy: .public)") }
   }
 
@@ -58,16 +61,15 @@ final class ChromeCoordinator {
     #endif
     applyTheme(state.theme)
     tabs.apply(state)
-    if !barFrozen {
-      showBar(state, animated: state.tab == shownTab)
+    bar.show(state, animated: state.tab == shownTab)
+    shownTab = state.chrome == .none ? nil : state.tab
+    // The pop of a back swipe brings a new entry: the bar fades back in.
+    if let swipeEntryId, swipeEntryId != state.entryId {
+      endBackSwipe()
     }
-    shownTab = state.tab
-    // The pop of a back swipe brings a new entry: its buttons fade back in.
-    if let swipe, swipe.entryId != state.entryId {
-      endBackSwipe(animated: true)
-    }
-    tabs.page(for: state.tab)?.setBarDimmed(state.modal)
+    bar.setDimmed(state.modal)
     menus.pageDidShow(entryId: state.entryId)
+    monthPicker.close(keeping: state.entryId)
     formatting.update(state.toolbar)
   }
 
@@ -79,53 +81,27 @@ final class ChromeCoordinator {
     host.chrome.send(intent)
   }
 
-  /// Shows the corner buttons of `state` in the page of its tab.
-  private func showBar(_ state: ChromeState, animated: Bool) {
-    guard let page = tabs.page(for: state.tab) else { return }
-    page.showBar(state, animated: animated, menus: menus) { [weak self] intent in
-      self?.send(intent)
-    }
+  private func presentMonthPicker(_ month: String, from source: UIView) {
+    guard let entryId = host.chrome.state?.entryId else { return }
+    monthPicker.present(month: month, entryId: entryId, from: source, in: container)
   }
 
   /// A user back swipe starts to move the page, or settles back without a
-  /// pop. The corner buttons of the page fade out as the swipe starts, and
-  /// back in as it settles back or as the next entry arrives.
+  /// pop. The bar fades out as the swipe starts, and back in as it settles
+  /// back or as the next entry arrives.
   private func backSwipe(started: Bool) {
     guard started else {
-      endBackSwipe(animated: true)
+      endBackSwipe()
       return
     }
-    guard swipe == nil, let state = host.chrome.state, let page = tabs.page(for: state.tab)
-    else { return }
-    swipe = (page, state.entryId)
-    page.setBarFaded(true, animated: true)
+    guard swipeEntryId == nil, let state = host.chrome.state else { return }
+    swipeEntryId = state.entryId
+    bar.setFaded(true, animated: true)
   }
 
-  private func endBackSwipe(animated: Bool) {
-    swipe?.page.setBarFaded(false, animated: animated)
-    swipe = nil
-  }
-
-  /// A web push or pop slide starts or ends. During the slide the corner
-  /// buttons keep the old page; at the end they cross-fade to the latest
-  /// state. A lost end thaws them after one second.
-  private func transition(started: Bool) {
-    // An end without a slide (a tab switch, the first mount) changes nothing.
-    guard started || barFrozen else { return }
-    slide += 1
-    let current = slide
-    barFrozen = started
-    if started {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-        guard let self, self.slide == current else { return }
-        self.transition(started: false)
-      }
-      return
-    }
-    guard let state = host.chrome.state, let page = tabs.page(for: state.tab) else { return }
-    UIView.transition(with: page.cornerButtons, duration: 0.2, options: .transitionCrossDissolve) {
-      self.showBar(state, animated: false)
-    }
+  private func endBackSwipe() {
+    swipeEntryId = nil
+    bar.setFaded(false, animated: true)
   }
 
   /// The window changed size (rotation, iPhone Duo posture, iPad split).
@@ -137,9 +113,10 @@ final class ChromeCoordinator {
   /// theme stays until the first state, so a pinned style does not flip.
   private func reset() {
     menus.closeAll()
-    barFrozen = false
+    monthPicker.close()
     shownTab = nil
-    endBackSwipe(animated: false)
+    swipeEntryId = nil
+    bar.reset()
     formatting.update(nil)
     formatting.reset()
     tabs.reset()

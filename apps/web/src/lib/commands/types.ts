@@ -1,5 +1,5 @@
 import type { MaybePromise } from '@reflect/utils'
-import type { AppServices, Command, Route, NavigateOptions } from '@reflect/app'
+import type { AppServices, Command, Route, NavigateOptions, Section } from '@reflect/app'
 import type { CoreServices, NoteListSort, WikiLanguage } from '@reflect/core'
 
 /**
@@ -14,8 +14,12 @@ export interface CommandContext {
    * The core services, for the commands that call one directly.
    */
   services: CoreServices
-  app: AppServices
+  app: WebAppServices
   navigate: (route: Route, options?: NavigateOptions) => void
+  /**
+   * Go to a section: where it was left from elsewhere, its root from within.
+   */
+  selectSection: (section: Section, options?: NavigateOptions) => void
   /** The current route, read at run time. */
   route: () => Route
   /**
@@ -75,6 +79,68 @@ export interface CommandContext {
 }
 
 /**
+ * The 1-based position of a recent graph that a `graph.switch` command opens.
+ */
+export type GraphSwitchPosition = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+
+/**
+ * The position of a pinned note that has an `pinned.open` command.
+ */
+export type PinnedNotePosition = GraphSwitchPosition | 10
+
+/**
+ * The id of an app command.
+ */
+export type AppCommandId =
+  | `graph.switch${GraphSwitchPosition}`
+  | 'nav.today'
+  | 'nav.allNotes'
+  | 'nav.tasks'
+  | 'note.new'
+  | 'note.openInNewWindow'
+  | 'note.find'
+  | 'note.findNext'
+  | 'note.findPrevious'
+  | 'chat.open'
+  | 'chat.new'
+  | 'history.back'
+  | 'history.forward'
+  | 'palette.open'
+  | 'note.togglePin'
+  | 'note.togglePrivate'
+  | 'note.publishGist'
+  | 'note.attachFile'
+  | 'note.copyDeepLink'
+  | 'note.copyPath'
+  | 'note.random'
+  | 'template.insert'
+  | 'template.new'
+  | 'audioMemo.toggle'
+  | 'theme.toggle'
+  | 'sidebar.toggle'
+  | 'settings.open'
+  | 'whatsNew.show'
+  | 'shortcuts.show'
+  | 'semantic.enable'
+  | 'index.rebuild'
+  | 'dev.toggleDevtools'
+  // This fork's commands.
+  | `pinned.open${PinnedNotePosition}`
+  | 'nav.attachments'
+  | 'allNotes.sortByTitle'
+  | 'allNotes.sortByUpdated'
+  | 'allNotes.reverseOrder'
+  | 'nav.wiki'
+  | 'wiki.switchLanguage'
+  | 'note.showDetails'
+  | 'outline.jumpToHeading'
+
+/**
  * A command of this app: it runs with a {@link CommandContext}.
  */
-export type AppCommand = Command<CommandContext>
+export type AppCommand = Command<AppCommandId, CommandContext>
+
+/**
+ * The app services of this app, typed with its commands.
+ */
+export type WebAppServices = AppServices<AppCommandId, CommandContext>

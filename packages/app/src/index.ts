@@ -126,7 +126,7 @@ export {
   weekOf,
   type WeekWindow,
 } from './daily/week-window.ts'
-export { type Command, type CommandService } from './commands/command-service.ts'
+export { type Command, type Commands, type CommandService } from './commands/command-service.ts'
 export { formatBinding } from './commands/keybindings.ts'
 export { type KeymapService } from './commands/keymap-service.ts'
 export {
@@ -165,6 +165,10 @@ export {
   focusedNotePathForRoute,
   normalizeRoute,
   notePathForRoute,
+  rootSectionForRoute,
+  ROUTE_META,
+  routeMeta,
+  sectionSchema,
   routeForPath,
   routeSchema,
   routesEqual,
@@ -172,6 +176,8 @@ export {
   type AllNotesFilter,
   type NoteRoute,
   type Route,
+  type RouteMeta,
+  type Section,
 } from './navigation/route.ts'
 export {
   createWindowService,

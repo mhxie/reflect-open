@@ -132,8 +132,10 @@ export interface AppHost {
 
 /**
  * The app-layer services of one webview, built over the core services.
+ * `CommandId` and `Context` are the id and context types of the app's
+ * commands.
  */
-export interface AppServices {
+export interface AppServices<CommandId extends string, Context> {
   /**
    * Facts about this webview's window and the actions that span windows.
    */
@@ -170,15 +172,15 @@ export interface AppServices {
   /**
    * The command registry. The app decides the context type that its commands run with.
    */
-  readonly commands: CommandService
+  readonly commands: CommandService<CommandId, Context>
   /**
    * The native macOS application menu and native context menus.
    */
-  readonly nativeMenu: NativeMenuService
+  readonly nativeMenu: NativeMenuService<CommandId>
   /**
    * The command palette's data layer.
    */
-  readonly paletteSearch: PaletteSearchService
+  readonly paletteSearch: PaletteSearchService<CommandId, Context>
   /**
    * Exception-only crash reporting.
    */
@@ -252,9 +254,15 @@ export interface AppServices {
 /**
  * Build the app layer once per webview.
  */
-export function createAppServices(core: CoreServices, host: AppHost): AppServices {
+export function createAppServices<CommandId extends string, Context>(
+  core: CoreServices,
+  host: AppHost,
+): AppServices<CommandId, Context> {
   const systemPreferences = createSystemPreferencesService({ media: host.media })
-  const commands = createCommandService({ platform: core.platform, logger: core.logger })
+  const commands = createCommandService<CommandId, Context>({
+    platform: core.platform,
+    logger: core.logger,
+  })
   const keymap = createKeymapService({ platform: core.platform })
   const nativeMenu = createNativeMenuService({
     commands,
