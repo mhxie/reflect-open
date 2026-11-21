@@ -2,8 +2,8 @@
 
 The rules every change to the sync path must keep. "The sync path" is
 `crates/git/src/`, the conflict ladder in `crates/graph-io/src/conflict/`,
-the desktop commands in `apps/desktop/src-tauri/src/git.rs` and
-`apps/desktop/src-tauri/src/git/`, `packages/core/src/sync/`, the backup
+the commands in `crates/core/src/git.rs` and `crates/core/src/git/`,
+`packages/core/src/sync/`, the backup
 flusher in `packages/core/src/graph/persistence-flush-service.ts`, and the
 external-change handling in
 `packages/core/src/documents/note-session-service.ts`.

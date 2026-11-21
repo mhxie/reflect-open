@@ -1,7 +1,7 @@
 /**
  * The on-device transcription models: whisper.cpp GGML conversions, and
  * Qwen3-ASR checkpoints run through candle. The ids mirror
- * `apps/desktop/src-tauri/src/local_transcription/` (`models.rs` maps the
+ * `apps/tauri/src/local_transcription/` (`models.rs` maps the
  * whisper ids to files, `mod.rs` pins the Qwen repos); this catalog owns their
  * display names and sizes. Dependency-free so the settings schema can import it.
  */

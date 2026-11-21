@@ -38,7 +38,7 @@ patchedDependencies:
 
 # Plan 25: Reflect runs the Meowdown fork (mhxie/meowdown, branch
 # master) from tarballs vendored by
-# apps/desktop/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
+# apps/tauri/scripts/vendor-meowdown.mjs; rerun it after changing the fork.
 overrides:
   '@meowdown/markdown': file:vendor/meowdown/meowdown-markdown-0.78.0-47dfaeeeef8a.tgz
   '@meowdown/core': file:vendor/meowdown/meowdown-core-0.84.0-47dfaeeeef8a.tgz

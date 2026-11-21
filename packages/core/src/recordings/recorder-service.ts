@@ -8,7 +8,7 @@ import type { ProgressPort } from '../ports/progress-port.ts'
 import type { Unlisten } from '../unlisten.ts'
 
 /**
- * The Rust recorder (`apps/desktop/src-tauri/src/recorder/`, macOS 14.2+),
+ * The Rust recorder (`apps/tauri/src/recorder/`, macOS 14.2+),
  * which every recording on the Mac goes through: two channels (microphone =
  * Me, system audio = Them), per-channel on-device transcription, and
  * archiving the audio. Recordings wait in a local staging area outside any

@@ -1,0 +1,221 @@
+[package]
+name = "reflect-open"
+# Intentionally frozen: the app version lives in apps/web/package.json and
+# tauri.conf.json points at it. The crate is never published, so its version
+# has no consumer — freezing it keeps Cargo.lock out of every release diff.
+version = "0.0.0"
+description = "The Reflect desktop app"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "reflect_open_lib"
+crate-type = ["rlib"]
+
+[dependencies]
+
+# `devtools` compiles the web inspector into release builds too (it is otherwise
+# debug-only), so a shipped app stays debuggable — see `src/devtools.rs`.
+tauri = { workspace = true, features = ["devtools", "tray-icon"] }
+tauri-plugin-opener = { workspace = true }
+# Decodes `reflect-asset://` request paths (`fs/asset_protocol.rs`); the same
+# crate tauri itself uses for its protocol URLs.
+percent-encoding = { workspace = true }
+# `time` backs the bounded wait in `windows::close_note_windows` (tauri
+# already runs on tokio; this only makes the sleep primitive addressable).
+# `macros` backs the `select!` that races an on-device request against its
+# cancel (`src/on_device_http.rs`).
+tokio = { workspace = true, features = ["time", "sync", "fs", "io-util", "net", "macros"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The CLI search socket and its result limit (`search_ipc.rs`).
+reflect-index-schema = { workspace = true, features = ["default"] }
+reflect-graph-paths = { workspace = true }
+reflect-types = { workspace = true, features = ["git2", "rusqlite"] }
+reflect-index = { workspace = true }
+reflect-graph-io = { workspace = true }
+reflect-core = { workspace = true }
+# The on-device transport carries response bodies as base64 (`on_device_http.rs`).
+base64 = { workspace = true }
+tempfile = { workspace = true }
+sha2 = { workspace = true }
+dirs = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+# `tracing` has no subscriber here: its `log` feature forwards every event to
+# the `log` crate, where `tauri-plugin-log` owns the sinks (see `logging.rs`).
+tracing = { workspace = true, features = ["log"] }
+log = { workspace = true }
+tauri-plugin-log = { workspace = true }
+keyring-core = { workspace = true }
+# The history root (`git/settings.rs`) is a libgit2 commit id.
+git2 = { workspace = true }
+# unsafe-headers lets provider-fetch.ts pass an explicit empty Origin, which
+# the plugin treats as "send no Origin header" (see providerFetch's doc).
+tauri-plugin-http = { workspace = true, features = ["unsafe-headers"] }
+# Link capture (Plan 11): screenshot downscale + the bounded meta-scrape fetch.
+image = { workspace = true, features = ["gif", "ico", "jpeg", "png", "webp"] }
+reqwest = { workspace = true }
+# The parsed host behind the on-device transport's loopback check; the same
+# url crate reqwest parses with.
+url = { workspace = true }
+# The watcher's local-only folder walks and the recovery store's listing.
+walkdir = { workspace = true }
+tauri-plugin-updater = { workspace = true }
+tauri-plugin-process = { workspace = true }
+tauri-plugin-window-state = { workspace = true }
+tauri-plugin-deep-link = { workspace = true }
+tauri-plugin-single-instance = { workspace = true, features = ["deep-link"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Apple Calendar read-only bridge (`src/calendar.rs`): EventKit through the
+# objc2 bindings, trimmed to the classes the modules touch. objc2-app-kit
+# backs EKCalendar's NSColor → hex conversion and the Edit menu's Paste and
+# Match Style item (`src/menu.rs`); NSProcessInfo backs the App Nap
+# activities in `src/activity.rs`.
+objc2 = { workspace = true }
+block2 = { workspace = true }
+objc2-foundation = { workspace = true, features = [
+  "std",
+  "NSArray",
+  "NSDate",
+  "NSEnumerator",
+  "NSError",
+  "NSNotification",
+  "NSObject",
+  "NSOperation",
+  "NSProcessInfo",
+  "NSString",
+  "NSUUID",
+  "NSValue",
+  "block2",
+] }
+objc2-event-kit = { workspace = true, features = [
+  "std",
+  "EKCalendar",
+  "EKCalendarItem",
+  "EKEvent",
+  "EKEventStore",
+  "EKObject",
+  "EKParticipant",
+  "EKSource",
+  "EKTypes",
+  "block2",
+  "objc2-app-kit",
+] }
+objc2-app-kit = { workspace = true, features = [
+  "std",
+  "NSApplication",
+  "NSColor",
+  "NSColorSpace",
+  "NSEvent",
+  "NSMenu",
+  "NSMenuItem",
+  "NSWorkspace",
+] }
+# On-device audio-memo transcription (`src/local_transcription/`): whisper.cpp
+# on Metal, fed by AudioToolbox's ExtAudioFile (m4a/AAC, WAV), which resamples
+# to the model's 16 kHz in the same pass.
+whisper-rs = { workspace = true, features = ["metal", "tracing_backend"] }
+objc2-audio-toolbox = { workspace = true, features = [
+  "std",
+  "AudioFile",
+  "ExtendedAudioFile",
+  "objc2-core-audio-types",
+  "objc2-core-foundation",
+] }
+objc2-core-audio-types = { workspace = true, features = ["std", "CoreAudioBaseTypes"] }
+objc2-core-foundation = { workspace = true, features = [
+  "std",
+  "CFArray",
+  "CFData",
+  "CFDictionary",
+  "CFNumber",
+  "CFString",
+  "CFURL",
+] }
+# Inline PDF embeds (`src/fs/pdf_render/`): CoreGraphics parses the PDF from
+# bytes Rust already read and rasterizes one page into an sRGB bitmap;
+# ImageIO encodes it as PNG for the `reflect-asset://` protocol.
+objc2-core-graphics = { workspace = true, features = [
+  "std",
+  "CGBitmapContext",
+  "CGColorSpace",
+  "CGContext",
+  "CGDataProvider",
+  "CGImage",
+  "CGPDFDocument",
+  "CGPDFPage",
+] }
+objc2-image-io = { workspace = true, features = [
+  "std",
+  "CGImageDestination",
+  "objc2-core-graphics",
+] }
+# The recorder (`src/recorder/`): a Core Audio process tap and
+# private aggregate device record the microphone and system audio on one
+# clock (macOS 14.2+); rtrb carries frames off the realtime IO thread;
+# realfft runs the echo suppressor's STFT; the global
+# shortcut starts and stops a recording from whichever app has focus.
+objc2-core-audio = { workspace = true, features = [
+  "std",
+  "AudioHardware",
+  "block2",
+  "dispatch2",
+  "objc2",
+  "objc2-core-audio-types",
+  "objc2-foundation",
+] }
+realfft = { workspace = true }
+rtrb = { workspace = true }
+# Qwen3-ASR (`src/local_transcription/qwen.rs`), the second on-device model
+# family: candle on Metal, no Python. Its own Hugging Face loader is left off;
+# downloads go through hf-hub like whisper's.
+qwen3-asr = { workspace = true, features = ["metal"] }
+tauri-plugin-global-shortcut = { workspace = true }
+# WebKit's MediaRecorder writes WebM/Opus, which AudioToolbox can't open:
+# symphonia demuxes it and libopus (built from source) decodes straight to 16 kHz.
+symphonia = { workspace = true, features = ["mkv"] }
+symphonia-adapter-libopus = { workspace = true }
+
+# The fork's desktop capabilities that live in this crate.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+trash = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
+# The watcher's pruned file-ID cache (rename stitching without the full-tree
+# walk) reuses the debouncer's own building blocks directly.
+file-id = { workspace = true }
+# hf-hub downloads the on-device transcription models with byte-level
+# progress. They also build on Intel macOS, so it stays outside the embedding
+# runtime's section below.
+hf-hub = { workspace = true, features = ["ureq", "native-tls"] }
+
+# The embedding runtime. Intel macOS has none: ONNX Runtime 1.24+ ships no
+# macOS x86_64 binaries.
+[target.'cfg(all(not(any(target_os = "android", target_os = "ios")), not(all(target_os = "macos", target_arch = "x86_64"))))'.dependencies]
+fastembed = { workspace = true }
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dev-dependencies]
+tauri = { workspace = true, features = ["test"] }
+reflect-graph-io = { workspace = true, features = ["test-support"] }
+# `capability_tests` match the `http:default` scope the way tauri-plugin-http does.
+regex = { workspace = true }
+urlpattern = { workspace = true }
+# The index command tests stage raw rows (a damaged local-only record) the
+# session refuses to write.
+rusqlite = { workspace = true }
+# Proves the assembled Qwen tokenizer.json loads (`local_transcription/qwen.rs`).
+tokenizers = { workspace = true, features = ["onig"] }
+
+# The PDF-preview tests (`src/fs/pdf_render/`) have CoreGraphics write their
+# password-protected fixtures.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-core-graphics = { workspace = true, features = ["CGDataConsumer", "CGPDFContext"] }

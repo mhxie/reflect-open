@@ -1,6 +1,6 @@
 /**
  * The embedding models the desktop runtime can load (`MODELS` in
- * `apps/desktop/src-tauri/src/embed.rs`; the ids must match). The first is
+ * `crates/core/src/embed.rs`; the ids must match). The first is
  * the default: the original model, so an existing index keeps its vector
  * table's width. Its vectors still re-embed once when the chunking or
  * `PASSAGE_VERSION` (`embedding-index-service.ts`) changes what a chunk is

@@ -7,7 +7,7 @@ import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
 
 /**
  * `fetch` for model servers on this Mac, over the Rust transport in
- * `src-tauri/src/on_device_http.rs`: no proxy, no redirects, `localhost`
+ * `apps/tauri/src/on_device_http.rs`: no proxy, no redirects, `localhost`
  * pinned to 127.0.0.1, and a loopback check on the peer that answered.
  * `LanguageModelService` and `AiKeyValidationService` use it for every
  * loopback OpenAI-compatible endpoint, so no call site can send one through

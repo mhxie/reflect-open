@@ -5,11 +5,13 @@
   "workspaces": {
     ".": { "entry": ["fixtures/*.mjs"] },
     "design-system": { "ignore": "./**/*" },
-    "apps/desktop": {
+    "apps/tauri": {
       "entry": ["scripts/vendor-meowdown.mjs"],
-      "ignoreBinaries": ["ditto", "osascript", "pgrep"],
-      "ignoreDependencies": ["@sentry/cli"]
+      "ignoreBinaries": ["ditto", "osascript", "pgrep"]
     },
-    "apps/ios": { "ignore": "Extensions/**" }
+    "apps/ios": {
+      "ignore": "Extensions/**",
+      "ignoreDependencies": ["@sentry/cli"]
+    }
   }
 }
