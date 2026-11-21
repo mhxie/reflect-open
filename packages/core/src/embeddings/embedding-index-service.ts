@@ -18,6 +18,7 @@ import type { Unlisten } from '../unlisten.ts'
 import { parseNote } from '../markdown/index.ts'
 import { chunkAssetDescriptions, chunkNote, type NoteChunk } from './chunk.ts'
 import type { EmbeddingRuntimeService } from './embedding-runtime-service.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * The incremental embedding pass (Plan 09): chunk a note, diff chunk hashes
@@ -464,7 +465,7 @@ class EmbeddingIndexServiceImpl implements EmbeddingIndexService {
                   fileGeneration,
                   modelId,
                   localOnly,
-                }).then(() => {})
+                }).then(noop)
           })
           .catch((cause: unknown) => {
             logger.error(`embedding sync failed for ${change.path}:`, cause)

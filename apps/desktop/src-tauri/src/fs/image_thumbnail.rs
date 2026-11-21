@@ -34,8 +34,8 @@ use reflect_graph_paths::LocalOnlyFolders;
 use tauri::http::StatusCode;
 use tokio::sync::Semaphore;
 
-use super::preview_cache;
 use super::{ReadTarget, resolve_write};
+use reflect_core::fs::preview_cache;
 
 /// The query parameter that routes a `reflect-asset://` request here.
 const THUMB_QUERY: &str = "reflect-preview=thumb";
@@ -46,18 +46,19 @@ const THUMB_QUERY: &str = "reflect-preview=thumb";
 const WIDTH_BUCKETS: [u32; 4] = [320, 640, 960, 1280];
 
 /// The thumbnail cache, graph-relative.
-const CACHE_DIR: &str = ".reflect/cache/thumbnails";
+const CACHE_DIR: &str = preview_cache::THUMBNAIL_CACHE_DIR;
 
 /// Hashed into every cache key; bump it when the output changes so stale
 /// thumbnails miss instead of being served.
 const CACHE_FORMAT: &str = "thumbnails/v1";
 
 /// Cache entries hold a JPEG or a PNG, told apart by their signature.
-const CACHE_EXTENSION: &str = "thumb";
+const CACHE_EXTENSION: &str = preview_cache::THUMBNAIL_CACHE_EXTENSION;
 
 /// The thumbnail cache's total size after the sweep at graph open: 256 MiB.
 /// Between opens it may grow past this; only the sweep evicts.
-const CACHE_CAP_BYTES: u64 = 256 * 1024 * 1024;
+#[cfg(test)]
+const CACHE_CAP_BYTES: u64 = preview_cache::THUMBNAIL_CACHE_CAP_BYTES;
 
 /// The formats thumbnailed: exactly what the passive-preview raster filter
 /// allows. Format detection is by content, never by extension.
@@ -502,7 +503,8 @@ fn encode(image: &DynamicImage) -> Result<Thumbnail, ThumbnailError> {
 }
 
 /// Bound the thumbnail cache when a graph opens (see [`CACHE_CAP_BYTES`]).
-pub(super) fn sweep_thumbnail_cache(root: &Path) {
+#[cfg(test)]
+fn sweep_thumbnail_cache(root: &Path) {
     preview_cache::sweep_cache_dir(root, CACHE_DIR, CACHE_EXTENSION, CACHE_CAP_BYTES);
 }
 

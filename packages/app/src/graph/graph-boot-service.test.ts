@@ -23,6 +23,7 @@ import type { Route } from '../navigation/route.ts'
 import { createTestDialogService } from '../testing/dialog.ts'
 import { createTestWindowService } from '../testing/window.ts'
 import { createGraphBootService } from './graph-boot-service.ts'
+import { returnNull } from '@ocavue/utils'
 
 const BOOT: WindowBootstrap = {
   graph: {
@@ -85,7 +86,7 @@ function setup(options?: SetupOptions) {
           localOnlyFolders: [],
         }
       },
-      graph_delete: () => null,
+      graph_delete: returnNull,
     },
   })
   const noteFile = createTestNoteFileService()

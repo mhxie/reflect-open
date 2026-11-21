@@ -277,7 +277,7 @@ export default defineESLintConfig(
     jsdoc: false,
   },
   {
-    ignores: ['./design-system/', '**/.wxt/', '**/.output/'],
+    ignores: ['./design-system/', '**/.wxt/', '**/.output/', 'apps/ios/Extensions/'],
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.mjs'],
@@ -344,15 +344,34 @@ export default defineESLintConfig(
     files: [
       // The adapters.
       `apps/desktop/src/services/**/*.${SOURCE_EXTENSIONS}`,
-      // The composition roots: `boot.ts` asks Tauri whether the shell is
-      // native before any service exists; `main.tsx` is listed with it and
-      // imports nothing from Tauri today.
+      // The composition roots: `boot.ts` picks the shell's adapters before
+      // any service exists; `main.tsx` is listed with it. Neither imports
+      // from Tauri today.
       'apps/desktop/src/boot.ts',
       'apps/desktop/src/main.tsx',
     ],
     rules: {
       'no-restricted-imports': 'off',
       'no-restricted-syntax': ['error', REACT_ACT_SELECTOR, ...CODE_SHAPE_SELECTORS],
+    },
+  },
+
+  // Rule: the extension imports WXT APIs from their real `wxt/*` paths. The
+  // `#imports` alias resolves only through WXT's Vite plugin.
+  {
+    files: [`apps/extension/**/*.${SOURCE_EXTENSIONS}`],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '#imports',
+              message: 'Import from the real `wxt/*` path, e.g. `wxt/utils/define-background`.',
+            },
+          ],
+        },
+      ],
     },
   },
 

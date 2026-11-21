@@ -1,0 +1,468 @@
+//! The local embedding runtime (Plan 09): fastembed (ONNX) in-process, off the
+//! UI thread. The model is chosen from [`MODELS`] (all-MiniLM-L6-v2 unless the
+//! settings pick another), downloaded on demand into app data — never bundled —
+//! and every failure degrades to a reported "unavailable" state (the same
+//! recoverable contract as sqlite-vec): semantic search is strictly additive,
+//! so nothing here may ever take the app down.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
+use hf_hub::Cache;
+use hf_hub::api::Progress;
+use hf_hub::api::sync::ApiBuilder;
+use reflect_types::{AppError, AppResult};
+use serde::{Deserialize, Serialize};
+
+use crate::{Core, Host};
+
+/// One model the runtime can load. `id` is stored with every chunk and in
+/// `index_meta.embeddingModel`, so switching models re-embeds the graph into
+/// a vector table of the new width.
+pub struct ModelSpec {
+    pub id: &'static str,
+    model: EmbeddingModel,
+    /// Prepended to search queries and to stored passages: EmbeddingGemma was
+    /// trained on task prompts, while MiniLM takes raw text.
+    query_prefix: &'static str,
+    passage_prefix: &'static str,
+}
+
+/// The models on offer; the first is the default (the original model, so an
+/// existing index keeps its vector table's width).
+pub const MODELS: &[ModelSpec] = &[
+    ModelSpec {
+        id: "all-MiniLM-L6-v2",
+        model: EmbeddingModel::AllMiniLML6V2,
+        query_prefix: "",
+        passage_prefix: "",
+    },
+    ModelSpec {
+        id: "embeddinggemma-300m",
+        model: EmbeddingModel::EmbeddingGemma300M,
+        query_prefix: "task: search result | query: ",
+        passage_prefix: "title: none | text: ",
+    },
+];
+
+fn model_spec(id: Option<&str>) -> AppResult<&'static ModelSpec> {
+    match id {
+        None => Ok(&MODELS[0]),
+        Some(id) => MODELS
+            .iter()
+            .find(|spec| spec.id == id)
+            .ok_or_else(|| AppError::parse(format!("unknown embedding model: {id}"))),
+    }
+}
+
+/// The tokenizer files fastembed reads beside every model.
+const TOKENIZER_FILES: [&str; 4] = [
+    "tokenizer.json",
+    "config.json",
+    "special_tokens_map.json",
+    "tokenizer_config.json",
+];
+
+/// Whether a text is a search query or a stored passage; the models that were
+/// trained with prefixes embed the two differently.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TextRole {
+    Query,
+    #[default]
+    Passage,
+}
+/// ONNX Runtime intra-op threads. The default is one per logical CPU, and the
+/// workers spin-wait between ops. A call embeds one note (two or three
+/// chunks), so a large pool mostly spins.
+const INTRA_OP_THREADS: usize = 2;
+/// Texts per ONNX Runtime run. Peak memory grows with the batch (fastembed's
+/// default of 256 needs about 17 GB for a 300 KB note), and the freed memory
+/// stays in the process. One text keeps the peak near the model's own size.
+const EMBED_BATCH_SIZE: usize = 1;
+
+/// Byte counts for an active model download. Absent until the download
+/// starts (cache probing, or a cached model that skips downloading); after
+/// the last byte it stays at 100% through the model-load phase.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ByteProgress {
+    pub downloaded: u64,
+    pub total: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
+pub enum EmbedStatus {
+    /// No model loaded yet; `embed_ensure` will download/load it.
+    Uninitialized,
+    /// Download/load in progress (first run downloads ~90MB). The runtime
+    /// keeps the latest byte counts, so polls and `embed:status` events
+    /// report the same progress.
+    Loading {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        progress: Option<ByteProgress>,
+    },
+    /// `embed_texts` is ready; `model` is recorded per vector (rebuild key)
+    /// and `dims` is the width its vector table must have.
+    Ready { model: String, dims: usize },
+    /// Load failed; semantic search is unavailable (lexical still works).
+    Failed { message: String },
+    /// This CPU cannot run ONNX Runtime (see `cpu_supported`).
+    Unsupported,
+}
+
+/// A loaded model and what callers need to know about it.
+struct Loaded {
+    spec: &'static ModelSpec,
+    dims: usize,
+    // fastembed's `embed` takes `&mut self`, so the model sits behind its own
+    // Mutex — embed calls serialize, which batching makes irrelevant.
+    model: Arc<Mutex<TextEmbedding>>,
+}
+
+#[derive(Default)]
+enum Runtime {
+    #[default]
+    Uninitialized,
+    Loading {
+        progress: Option<ByteProgress>,
+    },
+    Ready(Arc<Loaded>),
+    Failed(String),
+}
+
+/// Process-wide embedding runtime state.
+#[derive(Default)]
+pub struct EmbedState(Arc<Mutex<Runtime>>);
+
+/// ort's prebuilt x86_64 ONNX Runtime requires AVX2. Without it, runtime init
+/// dies with SIGILL, which no error path can catch, so check before any ort
+/// call and report `unsupported` instead.
+#[cfg(target_arch = "x86_64")]
+fn cpu_supported() -> bool {
+    std::is_x86_feature_detected!("avx2")
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn cpu_supported() -> bool {
+    true
+}
+
+fn lock_state<'a>(state: &'a EmbedState) -> AppResult<std::sync::MutexGuard<'a, Runtime>> {
+    state.0.lock().map_err(|err| {
+        tracing::error!(?err, "embed state lock poisoned by an earlier panic");
+        AppError::io("embed state lock poisoned")
+    })
+}
+
+fn status_of(runtime: &Runtime) -> EmbedStatus {
+    match runtime {
+        Runtime::Uninitialized => EmbedStatus::Uninitialized,
+        Runtime::Loading { progress } => EmbedStatus::Loading {
+            progress: *progress,
+        },
+        Runtime::Ready(loaded) => EmbedStatus::Ready {
+            model: loaded.spec.id.to_string(),
+            dims: loaded.dims,
+        },
+        Runtime::Failed(message) => EmbedStatus::Failed {
+            message: message.clone(),
+        },
+    }
+}
+
+fn emit_status(host: &dyn Host, status: &EmbedStatus) {
+    if let Ok(payload) = serde_json::to_value(status) {
+        host.emit("embed:status", payload);
+    }
+}
+
+/// Record download progress on the runtime state, so an `embed_status` poll
+/// (e.g. a UI surface mounted mid-download) reports the same bytes as the
+/// `embed:status` events. Only an in-flight load is updated — by the time a
+/// stale progress callback could land, the state owns a terminal status.
+fn store_progress(state: &Mutex<Runtime>, progress: ByteProgress) {
+    let Ok(mut runtime) = state.lock() else {
+        return;
+    };
+    if matches!(*runtime, Runtime::Loading { .. }) {
+        *runtime = Runtime::Loading {
+            progress: Some(progress),
+        };
+    }
+}
+
+/// How many newly-downloaded bytes accumulate between progress events — about
+/// ninety events for the full model, comfortably few for the IPC channel yet
+/// smooth enough for a progress bar.
+const PROGRESS_EMIT_STEP: u64 = 1024 * 1024;
+
+struct DownloadState {
+    host: Arc<dyn Host>,
+    state: Arc<Mutex<Runtime>>,
+    downloaded: u64,
+    total: u64,
+    emitted: u64,
+}
+
+impl DownloadState {
+    fn emit(&mut self) {
+        self.emitted = self.downloaded;
+        let progress = ByteProgress {
+            downloaded: self.downloaded,
+            total: self.total,
+        };
+        store_progress(&self.state, progress);
+        emit_status(
+            self.host.as_ref(),
+            &EmbedStatus::Loading {
+                progress: Some(progress),
+            },
+        );
+    }
+}
+
+/// Cumulative byte progress across the whole file set, surfaced as
+/// `embed:status` events. hf-hub takes the reporter by value per file, so the
+/// shared tally lives behind an `Arc` and each download gets a clone.
+#[derive(Clone)]
+struct DownloadProgress(Arc<Mutex<DownloadState>>);
+
+impl DownloadProgress {
+    fn new(host: Arc<dyn Host>, state: Arc<Mutex<Runtime>>, total: u64) -> Self {
+        let mut state = DownloadState {
+            host,
+            state,
+            downloaded: 0,
+            total,
+            emitted: 0,
+        };
+        // Surface the total before the first chunk lands, so the bar starts
+        // at a real 0% instead of indeterminate.
+        state.emit();
+        Self(Arc::new(Mutex::new(state)))
+    }
+}
+
+impl Progress for DownloadProgress {
+    fn init(&mut self, _size: usize, _filename: &str) {}
+
+    fn update(&mut self, size: usize) {
+        let Ok(mut state) = self.0.lock() else {
+            return;
+        };
+        state.downloaded += size as u64;
+        if state.downloaded - state.emitted >= PROGRESS_EMIT_STEP || state.downloaded >= state.total
+        {
+            state.emit();
+        }
+    }
+
+    fn finish(&mut self) {}
+}
+
+/// Fetch whatever model files are missing from the cache, with byte progress.
+/// fastembed downloads these itself inside `try_new`, but silently; fetching
+/// them first through the same hf-hub cache gives the UI a real progress bar
+/// and leaves `try_new` a pure cache hit. Mirrors fastembed's resolution —
+/// its model table for the repo and files, env overrides included — so both
+/// sides agree on location and endpoint. Returns the model's vector width.
+fn download_model_files(
+    host: Arc<dyn Host>,
+    state: Arc<Mutex<Runtime>>,
+    cache_dir: &Path,
+    spec: &ModelSpec,
+) -> Result<usize, String> {
+    let info = TextEmbedding::get_model_info(&spec.model).map_err(|err| err.to_string())?;
+    let cache_dir = std::env::var("HF_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| cache_dir.to_path_buf());
+    let endpoint =
+        std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_string());
+
+    let files: Vec<String> = std::iter::once(info.model_file.clone())
+        .chain(info.additional_files.iter().cloned())
+        .chain(TOKENIZER_FILES.iter().map(|file| (*file).to_string()))
+        .collect();
+    let cached = Cache::new(cache_dir.clone()).model(info.model_code.clone());
+    let missing: Vec<&str> = files
+        .iter()
+        .map(String::as_str)
+        .filter(|file| cached.get(file).is_none())
+        .collect();
+    if missing.is_empty() {
+        return Ok(info.dim);
+    }
+
+    let api = ApiBuilder::new()
+        .with_cache_dir(cache_dir)
+        .with_endpoint(endpoint)
+        .build()
+        .map_err(|err| format!("hf-hub api: {err}"))?;
+    let repo = api.model(info.model_code.clone());
+
+    // Size every missing file up front (HEAD-weight requests, ~nothing next
+    // to the 90MB body) so the bar tracks one stable total instead of
+    // restarting per file.
+    let mut total: u64 = 0;
+    for file in &missing {
+        total += api
+            .metadata(&repo.url(file))
+            .map_err(|err| format!("sizing {file}: {err}"))?
+            .size() as u64;
+    }
+
+    let progress = DownloadProgress::new(host, state, total);
+    for file in missing {
+        repo.download_with_progress(file, progress.clone())
+            .map_err(|err| format!("downloading {file}: {err}"))?;
+    }
+    Ok(info.dim)
+}
+
+impl Core {
+    /// Current runtime status (poll on startup; live changes arrive on
+    /// `embed:status` events).
+    pub fn embed_status(&self) -> AppResult<EmbedStatus> {
+        if !cpu_supported() {
+            return Ok(EmbedStatus::Unsupported);
+        }
+        Ok(status_of(&*lock_state(&self.embed)?))
+    }
+
+    /// Ensure `model` (the default when absent) is loaded, downloading it on first
+    /// use; a different model already loaded is replaced. Idempotent: a concurrent
+    /// call while loading returns immediately (the event stream carries the
+    /// outcome). Runs the load on a blocking thread — model init is seconds even
+    /// when cached, and the first run downloads.
+    pub async fn embed_ensure(&self, model: Option<String>) -> AppResult<EmbedStatus> {
+        if !cpu_supported() {
+            return Ok(EmbedStatus::Unsupported);
+        }
+        let spec = model_spec(model.as_deref())?;
+        // Resolve the cache dir BEFORE flipping to Loading: it's the only step
+        // here that may fail without a guaranteed state transition afterwards.
+        let cache_dir = self
+            .config
+            .app_data_dir
+            .as_ref()
+            .ok_or_else(|| AppError::io("no app data dir"))?
+            .join("models");
+
+        {
+            let mut runtime = lock_state(&self.embed)?;
+            match &*runtime {
+                Runtime::Ready(loaded) if std::ptr::eq(loaded.spec, spec) => {
+                    return Ok(status_of(&runtime));
+                }
+                Runtime::Loading { .. } => return Ok(status_of(&runtime)),
+                Runtime::Ready(_) | Runtime::Uninitialized | Runtime::Failed(_) => {
+                    *runtime = Runtime::Loading { progress: None };
+                }
+            }
+        }
+        emit_status(self.host(), &EmbedStatus::Loading { progress: None });
+
+        // From here every path — success, load failure, even a panicked blocking
+        // task — must land the state in Ready or Failed: an early `?` would wedge
+        // the runtime in Loading forever (later ensures return early on Loading).
+        let host = Arc::clone(&self.host);
+        let state = Arc::clone(&self.embed.0);
+        let loaded: Result<Loaded, String> = match self
+            .runtime
+            .spawn_blocking(move || {
+                let dims = download_model_files(host, state, &cache_dir, spec)?;
+                let model = TextEmbedding::try_new(
+                    TextInitOptions::new(spec.model.clone())
+                        .with_cache_dir(cache_dir)
+                        .with_intra_threads(INTRA_OP_THREADS),
+                )
+                .map_err(|err| err.to_string())?;
+                Ok(Loaded {
+                    spec,
+                    dims,
+                    model: Arc::new(Mutex::new(model)),
+                })
+            })
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => Err(format!("embedding load task panicked: {err}")),
+        };
+
+        let status = {
+            let mut runtime = lock_state(&self.embed)?;
+            *runtime = match loaded {
+                Ok(loaded) => Runtime::Ready(Arc::new(loaded)),
+                Err(message) => {
+                    tracing::error!(message, model = spec.id, "embedding model load failed");
+                    Runtime::Failed(message)
+                }
+            };
+            status_of(&runtime)
+        };
+        emit_status(self.host(), &status);
+        Ok(status)
+    }
+
+    /// Embed a batch of texts into the loaded model's vectors, off the UI thread,
+    /// prefixed for their `role` as the model expects. Errors if the model isn't
+    /// `Ready` (callers gate on `embed_status`/`embed_ensure`), or isn't `model`
+    /// when the caller names the one it expects.
+    pub async fn embed_texts(
+        &self,
+        texts: Vec<String>,
+        role: Option<TextRole>,
+        model: Option<String>,
+    ) -> AppResult<Vec<Vec<f32>>> {
+        let loaded = {
+            let runtime = lock_state(&self.embed)?;
+            loaded_model(&runtime, model.as_deref())?
+        };
+        let prefix = match role.unwrap_or_default() {
+            TextRole::Query => loaded.spec.query_prefix,
+            TextRole::Passage => loaded.spec.passage_prefix,
+        };
+        let texts: Vec<String> = if prefix.is_empty() {
+            texts
+        } else {
+            texts
+                .into_iter()
+                .map(|text| format!("{prefix}{text}"))
+                .collect()
+        };
+        self.runtime
+            .spawn_blocking(move || {
+                let mut model = loaded
+                    .model
+                    .lock()
+                    .map_err(|_| AppError::io("embedding model lock poisoned"))?;
+                model
+                    .embed(texts, Some(EMBED_BATCH_SIZE))
+                    .map_err(|err| AppError::io(format!("embedding failed: {err}")))
+            })
+            .await
+            .map_err(|err| AppError::io(format!("embedding task panicked: {err}")))?
+    }
+}
+
+/// The loaded model, provided it is `expected` when the caller names one: a
+/// caller that read the model id before a switch must not receive another
+/// model's vectors under that id.
+fn loaded_model(runtime: &Runtime, expected: Option<&str>) -> AppResult<Arc<Loaded>> {
+    match runtime {
+        Runtime::Ready(loaded) if expected.is_none_or(|model| model == loaded.spec.id) => {
+            Ok(Arc::clone(loaded))
+        }
+        Runtime::Ready(_) => Err(AppError::io(
+            "the embedding model changed; embed again with the loaded model",
+        )),
+        _ => Err(AppError::io("embedding model is not loaded")),
+    }
+}

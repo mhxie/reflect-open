@@ -12,6 +12,7 @@ import {
   type TestDatabaseService,
 } from '../testing/index.ts'
 import { passageText } from './embedding-index-service.ts'
+import { sleep } from '@ocavue/utils'
 
 const NOTE_PATH = 'notes/a.md'
 const NONE = NO_LOCAL_ONLY_FOLDERS
@@ -518,7 +519,7 @@ function setupGraph(options?: { unreadable?: string[]; onEmbed?: (text: string) 
  * Long enough for every queued item of a follow to have run.
  */
 async function queueDrained(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await sleep(20)
 }
 
 describe('removeNote', () => {

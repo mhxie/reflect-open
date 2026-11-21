@@ -8,9 +8,8 @@
     "apps/desktop": {
       "entry": ["scripts/vendor-meowdown.mjs"],
       "ignoreBinaries": ["ditto", "osascript", "pgrep"],
-      "ignoreDependencies": ["@sentry/cli"],
-      "ignore": "src-tauri/gen/**"
+      "ignoreDependencies": ["@sentry/cli"]
     },
-    "apps/extension": { "ignoreUnresolved": ["#imports"] }
+    "apps/ios": { "ignore": "Extensions/**" }
   }
 }

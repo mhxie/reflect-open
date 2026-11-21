@@ -9,6 +9,7 @@ import {
 } from '@reflect/core'
 import { useStore } from '@/lib/use-store.ts'
 import { useMaybeGraphServices } from '@/services/services-provider.tsx'
+import { noop } from '@ocavue/utils'
 
 /**
  * The git sync actions. `fileChanged` does nothing where no sync service runs.
@@ -23,7 +24,7 @@ const LOADING: GitSyncState = { phase: 'loading' }
  * What the surface reads where the graph runs no git sync service.
  */
 const NO_GIT_SYNC: Store<GitSyncState> = {
-  subscribe: () => () => {},
+  subscribe: () => noop,
   get: () => LOADING,
 }
 

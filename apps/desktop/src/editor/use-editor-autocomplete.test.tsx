@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useEditorAutocomplete } from './use-editor-autocomplete.ts'
+import { sleep } from '@ocavue/utils'
 
 /**
  * A tracked note the editor is editing.
@@ -168,7 +169,7 @@ describe('useEditorAutocomplete', () => {
   it('keeps Contact rows out while the integration is off', async () => {
     const { result } = await setup({ contactsEnabled: false })
     // Give the permission query time to settle: the setting alone must gate the rows.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     await expect(result.current.onWikilinkSearch('Ada Lovelace')).resolves.toMatchObject([
       { label: 'Create “Ada Lovelace”' },
     ])

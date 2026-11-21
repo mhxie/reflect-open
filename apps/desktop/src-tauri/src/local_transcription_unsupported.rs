@@ -6,7 +6,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::fs::GraphState;
+use crate::fs::GraphRef;
 
 // Braced, not a unit struct, so `lib.rs` builds it with `::default()` like
 // the macOS state.
@@ -47,7 +47,7 @@ pub fn local_transcription_delete(model: String) -> AppResult<ModelStatus> {
 #[tauri::command]
 pub async fn local_transcription_transcribe(
     request: serde_json::Value,
-    graph: State<'_, GraphState>,
+    graph: GraphRef,
     state: State<'_, LocalTranscriptionState>,
 ) -> AppResult<Unavailable> {
     let _ = (request, graph, state);

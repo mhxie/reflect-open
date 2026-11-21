@@ -19,6 +19,7 @@ import { scrollElement } from '@/test-utils/scroll.ts'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteRowList } from './note-row-list.tsx'
 import { SwipeableNoteRow, type NoteRowModel } from './swipeable-note-row.tsx'
+import { noop } from '@ocavue/utils'
 
 const commitNoteFrontmatter = vi.fn<NoteDocumentService['commitFrontmatter']>()
 
@@ -183,7 +184,7 @@ describe('NoteRowList', () => {
       snippet: [],
     }
 
-    const view = await mount(<NoteRowList rows={[row]} onOpen={() => {}} />)
+    const view = await mount(<NoteRowList rows={[row]} onOpen={noop} />)
     const match = view.getByText('Tim Mac')
 
     await expect.element(match).toBeInTheDocument()

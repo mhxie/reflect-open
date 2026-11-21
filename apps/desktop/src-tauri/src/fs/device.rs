@@ -3,9 +3,8 @@
 use serde::Serialize;
 #[cfg(not(unix))]
 use std::io::Read;
-use tauri::State;
 
-use super::{GraphState, ensure_shareable_note_path, graph_for, io, resolve_read};
+use super::{GraphRef, ensure_shareable_note_path, graph_for, io, resolve_read};
 use crate::error::{AppError, AppResult};
 
 #[cfg(unix)]
@@ -58,10 +57,7 @@ pub struct LocalOcrSupport {
 
 /// What local OCR this platform supports, so callers skip PDFs it can't render.
 #[tauri::command]
-pub async fn asset_ocr_supported(
-    generation: u64,
-    state: State<'_, GraphState>,
-) -> AppResult<LocalOcrSupport> {
+pub async fn asset_ocr_supported(generation: u64, state: GraphRef) -> AppResult<LocalOcrSupport> {
     graph_for(&state, Some(generation))?;
     Ok(LocalOcrSupport {
         cache: cfg!(unix),
@@ -82,7 +78,7 @@ pub struct DeviceNoteRead {
 pub async fn note_read_for_device(
     path: String,
     generation: Option<u64>,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<DeviceNoteRead> {
     ensure_shareable_note_path(&path)?;
     let (root, local_only) = graph_for(&state, generation)?;
@@ -103,7 +99,7 @@ pub async fn note_read_for_device(
 pub async fn asset_read_for_device(
     path: String,
     generation: u64,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<tauri::ipc::Response> {
     let extension = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     if !reflect_graph_paths::is_safe_visible(&path)
@@ -132,10 +128,7 @@ fn cache_relative_path(key: &str) -> AppResult<String> {
 
 /// List only OCR cache digest keys, for startup and wake-time source validation.
 #[tauri::command]
-pub async fn asset_ocr_cache_keys(
-    generation: u64,
-    state: State<'_, GraphState>,
-) -> AppResult<Vec<String>> {
+pub async fn asset_ocr_cache_keys(generation: u64, state: GraphRef) -> AppResult<Vec<String>> {
     let (root, _) = graph_for(&state, Some(generation))?;
     crate::blocking::run_blocking(move || cache_keys(&root)).await
 }
@@ -170,7 +163,7 @@ fn cache_keys(_root: &std::path::Path) -> AppResult<Vec<String>> {
 pub async fn asset_ocr_cache_read(
     key: String,
     generation: Option<u64>,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<String> {
     let relative = cache_relative_path(&key)?;
     let (root, _) = graph_for(&state, generation)?;
@@ -201,7 +194,7 @@ pub async fn asset_ocr_cache_write(
     key: String,
     contents: String,
     generation: u64,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<()> {
     let relative = cache_relative_path(&key)?;
     if contents.len() > 1024 * 1024 {
@@ -238,7 +231,6 @@ fn write_cache(_root: &std::path::Path, _relative: &str, _contents: &str) -> App
 mod tests {
     use super::*;
     use std::fs;
-    use tauri::Manager;
 
     type MockApp = tauri::App<tauri::test::MockRuntime>;
 
@@ -246,7 +238,7 @@ mod tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
-        app.manage(GraphState::default());
+        crate::fs::manage_core(&app);
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         io::bootstrap(&root).unwrap();
@@ -256,7 +248,7 @@ mod tests {
             "---\nprivate: true\n---\nSecret",
         )
         .unwrap();
-        let state: State<GraphState> = app.state();
+        let state = GraphRef::of(&app);
         let mut inner = state.0.lock().unwrap();
         inner.generation = 7;
         inner.root = Some(root);
@@ -271,7 +263,7 @@ mod tests {
         let read = tauri::async_runtime::block_on(note_read_for_device(
             "notes/private.md".into(),
             Some(7),
-            app.state(),
+            GraphRef::of(&app),
         ))
         .unwrap();
         assert!(read.content.contains("Secret"));
@@ -280,7 +272,7 @@ mod tests {
             tauri::async_runtime::block_on(note_read_for_device(
                 "notes/private.md".into(),
                 Some(6),
-                app.state(),
+                GraphRef::of(&app),
             ))
             .is_err()
         );
@@ -294,7 +286,7 @@ mod tests {
                 tauri::async_runtime::block_on(note_read_for_device(
                     path.into(),
                     Some(7),
-                    app.state(),
+                    GraphRef::of(&app),
                 ))
                 .is_err()
             );
@@ -316,14 +308,14 @@ mod tests {
             directory.path().join("notes/link.md"),
         )
         .unwrap();
-        let state: State<GraphState> = app.state();
+        let state = GraphRef::of(&app);
         state.0.lock().unwrap().set_local_only(Some(
             reflect_graph_paths::LocalOnlyFolders::new(["secure"], Some(&raw_root)).unwrap(),
         ));
         let read = tauri::async_runtime::block_on(note_read_for_device(
             "secure/scan.md".into(),
             Some(7),
-            app.state(),
+            GraphRef::of(&app),
         ))
         .unwrap();
         assert!(read.local_only);
@@ -332,7 +324,7 @@ mod tests {
             tauri::async_runtime::block_on(note_read_for_device(
                 "notes/link.md".into(),
                 Some(7),
-                app.state(),
+                GraphRef::of(&app),
             ))
             .is_err()
         );
@@ -348,19 +340,21 @@ mod tests {
                 key.clone(),
                 contents.into(),
                 7,
-                app.state(),
+                GraphRef::of(&app),
             ))
             .unwrap();
         }
         assert_eq!(
-            tauri::async_runtime::block_on(
-                asset_ocr_cache_read(key.clone(), Some(7), app.state(),)
-            )
+            tauri::async_runtime::block_on(asset_ocr_cache_read(
+                key.clone(),
+                Some(7),
+                GraphRef::of(&app),
+            ))
             .unwrap(),
             "second"
         );
         assert_eq!(
-            tauri::async_runtime::block_on(asset_ocr_cache_keys(7, app.state())).unwrap(),
+            tauri::async_runtime::block_on(asset_ocr_cache_keys(7, GraphRef::of(&app))).unwrap(),
             vec![key.clone()]
         );
         assert!(
@@ -375,7 +369,7 @@ mod tests {
                     bad_key,
                     "bad".into(),
                     generation,
-                    app.state(),
+                    GraphRef::of(&app),
                 ))
                 .is_err()
             );
@@ -385,7 +379,7 @@ mod tests {
                 key,
                 "x".repeat(1024 * 1024 + 1),
                 7,
-                app.state(),
+                GraphRef::of(&app),
             ))
             .is_err()
         );
@@ -412,7 +406,7 @@ mod tests {
                 "a".repeat(64),
                 "secret".into(),
                 7,
-                app.state(),
+                GraphRef::of(&app),
             ))
             .is_err()
         );
@@ -431,7 +425,7 @@ mod tests {
                 "a".repeat(64),
                 "Private OCR".into(),
                 7,
-                app.state(),
+                GraphRef::of(&app),
             ))
             .is_err()
         );
@@ -441,7 +435,9 @@ mod tests {
                 .next()
                 .is_none()
         );
-        assert!(tauri::async_runtime::block_on(asset_ocr_cache_keys(7, app.state())).is_err());
+        assert!(
+            tauri::async_runtime::block_on(asset_ocr_cache_keys(7, GraphRef::of(&app))).is_err()
+        );
     }
 
     #[cfg(unix)]
@@ -483,7 +479,8 @@ mod tests {
     #[test]
     fn reports_pdf_support_only_where_pages_can_render() {
         let (app, _directory) = open_graph();
-        let support = tauri::async_runtime::block_on(asset_ocr_supported(7, app.state())).unwrap();
+        let support =
+            tauri::async_runtime::block_on(asset_ocr_supported(7, GraphRef::of(&app))).unwrap();
         assert_eq!(
             support,
             LocalOcrSupport {
@@ -491,7 +488,9 @@ mod tests {
                 pdf: cfg!(target_os = "macos"),
             }
         );
-        assert!(tauri::async_runtime::block_on(asset_ocr_supported(6, app.state())).is_err());
+        assert!(
+            tauri::async_runtime::block_on(asset_ocr_supported(6, GraphRef::of(&app))).is_err()
+        );
     }
 
     #[cfg(not(unix))]

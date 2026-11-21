@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::error::{AppError, AppResult};
-use crate::fs::GraphState;
+use crate::fs::{GraphRef, GraphState};
 use engine::{Engine, TranscriptSegment};
 use models::{MODEL_REPO, ModelSpec};
 use qwen::{QwenEngine, QwenModel};
@@ -607,7 +607,7 @@ fn recording_path(graph: &GraphState, generation: u64, path: &str) -> AppResult<
 pub async fn local_transcription_transcribe(
     request: TranscribeRequest,
     app: AppHandle,
-    graph: State<'_, GraphState>,
+    graph: GraphRef,
     state: State<'_, LocalTranscriptionState>,
 ) -> AppResult<LocalTranscript> {
     let TranscribeRequest {

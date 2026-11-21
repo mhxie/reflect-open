@@ -1,4 +1,4 @@
-import { isShallowEqual } from '@ocavue/utils'
+import { isShallowEqual, noop, returnNull } from '@ocavue/utils'
 import type { MaybePromise } from '@reflect/utils'
 import { isCaptureSpoolPath } from '../capture/capture-identity.ts'
 import type { ActivityPort } from '../ports/activity-port.ts'
@@ -250,7 +250,7 @@ class GitSyncServiceImpl implements GitSyncService {
       connected = resolve
     })
     const run = this.#startTail.then(() => this.#runStart(connected))
-    this.#startTail = run.catch(() => undefined)
+    this.#startTail = run.catch(noop)
     // A run that returns early, or throws before its own `finally`, still settles it.
     void this.#startTail.then(connected)
     return run
@@ -666,7 +666,7 @@ class GitSyncServiceImpl implements GitSyncService {
       const next = syncEngines.create({
         generation: this.#generation,
         localOnly: true,
-        getCredential: () => null,
+        getCredential: returnNull,
         onStatus: (engineStatus) => {
           // No UI surfaces local history, so a failing commit loop (disk full,
           // corrupted repo) must at least leave a trace for diagnosis.

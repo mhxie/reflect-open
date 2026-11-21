@@ -20,6 +20,7 @@ import {
   type NoteSessionSnapshot,
 } from './note-session-types.ts'
 import { createOpenDocumentsService, type OpenDocumentsService } from './open-documents-service.ts'
+import { noop, sleep } from '@ocavue/utils'
 
 /**
  * The create/adopt/teardown/hand-off protocol, driven directly — the React
@@ -40,7 +41,7 @@ function fakeCoordinator() {
   const dispose = vi.fn()
   const coordinator: DocumentCoordinator = {
     settle,
-    settled: () => {},
+    settled: noop,
     dispose,
   }
   return { coordinator, settle, dispose }
@@ -77,7 +78,7 @@ function createBinding(): DocumentBinding {
   return createDocumentBinding({ openDocuments })
 }
 
-const microtasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+const microtasks = () => sleep(0)
 
 describe('createDocumentBinding', () => {
   it('creates on first bind, registers, and counts the epoch', () => {

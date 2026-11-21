@@ -39,15 +39,17 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use reflect_core::Core;
 use reflect_graph_paths::LocalOnlyFolders;
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::utils::mime_type::MimeType;
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
-use super::GraphState;
+use super::GraphRef;
 use super::ReadTarget;
 use super::image_thumbnail::{self, ThumbnailError, ThumbnailLookup, ThumbnailRequest};
 use super::pdf_render::{self, PageLookup, PageRequest, PdfError};
+use crate::error::AppResult;
 
 /// The scheme name, shared with the `lib.rs` registration. The frontend and
 /// the CSP `img-src` grant in `tauri.conf.json` spell it out literally.
@@ -70,7 +72,11 @@ pub(crate) fn handle<R: Runtime>(
         .decode_utf8_lossy()
         .into_owned();
     if request_path.split('/').nth(1) == Some("x-media") {
-        super::x_media_protocol::handle(app, request, request_path, responder);
+        // Archived X media is resolved (and downloaded) by the shared core.
+        let core = Arc::clone(app.state::<Arc<Core>>().inner());
+        tauri::async_runtime::spawn(async move {
+            responder.respond(serve_x_media(&core, &request, &request_path).await);
+        });
         return;
     }
     let method_allowed = request.method() == tauri::http::Method::GET;
@@ -178,7 +184,7 @@ struct Located {
 /// the external storage). File IO, so it runs on the blocking pool.
 fn locate<R: Runtime>(app: &AppHandle<R>, request_path: &str) -> Result<Located, StatusCode> {
     let (generation, rel) = parse_request_path(request_path)?;
-    let state = app.state::<GraphState>();
+    let state = GraphRef::of(app);
     let scope = super::graph_for_attachments(&state, Some(generation))
         .map_err(|_| StatusCode::FORBIDDEN)?;
     let target = scope.resolve(rel).map_err(|_| StatusCode::FORBIDDEN)?;
@@ -188,6 +194,76 @@ fn locate<R: Runtime>(app: &AppHandle<R>, request_path: &str) -> Result<Located,
         rel: rel.to_owned(),
         target,
     })
+}
+
+/// Serve one archived X media file through [`Core::asset_resolve`], which
+/// waits for the shared download to publish a complete file.
+async fn serve_x_media(
+    core: &Core,
+    request: &Request<Vec<u8>>,
+    request_path: &str,
+) -> Response<Cow<'static, [u8]>> {
+    use reflect_core::fs::asset_request::{AssetFile, AssetRefusal};
+    use std::io::{Read, Seek, SeekFrom};
+    let status_only = |status: u16, total: Option<u64>| {
+        let mut response = Response::builder()
+            .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
+            .header(header::CACHE_CONTROL, "no-store");
+        if let Some(total) = total {
+            response = response.header(header::CONTENT_RANGE, format!("bytes */{total}"));
+        }
+        response
+            .body(Cow::Borrowed(&[][..]))
+            .expect("a status-only response always builds")
+    };
+    if request.method() != tauri::http::Method::GET {
+        return status_only(StatusCode::METHOD_NOT_ALLOWED.as_u16(), None);
+    }
+    let range = request
+        .headers()
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok());
+    let file = match core
+        .asset_resolve(request_path, request.uri().query(), range)
+        .await
+    {
+        Ok(file) => file,
+        Err(AssetRefusal { status, total }) => return status_only(status, total),
+    };
+    let AssetFile {
+        path,
+        mime,
+        total,
+        range,
+    } = file;
+    let (first, last) = range.unwrap_or((0, total.saturating_sub(1)));
+    let count = if total == 0 { 0 } else { last - first + 1 };
+    let bytes = core
+        .spawn_blocking(move || -> AppResult<Vec<u8>> {
+            let mut file = std::fs::File::open(path)?;
+            file.seek(SeekFrom::Start(first))?;
+            let mut bytes = vec![0; count as usize];
+            file.read_exact(&mut bytes)?;
+            Ok(bytes)
+        })
+        .await;
+    let Ok(bytes) = bytes else {
+        return status_only(StatusCode::INTERNAL_SERVER_ERROR.as_u16(), None);
+    };
+    let mut response = Response::builder()
+        .status(if range.is_some() { 206 } else { 200 })
+        .header(header::CONTENT_TYPE, mime)
+        .header(header::CONTENT_LENGTH, count)
+        .header(header::ACCEPT_RANGES, "bytes");
+    if range.is_some() {
+        response = response.header(
+            header::CONTENT_RANGE,
+            format!("bytes {first}-{last}/{total}"),
+        );
+    }
+    response
+        .body(Cow::Owned(bytes))
+        .unwrap_or_else(|_| status_only(StatusCode::INTERNAL_SERVER_ERROR.as_u16(), None))
 }
 
 pub(super) fn io_status(err: &std::io::Error) -> StatusCode {
@@ -444,9 +520,9 @@ mod tests {
             let app = tauri::test::mock_builder()
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .expect("mock app");
-            app.manage(GraphState::default());
+            crate::fs::manage_core(&app);
             {
-                let state = app.state::<GraphState>();
+                let state = GraphRef::of(&app);
                 let mut inner = state.0.lock().unwrap();
                 inner.generation = 4;
                 inner.root = Some(root.clone());
@@ -508,9 +584,9 @@ mod tests {
             let app = tauri::test::mock_builder()
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .expect("mock app");
-            app.manage(GraphState::default());
+            crate::fs::manage_core(&app);
             {
-                let state = app.state::<GraphState>();
+                let state = GraphRef::of(&app);
                 let mut inner = state.0.lock().unwrap();
                 inner.generation = 4;
                 inner.root = Some(root.clone());
@@ -553,9 +629,9 @@ mod tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
-        app.manage(GraphState::default());
+        crate::fs::manage_core(&app);
         {
-            let state = app.state::<GraphState>();
+            let state = GraphRef::of(&app);
             let mut inner = state.0.lock().unwrap();
             inner.generation = 4;
             inner.root = Some(root.clone());
@@ -643,9 +719,9 @@ mod tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
-        app.manage(GraphState::default());
+        crate::fs::manage_core(&app);
         {
-            let state = app.state::<GraphState>();
+            let state = GraphRef::of(&app);
             let mut inner = state.0.lock().unwrap();
             inner.generation = 4;
             inner.root = Some(root.clone());

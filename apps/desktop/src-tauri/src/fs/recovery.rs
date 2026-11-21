@@ -12,12 +12,10 @@
 
 use std::path::PathBuf;
 
-use tauri::State;
-
 use crate::error::{AppError, AppResult};
 
 use super::local_only_edit::{self, NoteRecovery};
-use super::{GraphState, ensure_relative, graph_for, with_graph_lock};
+use super::{GraphRef, GraphState, ensure_relative, graph_for, with_graph_lock};
 
 /// Keep `contents` as the unsaved text of the local-only note at `path`,
 /// replacing only this editor session's earlier copy.
@@ -28,7 +26,7 @@ pub async fn note_recovery_write(
     owner_id: String,
     source_revision: Option<String>,
     generation: u64,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<NoteRecovery> {
     let root = recovery_root(&state, generation, &path)?;
     crate::blocking::run_blocking(move || {
@@ -54,7 +52,7 @@ pub async fn note_recovery_write(
 pub async fn note_recovery_read(
     path: String,
     generation: u64,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<Option<NoteRecovery>> {
     let root = recovery_root(&state, generation, &path)?;
     crate::blocking::run_blocking(move || local_only_edit::read_recovery(&root, &path)).await
@@ -67,7 +65,7 @@ pub async fn note_recovery_clear(
     owner_id: String,
     token: String,
     generation: u64,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<()> {
     let root = recovery_root(&state, generation, &path)?;
     crate::blocking::run_blocking(move || {
@@ -104,7 +102,6 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use reflect_graph_paths::LocalOnlyFolders;
-    use tauri::Manager;
 
     use super::*;
 
@@ -117,7 +114,7 @@ mod tests {
         owner_id: String,
         source_revision: Option<String>,
         generation: u64,
-        state: State<GraphState>,
+        state: GraphRef,
     ) -> AppResult<NoteRecovery> {
         tauri::async_runtime::block_on(super::note_recovery_write(
             path,
@@ -132,7 +129,7 @@ mod tests {
     fn note_recovery_read(
         path: String,
         generation: u64,
-        state: State<GraphState>,
+        state: GraphRef,
     ) -> AppResult<Option<NoteRecovery>> {
         tauri::async_runtime::block_on(super::note_recovery_read(path, generation, state))
     }
@@ -142,7 +139,7 @@ mod tests {
         owner_id: String,
         token: String,
         generation: u64,
-        state: State<GraphState>,
+        state: GraphRef,
     ) -> AppResult<()> {
         tauri::async_runtime::block_on(super::note_recovery_clear(
             path, owner_id, token, generation, state,
@@ -159,12 +156,12 @@ mod tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
-        app.manage(GraphState::default());
+        crate::fs::manage_core(&app);
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap().join("graph");
         super::super::io::bootstrap(&root).unwrap();
         {
-            let state: State<GraphState> = app.state();
+            let state = GraphRef::of(&app);
             let mut inner = state.0.lock().unwrap();
             inner.generation = 1;
             inner.root = Some(root.clone());
@@ -218,7 +215,12 @@ mod tests {
         let session = session(secure());
         let (release, holder) = hold_graph_lock(&session.root);
         assert_eq!(
-            note_recovery_read("finance/secure/bank.md".into(), 1, session.app.state()).unwrap(),
+            note_recovery_read(
+                "finance/secure/bank.md".into(),
+                1,
+                GraphRef::of(&session.app)
+            )
+            .unwrap(),
             None
         );
         release.send(()).unwrap();
@@ -235,7 +237,7 @@ mod tests {
             OWNER_A.into(),
             None,
             1,
-            session.app.state(),
+            GraphRef::of(&session.app),
         ));
         let mut context = Context::from_waker(Waker::noop());
         assert!(matches!(write.as_mut().poll(&mut context), Poll::Pending));
@@ -250,7 +252,7 @@ mod tests {
     #[test]
     fn unsaved_text_round_trips_in_one_slot_per_session() {
         let session = session(secure());
-        let state = || session.app.state::<GraphState>();
+        let state = || GraphRef::of(&session.app);
         let path = "finance/secure/bank.md";
         assert_eq!(note_recovery_read(path.into(), 1, state()).unwrap(), None);
 
@@ -307,7 +309,7 @@ mod tests {
     #[test]
     fn resolving_one_session_keeps_the_other_sessions_copy() {
         let session = session(secure());
-        let state = || session.app.state::<GraphState>();
+        let state = || GraphRef::of(&session.app);
         let path = "finance/secure/bank.md";
         let first =
             note_recovery_write(path.into(), "A".into(), OWNER_A.into(), None, 1, state()).unwrap();
@@ -332,7 +334,7 @@ mod tests {
         for folders in [secure(), None] {
             let configured = folders.is_some();
             let session = session(folders);
-            let state = || session.app.state::<GraphState>();
+            let state = || GraphRef::of(&session.app);
             for path in ["notes/plan.md", "finance/secure", "../secure/x.md"] {
                 assert!(
                     note_recovery_write(path.into(), "x".into(), OWNER_A.into(), None, 1, state())
@@ -370,7 +372,7 @@ mod tests {
     #[test]
     fn a_recovery_directory_swapped_for_a_symlink_is_refused() {
         let session = session(secure());
-        let state = || session.app.state::<GraphState>();
+        let state = || GraphRef::of(&session.app);
         let notes = session.root.join("notes");
         fs::write(notes.join("kept.md"), "# Kept\n").unwrap();
         symlink(&notes, session.root.join(".reflect/recovery")).unwrap();

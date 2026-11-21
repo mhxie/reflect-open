@@ -20,6 +20,7 @@ import {
   createAttachmentService,
   type AttachmentInsertTarget,
 } from './attachment-service.ts'
+import { sleep, returnNull } from '@ocavue/utils'
 
 interface Listing {
   path: string
@@ -726,7 +727,7 @@ describe('watchCatalog', () => {
     const first = await attachments.loadCatalog()
     fileChanges.emitReconcile()
     await expect.poll(() => noteFile.listings()).toBe(2)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await sleep(0)
 
     expect(attachments.catalog.get()).toBe(first)
     expect(changes).toBe(1)
@@ -807,7 +808,7 @@ describe('attachFilesToNote', () => {
     await attachments.attachFilesToNote({
       notePath: 'notes/plan.md',
       sources: ['/tmp/report.pdf'],
-      findEditor: () => null,
+      findEditor: returnNull,
     })
 
     const target = editor()

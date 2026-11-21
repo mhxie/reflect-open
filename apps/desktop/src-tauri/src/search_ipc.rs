@@ -22,7 +22,7 @@ use tauri::{AppHandle, State};
 use tokio::sync::oneshot;
 
 use crate::error::{AppError, AppResult};
-use crate::fs::{GraphState, current_root};
+use crate::fs::{GraphRef, current_root};
 
 /// The event the main window's responder answers with `search_ipc_respond`.
 const REQUEST_EVENT: &str = "search-ipc:request";
@@ -144,7 +144,7 @@ impl SearchIpcState {
 #[tauri::command]
 pub async fn search_ipc_start(
     app: AppHandle,
-    graph: State<'_, GraphState>,
+    graph: GraphRef,
     state: State<'_, SearchIpcState>,
 ) -> AppResult<()> {
     let root = current_root(&graph)?;

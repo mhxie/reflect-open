@@ -672,7 +672,7 @@ class SyncEngineImpl implements SyncEngine {
     remoteChanges: (changes: ChangedFile[]) => void,
     pass: CyclePass,
   ): Promise<PullOutcome> {
-    for (;;) {
+    while (true) {
       const pull = await this.#step(this.#deps.git.pull('Update notes', this.#options.generation), {
         onResult: (outcome) => {
           this.#reportSkipped(outcome.skippedLargeFiles, pass)

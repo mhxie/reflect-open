@@ -47,6 +47,7 @@ import {
 } from './asset-ocr-maintenance-service.ts'
 import type { AssetPrivacyService } from './asset-privacy-service.ts'
 import { createLocalAssetOcrService, type LocalAssetOcrService } from './local-asset-ocr-service.ts'
+import { returnNull } from '@ocavue/utils'
 
 /**
  * Largest source we send to a provider; bigger assets are skipped, not sent.
@@ -618,7 +619,7 @@ class AssetDescriptionServiceImpl implements AssetDescriptionService {
     if (config === null) {
       return outcome(total, { reason: 'config', message: 'No AI provider is configured.' })
     }
-    const apiKey = await aiCredentials.read(config).catch(() => null)
+    const apiKey = await aiCredentials.read(config).catch(returnNull)
     if (apiKey === null) {
       return outcome(total, {
         reason: 'config',

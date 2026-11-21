@@ -3,6 +3,7 @@ import { NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import { cloudSafeLinkHref } from '../privacy/privacy-service.ts'
 import { createTestIpcBridgeService } from '../testing/index.ts'
 import { createWebFetchService } from './web-fetch-service.ts'
+import { returnNull } from '@ocavue/utils'
 
 function publicUrl(url: string) {
   return cloudSafeLinkHref(
@@ -23,7 +24,7 @@ describe('createWebFetchService', () => {
       commands: {
         capture_meta_fetch: () => '<title>A</title>',
         capture_oembed_fetch: () => '{}',
-        capture_link_preview: () => null,
+        capture_link_preview: returnNull,
       },
     })
     const webFetch = createWebFetchService({ ipc })

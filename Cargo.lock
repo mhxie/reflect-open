@@ -5358,6 +5358,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflect-core"
+version = "0.0.0"
+dependencies = [
+ "apple-native-keyring-store",
+ "base64 0.23.1",
+ "block2",
+ "dbus-secret-service-keyring-store",
+ "dirs 7.0.0",
+ "dispatch2",
+ "fastembed",
+ "file-id",
+ "git2",
+ "hf-hub",
+ "http-range-header",
+ "image",
+ "infer",
+ "jiff",
+ "keyring-core",
+ "log",
+ "notify",
+ "notify-debouncer-full",
+ "objc2",
+ "objc2-contacts",
+ "objc2-foundation",
+ "objc2-link-presentation",
+ "objc2-ui-kit",
+ "reflect-git",
+ "reflect-graph-io",
+ "reflect-graph-paths",
+ "reflect-index",
+ "reflect-index-schema",
+ "reflect-types",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "trash",
+ "walkdir",
+ "windows-native-keyring-store",
+]
+
+[[package]]
+name = "reflect-ffi"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "log",
+ "reflect-core",
+ "reflect-graph-io",
+ "reflect-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "reflect-frontmatter"
 version = "0.1.0"
 dependencies = [
@@ -5452,17 +5512,13 @@ dependencies = [
 name = "reflect-open"
 version = "0.0.0"
 dependencies = [
- "apple-native-keyring-store",
  "base64 0.23.1",
  "block2",
- "dbus-secret-service-keyring-store",
  "dirs 7.0.0",
- "dispatch2",
  "fastembed",
  "file-id",
  "git2",
  "hf-hub",
- "http-range-header",
  "image",
  "keyring-core",
  "log",
@@ -5471,7 +5527,6 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-audio-toolbox",
- "objc2-contacts",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -5479,12 +5534,10 @@ dependencies = [
  "objc2-event-kit",
  "objc2-foundation",
  "objc2-image-io",
- "objc2-link-presentation",
- "objc2-ui-kit",
  "percent-encoding",
  "qwen3-asr",
  "realfft",
- "reflect-git",
+ "reflect-core",
  "reflect-graph-io",
  "reflect-graph-paths",
  "reflect-index",
@@ -5524,7 +5577,6 @@ dependencies = [
  "url",
  "walkdir",
  "whisper-rs",
- "windows-native-keyring-store",
 ]
 
 [[package]]
@@ -7338,7 +7390,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

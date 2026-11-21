@@ -41,6 +41,7 @@ import { wikiLinkSafe } from '../markdown/edit.ts'
 import { appendListItem } from '../markdown/task-ast.ts'
 import type { TranscriptionEngine } from '../settings/schema.ts'
 import type { SettingsService } from '../settings/settings-service.ts'
+import { returnNull } from '@ocavue/utils'
 
 /**
  * The category note every audio-memo section backlinks; recordings that
@@ -660,7 +661,7 @@ class AudioMemoTranscriptionServiceImpl implements AudioMemoTranscriptionService
         ? null
         : enrichmentConfig.id === config.id
           ? apiKey
-          : await aiCredentials.read(enrichmentConfig).catch(() => null)
+          : await aiCredentials.read(enrichmentConfig).catch(returnNull)
     const fallbackEnrichmentConfig = smallModelConfig(config)
     return {
       transcriber: cloudSegmentTranscriber(

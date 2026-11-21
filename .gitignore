@@ -1,5 +1,6 @@
 apps/desktop/src-tauri/gen/apple/xcuserdata/
 apps/desktop/src-tauri/gen/apple/build/
+apps/ios/build/
 apps/desktop/src-tauri/gen/apple/Externals/
 
 # Logs
@@ -52,7 +53,7 @@ dist-ssr
 __screenshots__/
 
 # Xcode build-phase toolchain paths, generated per machine (see
-# apps/desktop/src-tauri/xcode-scripts/generate-xcode-env.mjs)
+# scripts/generate-xcode-env.mjs)
 .xcode.env.local
 
 # Tauri mobile plugins (plugins/*): `.tauri` is the vendored copy of tauri's

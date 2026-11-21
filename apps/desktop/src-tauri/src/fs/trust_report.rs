@@ -6,10 +6,9 @@
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::State;
 
 use super::resolve;
-use super::{GraphState, graph_for};
+use super::{GraphRef, graph_for};
 use crate::error::{AppError, AppResult};
 
 /// The largest report Reflect reads; a larger file is refused, not truncated.
@@ -142,7 +141,7 @@ fn read_report(
             // Older iCloud keeps an evicted file as a `.name.icloud` stub
             // beside the absent path; nothing downloads a report on its own.
             if reflect_graph_paths::eviction_placeholder(&abs).is_some_and(|stub| stub.exists()) {
-                crate::icloud::storage::request_download(&abs);
+                reflect_core::icloud::storage::request_download(&abs);
                 return Err(downloading());
             }
             return Ok(None);
@@ -169,7 +168,7 @@ fn read_report(
     // A version another device wrote may still be an iCloud placeholder:
     // nothing downloads it on its own, so ask, and the next poll reads it.
     if reflect_graph_paths::is_dataless(&meta) {
-        crate::icloud::storage::request_download(&abs);
+        reflect_core::icloud::storage::request_download(&abs);
         return Err(downloading());
     }
     let contents = String::from_utf8(read_bounded(root, rel)?)
@@ -188,7 +187,7 @@ pub async fn wiki_trust_report_read(
     path: String,
     known_stamp: Option<String>,
     generation: u64,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<Option<TrustReportRead>> {
     let (root, _) = graph_for(&state, Some(generation))?;
     crate::blocking::run_blocking(move || read_report(&root, &path, known_stamp.as_deref())).await

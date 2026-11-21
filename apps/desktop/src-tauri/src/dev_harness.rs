@@ -10,30 +10,11 @@
 //!   `apps/desktop/src/dev/search-eval-runner.tsx`). Whoever writes the job
 //!   decides when the index is ready, so a run never races the first pass.
 
-use std::path::PathBuf;
+use reflect_core::dev_harness::dev_env_path;
 
 use crate::error::{AppError, AppResult};
 
-const CONFIG_DIR_ENV: &str = "REFLECT_DEV_CONFIG_DIR";
 const SEARCH_EVAL_ENV: &str = "REFLECT_SEARCH_EVAL";
-
-fn dev_env_path(name: &str) -> Option<PathBuf> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-/// The directory the per-user stores live under: the OS config dir, unless a
-/// dev build is pointed elsewhere.
-pub fn config_dir() -> AppResult<PathBuf> {
-    match dev_env_path(CONFIG_DIR_ENV) {
-        Some(dir) => Ok(dir),
-        None => dirs::config_dir().ok_or_else(|| AppError::io("no OS config dir")),
-    }
-}
 
 /// The pending search-evaluation job, if this dev app was started with one
 /// and it hasn't run yet.

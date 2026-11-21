@@ -42,6 +42,7 @@ import type {
   ReconcileAssetDescriptionsInput,
   ReconcileAssetDescriptionsOutcome,
 } from './asset-description-types.ts'
+import { sleep, returnTrue } from '@ocavue/utils'
 
 const PROVIDER: AiProviderConfig = {
   id: 'cfg-anthropic',
@@ -101,7 +102,7 @@ function outcome(
  */
 async function settle(): Promise<void> {
   for (let turn = 0; turn < 10; turn += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await sleep(0)
   }
 }
 
@@ -641,7 +642,7 @@ describe('AssetDescriptionService.reconcile', () => {
     files.set('notes/pub.md', publicNote('assets/a.png'))
     refs.set('assets/a.png', ['notes/pub.md'])
 
-    const outcome = await reconcile({ isStale: () => true })
+    const outcome = await reconcile({ isStale: returnTrue })
 
     expect(outcome.stopped?.reason).toBe('stale')
     expect(outcome.described).toBe(0)

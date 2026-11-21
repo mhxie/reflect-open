@@ -2,7 +2,7 @@
 //! protocol: CoreGraphics on macOS, `unsupported` elsewhere. The PDF is parsed
 //! from bytes read through `ReadTarget::open`, never re-opened by path. PNGs
 //! cache under `.reflect/cache/pdf-pages/<key>/<page>-<width>.png`, the key
-//! hashing path, size, and mtime; [`sweep_page_cache`] bounds the cache.
+//! hashing path, size, and mtime; `preview_cache::sweep_page_cache` bounds the cache.
 
 use std::fs::{File, Metadata};
 use std::io::Read;
@@ -12,14 +12,13 @@ use std::time::Instant;
 use reflect_graph_paths::LocalOnlyFolders;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::State;
 use tauri::http::StatusCode;
 use tokio::sync::Semaphore;
 
-use super::GraphState;
-use super::preview_cache;
+use super::GraphRef;
 use super::{ReadTarget, resolve_write};
 use crate::error::{AppError, AppResult};
+use reflect_core::fs::preview_cache;
 
 #[cfg(target_os = "macos")]
 mod core_graphics;
@@ -52,7 +51,7 @@ const MAX_CONCURRENT_RENDERS: usize = 2;
 static RENDER_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_RENDERS);
 
 /// The page cache, graph-relative.
-const CACHE_DIR: &str = ".reflect/cache/pdf-pages";
+const CACHE_DIR: &str = preview_cache::PDF_PAGE_CACHE_DIR;
 
 /// Hashed into every cache key; bump it when rendering output changes so
 /// earlier PNGs stop matching.
@@ -60,7 +59,8 @@ const CACHE_FORMAT: &str = "pdf-pages/v1";
 
 /// The page cache's total size after the sweep at graph open: 512 MiB.
 /// Between opens it may grow past this; only the sweep evicts.
-const CACHE_CAP_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(test)]
+const CACHE_CAP_BYTES: u64 = preview_cache::PDF_PAGE_CACHE_CAP_BYTES;
 
 /// One page's size in PDF points (1/72 inch), as displayed: the crop box
 /// with the page's `/Rotate` applied.
@@ -286,11 +286,7 @@ fn read_capped(file: File, expected_len: u64, cap: u64) -> Result<Vec<u8>, PdfEr
 /// (local-only folders included: nothing leaves the device). Fails with
 /// `unsupported` (not macOS, or too large), `locked`, or `invalid`.
 #[tauri::command]
-pub async fn pdf_info(
-    path: String,
-    generation: u64,
-    state: State<'_, GraphState>,
-) -> AppResult<PdfInfo> {
+pub async fn pdf_info(path: String, generation: u64, state: GraphRef) -> AppResult<PdfInfo> {
     super::ensure_readable_attachment_path(&path)?;
     let scope = super::graph_for_attachments(&state, Some(generation))?;
     if !engine::SUPPORTED {
@@ -333,7 +329,7 @@ pub async fn pdf_info_for_device(
     path: String,
     generation: u64,
     source_hash: String,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<PdfInfo> {
     super::ensure_readable_attachment_path(&path)?;
     let scope = super::graph_for_attachments(&state, Some(generation))?;
@@ -363,7 +359,7 @@ pub async fn pdf_page_read_for_device(
     page: usize,
     generation: u64,
     source_hash: String,
-    state: State<'_, GraphState>,
+    state: GraphRef,
 ) -> AppResult<tauri::ipc::Response> {
     super::ensure_readable_attachment_path(&path)?;
     if page == 0 {
@@ -518,13 +514,14 @@ fn read_cached(path: &Path) -> Option<Vec<u8>> {
     preview_cache::read_cached(path, preview_cache::is_png)
 }
 
-/// Bound the page cache when a graph opens: past [`CACHE_CAP_BYTES`], delete
-/// the least-recently-used PNGs until the rest fit. Best-effort — nothing
-/// here can fail the open.
-pub(super) fn sweep_page_cache(root: &Path) {
+/// The graph-open sweep of the page cache (`preview_cache::sweep_page_cache`),
+/// which the tests here drive against real cached pages.
+#[cfg(test)]
+fn sweep_page_cache(root: &Path) {
     sweep_cache_dir(root, CACHE_CAP_BYTES);
 }
 
+#[cfg(test)]
 fn sweep_cache_dir(root: &Path, cap: u64) {
     preview_cache::sweep_cache_dir(root, CACHE_DIR, "png", cap);
 }
@@ -994,7 +991,6 @@ mod tests {
     #[test]
     fn pdf_info_reports_every_page_under_the_asset_open_rules() {
         use std::os::unix::fs::symlink;
-        use tauri::Manager;
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().canonicalize().unwrap();
         let (root, raw) = (base.join("graph"), base.join("raw"));
@@ -1009,20 +1005,16 @@ mod tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
-        app.manage(GraphState::default());
+        crate::fs::manage_core(&app);
         {
-            let state = app.state::<GraphState>();
+            let state = GraphRef::of(&app);
             let mut inner = state.0.lock().unwrap();
             inner.generation = 4;
             inner.root = Some(root.clone());
             inner.set_local_only(Some(LocalOnlyFolders::new(["secure"], Some(&raw)).unwrap()));
         }
         let info = |path: &str, generation| {
-            tauri::async_runtime::block_on(pdf_info(
-                path.into(),
-                generation,
-                app.state::<GraphState>(),
-            ))
+            tauri::async_runtime::block_on(pdf_info(path.into(), generation, GraphRef::of(&app)))
         };
 
         assert_eq!(
@@ -1043,7 +1035,7 @@ mod tests {
                 "assets/paper.pdf".into(),
                 4,
                 source_hash.clone(),
-                app.state::<GraphState>()
+                GraphRef::of(&app)
             ))
             .unwrap()
             .pages
@@ -1056,7 +1048,7 @@ mod tests {
                 1,
                 4,
                 source_hash.clone(),
-                app.state::<GraphState>()
+                GraphRef::of(&app)
             ))
             .is_ok()
         );
@@ -1066,7 +1058,7 @@ mod tests {
                 "assets/paper.pdf".into(),
                 4,
                 source_hash.clone(),
-                app.state::<GraphState>()
+                GraphRef::of(&app)
             )),
             Err(AppError::Invalid { .. })
         ));
@@ -1076,7 +1068,7 @@ mod tests {
                 1,
                 4,
                 source_hash,
-                app.state::<GraphState>()
+                GraphRef::of(&app)
             )),
             Err(AppError::Invalid { .. })
         ));
@@ -1107,9 +1099,9 @@ mod tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
-        app.manage(GraphState::default());
+        crate::fs::manage_core(&app);
         {
-            let state = app.state::<GraphState>();
+            let state = GraphRef::of(&app);
             let mut inner = state.0.lock().unwrap();
             inner.generation = 1;
             inner.root = Some(dir.path().to_path_buf());
@@ -1117,7 +1109,7 @@ mod tests {
         let info = tauri::async_runtime::block_on(pdf_info(
             "assets/missing.pdf".into(),
             1,
-            app.state::<GraphState>(),
+            GraphRef::of(&app),
         ));
         assert!(matches!(info, Err(AppError::Unsupported { .. })));
         let target = resolve_read(dir.path(), "assets/missing.pdf", None).unwrap();

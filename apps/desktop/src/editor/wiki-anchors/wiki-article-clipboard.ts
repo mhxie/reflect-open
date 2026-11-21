@@ -232,7 +232,7 @@ function makeLeadingMarkersPortable(transaction: Transaction): void {
     if (node.type.name !== 'paragraph') return true
     const markers: ProseMirrorNode[] = []
     let offset = 0
-    for (;;) {
+    while (true) {
       const match = /^(<!--[ \t]*\/?claim:c[1-9]\d*[ \t]*-->)/.exec(node.textContent.slice(offset))
       if (match === null) break
       markers.push(node.type.schema.nodes['htmlComment']!.create({ content: match[1] }))

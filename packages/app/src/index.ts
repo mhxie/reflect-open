@@ -165,6 +165,7 @@ export {
   normalizeRoute,
   notePathForRoute,
   routeForPath,
+  routeSchema,
   routesEqual,
   wikiRoute,
   type AllNotesFilter,

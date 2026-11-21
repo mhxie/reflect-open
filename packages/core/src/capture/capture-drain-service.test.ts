@@ -12,6 +12,7 @@ import {
   IDENTITY,
   type CaptureTestKit,
 } from './capture-test-kit.ts'
+import { returnTrue } from '@ocavue/utils'
 
 let kit: CaptureTestKit
 
@@ -481,7 +482,7 @@ describe('CaptureDrainService', () => {
 
   it('stops before any work when the session is stale', async () => {
     kit.addSpool(envelope())
-    const outcome = await kit.drain({ isStale: () => true })
+    const outcome = await kit.drain({ isStale: returnTrue })
     expect(outcome.stopped?.reason).toBe('stale')
     expect(kit.writeNoteMock).not.toHaveBeenCalled()
     expect(kit.captureInbox.files().size).toBe(2)

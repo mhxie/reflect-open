@@ -9,6 +9,7 @@ import {
 } from '../testing/index.ts'
 import type { FileChange } from '../indexing/file-change-service.ts'
 import { createNoteFileService } from './note-file-service.ts'
+import { returnTrue } from '@ocavue/utils'
 
 function setup(ipc: TestIpcBridgeService = createTestIpcBridgeService()) {
   const fileChanges = createTestFileChangeService()
@@ -23,7 +24,7 @@ describe('createNoteFileService', () => {
         commands: {
           note_read: () => '# A\n',
           note_read_local: () => ({ kind: 'evicted' }),
-          note_exists: () => true,
+          note_exists: returnTrue,
         },
       }),
     )

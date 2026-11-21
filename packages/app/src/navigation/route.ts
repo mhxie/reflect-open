@@ -12,11 +12,13 @@ import {
   dailyPath,
   dateFromDailyPath,
   isDaily,
+  NOTE_ATTACHMENT_TYPES,
   wikiFiltersEqual,
   type KnowledgeClassification,
   type NoteAttachmentType,
   type WikiFilter,
 } from '@reflect/core'
+import { z } from 'zod'
 
 /**
  * What the All Notes list is narrowed to: one tag, attachment type, edit day, or level.
@@ -28,31 +30,65 @@ export type AllNotesFilter =
   | { kind: 'updated'; date: string }
   | { kind: 'level'; level: KnowledgeClassification['level'] }
 
-export type Route =
-  | { kind: 'today' }
-  | { kind: 'daily'; date: string }
-  | { kind: 'note'; path: string }
-  | { kind: 'allNotes'; filter: AllNotesFilter | null }
-  /**
-   * Every media attachment in the graph, optionally narrowed to one type
-   * and/or to files linked from notes carrying a tag.
-   */
-  | { kind: 'attachments'; type: NoteAttachmentType | null; tag: string | null }
+const attachmentTypeSchema = z.enum(NOTE_ATTACHMENT_TYPES)
+
+const allNotesFilterSchema: z.ZodType<AllNotesFilter> = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('tag'), tag: z.string() }),
+  z.object({ kind: z.literal('attachment'), type: attachmentTypeSchema }),
+  z.object({ kind: z.literal('updated'), date: z.string() }),
+  z.object({
+    kind: z.literal('level'),
+    level: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  }),
+])
+
+const wikiFilterSchema: z.ZodType<WikiFilter> = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('knowledge') }),
+  z.object({ kind: z.literal('index') }),
+  z.object({ kind: z.literal('flagged') }),
+  z.object({ kind: z.literal('unreviewed') }),
+  z.object({ kind: z.literal('unsourced') }),
+  z.object({ kind: z.literal('untranslated'), folder: z.string() }),
+  z.object({ kind: z.literal('tag'), tag: z.string() }),
+])
+
+/**
+ * Parses a route that was stored as JSON.
+ */
+export const routeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('today') }),
+  z.object({ kind: z.literal('daily'), date: z.string() }),
+  z.object({ kind: z.literal('note'), path: z.string() }),
+  z.object({ kind: z.literal('allNotes'), filter: allNotesFilterSchema.nullable() }),
+  // Every media attachment in the graph, optionally narrowed to one type
+  // and/or to files linked from notes carrying a tag.
+  z.object({
+    kind: z.literal('attachments'),
+    type: attachmentTypeSchema.nullable(),
+    tag: z.string().nullable(),
+  }),
   // The graph's wiki entries. `filter` narrows the list; `language` is the
   // folder of the language entries open in (a `WikiLanguage.folder`), or null
   // for the source. Both live on the route so back/forward and "open an
   // entry, come back" keep them.
-  | { kind: 'wiki'; filter: WikiFilter | null; language: string | null }
-  | { kind: 'search'; query: string }
-  | { kind: 'tasks' }
-  | { kind: 'chat' }
-  | { kind: 'settings' }
+  z.object({
+    kind: z.literal('wiki'),
+    filter: wikiFilterSchema.nullable(),
+    language: z.string().nullable(),
+  }),
+  z.object({ kind: z.literal('search'), query: z.string() }),
+  z.object({ kind: z.literal('tasks') }),
+  z.object({ kind: z.literal('chat') }),
+  z.object({ kind: z.literal('settings') }),
   // The graph-switcher screen — a mobile settings sub-screen; desktop renders
   // it as the settings screen (its switcher lives in the sidebar footer).
-  | { kind: 'graphs' }
+  z.object({ kind: z.literal('graphs') }),
   // The Open Source Licenses screen: a mobile settings sub-screen. Desktop
   // shows licenses in a dialog and renders this route as the settings screen.
-  | { kind: 'licenses' }
+  z.object({ kind: z.literal('licenses') }),
+])
+
+export type Route = z.infer<typeof routeSchema>
 
 /**
  * A route that addresses one concrete note, including a dated daily note.
