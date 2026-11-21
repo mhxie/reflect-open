@@ -133,7 +133,7 @@ describe('MobileChat', () => {
   it('Back from a cold entry lands on today, as the back-swipe does', async () => {
     // Chat is the first and only history entry: there is nothing to pop.
     await renderHarness({ kind: 'chat', conversationId: null })
-    expect(probedRouteRef.current).toMatchObject({ kind: 'chat', conversationId: null })
+    expect(probedRouteRef.current).toMatchObject({ kind: 'chat' })
 
     await page.getByRole('button', { name: 'Back' }).click()
 

@@ -154,7 +154,7 @@ const APP_COMMANDS: Commands<AppCommandId, CommandContext> = [
     title: 'All notes',
     keywords: ['notes', 'list', 'browse', 'library'],
     keybinding: 'Mod-Shift-a',
-    run: (context) => context.navigate(allNotesRoute(null)),
+    run: (context) => context.selectSection('all'),
   },
   {
     id: 'nav.attachments',
