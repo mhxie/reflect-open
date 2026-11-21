@@ -5,9 +5,9 @@ import {
   createTestCoreServices,
   createTestNoteFileService,
   type TestNoteFileService,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { KnowledgeLevelLabel } from './knowledge-level-label.tsx'
 
 const contract = {
@@ -34,7 +34,7 @@ async function renderLabels(ui: ReactNode, source: string | null = JSON.stringif
   const noteFile = createTestNoteFileService({
     files: source === null ? {} : { [KNOWLEDGE_LEVELS_PATH]: source },
   })
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
+  const app = createTestCoreServices({ database: createTestDatabaseService(), noteFile })
   onTestFinished(() => app.database.close())
   const view = await renderInApp(ui, { core: app, graph: { root: '/g', name: 'g', generation: 7 } })
   return Object.assign(view, { noteFile, contractReads: () => contractReads(noteFile) })

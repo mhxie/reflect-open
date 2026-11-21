@@ -1,9 +1,12 @@
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { NoteDocumentService, NoteLinkResolverService } from '@reflect/core'
-import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  type TestCoreServices,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import {
   MAX_NOTE_EMBED_DEPTH,
   useNoteEmbedSource,
@@ -71,7 +74,7 @@ function listeners(): { changes: number; ownWrites: number } {
 }
 
 beforeEach(() => {
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   resolve = vi

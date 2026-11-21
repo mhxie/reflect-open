@@ -6,13 +6,13 @@ import {
   createTestCoreServices,
   createTestNoteSession,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
 import { useRouterState } from '@/routing/router.tsx'
 import { routeForPath } from '@reflect/app'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { PeekPanel } from './peek-panel.tsx'
 import { PeekProvider, usePeek, usePeekNavigation } from './peek-provider.tsx'
 
@@ -60,7 +60,7 @@ function RouteProbe(): ReactElement {
 }
 
 async function renderPeek(): Promise<TestCoreServices> {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   app.clock.setNow(new Date('2026-10-03T12:00:00').getTime())
   vi.spyOn(app.openDocuments, 'sessionFor').mockImplementation((path) => {

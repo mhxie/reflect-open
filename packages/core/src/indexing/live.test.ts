@@ -7,7 +7,7 @@ import {
 } from '../graph/local-only.ts'
 import { createTestXArchiveService } from '../testing/capture.ts'
 import { createTestClockService } from '../testing/clock.ts'
-import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createTestFileChangeService } from '../testing/file-change.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createTestAssetStoreService, createTestNoteFileService } from '../testing/graph.ts'
@@ -52,7 +52,7 @@ function setup(options?: {
    */
   present?: readonly string[]
 }) {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   databases.push(database)
   seedNotes(database, options?.indexed ?? [])
   const store = createTestIndexStoreService()

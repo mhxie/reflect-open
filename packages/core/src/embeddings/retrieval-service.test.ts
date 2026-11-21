@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import { literalSearchQuery } from '../indexing/filter-query.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
   createTestGraphSessionService,
@@ -132,7 +132,7 @@ async function setup(options?: {
 }) {
   const notes = options?.notes ?? NOTES
   const modelId = options?.modelId ?? MODEL
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   await seedIndexed(database, notes)
   const noteFile = createTestNoteFileService({
     files: Object.fromEntries(notes.map((note) => [note.path, note.markdown])),
@@ -146,7 +146,7 @@ async function setup(options?: {
         vectors: embed,
         status: { status: 'ready', model: modelId, dims: DIMENSIONS },
       }),
-      storeChunks: true,
+      storeChunksIn: database,
     })
     await expect(
       index.backfill({

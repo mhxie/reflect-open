@@ -14,6 +14,7 @@ import {
 import { StrictMode, type ReactElement } from 'react'
 import { act } from '@/test-utils/act.ts'
 import {
+  createTestDatabaseService,
   createTestChatEngineService,
   createTestCoreServices,
   createTestSecretStoreService,
@@ -38,7 +39,6 @@ import { dispatchTouch, scrollElement, touch } from '@/test-utils/scroll.ts'
 import { emulateReducedMotion } from '@/test-utils/reduced-motion.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp, type RenderInAppOptions } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileAudioMemoProvider } from './audio-memo-provider.tsx'
 import { AllSearchProvider } from '@/mobile/all-search.tsx'
 import { quickOpenVisible } from '@/mobile/quick-open.tsx'
@@ -140,7 +140,7 @@ let statusBarEnabled: boolean
 
 /** Fresh services for the next `mount`, as each test starts with. */
 async function createCore(): Promise<void> {
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   core = createTestCoreServices({ database })
   appServices = createWebTestAppServices(core)
@@ -777,7 +777,7 @@ describe('MobileShell', () => {
       { type: 'complete', messages: [{ role: 'assistant', content: reply }] },
     ])
     core = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       secretStore: createTestSecretStoreService({ [aiKeySecretName(model.id)]: 'sk-test' }),
       chatEngine,
     })

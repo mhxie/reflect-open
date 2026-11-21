@@ -11,6 +11,7 @@ import {
   formatFullDate,
 } from '@reflect/core'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   createTestEmbeddingRuntimeService,
   createTestPlatformService,
@@ -26,7 +27,6 @@ import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { act } from '@/test-utils/act.ts'
 import { renderInApp, renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { usePinnedTagFilters } from '@/hooks/use-pinned-tag-filters.ts'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { ShortcutsDialog } from './shortcuts-dialog.tsx'
 import { SettingsScreen } from './settings-screen.tsx'
 
@@ -54,7 +54,7 @@ function saved(): Settings[] {
 // a graph open and its git sync disconnected.
 function createCore() {
   return createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     embeddingRuntime: embedRuntime,
     platform: createTestPlatformService({ isMacosDesktop: false, hasMacosTitleBarOverlay: false }),
     gitSync: createTestGitSyncService({ state: { phase: 'disconnected' } }),

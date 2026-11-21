@@ -1,3 +1,4 @@
+import type { TagFacet } from '@reflect/types'
 import { useDeferredValue, useMemo, useRef, type ReactElement } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { FileText, SearchX } from 'lucide-react'
@@ -7,7 +8,6 @@ import {
   parseHighlights,
   type DateFormat,
   type FilteredSearchHit,
-  type NoteTagFacet,
   formatDayLabel,
 } from '@reflect/core'
 import {
@@ -62,7 +62,7 @@ export function rowForHit(hit: FilteredSearchHit, dateFormat: DateFormat): NoteR
 }
 
 /** The tags matching a half-typed `#…` token, by folded-substring match. */
-export function matchingTagFacets(facets: NoteTagFacet[], partial: string): NoteTagFacet[] {
+export function matchingTagFacets(facets: TagFacet[], partial: string): TagFacet[] {
   const needle = foldTag(partial)
   return facets.filter((facet) => foldTag(facet.tag).includes(needle))
 }
@@ -147,7 +147,7 @@ export function MobileAllNotes({
 
   const clearRouteTag = (): void => navigate(allNotesRoute(null))
 
-  const addPendingTag = (facet: NoteTagFacet): void => {
+  const addPendingTag = (facet: TagFacet): void => {
     const key = foldTag(facet.tag)
     if (!filters.tags.includes(key)) {
       onFiltersChange({ ...filters, tags: [...filters.tags, key] })
@@ -221,8 +221,8 @@ function TagSuggestions({
   facets,
   onPick,
 }: {
-  facets: NoteTagFacet[]
-  onPick: (facet: NoteTagFacet) => void
+  facets: TagFacet[]
+  onPick: (facet: TagFacet) => void
 }): ReactElement {
   if (facets.length === 0) {
     return <p className="pb-1 text-xs text-text-muted">No matching tags</p>

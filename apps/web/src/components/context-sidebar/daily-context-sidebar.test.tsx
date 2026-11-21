@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { act } from '@/test-utils/act.ts'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   createTestNoteFileService,
   createTestRetrievalService,
@@ -25,7 +26,6 @@ import { fireEvent } from '@/test-utils/fire-event.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { scrollContainerOf } from '@/test-utils/scroll-container.ts'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { DailyContextSidebar } from './daily-context-sidebar.tsx'
 import { sleep } from '@ocavue/utils'
 
@@ -63,7 +63,7 @@ function sidebar(date: string, height?: number): ReactNode {
 function createCore(storage: TestStorageService = createTestStorageService()) {
   noteFile = createTestNoteFileService({ files: { 'daily/2026-06-09.md': dailySource } })
   const core = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     noteFile,
     storage,
     retrieval: createTestRetrievalService({ relatedNotes }),

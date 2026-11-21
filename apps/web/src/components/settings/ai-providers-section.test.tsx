@@ -8,6 +8,7 @@ import {
   type Settings,
 } from '@reflect/core'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   createTestSecretStoreService,
   createTestSettingsService,
@@ -17,7 +18,6 @@ import {
 } from '@reflect/core/testing'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AiProvidersSection } from './ai-providers-section.tsx'
 import { sleep } from '@ocavue/utils'
 
@@ -37,7 +37,7 @@ async function renderSection(): Promise<void> {
     settings.failLoad()
   }
   const core = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     settings,
     secretStore: secrets,
   })

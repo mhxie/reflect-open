@@ -1,11 +1,10 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { createWebTestAppServices } from '@/test-utils/app-services.ts'
 import { page } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { LocalModelStatus, LocalTranscriptionModelId } from '@reflect/core'
 import type { PendingLocalModelUpdate } from '@reflect/app'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { LocalModelActions } from './local-model-actions.tsx'
 import { noop } from '@ocavue/utils'
 
@@ -18,7 +17,7 @@ async function renderActions(
   status: LocalModelStatus,
   pending: PendingLocalModelUpdate | null = null,
 ) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const appServices = createWebTestAppServices(app)
   const download = vi

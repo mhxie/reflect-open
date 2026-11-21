@@ -1,3 +1,4 @@
+import type { PinnedNoteRow } from '@reflect/types'
 import { isIsoDate } from '@reflect/utils'
 import {
   requireGraphSession,
@@ -13,7 +14,7 @@ import type { NoteFileService } from '../graph/note-file-service.ts'
 import { dateFromDailyPath, isDaily } from '../graph/paths.ts'
 import type { NoteDeleteOutcome } from '../graph/schemas.ts'
 import type { IndexLifecycleService } from '../indexing/index-lifecycle-service.ts'
-import type { IndexQueryService, PinnedNote } from '../indexing/index-query-service.ts'
+import type { IndexQueryService } from '../indexing/index-query-service.ts'
 import { parseNote } from '../markdown/extract.ts'
 import { dailyDeepLink, noteDeepLink } from '../navigation/deep-link-format.ts'
 import { isPinned, type ParsedNote } from '../markdown/model.ts'
@@ -174,7 +175,7 @@ export interface NoteActionsService {
    * when a write fails. Writes nothing when no graph is open.
    */
   reorderPinned(
-    notes: ReadonlyArray<Pick<PinnedNote, 'path' | 'pinnedOrder'>>,
+    notes: ReadonlyArray<Pick<PinnedNoteRow, 'path' | 'pinnedOrder'>>,
   ): Promise<NotePinOrderWrite[]>
   /**
    * Toggle `private` from the state the note's frontmatter holds now; the
@@ -317,7 +318,7 @@ class NoteActionsServiceImpl implements NoteActionsService {
   }
 
   async reorderPinned(
-    notes: ReadonlyArray<Pick<PinnedNote, 'path' | 'pinnedOrder'>>,
+    notes: ReadonlyArray<Pick<PinnedNoteRow, 'path' | 'pinnedOrder'>>,
   ): Promise<NotePinOrderWrite[]> {
     const { noteRows, graphSession } = this.#deps
     const session = graphSession.get().session
@@ -485,7 +486,7 @@ class NoteActionsServiceImpl implements NoteActionsService {
   /**
    * The pinned notes the index lists, or `null` when the index cannot say.
    */
-  async #readIndexedShelf(): Promise<PinnedNote[] | null> {
+  async #readIndexedShelf(): Promise<PinnedNoteRow[] | null> {
     const { indexQuery } = this.#deps
     try {
       return await indexQuery.getPinnedNotes()

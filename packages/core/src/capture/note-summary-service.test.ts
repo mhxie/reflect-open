@@ -18,7 +18,7 @@ import type {
   Settings,
 } from '../settings/schema.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestActivityPort,
   createTestAiKeyValidationService,
   createTestClockService,
@@ -99,7 +99,7 @@ interface SetupOptions {
  * recorded in `calls`.
  */
 async function setup(options: SetupOptions = {}) {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   const noteFile = createTestNoteFileService({ generation: GENERATION })
   const graphSession = createTestGraphSessionService({
     graph: {

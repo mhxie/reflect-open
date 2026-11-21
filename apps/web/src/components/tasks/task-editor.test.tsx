@@ -1,4 +1,8 @@
-import { createTestCoreServices, makeOpenTask } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  makeOpenTask,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { page } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NoteRow, OpenTask } from '@reflect/core'
@@ -7,7 +11,6 @@ import { queryKeys } from '@/lib/query-client.ts'
 import { act } from '@/test-utils/act.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { TaskEditor } from './task-editor.tsx'
 import { sleep, noop } from '@ocavue/utils'
 
@@ -51,7 +54,7 @@ function archivedPost(id: string): ResolvedArchivedPost {
 }
 
 async function renderTaskEditor(task: OpenTask) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const getNote = vi
     .spyOn(app.indexQuery, 'getNote')

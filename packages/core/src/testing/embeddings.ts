@@ -1,3 +1,4 @@
+import type { EmbeddedChunk } from '@reflect/types'
 import type { MaybePromise } from '@reflect/utils'
 import type { ClockService } from '../ports/clock-service.ts'
 import type { LoggerService } from '../ports/logger-service.ts'
@@ -8,7 +9,6 @@ import type { GraphRole } from '../graph/graph-session.ts'
 import type { AssetStoreService } from '../graph/asset-store-service.ts'
 import {
   createEmbeddingIndexService,
-  type EmbedChunkPayload,
   type EmbedNoteOptions,
   type EmbeddingBackfillOptions,
   type EmbeddingBackfillResult,
@@ -37,7 +37,7 @@ import type { Unlisten } from '../unlisten.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import type { IndexLifecycleService } from '../indexing/index-lifecycle-service.ts'
 import type { DatabaseService } from '../indexing/database-service.ts'
-import { createNodeTestDatabaseService, type TestDatabaseService } from './database.ts'
+import { createTestDatabaseService, type TestDatabaseService } from './database.ts'
 import { createTestAssetStoreService, createTestNoteFileService } from './graph.ts'
 import { createTestGraphSessionService } from './graph-session.ts'
 import { createTestIndexLifecycleService } from './index-lifecycle.ts'
@@ -274,7 +274,7 @@ export function createTestRetrievalService(
  */
 export interface TestEmbeddingApply {
   readonly path: string
-  readonly chunks: readonly EmbedChunkPayload[]
+  readonly chunks: readonly EmbeddedChunk[]
   readonly generation: number
 }
 
@@ -308,17 +308,18 @@ export interface TestEmbeddingIndexServiceOptions {
   assetStore?: AssetStoreService
   /**
    * Read lazily, so the default costs nothing until a note is embedded.
+   * Defaults to `storeChunksIn`, else to a new test database.
    */
-  database?: DatabaseService | TestDatabaseService
+  database?: DatabaseService
   indexLifecycle?: IndexLifecycleService
   logger?: LoggerService
   clock?: ClockService
   /**
-   * Write applied and removed chunk sets into `database` as the native
-   * writer does, so later passes and retrieval read them back. Needs a test
-   * database. Defaults to `false`: writes are only recorded.
+   * Write applied and removed chunk sets into this database as the native
+   * writer does, so later passes and retrieval read them back. Without it,
+   * writes are only recorded.
    */
-  storeChunks?: boolean
+  storeChunksIn?: TestDatabaseService
   /**
    * Answers `backfill` calls in place of the real pass; a `follow` still runs the real one.
    */
@@ -358,13 +359,6 @@ export interface TestEmbeddingIndexService extends EmbeddingIndexService {
   follows(): readonly { readonly generation: number; readonly modelId: string }[]
 }
 
-function writableDatabase(database: DatabaseService | TestDatabaseService): TestDatabaseService {
-  if (!('invoke' in database)) {
-    throw new TypeError('storeChunks needs a test database')
-  }
-  return database
-}
-
 class TestEmbeddingIndexServiceImpl implements TestEmbeddingIndexService {
   readonly #inner: EmbeddingIndexService
   readonly #backfillOverride: TestEmbeddingIndexServiceOptions['backfill']
@@ -375,8 +369,8 @@ class TestEmbeddingIndexServiceImpl implements TestEmbeddingIndexService {
   readonly #followLog: { generation: number; modelId: string }[] = []
 
   constructor(options?: TestEmbeddingIndexServiceOptions) {
-    const database = options?.database ?? createNodeTestDatabaseService()
-    const store = options?.storeChunks === true ? writableDatabase(database) : null
+    const store = options?.storeChunksIn ?? null
+    const database = options?.database ?? store ?? createTestDatabaseService()
     this.#backfillOverride = options?.backfill
     const ipc = createTestIpcBridgeService({
       commands: {

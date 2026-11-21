@@ -11,7 +11,7 @@ import { createSuggestionService } from '../indexing/suggestion-service.ts'
 import { createWikiResolverService } from '../indexing/wiki-resolver-service.ts'
 import { createBackgroundReconcilerFactory } from '../reconcile/background-reconciler.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestActivityPort,
   createTestCalendarService,
   createTestContactsService,
@@ -162,7 +162,7 @@ function setup(
   const calendar = createTestCalendarService({ events: options.events ?? [SYNC] })
   const contacts = createTestContactsService()
   const settings = createTestSettingsService()
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   const noteCreation = createTestNoteCreationService({ noteFile })
   const wikiResolver = createWikiResolverService({ database })
   const meetings = createMeetingService({

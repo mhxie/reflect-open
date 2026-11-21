@@ -1,9 +1,12 @@
-import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import {
+  createTestDatabaseService,
+  createTestCoreServices,
+  type TestCoreServices,
+} from '@reflect/core/testing'
 import { userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { SnippetTask, TaskService } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { BacklinkSnippet } from './backlink-snippet.tsx'
 import { noop } from '@ocavue/utils'
 
@@ -47,7 +50,7 @@ async function renderSnippet(
   text: string = SNIPPET,
   onWikilinkClick: () => void = noop,
 ) {
-  const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const core = createTestCoreServices({ database: createTestDatabaseService() })
   operations = core.progress
   writeTask = vi
     .spyOn(core.tasks, 'writeTask')
@@ -235,7 +238,7 @@ describe('BacklinkSnippet network policy', () => {
   let core: TestCoreServices
 
   beforeEach(() => {
-    core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    core = createTestCoreServices({ database: createTestDatabaseService() })
     onTestFinished(() => core.database.close())
   })
 

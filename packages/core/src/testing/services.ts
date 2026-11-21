@@ -133,8 +133,8 @@ export type TestCoreServiceOverrides = Partial<CoreServices & CoreInternalServic
    */
   readonly createGraphServices?: (session: GraphSession, deps: GraphServicesDeps) => GraphServices
   /**
-   * The index database: `createNodeTestDatabaseService()` in Node.js tests,
-   * `createWasmTestDatabaseService()` in desktop browser tests.
+   * The index database: `createTestDatabaseService()` in Node.js tests,
+   * `createTestDatabaseService()` in desktop browser tests.
    */
   readonly database: TestDatabaseService
 }

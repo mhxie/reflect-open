@@ -2,13 +2,16 @@ import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { OpenerService } from '@reflect/app'
 import { createWebTestAppServices, type WebTestAppServices } from '@/test-utils/app-services.ts'
-import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  type TestCoreServices,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { RouteContent } from '@/components/route-content.tsx'
 import { queryClient } from '@/lib/query-client.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { noop } from '@ocavue/utils'
 
 /**
@@ -44,7 +47,7 @@ let openUrlSync: MockInstance<OpenerService['openUrlSync']>
 
 beforeEach(() => {
   entrySource = ENTRY
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   appLayer = createWebTestAppServices(app)

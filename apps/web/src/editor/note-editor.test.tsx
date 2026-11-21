@@ -7,6 +7,7 @@ import {
   createTestCoreServices,
   createTestPlatformService,
   type TestPlatformOptions,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { pasteFiles } from '@/test-utils/file-events.ts'
@@ -14,7 +15,6 @@ import { getSvgImageUrl } from '@/test-utils/image.ts'
 import '@/test-utils/locator.ts'
 import { hover, unhover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { XPost } from '@post-embed/types'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 import { createPdfPagesView } from './pdf-pages-view.ts'
@@ -60,7 +60,7 @@ let resolveYouTubeVideo: MockInstance<EmbedMediaService['resolveYouTubeVideo']>
  */
 async function render(ui: ReactNode, platform?: TestPlatformOptions) {
   const core = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     platform: createTestPlatformService(platform),
   })
   onTestFinished(() => core.database.close())

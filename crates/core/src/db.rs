@@ -21,26 +21,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The iOS background assertion that an index write holds while it has the
-/// SQLite lock.
-fn background_task_name(command: &str) -> &'static str {
-    match command {
-        "index_apply" | "index_apply_batch" => "Reflect index update",
-        "index_remove" => "Reflect index remove",
-        "index_move" => "Reflect index move",
-        "index_touch" => "Reflect index touch",
-        "index_meta_set" => "Reflect index metadata",
-        "index_clear" => "Reflect index clear",
-        "index_prune_embeddings" => "Reflect embedding cleanup",
-        "embed_prepare_index" => "Reflect embeddings preparation",
-        "chat_message_save" => "Reflect chat save",
-        "chat_conversation_delete" => "Reflect chat delete",
-        "embed_apply" => "Reflect embeddings update",
-        "embed_remove" => "Reflect embeddings remove",
-        _ => "Reflect index write",
-    }
-}
-
 impl IndexEvents for Core {
     fn index_written(&self) {
         self.emit_index_written();
@@ -78,8 +58,7 @@ impl Core {
                 .await
                 .map(Reply::Json);
         }
-        let _background_task =
-            background_task::scoped(&self.background_tasks, background_task_name(command));
+        let _background_task = background_task::scoped(&self.background_tasks, command);
         // A write takes no reader lock: a long query never delays it.
         IndexCommands::new(&self.index, self.as_ref(), 0)
             .dispatch(command, args_json)

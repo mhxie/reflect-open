@@ -1,10 +1,13 @@
 import { page } from 'vitest/browser'
 import { expect, it, onTestFinished, vi } from 'vitest'
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { RouteContent } from './route-content.tsx'
 
 /** Every way the pane renders a note — editor, protected, read-only preview — leads with the wiki trail. */
@@ -16,7 +19,7 @@ import { RouteContent } from './route-content.tsx'
  */
 async function renderNote(path: string, content: string) {
   const app = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { [path]: content } }),
   })
   onTestFinished(() => app.database.close())

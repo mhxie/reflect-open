@@ -20,9 +20,11 @@ mod embed_write;
 #[cfg(any(feature = "native", test))]
 mod local_only_record;
 mod query;
-mod read;
+pub mod read;
 mod scan;
+mod schema;
 mod session;
+mod sql;
 #[cfg(test)]
 mod tests;
 pub mod text;

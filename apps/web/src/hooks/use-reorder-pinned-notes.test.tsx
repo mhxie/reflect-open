@@ -1,13 +1,14 @@
+import type { PinnedNoteRow } from '@reflect/types'
 import { act } from '@/test-utils/act.ts'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import type { NoteActionsService, PinnedNote } from '@reflect/core'
+import type { NoteActionsService } from '@reflect/core'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   type TestCoreServices,
   type TestOpenGraph,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useReorderPinnedNotes } from './use-reorder-pinned-notes.ts'
 
 const GRAPH: TestOpenGraph = { generation: 7, root: '/graphs/personal' }
@@ -20,25 +21,25 @@ const NOTE_A = {
   path: 'a.md',
   title: 'A',
   pinnedOrder: 1024,
-} satisfies PinnedNote
+} satisfies PinnedNoteRow
 const NOTE_B = {
   dailyDate: null,
   path: 'b.md',
   title: 'B',
   pinnedOrder: 2048,
-} satisfies PinnedNote
+} satisfies PinnedNoteRow
 const NOTE_C = {
   dailyDate: null,
   path: 'c.md',
   title: 'C',
   pinnedOrder: 3072,
-} satisfies PinnedNote
+} satisfies PinnedNoteRow
 const NOTES = [NOTE_A, NOTE_B, NOTE_C] as const
 
-function renderReorder(pinned: readonly PinnedNote[] = NOTES) {
+function renderReorder(pinned: readonly PinnedNoteRow[] = NOTES) {
   return renderHookInApp(
     (
-      { pinned }: { pinned: readonly PinnedNote[] } = {
+      { pinned }: { pinned: readonly PinnedNoteRow[] } = {
         pinned: NOTES,
       },
     ) => useReorderPinnedNotes(pinned),
@@ -47,7 +48,7 @@ function renderReorder(pinned: readonly PinnedNote[] = NOTES) {
 }
 
 beforeEach(() => {
-  core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  core = createTestCoreServices({ database: createTestDatabaseService() })
   reorderPinnedNotes = vi.spyOn(core.noteActions, 'reorderPinned')
 })
 
@@ -84,9 +85,9 @@ describe('useReorderPinnedNotes', () => {
 
   it('renumbers the whole shelf when a neighbour carries no order', async () => {
     const bare = [
-      { dailyDate: null, path: 'a.md', title: 'A' },
-      { dailyDate: null, path: 'b.md', title: 'B' },
-    ] satisfies PinnedNote[]
+      { dailyDate: null, path: 'a.md', title: 'A', pinnedOrder: null },
+      { dailyDate: null, path: 'b.md', title: 'B', pinnedOrder: null },
+    ] satisfies PinnedNoteRow[]
     const hook = await renderReorder(bare)
 
     await act(() => hook.result.current('a.md', 'b.md'))

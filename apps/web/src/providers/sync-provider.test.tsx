@@ -1,9 +1,8 @@
 import type { ReactElement } from 'react'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { page } from 'vitest/browser'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestDatabaseService, createTestCoreServices } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useGitSyncActions, useGitSyncState } from './sync-provider.tsx'
 
 function Probe(): ReactElement {
@@ -35,7 +34,7 @@ describe('useGitSyncState', () => {
 
   it('reads loading where the graph runs no backup', async () => {
     const core = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       role: 'note-window',
     })
     await renderInApp(<Probe />, { core })
@@ -58,7 +57,7 @@ describe('useGitSyncState', () => {
 
     // A note window runs no backup: the same call is a no-op, not a throw.
     const noteWindow = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       role: 'note-window',
     })
     onTestFinished(() => noteWindow.database.close())

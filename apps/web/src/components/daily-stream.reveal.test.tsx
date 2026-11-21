@@ -1,4 +1,4 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
@@ -7,7 +7,6 @@ import type { NoteReveal } from '@/lib/note-reveal.ts'
 import { useRouterActions, useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { DailyStream } from './daily-stream.tsx'
 
 /**
@@ -60,7 +59,7 @@ function Stream(): ReactElement {
 it('reveals the linked heading in the arrival day only, once', async () => {
   reveals.length = 0
   const yesterday = addDaysToIsoDate(getIsoToday(), -1)
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   // The stream's today is the clock's; the link targets the real yesterday.
   app.clock.setNow(Date.now())

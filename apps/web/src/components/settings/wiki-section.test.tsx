@@ -1,9 +1,8 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { page } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { DEFAULT_SETTINGS, type Settings, type WikiLanguage } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiSection } from './wiki-section.tsx'
 import { noop, returnNull } from '@ocavue/utils'
 
@@ -13,7 +12,7 @@ import { noop, returnNull } from '@ocavue/utils'
  * `useSettings` hands out the service's function itself.
  */
 async function renderSection({ captureEdits = false } = {}) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   // The trust report row has its own test (wiki-trust-fields.test.tsx).
   app.ipc.onCommand('wiki_trust_report_read', returnNull)

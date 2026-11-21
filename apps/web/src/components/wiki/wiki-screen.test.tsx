@@ -1,4 +1,8 @@
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import '@/styles/index.css'
@@ -14,7 +18,6 @@ import { wikiRoute, type Route } from '@reflect/app'
 import { useRouterState } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiScreen } from './wiki-screen.tsx'
 
 /**
@@ -197,7 +200,7 @@ async function renderScreen(language: string | null = null) {
     CITERS.map((path) => [path, 'See [[wiki/memory/Spacing Effect]].\n']),
   )
   const app = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     noteFile: createTestNoteFileService({ files: { ...fixture.files, ...citers }, generation: 1 }),
   })
   onTestFinished(() => app.database.close())

@@ -6,9 +6,9 @@ import {
   createTestCoreServices,
   type TestClockService,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { NoteProtection } from './note-protection.ts'
 import { useNoteStatus, type NoteStatusScope } from './note-status-store.ts'
 import { useNoteStatusPublisher } from './use-note-status-publisher.ts'
@@ -36,7 +36,7 @@ let app: TestCoreServices
 
 beforeEach(() => {
   clock = createTestClockService()
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database, clock })
 })

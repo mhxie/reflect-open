@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '../errors.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { createTestClockService } from '../testing/clock.ts'
-import { createNodeTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
+import { createTestDatabaseService, seedNotes, type TestNote } from '../testing/database.ts'
 import { createTestNoteFileService } from '../testing/graph.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
@@ -57,7 +57,7 @@ interface SetupOptions {
  * the pull displacements of the open file session 7.
  */
 function setup(options: SetupOptions = {}) {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   databases.push(database)
   seedNotes(database, options.rows ?? [{ path: ORPHAN, markdown: CONTENT }])
   const onDisk = options.files ?? { [ARRIVAL]: CONTENT }

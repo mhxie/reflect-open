@@ -13,6 +13,7 @@ import type {
   RecentGraph,
 } from '@reflect/core'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   createTestGraphSessionService,
   createTestIpcBridgeService,
@@ -21,7 +22,6 @@ import {
 } from '@reflect/core/testing'
 import { useGraphServices } from '@/services/services-provider.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import {
   GraphProvider,
   useGraphActions,
@@ -136,7 +136,7 @@ function graphSessionReporting(problems: {
 describe('GraphProvider', () => {
   it('starts at the chooser when there are no recents', async () => {
     const { result } = await renderGraph(
-      createTestCoreServices({ database: createWasmTestDatabaseService() }),
+      createTestCoreServices({ database: createTestDatabaseService() }),
     )
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
     expect(result.current.graph).toBeNull()
@@ -147,7 +147,7 @@ describe('GraphProvider', () => {
     const dialog = createTestDialogService()
     const { result } = await renderGraph(
       createTestCoreServices({
-        database: createWasmTestDatabaseService(),
+        database: createTestDatabaseService(),
         graphSession: createTestGraphSessionService({ recents }),
       }),
       undefined,
@@ -169,7 +169,7 @@ describe('GraphProvider', () => {
 
   it('opens a picked folder and seeds the empty graph', async () => {
     const { core, appServices, result } = await renderGraph(
-      createTestCoreServices({ database: createWasmTestDatabaseService() }),
+      createTestCoreServices({ database: createTestDatabaseService() }),
     )
     appServices.dialog.setFolder('/fresh')
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
@@ -187,7 +187,7 @@ describe('GraphProvider', () => {
 
   it('boots the app’s graph session and passes its actions through', async () => {
     const { core, result } = await renderGraph(
-      createTestCoreServices({ database: createWasmTestDatabaseService() }),
+      createTestCoreServices({ database: createTestDatabaseService() }),
     )
     await vi.waitFor(() => expect(result.current.status).toBe('choosing'))
 
@@ -232,7 +232,7 @@ describe('GraphProvider', () => {
         </button>
       )
     }
-    const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+    const core = createTestCoreServices({ database: createTestDatabaseService() })
     const screen = await renderInApp(tree(<Probe />), { core, servicesOnly: true })
 
     await screen.getByRole('button', { name: 'Open' }).click()
@@ -250,7 +250,7 @@ describe('GraphProvider', () => {
       return <p>{useGraphIndexing() ? 'indexing' : 'idle'}</p>
     }
     const core = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       graphSession: createTestGraphSessionService({ graph: { root: '/a' } }),
     })
     const screen = await renderInApp(
@@ -282,7 +282,7 @@ describe('GraphProvider', () => {
   it('shows a graph’s local-only configuration problems when it opens', async () => {
     const warning = '"ſecure" can’t be a local-only folder (it must be plain ASCII).'
     const app = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       graphSession: graphSessionReporting({ localOnlyWarnings: [warning] }),
     })
     onTestFinished(() => app.database.close())
@@ -315,7 +315,7 @@ describe('GraphProvider', () => {
   it('shows a graph’s backup settings problems when it opens', async () => {
     const warning = 'The backup size limit for this graph must be a whole number of MiB.'
     const app = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       graphSession: graphSessionReporting({ backupWarnings: [warning] }),
     })
     onTestFinished(() => app.database.close())
@@ -354,7 +354,7 @@ describe('GraphProvider mobile onboarding (Plans 19/21)', () => {
     }
     const { core, result } = await renderGraph(
       createTestCoreServices({
-        database: createWasmTestDatabaseService(),
+        database: createTestDatabaseService(),
         platform: createTestPlatformService({ appPlatform: 'ios' }),
         mobileStorage: createTestMobileStorageService({ storage }),
       }),
@@ -372,7 +372,7 @@ describe('GraphProvider mobile onboarding (Plans 19/21)', () => {
   it('publishes the app’s mobile onboarding after completeOnboarding', async () => {
     const { core, appServices, result } = await renderGraph(
       createTestCoreServices({
-        database: createWasmTestDatabaseService(),
+        database: createTestDatabaseService(),
         platform: createTestPlatformService({ appPlatform: 'ios' }),
       }),
       'ios',

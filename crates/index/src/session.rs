@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use reflect_graph_paths::LocalOnlyFolders;
 use reflect_index_schema::{LOCAL_ONLY_FOLDERS_KEY, PROJECTION_VERSION_KEY};
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
+use sea_query::{OnConflict, Query};
 use serde_json::{Map, Value};
 
 use reflect_types::{
@@ -18,6 +19,8 @@ use crate::chat_write;
 use crate::embed_write;
 use crate::query;
 use crate::scan;
+use crate::schema::IndexMeta;
+use crate::sql;
 use crate::write;
 
 /// Where a session gets its connections when it opens a root.
@@ -381,11 +384,18 @@ impl IndexSession {
             )));
         }
         Self::applied(self.write(generation, |conn, _| {
-            conn.prepare_cached(
-                "INSERT INTO index_meta(key, value) VALUES(?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            )?
-            .execute(params![key, value])?;
+            sql::execute(
+                conn,
+                Query::insert()
+                    .into_table(IndexMeta::Table)
+                    .columns([IndexMeta::Key, IndexMeta::Value])
+                    .values_panic([key.into(), value.into()])
+                    .on_conflict(
+                        OnConflict::column(IndexMeta::Key)
+                            .update_column(IndexMeta::Value)
+                            .to_owned(),
+                    ),
+            )?;
             Ok(())
         }))
     }

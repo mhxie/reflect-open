@@ -1,4 +1,4 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactElement } from 'react'
@@ -8,7 +8,6 @@ import { AudioMemoContext } from '@/providers/audio-memo-provider.tsx'
 import { act } from '@/test-utils/act.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { Mutable } from '@reflect/utils'
 
 const memo: Mutable<AudioMemoSessionState> = {
@@ -45,7 +44,7 @@ function PeekProbe(): ReactElement {
 
 async function renderStrip() {
   state.set({ ...memo })
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.indexQuery, 'getNote').mockImplementation((path) => {
     return Promise.resolve({

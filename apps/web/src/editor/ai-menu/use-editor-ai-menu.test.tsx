@@ -1,11 +1,10 @@
 import type { RefObject } from 'react'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AiProviderConfig } from '@reflect/core'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import { toast } from '@/components/ui/toast.tsx'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useEditorAiMenu } from './use-editor-ai-menu.tsx'
 import { noop, returnFalse } from '@ocavue/utils'
 
@@ -50,7 +49,7 @@ function editorWithSelection(stagesReplacement = false): {
  * spy that sees every provider call (a model built for the transform).
  */
 function appWithKey(key: Promise<string | null>) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const read = vi.spyOn(app.aiCredentials, 'read').mockReturnValueOnce(key)
   const create = vi.spyOn(app.languageModel, 'create')

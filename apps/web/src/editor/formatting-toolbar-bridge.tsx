@@ -1,3 +1,4 @@
+import type { ToolbarState } from '@reflect/types'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useEditor } from '@meowdown/react'
 import { buildFileMarkdown, type EditorExtension } from '@meowdown/core'
@@ -8,7 +9,6 @@ import { whenEditorMounted } from './when-editor-mounted.ts'
 import {
   clearFormattingToolbar,
   publishFormattingToolbar,
-  type FormattingToolbarCapabilities,
   type FormattingToolbarCommands,
   type FormattingTriggerText,
 } from './formatting-toolbar-store.ts'
@@ -65,7 +65,7 @@ export function FormattingToolbarBridge({
     const cancel = whenEditorMounted(logger, editor, () => {
       const dom = editor.view.dom
 
-      function readCapabilities(): FormattingToolbarCapabilities {
+      function readCapabilities(): ToolbarState {
         return {
           canIndent: editor.commands.indentList.canExec(),
           canDedent: editor.commands.dedentList.canExec(),

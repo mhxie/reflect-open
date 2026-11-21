@@ -1,10 +1,13 @@
 import { page } from 'vitest/browser'
 import { expect, it, onTestFinished, vi } from 'vitest'
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { useNoteStatus } from '@/editor/status/note-status-store.ts'
 import { renderHookInApp, renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import '@/test-utils/locator.ts'
 import { RouteContent } from './route-content.tsx'
 import { sleep } from '@ocavue/utils'
@@ -19,7 +22,7 @@ const REMOTE_COMMANDS = ['x_syndication_fetch', 'x_archive_write', 'x_archive_re
  */
 async function renderNote(path: string, files: Record<string, string>) {
   const noteFile = createTestNoteFileService({ files })
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
+  const app = createTestCoreServices({ database: createTestDatabaseService(), noteFile })
   onTestFinished(() => app.database.close())
   const view = await renderInApp(
     <PaletteProvider>
@@ -65,7 +68,7 @@ it('a link from a local-only note navigates but never creates a note', async () 
   const noteFile = createTestNoteFileService({
     files: { 'finance/secure/bank.md': '# Bank\n\nSee [[Brand New Idea]].\n' },
   })
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
+  const app = createTestCoreServices({ database: createTestDatabaseService(), noteFile })
   onTestFinished(() => app.database.close())
   const resolveReadOnly = vi.spyOn(app.wikiResolver, 'resolveWikiTarget')
   const resolveOrCreate = vi.spyOn(app.noteCreation, 'resolveOrCreateNoteWithTitle')

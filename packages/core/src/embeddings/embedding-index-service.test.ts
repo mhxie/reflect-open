@@ -2,7 +2,7 @@ import { sha256Hex } from '@reflect/utils'
 import { describe, expect, it } from 'vitest'
 import { createLocalOnlyFolders, NO_LOCAL_ONLY_FOLDERS } from '../graph/local-only.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
   createTestIndexLifecycleService,
@@ -53,7 +53,7 @@ async function setup(options: {
 }) {
   const path = options.path ?? NOTE_PATH
   const evictedSidecars = options.evictedSidecars ?? []
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   await seedStoredRows(database, options.storedRows)
   const runtime = createTestEmbeddingRuntimeService({ vectors: () => [0.5, 0.5] })
   const index = createTestEmbeddingIndexService({
@@ -477,7 +477,7 @@ const NOTES = await Promise.all(
  * An embedding index whose chunk writes land in a database indexed with {@link NOTES}.
  */
 function setupGraph(options?: { unreadable?: string[]; onEmbed?: (text: string) => void }) {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   seedNotes(database, NOTES)
   const unreadable = options?.unreadable ?? []
   /**
@@ -504,7 +504,7 @@ function setupGraph(options?: { unreadable?: string[]; onEmbed?: (text: string) 
     indexLifecycle,
     logger,
     embeddingRuntime: runtime,
-    storeChunks: true,
+    storeChunksIn: database,
     failApply: (apply) => (unwritable.has(apply.path) ? new Error('disk full') : undefined),
   })
   const storedPaths = async (): Promise<string[]> => {

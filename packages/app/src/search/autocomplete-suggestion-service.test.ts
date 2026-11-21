@@ -19,7 +19,7 @@ import {
 import {
   createTestClockService,
   createTestContactsService,
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestGraphSessionService,
   createTestLoggerService,
   createTestNoteCreationService,
@@ -89,7 +89,7 @@ async function setup(options?: SetupOptions) {
   const created: { title: string; generation: number; body?: string | undefined }[] = []
   const ensured: EnsurePersonNoteInput[] = []
   const graphSession = createTestGraphSessionService({ graph: { generation: 7 } })
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   const suggestions = createSuggestionService({ database })
   vi.spyOn(suggestions, 'suggestWikiLinkTargets').mockImplementation((query, limit, dateGen) => {
     linkQueries.push({
@@ -608,7 +608,7 @@ describe('AutocompleteSuggestionService.suggestLinks', () => {
   })
 
   it('ranks suggestions from the index and creates the note behind the Create row', async () => {
-    const database = createNodeTestDatabaseService()
+    const database = createTestDatabaseService()
     seedNotes(database, [
       { path: 'notes/roadmap.md', markdown: '# Roadmap\n' },
       { path: 'notes/road-trip.md', markdown: '# Road trip\n' },

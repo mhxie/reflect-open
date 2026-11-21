@@ -9,7 +9,7 @@ import type { IndexAppliedEvent } from '../indexing/index-lifecycle-service.ts'
 import type { SecretStoreService } from '../secrets/secret-store-service.ts'
 import type { AiProviderConfig } from '../settings/schema.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestAssetDescriberService,
   createTestAssetReferences,
   createTestAssetStoreService,
@@ -234,7 +234,7 @@ function setup(options?: {
   const service = createAssetDescriptionService({
     assetStore,
     noteFile: files,
-    database: createNodeTestDatabaseService(),
+    database: createTestDatabaseService(),
     assetPrivacy: privacy,
     assetDescriber: describer,
     aiProviderConfig,

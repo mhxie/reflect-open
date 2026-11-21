@@ -2,6 +2,7 @@ import {
   createTestAttachmentService,
   createTestCoreServices,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
@@ -9,7 +10,6 @@ import type { CoreServices, NoteListEntry } from '@reflect/core'
 import type { ListSelection } from '@/lib/selection/use-list-selection.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AttachmentGallery } from './attachment-gallery.tsx'
 
 // Every asset URL serves one real 1×1 PNG, so previews load rather than
@@ -61,7 +61,7 @@ async function renderGallery(
   vi.spyOn(attachments, 'assetUrl').mockImplementation(
     (path, generation) => `${imageUrl}#reflect-asset/${generation}/${path}`,
   )
-  app = createTestCoreServices({ database: createWasmTestDatabaseService(), attachments })
+  app = createTestCoreServices({ database: createTestDatabaseService(), attachments })
   onTestFinished(() => app.database.close())
   listAttachmentPreviews = vi.spyOn(app.noteList, 'listAttachmentPreviews').mockResolvedValue(
     new Map([

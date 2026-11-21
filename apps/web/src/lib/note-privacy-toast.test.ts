@@ -9,7 +9,7 @@ import {
   type MockInstance,
 } from 'vitest'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestCoreServices,
   createTestNoteFileService,
 } from '@reflect/core/testing'
@@ -30,7 +30,7 @@ afterEach(() => {
 
 function setup(files: Record<string, string>) {
   const noteFile = createTestNoteFileService({ files })
-  const core = createTestCoreServices({ database: createNodeTestDatabaseService(), noteFile })
+  const core = createTestCoreServices({ database: createTestDatabaseService(), noteFile })
   onTestFinished(() => core.database.close())
   core.graphSession.setGraph({ root: '/g', generation: 3 })
   return { noteActions: core.noteActions, noteFile }

@@ -1,11 +1,14 @@
-import { createTestCoreServices, makeOpenTask } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  makeOpenTask,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { page } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NoteRow, OpenTask } from '@reflect/core'
 import type { TaskActions } from '@/lib/tasks/use-task-actions.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileTaskEditSheet } from './task-edit-sheet.tsx'
 import { noop, sleep } from '@ocavue/utils'
 
@@ -49,7 +52,7 @@ const actions: TaskActions = {
 }
 
 async function renderSheet(task: OpenTask) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const getNote = vi
     .spyOn(app.indexQuery, 'getNote')

@@ -13,7 +13,7 @@ import { project } from '../../indexing/flow-test-harness.ts'
 import { cloudTarget, modelTarget } from '../../privacy/on-device.ts'
 import { overrideNoteFileService } from '../../testing/graph.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestAssetStoreService,
   createTestGraphSessionService,
   createTestNoteFileService,
@@ -75,7 +75,7 @@ interface IndexOptions {
  * also answers the live reads) and the given asset references.
  */
 async function openIndex(notes: Record<string, string>, options: IndexOptions = {}) {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   for (const [path, source] of Object.entries(notes)) {
     database.applyProjection(project(path, source, 1))
   }

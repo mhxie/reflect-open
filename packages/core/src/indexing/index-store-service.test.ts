@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../errors.ts'
 import { parseNote } from '../markdown/index.ts'
-import { createNodeTestDatabaseService } from '../testing/database.ts'
+import { createTestDatabaseService } from '../testing/database.ts'
 import { createTestIndexStoreService } from '../testing/index-store.ts'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
 import { buildIndexedNote, type IndexedNote } from './indexed-note.ts'
@@ -31,7 +31,7 @@ function writeCommands(): Record<string, () => null> {
 describe('createIndexStoreService', () => {
   it('sends each write to its command with the generation', async () => {
     const ipc = createTestIpcBridgeService({ commands: writeCommands() })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
     const a = note('notes/a.md')
 
     await store.apply(a, 3)
@@ -58,7 +58,7 @@ describe('createIndexStoreService', () => {
     const ipc = createTestIpcBridgeService({
       commands: { index_clear: returnNull, index_prune_embeddings: () => 4 },
     })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
 
     await store.clear(3, { keepEmbeddings: true })
     await expect(store.pruneEmbeddings(3, ['notes/evicted.md'])).resolves.toBe(4)
@@ -74,7 +74,7 @@ describe('createIndexStoreService', () => {
 
   it('skips the backend for an empty batch or touch', async () => {
     const ipc = createTestIpcBridgeService()
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
 
     await store.applyBatch([], 1)
     await store.touch([], 1)
@@ -84,14 +84,14 @@ describe('createIndexStoreService', () => {
 
   it('opens the index and resolves with its generation', async () => {
     const ipc = createTestIpcBridgeService({ commands: { index_open: () => 12 } })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
 
     await expect(store.open()).resolves.toBe(12)
   })
 
   it('re-states the path-derived addresses of a move', async () => {
     const ipc = createTestIpcBridgeService({ commands: writeCommands() })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
 
     await store.move('notes/Old.md', 'daily/2026-01-02.md', 4)
     await store.moveIndexed('notes/Old.md', 'notes/New Name.md', 8)
@@ -133,14 +133,14 @@ describe('createIndexStoreService', () => {
       stalePlaceholders: ['notes/c.md'],
     }
     const ipc = createTestIpcBridgeService({ commands: { index_reconcile_scan: () => scan } })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
 
     await expect(store.reconcileScan(5)).resolves.toEqual(scan)
     expect(ipc.calls()).toEqual([{ command: 'index_reconcile_scan', args: { generation: 5 } }])
   })
 
   it('reads `index_meta` through the database', async () => {
-    const database = createNodeTestDatabaseService()
+    const database = createTestDatabaseService()
     database.invoke('index_meta_set', { key: 'k', value: 'v', generation: database.generation() })
     const store = createIndexStoreService({ ipc: createTestIpcBridgeService(), database })
     try {
@@ -167,7 +167,7 @@ describe('createApplyBatch', () => {
         },
       },
     })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
     const skipped: { path: string; message: string }[] = []
     const batch = store.createApplyBatch(2, (skip) => {
       skipped.push(skip)
@@ -197,7 +197,7 @@ describe('createApplyBatch', () => {
         },
       },
     })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
     const batch = store.createApplyBatch(1)
 
     await batch.add(note('notes/a.md'))
@@ -207,7 +207,7 @@ describe('createApplyBatch', () => {
 
   it('flushes on its own at the transaction cap', async () => {
     const ipc = createTestIpcBridgeService({ commands: writeCommands() })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
     const batch = store.createApplyBatch(1)
     const projection = note('notes/a.md')
 
@@ -223,7 +223,7 @@ describe('createApplyBatch', () => {
 describe('createTouchBatch', () => {
   it('applies queued re-stamps in one `index_touch`', async () => {
     const ipc = createTestIpcBridgeService({ commands: writeCommands() })
-    const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
+    const store = createIndexStoreService({ ipc, database: createTestDatabaseService() })
     const touches = store.createTouchBatch(6)
 
     await touches.add({ path: 'notes/a.md', mtime: 1 })
@@ -248,7 +248,7 @@ describe('createTouchBatch', () => {
 })
 describe('createTestIndexStoreService', () => {
   it('records calls and mirrors applies into its database', async () => {
-    const database = createNodeTestDatabaseService()
+    const database = createTestDatabaseService()
     const store = createTestIndexStoreService({ database, meta: { seeded: 'yes' } })
     try {
       await store.applyBatch([note('notes/a.md'), note('notes/b.md')], 1)
@@ -275,7 +275,7 @@ describe('createTestIndexStoreService', () => {
   })
 
   it('mirrors a move into its database, re-stating the path-derived claims', async () => {
-    const database = createNodeTestDatabaseService()
+    const database = createTestDatabaseService()
     const store = createTestIndexStoreService({ database })
     try {
       const source = '# Title\n\n[[Other]] #tag\n'

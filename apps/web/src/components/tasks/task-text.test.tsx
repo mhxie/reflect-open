@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NoteRow } from '@reflect/core'
-import { createTestCoreServices, makeOpenTask } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  makeOpenTask,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { TaskText } from './task-text.tsx'
 import { sleep } from '@ocavue/utils'
 
@@ -47,7 +50,7 @@ beforeEach(() => {
 })
 
 async function renderFor(notePath: string): Promise<void> {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
   const view = await renderInApp(

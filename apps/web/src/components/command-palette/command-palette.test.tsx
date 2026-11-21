@@ -11,6 +11,7 @@ import type {
   WikiSuggestion,
 } from '@reflect/core'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   createTestEmbeddingRuntimeService,
   createTestNoteFileService,
@@ -21,7 +22,6 @@ import type { CommandContext } from '@/lib/commands/types.ts'
 import { useRouterState } from '@/routing/router.tsx'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { CommandPalette } from './command-palette.tsx'
 import { PaletteProvider, usePalette } from './palette-provider.tsx'
 import { noop, returnNull } from '@ocavue/utils'
@@ -98,7 +98,7 @@ function PeekProbe(): ReactNode {
 async function renderPalette(query: string, context?: Partial<CommandContext>) {
   const navigate = vi.fn()
   const core = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     suggestions: {
       suggestWikiTargets,
       suggestWikiLinkTargets: () => ({

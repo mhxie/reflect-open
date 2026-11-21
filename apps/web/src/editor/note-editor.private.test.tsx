@@ -11,10 +11,13 @@ import {
   type MockInstance,
 } from 'vitest'
 import type { EmbedMediaService } from '@reflect/core'
-import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  type TestCoreServices,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { queryClient } from '@/lib/query-client.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteEditor } from './note-editor.tsx'
 
 /**
@@ -67,7 +70,7 @@ function editor(privateNote: boolean) {
 beforeEach(() => {
   editorProps.length = 0
   vi.clearAllMocks()
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   loadXPost = vi.spyOn(app.embedMedia, 'loadXPost').mockResolvedValue(null)

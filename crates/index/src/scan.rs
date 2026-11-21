@@ -16,6 +16,8 @@ use rusqlite::Connection;
 
 use reflect_types::{AppResult, FileMeta, ReconcileScan, ScanCandidate, ScanOrphan};
 
+use crate::read::notes::stored_file_facts;
+
 /// Mirrors `MTIME_TRUST_AGE_MS` in `packages/core/src/indexing/hash.ts`: an
 /// mtime match may only skip the read once the file has settled — local write
 /// echoes stamp rows at write time, so two same-millisecond saves could
@@ -38,15 +40,7 @@ pub(super) fn scan_reconcile(
     now_ms: u64,
     mut unreachable: impl FnMut(&str) -> bool,
 ) -> AppResult<ReconcileScan> {
-    let mut stored: HashMap<String, (i64, String)> = HashMap::new();
-    let mut stmt = conn.prepare_cached("SELECT path, mtime, file_hash FROM notes")?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, (row.get(1)?, row.get(2)?)))
-    })?;
-    for row in rows {
-        let (path, facts) = row?;
-        stored.insert(path, facts);
-    }
+    let stored = stored_file_facts(conn)?;
 
     let mut candidates = Vec::new();
     let mut stale_placeholders = Vec::new();

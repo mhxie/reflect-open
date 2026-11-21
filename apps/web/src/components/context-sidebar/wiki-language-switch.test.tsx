@@ -3,11 +3,10 @@ import { createTestWindowService } from '@reflect/app/testing'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { WikiService } from '@reflect/core'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import type { MaybePromise } from '@reflect/utils'
 import { useRouterState } from '@/routing/router.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiLanguageSwitch } from './wiki-language-switch.tsx'
 
 const ENGLISH = { label: 'English', folder: 'wiki' }
@@ -23,7 +22,7 @@ function RouteProbe(): ReactNode {
 }
 
 async function renderSection(path: string) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.wiki, 'copies').mockImplementation(wikiCopies)
   return await renderInApp(

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { noteBodyHash } from '../markdown/body-hash.ts'
 import { parseNote } from '../markdown/index.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   seedNotes,
   type TestDatabaseService,
   type TestNote,
@@ -27,7 +27,7 @@ function setup(notes: readonly TestNote[]): {
   database: TestDatabaseService
   search: SearchService
 } {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   seedNotes(database, notes)
   const wikiResolver = createWikiResolverService({ database })
   return { database, search: createSearchService({ database, wikiResolver }) }
@@ -371,7 +371,7 @@ describe('searchWithFilters', () => {
   })
 
   it('reads privacy flags in the same snapshot as the search snippet', async () => {
-    const database = createNodeTestDatabaseService()
+    const database = createTestDatabaseService()
     const markdown = '---\nprivate: true\n---\n# Scan\n![](assets/scan.png)\n'
     database.applyProjection(
       buildIndexedNote(parseNote({ path: 'notes/scan.md', source: markdown }), {

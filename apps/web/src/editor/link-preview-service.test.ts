@@ -7,7 +7,7 @@ import {
   type WebFetchService,
   AppError,
 } from '@reflect/core'
-import { createNodeTestDatabaseService, createTestCoreServices } from '@reflect/core/testing'
+import { createTestDatabaseService, createTestCoreServices } from '@reflect/core/testing'
 
 /**
  * The boundaries of the resolver pipeline that `NotePane` gets from `LinkPreviewService`.
@@ -39,7 +39,7 @@ function createNoteLinkPreviewResolver(
   dependencies: LinkPreviewResolverDependencies,
 ): LinkPreviewResolver {
   const { graphSession, noteDocuments, privacy, webFetch } = createTestCoreServices({
-    database: createNodeTestDatabaseService(),
+    database: createTestDatabaseService(),
   })
   // The privacy gate fails closed while no graph is open.
   graphSession.setGraph({ generation: 7 })

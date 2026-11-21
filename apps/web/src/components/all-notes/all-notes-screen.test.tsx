@@ -1,4 +1,8 @@
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import {
+  createTestDatabaseService,
+  createTestCoreServices,
+  createTestNoteFileService,
+} from '@reflect/core/testing'
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
@@ -19,7 +23,6 @@ import { act } from '@/test-utils/act.ts'
 import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { hover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { AllNotesScreen } from './all-notes-screen.tsx'
 import { deepLinkForRoute } from '@reflect/app'
 
@@ -162,7 +165,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
     files[KNOWLEDGE_LEVELS_PATH] = options.knowledgeLevels
   }
   const core = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     noteFile: createTestNoteFileService({
       files,
       // A delete pinned to another generation rejects.

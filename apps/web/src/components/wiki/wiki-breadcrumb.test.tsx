@@ -1,9 +1,8 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { deepLinkForRoute } from '@reflect/app'
 import type { WikiAncestor, WikiLanguage } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiBreadcrumb } from './wiki-breadcrumb.tsx'
 import { noop } from '@ocavue/utils'
 
@@ -16,7 +15,7 @@ const wikiAncestors =
   vi.fn<(path: string, languages: readonly WikiLanguage[]) => Promise<WikiAncestor[]>>()
 
 async function renderBreadcrumb(path: string) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.wiki, 'ancestors').mockImplementation(wikiAncestors)
   return await renderInApp(

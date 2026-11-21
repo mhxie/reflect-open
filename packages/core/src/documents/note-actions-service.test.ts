@@ -1,15 +1,12 @@
+import type { PinnedNoteRow } from '@reflect/types'
 import { describe, expect, it, vi } from 'vitest'
 import { AppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { createTestClockService } from '../testing/clock.ts'
 import { createPathService, createPosixPathTransport } from '../ports/path-service.ts'
 import type { IndexLifecycleService } from '../indexing/index-lifecycle-service.ts'
-import {
-  createIndexQueryService,
-  type IndexQueryService,
-  type PinnedNote,
-} from '../indexing/index-query-service.ts'
-import { createNodeTestDatabaseService } from '../testing/database.ts'
+import { createIndexQueryService, type IndexQueryService } from '../indexing/index-query-service.ts'
+import { createTestDatabaseService } from '../testing/database.ts'
 import { createTestIndexLifecycleService } from '../testing/index-lifecycle.ts'
 import { createTestNoteSession, type TestNoteSessionOptions } from '../testing/documents.ts'
 import { createTestFileChangeService } from '../testing/file-change.ts'
@@ -98,7 +95,7 @@ function createNoteActions(deps: {
     openDocuments,
     indexLifecycle: deps.indexLifecycle ?? recordingIndexLifecycle(indexLog),
     indexQuery:
-      deps.indexQuery ?? createIndexQueryService({ database: createNodeTestDatabaseService() }),
+      deps.indexQuery ?? createIndexQueryService({ database: createTestDatabaseService() }),
     noteRows: deps.noteRows ?? createNoteRowService({ graphSession: graph }),
     progress: deps.progress ?? createTestProgressPort(),
     path: createPathService({ transport: createPosixPathTransport('/home/test') }),
@@ -119,7 +116,7 @@ function setup(options?: {
   /**
    * The pinned shelf the index lists.
    */
-  pinned?: readonly PinnedNote[] | (() => Promise<PinnedNote[]>)
+  pinned?: readonly PinnedNoteRow[] | (() => Promise<PinnedNoteRow[]>)
   /**
    * The open graph's fields over the default `/g` (e.g. its local-only folders).
    */
@@ -133,7 +130,7 @@ function setup(options?: {
   const graph = createTestGraph(options?.graph)
   const noteRows = createNoteRowService({ graphSession: graph })
   const pinned = options?.pinned ?? []
-  const indexQuery = createIndexQueryService({ database: createNodeTestDatabaseService() })
+  const indexQuery = createIndexQueryService({ database: createTestDatabaseService() })
   vi.spyOn(indexQuery, 'getPinnedNotes').mockImplementation(
     typeof pinned === 'function' ? pinned : () => Promise.resolve([...pinned]),
   )
@@ -151,7 +148,7 @@ function setup(options?: {
   return { actions, files, session, openDocuments, progress, noteRows, graph }
 }
 
-function shelfNote(path: string, pinnedOrder: number | null): PinnedNote {
+function shelfNote(path: string, pinnedOrder: number | null): PinnedNoteRow {
   return { path, title: path, dailyDate: null, pinnedOrder }
 }
 
@@ -281,7 +278,7 @@ describe('togglePinned', () => {
   })
 
   it('answers a second call while the first is in flight with the first result', async () => {
-    const gate = Promise.withResolvers<PinnedNote[]>()
+    const gate = Promise.withResolvers<PinnedNoteRow[]>()
     const getPinnedNotes = vi.fn(() => gate.promise)
     const { actions, files } = setup({ files: { 'notes/a.md': '# A\n' }, pinned: getPinnedNotes })
     const first = actions.togglePinned('notes/a.md')
@@ -299,7 +296,7 @@ describe('togglePinned', () => {
   })
 
   it('does not dedupe across notes or generations', async () => {
-    const gate = Promise.withResolvers<PinnedNote[]>()
+    const gate = Promise.withResolvers<PinnedNoteRow[]>()
     let calls = 0
     const { actions, graph } = setup({
       files: { 'notes/a.md': '# A\n', 'notes/b.md': '# B\n' },
@@ -727,7 +724,7 @@ describe('togglePrivate', () => {
   })
 
   it('is deduped apart from pin actions on the same note', async () => {
-    const gate = Promise.withResolvers<PinnedNote[]>()
+    const gate = Promise.withResolvers<PinnedNoteRow[]>()
     const { actions } = setup({ files: { 'notes/a.md': '# A\n' }, pinned: () => gate.promise })
     const pin = actions.togglePinned('notes/a.md')
 

@@ -2,7 +2,7 @@ import { noop } from '@ocavue/utils'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
 import type { ReactElement } from 'react'
-import { createTestCoreServices, seedNotes } from '@reflect/core/testing'
+import { createTestDatabaseService, createTestCoreServices, seedNotes } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { PeekProvider } from '@/components/peek/peek-provider.tsx'
 import { type GraphInfo, formatDayLabel } from '@reflect/core'
@@ -19,7 +19,6 @@ import { SidebarProvider, useSidebar } from '@/providers/sidebar-provider.tsx'
 import { V1ImportProvider } from '@/providers/v1-import-provider.tsx'
 import { hover } from '@/test-utils/mouse.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WorkspaceContent } from './workspace-content.tsx'
 
 const GRAPH: GraphInfo = {
@@ -43,7 +42,7 @@ function SidebarToggle(): ReactElement {
 }
 
 function renderWorkspace(route: Route) {
-  const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const core = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => core.database.close())
   // Pinned, so the sidebar of this note (and only this note) offers "Un-pin this note".
   seedNotes(core.database, [

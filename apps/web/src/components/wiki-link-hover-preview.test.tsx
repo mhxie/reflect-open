@@ -1,10 +1,13 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { WikilinkHoverHit } from '@meowdown/core'
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiLinkHoverPreview } from './wiki-link-hover-preview.tsx'
 import { sleep } from '@ocavue/utils'
 
@@ -66,7 +69,7 @@ describe('wiki-link hover card over a private target', () => {
     ['a locked target', 'notes/locked.md', `---\nprivate: true\n---\n${REMOTE_BODY}`],
   ])('reaches nothing remote for %s', async (_label, path, source) => {
     const app = createTestCoreServices({
-      database: createWasmTestDatabaseService(),
+      database: createTestDatabaseService(),
       noteFile: createTestNoteFileService({ files: { [path]: source } }),
     })
     onTestFinished(() => app.database.close())

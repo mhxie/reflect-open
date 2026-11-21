@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createGraphSession, type GraphRole } from '../graph/graph-session.ts'
 import { isLocalOnlyPath, type LocalOnlyFolders } from '../graph/local-only.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestEmbeddingIndexService,
   createTestEmbeddingRuntimeService,
   createTestGraphSessionService,
@@ -101,7 +101,7 @@ async function setup(options?: {
     }),
   })
   const notes = graphNotes(options?.notes ?? 0)
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   seedNotes(database, notes)
   const embeddingIndex = createTestEmbeddingIndexService({
     embeddingRuntime: runtime,

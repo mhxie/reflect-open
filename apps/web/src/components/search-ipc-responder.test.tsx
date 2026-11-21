@@ -1,9 +1,8 @@
 import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { SearchIpcAnswer, SearchIpcRequest } from '@reflect/core'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { SearchIpcResponder } from './search-ipc-responder.tsx'
 
 const REQUEST: SearchIpcRequest = { id: 7, query: 'wombat', mode: 'hybrid', limit: 10 }
@@ -18,7 +17,7 @@ const ANSWER: SearchIpcAnswer = {
  * answer scripted (`SearchIpcService.answer` itself is tested in core).
  */
 function setup() {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const { ipc } = app
   for (const command of ['search_ipc_start', 'search_ipc_stop', 'search_ipc_respond']) {

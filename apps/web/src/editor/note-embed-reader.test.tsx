@@ -15,9 +15,9 @@ import {
   createTestCoreServices,
   seedNotes,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MarkdownPreview } from './markdown-preview.tsx'
 import { NoteEmbedReader, type NoteEmbedReaderOptions } from './note-embed-reader.tsx'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
@@ -61,7 +61,7 @@ let navigate: MockInstance<LinkNavigationService['openNoteLink']>
 let external: MockInstance<LinkNavigationService['followMarkdownLink']>
 
 beforeEach(() => {
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   // Public index rows: a source's privacy then rests on its path, its header,

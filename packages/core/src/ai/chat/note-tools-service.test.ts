@@ -32,7 +32,7 @@ import { createAssetPrivacyService } from '../../assets/asset-privacy-service.ts
 import { cloudTarget, modelTarget, type VerifiedModelTarget } from '../../privacy/on-device.ts'
 import { createPrivacyService, PrivateNoteError } from '../../privacy/privacy-service.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestAssetStoreService,
   createTestNoteFileService,
   createTestOnDeviceModelService,
@@ -147,7 +147,7 @@ function buildNoteTools(effects: ToolEffects = {}): NoteTools {
   vi.spyOn(retrieval, 'retrieve').mockImplementation(
     effects.retrieveFn ?? (() => Promise.resolve([])),
   )
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   const noteList = createNoteListService({ database })
   vi.spyOn(noteList, 'listRecentNotes').mockImplementation(
     effects.listRecentNotesFn ?? (() => Promise.resolve([])),

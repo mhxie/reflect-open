@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { queryClient } from '@/lib/query-client.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useXPostPreload, type XPostPreloadPrivacy } from './use-x-post-preload.ts'
 import { noop } from '@ocavue/utils'
 
@@ -10,7 +9,7 @@ import { noop } from '@ocavue/utils'
  * Core services whose X post archive reads never answer: only the wait can settle the preload.
  */
 function appWithStuckArchive() {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const loadXPost = vi
     .spyOn(app.embedMedia, 'loadXPost')

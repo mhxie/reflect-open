@@ -51,17 +51,19 @@ the service plus members that seed, drive or observe it.
   use the real `NoteDocumentService` and fake only the files.
 - Do not use `vi.useFakeTimers`. The test clock starts at epoch 0, and
   `clock.advance(ms)` runs the due timers.
-- `createNodeTestDatabaseService()` (Node.js) and `createWasmTestDatabaseService()`
-  (desktop browser tests, `@/test-utils/test-database.ts`) are the Rust index
-  of the native shells, compiled to wasm, over an in-memory SQLite database.
-  Seed notes and assert query results, not SQL. `database.invoke(command, args)`
-  runs a native index command, for rows that `seedNotes` cannot write (chat
-  history, embeddings, `index_meta`).
-- The tests need the wasm build of the index. `pnpm test` builds it first; it
-  needs the Rust toolchain and the `wasm-bindgen` CLI (`mise install`). After a
-  change in `crates/index`, `crates/index-schema`, `crates/index-wasm` or
-  `crates/types`, run `pnpm build:index-wasm` before a test that is already in
-  watch mode.
+- `createTestDatabaseService()` is the Rust index of the native shells,
+  compiled to wasm, over an in-memory SQLite database. Node.js tests and
+  browser tests use the same one.
+  Seed notes and assert the results of the services. `database.invoke(command,
+  args)` runs a native index command, for rows that `seedNotes` cannot write
+  (chat history, embeddings, `index_meta`). `database.query(sql, params)` runs
+  one read-only statement, for rows that no read command returns.
+  `database.getReads()` lists the read commands a test ran.
+- The tests need the wasm build of the index. `pnpm test` builds it first with
+  `cargo xtask index-wasm`; it needs only the Rust toolchain. After a change in
+  `crates/index`, `crates/index-schema`, `crates/index-wasm`, `crates/types` or
+  `xtask`, run `pnpm build:index-wasm` before a test that is already in watch
+  mode.
 
 ## The service containers
 
@@ -111,7 +113,7 @@ the function the component calls. So build your own `core`, spy on it, and pass
 it in:
 
 ```tsx
-const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
+const core = createTestCoreServices({ database: createTestDatabaseService() })
 const rebuild = Promise.withResolvers<void>()
 vi.spyOn(core.indexLifecycle, 'rebuildVisibly').mockReturnValueOnce(rebuild.promise)
 await renderInApp(<RebuildIndexField />, { core, graph: { indexGeneration: 7 } })
@@ -121,9 +123,8 @@ With your own `core`, put the platform, the git sync service and the
 connectors in it yourself. The helper throws if you also pass `platform` or
 `sync`.
 
-`database` is required: a Node.js test passes
-`createNodeTestDatabaseService()`, a desktop browser test passes
-`createWasmTestDatabaseService()`. `renderInApp` passes a wasm database when it
+`database` is required: pass `createTestDatabaseService()`. `renderInApp`
+passes one when it
 builds the app itself.
 
 ## `vi.mock`
@@ -156,25 +157,3 @@ in flight as `flush()` in
 - Drive input with `userEvent` from `vitest/browser`. `view.rerender(<X />)`
   keeps the providers: pass only the bare element.
 - A platform-specific skip needs a stated engine difference.
-
-## Benchmarks
-
-`pnpm bench` runs the `@reflect/core` benchmarks (`packages/core/src/bench/*.bench.ts`)
-in the `core-node` project, through Vitest's benchmark mode:
-
-- **`search.bench.ts`**: the search palette's per-keystroke reads,
-  `searchWithFilters` and `suggestWikiTargets`, for prefixes from one letter
-  to a whole word. They run the exact SQL the app sends, against SQLite.
-- **`indexing.bench.ts`**: the CPU half of an index pass, `parseNote` then
-  `buildIndexedNote`.
-
-By default the benchmarks build a deterministic synthetic graph
-(`corpus.ts`): 6,000 notes shaped like a large personal graph, with dailies,
-a long tail of note lengths, wiki links, tags, tasks, and CJK prose. Set
-`REFLECT_BENCH_GRAPH=<graph directory>` to run the search benchmarks against
-a real graph's `.reflect/index.sqlite` instead, opened read-only. Results
-from a real graph stay on your machine; quote aggregate numbers only.
-
-The numbers are node-side. They leave out the Tauri IPC hop and the WebKit
-JavaScript engine the app runs in, so compare runs with each other rather
-than reading them as in-app latency.

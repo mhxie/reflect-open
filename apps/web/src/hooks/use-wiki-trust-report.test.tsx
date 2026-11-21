@@ -5,10 +5,10 @@ import {
   createTestCoreServices,
   type TestGitSyncService,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useWikiTrustReport } from './use-wiki-trust-report.ts'
 import { noop } from '@ocavue/utils'
 
@@ -36,7 +36,7 @@ let readGate: Promise<void> | null
  */
 function appWith(backup: TestGitSyncService | null): TestCoreServices {
   const app: TestCoreServices = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     ...(backup === null ? {} : { gitSync: backup }),
   })
   onTestFinished(() => app.database.close())

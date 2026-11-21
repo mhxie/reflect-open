@@ -4,7 +4,7 @@ import { AppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { buildIndexedNote } from '../indexing/indexed-note.ts'
 import { parseNote } from '../markdown/extract.ts'
-import { createNodeTestDatabaseService, type TestDatabaseService } from '../testing/database.ts'
+import { createTestDatabaseService, type TestDatabaseService } from '../testing/database.ts'
 import { createTestGraphSessionService } from '../testing/graph-session.ts'
 import { createTestNoteFileService, overrideNoteFileService } from '../testing/graph.ts'
 import { createTestIpcBridgeService, type TestIpcBridgeService } from '../testing/ipc.ts'
@@ -119,7 +119,7 @@ interface Setup {
 
 function setup(options: Setup = {}) {
   const graph = options.graph ?? GRAPH
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   const files: Record<string, string> = {}
   for (const [path, note] of Object.entries(graph)) {
     project(database, path, note)

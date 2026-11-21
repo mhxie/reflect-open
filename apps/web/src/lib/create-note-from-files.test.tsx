@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createWebTestAppServices, type WebTestAppServices } from '@/test-utils/app-services.ts'
-import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  type TestCoreServices,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import {
   registerNoteEditorHandle,
   unregisterNoteEditorHandle,
 } from '@/editor/editor-handle-registry.ts'
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import type { Route } from '@reflect/app'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import {
   createNoteFromFiles,
   noteMarkdownForFiles,
@@ -24,7 +27,7 @@ let app: TestCoreServices
 let appServices: WebTestAppServices
 
 beforeEach(() => {
-  const database = createWasmTestDatabaseService()
+  const database = createTestDatabaseService()
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   app.graphSession.setGraph({ generation: 4 })

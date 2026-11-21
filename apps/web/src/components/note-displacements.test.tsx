@@ -1,10 +1,13 @@
 import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import { createTestCoreServices, createTestPlatformService } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  createTestPlatformService,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { MobileRoot } from '@/mobile/mobile-root.tsx'
 import { act } from '@/test-utils/act.ts'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteDisplacements } from './note-displacements.tsx'
 
 // The mobile shell's screens: the wiring test only needs the root around them.
@@ -24,7 +27,7 @@ const GRAPH = { root: '/graph', name: 'graph', generation: 7, indexGeneration: 7
  */
 function setup(options?: { gateListen?: boolean; mobile?: boolean }) {
   const app = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     ...(options?.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),
   })
   onTestFinished(() => app.database.close())

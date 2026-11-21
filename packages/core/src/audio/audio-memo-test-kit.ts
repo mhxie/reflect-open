@@ -28,7 +28,7 @@ import { createRecordingService, type RecordingService } from '../recordings/rec
 import type { SecretStoreService } from '../secrets/secret-store-service.ts'
 import type { SettingsService } from '../settings/settings-service.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestAiKeyValidationService,
   createTestIdService,
   createTestAssetStoreService,
@@ -277,7 +277,7 @@ export function createTestRecordingStack(deps: TestRecordingStackDeps): {
     progress,
     logger,
   })
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   const contacts = createTestContactsService()
   const noteCreation = createTestNoteCreationService({ noteFile })
   const wikiResolver = createWikiResolverService({ database })

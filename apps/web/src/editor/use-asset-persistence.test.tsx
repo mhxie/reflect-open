@@ -8,6 +8,7 @@ import {
   type AttachmentService,
 } from '@reflect/core'
 import {
+  createTestDatabaseService,
   createTestCoreServices,
   createTestAssetStoreService,
   createTestAttachmentService,
@@ -21,7 +22,6 @@ import {
   type TestAttachmentServiceOptions,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useAssetPersistence, type AssetPersistence } from './use-asset-persistence.ts'
 
 let persistence: AssetPersistence | null = null
@@ -46,7 +46,7 @@ function renderPersistence({
   localOnly?: boolean
 }) {
   core = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     attachments: attachmentService,
   })
   return renderHookInApp(

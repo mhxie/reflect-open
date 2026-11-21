@@ -40,7 +40,8 @@ use std::time::Duration;
 use notify_debouncer_full::file_id::{FileId, get_file_id};
 use notify_debouncer_full::notify::{self, EventKindMask, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
-    DebounceEventHandler, DebounceEventResult, Debouncer, FileIdCache, FileIdMap, new_debouncer_opt,
+    Config, DebounceEventHandler, DebounceEventResult, Debouncer, FileIdCache, FileIdMap,
+    new_debouncer_opt,
 };
 use reflect_graph_paths::{
     GraphPathKind, LocalOnlyFolders, LocalOnlyLink, classify, evicted_logical_path,
@@ -509,12 +510,13 @@ fn watch_graph(
     extra_roots: Arc<RwLock<Vec<PathBuf>>>,
     handler: impl DebounceEventHandler,
 ) -> notify::Result<GraphDebouncer> {
+    let config = Config::default()
+        .with_timeout(Duration::from_millis(400))
+        .with_notify_config(notify::Config::default().with_event_kinds(EventKindMask::CORE));
     let mut debouncer = new_debouncer_opt(
-        Duration::from_millis(400),
-        None,
+        config,
         handler,
         PrunedFileIdMap::with_extra_roots(root.to_path_buf(), extra_roots),
-        notify::Config::default().with_event_kinds(EventKindMask::CORE),
     )?;
     debouncer.watch(root, RecursiveMode::Recursive)?;
     Ok(debouncer)
@@ -1166,8 +1168,7 @@ mod tests {
         let (events, received) = std::sync::mpsc::channel();
         let extra_roots: Arc<RwLock<Vec<PathBuf>>> = Arc::default();
         let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, PrunedFileIdMap>(
-            Duration::from_millis(50),
-            None,
+            Config::default().with_timeout(Duration::from_millis(50)),
             move |result: DebounceEventResult| {
                 for event in result.unwrap_or_default() {
                     for path in event.paths.clone() {
@@ -1176,7 +1177,6 @@ mod tests {
                 }
             },
             PrunedFileIdMap::with_extra_roots(root.clone(), Arc::clone(&extra_roots)),
-            notify::Config::default(),
         )
         .unwrap();
         debouncer.watch(&root, RecursiveMode::Recursive).unwrap();
@@ -1301,11 +1301,9 @@ mod tests {
         let core = crate::test_support::core();
         let extra_roots: Arc<RwLock<Vec<PathBuf>>> = Arc::default();
         let debouncer = new_debouncer_opt::<_, RecommendedWatcher, PrunedFileIdMap>(
-            Duration::from_millis(50),
-            None,
+            Config::default().with_timeout(Duration::from_millis(50)),
             |_: DebounceEventResult| {},
             PrunedFileIdMap::with_extra_roots(root.clone(), Arc::clone(&extra_roots)),
-            notify::Config::default(),
         )
         .unwrap();
         let watch = Arc::new(Mutex::new(LinkedWatch {

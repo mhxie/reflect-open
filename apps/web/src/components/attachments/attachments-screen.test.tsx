@@ -1,4 +1,4 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import type { ReactElement } from 'react'
@@ -7,7 +7,6 @@ import { PeekProvider, usePeek } from '@/components/peek/peek-provider.tsx'
 import { useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { resetRatioCaches } from './attachment-ratio-cache.ts'
 import { AttachmentsScreen } from './attachments-screen.tsx'
 
@@ -104,7 +103,7 @@ function RoutedScreen(): ReactElement {
 }
 
 async function renderScreen() {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.attachments, 'listFiles').mockImplementation(() => Promise.resolve([...listing]))
   vi.spyOn(app.attachments, 'assetUrl').mockImplementation((path, generation) => {

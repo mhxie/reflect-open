@@ -17,7 +17,7 @@ import { cloudTarget, modelTarget, type VerifiedModelTarget } from '../../privac
 import { cloudSafeGraphContext, createPrivacyService } from '../../privacy/privacy-service.ts'
 import type { AiProviderConfig } from '../../settings/schema.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestAssetStoreService,
   createTestLanguageModelService,
   createTestLoggerService,
@@ -88,7 +88,7 @@ function graphOver(
   notes: Readonly<Record<string, string>> = {},
   effects: GraphEffects = {},
 ): TestGraph {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   for (const [path, source] of Object.entries(notes)) {
     database.applyProjection(project(path, source, 1))
   }

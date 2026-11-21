@@ -1,12 +1,15 @@
 import { page } from 'vitest/browser'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { useEffect, type ReactElement } from 'react'
-import { createTestCoreServices, createTestNoteFileService } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  createTestNoteFileService,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { useRouterActions } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { RouteContent } from './route-content.tsx'
 
 /**
@@ -46,7 +49,7 @@ async function renderFollowing(
   options?: { source?: string; localOnly?: 'editable' | 'read-only' },
 ) {
   const app = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     noteFile: createTestNoteFileService({
       files: { 'wiki/Anchoring.md': options?.source ?? ENTRY },
     }),

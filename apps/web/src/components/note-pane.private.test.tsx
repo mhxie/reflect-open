@@ -8,6 +8,7 @@ import {
   createTestNoteFileService,
   type TestCoreServices,
   type TestNoteFileService,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { PaletteProvider } from '@/components/command-palette/palette-provider.tsx'
 import { useNoteMenuRequest } from '@/editor/status/note-menu-request.ts'
@@ -16,7 +17,6 @@ import { queryClient } from '@/lib/query-client.ts'
 import { type RouterNavigate, useRouterActions } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { RouteContent } from './route-content.tsx'
 
 type ResolvedArchive = ResolvedArchivedPost | null
@@ -117,7 +117,7 @@ function MenuRequestProbe({ path }: { path: string }) {
  */
 async function renderNote(path: string, files: Record<string, string>) {
   noteFile = createTestNoteFileService({ files })
-  app = createTestCoreServices({ database: createWasmTestDatabaseService(), noteFile })
+  app = createTestCoreServices({ database: createTestDatabaseService(), noteFile })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.indexQuery, 'getNote').mockImplementation(getNote)
   vi.spyOn(app.xArchive, 'resolve').mockImplementation(

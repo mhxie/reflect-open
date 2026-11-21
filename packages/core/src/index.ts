@@ -241,6 +241,8 @@ export {
 } from './contacts/meeting-service.ts'
 export { createDatabaseService } from './indexing/database-service.ts'
 export { type IndexQueryService } from './indexing/index-query-service.ts'
+// The names this fork's own code knows these wire rows by.
+export type { NoteRow, PinnedNoteRow as PinnedNote } from '@reflect/types'
 export {
   createWikiResolverService,
   type WikiResolverService,
@@ -562,7 +564,6 @@ export {
   encodeTaskBreadcrumbs,
   indexedNoteSchema,
   aliasHint,
-  type TemplateEntry,
   parseHighlights,
   parseSearchQuery,
   type ParsedSearchQuery,
@@ -570,12 +571,7 @@ export {
   type IndexedNote,
   type BacklinkContext,
   type BacklinkContextPage,
-  type BacklinkSourceCursor,
   type SnippetTask,
-  type NoteRow,
-  type NoteListEntry,
-  type NoteTagFacet,
-  type PinnedNote,
   type WikiLinkSuggestionResult,
   type DateSuggestionContext,
   type FileChange,
@@ -631,7 +627,9 @@ export {
 } from './indexing/note-displacement-service.ts'
 export {
   firstExistingAttachment,
+  type NoteListEntry,
   type NoteListOptions,
+  type NoteTagFacet,
   type PreviewableAttachmentType,
 } from './indexing/note-list-service.ts'
 export {

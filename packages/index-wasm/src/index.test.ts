@@ -1,11 +1,14 @@
+import type { IndexedNote } from '@reflect/types'
 import { afterEach, expect, it } from 'vitest'
 
 import { createWasmIndexBackend, WasmIndexError, type WasmIndexBackend } from './index.ts'
 
-const NOTE = {
+const NOTE: IndexedNote = {
   path: 'notes/a.md',
   id: null,
   title: 'Alpha',
+  displayTitle: null,
+  lang: null,
   titleKey: 'alpha',
   pathKey: 'notes/a',
   kind: 'note',
@@ -22,6 +25,7 @@ const NOTE = {
   bodyChars: 5,
   summaryFresh: false,
   text: 'hello world',
+  assetText: '',
   links: [],
   tags: [],
   aliases: [],

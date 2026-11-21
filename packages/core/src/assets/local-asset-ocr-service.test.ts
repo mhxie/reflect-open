@@ -6,7 +6,7 @@ import { AppError } from '../errors.ts'
 import type { LocalOcrSupport } from '../graph/asset-store-service.ts'
 import type { OpenAiCompatibleProviderConfig } from '../settings/schema.ts'
 import {
-  createNodeTestDatabaseService,
+  createTestDatabaseService,
   createTestAiKeyValidationService,
   createTestAssetDescriberService,
   createTestAssetStoreService,
@@ -51,7 +51,7 @@ async function setup(
     notePath?: string
   } = {},
 ) {
-  const database = createNodeTestDatabaseService()
+  const database = createTestDatabaseService()
   seedNotes(database, [
     {
       path: options.notePath ?? 'private.md',

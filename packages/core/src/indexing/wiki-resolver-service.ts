@@ -11,7 +11,7 @@ export interface WikiTargetMatch {
    * One of `CLAIM_TIER`, or {@link UNCLAIMED_TIER} with no paths.
    */
   readonly tier: number
-  readonly paths: readonly string[]
+  readonly paths: string[]
 }
 
 /**

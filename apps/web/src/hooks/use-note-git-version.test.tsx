@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { createTestCoreServices, type TestCoreServices } from '@reflect/core/testing'
+import {
+  createTestCoreServices,
+  type TestCoreServices,
+  createTestDatabaseService,
+} from '@reflect/core/testing'
 import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteGitVersion } from './use-note-git-version.ts'
 
 /**
  * The test core services of the running test, closed when it ends.
  */
 function createApp(): TestCoreServices {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   return app
 }

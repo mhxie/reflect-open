@@ -1,10 +1,9 @@
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest'
 import type { Settings } from '@reflect/core'
 import exampleReport from '../../../../../fixtures/wiki-trust-report.example.json'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiTrustDisplayField } from './wiki-trust-display-field.tsx'
 import { WikiTrustReportField } from './wiki-trust-report-field.tsx'
 
@@ -20,7 +19,7 @@ function written(): Partial<Settings>[] {
 
 async function renderFields(): Promise<void> {
   reads = []
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   app.ipc.onCommand('wiki_trust_report_read', (args) => {
     reads.push(args)

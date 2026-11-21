@@ -6,13 +6,13 @@ import {
   createTestClockService,
   createTestCoreServices,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createWikilinkResolver } from '@/editor/resolve-wikilink.ts'
 import { getIsoToday } from '@reflect/utils'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiArticleBridge } from './wiki-article-bridge.tsx'
 import { savedFileRetryMs } from './use-wiki-trust-view.ts'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
@@ -130,7 +130,7 @@ beforeEach(async () => {
 function createApp(): TestCoreServices {
   // Today is the date a question records.
   const services = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     clock: createTestClockService({ now: Date.now() }),
   })
   onTestFinished(() => services.database.close())

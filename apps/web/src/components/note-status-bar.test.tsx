@@ -15,6 +15,7 @@ import {
   createTestPlatformService,
   type TestGitSyncService,
   type TestCoreServices,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import type { NoteProtection } from '@/editor/status/note-protection.ts'
 import {
@@ -31,7 +32,6 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx'
 import { requestNoteMenu } from '@/editor/status/note-menu-request.ts'
 import { act } from '@/test-utils/act.ts'
 import { MOBILE_PLATFORM, renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteStatusBar } from './note-status-bar.tsx'
 
 const EDITABLE: NoteState = {
@@ -133,7 +133,7 @@ let togglePrivate: MockInstance<NoteActionsService['togglePrivate']>
 async function renderBar(initialRoute: Route, options: BarOptions = {}) {
   backup = createTestGitSyncService({ state: options.backup ?? { phase: 'disconnected' } })
   app = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     gitSync: backup,
     noteFile: createTestNoteFileService({ files: { ...options.files } }),
     ...(options.mobile === true ? { platform: createTestPlatformService(MOBILE_PLATFORM) } : {}),

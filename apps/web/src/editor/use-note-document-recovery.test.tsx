@@ -4,9 +4,9 @@ import {
   createTestCoreServices,
   createTestNoteFileService,
   overrideNoteFileService,
+  createTestDatabaseService,
 } from '@reflect/core/testing'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useNoteDocument } from './use-note-document.ts'
 
 const NOTE = 'secure/note.md'
@@ -75,7 +75,7 @@ it('pins recovery ownership to the hook session and offers each closed window’
   let blocked = true
   const store = recoveryStore(() => blocked)
   const app = createTestCoreServices({
-    database: createWasmTestDatabaseService(),
+    database: createTestDatabaseService(),
     noteFile: store.noteFile,
   })
   onTestFinished(() => app.database.close())

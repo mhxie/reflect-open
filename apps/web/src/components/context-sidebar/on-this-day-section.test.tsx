@@ -2,11 +2,10 @@ import { page, userEvent } from 'vitest/browser'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { DailyActivityService } from '@reflect/core'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import { useRouterState } from '@/routing/router.tsx'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { OnThisDaySection } from './on-this-day-section.tsx'
 
 const listOnThisDay = vi.fn<DailyActivityService['listOnThisDay']>()
@@ -17,7 +16,7 @@ function RouteProbe(): ReactNode {
 }
 
 async function renderSection(date: string) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   vi.spyOn(app.dailyActivity, 'listOnThisDay').mockImplementation(listOnThisDay)
   return await renderInApp(

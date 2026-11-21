@@ -1,16 +1,15 @@
 import { page } from 'vitest/browser'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AttachmentService } from '@reflect/core'
-import { createTestCoreServices } from '@reflect/core/testing'
+import { createTestCoreServices, createTestDatabaseService } from '@reflect/core/testing'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
-import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { PdfPeekPages } from './pdf-peek-pages.tsx'
 
 type PdfInfo = Awaited<ReturnType<AttachmentService['pdfInfo']>>
 
 async function renderPages(info: PdfInfo | Error) {
-  const app = createTestCoreServices({ database: createWasmTestDatabaseService() })
+  const app = createTestCoreServices({ database: createTestDatabaseService() })
   onTestFinished(() => app.database.close())
   const pdfInfo = vi.spyOn(app.attachments, 'pdfInfo')
   if (info instanceof Error) {

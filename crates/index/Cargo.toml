@@ -18,6 +18,7 @@ raw-write = []
 # `hooks` adds the authorizer API that locks the read-only `db_query` bridge
 # down to pure reads (deny ATTACH/DETACH/PRAGMA); see `query.rs`.
 rusqlite = { workspace = true, features = ["hooks"] }
+sea-query = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -32,5 +33,6 @@ reflect-graph-paths = { workspace = true }
 reflect-index-schema = { workspace = true }
 
 [dev-dependencies]
+expect-test = { workspace = true }
 tempfile = { workspace = true }
 reflect-index-schema = { workspace = true, features = ["default"] }

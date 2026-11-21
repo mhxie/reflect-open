@@ -1,5 +1,5 @@
 import { createDb } from '@reflect/db'
-import type { IndexReadCommand } from '@reflect/types'
+import type { IndexReadCommand, IndexWriteCommand } from '@reflect/types'
 import { createWasmIndexBackend, type WasmIndexBackend } from '@reflect/index-wasm'
 import { toAppError } from '../errors.ts'
 import type { LocalOnlyFolders } from '../graph/local-only.ts'
@@ -24,6 +24,11 @@ export interface TestDatabaseRead {
   readonly args: Readonly<Record<string, unknown>>
 }
 
+/**
+ * The name of every command that writes or reads the index.
+ */
+export type IndexCommand = IndexWriteCommand | IndexReadCommand
+
 export interface TestDatabaseService extends DatabaseService {
   /**
    * Replace every projected row of `note.path` with `note`, like `index_apply`.
@@ -32,7 +37,7 @@ export interface TestDatabaseService extends DatabaseService {
   /**
    * Run one index command on the database, like the native shell.
    */
-  invoke(command: string, args: Record<string, unknown>): unknown
+  invoke<C extends IndexCommand>(command: C, args: CommandArgs<C>): CommandResult<C>
   /**
    * The generation of the open index, which a write command must carry.
    */
@@ -49,6 +54,11 @@ export interface TestDatabaseService extends DatabaseService {
    * Release the database; later queries and seeding throw.
    */
   close(): void
+  /**
+   * Runs one SQL statement and returns its rows. A statement that writes
+   * seeds rows the index writer would never produce.
+   */
+  query(sql: string, params?: readonly unknown[]): Record<string, unknown>[]
 }
 
 const READ_STATEMENT = /^\s*(?:select|with|explain)\b/i
@@ -68,17 +78,21 @@ class TestDatabaseServiceImpl implements TestDatabaseService {
   readonly runQuery = (sql: string, params: readonly unknown[]): Promise<unknown> => {
     return Promise.try(() => {
       this.#queries.push({ sql, params: [...params] })
-      // A statement that writes seeds rows the index writer would never
-      // produce; the wasm index runs it through its test-only command.
-      const command = READ_STATEMENT.test(sql) ? 'db_query' : 'test_execute'
-      return this.invoke(command, { sql, params: [...params] })
+      return this.query(sql, params)
     })
+  }
+
+  query(sql: string, params: readonly unknown[] = []): Record<string, unknown>[] {
+    // A statement that writes seeds rows the index writer would never
+    // produce; the wasm index runs it through its test-only command.
+    const command = READ_STATEMENT.test(sql) ? 'db_query' : 'test_execute'
+    return this.#invoke(command, { sql, params: [...params] }) as Record<string, unknown>[]
   }
 
   read<C extends IndexReadCommand>(command: C, args: CommandArgs<C>): Promise<CommandResult<C>> {
     return Promise.try(() => {
       this.#reads.push({ command, args: structuredClone(args) })
-      return this.invoke(command, args) as CommandResult<C>
+      return this.invoke(command, args)
     })
   }
 
@@ -86,16 +100,8 @@ class TestDatabaseServiceImpl implements TestDatabaseService {
     this.invoke('index_apply', { note, generation: this.generation() })
   }
 
-  invoke(command: string, args: Record<string, unknown>): unknown {
-    try {
-      const result = this.#open().invoke(command, args)
-      if (command === 'index_open') {
-        this.#generation = result as number
-      }
-      return result
-    } catch (error) {
-      throw toAppError(error)
-    }
+  invoke<C extends IndexCommand>(command: C, args: CommandArgs<C>): CommandResult<C> {
+    return this.#invoke(command, args) as CommandResult<C>
   }
 
   generation(): number {
@@ -117,6 +123,14 @@ class TestDatabaseServiceImpl implements TestDatabaseService {
     this.#index = null
   }
 
+  #invoke(command: string, args: Readonly<Record<string, unknown>>): unknown {
+    try {
+      return this.#open().invoke(command, args)
+    } catch (error) {
+      throw toAppError(error)
+    }
+  }
+
   #open(): WasmIndexBackend {
     if (this.#closed) {
       throw new Error('the test database is closed')
@@ -134,7 +148,7 @@ class TestDatabaseServiceImpl implements TestDatabaseService {
  * wasm, with a new in-memory database. The database opens on first use, so
  * building one is cheap.
  */
-export function createNodeTestDatabaseService(): TestDatabaseService {
+export function createTestDatabaseService(): TestDatabaseService {
   return new TestDatabaseServiceImpl()
 }
 
