@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { page, userEvent, type Locator } from 'vitest/browser'
@@ -68,7 +69,7 @@ async function renderScreen() {
     .spyOn(core.onDeviceModels, 'listOllamaModels')
     .mockImplementation(() => Promise.resolve(ollamaModels))
   // The Wiki section's trust report row: no report written yet.
-  core.ipc.onCommand('wiki_trust_report_read', () => null)
+  core.ipc.onCommand('wiki_trust_report_read', returnNull)
   return await renderInApp(
     <>
       <SettingsScreen />

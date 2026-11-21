@@ -7,6 +7,7 @@ import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
 import type { OnDeviceHttpService } from './on-device-http-service.ts'
 import { OPENROUTER_BASE_URL } from './openrouter.ts'
 import type { HttpService } from '../ports/http-service.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * BYOK key validation (Plan 10): one cheap authenticated probe against the
@@ -134,7 +135,7 @@ class AiKeyValidationServiceImpl implements AiKeyValidationService {
     }
     // Only the status matters. Release the body now: the on-device transport
     // holds an unread body (and one of its few slots) until it is cancelled.
-    response.body?.cancel().catch(() => {})
+    response.body?.cancel().catch(noop)
     if (response.ok) {
       return 'valid'
     }

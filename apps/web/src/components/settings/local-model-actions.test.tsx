@@ -7,6 +7,7 @@ import type { PendingLocalModelUpdate } from '@reflect/app'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { LocalModelActions } from './local-model-actions.tsx'
+import { noop } from '@ocavue/utils'
 
 /**
  * Render the actions over a scripted transcription service and update
@@ -28,7 +29,7 @@ async function renderActions(
   vi.spyOn(updates, 'getPending').mockReturnValue(pending)
   const install = vi.spyOn(updates, 'install').mockResolvedValue(undefined)
   const skip = vi.spyOn(updates, 'skip').mockResolvedValue(undefined)
-  const clear = vi.spyOn(updates, 'clear').mockImplementation(() => {})
+  const clear = vi.spyOn(updates, 'clear').mockImplementation(noop)
   await renderInApp(<LocalModelActions model={model} status={status} />, { core: app, appServices })
   return { download, remove, install, skip, clear }
 }

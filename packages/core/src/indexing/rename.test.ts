@@ -9,6 +9,7 @@ import {
   rewritePathLinksForMove,
   type RenameIo,
 } from './rename.ts'
+import { noop } from '@ocavue/utils'
 
 function fakeIo(
   files: Record<string, string>,
@@ -627,10 +628,7 @@ describe('checked rewrites', () => {
   const CHANGED_ON_DISK = new AppError('io', 'Note changed on disk; reload before retrying')
 
   /** A fake IO whose writes keep Rust's rule: they land only over `expected`. */
-  function checkedIo(
-    files: Record<string, string>,
-    beforeWrite: (path: string) => void = () => {},
-  ) {
+  function checkedIo(files: Record<string, string>, beforeWrite: (path: string) => void = noop) {
     const { io } = fakeIo(files)
     const calls: Array<[string, string, string | null]> = []
     io.write = (path, content, expected) => {

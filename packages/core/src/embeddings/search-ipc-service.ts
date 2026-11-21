@@ -10,6 +10,7 @@ import type { SettingsService } from '../settings/settings-service.ts'
 import type { Unlisten } from '../unlisten.ts'
 import type { EmbeddingRuntimeService } from './embedding-runtime-service.ts'
 import type { RetrievalService } from './retrieval-service.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * Search for the `reflect` CLI (`search_ipc.rs`): the CLI's semantic and
@@ -112,7 +113,7 @@ class SearchIpcServiceImpl implements SearchIpcService {
   start(): Unlisten {
     const { graphSession, platform, role } = this.#deps
     if (role !== 'main' || isMobilePlatform(platform.appPlatform) || platform.surface.mobileApp) {
-      return () => {}
+      return noop
     }
     let served: string | null = null
     let stopServing: Unlisten | null = null
@@ -191,8 +192,8 @@ class SearchIpcServiceImpl implements SearchIpcService {
       active = false
       // A subscription that failed has nothing to stop (its failure was
       // already reported above).
-      void listening.then((unlisten) => unlisten()).catch(() => {})
-      void ipc.call('search_ipc_stop', {}, voidSchema).catch(() => {})
+      void listening.then((unlisten) => unlisten()).catch(noop)
+      void ipc.call('search_ipc_stop', {}, voidSchema).catch(noop)
     }
   }
 

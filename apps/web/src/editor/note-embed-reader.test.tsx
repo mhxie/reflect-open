@@ -24,6 +24,7 @@ import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 import { OutlineBridge } from './outline/outline-bridge.tsx'
 import { noteOutlineFor } from './outline/outline-store.ts'
 import { OutlineSection } from '@/components/context-sidebar/outline-section.tsx'
+import { noop } from '@ocavue/utils'
 
 const IMAGE =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/%3E'
@@ -98,8 +99,8 @@ beforeEach(() => {
   loadCatalog = vi.spyOn(app.attachments, 'loadCatalog')
   openOrReveal = vi.spyOn(app.attachments, 'openOrReveal').mockResolvedValue(undefined)
   appLayer = createTestAppServices(app)
-  navigate = vi.spyOn(appLayer.linkNavigation, 'openNoteLink').mockImplementation(() => {})
-  external = vi.spyOn(appLayer.linkNavigation, 'followMarkdownLink').mockImplementation(() => {})
+  navigate = vi.spyOn(appLayer.linkNavigation, 'openNoteLink').mockImplementation(noop)
+  external = vi.spyOn(appLayer.linkNavigation, 'followMarkdownLink').mockImplementation(noop)
 })
 
 function render(ui: ReactNode) {
@@ -628,7 +629,7 @@ describe('NoteEmbedReader', () => {
         sources.set('secure/Original.md', sources.get('notes/Original.md') ?? '')
       }
       // The index row never arrives, so the verdict waits.
-      if (restriction === 'pending') getNote.mockReturnValue(new Promise(() => {}))
+      if (restriction === 'pending') getNote.mockReturnValue(new Promise(noop))
       // An in-app Lock, ahead of the index.
       if (restriction === 'overlay')
         app.noteRows.setOverlay('notes/Original.md', 7, { isPrivate: true })

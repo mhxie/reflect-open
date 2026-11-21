@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../errors.ts'
 import type { GraphRole } from '../graph/graph-session.ts'
@@ -57,9 +58,9 @@ async function setup(options: SetupOptions = {}) {
   const retrieveCalls: Array<RetrieveOptions | undefined> = []
   const ipc = createTestIpcBridgeService({
     commands: {
-      search_ipc_start: () => null,
-      search_ipc_stop: () => null,
-      search_ipc_respond: () => null,
+      search_ipc_start: returnNull,
+      search_ipc_stop: returnNull,
+      search_ipc_respond: returnNull,
     },
   })
   const graphSession = createTestGraphSessionService({

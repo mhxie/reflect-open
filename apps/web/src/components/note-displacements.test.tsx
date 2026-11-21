@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createTestCoreServices, createTestPlatformService } from '@reflect/core/testing'
 import { MobileRoot } from '@/mobile/mobile-root.tsx'
@@ -7,7 +8,7 @@ import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { NoteDisplacements } from './note-displacements.tsx'
 
 // The mobile shell's screens: the wiring test only needs the root around them.
-vi.mock('@/mobile/mobile-app.tsx', () => ({ MobileApp: () => null }))
+vi.mock('@/mobile/mobile-app.tsx', () => ({ MobileApp: returnNull }))
 
 const FROM = 'notes/plan.md'
 const TO = 'notes/plan (this device).md'

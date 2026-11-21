@@ -11,6 +11,7 @@ import {
   IDLE_RECORDER_STATUS,
   type RecorderStatus,
 } from './recorder-service.ts'
+import { sleep, noop, returnNull } from '@ocavue/utils'
 
 const IDLE: RecorderStatus = {
   supported: true,
@@ -43,7 +44,7 @@ function setup(options: { nativeShell?: boolean } = {}) {
       recorder_start: control(RECORDING),
       recorder_stop: control(IDLE),
       recorder_cancel: control(IDLE),
-      recorder_configure: () => null,
+      recorder_configure: returnNull,
       recorder_sessions: () => [
         { id: 'session-0', startedAtMs: 0, endedAtMs: 500, transcribed: true, warnings: [] },
       ],
@@ -55,7 +56,7 @@ function setup(options: { nativeShell?: boolean } = {}) {
         echoSuppressed: false,
         systemSilent: true,
       }),
-      recorder_archive: () => null,
+      recorder_archive: returnNull,
     },
   })
   const progress = createTestProgressPort()
@@ -82,7 +83,7 @@ function setup(options: { nativeShell?: boolean } = {}) {
  * Settle the promise chains a subscription and a control run on.
  */
 function flush(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0))
+  return sleep(0)
 }
 
 describe('RecorderService', () => {
@@ -107,8 +108,8 @@ describe('RecorderService', () => {
 
   it('never asks the native side outside the native shell', async () => {
     const { recorder, commands } = setup({ nativeShell: false })
-    recorder.subscribe(() => {})
-    const level = recorder.subscribeLevel(() => {})
+    recorder.subscribe(noop)
+    const level = recorder.subscribeLevel(noop)
     await flush()
 
     expect(recorder.getState()).toBe(IDLE_RECORDER_STATUS)
@@ -118,7 +119,7 @@ describe('RecorderService', () => {
 
   it('starts, then stops, adopting the status each control answers', async () => {
     const { recorder, commands } = setup()
-    recorder.subscribe(() => {})
+    recorder.subscribe(noop)
     await flush()
 
     await recorder.toggleRecording()

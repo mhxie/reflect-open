@@ -239,9 +239,10 @@ impl Core {
                 kept_out: file.kept_out,
             };
             match serde_json::to_value(payload) {
-                Ok(payload) => self
-                    .host()
-                    .emit(reflect_types::events::NOTE_DISPLACED, payload),
+                Ok(payload) => self.host().emit(
+                    reflect_types::events::EventName::NoteDisplaced.as_str(),
+                    payload,
+                ),
                 Err(err) => {
                     tracing::warn!(?err, from = %file.from, "could not announce a displaced note")
                 }

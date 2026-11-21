@@ -538,6 +538,7 @@ class AudioMemoTranscriptionServiceImpl implements AudioMemoTranscriptionService
               enrichmentCredentials,
               formatTranscript: input.formatTranscript,
               fallbackTitle: memo.title,
+              isStale: stale,
             })
             title = enriched.title
             body = enriched.body
@@ -618,7 +619,7 @@ class AudioMemoTranscriptionServiceImpl implements AudioMemoTranscriptionService
     const { assetStore, transcription, localTranscription, aiProviderConfig, aiCredentials } =
       this.#deps
     if (input.engine === 'local') {
-      const status = await localTranscription.status(input.localModel).catch(() => null)
+      const status = await localTranscription.status(input.localModel).catch(returnNull)
       if (status?.status !== 'ready') {
         return {
           stopped: {

@@ -1,4 +1,5 @@
-import { transcriptFallbackTitle } from '../ai/transcript-enrichment-service.ts'
+import { clipAtWordBoundary } from '../ai/text.ts'
+import { wikiLinkSafe } from '../markdown/edit.ts'
 import { upsertFrontmatter } from '../markdown/frontmatter.ts'
 
 /**
@@ -336,4 +337,34 @@ export function renderRecordingTranscript(input: RecordingNoteInput): string {
     speakers: conversation ? 'Me = microphone, Them = system audio' : undefined,
     warnings: input.warnings.length > 0 ? [...input.warnings] : undefined,
   })
+}
+
+const MAX_TITLE_CHARS = 80
+const MAX_FALLBACK_WORDS = 8
+
+/**
+ * A title from the transcript's own first sentence, or `fallbackTitle` when
+ * the transcript has none. A recording made here is named without a model.
+ */
+function transcriptFallbackTitle(transcript: string, fallbackTitle: string): string {
+  const firstLine =
+    transcript
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line !== '') ?? ''
+  const firstSentence = firstLine.split(/[.!?]/u)[0] ?? ''
+  const words = firstSentence
+    .split(/\s+/)
+    .filter((word) => word !== '')
+    .slice(0, MAX_FALLBACK_WORDS)
+    .map((word, index) => {
+      const lower = word.toLocaleLowerCase()
+      return index === 0 ? lower.charAt(0).toLocaleUpperCase() + lower.slice(1) : lower
+    })
+    .join(' ')
+  const safe = wikiLinkSafe(words)
+    .replace(/[.!?]+$/u, '')
+    .trim()
+  const clipped = clipAtWordBoundary(safe, MAX_TITLE_CHARS)
+  return clipped === '' ? fallbackTitle : clipped
 }

@@ -320,7 +320,7 @@ describe('openNoteLink', () => {
   })
 
   it('asks the in-window arrival to reveal the heading, also after a declined window', async () => {
-    const { linkNavigation, host } = setup({ openNoteWindow: () => false })
+    const { linkNavigation, host } = setup({ openNoteWindow: returnFalse })
     linkNavigation.openNoteLink({ target: alpha, openInNewWindow: false }, host)
     linkNavigation.openNoteLink(
       { target: alpha, openInNewWindow: false, revealHeading: 'Next steps' },

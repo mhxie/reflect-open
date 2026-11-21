@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import type { LoggerService } from '../ports/logger-service.ts'
 import { createTestLoggerService } from './logger.ts'
 import { AppError } from '../errors.ts'
@@ -18,8 +19,8 @@ type BinaryCommandHandler = (body: Uint8Array, headers: Record<string, string>) 
  * CLI search socket the main window opens on mount (`SearchIpcService.start`).
  */
 const DEFAULT_COMMANDS: Readonly<Record<string, CommandHandler>> = {
-  search_ipc_start: () => null,
-  search_ipc_stop: () => null,
+  search_ipc_start: returnNull,
+  search_ipc_stop: returnNull,
 }
 
 export interface TestIpcBridgeService extends IpcBridgeService {

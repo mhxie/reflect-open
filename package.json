@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:web": "pnpm --filter @reflect/web dev",
+    "dev:ios": "node scripts/dev-ios.ts",
     "build": "turbo run build",
     "build:ipa": "pnpm --filter @reflect/ios build:ipa",
     "build:ffi": "node scripts/build-ffi.ts",
@@ -17,6 +18,7 @@
     "test": "vitest",
     "test:browser": "vitest run --project '*browser*'",
     "test:node": "vitest run --project '!*browser*'",
+    "test:ios": "node scripts/test-ios.ts",
     "test:swift": "swift test --package-path apple",
     "bench": "pnpm --filter @reflect/core bench",
     "lint": "pnpm run lint:oxfmt && pnpm run lint:oxlint && pnpm run lint:eslint && pnpm run lint:knip",
@@ -31,6 +33,7 @@
     "check": "pnpm typecheck && pnpm lint",
     "gen:ios-csp": "node scripts/generate-ios-csp.ts",
     "gen:licenses": "pnpm --filter @reflect/web gen:licenses",
+    "gen:types": "cargo run --quiet --package reflect-types --features codegen --bin codegen",
     "gen:wxt": "pnpm --filter @reflect/extension gen:wxt",
     "tauri": "pnpm --filter @reflect/tauri tauri",
     "upload:testflight": "pnpm --filter @reflect/ios upload:testflight",
@@ -42,7 +45,7 @@
     "postinstall": "simple-git-hooks"
   },
   "devDependencies": {
-    "@ocavue/eslint-config": "^4.23.0",
+    "@ocavue/eslint-config": "^4.24.0",
     "@ocavue/tsconfig": "^0.7.1",
     "@types/node": "^24.0.0",
     "eslint": "^10.14.0",

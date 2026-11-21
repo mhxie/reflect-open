@@ -36,7 +36,7 @@ import {
 import { createAudioMemoService, type AudioMemoSurface } from './audio-memo-service.ts'
 import type { AudioRecorderFinalSegment } from './audio-recorder-service.ts'
 import { createTestRecordingStack } from './audio-memo-test-kit.ts'
-import { sleep, returnTrue } from '@ocavue/utils'
+import { sleep, returnTrue, returnNull } from '@ocavue/utils'
 
 const PROVIDERS: AiProvidersState = {
   providers: [{ id: 'cfg-openai', provider: 'openai', model: 'gpt-5.1', keyHint: 'wxyz1' }],
@@ -125,7 +125,7 @@ function nativeRecorderIpc(now: () => number) {
         status = { ...status, recording: null }
         return status
       },
-      recorder_configure: () => null,
+      recorder_configure: returnNull,
       recorder_sessions: () => [],
     },
   })

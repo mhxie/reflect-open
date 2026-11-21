@@ -19,6 +19,7 @@ import { createIndexQueryService } from './index-query-service.ts'
 import type { ChangesAppliedEmitter } from './indexer.ts'
 import { createLiveIndex } from './live.ts'
 import { createNoteDisplacementService } from './note-displacement-service.ts'
+import { sleep } from '@ocavue/utils'
 
 const databases: { close(): void }[] = []
 
@@ -277,7 +278,7 @@ describe('LiveIndex.subscribe', () => {
     canApply = false
     pendingRead.resolve()
     await vi.waitFor(() => expect(finished).toContain('notes/started-visible.md'))
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await sleep(0)
 
     // The first batch had begun reading while visible, but did not start its
     // SQLite write after suspension. The second never began at all; the
@@ -346,7 +347,7 @@ describe('LiveIndex.subscribe', () => {
 
     liveIndex.subscribe(1, FILE_GENERATION, LOCAL_ONLY).unlisten()
     emit([{ path: 'notes/a.md', kind: 'upsert' }])
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await sleep(0)
 
     expect(reads).toEqual([])
     expect(store.calls()).toEqual([])
@@ -481,7 +482,7 @@ describe('LiveIndex reread', () => {
 
     subscription.unlisten()
     subscription.reread(['notes/a.md'])
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await sleep(10)
     expect(applied).toHaveBeenCalledTimes(1)
     unsubscribe()
   })

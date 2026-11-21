@@ -1,4 +1,5 @@
 import type { MaybePromise } from '@reflect/utils'
+import type { EventName, FileChange as WireFileChange } from '@reflect/types'
 import { z } from 'zod'
 import type { LoggerService } from '../ports/logger-service.ts'
 import { createFanOut, listenNow, type FanOut, type IpcBridgeService } from '../ipc/ipc-service.ts'
@@ -7,14 +8,14 @@ import type { Unlisten } from '../unlisten.ts'
 /**
  * Event name the Rust watcher emits tracked-file changes on.
  */
-export const FILE_CHANGES_EVENT = 'index:changed'
+export const FILE_CHANGES_EVENT = 'index:changed' satisfies EventName
 
 /**
  * Event name the Rust watcher emits when only a full reconcile can tell what
  * changed: a visible folder was created, renamed, or removed, and no platform
  * enumerates its descendants per file. Carries no payload.
  */
-export const RECONCILE_EVENT = 'index:reconcile'
+export const RECONCILE_EVENT = 'index:reconcile' satisfies EventName
 
 const fileChangeSchema = z.object({
   path: z.string(),
@@ -30,12 +31,13 @@ const fileChangeSchema = z.object({
    * file anyway. The watcher never sets it.
    */
   reread: z.boolean().optional(),
-})
+}) satisfies z.ZodType<WireFileChange>
 const fileChangesSchema = z.array(fileChangeSchema)
 const voidSchema = z.null()
 
 /**
- * A single tracked change.
+ * A single tracked change: the watcher's wire shape, plus `reread`, which
+ * only this device's own writes set.
  */
 export type FileChange = z.infer<typeof fileChangeSchema>
 

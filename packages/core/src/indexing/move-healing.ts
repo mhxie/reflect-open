@@ -1,3 +1,4 @@
+import { returnTrue } from '@ocavue/utils'
 import type { NoteFileService } from '../graph/note-file-service.ts'
 import { foldGraphPath } from '../graph/paths.ts'
 import { parseNote } from '../markdown/index.ts'
@@ -137,7 +138,7 @@ class MoveHealingImpl implements MoveHealing {
         if (respelled === true) {
           return false
         }
-        return await noteFile.exists(path).catch(() => true)
+        return await noteFile.exists(path).catch(returnTrue)
       }),
     )
     return paths.filter((_path, position) => present[position] !== true)

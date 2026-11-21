@@ -7,6 +7,7 @@ import { toast } from '@/components/ui/toast.tsx'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useEditorAiMenu } from './use-editor-ai-menu.tsx'
+import { noop, returnFalse } from '@ocavue/utils'
 
 const PROVIDER: AiProviderConfig = {
   id: 'test-provider',
@@ -27,19 +28,19 @@ function editorWithSelection(stagesReplacement = false): {
   const discardPendingReplacement = vi.fn()
   const handle: NoteEditorHandle = {
     getMarkdown: () => 'selected words',
-    setMarkdown: () => {},
-    insertMarkdown: () => {},
-    focus: () => {},
-    setSelection: () => {},
+    setMarkdown: noop,
+    insertMarkdown: noop,
+    focus: noop,
+    setSelection: noop,
     getSelectedText: () => 'selected words',
     openSelectionMenu,
     startPendingReplacement: () => stagesReplacement,
-    appendPendingReplacementText: () => {},
-    acceptPendingReplacement: () => {},
+    appendPendingReplacementText: noop,
+    acceptPendingReplacement: noop,
     discardPendingReplacement,
-    findNext: () => {},
-    findPrevious: () => {},
-    revealHeading: () => false,
+    findNext: noop,
+    findPrevious: noop,
+    revealHeading: returnFalse,
   }
   return { editorRef: { current: handle }, openSelectionMenu, discardPendingReplacement }
 }

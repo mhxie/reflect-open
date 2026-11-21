@@ -245,7 +245,7 @@ class GitSyncServiceImpl implements GitSyncService {
   start(): Promise<void> {
     // Replaced before the queued run begins, so a catch-up asked right after
     // `start` waits for this run rather than the last one.
-    let connected = (): void => {}
+    let connected: () => void = noop
     this.#connecting = new Promise<void>((resolve) => {
       connected = resolve
     })

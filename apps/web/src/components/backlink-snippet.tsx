@@ -92,7 +92,7 @@ export function BacklinkSnippet({
         resolveWikilink={resolveWikilink}
         onWikilinkClick={handleWikilinkClick}
         onLinkClick={onLinkClick}
-        {...(onTaskClick ? { onTaskClick } : {})}
+        onTaskClick={onTaskClick}
         resolveImageUrl={imageResolver}
         resolveWikiEmbed={resolveWikiEmbed}
       />

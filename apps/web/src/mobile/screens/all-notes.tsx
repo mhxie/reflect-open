@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo, useRef, type ReactElement } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { ChevronLeft, FileText, SearchX } from 'lucide-react'
+import { FileText, SearchX } from 'lucide-react'
 import { Spinner } from '@/components/ui/spinner.tsx'
 import {
   foldTag,
@@ -19,18 +19,15 @@ import {
   allNotesRoute,
 } from '@reflect/app'
 import { queryKeys } from '@/lib/query-client.ts'
+import { newNoteRoute } from '@/lib/commands/app-commands.ts'
 import { MobileAskRow } from '@/mobile/ask-row.tsx'
 import { MobileChatButton } from '@/mobile/chat-button.tsx'
 import { FilterBar } from '@/mobile/search-filters/filter-bar.tsx'
 import { NoteRowList } from '@/mobile/note-row-list.tsx'
 import { SearchInput } from '@/mobile/search-input.tsx'
 import type { NoteRowModel } from '@/mobile/swipeable-note-row.tsx'
-import {
-  MobileTopBar,
-  MobileTopBarIconButton,
-  MobileTopBarRow,
-  MobileTopBarScrollableRow,
-} from '@/mobile/top-bar.tsx'
+import { ChromeTopBar } from '@/mobile/chrome/chrome-top-bar.tsx'
+import { MobileTopBarScrollableRow } from '@/mobile/top-bar.tsx'
 import { useArrivalFocus } from '@/mobile/use-arrival-focus.ts'
 import { useGraphInfo } from '@/providers/graph-provider.tsx'
 import { useCoreServices } from '@/services/services-provider.tsx'
@@ -104,8 +101,8 @@ export function MobileAllNotes({
   onFiltersChange,
 }: MobileAllNotesProps): ReactElement {
   const graph = useGraphInfo()
-  const { noteList, search } = useCoreServices()
-  const { arrivalSeq, arrivalFocusEditor } = useRouterState()
+  const { noteList, search, noteCreation } = useCoreServices()
+  const { arrivalSeq, arrivalFocusEditor, canBack } = useRouterState()
   const { navigate, back } = useRouterActions()
   const enabled = graph !== null
 
@@ -147,6 +144,8 @@ export function MobileAllNotes({
     [hits, dateFormat],
   )
 
+  const clearRouteTag = (): void => navigate(allNotesRoute(null))
+
   const addPendingTag = (facet: NoteTagFacet): void => {
     const key = foldTag(facet.tag)
     if (!filters.tags.includes(key)) {
@@ -156,23 +155,27 @@ export function MobileAllNotes({
   }
 
   return (
-    <div className="flex h-full w-screen flex-col pt-safe">
-      <MobileTopBar>
-        <MobileTopBarRow>
-          {tag !== null && (
-            <MobileTopBarIconButton edge="leading" aria-label="Back" onClick={back}>
-              <ChevronLeft />
-            </MobileTopBarIconButton>
-          )}
-          <SearchInput
-            ref={searchInputRef}
-            placeholder="Search or ask…"
-            aria-label="Search notes"
-            value={query}
-            onValueChange={onQueryChange}
-          />
-          <MobileChatButton />
-        </MobileTopBarRow>
+    <div className="flex h-full w-full flex-col pt-safe">
+      <ChromeTopBar
+        back={tag === null ? undefined : canBack ? back : clearRouteTag}
+        plus={{
+          kind: 'action',
+          label: 'New note',
+          onTap: () => navigate(newNoteRoute(noteCreation)),
+        }}
+        title={
+          <>
+            <SearchInput
+              ref={searchInputRef}
+              placeholder="Search or ask…"
+              aria-label="Search notes"
+              value={query}
+              onValueChange={onQueryChange}
+            />
+            <MobileChatButton />
+          </>
+        }
+      >
         <MobileTopBarScrollableRow>
           {pending !== null ? (
             <TagSuggestions
@@ -185,11 +188,11 @@ export function MobileAllNotes({
               onFiltersChange={onFiltersChange}
               facets={facets ?? []}
               routeTag={tag}
-              onClearRouteTag={() => navigate(allNotesRoute(null))}
+              onClearRouteTag={clearRouteTag}
             />
           )}
         </MobileTopBarScrollableRow>
-      </MobileTopBar>
+      </ChromeTopBar>
       {/* A half-typed `#…` token is a tag being picked, not a question. */}
       {pending === null ? <MobileAskRow query={query} /> : null}
       {/* Undefined hits mean "still fetching" only while the query can run —

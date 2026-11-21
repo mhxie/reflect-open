@@ -70,6 +70,9 @@ jobs:
             'Cargo.lock'
             '*.sql'
             'apps/tauri/*.json'
+            # The generated wire types: `lint-rust` checks they are current.
+            'packages/types/src/*.gen.ts'
+            'apple/Sources/TypesShared/*'
           )
           swift_files=(
             '.github/*'
@@ -77,8 +80,9 @@ jobs:
             '.swift-format'
             'apple/*'
             'apps/ios/*'
-            'apps/tauri/safari-extension/*'
+            'apps/safari-extension/*'
             'scripts/build-ffi.ts'
+            'scripts/test-ios.ts'
           )
 
           changed() {
@@ -88,6 +92,7 @@ jobs:
           js=false
           rust=false
           swift=false
+          skip_slow=$PR_IS_DRAFT
 
           if [[ $PR_IS_STACK_MIDDLE == true ]]; then
             echo "In the middle of a stack: the top PR runs the jobs."
@@ -95,6 +100,7 @@ jobs:
             js=true
             rust=true
             swift=true
+            skip_slow=false
           else
             git diff --name-only --no-renames HEAD^1 HEAD
             if changed "${js_files[@]}"; then
@@ -108,13 +114,20 @@ jobs:
             fi
           fi
 
+          webkit=$js
+          ios=$swift
+          if [[ $skip_slow == true ]]; then
+            webkit=false
+            ios=false
+          fi
+
           {
             echo "lint-node=$js"
             echo "test-node=$js"
             echo "test-chromium=$js"
-            echo "test-webkit=$([[ $js == true && $PR_IS_DRAFT == false ]] && echo true || echo false)"
+            echo "test-webkit=$webkit"
             echo "test-swift=$swift"
-            echo "test-ios=$swift"
+            echo "test-ios=$ios"
             echo "lint-rust=$rust"
             echo "test-rust=$rust"
           } | tee -a "$GITHUB_OUTPUT"
@@ -200,7 +213,7 @@ jobs:
 
   # Not part of `all-green`: a WebKit failure does not block merging.
   test-webkit:
-    needs: classify
+    needs: [classify, test-chromium]
     if: needs.classify.outputs.test-webkit == 'true'
     runs-on: xcode-27
     env:
@@ -258,9 +271,13 @@ jobs:
         working-directory: apple
         run: xcodebuild build -scheme ReflectApple-Package -destination 'generic/platform=iOS Simulator' -quiet
 
+      - name: Build apple/ for iOS devices
+        working-directory: apple
+        run: xcodebuild build -scheme ReflectApple-Package -destination 'generic/platform=iOS' -quiet
+
   # Builds the Swift shell in apps/ios and runs its unit and UI tests in a simulator.
   test-ios:
-    needs: classify
+    needs: [classify, test-swift]
     if: needs.classify.outputs.test-ios == 'true'
     runs-on: xcode-27
     timeout-minutes: 60
@@ -279,58 +296,18 @@ jobs:
 
       - uses: ./.github/actions/setup-mise
 
-      - name: Build the web app
-        run: pnpm --filter @reflect/ios build:web
+      # The script prints the time of each of its steps.
+      - name: Build and run the tests
+        run: pnpm test:ios
 
-      # A simulator that still does its first-boot work launches the app
-      # slowly, or not at all.
-      - name: Boot the simulator
-        run: |
-          udid=$(xcrun simctl list devices available --json \
-            | jq -r '[.devices[][] | select(.name == "iPhone 17")][-1].udid')
-          xcrun simctl bootstatus "$udid" -b
-          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
-
-      # The steps are separate so that the job page shows the time of each.
-      - name: Build the Rust core
-        run: pnpm build:ffi --debug --sdk iphonesimulator
-
-      - name: Resolve the Swift packages
-        run: |
-          xcodebuild -resolvePackageDependencies \
-            -project apps/ios/Reflect.xcodeproj \
-            -scheme Reflect \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData"
-
-      - name: Build the app and the tests
-        run: |
-          xcodebuild build-for-testing \
-            -project apps/ios/Reflect.xcodeproj \
-            -scheme Reflect \
-            -configuration Debug-Dev \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -showBuildTimingSummary
-
-      - name: Run the unit tests
-        run: |
-          xcodebuild test-without-building \
-            -project apps/ios/Reflect.xcodeproj \
-            -scheme Reflect \
-            -configuration Debug-Dev \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -only-testing:ReflectTests
-
-      - name: Run the UI tests
-        run: |
-          xcodebuild test-without-building \
-            -project apps/ios/Reflect.xcodeproj \
-            -scheme Reflect \
-            -configuration Debug-Dev \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -only-testing:ReflectUITests
+      # The result bundle has the screenshots and the steps of each failed test.
+      - name: Upload the result bundle and the logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-ios-results
+          path: apps/ios/build/test-ios
+          retention-days: 7
 
   lint-rust:
     needs: classify
@@ -376,6 +353,16 @@ jobs:
 
       - name: Format check
         run: cargo fmt --all -- --check
+
+      - name: Verify the generated wire types are current
+        if: matrix.name == 'Linux'
+        run: |
+          cargo run --quiet --package reflect-types --features codegen --bin codegen
+          if [[ -n $(git status --porcelain --untracked-files=all -- packages/types apple/Sources/TypesShared) ]]; then
+            git status --short -- packages/types apple/Sources/TypesShared
+            echo "::error::Generated wire types are stale. Run 'pnpm gen:types' and commit the result."
+            exit 1
+          fi
 
       - if: matrix.name == 'Linux'
         uses: ./.github/actions/setup-mise

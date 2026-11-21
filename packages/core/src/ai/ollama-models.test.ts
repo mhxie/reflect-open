@@ -1,3 +1,4 @@
+import { returnTrue } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { createTestHttpService, type TestHttpReply } from '../testing/http.ts'
 import { listOllamaModels, OLLAMA_BASE_URL } from './ollama-models.ts'
@@ -8,7 +9,7 @@ const SHOW_URL = 'http://localhost:11434/api/show'
 /** A server answering every request with `reply`. */
 function respond(body: string, status = 200) {
   return createTestHttpService([
-    { method: '*', url: () => true, reply: () => new Response(body, { status }) },
+    { method: '*', url: returnTrue, reply: () => new Response(body, { status }) },
   ])
 }
 
@@ -102,7 +103,7 @@ describe('listOllamaModels', () => {
     const refused = createTestHttpService([
       {
         method: '*',
-        url: () => true,
+        url: returnTrue,
         reply: () => {
           throw new TypeError('fetch failed')
         },
@@ -125,7 +126,7 @@ describe('listOllamaModels', () => {
     const http = createTestHttpService([
       {
         method: '*',
-        url: () => true,
+        url: returnTrue,
         reply: (request) => {
           request.signal.throwIfAborted()
           return new Response('{"models":[]}')

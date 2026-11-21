@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { z } from 'zod'
 import type { EmbeddingRuntimeService } from '../embeddings/embedding-runtime-service.ts'
 import type { RetrievalService } from '../embeddings/retrieval-service.ts'
@@ -86,7 +87,7 @@ class SearchEvalServiceImpl implements SearchEvalService {
 
   async #score(job: SearchEvalJob): Promise<void> {
     const { ipc, retrieval, embeddingRuntime, clock } = this.#deps
-    const embed = await embeddingRuntime.status().catch(() => null)
+    const embed = await embeddingRuntime.status().catch(returnNull)
     const results: SearchEvalQueryResult[] = []
     for (const mode of job.modes) {
       for (const { id, query } of job.queries) {

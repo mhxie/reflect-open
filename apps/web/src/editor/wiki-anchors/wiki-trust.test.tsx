@@ -19,6 +19,7 @@ import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import { noteArticleFor } from './wiki-article-store.ts'
 import { wikiEditorRange } from './wiki-article-projection.ts'
 import { WikiTrustSummary } from './wiki-trust-summary.tsx'
+import { sleep, noop } from '@ocavue/utils'
 
 const resolveWikilink = createWikilinkResolver('mdy')
 
@@ -459,7 +460,7 @@ describe('claim trust from the harness report', () => {
     )
     // A reindex for some other change re-reads the same file: still unsaved.
     await queryClient.invalidateQueries({ queryKey: ['index'] })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(container.querySelector('[data-wiki-claim="c2"]')?.getAttribute('data-wiki-trust')).toBe(
       'pending',
     )
@@ -544,7 +545,7 @@ describe('claim trust from the harness report', () => {
   })
 
   it('marks a claim edited while the saved file is still being read', async () => {
-    let release = (): void => {}
+    let release: () => void = noop
     readGate = new Promise((resolve) => {
       release = resolve
     })
@@ -584,7 +585,7 @@ describe('claim trust from the harness report', () => {
     expect(citation).not.toBeNull()
     report = { stamp: '5:5', contents: await reportText() }
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(citation?.isConnected).toBe(true)
   })
 
@@ -604,17 +605,17 @@ describe('claim trust from the harness report', () => {
     )
     await page.getByRole('button', { name: 'Claim C2: Needs work' }).click()
     await page.getByRole('button', { name: 'Question this claim' }).click()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(ref.current!.getMarkdown()).not.toContain('@pass: reader')
     await expect.element(page.getByText(/entry in the Evidence section first/)).toBeVisible()
   })
 
   it('rereads the saved file for a new report, not for an unchanged poll', async () => {
     await editorFixture()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     const settled = reads
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(reads).toBe(settled)
     report = { stamp: '7:7', contents: await reportText() }
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
@@ -623,20 +624,20 @@ describe('claim trust from the harness report', () => {
 
   it('rereads the saved file when that file changes, not when another does', async () => {
     await editorFixture()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     const settled = reads
     app.fileChanges.emit({
       changes: [{ path: 'wiki/Other.md', kind: 'upsert' }],
       source: 'own-write',
     })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(reads).toBe(settled)
     app.fileChanges.emit({ changes: [{ path: PATH, kind: 'upsert' }], source: 'own-write' })
     await vi.waitFor(() => expect(reads).toBe(settled + 1))
   })
 
   it('reads again when the file changes during the first read', async () => {
-    let release = (): void => {}
+    let release: () => void = noop
     readGate = new Promise((resolve) => {
       release = resolve
     })
@@ -646,7 +647,7 @@ describe('claim trust from the harness report', () => {
       </MarkdownEditor>,
     )
     await vi.waitFor(() => expect(reads).toBe(0))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     app.fileChanges.emit({ changes: [{ path: PATH, kind: 'upsert' }], source: 'external' })
     release()
     await vi.waitFor(() => expect(reads).toBe(2))
@@ -654,7 +655,7 @@ describe('claim trust from the harness report', () => {
 
   it('rereads the saved file when the window regains focus', async () => {
     await editorFixture()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     const settled = reads
     window.dispatchEvent(new Event('focus'))
     await vi.waitFor(() => expect(reads).toBeGreaterThan(settled))
@@ -683,7 +684,7 @@ describe('claim trust from the harness report', () => {
     expect(queryClient.getQueriesData({ queryKey: ['wiki-trust'] })[0]?.[1]).toMatchObject({
       status: 'invalid',
     })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(container.querySelector('[data-wiki-claim="c1"]')?.getAttribute('data-wiki-trust')).toBe(
       'solid',
     )
@@ -742,7 +743,7 @@ describe('claim trust from the harness report', () => {
     )
     await vi.waitFor(() => expect(container.querySelector('[data-wiki-claim="c1"]')).not.toBeNull())
     await queryClient.refetchQueries({ queryKey: ['wiki-trust'] })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(container.querySelector('[data-wiki-trust]')).toBeNull()
     expect(container.querySelector('.wiki-trust-mark')).toBeNull()
   })

@@ -5,9 +5,10 @@ import {
   publishNoteOutline,
   type NoteOutline,
 } from './outline-store.ts'
+import { noop } from '@ocavue/utils'
 
 function outline(text: string): NoteOutline {
-  return { headings: [{ level: 2, text, position: 0 }], activeIndex: null, reveal: () => {} }
+  return { headings: [{ level: 2, text, position: 0 }], activeIndex: null, reveal: noop }
 }
 
 describe('outline store', () => {

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useLayoutEffect,
   useRef,
@@ -10,7 +11,8 @@ import {
 import { cn } from '@/lib/utils.ts'
 import { MobileScreen } from '@/mobile/mobile-screen.tsx'
 import { routesEqual, type AllNotesFilters, type Route } from '@reflect/app'
-import { useBackPager } from '@/mobile/use-back-pager.ts'
+import { ChromeLayerContext, useChromeRenderer } from '@/mobile/chrome/chrome-renderer.ts'
+import { BACK_PAGER_OVERSHOOT_PX, useBackPager } from '@/mobile/use-back-pager.ts'
 import { RouterFreeze, useRouterState, useRouterActions } from '@/routing/router.tsx'
 import './mobile-stack.css'
 
@@ -79,12 +81,14 @@ function layerKey(route: Route): string {
  * pushed onto the screen being left slides in; one that lands over any other
  * screen (the All tab returning to its open Chat or note, with All's list put
  * beneath it, or Back from another tab into a card) is a tab switch too, so
- * it appears in place.
+ * it appears in place. Likewise a card slides out only on the way back (a
+ * history pop, or a move to the screen beneath it); a tab tap that leaves a
+ * card for another tab's root is instant.
  *
  * @param below The screen the arriving route sits on (what its Back reveals).
  */
 function transitionFor(
-  from: { route: Route; entryId: number },
+  from: { route: Route; entryId: number; below: Route },
   to: { route: Route; entryId: number },
   below: Route,
 ): StackTransition {
@@ -98,7 +102,7 @@ function transitionFor(
     return routesEqual(below, from.route) ? { kind: 'push' } : { kind: 'none' }
   }
   if (!toStacked && fromStacked) {
-    return pop
+    return to.entryId < from.entryId || routesEqual(to.route, from.below) ? pop : { kind: 'none' }
   }
   if (toStacked && fromStacked) {
     // Note to note: entry ids grow monotonically, so a smaller id means the
@@ -219,13 +223,19 @@ interface MobileStackProps {
  * remounting it, bounded to the one screen `back()` would land on.
  *
  * The layers are pages of a horizontal scroll-snap pager, each sticky at the
- * left edge with the current one last. An edge back-swipe is a native scroll
- * of that pager ({@link useBackPager}): the browser moves the card with the
+ * left edge with the current one last, after a spacer that puts the pop
+ * snap point past the screen edge. A back-swipe is a native scroll of
+ * that pager ({@link useBackPager}): the browser moves the card with the
  * finger and snaps it home or off, so the drag never waits for the main
- * thread. Stacked screens pan only vertically (`.mobile-pager-content` in
- * index.css); a strip along the card's left edge takes the horizontal drag,
- * by finger or by mouse, and hands taps to what lies under it. A horizontal scroller inside a
- * stacked screen needs `data-scroll-x`.
+ * thread. A horizontal drag reaches the pager from the background of a
+ * stacked screen and from rows marked `data-back-swipe="on"`; controls, the
+ * editor and `data-back-swipe="off"` pan only vertically (`.mobile-pager-content`
+ * in index.css). A strip along the card's left edge takes the horizontal
+ * drag over any of them, by finger or by mouse, and hands taps to what lies
+ * under it. A horizontal scroller inside a stacked screen needs
+ * `data-scroll-x`. Only the current card takes hits: the pager and the
+ * layers under it are `pointer-events: none`, so a touch on the revealed
+ * screen while the card snaps leaves the snap running.
  *
  * A stacked screen must not hold a `position: fixed` element: it stays put
  * while the card moves. Put floating UI in a portal or the top layer.
@@ -237,13 +247,15 @@ interface MobileStackProps {
 export function MobileStack(props: MobileStackProps): ReactElement {
   const { route, entryId, backRoute, canBack } = useRouterState()
   const { back, navigate } = useRouterActions()
+  const chromeRenderer = useChromeRenderer()
   const containerRef = useRef<HTMLDivElement>(null)
   const pagerRef = useRef<HTMLDivElement>(null)
   const scrimRef = useRef<HTMLDivElement>(null)
   const edgeRef = useRef<HTMLDivElement>(null)
 
   const [transition, setTransition] = useState<StackTransition>({ kind: 'none' })
-  const [arrival, setArrival] = useState({ route, entryId })
+  const below: Route = backRoute ?? { kind: 'today' }
+  const [arrival, setArrival] = useState({ route, entryId, below })
   // Set when a completed back-swipe commits its pop: the screen is already
   // offscreen, so the arrival it causes must not animate a second time.
   const [poppedByGesture, setPoppedByGesture] = useState(false)
@@ -251,17 +263,15 @@ export function MobileStack(props: MobileStackProps): ReactElement {
   // Transition detection happens during render (the mobile-shell `lastTab`
   // pattern) so the new screen's very first frame starts offscreen.
   if (entryId !== arrival.entryId) {
-    setArrival({ route, entryId })
+    setArrival({ route, entryId, below })
     setPoppedByGesture(false)
     setTransition(
-      poppedByGesture
-        ? { kind: 'none' }
-        : transitionFor(arrival, { route, entryId }, backRoute ?? { kind: 'today' }),
+      poppedByGesture ? { kind: 'none' } : transitionFor(arrival, { route, entryId }, below),
     )
   } else if (route !== arrival.route) {
     // Same entry, new route object: a note move rewrote the history in
     // place. Track it so a later pop's exiting card shows the live path.
-    setArrival({ route, entryId })
+    setArrival({ route, entryId, below })
   }
 
   const popByGesture = useCallback((): void => {
@@ -272,6 +282,13 @@ export function MobileStack(props: MobileStackProps): ReactElement {
       navigate({ kind: 'today' })
     }
   }, [canBack, back, navigate])
+
+  const reportSwipe = useCallback(
+    (phase: 'start' | 'cancel'): void => {
+      chromeRenderer.reportStackMotion({ type: 'backSwipe', phase })
+    },
+    [chromeRenderer],
+  )
 
   const finishTransition = useCallback((): void => {
     setTransition((current) => (current.kind === 'none' ? current : { kind: 'none' }))
@@ -301,6 +318,16 @@ export function MobileStack(props: MobileStackProps): ReactElement {
     return () => controller.abort()
   }, [transition, finishTransition])
 
+  // A layout effect, so the start reaches the chrome before the state of the
+  // new page, which the shell bars post from a passive effect. Each new slide
+  // reports its own start.
+  useLayoutEffect(() => {
+    chromeRenderer.reportStackMotion({
+      type: 'transition',
+      phase: transition.kind === 'none' ? 'end' : 'start',
+    })
+  }, [chromeRenderer, transition])
+
   const currentKey = layerKey(route)
   // What the back gesture reveals. A cold note entry has no history below
   // it, so it sits over today, where its back button lands too.
@@ -320,8 +347,9 @@ export function MobileStack(props: MobileStackProps): ReactElement {
     layers.push({ key: transition.exiting.key, route: transition.exiting.route, role: 'exiting' })
   }
 
-  const swipeEnabled =
-    isStacked(route) && transition.kind === 'none' && layers.some((layer) => layer.role === 'below')
+  const hasBelow = layers.some((layer) => layer.role === 'below')
+  const currentIndex = layers.findIndex((layer) => layer.role === 'current')
+  const swipeEnabled = isStacked(route) && transition.kind === 'none' && hasBelow
 
   useBackPager({
     scrollerRef: pagerRef,
@@ -330,6 +358,7 @@ export function MobileStack(props: MobileStackProps): ReactElement {
     pagesKey: layers.map((layer) => layer.key).join('|'),
     enabled: swipeEnabled,
     onPop: popByGesture,
+    onSwipe: reportSwipe,
   })
 
   const transitionScrim = transition.kind === 'none' ? null : presentScrim(transition)
@@ -339,7 +368,7 @@ export function MobileStack(props: MobileStackProps): ReactElement {
       <div
         ref={pagerRef}
         className={cn(
-          'mobile-pager relative flex h-full snap-x snap-mandatory scrollbar-none overflow-y-hidden overscroll-none',
+          'mobile-pager pointer-events-none relative flex h-full snap-x snap-mandatory scrollbar-none overflow-y-hidden overscroll-none',
           swipeEnabled ? 'overflow-x-auto' : 'overflow-x-hidden',
         )}
       >
@@ -347,52 +376,72 @@ export function MobileStack(props: MobileStackProps): ReactElement {
           const { className, style } = presentLayer(layer.role, layer.route, transition)
           const hidden = layer.role !== 'current'
           return (
-            <div
-              key={layer.key}
-              className={cn(
-                'mobile-stack-layer sticky left-0 h-full w-full shrink-0 bg-surface-canvas',
-                className,
-              )}
-              style={style}
-              data-stack-role={layer.role}
-              aria-hidden={hidden || undefined}
-              inert={hidden}
-            >
-              <div className={cn('h-full', isStacked(layer.route) && 'mobile-pager-content')}>
-                {/* Background layers must not observe navigation: a push bumps
+            <Fragment key={layer.key}>
+              {layer.role === 'current' && hasBelow ? (
+                // Puts the pop snap point past the screen edge.
+                <div
+                  aria-hidden
+                  className="h-full shrink-0"
+                  style={{ width: BACK_PAGER_OVERSHOOT_PX }}
+                />
+              ) : null}
+              <div
+                className={cn(
+                  'mobile-stack-layer sticky left-0 h-full w-full shrink-0 bg-surface-canvas',
+                  !hidden && 'pointer-events-auto',
+                  className,
+                )}
+                style={style}
+                data-stack-role={layer.role}
+                aria-hidden={hidden || undefined}
+                inert={hidden}
+              >
+                <div className={cn('h-full', isStacked(layer.route) && 'mobile-pager-content')}>
+                  {/* Background layers must not observe navigation: a push bumps
                     arrivalSeq, which the daily surface under the note would read
                     as a re-arrival and re-anchor its scroll while hidden. */}
-                <RouterFreeze frozen={hidden}>
-                  <MobileScreen route={layer.route} {...props} />
-                </RouterFreeze>
+                  <RouterFreeze frozen={hidden}>
+                    <ChromeLayerContext value={!hidden}>
+                      <MobileScreen route={layer.route} {...props} />
+                    </ChromeLayerContext>
+                  </RouterFreeze>
+                </div>
+                {swipeEnabled && !hidden ? (
+                  <>
+                    <div
+                      ref={scrimRef}
+                      aria-hidden
+                      className="mobile-pager-scrim pointer-events-none absolute inset-y-0 right-full w-full bg-black/25"
+                    />
+                    <div
+                      ref={edgeRef}
+                      aria-hidden
+                      data-pager-edge
+                      className="absolute inset-y-0 left-0 z-10 w-5 touch-pan-x select-none"
+                      onClick={forwardStripTap}
+                    />
+                  </>
+                ) : null}
               </div>
-              {swipeEnabled && !hidden ? (
-                <>
-                  <div
-                    ref={scrimRef}
-                    aria-hidden
-                    className="mobile-pager-scrim pointer-events-none absolute inset-y-0 right-full w-full bg-black/25"
-                  />
-                  <div
-                    ref={edgeRef}
-                    aria-hidden
-                    data-pager-edge
-                    className="absolute inset-y-0 left-0 z-10 w-5 touch-pan-x select-none"
-                    onClick={forwardStripTap}
-                  />
-                </>
-              ) : null}
-            </div>
+            </Fragment>
           )
         })}
-        {layers.map((layer, index) => (
-          <div
-            key={`snap:${layer.key}`}
-            aria-hidden
-            className="pointer-events-none absolute top-0 size-px snap-start"
-            style={{ left: `${index * 100}%` }}
-          />
-        ))}
+        {layers.map((layer, index) => {
+          // The current layer and the layers after it sit after the spacer.
+          const afterSpacer = hasBelow && index >= currentIndex
+          return (
+            <div
+              key={`snap:${layer.key}`}
+              aria-hidden
+              className="pointer-events-none absolute top-0 size-px snap-start"
+              style={{
+                left: afterSpacer
+                  ? `calc(${index * 100}% + ${BACK_PAGER_OVERSHOOT_PX}px)`
+                  : `${index * 100}%`,
+              }}
+            />
+          )
+        })}
       </div>
       {transitionScrim ? (
         <div

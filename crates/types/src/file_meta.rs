@@ -2,6 +2,7 @@ use serde::Serialize;
 
 /// Metadata for a file inside the graph.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "codegen", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct FileMeta {
     /// Graph-relative path, forward-slashed.
@@ -16,7 +17,7 @@ pub struct FileMeta {
     /// stub, `size` and `modified_ms` describe the stub; for a modern
     /// dataless file they are the real (preserved) values. Also true for an
     /// external file whose bytes its folder's provider holds.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub placeholder: bool,
     /// Set when the file lives in the graph's external storage folder rather
     /// than the graph itself; absent for every graph file.
@@ -26,6 +27,7 @@ pub struct FileMeta {
 
 /// Where an external file's bytes are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ExternalAvailability {
     /// On this device: it reads like any graph file.

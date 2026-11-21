@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../errors.ts'
 import {
@@ -160,7 +161,7 @@ describe('AiKeyValidationService', () => {
         commands: {
           on_device_http_send: refused,
           on_device_http_read: refused,
-          on_device_http_cancel: () => null,
+          on_device_http_cancel: returnNull,
         },
       }),
       id: createTestIdService(),

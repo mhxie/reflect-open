@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import type { MaybePromise } from '@reflect/utils'
 import type { LanguageModel } from '@reflect/modules/ai'
 import { MockLanguageModelV3 } from '@reflect/modules/ai/test'
@@ -595,7 +596,7 @@ class TestLocalTranscriptionServiceImpl implements TestLocalTranscriptionService
         local_transcription_download: () => this.#status,
         local_transcription_delete: () => this.#status,
         local_transcription_check_updates: () => updates,
-        local_transcription_skip_update: () => null,
+        local_transcription_skip_update: returnNull,
       },
     })
     this.#inner = createLocalTranscriptionService({

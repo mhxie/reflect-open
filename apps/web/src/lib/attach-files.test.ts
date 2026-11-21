@@ -12,6 +12,7 @@ import {
 import type { NoteEditorHandle } from '@/editor/note-editor.tsx'
 import type { CommandContext } from '@/lib/commands/types.ts'
 import { attachFilesToNote } from './attach-files.ts'
+import { noop, returnFalse } from '@ocavue/utils'
 
 let core: TestCoreServices
 let appLayer: TestAppServices
@@ -35,8 +36,8 @@ function contextFor(notePath: string | null): CommandContext {
     notePath: () => notePath,
     back: vi.fn(),
     forward: vi.fn(),
-    togglePin: vi.fn(() => {}),
-    togglePrivate: vi.fn(() => {}),
+    togglePin: vi.fn(noop),
+    togglePrivate: vi.fn(noop),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -62,19 +63,19 @@ function contextFor(notePath: string | null): CommandContext {
 function editorHandle(): NoteEditorHandle {
   return {
     getMarkdown: () => '',
-    setMarkdown: () => {},
+    setMarkdown: noop,
     insertMarkdown: vi.fn(),
-    focus: () => {},
-    setSelection: () => {},
+    focus: noop,
+    setSelection: noop,
     getSelectedText: () => '',
-    openSelectionMenu: () => {},
-    startPendingReplacement: () => false,
-    appendPendingReplacementText: () => {},
-    acceptPendingReplacement: () => {},
-    discardPendingReplacement: () => {},
-    findNext: () => {},
-    findPrevious: () => {},
-    revealHeading: () => false,
+    openSelectionMenu: noop,
+    startPendingReplacement: returnFalse,
+    appendPendingReplacementText: noop,
+    acceptPendingReplacement: noop,
+    discardPendingReplacement: noop,
+    findNext: noop,
+    findPrevious: noop,
+    revealHeading: returnFalse,
   }
 }
 

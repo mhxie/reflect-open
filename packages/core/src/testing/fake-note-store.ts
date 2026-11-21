@@ -1,5 +1,6 @@
 import { AppError } from '../errors.ts'
 import type { NoteCreateOutcome } from '../graph/schemas.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * An in-memory stand-in for the note commands that keeps Rust's write rules:
@@ -44,7 +45,7 @@ export function fakeNoteStore(initial: Record<string, string> = {}): FakeNoteSto
     files,
     landed: [],
     refused: 0,
-    beforeWrite: () => {},
+    beforeWrite: noop,
     // Each executor turns a synchronous throw into a rejection, as Rust's
     // commands answer.
     readNote: (path) => {

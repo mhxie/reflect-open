@@ -63,7 +63,7 @@ describe('uploadBlob', () => {
     const { ipc, assetStore } = setup()
     ipc.onCommand('asset_upload_begin', () => 'upload-3')
     ipc.onCommand('asset_upload_commit', () => 'finance/secure/assets/scan.png')
-    ipc.onBinaryCommand('asset_upload_append', () => null)
+    ipc.onBinaryCommand('asset_upload_append', returnNull)
 
     const path = await assetStore.uploadBlob('scan.png', bytesOf(8, 1), 'finance/secure/bank.md', 4)
 

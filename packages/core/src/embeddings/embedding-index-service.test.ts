@@ -12,7 +12,7 @@ import {
   type TestDatabaseService,
 } from '../testing/index.ts'
 import { passageText } from './embedding-index-service.ts'
-import { sleep } from '@ocavue/utils'
+import { sleep, noop } from '@ocavue/utils'
 
 const NOTE_PATH = 'notes/a.md'
 const NONE = NO_LOCAL_ONLY_FOLDERS
@@ -724,7 +724,7 @@ describe('follow', () => {
   })
 
   it('reports no progress once stopped, not even for the note in flight', async () => {
-    let stop: () => void = () => {}
+    let stop: () => void = noop
     const { index } = setupGraph({ onEmbed: () => stop() })
     const events: string[] = []
     stop = index.follow({

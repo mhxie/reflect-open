@@ -80,9 +80,13 @@ async function setup(options?: SetupOptions) {
     }
     return await contacts.lookupByName(name)
   }
-  const linkQueries: { query: string; limit?: number; dateGen?: DateSuggestionContext }[] = []
+  const linkQueries: {
+    query: string
+    limit?: number | undefined
+    dateGen?: DateSuggestionContext | undefined
+  }[] = []
   const tagQueries: string[] = []
-  const created: { title: string; generation: number; body?: string }[] = []
+  const created: { title: string; generation: number; body?: string | undefined }[] = []
   const ensured: EnsurePersonNoteInput[] = []
   const graphSession = createTestGraphSessionService({ graph: { generation: 7 } })
   const database = createNodeTestDatabaseService()
@@ -90,8 +94,8 @@ async function setup(options?: SetupOptions) {
   vi.spyOn(suggestions, 'suggestWikiLinkTargets').mockImplementation((query, limit, dateGen) => {
     linkQueries.push({
       query,
-      ...(limit === undefined ? {} : { limit }),
-      ...(dateGen === undefined ? {} : { dateGen }),
+      limit,
+      dateGen,
     })
     return options?.wikiLinks ?? NO_SUGGESTIONS
   })
@@ -105,7 +109,7 @@ async function setup(options?: SetupOptions) {
   const noteCreation = createTestNoteCreationService()
   vi.spyOn(noteCreation, 'resolveOrCreateNoteWithTitle').mockImplementation(
     async (title, generation, body) => {
-      created.push({ title, generation, ...(body === undefined ? {} : { body }) })
+      created.push({ title, generation, body })
       return await (options?.create?.() ??
         Promise.resolve({ kind: 'created', path: 'notes/created.md' }))
     },
@@ -348,7 +352,7 @@ describe('AutocompleteSuggestionService.suggestLinks', () => {
       { target: 'Tim MacCaw // Dad|Dad', label: 'Tim MacCaw', detail: 'Dad → Tim MacCaw' },
       { target: 'Charlotte MacCaw // Mum|Charlotte MacCaw', label: 'Charlotte MacCaw' },
     ])
-    expect(items[1]).not.toHaveProperty('detail')
+    expect(items[1]?.detail).toBeUndefined()
   })
 
   it('details notes that share a title with their paths', async () => {
@@ -391,7 +395,7 @@ describe('AutocompleteSuggestionService.suggestLinks', () => {
       { target: 'notes/event-loop-2', label: 'Event loop', detail: 'notes/event-loop-2.md' },
       { target: 'Event sourcing', label: 'Event sourcing' },
     ])
-    expect(items[2]).not.toHaveProperty('detail')
+    expect(items[2]?.detail).toBeUndefined()
   })
 
   it('labels daily notes and generated dates per the date-format setting', async () => {

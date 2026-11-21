@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../errors.ts'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
@@ -15,7 +16,7 @@ function fakeShell(grant: boolean) {
         }
         return 'activity-1'
       },
-      activity_end: () => null,
+      activity_end: returnNull,
     },
   })
   return { ipc, activity: createNativeActivityService({ ipc }) }

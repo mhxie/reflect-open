@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import {
   errorMessage,
   formatModelSize,
@@ -82,7 +83,7 @@ class LocalModelUpdateServiceImpl implements LocalModelUpdateService {
 
   async check(model: LocalTranscriptionModelId, force: boolean): Promise<void> {
     const { localTranscription, operations } = this.#deps
-    const report = await localTranscription.checkUpdates(model, force).catch(() => null)
+    const report = await localTranscription.checkUpdates(model, force).catch(returnNull)
     if (report === null) {
       return
     }

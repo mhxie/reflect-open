@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, vi } from 'vitest'
 import { markdownToDoc } from '@meowdown/core'
 import {
@@ -16,7 +17,7 @@ function reader(id: string, target: string, body: string, offset: number) {
     id,
     target,
     blocks: readEmbeddedOutlineBlocks(body, offset),
-    element: () => null,
+    element: returnNull,
     reveal: vi.fn(),
   })
   return { root, unregister }
@@ -78,7 +79,7 @@ describe('embedded outline collection', () => {
       id: 'new',
       target: 'Parent',
       blocks: readEmbeddedOutlineBlocks('# New', 1),
-      element: () => null,
+      element: returnNull,
       reveal: vi.fn(),
     })
     parent.unregister()
@@ -96,7 +97,7 @@ describe('embedded outline collection', () => {
       id: 'parent',
       target: 'Parent',
       blocks: readEmbeddedOutlineBlocks('# Parent', 1),
-      element: () => null,
+      element: returnNull,
       reveal,
     })
     first[0]?.embedded?.reveal()

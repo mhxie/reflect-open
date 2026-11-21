@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { SearchIpcAnswer, SearchIpcRequest } from '@reflect/core'
 import { createTestCoreServices } from '@reflect/core/testing'
@@ -21,7 +22,7 @@ function setup() {
   onTestFinished(() => app.database.close())
   const { ipc } = app
   for (const command of ['search_ipc_start', 'search_ipc_stop', 'search_ipc_respond']) {
-    ipc.onCommand(command, () => null)
+    ipc.onCommand(command, returnNull)
   }
   const answer = vi.spyOn(app.searchIpc, 'answer').mockResolvedValue(ANSWER)
   const socketCalls = () => {

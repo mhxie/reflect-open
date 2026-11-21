@@ -56,7 +56,6 @@ fastembed = { version = "7.5.0", default-features = false, features = [
   "hf-hub-native-tls",
   "ort-download-binaries-native-tls",
 ] }
-file-id = "0.2.3"
 getrandom = "0.4.3"
 futures-util = { version = "0.3.33", default-features = false, features = ["std"] }
 # Everything is vendored/static: libssh2 and openssl must never link against
@@ -78,8 +77,7 @@ jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 keyring-core = "1.0.1"
 libc = "0.2.189"
 log = "0.4.34"
-notify = "9.0.0-rc.7"
-notify-debouncer-full = "0.8.0-rc.2"
+notify-debouncer-full = "0.8.0-rc.3"
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false }
 objc2-audio-toolbox = { version = "0.3.2", default-features = false }
@@ -111,6 +109,13 @@ saphyr-parser = "0.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
+# `reflect-types` codegen. Pinned exactly: specta is a release candidate and
+# its exporters are 0.0.x, so any bump can change the generated files.
+specta = { version = "=2.0.0-rc.28", features = ["derive"] }
+specta-serde = "=0.0.15"
+specta-swift = "=0.0.6"
+specta-typescript = "=0.0.15"
+specta-util = "=0.0.15"
 sqlite-vec = "0.1.9"
 symphonia = { version = "0.6.1", default-features = false }
 symphonia-adapter-libopus = "0.3.0"
@@ -119,9 +124,9 @@ tauri-build = "2.7.4"
 tauri-plugin-deep-link = "2.6.3"
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-global-shortcut = "2.3.1"
-tauri-plugin-http = "2.8.3"
-tauri-plugin-log = "2.10.1"
-tauri-plugin-opener = "2.7.2"
+tauri-plugin-http = "2.9.0"
+tauri-plugin-log = "2.10.2"
+tauri-plugin-opener = "2.7.3"
 tauri-plugin-process = "2.4.0"
 tauri-plugin-single-instance = "2.5.5"
 tauri-plugin-updater = "2.14.1"

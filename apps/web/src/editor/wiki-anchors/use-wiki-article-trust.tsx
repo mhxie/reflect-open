@@ -20,6 +20,7 @@ import { wikiReaderTransaction, type WikiReaderStatus } from './wiki-reader-reco
 import { WikiClaimTrustCard } from './wiki-claim-trust-card.tsx'
 import { wikiArticleKey } from './wiki-article-plugin.tsx'
 import type { WikiTrustView } from './wiki-trust-view.ts'
+import { noop } from '@ocavue/utils'
 
 type Editor = ReturnType<typeof useEditor<EditorExtension>>
 
@@ -142,7 +143,7 @@ export function useWikiArticleTrust(
     }
   }, [editor, published, trust.view, trust.summary, openClaim])
   useEffect(() => {
-    let detach = (): void => {}
+    let detach: () => void = noop
     const cancel = whenEditorMounted(logger, editor, () => {
       const dom = editor.view.dom
       dom.dataset['wikiTrustDisplay'] = display

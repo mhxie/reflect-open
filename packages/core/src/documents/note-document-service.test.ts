@@ -12,6 +12,7 @@ import {
 import { createNoteDocumentService, NoteBusyError } from './note-document-service.ts'
 import { createTestGraphSessionService, type TestOpenGraph } from '../testing/graph-session.ts'
 import { createOpenDocumentsService } from './open-documents-service.ts'
+import { noop } from '@ocavue/utils'
 
 function setup(options?: {
   files?: TestNoteFileServiceOptions['files']
@@ -24,8 +25,8 @@ function setup(options?: {
   noteFile?: (files: TestNoteFileService) => NoteFileService
 }) {
   const files = createTestNoteFileService({
-    ...(options?.files === undefined ? {} : { files: options.files }),
-    ...(options?.generation === undefined ? {} : { generation: options.generation }),
+    files: options?.files,
+    generation: options?.generation,
   })
   const session =
     options?.session === undefined
@@ -348,7 +349,7 @@ describe('commitSourceEdit', () => {
       expect(noteFile.writes()).toEqual([{ path: 'notes/a.md', contents: 'a+', generation: 8 }])
     } finally {
       firstWrite.resolve()
-      await first.catch(() => undefined)
+      await first.catch(noop)
     }
   })
 

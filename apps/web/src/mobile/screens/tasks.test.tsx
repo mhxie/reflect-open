@@ -18,6 +18,7 @@ import { act } from '@/test-utils/act.ts'
 import { scrollElement } from '@/test-utils/scroll.ts'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileTasks } from './tasks.tsx'
+import { noop, returnFalse } from '@ocavue/utils'
 
 let haptics: TestHapticsService
 
@@ -65,20 +66,20 @@ vi.mock('@/editor/note-editor.tsx', async () => {
               areaRef.current.value = markdown
             }
           },
-          insertMarkdown: () => {},
+          insertMarkdown: noop,
           focus: () => {
             editorProbe.focusCalls += 1
           },
-          setSelection: () => {},
+          setSelection: noop,
           getSelectedText: () => '',
-          openSelectionMenu: () => {},
-          startPendingReplacement: () => false,
-          appendPendingReplacementText: () => {},
-          acceptPendingReplacement: () => {},
-          discardPendingReplacement: () => {},
-          findNext: () => {},
-          findPrevious: () => {},
-          revealHeading: () => false,
+          openSelectionMenu: noop,
+          startPendingReplacement: returnFalse,
+          appendPendingReplacementText: noop,
+          acceptPendingReplacement: noop,
+          discardPendingReplacement: noop,
+          findNext: noop,
+          findPrevious: noop,
+          revealHeading: returnFalse,
         })
         return () => {
           if (typeof cleanup === 'function') {
@@ -577,7 +578,7 @@ describe('MobileTasks', () => {
   it('keeps open tasks visible while the archived history is still loading', async () => {
     storage.session.set('reflect.tasks.filter.archived', 'true')
     getOpenTasks.mockResolvedValue([task({ text: 'still open' })])
-    getCompletedTasks.mockReturnValue(new Promise<OpenTask[]>(() => {}))
+    getCompletedTasks.mockReturnValue(new Promise<OpenTask[]>(noop))
     const view = await renderScreen()
 
     // The open groups render; the pending completed query must not blank them.

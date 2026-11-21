@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, vi } from 'vitest'
 import { AppError, isAppError } from '../errors.ts'
 import { CHANGED_ON_DISK, fakeNoteStore, type FakeNoteStore } from '../testing/fake-note-store.ts'
@@ -60,7 +61,7 @@ describe('patchNoteWith', () => {
   it('writes nothing when the patch declines or changes nothing', async () => {
     const store = fakeNoteStore({ [PATH]: '# Plan\n' })
 
-    await expect(patchNoteWith(storeIo(store), PATH, () => null)).resolves.toEqual({
+    await expect(patchNoteWith(storeIo(store), PATH, returnNull)).resolves.toEqual({
       source: '# Plan\n',
       patched: null,
       written: false,

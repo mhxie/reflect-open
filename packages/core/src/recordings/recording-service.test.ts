@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { CalendarEvent } from '../calendar/calendar-service.ts'
@@ -130,7 +131,7 @@ function setup(
         defaultRecordingsFolder: '/Users/someone/Library/Recordings',
         recording: null,
       }),
-      recorder_configure: () => null,
+      recorder_configure: returnNull,
       recorder_sessions: () => options.finished ?? [MEETING],
       recorder_transcribe: (args) => {
         transcribed.push(args['request'])

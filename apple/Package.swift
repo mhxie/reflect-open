@@ -32,16 +32,20 @@ struct Module {
   let layer: Layer
   var deps: [String] = []
   var hasTests = false
+  /// The test target copies its `Fixtures` directory as a resource.
+  var hasTestFixtures = false
 }
 
 let modules: [Module] = [
-  Module(name: "AppStoreKit", layer: .engine),
+  Module(name: "AppStoreKit", layer: .engine, deps: ["TypesShared"], hasTests: true),
   Module(name: "CaptureShared", layer: .shared, hasTests: true),
+  Module(name: "ChromeKit", layer: .engine, hasTests: true, hasTestFixtures: true),
   Module(name: "KeyboardKit", layer: .engine),
   Module(name: "RecordingShared", layer: .shared),
   Module(name: "RecordingKit", layer: .engine, deps: ["RecordingShared"], hasTests: true),
+  Module(name: "TypesShared", layer: .shared),
   Module(name: "WebAuthKit", layer: .engine),
-  Module(name: "WebHostKit", layer: .engine, hasTests: true),
+  Module(name: "WebHostKit", layer: .engine, deps: ["TypesShared"], hasTests: true),
 ]
 
 let layerOf = Dictionary(uniqueKeysWithValues: modules.map { ($0.name, $0.layer) })
@@ -62,13 +66,12 @@ for module in modules {
 let swiftSettings: [SwiftSetting] = [
   .enableUpcomingFeature("InternalImportsByDefault"),
   .enableUpcomingFeature("MemberImportVisibility"),
+  .treatAllWarnings(as: .error),
 ]
 
 let package = Package(
   name: "ReflectApple",
-  // The floor is below the deployment targets of `apps/ios/Config`, so the
-  // compiler checks every `#available`.
-  platforms: [.iOS(.v15), .macOS(.v13)],
+  platforms: [.iOS(.v18), .macOS(.v13)],
   products: modules.map { .library(name: $0.name, targets: [$0.name]) },
   targets:
     modules.map { module in
@@ -81,6 +84,7 @@ let package = Package(
       .testTarget(
         name: "\(module.name)Tests",
         dependencies: [.target(name: module.name)],
+        resources: module.hasTestFixtures ? [.copy("Fixtures")] : nil,
         swiftSettings: swiftSettings)
     },
   swiftLanguageModes: [.v5]

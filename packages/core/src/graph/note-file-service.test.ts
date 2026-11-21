@@ -9,7 +9,7 @@ import {
 } from '../testing/index.ts'
 import type { FileChange } from '../indexing/file-change-service.ts'
 import { createNoteFileService } from './note-file-service.ts'
-import { returnTrue } from '@ocavue/utils'
+import { returnTrue, returnNull } from '@ocavue/utils'
 
 function setup(ipc: TestIpcBridgeService = createTestIpcBridgeService()) {
   const fileChanges = createTestFileChangeService()
@@ -305,7 +305,7 @@ describe('fork note reads and writes', () => {
         commands: {
           note_recovery_write: () => kept,
           note_recovery_read: () => kept,
-          note_recovery_clear: () => null,
+          note_recovery_clear: returnNull,
         },
       }),
     )
@@ -351,7 +351,7 @@ describe('fork note reads and writes', () => {
 
   it('reads no kept text as null', async () => {
     const { noteFile } = setup(
-      createTestIpcBridgeService({ commands: { note_recovery_read: () => null } }),
+      createTestIpcBridgeService({ commands: { note_recovery_read: returnNull } }),
     )
 
     await expect(noteFile.readRecovery('finance/secure/bank.md', 3)).resolves.toBeNull()

@@ -17,6 +17,7 @@ import type {
   RemoteDelta,
   SkippedFile,
 } from './git-repository-service.ts'
+import { noop, returnFalse, returnNull } from '@ocavue/utils'
 
 let clock: TestClockService
 let activeGit: TestGitRepositoryService
@@ -143,7 +144,7 @@ describe('createSyncEngineFactory', () => {
     const git = fakeGit()
     const engine = createSyncEngine({
       generation: 1,
-      getCredential: () => null,
+      getCredential: returnNull,
       idleMs: 100,
       maxWaitMs: 250,
     })
@@ -252,7 +253,7 @@ describe('createSyncEngineFactory', () => {
   })
 
   it('commitNow joins the single-flight queue and never touches the network', async () => {
-    const gate: { release: () => void } = { release: () => {} }
+    const gate: { release: () => void } = { release: noop }
     const git = fakeGit()
     git.onPull(() => {
       return new Promise((resolve) => {
@@ -302,7 +303,7 @@ describe('createSyncEngineFactory', () => {
   })
 
   it('a flush queued behind a sync commits when the app hides meanwhile', async () => {
-    const gate: { release: () => void } = { release: () => {} }
+    const gate: { release: () => void } = { release: noop }
     const git = fakeGit()
     git.onPull(() => {
       return new Promise((resolve) => {
@@ -332,7 +333,7 @@ describe('createSyncEngineFactory', () => {
   })
 
   it('a flush queued into a full cycle commits when the gate closes after the fetch', async () => {
-    const gate: { release: () => void } = { release: () => {} }
+    const gate: { release: () => void } = { release: noop }
     const git = fakeGit()
     git.onPull(() => {
       return new Promise((resolve) => {
@@ -402,7 +403,7 @@ describe('createSyncEngineFactory', () => {
   })
 
   it('requests queued behind a running cycle merge into one follow-up that does their union', async () => {
-    const gate: { release: () => void } = { release: () => {} }
+    const gate: { release: () => void } = { release: noop }
     const git = fakeGit()
     git.onPull(() => {
       return new Promise((resolve) => {
@@ -427,7 +428,7 @@ describe('createSyncEngineFactory', () => {
     const engine = createSyncEngine({
       generation: 1,
       getCredential: () => CRED,
-      canStartCycle: () => false,
+      canStartCycle: returnFalse,
     })
     await engine.commitNow()
     expect(methodsOf(git)).toEqual(['commitAll'])
@@ -1040,7 +1041,7 @@ describe('createSyncEngineFactory', () => {
     const git = fakeGit()
     const engine = createSyncEngine({
       generation: 1,
-      getCredential: () => null,
+      getCredential: returnNull,
       localOnly: true,
       idleMs: 10,
     })
@@ -1072,7 +1073,7 @@ describe('createSyncEngineFactory', () => {
     const statuses: SyncStatus[] = []
     const engine = createSyncEngine({
       generation: 1,
-      getCredential: () => null,
+      getCredential: returnNull,
       onStatus: (status) => {
         statuses.push(status)
       },
@@ -1522,7 +1523,7 @@ describe('quiet mode', () => {
 
   it('an edit during the readiness ask is honoured', async () => {
     const git = fakeGit()
-    let answer: (ready: boolean) => void = () => {}
+    let answer: (ready: boolean) => void = noop
     let asks = 0
     const engine = quietEngine({
       networkReady: () => {

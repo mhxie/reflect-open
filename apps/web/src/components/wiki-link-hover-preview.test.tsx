@@ -6,6 +6,7 @@ import { useWikiLinkHoverPreview } from '@/editor/use-wiki-link-hover-preview.ts
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiLinkHoverPreview } from './wiki-link-hover-preview.tsx'
+import { sleep } from '@ocavue/utils'
 
 const YOUTUBE_URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
 // A saved card whose poster would load from the network if it rendered.
@@ -79,7 +80,7 @@ describe('wiki-link hover card over a private target', () => {
     })
 
     await expect.element(screen.getByText('Body')).toBeVisible()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(remoteElements()).toBeNull()
     const commands = app.ipc.calls().map((call) => call.command)
     for (const command of REMOTE_COMMANDS) {

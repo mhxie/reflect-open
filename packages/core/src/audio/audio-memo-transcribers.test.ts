@@ -1,3 +1,4 @@
+import { returnFalse } from '@ocavue/utils'
 import { describe, expect, it, vi } from 'vitest'
 import { TRANSCRIPTION_MAX_SEGMENT_BYTES } from '../ai/provider-config.ts'
 import { isTranscriptionRejected } from '../ai/transcribe-http.ts'
@@ -31,7 +32,7 @@ describe('cloudSegmentTranscriber', () => {
     const assetStore = createTestAssetStoreService({ assets: { [MEMO.audioPath]: 'audio-bytes' } })
     const readBytes = vi.spyOn(assetStore, 'readBytes')
     const transcription = createTestTranscriptionService('cloud text')
-    const isStale = (): boolean => false
+    const isStale = returnFalse
     const transcriber = cloudSegmentTranscriber(
       { assetStore, transcription },
       {

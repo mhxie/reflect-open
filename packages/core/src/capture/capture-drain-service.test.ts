@@ -12,7 +12,7 @@ import {
   IDENTITY,
   type CaptureTestKit,
 } from './capture-test-kit.ts'
-import { returnTrue } from '@ocavue/utils'
+import { returnTrue, returnNull } from '@ocavue/utils'
 
 let kit: CaptureTestKit
 
@@ -590,7 +590,7 @@ describe('CaptureDrainService', () => {
     await kit.drain()
     const originalNotePath = 'notes/capture-2026-06-11-093000-000-0000.md'
     kit.addSpool(envelope())
-    kit.raceNextWrite(originalNotePath, () => null)
+    kit.raceNextWrite(originalNotePath, returnNull)
 
     const outcome = await kit.drain()
 

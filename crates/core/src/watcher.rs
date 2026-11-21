@@ -31,22 +31,22 @@
 //! Evicted (dataless) raw-store files are skipped like any other — a raw
 //! store must be kept available offline.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, Weak};
 use std::time::Duration;
 
-use file_id::{FileId, get_file_id};
-use notify::{EventKindMask, RecommendedWatcher, RecursiveMode};
+use notify_debouncer_full::file_id::{FileId, get_file_id};
+use notify_debouncer_full::notify::{self, EventKindMask, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
-    DebounceEventHandler, DebounceEventResult, Debouncer, FileIdCache, new_debouncer_opt,
+    DebounceEventHandler, DebounceEventResult, Debouncer, FileIdCache, FileIdMap, new_debouncer_opt,
 };
 use reflect_graph_paths::{
     GraphPathKind, LocalOnlyFolders, LocalOnlyLink, classify, evicted_logical_path,
     eviction_placeholder, has_pruned_component, is_pruned_dir_name, to_slash_lossy, wire_path,
 };
-use reflect_types::events::{INDEX_CHANGED, INDEX_RECONCILE};
+use reflect_types::events::EventName;
 use reflect_types::{AppError, AppResult, ChangeKind, FileChange};
 use walkdir::WalkDir;
 
@@ -175,7 +175,7 @@ pub struct PrunedFileIdMap {
     /// Further watched trees (local-only link targets), screened the same
     /// way below their own roots.
     extra_roots: Arc<RwLock<Vec<PathBuf>>>,
-    paths: HashMap<PathBuf, FileId>,
+    ids: FileIdMap,
 }
 
 impl PrunedFileIdMap {
@@ -188,7 +188,7 @@ impl PrunedFileIdMap {
         Self {
             root,
             extra_roots,
-            paths: HashMap::new(),
+            ids: FileIdMap::new(),
         }
     }
 }
@@ -208,7 +208,7 @@ fn cache_keeps(root: &Path, path: &Path) -> bool {
 
 impl FileIdCache for PrunedFileIdMap {
     fn cached_file_id(&self, path: &Path) -> Option<impl AsRef<FileId>> {
-        self.paths.get(path)
+        self.ids.cached_file_id(path)
     }
 
     fn add_path(&mut self, path: &Path, recursive_mode: RecursiveMode) {
@@ -226,18 +226,24 @@ impl FileIdCache for PrunedFileIdMap {
             // `filter_entry` prunes whole subtrees: the walk never descends
             // into an excluded directory, which is the entire point.
             .filter_entry(move |entry| roots.iter().all(|root| cache_keeps(root, entry.path())));
-        for entry in walk {
-            let Ok(entry) = entry else { continue };
-            let path = entry.into_path();
-            let Ok(file_id) = get_file_id(&path) else {
-                continue;
-            };
-            self.paths.insert(path, file_id);
+        for entry in walk.flatten() {
+            self.ids.add_single_path(entry.path());
         }
     }
 
+    fn add_single_path(&mut self, path: &Path) {
+        let kept = cache_keeps(&self.root, path)
+            && read_lock(&self.extra_roots)
+                .iter()
+                .all(|root| cache_keeps(root, path));
+        if !kept {
+            return;
+        }
+        self.ids.add_single_path(path);
+    }
+
     fn remove_path(&mut self, path: &Path) {
-        self.paths.retain(|cached, _| !cached.starts_with(path));
+        self.ids.remove_path(path);
     }
 }
 
@@ -601,10 +607,14 @@ impl Core {
                 if !effects.changes.is_empty()
                     && let Ok(payload) = serde_json::to_value(&effects.changes)
                 {
-                    strong.host().emit(INDEX_CHANGED, payload);
+                    strong
+                        .host()
+                        .emit(EventName::IndexChanged.as_str(), payload);
                 }
                 if effects.reconcile {
-                    strong.host().emit(INDEX_RECONCILE, serde_json::Value::Null);
+                    strong
+                        .host()
+                        .emit(EventName::IndexReconcile.as_str(), serde_json::Value::Null);
                 }
                 if needs_link_refresh(&routed, effects.reconcile, follows_links) {
                     request_link_refresh(core.clone(), session, Arc::clone(&handler_refresh));
@@ -998,17 +1008,24 @@ mod tests {
         let mut cache = PrunedFileIdMap::new(root.to_path_buf());
         cache.add_path(root, RecursiveMode::Recursive);
 
-        assert!(cache.paths.contains_key(&root.join("notes/a.md")));
-        assert!(cache.paths.contains_key(&root.join("notes/b.md.tmp")));
-        assert!(
-            !cache
-                .paths
-                .keys()
-                .any(|path| path.starts_with(root.join(".git"))
-                    || path.starts_with(root.join(".reflect"))
-                    || path.starts_with(root.join("node_modules"))),
-            "hidden and pruned trees must never enter the cache"
-        );
+        assert!(cache.cached_file_id(&root.join("notes/a.md")).is_some());
+        assert!(cache.cached_file_id(&root.join("notes/b.md.tmp")).is_some());
+        for skipped in [
+            ".git",
+            ".git/objects",
+            ".git/objects/aa",
+            ".git/objects/aa/bb",
+            ".reflect",
+            ".reflect/index.sqlite",
+            "node_modules",
+            "node_modules/pkg",
+            "node_modules/pkg/x.js",
+        ] {
+            assert!(
+                cache.cached_file_id(&root.join(skipped)).is_none(),
+                "hidden and pruned trees must never enter the cache: {skipped}"
+            );
+        }
     }
 
     #[test]
@@ -1024,9 +1041,33 @@ mod tests {
         // Per-event adds arrive as single paths, not walks: `.git` churn from
         // the local-history commits must not grow the cache over a session.
         cache.add_path(&root.join(".git/objects/loose"), RecursiveMode::Recursive);
-        assert!(cache.paths.is_empty());
+        assert!(
+            cache
+                .cached_file_id(&root.join(".git/objects/loose"))
+                .is_none()
+        );
         cache.add_path(&root.join("notes/new.md"), RecursiveMode::Recursive);
-        assert!(cache.paths.contains_key(&root.join("notes/new.md")));
+        assert!(cache.cached_file_id(&root.join("notes/new.md")).is_some());
+    }
+
+    #[test]
+    fn cache_single_path_adds_respect_the_same_prune() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join(".git/objects/loose"), "obj").unwrap();
+        std::fs::write(root.join("notes/new.md"), "note").unwrap();
+
+        let mut cache = PrunedFileIdMap::new(root.to_path_buf());
+        cache.add_single_path(&root.join(".git/objects/loose"));
+        assert!(
+            cache
+                .cached_file_id(&root.join(".git/objects/loose"))
+                .is_none()
+        );
+        cache.add_single_path(&root.join("notes/new.md"));
+        assert!(cache.cached_file_id(&root.join("notes/new.md")).is_some());
     }
 
     #[test]
@@ -1040,7 +1081,7 @@ mod tests {
 
         let mut cache = PrunedFileIdMap::new(root.clone());
         cache.add_path(&root, RecursiveMode::Recursive);
-        assert!(cache.paths.contains_key(&root.join("notes/a.md")));
+        assert!(cache.cached_file_id(&root.join("notes/a.md")).is_some());
     }
 
     /// A graph whose `finance/secure` links into a raw store, both
@@ -1309,13 +1350,9 @@ mod tests {
         let extra = Arc::new(RwLock::new(vec![target.clone()]));
         let mut cache = PrunedFileIdMap::with_extra_roots(root, extra);
         cache.add_path(&target, RecursiveMode::Recursive);
-        assert!(cache.paths.contains_key(&target.join("bank.md")));
-        assert!(
-            !cache
-                .paths
-                .keys()
-                .any(|path| path.starts_with(target.join(".cache")))
-        );
+        assert!(cache.cached_file_id(&target.join("bank.md")).is_some());
+        assert!(cache.cached_file_id(&target.join(".cache")).is_none());
+        assert!(cache.cached_file_id(&target.join(".cache/blob")).is_none());
     }
 
     #[test]
@@ -1331,16 +1368,15 @@ mod tests {
 
         let mut cache = PrunedFileIdMap::new(root.to_path_buf());
         cache.add_path(root, RecursiveMode::Recursive);
-        assert!(cache.paths.contains_key(&root.join("notes/sub/b.md")));
+        assert!(cache.cached_file_id(&root.join("notes/sub/b.md")).is_some());
 
         cache.remove_path(&root.join("notes"));
-        assert!(
-            !cache
-                .paths
-                .keys()
-                .any(|path| path.starts_with(root.join("notes"))),
-            "the removed subtree must be fully evicted"
-        );
-        assert!(cache.paths.contains_key(&root.join("top.md")));
+        for evicted in ["notes", "notes/a.md", "notes/sub", "notes/sub/b.md"] {
+            assert!(
+                cache.cached_file_id(&root.join(evicted)).is_none(),
+                "the removed subtree must be fully evicted: {evicted}"
+            );
+        }
+        assert!(cache.cached_file_id(&root.join("top.md")).is_some());
     }
 }

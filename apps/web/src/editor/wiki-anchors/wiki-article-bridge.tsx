@@ -19,6 +19,7 @@ import type { WikiNoteTrustSummary } from './use-wiki-trust-view.ts'
 import { defineWikiArticle, wikiArticleKey } from './wiki-article-plugin.tsx'
 import { wikiEditorRange } from './wiki-article-projection.ts'
 import type { WikiEvidenceOptions } from './wiki-evidence.ts'
+import { noop } from '@ocavue/utils'
 
 interface WikiArticleBridgeProps {
   readonly path: string
@@ -35,7 +36,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
   const article = useNoteArticle(path)
   const noteIdentity = useWikiArticleIdentities(article?.index.source ?? '')
   const identitiesRef = useRef(noteIdentity)
-  const updateRef = useRef<() => void>(() => {})
+  const updateRef = useRef<() => void>(noop)
   const navigateRef = useRef(onWikiLinkClick)
   const {
     view: trustView,
@@ -202,7 +203,7 @@ export function WikiArticleBridge({ path, onWikiLinkClick }: WikiArticleBridgePr
     const cancel = whenEditorMounted(logger, editor, publish)
     return () => {
       cancel()
-      updateRef.current = () => {}
+      updateRef.current = noop
       clearNoteArticle(path, owner)
     }
   }, [editor, logger, path, trustSummaryOf])

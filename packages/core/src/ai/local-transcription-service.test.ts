@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { createTestIpcBridgeService } from '../testing/ipc.ts'
 import { createTestLoggerService } from '../testing/logger.ts'
@@ -21,7 +22,7 @@ function setup(answer: unknown = { outcome: 'transcribed', text: '', segments: [
       local_transcription_download: () => ({ status: 'downloading' }),
       local_transcription_delete: () => ({ status: 'missing' }),
       local_transcription_check_updates: () => ({ revision: null, generations: ['v4'] }),
-      local_transcription_skip_update: () => null,
+      local_transcription_skip_update: returnNull,
     },
   })
   return { ipc, logger, service: createLocalTranscriptionService({ ipc, logger }) }

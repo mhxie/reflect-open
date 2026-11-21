@@ -12,6 +12,7 @@ import { createNoteMoveService, NOTE_MOVED_EVENT } from './note-move-service.ts'
 import { createNoteSessionService } from './note-session-service.ts'
 import { createOpenDocumentsService } from './open-documents-service.ts'
 import type { NoteSession } from './note-session-types.ts'
+import { noop, returnFalse, returnTrue } from '@ocavue/utils'
 
 /**
  * The move service's carry/compensate contract (Plan 17): the session and
@@ -199,7 +200,7 @@ describe('followDisplacedNote', () => {
     const session = displacedSession(true, GENERATION + 1)
     const { noteMove, noteFile, openDocuments } = setup({ sessions: [session] })
 
-    await noteMove.followDisplacedNote(FROM, TO, true, GENERATION, () => true)
+    await noteMove.followDisplacedNote(FROM, TO, true, GENERATION, returnTrue)
 
     expect(noteFile.getReads()).toEqual([])
     expect(session.getCalls('followDisplacement')).toEqual([])
@@ -214,7 +215,7 @@ describe('followDisplacedNote', () => {
       noteFile: createTestNoteFileService({ files: { [FROM]: '# From the phone\n' } }),
     })
 
-    await noteMove.followDisplacedNote(FROM, TO, true, GENERATION, () => true)
+    await noteMove.followDisplacedNote(FROM, TO, true, GENERATION, returnTrue)
 
     expect(noteFile.getReads()).toEqual([{ path: FROM, generation: GENERATION }])
     expect(session.getCalls('followDisplacement')).toEqual([[TO, '# From the phone\n', true]])
@@ -231,7 +232,7 @@ describe('followDisplacedNote', () => {
       noteFile: createTestNoteFileService({ files: { [FROM]: '# From the phone\n' } }),
     })
 
-    await noteMove.followDisplacedNote(FROM, TO, false, GENERATION, () => true)
+    await noteMove.followDisplacedNote(FROM, TO, false, GENERATION, returnTrue)
 
     expect(session.getCalls('followDisplacement')).toEqual([[TO, '# From the phone\n', false]])
     expect(openDocuments.sessionFor(FROM)).toBe(session)
@@ -242,7 +243,7 @@ describe('followDisplacedNote', () => {
     const session = displacedSession(true)
     const { noteMove } = setup({ sessions: [session] }) // nothing on disk at FROM
 
-    await noteMove.followDisplacedNote(FROM, TO, false, GENERATION, () => true)
+    await noteMove.followDisplacedNote(FROM, TO, false, GENERATION, returnTrue)
 
     expect(session.getCalls('followDisplacement')).toEqual([[TO, null, false]])
   })
@@ -250,7 +251,7 @@ describe('followDisplacedNote', () => {
   it('does nothing for a note no pane has open', async () => {
     const { noteMove, noteFile, moves } = setup()
 
-    await noteMove.followDisplacedNote(FROM, TO, true, GENERATION, () => true)
+    await noteMove.followDisplacedNote(FROM, TO, true, GENERATION, returnTrue)
 
     expect(noteFile.getReads()).toEqual([])
     expect(moves).toEqual([])
@@ -268,7 +269,7 @@ describe('followDisplacedNote', () => {
     }).create({
       path: FROM,
       classify: () => 'exact',
-      onSnapshot: () => {},
+      onSnapshot: noop,
     })
     const { noteMove, openDocuments, moves } = setup({ sessions: [session], noteFile })
     try {
@@ -277,7 +278,7 @@ describe('followDisplacedNote', () => {
       session.editorChanged('# Graph B unsaved\n')
       expect(session.isDirty()).toBe(true)
 
-      await noteMove.followDisplacedNote(FROM, TO, false, GENERATION, () => false)
+      await noteMove.followDisplacedNote(FROM, TO, false, GENERATION, returnFalse)
       await session.flush()
 
       // The session's own load is the only read: the stale event read nothing.

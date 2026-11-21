@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../errors.ts'
 import { createTestClockService } from '../testing/clock.ts'
@@ -28,7 +29,7 @@ function setup(job: SearchEvalJob | null = JOB) {
         return null
       },
       activity_begin: () => 'activity-1',
-      activity_end: () => null,
+      activity_end: returnNull,
     },
   })
   const retrieval = createTestRetrievalService({

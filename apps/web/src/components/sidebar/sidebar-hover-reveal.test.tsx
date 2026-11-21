@@ -4,6 +4,7 @@ import { hover } from '@/test-utils/mouse.ts'
 import { SIDEBAR_HIDE_DELAY_MS } from '@/hooks/use-sidebar-hover-reveal.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { SidebarHoverReveal } from './sidebar-hover-reveal.tsx'
+import { sleep } from '@ocavue/utils'
 
 function renderReveal() {
   return renderInApp(
@@ -26,7 +27,7 @@ function renderReveal() {
 
 /** Wait out the hide grace so a dismissal that should not happen would have. */
 async function outlastHideDelay(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, SIDEBAR_HIDE_DELAY_MS * 2))
+  await sleep(SIDEBAR_HIDE_DELAY_MS * 2)
 }
 
 describe('SidebarHoverReveal', () => {

@@ -1,3 +1,4 @@
+import { returnFalse } from '@ocavue/utils'
 import {
   registerNoteEditorHandle,
   unregisterNoteEditorHandle,
@@ -31,13 +32,13 @@ function editorHandle(): NoteEditorHandle {
     setSelection: vi.fn(),
     getSelectedText: () => '',
     openSelectionMenu: vi.fn(),
-    startPendingReplacement: () => false,
+    startPendingReplacement: returnFalse,
     appendPendingReplacementText: vi.fn(),
     acceptPendingReplacement: vi.fn(),
     discardPendingReplacement: vi.fn(),
     findNext: vi.fn(),
     findPrevious: vi.fn(),
-    revealHeading: () => false,
+    revealHeading: returnFalse,
   }
 }
 

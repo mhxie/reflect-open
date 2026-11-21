@@ -9,6 +9,7 @@ import { queryClient } from '@/lib/query-client.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * A wiki entry through the real note view and editor: its `anchors` fences
@@ -47,7 +48,7 @@ beforeEach(() => {
   onTestFinished(() => database.close())
   app = createTestCoreServices({ database })
   appLayer = createTestAppServices(app)
-  openUrlSync = vi.spyOn(appLayer.opener, 'openUrlSync').mockImplementation(() => {})
+  openUrlSync = vi.spyOn(appLayer.opener, 'openUrlSync').mockImplementation(noop)
 })
 
 afterEach(() => {

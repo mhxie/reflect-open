@@ -6,6 +6,7 @@ import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { usePrivateNoteState, type PrivateNoteOptions } from './use-private-note.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * The open graph: rooted at `/g`, its local-only folders are `secure`.
@@ -80,7 +81,7 @@ describe('usePrivateNoteState', () => {
   })
 
   it('fails closed while the row loads, and says it is pending', async () => {
-    getNote.mockImplementation(() => new Promise(() => {}))
+    getNote.mockImplementation(() => new Promise(noop))
     const { result } = await renderHookInApp(
       () => usePrivateNoteState('notes/plan.md', noSession),
       { core: app, graph: GRAPH },
@@ -137,7 +138,7 @@ describe('usePrivateNoteState', () => {
   it('carries nothing across notes without a session', async () => {
     rows['notes/old.md'] = row('notes/old.md', false)
     getNote.mockImplementation(async (path) => {
-      return path === 'notes/other.md' ? await new Promise<never>(() => {}) : rows[path]
+      return path === 'notes/other.md' ? await new Promise<never>(noop) : rows[path]
     })
     const hook = await renderHookInApp(
       ({ path }: { path: string } = { path: 'notes/old.md' }) => {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { detectHostKind, detectPlatformFacts } from './detect-platform.ts'
+import { noop } from '@ocavue/utils'
 
 const DESKTOP_SURFACE = { touchEditor: false, mobileApp: false }
 const MOBILE_SURFACE = { touchEditor: true, mobileApp: true }
@@ -47,6 +48,13 @@ describe('detectPlatformFacts', () => {
     expect(facts.surface).toEqual(DESKTOP_SURFACE)
   })
 
+  it('is the iOS surface in the Swift shell without a build target', () => {
+    vi.stubEnv('TAURI_ENV_PLATFORM', '')
+    const facts = detectPlatformFacts('swift')
+    expect(facts.appPlatform).toBe('ios')
+    expect(facts.surface).toEqual(MOBILE_SURFACE)
+  })
+
   it.each(['ios', 'android'] as const)(
     'follows the `?platform=%s` override in plain-browser dev',
     (platform) => {
@@ -84,7 +92,7 @@ describe('detectHostKind', () => {
   })
 
   it('is Swift when the Swift shell adds its script message handler', () => {
-    const reflectHost = { postMessage: () => {} }
+    const reflectHost = { postMessage: noop }
     expect(detectHostKind({ webkit: { messageHandlers: { reflectHost } } })).toBe('swift')
   })
 

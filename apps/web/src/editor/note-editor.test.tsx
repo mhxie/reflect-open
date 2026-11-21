@@ -18,6 +18,7 @@ import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import type { XPost } from '@post-embed/types'
 import { NoteEditor, type NoteEditorHandle } from './note-editor.tsx'
 import { createPdfPagesView } from './pdf-pages-view.ts'
+import { noop, sleep } from '@ocavue/utils'
 
 // Media that loads without the network: the card hides a photo that fails.
 const X_PHOTO_URL = getSvgImageUrl(100, 100)
@@ -557,7 +558,7 @@ describe('NoteEditor attachment resolution', () => {
       <NoteEditor
         privateNote={false}
         initialContent="![[../outside.png]]"
-        resolveWikiEmbed={() => undefined}
+        resolveWikiEmbed={noop}
         resolveImageUrl={(src) => `asset://${src}`}
         handleRef={handleRef}
       />,
@@ -870,7 +871,7 @@ describe('NoteEditor private note policy', () => {
     // A click on the source URL activates it like any image preview; the
     // lightbox may only load what the private policy resolves.
     await pmRoot.getByTestId('embed-link').click()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(hostResolver).not.toHaveBeenCalled()
     await expectLocatorToHaveCount(page.getByRole('dialog'), 0)
   })

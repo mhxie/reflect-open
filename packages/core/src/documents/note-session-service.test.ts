@@ -15,6 +15,7 @@ import { createTestLoggerService, type TestLoggerService } from '../testing/logg
 import { createNoteSessionService } from './note-session-service.ts'
 import type { NoteSession, NoteSessionSnapshot } from './note-session-types.ts'
 import { createTitleRenameTracker, type TitleRename } from './title-rename-tracker.ts'
+import { noop } from '@ocavue/utils'
 
 /** The first task's locator as the index records it. */
 function firstTask(source: string): TaskLocator {
@@ -839,7 +840,7 @@ describe('frontmatter ownership (Plan 07b)', () => {
       logger,
       id,
       graphSession: createTestGraphSessionService({ graph: null }),
-    }).create({ path: PATH, classify: () => 'exact', onSnapshot: () => {} })
+    }).create({ path: PATH, classify: () => 'exact', onSnapshot: noop })
     expect(session.generation()).toBeNull()
     await expect(session.commitFrontmatter({ pinned: true })).resolves.toBe(false)
   })
@@ -2070,7 +2071,7 @@ describe('unsaved-text recovery (editable local-only notes)', () => {
   })
 
   it('a teardown over a refused save keeps the latest text, and its flush waits for it', async () => {
-    let releaseKeep: () => void = () => {}
+    let releaseKeep: () => void = noop
     const recovery = recoveryFake(null, () => {
       return new Promise<void>((resolve) => {
         releaseKeep = resolve

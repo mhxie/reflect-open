@@ -10,6 +10,7 @@ import { act } from '@/test-utils/act.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useWikiTrustReport } from './use-wiki-trust-report.ts'
+import { noop } from '@ocavue/utils'
 
 const VALID = JSON.stringify({
   format: 'reflect-wiki-trust',
@@ -102,7 +103,7 @@ describe('useWikiTrustReport and a backup that starts mid-read', () => {
   it('tells the backup running when the report arrives', async () => {
     const backup = createTestGitSyncService()
     const app = appWith(backup)
-    let release = (): void => {}
+    let release: () => void = noop
     readGate = new Promise((resolve) => (release = resolve))
     // The graph opens without its services, so no backup runs yet.
     const { result } = await renderHookInApp(() => useWikiTrustReport(true), {

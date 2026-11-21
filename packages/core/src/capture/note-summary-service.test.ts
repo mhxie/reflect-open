@@ -43,6 +43,7 @@ import {
   type ReconcileNoteSummariesInput,
   type ReconcileNoteSummariesOutcome,
 } from './note-summary-service.ts'
+import { sleep, noop, returnTrue } from '@ocavue/utils'
 
 const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
@@ -241,7 +242,7 @@ function outcome(
  * Settle the promise chains a pass runs on.
  */
 function flush(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0))
+  return sleep(0)
 }
 
 describe('NoteSummaryService.reconcile', () => {
@@ -302,7 +303,7 @@ describe('NoteSummaryService.reconcile', () => {
     const { service, calls } = await setup()
     const catchUp = vi.fn()
 
-    await service.reconcile(input({ catchUp, isBusy: () => true }))
+    await service.reconcile(input({ catchUp, isBusy: returnTrue }))
     await service.reconcile(
       input({ catchUp, providers: { providers: [CLOUD], defaultProviderId: CLOUD.id } }),
     )
@@ -708,7 +709,7 @@ describe('NoteSummaryService.openSession', () => {
     const { service, graphSession } = await setup({ seed: false })
     graphSession.setGraph(null)
 
-    expect(() => service.openSession({ onConsentNeeded: () => {} })).toThrow('No graph is open.')
+    expect(() => service.openSession({ onConsentNeeded: noop })).toThrow('No graph is open.')
   })
 
   it('runs a launch pass and a pass after each indexed note change', async () => {

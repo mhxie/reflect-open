@@ -1,3 +1,4 @@
+import { returnTrue } from '@ocavue/utils'
 import { definePlugin, type PlainExtension } from '@prosekit/core'
 import type { Node as ProseMirrorNode, ResolvedPos } from '@prosekit/pm/model'
 import {
@@ -88,7 +89,7 @@ function anchorDecorations(state: EditorState, options: WikiAnchorChipsOptions):
       Decoration.widget(end, (view, getPos) => chipsRow(view, getPos, labeled, text, options), {
         side: -1,
         key: `wiki-anchors:${options.asOf()}:${text}:${JSON.stringify(labeled.sources)}`,
-        stopEvent: () => true,
+        stopEvent: returnTrue,
         ignoreSelection: true,
       }),
     )

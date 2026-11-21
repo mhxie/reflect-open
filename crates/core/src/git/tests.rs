@@ -349,7 +349,8 @@ fn withheld_edit_the_remote_changed() -> (Backup, App, u64) {
 
 /// Every `note:displaced` payload `app` broadcasts from now on.
 fn announcements(app: &App) -> Arc<Mutex<Vec<Value>>> {
-    app.host.listen(reflect_types::events::NOTE_DISPLACED)
+    app.host
+        .listen(reflect_types::events::EventName::NoteDisplaced.as_str())
 }
 
 /// `git_pull` announces every entry left displaced on `note:displaced`,

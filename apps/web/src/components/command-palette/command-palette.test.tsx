@@ -24,6 +24,7 @@ import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { CommandPalette } from './command-palette.tsx'
 import { PaletteProvider, usePalette } from './palette-provider.tsx'
+import { noop, returnNull } from '@ocavue/utils'
 
 // The palette runs on the real `PaletteSearchService` of the test app
 // services; each test scripts the index reads below it.
@@ -123,12 +124,12 @@ async function renderPalette(query: string, context?: Partial<CommandContext>) {
     app: appLayer,
     navigate,
     route: () => ({ kind: 'today' }),
-    notePath: () => null,
+    notePath: returnNull,
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
-    togglePin: vi.fn(() => {}),
-    togglePrivate: vi.fn(() => {}),
+    togglePin: vi.fn(noop),
+    togglePrivate: vi.fn(noop),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),

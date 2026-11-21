@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { AppError } from '../errors.ts'
 import type { NoteFileService } from '../graph/note-file-service.ts'
@@ -416,14 +417,14 @@ describe('WikiService.readTrustReportFile', () => {
   })
 
   it('is null when no report is there', async () => {
-    const ipc = createTestIpcBridgeService({ commands: { wiki_trust_report_read: () => null } })
+    const ipc = createTestIpcBridgeService({ commands: { wiki_trust_report_read: returnNull } })
     const { wiki } = setup({ ipc })
 
     await expect(wiki.readTrustReportFile('.harness/wiki-trust.json', null)).resolves.toBeNull()
   })
 
   it('rejects without reading when no graph is open', async () => {
-    const ipc = createTestIpcBridgeService({ commands: { wiki_trust_report_read: () => null } })
+    const ipc = createTestIpcBridgeService({ commands: { wiki_trust_report_read: returnNull } })
     const { wiki, graphSession } = setup({ ipc })
     graphSession.setGraph(null)
 

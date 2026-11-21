@@ -8,6 +8,7 @@ import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { DayTasksSection } from './day-tasks-section.tsx'
+import { noop } from '@ocavue/utils'
 
 const TODAY = '2026-10-03'
 
@@ -172,7 +173,7 @@ describe('DayTasksSection', () => {
   })
 
   it('shows only the header while the open tasks load', async () => {
-    getOpenTasks.mockReturnValue(new Promise(() => {}))
+    getOpenTasks.mockReturnValue(new Promise(noop))
     const view = await renderSection(TODAY)
 
     await expect.element(page.getByText('Tasks', { exact: true })).toBeVisible()

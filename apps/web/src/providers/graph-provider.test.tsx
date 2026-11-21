@@ -66,7 +66,7 @@ interface GraphProbe extends ReturnType<typeof useGraphActions> {
 }
 
 function tree(children: ReactNode, platform?: AppPlatform): ReactElement {
-  return <GraphProvider {...(platform === undefined ? {} : { platform })}>{children}</GraphProvider>
+  return <GraphProvider platform={platform}>{children}</GraphProvider>
 }
 
 /**
@@ -95,7 +95,7 @@ async function renderGraph<Core extends CoreServices>(
   const view = await renderInApp(tree(<Probe />, platform), {
     core,
     servicesOnly: true,
-    ...(appServices === undefined ? {} : { appServices }),
+    appServices,
   })
   return {
     core,

@@ -1,3 +1,4 @@
+import { returnTrue } from '@ocavue/utils'
 import { definePlugin, Priority, withPriority, type PlainExtension } from '@prosekit/core'
 import {
   Plugin,
@@ -76,7 +77,7 @@ function widget(position: number, key: string, children: ReactNode, block = fals
       key,
       side: 1,
       ignoreSelection: true,
-      stopEvent: () => true,
+      stopEvent: returnTrue,
       destroy: (node) => {
         const root = roots.get(node)
         if (root !== undefined) queueMicrotask(() => root.unmount())
@@ -216,7 +217,7 @@ function decorations(
             })
             return button
           },
-          { key: `claim-label:${revision}:${claim.id}`, side: -1, stopEvent: () => true },
+          { key: `claim-label:${revision}:${claim.id}`, side: -1, stopEvent: returnTrue },
         ),
       )
     }
@@ -478,7 +479,7 @@ function trustWidget(
       return node
     },
     // After the claim's citations (drawn at side 1), so the mark closes the claim.
-    { key, side: 2, ignoreSelection: true, stopEvent: () => true },
+    { key, side: 2, ignoreSelection: true, stopEvent: returnTrue },
   )
 }
 

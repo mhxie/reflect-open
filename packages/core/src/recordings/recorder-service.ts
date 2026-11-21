@@ -6,6 +6,7 @@ import type { LoggerService } from '../ports/logger-service.ts'
 import type { PlatformFacts } from '../ports/platform-facts.ts'
 import type { ProgressPort } from '../ports/progress-port.ts'
 import type { Unlisten } from '../unlisten.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * The Rust recorder (`apps/tauri/src/recorder/`, macOS 14.2+),
@@ -338,7 +339,7 @@ class RecorderServiceImpl implements RecorderService {
   #listen(event: string, handler: (payload: unknown) => void): Unlisten {
     const { ipc, platform, logger } = this.#deps
     if (!platform.isNativeShell) {
-      return () => {}
+      return noop
     }
     return listenNow(
       () => ipc.listen(event, handler),

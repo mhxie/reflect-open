@@ -43,6 +43,7 @@ import type { ToastController } from '@/lib/use-toasts.ts'
 import { toast } from '@/components/ui/toast.tsx'
 import { useAppShortcuts } from './app-shortcuts.ts'
 import { useRouterActions, useRouterHandlers, useRouterState } from './router.tsx'
+import { noop, returnFalse } from '@ocavue/utils'
 
 const GRAPH = {
   root: '/g',
@@ -63,19 +64,19 @@ let newChat: MockInstance<ChatSession['newChat']>
 function findHandle(findNext: () => void, findPrevious: () => void): NoteEditorHandle {
   return {
     getMarkdown: () => '',
-    setMarkdown: () => {},
-    insertMarkdown: () => {},
-    focus: () => {},
-    setSelection: () => {},
+    setMarkdown: noop,
+    insertMarkdown: noop,
+    focus: noop,
+    setSelection: noop,
     getSelectedText: () => '',
-    openSelectionMenu: () => {},
-    startPendingReplacement: () => false,
-    appendPendingReplacementText: () => {},
-    acceptPendingReplacement: () => {},
-    discardPendingReplacement: () => {},
+    openSelectionMenu: noop,
+    startPendingReplacement: returnFalse,
+    appendPendingReplacementText: noop,
+    acceptPendingReplacement: noop,
+    discardPendingReplacement: noop,
     findNext,
     findPrevious,
-    revealHeading: () => false,
+    revealHeading: returnFalse,
   }
 }
 

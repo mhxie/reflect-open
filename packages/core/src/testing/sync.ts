@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import type { MaybePromise } from '@reflect/utils'
 import { AppError } from '../errors.ts'
 import { WritableStore } from '../store.ts'
@@ -93,7 +94,7 @@ class TestGitRepositoryServiceImpl implements TestGitRepositoryService {
   readonly #log: GitRepositoryCall[] = []
   readonly #handlers: { [M in GitMethod]: GitRepositoryHandler<M> } = {
     status: () => ({ ...this.#status }),
-    noteVersion: () => null,
+    noteVersion: returnNull,
     setup: (remoteUrl, branch) => {
       this.#status = {
         ...this.#status,

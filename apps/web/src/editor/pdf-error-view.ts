@@ -1,4 +1,5 @@
 import type { PdfEmbedView } from '@/editor/pdf-pages-view.ts'
+import { noop } from '@ocavue/utils'
 
 export interface PdfErrorViewOptions {
   /** The PDF's file name. */
@@ -27,7 +28,7 @@ export function createPdfErrorView({ name, message, onOpen }: PdfErrorViewOption
   element.append(title, reason)
 
   if (onOpen === undefined) {
-    return { element, destroy: () => {} }
+    return { element, destroy: noop }
   }
   const button = document.createElement('button')
   button.type = 'button'

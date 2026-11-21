@@ -1,4 +1,5 @@
 import type { ImageUrlResolver, XPostResolver, YouTubeVideoResolver } from '@meowdown/core'
+import { noop } from '@ocavue/utils'
 
 /**
  * Rendering switches for content from a private note (locked, unreadable, or
@@ -8,10 +9,10 @@ import type { ImageUrlResolver, XPostResolver, YouTubeVideoResolver } from '@meo
  * embed props still fall back to its own fetching resolvers when omitted, so
  * "off" also passes an explicit resolver that finds nothing.
  */
-export const resolveNoXPost: XPostResolver = () => undefined
+export const resolveNoXPost: XPostResolver = noop
 
 /** The YouTube counterpart of {@link resolveNoXPost}. */
-export const resolveNoYouTubeVideo: YouTubeVideoResolver = () => undefined
+export const resolveNoYouTubeVideo: YouTubeVideoResolver = noop
 
 /** A source carrying a URL scheme (or protocol-relative) names a remote resource, not an attachment. */
 function isRemoteSource(source: string): boolean {

@@ -4,6 +4,7 @@ import { NoteDisplacements } from '@/components/note-displacements.tsx'
 import { OutdatedWebEngineBanner } from '@/components/outdated-web-engine-banner.tsx'
 import { Toaster } from '@/components/ui/toast.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip.tsx'
+import { ChromeRendererProvider } from '@/mobile/chrome/chrome-renderer-provider.tsx'
 import { MobileApp } from '@/mobile/mobile-app.tsx'
 import { GraphProvider } from '@/providers/graph-provider.tsx'
 
@@ -14,13 +15,15 @@ import { GraphProvider } from '@/providers/graph-provider.tsx'
  */
 export function MobileRoot({ platform }: { platform: AppPlatform }): ReactElement {
   return (
-    <GraphProvider platform={platform}>
-      <NoteDisplacements />
-      <TooltipProvider>
-        <MobileApp />
-        <OutdatedWebEngineBanner />
-        <Toaster position="top-center" />
-      </TooltipProvider>
-    </GraphProvider>
+    <ChromeRendererProvider>
+      <GraphProvider platform={platform}>
+        <NoteDisplacements />
+        <TooltipProvider>
+          <MobileApp />
+          <OutdatedWebEngineBanner />
+          <Toaster position="top-center" />
+        </TooltipProvider>
+      </GraphProvider>
+    </ChromeRendererProvider>
   )
 }

@@ -10,6 +10,7 @@ import { InlineAlert } from '@/components/inline-alert.tsx'
 import { useAppServices, useCoreServices } from '@/services/services-provider.tsx'
 import { useStore } from '@/lib/use-store.ts'
 import { ModelDownloadProgress } from './model-download-progress.tsx'
+import { noop } from '@ocavue/utils'
 
 const PRIMARY_BUTTON =
   'inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-text-on-brand shadow-sm transition-colors duration-100 hover:bg-accent-hover'
@@ -41,7 +42,7 @@ export function LocalModelActions({ model, status }: LocalModelActionsProps): Re
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const download = (): void => {
     // The status events carry progress and the outcome; nothing to add here.
-    void localTranscription.download(model).catch(() => undefined)
+    void localTranscription.download(model).catch(noop)
   }
 
   switch (status.status) {

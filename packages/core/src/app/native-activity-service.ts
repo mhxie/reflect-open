@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { IpcBridgeService } from '../ipc/ipc-service.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * The native shell's "user-initiated work" activity.
@@ -41,7 +42,7 @@ class NativeActivityServiceImpl implements NativeActivityService {
       return await work()
     } finally {
       if (token !== null) {
-        await ipc.call('activity_end', { token }, voidSchema).catch(() => {})
+        await ipc.call('activity_end', { token }, voidSchema).catch(noop)
       }
     }
   }

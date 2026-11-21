@@ -4,6 +4,7 @@ import { queryClient } from '@/lib/query-client.ts'
 import { renderHookInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { useXPostPreload, type XPostPreloadPrivacy } from './use-x-post-preload.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * Core services whose X post archive reads never answer: only the wait can settle the preload.
@@ -13,7 +14,7 @@ function appWithStuckArchive() {
   onTestFinished(() => app.database.close())
   const loadXPost = vi
     .spyOn(app.embedMedia, 'loadXPost')
-    .mockImplementation(async () => await new Promise(() => {}))
+    .mockImplementation(async () => await new Promise(noop))
   return { app, loadXPost }
 }
 

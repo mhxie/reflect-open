@@ -1,3 +1,4 @@
+import { returnFalse } from '@ocavue/utils'
 import type { MaybePromise } from '@reflect/utils'
 import type { AiCredentialService } from '../ai/ai-credential-service.ts'
 import type { AiProviderConfigService } from '../ai/ai-provider-config-service.ts'
@@ -411,7 +412,7 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
       return outcome
     }
     const { localOnly } = session
-    const isStale = input.isStale ?? (() => false)
+    const isStale = input.isStale ?? returnFalse
     const { clock } = this.#deps
     try {
       const candidates = (await this.#candidates()).filter((candidate) => {
@@ -647,7 +648,7 @@ class NoteSummaryServiceImpl implements NoteSummaryService {
     localOnly: LocalOnlyFolders,
   ): Promise<NoteStep> {
     const { noteFile, indexLifecycle } = this.#deps
-    const isStale = input.isStale ?? (() => false)
+    const isStale = input.isStale ?? returnFalse
     let read: LocalNoteRead
     try {
       // Bytes bound for the cloud refuse while sharing is paused.

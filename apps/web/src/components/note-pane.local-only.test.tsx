@@ -7,6 +7,7 @@ import { renderHookInApp, renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import '@/test-utils/locator.ts'
 import { RouteContent } from './route-content.tsx'
+import { sleep } from '@ocavue/utils'
 
 /** What reaches the network, or writes the X archive, on a note's behalf. */
 const REMOTE_COMMANDS = ['x_syndication_fetch', 'x_archive_write', 'x_archive_resolve']
@@ -86,7 +87,7 @@ it('a link from a local-only note navigates but never creates a note', async () 
   await page.getByTestId('wikilink').getByText('Brand New Idea').click()
   // Resolution is async; let it settle before checking nothing was created.
   await vi.waitFor(() => expect(resolveReadOnly).toHaveBeenCalledWith('Brand New Idea'))
-  await new Promise((resolve) => setTimeout(resolve, 100))
+  await sleep(100)
   expect(resolveOrCreate).not.toHaveBeenCalled()
   expect(noteFile.writes()).toEqual([])
 })

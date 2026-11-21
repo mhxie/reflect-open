@@ -1,3 +1,4 @@
+import { returnTrue } from '@ocavue/utils'
 import { describe, expect, it } from 'vitest'
 import { createTestHttpService, type TestHttpReply } from '../testing/http.ts'
 import { resolveOnDeviceTarget } from './on-device.ts'
@@ -85,7 +86,7 @@ describe('local model verification', () => {
   )
 
   it('does not turn a failed Ollama check into a generic server success', async () => {
-    const http = createTestHttpService([{ method: '*', url: () => true, reply: { status: 503 } }])
+    const http = createTestHttpService([{ method: '*', url: returnTrue, reply: { status: 503 } }])
     expect(await verifyOnDeviceServer(http, target('local', 'openai-compatible'))).toMatchObject({
       kind: 'refused',
     })
@@ -107,7 +108,7 @@ describe('local model verification', () => {
     const http = createTestHttpService([
       {
         method: '*',
-        url: () => true,
+        url: returnTrue,
         reply: () => {
           throw new TypeError('fetch failed')
         },

@@ -9,6 +9,7 @@ import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { TaskEditor } from './task-editor.tsx'
+import { sleep, noop } from '@ocavue/utils'
 
 const X_URL = 'https://x.com/jack/status/101'
 /** What reaches the network, or writes the X archive, on a note's behalf. */
@@ -56,7 +57,6 @@ async function renderTaskEditor(task: OpenTask) {
     .spyOn(app.indexQuery, 'getNote')
     .mockImplementation((path) => Promise.resolve(noteRow(path, path === 'notes/locked.md')))
   app.xArchive.setPost('101', archivedPost('101'))
-  const noop = (): void => {}
   const view = await renderInApp(
     <TaskEditor
       task={task}
@@ -115,7 +115,7 @@ describe('TaskEditor network policy', () => {
     )
     await expect.element(page.getByTestId('embed-link')).toHaveTextContent(X_URL)
     await vi.waitFor(() => expect(getNote).toHaveBeenCalledWith('notes/locked.md'))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(remoteElements()).toBeNull()
     for (const command of REMOTE_COMMANDS) {
       expect(commands(view)).not.toContain(command)
@@ -148,7 +148,7 @@ describe('TaskEditor network policy', () => {
       makeOpenTask({ notePath: 'finance/secure/bank.md', markdown: 'call [[Brand New Idea]]' }),
     )
     await page.getByTestId('wikilink').getByText('Brand New Idea').click()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await sleep(100)
     expect(view.core.noteFile.writes()).toEqual([])
     expect([...view.core.noteFile.files().keys()]).toEqual([])
   })

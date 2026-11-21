@@ -7,6 +7,7 @@ import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { MobileTaskEditSheet } from './task-edit-sheet.tsx'
+import { noop, sleep } from '@ocavue/utils'
 
 const X_URL = 'https://x.com/jack/status/101'
 /** What reaches the network, or writes the X archive, on a note's behalf. */
@@ -32,18 +33,18 @@ function noteRow(path: string, isPrivate: boolean): NoteRow {
 }
 
 const actions: TaskActions = {
-  complete: () => {},
-  toggle: () => {},
-  remove: () => {},
-  edit: () => {},
-  checkboxToggle: () => {},
+  complete: noop,
+  toggle: noop,
+  remove: noop,
+  edit: noop,
+  checkboxToggle: noop,
   insert: () => Promise.resolve(null),
   insertAfter: () => Promise.resolve(null),
-  editAndToggle: () => {},
-  schedule: () => {},
-  convertToBullet: () => {},
-  editAndConvertToBullet: () => {},
-  archive: () => {},
+  editAndToggle: noop,
+  schedule: noop,
+  convertToBullet: noop,
+  editAndConvertToBullet: noop,
+  archive: noop,
   isPending: false,
 }
 
@@ -57,10 +58,10 @@ async function renderSheet(task: OpenTask) {
     <MobileTaskEditSheet
       task={task}
       open
-      onOpenChange={() => {}}
+      onOpenChange={noop}
       today="2026-10-04"
       actions={actions}
-      onOpenNote={() => {}}
+      onOpenNote={noop}
     />,
     {
       core: app,
@@ -102,7 +103,7 @@ describe('MobileTaskEditSheet network policy', () => {
     )
     await expect.element(page.getByTestId('embed-link')).toHaveTextContent(X_URL)
     await vi.waitFor(() => expect(getNote).toHaveBeenCalledWith('notes/locked.md'))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(remoteElements()).toBeNull()
     for (const command of REMOTE_COMMANDS) {
       expect(commands(view)).not.toContain(command)
@@ -114,7 +115,7 @@ describe('MobileTaskEditSheet network policy', () => {
       makeOpenTask({ notePath: 'finance/secure/bank.md', markdown: 'call [[Brand New Idea]]' }),
     )
     await page.getByTestId('wikilink').getByText('Brand New Idea').click()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await sleep(100)
     expect(view.core.noteFile.writes()).toEqual([])
     expect([...view.core.noteFile.files().keys()]).toEqual([])
   })

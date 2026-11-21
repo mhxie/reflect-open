@@ -210,7 +210,7 @@ async function renderScreen(options: RenderScreenOptions = {}) {
         allNotesFilterAttachments: ['pdf', 'video'],
         ...options.settings,
       },
-      ...(options.queryClient === undefined ? {} : { queryClient: options.queryClient }),
+      queryClient: options.queryClient,
     },
   )
 }

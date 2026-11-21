@@ -5,6 +5,7 @@ import type { WikiAncestor, WikiLanguage } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { WikiBreadcrumb } from './wiki-breadcrumb.tsx'
+import { noop } from '@ocavue/utils'
 
 const LANGUAGES: WikiLanguage[] = [
   { label: 'English', folder: 'wiki' },
@@ -75,7 +76,7 @@ describe('WikiBreadcrumb', () => {
   })
 
   it('holds its line while the lookup runs, so the title below does not jump', async () => {
-    wikiAncestors.mockReturnValue(new Promise(() => {}))
+    wikiAncestors.mockReturnValue(new Promise(noop))
     const view = await renderBreadcrumb('wiki/memory/Spacing Effect.md')
 
     await expect.element(view.getByTestId('wiki-path-pending')).toBeInTheDocument()

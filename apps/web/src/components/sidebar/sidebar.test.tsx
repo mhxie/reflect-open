@@ -36,6 +36,7 @@ import { expectLocatorToHaveCount } from '@/test-utils/expect.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { Sidebar } from './sidebar.tsx'
+import { noop, returnNull } from '@ocavue/utils'
 
 /**
  * The native menu row the mocked menu "selects" when it opens.
@@ -162,12 +163,12 @@ async function renderSidebar(
     app: appLayer,
     navigate,
     route: () => ({ kind: 'today' }),
-    notePath: () => null,
+    notePath: returnNull,
     back: vi.fn(),
     forward: vi.fn(),
     clearScrollState: vi.fn(),
-    togglePin: vi.fn(() => {}),
-    togglePrivate: vi.fn(() => {}),
+    togglePin: vi.fn(noop),
+    togglePrivate: vi.fn(noop),
     showNoteDetails: vi.fn(),
     toggleTheme: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -219,7 +220,7 @@ async function renderSidebar(
       aiProviders,
       defaultAiProviderId: aiProviders[0]?.id ?? null,
     },
-    ...(initialRoute === undefined ? {} : { route: initialRoute }),
+    route: initialRoute,
     wrapper: (children: ReactNode) => (
       <div style={{ width: 260, height: 560 }}>
         <UpdateProvider autoCheck={false}>

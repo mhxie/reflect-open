@@ -1,3 +1,4 @@
+import { returnNull } from '@ocavue/utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CaptureEnvelope } from './capture-envelope.ts'
 import { captureIdentity } from './capture-identity.ts'
@@ -905,7 +906,7 @@ describe('CaptureEnrichmentService', () => {
 
   it('skips a capture note removed during a checkpoint write, never recreating it', async () => {
     await drainOne()
-    kit.raceNextWrite(IDENTITY.notePath, () => null)
+    kit.raceNextWrite(IDENTITY.notePath, returnNull)
 
     const outcome = await kit.reconcile()
 

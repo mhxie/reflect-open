@@ -5,6 +5,7 @@ import type { SnippetTask, TaskService } from '@reflect/core'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { BacklinkSnippet } from './backlink-snippet.tsx'
+import { noop } from '@ocavue/utils'
 
 /**
  * A context with one round task, one square box, and a nested round task —
@@ -44,7 +45,7 @@ let writeTask: MockInstance<TaskService['writeTask']>
 async function renderSnippet(
   tasks: SnippetTask[] = anchors(),
   text: string = SNIPPET,
-  onWikilinkClick: () => void = () => {},
+  onWikilinkClick: () => void = noop,
 ) {
   const core = createTestCoreServices({ database: createWasmTestDatabaseService() })
   operations = core.progress
@@ -183,7 +184,7 @@ describe('BacklinkSnippet saved embed snapshots', () => {
         notePath={notePath}
         sourcePrivate={sourcePrivate}
         tasks={[]}
-        onWikilinkClick={() => {}}
+        onWikilinkClick={noop}
       />,
       { graph: GRAPH },
     )
@@ -263,7 +264,7 @@ describe('BacklinkSnippet network policy', () => {
         notePath="notes/locked.md"
         sourcePrivate={sourcePrivate}
         tasks={[]}
-        onWikilinkClick={() => {}}
+        onWikilinkClick={noop}
       />
     )
   }

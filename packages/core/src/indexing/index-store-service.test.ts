@@ -56,7 +56,7 @@ describe('createIndexStoreService', () => {
 
   it('spares the embeddings on request and prunes the ones whose note went', async () => {
     const ipc = createTestIpcBridgeService({
-      commands: { index_clear: () => null, index_prune_embeddings: () => 4 },
+      commands: { index_clear: returnNull, index_prune_embeddings: () => 4 },
     })
     const store = createIndexStoreService({ ipc, database: createNodeTestDatabaseService() })
 

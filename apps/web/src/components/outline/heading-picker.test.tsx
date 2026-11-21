@@ -1,3 +1,4 @@
+import { returnFalse } from '@ocavue/utils'
 import { useEffect } from 'react'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
@@ -124,13 +125,13 @@ describe('HeadingPicker', () => {
       setSelection: vi.fn(),
       getSelectedText: () => '',
       openSelectionMenu: vi.fn(),
-      startPendingReplacement: () => false,
+      startPendingReplacement: returnFalse,
       appendPendingReplacementText: vi.fn(),
       acceptPendingReplacement: vi.fn(),
       discardPendingReplacement: vi.fn(),
       findNext: vi.fn(),
       findPrevious: vi.fn(),
-      revealHeading: () => false,
+      revealHeading: returnFalse,
     }
     registerNoteEditorHandle(PATH, handle, 1)
     try {

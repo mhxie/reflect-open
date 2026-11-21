@@ -4,6 +4,7 @@ import { toAppError } from '../errors.ts'
 import type { IpcBridgeService } from '../ipc/ipc-service.ts'
 import type { IdService } from '../ports/id-service.ts'
 import { isLoopbackHttpUrl } from '../privacy/loopback.ts'
+import { noop } from '@ocavue/utils'
 
 /**
  * `fetch` for model servers on this Mac, over the Rust transport in
@@ -89,7 +90,7 @@ class OnDeviceHttpServiceImpl implements OnDeviceHttpService {
 
     const requestId = id.uuid()
     const cancel = (): void => {
-      ipc.call('on_device_http_cancel', { requestId }, voidSchema).catch(() => {})
+      ipc.call('on_device_http_cancel', { requestId }, voidSchema).catch(noop)
     }
     const sent = ipc
       .call('on_device_http_send', { requestId, method, url, headers, body }, responseHeadSchema)

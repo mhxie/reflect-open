@@ -1,3 +1,4 @@
+import type { FileMeta } from '@reflect/types'
 import { z } from 'zod'
 
 /** Identity of an open graph (mirrors the Rust `GraphInfo`). */
@@ -50,8 +51,10 @@ export const recentGraphSchema = z.object({
 })
 export type RecentGraph = z.infer<typeof recentGraphSchema>
 
-/** Metadata for a file inside the graph (mirrors the Rust `FileMeta`). */
-export const fileMetaSchema = z.object({
+export type { FileMeta }
+
+/** Validates a {@link FileMeta} at the IPC boundary. */
+export const fileMetaSchema: z.ZodType<FileMeta> = z.object({
   /** Graph-relative path, forward-slashed. */
   path: z.string(),
   size: z.number(),
@@ -73,7 +76,6 @@ export const fileMetaSchema = z.object({
    */
   external: z.enum(['local', 'offline']).optional(),
 })
-export type FileMeta = z.infer<typeof fileMetaSchema>
 
 /** Result of the native no-clobber note claim. */
 export const noteCreateOutcomeSchema = z.discriminatedUnion('kind', [

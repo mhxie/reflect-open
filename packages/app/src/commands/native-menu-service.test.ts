@@ -14,6 +14,7 @@ import {
   type AppSubmenuLayout,
   type NativeMenuItem,
 } from './native-menu-service.ts'
+import { noop, returnNull } from '@ocavue/utils'
 
 const LAYOUT: AppSubmenuLayout[] = [
   {
@@ -35,14 +36,14 @@ function setup(options?: { label?: string; platform?: TestPlatformOptions; failP
     logger: createTestLoggerService(),
   })
   commands.register([
-    { id: 'sidebar.toggle', title: 'Toggle sidebar', keybinding: 'Mod-\\', run: () => {} },
-    { id: 'theme.toggle', title: 'Toggle theme', run: () => {} },
+    { id: 'sidebar.toggle', title: 'Toggle sidebar', keybinding: 'Mod-\\', run: noop },
+    { id: 'theme.toggle', title: 'Toggle theme', run: noop },
   ])
   const windows = createTestWindowService(
     options?.label !== undefined ? { label: options.label } : {},
   )
   const ipc = createTestIpcBridgeService({
-    commands: options?.failPaste ? {} : { menu_install_paste_and_match_style: () => null },
+    commands: options?.failPaste ? {} : { menu_install_paste_and_match_style: returnNull },
     logger,
   })
   const menu = createTestNativeMenuService({
@@ -76,7 +77,7 @@ describe('install', () => {
       { kind: 'command', id: 'theme.toggle', text: 'Switch theme', action: menu.dispatchCommand },
       { kind: 'predefined', item: 'Quit', text: 'Quit Reflect' },
     ])
-    expect(view).not.toHaveProperty('nsAppRole')
+    expect(view?.nsAppRole).toBeUndefined()
     expect(windowMenu).toMatchObject({ text: 'Window', nsAppRole: 'windows' })
 
     const sidebarToggle = view?.items[0]

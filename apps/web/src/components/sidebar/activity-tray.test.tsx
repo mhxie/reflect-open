@@ -4,6 +4,7 @@ import { act } from '@/test-utils/act.ts'
 import '@/test-utils/locator.ts'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { ActivityTray } from './activity-tray.tsx'
+import { sleep } from '@ocavue/utils'
 
 const trigger = () => page.getByRole('button', { name: /^Activity/ })
 
@@ -40,7 +41,7 @@ describe('ActivityTray', () => {
       view.core.indexLifecycle.setFileProgress({ done: 50, total: 2000, worked: 0 })
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await sleep(50)
     expect(view.container.querySelector('button')).toBeNull()
   })
 

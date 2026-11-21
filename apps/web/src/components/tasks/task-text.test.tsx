@@ -5,6 +5,7 @@ import { MarkdownPreview } from '@/editor/markdown-preview.tsx'
 import { renderInApp } from '@/test-utils/render-in-app.tsx'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
 import { TaskText } from './task-text.tsx'
+import { sleep } from '@ocavue/utils'
 
 /** The props each rendered preview received. */
 const previews = vi.hoisted((): Array<{ content: string; remoteEmbeds?: boolean }> => [])
@@ -60,7 +61,7 @@ async function renderFor(notePath: string): Promise<void> {
  * Lets the note row query settle, then checks no preview ever allowed remote embeds.
  */
 async function expectNoRemoteEmbeds(notePath: string): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await sleep(50)
   expect(previews.length).toBeGreaterThan(0)
   expect(
     previews.every((props) => props.remoteEmbeds === false),

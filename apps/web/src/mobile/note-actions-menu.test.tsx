@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import type { ShareService } from '@reflect/app'
 import {
   frontmatterPatchToYaml,
@@ -15,8 +16,16 @@ import { act } from '@/test-utils/act.ts'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { createWasmTestDatabaseService } from '@/test-utils/test-database.ts'
-import { NoteActionsMenu } from './note-actions-menu.tsx'
 import { noop } from '@ocavue/utils'
+import { createTestNativeChromeHost, type TestNativeChromeHost } from '@reflect/app/testing'
+import { ChromeTopBar } from '@/mobile/chrome/chrome-top-bar.tsx'
+import { lastChromeState, nativeChromeOptions } from '@/test-utils/native-chrome.tsx'
+import { useNoteActions } from './note-actions-menu.tsx'
+import {
+  createTestToastController,
+  withToastController,
+  type TestToastController,
+} from '@/test-utils/toast.tsx'
 
 // What the app's fakes answer; each test sets them before `mount`.
 const getNote = vi.fn<IndexQueryService['getNote']>()
@@ -33,6 +42,7 @@ let noteContent: MockInstance<ShareService['noteContent']>
 
 let currentNoteRow: NoteRow | null
 let currentNoteRowSettled: boolean
+let toasts: TestToastController
 
 function noteRow(path: string, isPrivate: boolean, title = 'Meeting'): NoteRow {
   return {
@@ -66,7 +76,11 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, 'share')
 })
 
-async function mount(path = 'notes/meeting.md', onDeleted = vi.fn()) {
+async function mount(
+  path = 'notes/meeting.md',
+  onDeleted = vi.fn(),
+  nativeHost?: TestNativeChromeHost,
+) {
   const created = createTestCoreServices({
     database: createWasmTestDatabaseService(),
     noteDocuments: {
@@ -79,8 +93,13 @@ async function mount(path = 'notes/meeting.md', onDeleted = vi.fn()) {
   })
   vi.spyOn(created.indexQuery, 'getNote').mockImplementation(getNote)
   vi.spyOn(created.indexQuery, 'getPinnedNotes').mockResolvedValue([])
-  trash = vi.spyOn(created.noteActions, 'trashOne').mockResolvedValue({ trashed: 'system' })
-  const view = await renderInApp(<NoteActionsMenu path={path} onDeleted={onDeleted} />, {
+  trash = vi.spyOn(created.noteActions, 'trashOne').mockResolvedValue(null)
+  toasts = createTestToastController()
+  const native = nativeHost === undefined ? undefined : nativeChromeOptions(nativeHost)
+  const withToasts = withToastController(toasts)
+  const view = await renderInApp(<NoteActions path={path} onDeleted={onDeleted} />, {
+    appServices: native?.appServices,
+    wrapper: (children) => withToasts(native?.wrapper?.(children) ?? children),
     core: created,
     graph: { root: '/g', name: 'g', generation: 7 },
   })
@@ -89,59 +108,53 @@ async function mount(path = 'notes/meeting.md', onDeleted = vi.fn()) {
   return { view, onDeleted, client: view.queryClient }
 }
 
+function NoteActions({ path, onDeleted }: { path: string; onDeleted: () => void }): ReactElement {
+  const actions = useNoteActions(path, onDeleted)
+  return (
+    <ChromeTopBar
+      trailing={[
+        { id: 'note-actions', title: 'Note actions', icon: 'ellipsis', menu: actions.items },
+      ]}
+      onAction={actions.runAction}
+      title={<h1>Note</h1>}
+    />
+  )
+}
+
 async function openActions(): Promise<void> {
   await page.getByRole('button', { name: 'Note actions' }).click()
 }
 
 /**
- * The mobile note actions drawer: pin/share/delete already live here; this
- * suite adds privacy parity coverage against mocked index state and canonical
- * toggle helpers so close/reopen and failure rollback are exercised directly.
- * Delete routes through the shared {@link NoteDeleteDrawer}; the graph comes
+ * The note actions through the web menu drawer of the top bar: privacy
+ * parity against mocked index state and canonical toggle helpers, so
+ * close/reopen and failure rollback are exercised directly. The graph comes
  * from a mutable store so the no-graph failure path can be exercised too.
  */
-describe('NoteActionsMenu', () => {
-  it('offers Private for a standard note, toggles canonically, and closes the drawer', async () => {
+describe('useNoteActions', () => {
+  it('offers Lock note for a public note, toggles canonically, and closes the drawer', async () => {
     const { view } = await mount()
 
     await openActions()
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note private' }))
-      .toBeInTheDocument()
-    expect(
-      view
-        .getByRole('button', { name: 'Make this note private' })
-        .element()
-        .querySelector('.lucide-shield'),
-    ).not.toBeNull()
+    await expect.element(view.getByRole('button', { name: 'Lock note' })).toBeInTheDocument()
 
-    await view.getByRole('button', { name: 'Make this note private' }).click()
+    await view.getByRole('button', { name: 'Lock note' }).click()
 
     await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { private: true }, 7)
     })
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note private' }))
-      .not.toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Lock note' })).not.toBeInTheDocument()
   })
 
-  it('offers Standard for a private daily note and toggles canonically', async () => {
+  it('offers Unlock note for a private daily note and toggles canonically', async () => {
     currentNoteRow = noteRow('daily/2026-06-10.md', true, 'June 10th, 2026')
     noteSource.value = '---\nprivate: true\n---\n# A\n'
     const { view } = await mount('daily/2026-06-10.md')
 
     await openActions()
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note standard' }))
-      .toBeInTheDocument()
-    expect(
-      view
-        .getByRole('button', { name: 'Make this note standard' })
-        .element()
-        .querySelector('.lucide-shield-off'),
-    ).not.toBeNull()
+    await expect.element(view.getByRole('button', { name: 'Unlock note' })).toBeInTheDocument()
 
-    await view.getByRole('button', { name: 'Make this note standard' }).click()
+    await view.getByRole('button', { name: 'Unlock note' }).click()
 
     await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith(
@@ -152,39 +165,22 @@ describe('NoteActionsMenu', () => {
     })
   })
 
-  it('shows unreadable frontmatter as locked and disables the privacy action', async () => {
-    currentNoteRow = noteRow('notes/meeting.md', true)
-    noteSource.value = '---\nprivate: no\ntitle: [unclosed\n---\n# A\n'
-    const { view } = await mount()
-
-    await openActions()
-    await expect
-      .element(view.getByRole('button', { name: "Frontmatter can't be read — treated as locked" }))
-      .toBeDisabled()
-    expect(view.getByRole('button', { name: 'Make this note standard' }).query()).toBeNull()
-    expect(commitNoteFrontmatter).not.toHaveBeenCalled()
-  })
-
   it('bridges the privacy label from the toggle result while the index is stale', async () => {
     const { view } = await mount()
 
     await openActions()
-    await view.getByRole('button', { name: 'Make this note private' }).click()
+    await view.getByRole('button', { name: 'Lock note' }).click()
     await vi.waitFor(() => expect(commitNoteFrontmatter).toHaveBeenCalledTimes(1))
 
     await openActions()
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note standard' }))
-      .toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Unlock note' })).toBeInTheDocument()
 
     noteSource.value = '---\nprivate: true\n---\n# A\n'
-    await view.getByRole('button', { name: 'Make this note standard' }).click()
+    await view.getByRole('button', { name: 'Unlock note' }).click()
     await vi.waitFor(() => expect(commitNoteFrontmatter).toHaveBeenCalledTimes(2))
 
     await openActions()
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note private' }))
-      .toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Lock note' })).toBeInTheDocument()
   })
 
   it('shows shared privacy on reopening while a menu write is still pending', async () => {
@@ -192,11 +188,9 @@ describe('NoteActionsMenu', () => {
     commitNoteFrontmatter.mockReturnValueOnce(write.promise)
     const { view } = await mount()
     await openActions()
-    await view.getByRole('button', { name: 'Make this note private' }).click()
+    await view.getByRole('button', { name: 'Lock note' }).click()
     await openActions()
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note standard' }))
-      .toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Unlock note' })).toBeInTheDocument()
     write.resolve()
     await write.promise
   })
@@ -206,7 +200,7 @@ describe('NoteActionsMenu', () => {
     const { view } = await mount()
 
     await openActions()
-    await view.getByRole('button', { name: 'Make this note private' }).click()
+    await view.getByRole('button', { name: 'Lock note' }).click()
 
     await vi.waitFor(() => {
       expect(core.progress.findByLabel('Updating privacy')).toMatchObject({
@@ -214,14 +208,10 @@ describe('NoteActionsMenu', () => {
         message: 'disk on fire',
       })
     })
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note private' }))
-      .not.toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Lock note' })).not.toBeInTheDocument()
 
     await openActions()
-    await expect
-      .element(view.getByRole('button', { name: 'Make this note private' }))
-      .toBeInTheDocument()
+    await expect.element(view.getByRole('button', { name: 'Lock note' })).toBeInTheDocument()
   })
 
   it('disables the privacy action until the note row query settles', async () => {
@@ -234,12 +224,12 @@ describe('NoteActionsMenu', () => {
     expect(commitNoteFrontmatter).not.toHaveBeenCalled()
   })
 
-  it('offers Private for a visible note with no indexed row yet', async () => {
+  it('offers Lock note for a visible note with no indexed row yet', async () => {
     currentNoteRow = null
     const { view } = await mount()
 
     await openActions()
-    await view.getByRole('button', { name: 'Make this note private' }).click()
+    await view.getByRole('button', { name: 'Lock note' }).click()
 
     await vi.waitFor(() => {
       expect(commitNoteFrontmatter).toHaveBeenCalledWith('notes/meeting.md', { private: true }, 7)
@@ -300,6 +290,26 @@ describe('NoteActionsMenu', () => {
 
     await vi.waitFor(() => expect(trash).toHaveBeenCalledWith('notes/meeting.md'))
     expect(onDeleted).toHaveBeenCalledOnce()
+  })
+
+  it('shows a toast when a delete from the native menu fails', async () => {
+    const host = createTestNativeChromeHost()
+    const { onDeleted } = await mount('notes/meeting.md', vi.fn(), host)
+    trash.mockRejectedValue(new Error('disk full'))
+
+    await vi.waitFor(() => expect(lastChromeState(host)?.trailing).toHaveLength(1))
+    host.sendIntent({ type: 'action', entryId: lastChromeState(host)?.entryId, id: 'delete' })
+
+    await vi.waitFor(() => {
+      expect(toasts.open()).toEqual([
+        expect.objectContaining({
+          type: 'error',
+          title: 'Could not delete the note',
+          description: 'disk full',
+        }),
+      ])
+    })
+    expect(onDeleted).not.toHaveBeenCalled()
   })
 
   it('reports when the graph disappears before delete confirmation', async () => {
