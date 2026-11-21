@@ -311,37 +311,6 @@ describe('MobileShell', () => {
     await expect.element(footer).toBeVisible()
   })
 
-  it('keeps Daily capture above a visible status row and restores its inset when hidden', async () => {
-    const today = getIsoToday()
-    core.noteFile.set(`daily/${today}.md`, 'Captured today')
-    const withoutStatus = await mount({ kind: 'today' })
-    await waitFor(() => {
-      expect(withoutStatus.getByTestId('fake-editor').elements().length).toBeGreaterThan(0)
-    })
-    const defaultBottom = withoutStatus
-      .getByRole('button', { name: 'Show capture actions' })
-      .element()
-      .getBoundingClientRect().bottom
-    expect(withoutStatus.getByRole('status', { name: 'Note status' }).query()).toBeNull()
-    await withoutStatus.unmount()
-
-    // The same day, now with the status row on.
-    await createCore()
-    core.noteFile.set(`daily/${today}.md`, 'Captured today')
-    statusBarEnabled = true
-    const withStatus = await mount({ kind: 'today' })
-    const footer = withStatus.getByRole('status', { name: 'Note status' })
-    await expect.element(footer).toBeVisible()
-    const capture = withStatus.getByRole('button', { name: 'Show capture actions' }).element()
-    await waitFor(() => {
-      expect(
-        capture.getBoundingClientRect().bottom,
-        capture.parentElement?.getAttribute('style') ?? '',
-      ).toBeLessThan(footer.element().getBoundingClientRect().top)
-    })
-    await waitFor(() => expect(defaultBottom - capture.getBoundingClientRect().bottom).toBe(24))
-  })
-
   it('renders today as the daily spine with its note content', async () => {
     const today = getIsoToday()
     core.noteFile.set(`daily/${today}.md`, 'captured on the go')

@@ -152,6 +152,6 @@ describe('MobileAllNotes', () => {
 
     await page.getByRole('button', { name: 'Back' }).click()
 
-    expect(route).toEqual({ kind: 'allNotes', tag: null })
+    expect(route).toEqual({ kind: 'allNotes', filter: null })
   })
 })
